@@ -1,8 +1,8 @@
 //! Defines parsers for bors commands.
 
+use crate::command::BorsCommand;
 use std::iter::Peekable;
 use std::str::SplitWhitespace;
-use crate::command::BorsCommand;
 
 pub enum CommandParseError<'a> {
     MissingCommand,

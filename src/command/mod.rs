@@ -1,6 +1,6 @@
 pub mod parser;
 
-/// Command specified by a user in a comment.
+/// Bors command specified by a user.
 pub enum BorsCommand {
     Ping,
     Try,
