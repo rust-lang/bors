@@ -167,6 +167,7 @@ dependencies = [
  "hex",
  "hmac",
  "hyper",
+ "jsonwebtoken",
  "log",
  "octocrab",
  "secrecy",

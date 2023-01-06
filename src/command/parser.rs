@@ -4,24 +4,25 @@ use crate::command::BorsCommand;
 use std::iter::Peekable;
 use std::str::SplitWhitespace;
 
+#[derive(Debug)]
 pub enum CommandParseError<'a> {
     MissingCommand,
     UnknownCommand(&'a str),
 }
+
+pub const BOT_PREFIX: &str = "@bors";
 
 /// Parses bors commands from the given string.
 ///
 /// Assumes that each command spands at most one line and that there are not more commands on
 /// each line.
 pub fn parse_commands(text: &str) -> Vec<Result<BorsCommand, CommandParseError>> {
-    let bot_name = "@bors";
-
     let parsers: Vec<fn(Tokenizer) -> ParseResult> = vec![parser_ping, parser_try];
 
     text.lines()
-        .filter_map(|line| match line.find(bot_name) {
+        .filter_map(|line| match line.find(BOT_PREFIX) {
             Some(index) => {
-                let command = &line[index + bot_name.len()..];
+                let command = &line[index + BOT_PREFIX.len()..];
                 for parser in &parsers {
                     if let Some(result) = parser(Tokenizer::new(command)) {
                         return Some(result);
