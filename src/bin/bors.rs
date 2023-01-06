@@ -2,17 +2,14 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use anyhow::Context;
-use axum::extract::State;
-use axum::http::StatusCode;
-use axum::response::IntoResponse;
 use axum::routing::post;
 use axum::Router;
 use clap::Parser;
 use tower::limit::ConcurrencyLimitLayer;
 
 use bors::github::api::RepositoryAccess;
-use bors::github::service::{github_webhook_process, WebhookSender};
-use bors::github::webhook::GitHubWebhook;
+use bors::github::server::{github_webhook_handler, ServerState};
+use bors::github::service::github_webhook_process;
 use bors::github::WebhookSecret;
 
 #[derive(clap::Parser)]
@@ -28,32 +25,6 @@ struct Opts {
     /// Private key used to authenticate as a Github App.
     #[arg(long, env = "PRIVATE_KEY")]
     private_key: String,
-}
-
-struct ServerState {
-    sender: WebhookSender,
-    webhook_secret: WebhookSecret,
-}
-
-impl AsRef<WebhookSecret> for ServerState {
-    fn as_ref(&self) -> &WebhookSecret {
-        &self.webhook_secret
-    }
-}
-
-type ServerStateRef = Arc<ServerState>;
-
-async fn github_webhook_handler(
-    State(state): State<ServerStateRef>,
-    GitHubWebhook(event): GitHubWebhook,
-) -> impl IntoResponse {
-    match state.sender.send(event).await {
-        Ok(_) => (StatusCode::OK, ""),
-        Err(err) => {
-            log::error!("Could not handle webhook event: {err:?}");
-            (StatusCode::INTERNAL_SERVER_ERROR, "")
-        }
-    }
 }
 
 async fn server(state: ServerState) -> anyhow::Result<()> {
@@ -83,10 +54,7 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
     ))?;
     let (tx, gh_process) = github_webhook_process(access);
 
-    let state = ServerState {
-        sender: tx,
-        webhook_secret: WebhookSecret::new(opts.webhook_secret),
-    };
+    let state = ServerState::new(tx, WebhookSecret::new(opts.webhook_secret));
     let server_process = server(state);
 
     runtime.block_on(async move {

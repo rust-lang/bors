@@ -8,8 +8,8 @@ use octocrab::models::events::payload::IssueCommentEventPayload;
 use octocrab::models::Repository;
 use sha2::Sha256;
 use std::fmt::Debug;
-use std::sync::Arc;
 
+use crate::github::server::ServerStateRef;
 use crate::github::{GitHubRepositoryKey, WebhookSecret};
 
 /// This struct is used to extract the repository and user from a GitHub webhook event.
@@ -36,16 +36,18 @@ pub struct GitHubWebhook(pub WebhookContent);
 
 /// Extracts a webhook event from a HTTP request.
 #[async_trait]
-impl<S, B> FromRequest<Arc<S>, B> for GitHubWebhook
+impl<B> FromRequest<ServerStateRef, B> for GitHubWebhook
 where
     B: HttpBody + Send + Debug + 'static,
     B::Data: Send,
     B::Error: std::error::Error + Send + Sync + 'static,
-    S: AsRef<WebhookSecret> + Send + Sync,
 {
     type Rejection = StatusCode;
 
-    async fn from_request(request: Request<B>, state: &Arc<S>) -> Result<Self, Self::Rejection> {
+    async fn from_request(
+        request: Request<B>,
+        state: &ServerStateRef,
+    ) -> Result<Self, Self::Rejection> {
         let (parts, body) = request
             .with_limited_body()
             .expect("There should be a body size limit")
@@ -58,7 +60,7 @@ where
         })?;
 
         // Verify that the request is valid
-        if !verify_gh_signature(&parts.headers, &body, state.as_ref().as_ref()) {
+        if !verify_gh_signature(&parts.headers, &body, state.get_webhook_secret()) {
             log::error!("Webhook request failed, could not authenticate webhook");
             return Err(StatusCode::BAD_REQUEST);
         }

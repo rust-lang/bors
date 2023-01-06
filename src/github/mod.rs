@@ -3,6 +3,7 @@ use std::fmt::{Display, Formatter};
 use secrecy::{ExposeSecret, SecretString};
 
 pub mod api;
+pub mod server;
 pub mod service;
 pub mod webhook;
 
