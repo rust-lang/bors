@@ -5,14 +5,14 @@ use tokio::sync::mpsc;
 
 use crate::command::parser::{parse_commands, CommandParseError};
 use crate::command::BorsCommand;
-use crate::github::api::{Repository, RepositoryAccess};
+use crate::github::api::{GithubAppClient, RepositoryClient};
 use crate::github::webhook::{WebhookContent, WebhookEvent};
 
 pub type WebhookSender = mpsc::Sender<WebhookContent>;
 
 /// Asynchronous process that receives webhooks and reacts to them.
 pub fn github_webhook_process(
-    access: RepositoryAccess,
+    client: GithubAppClient,
 ) -> (mpsc::Sender<WebhookContent>, impl Future<Output = ()>) {
     let (tx, mut rx) = mpsc::channel::<WebhookContent>(1024);
 
@@ -20,9 +20,9 @@ pub fn github_webhook_process(
         while let Some(message) = rx.recv().await {
             log::trace!("Received webhook: {message:#?}");
 
-            match access.get_repo(&message.repository) {
+            match client.get_repo(&message.repository) {
                 Some(repo) => {
-                    if let Err(error) = handle_event(repo, message).await {
+                    if let Err(error) = handle_event(&client, repo, message).await {
                         log::warn!("Error occured while handling event: {error:?}");
                     }
                 }
@@ -35,7 +35,11 @@ pub fn github_webhook_process(
     (tx, service)
 }
 
-async fn handle_event(repo: &Repository, message: WebhookContent) -> anyhow::Result<()> {
+async fn handle_event(
+    client: &GithubAppClient,
+    repo: &RepositoryClient,
+    message: WebhookContent,
+) -> anyhow::Result<()> {
     match message.event {
         WebhookEvent::Comment(event) => {
             // We only care about pull request comments
@@ -45,8 +49,9 @@ async fn handle_event(repo: &Repository, message: WebhookContent) -> anyhow::Res
                 );
                 return Ok(());
             }
+
             // We want to ignore comments made by this bot
-            if repo.is_comment_internal(&event.comment) {
+            if client.is_comment_internal(&event.comment) {
                 log::trace!("Ignoring event {event:?} because it was authored by this bot");
                 return Ok(());
             }
@@ -91,7 +96,7 @@ async fn handle_event(repo: &Repository, message: WebhookContent) -> anyhow::Res
 }
 
 async fn execute_bors_command(
-    repo: &Repository,
+    repo: &RepositoryClient,
     command: BorsCommand,
     pr_number: u64,
 ) -> anyhow::Result<()> {
