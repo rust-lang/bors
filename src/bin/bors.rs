@@ -1,5 +1,4 @@
 use std::net::SocketAddr;
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::Context;
@@ -21,12 +20,14 @@ struct Opts {
     /// Secret used to authenticate webhooks.
     #[arg(long, env = "WEBHOOK_SECRET")]
     webhook_secret: String,
+
     /// Github App ID.
     #[arg(long, env = "APP_ID")]
     app_id: u64,
-    /// Path to a private key used to authenticate as a Github App.
-    #[arg(long, env = "PRIVATE_KEY_PATH")]
-    private_key_path: PathBuf,
+
+    /// Private key used to authenticate as a Github App.
+    #[arg(long, env = "PRIVATE_KEY")]
+    private_key: String,
 }
 
 struct ServerState {
@@ -76,10 +77,9 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
         .build()
         .context("Cannot build tokio runtime")?;
 
-    let private_key = std::fs::read(opts.private_key_path).context("Could not read private key")?;
     let access = runtime.block_on(RepositoryAccess::load_repositories(
         opts.app_id.into(),
-        private_key.into(),
+        opts.private_key.into_bytes().into(),
     ))?;
     let (tx, gh_process) = github_webhook_process(access);
 
