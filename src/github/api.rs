@@ -6,12 +6,12 @@ use octocrab::models::{AppId, InstallationRepositories};
 use octocrab::Octocrab;
 use secrecy::{ExposeSecret, SecretVec};
 
-use crate::github::GitHubRepositoryKey;
+use crate::github::GithubRepoName;
 
 /// Provides access to managed GitHub repositories.
 #[derive(Debug)]
 pub struct RepositoryAccess {
-    repositories: HashMap<GitHubRepositoryKey, Repository>,
+    repositories: HashMap<GithubRepoName, Repository>,
 }
 
 impl RepositoryAccess {
@@ -46,17 +46,18 @@ impl RepositoryAccess {
                     .await?;
                 for repo in repos.repositories {
                     let Some(owner) = repo.owner else { continue; };
-                    let key = GitHubRepositoryKey::new(&owner.login, &repo.name);
+                    let repository = GithubRepoName::new(&owner.login, &repo.name);
                     let access = Repository {
                         client: installation_client.clone(),
-                        key: key.clone(),
+                        repository: repository.clone(),
                     };
 
-                    log::info!("Found repository {key}");
+                    log::info!("Found repository {repository}");
 
-                    if repositories.insert(key.clone(), access).is_some() {
+                    if let Some(existing) = repositories.insert(repository, access) {
                         return Err(anyhow::anyhow!(
-                            "Repository {key} found in multiple installations!"
+                            "Repository {} found in multiple installations!",
+                            existing.repository
                         ));
                     }
                 }
@@ -65,7 +66,7 @@ impl RepositoryAccess {
         Ok(RepositoryAccess { repositories })
     }
 
-    pub fn get_repo(&self, key: &GitHubRepositoryKey) -> Option<&Repository> {
+    pub fn get_repo(&self, key: &GithubRepoName) -> Option<&Repository> {
         self.repositories.get(key)
     }
 }
@@ -76,8 +77,10 @@ const BORS_MARKER: &str = "<!-- bors -->";
 /// Provides access to a single app installation (repository).
 #[derive(Debug)]
 pub struct Repository {
+    /// The client caches the access token for this given repository and refreshes it once it
+    /// expires.
     client: Octocrab,
-    key: GitHubRepositoryKey,
+    repository: GithubRepoName,
 }
 
 impl Repository {
@@ -91,12 +94,12 @@ impl Repository {
         let content = format!("{content}\n{BORS_MARKER}");
 
         self.client
-            .issues(&self.key.owner, &self.key.name)
+            .issues(&self.repository.owner, &self.repository.name)
             .create_comment(issue, content)
             .await
     }
 
-    pub fn repository(&self) -> &GitHubRepositoryKey {
-        &self.key
+    pub fn repository(&self) -> &GithubRepoName {
+        &self.repository
     }
 }

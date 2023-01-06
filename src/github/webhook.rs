@@ -10,7 +10,7 @@ use sha2::Sha256;
 use std::fmt::Debug;
 
 use crate::github::server::ServerStateRef;
-use crate::github::{GitHubRepositoryKey, WebhookSecret};
+use crate::github::{GithubRepoName, WebhookSecret};
 
 /// This struct is used to extract the repository and user from a GitHub webhook event.
 /// The wrapper exists because octocrab doesn't expose/parse the repository field.
@@ -21,7 +21,7 @@ pub struct WebhookEventRepository {
 
 #[derive(Debug)]
 pub struct WebhookContent {
-    pub repository: GitHubRepositoryKey,
+    pub repository: GithubRepoName,
     pub event: WebhookEvent,
 }
 
@@ -90,7 +90,7 @@ fn parse_webhook_event(request: Parts, body: &[u8]) -> anyhow::Result<Option<Web
         .map(|u| u.login) else {
         return Err(anyhow::anyhow!("Owner for repo {repo_name} is missing"));
     };
-    let repository_key = GitHubRepositoryKey::new(&repo_owner, &repo_name);
+    let repository_key = GithubRepoName::new(&repo_owner, &repo_name);
 
     let event = match event_type.as_bytes() {
         b"issue_comment" => {

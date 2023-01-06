@@ -40,10 +40,14 @@ async fn handle_event(repo: &Repository, message: WebhookContent) -> anyhow::Res
         WebhookEvent::Comment(event) => {
             // We only care about pull request comments
             if event.issue.pull_request.is_none() {
+                log::trace!(
+                    "Ignoring event {event:?} because it does not belong to a pull request"
+                );
                 return Ok(());
             }
             // We want to ignore comments made by this bot
             if repo.is_comment_internal(&event.comment) {
+                log::trace!("Ignoring event {event:?} because it was authored by this bot");
                 return Ok(());
             }
 
@@ -61,14 +65,12 @@ async fn handle_event(repo: &Repository, message: WebhookContent) -> anyhow::Res
             );
             for command in commands {
                 match command {
-                    Ok(command) => match command {
-                        BorsCommand::Ping => {
-                            execute_bors_command(repo, command, pr_number)
-                                .await
-                                .context("Cannot execute bors command")?;
-                        }
-                        _ => {}
-                    },
+                    Ok(BorsCommand::Ping) => {
+                        execute_bors_command(repo, BorsCommand::Ping, pr_number)
+                            .await
+                            .context("Could not execute bors command")?
+                    }
+                    Ok(_) => {}
                     Err(error) => {
                         let error_msg = match error {
                             CommandParseError::MissingCommand => "Missing command.".to_string(),
@@ -79,7 +81,7 @@ async fn handle_event(repo: &Repository, message: WebhookContent) -> anyhow::Res
 
                         repo.post_pr_comment(pr_number, &error_msg)
                             .await
-                            .context("Cannot reply to PR comment")?;
+                            .context("Could not reply to PR comment")?;
                     }
                 }
             }
@@ -95,7 +97,7 @@ async fn execute_bors_command(
 ) -> anyhow::Result<()> {
     match command {
         BorsCommand::Ping => {
-            log::info!("Executing ping");
+            log::debug!("Executing ping");
             repo.post_pr_comment(pr_number, "Pong 🏓!").await?;
         }
         BorsCommand::Try => {}
