@@ -20,19 +20,20 @@ pub struct WebhookEventRepository {
 }
 
 #[derive(Debug)]
-pub struct WebhookContent {
+pub struct WebhookCommentEvent {
     pub repository: GithubRepoName,
-    pub event: WebhookEvent,
+    pub payload: IssueCommentEventPayload,
 }
 
 #[derive(Debug)]
 pub enum WebhookEvent {
-    Comment(IssueCommentEventPayload),
+    Comment(WebhookCommentEvent),
+    InstallationsChanged,
 }
 
 /// axum extractor for GitHub webhook events.
 #[derive(Debug)]
-pub struct GitHubWebhook(pub WebhookContent);
+pub struct GitHubWebhook(pub WebhookEvent);
 
 /// Extracts a webhook event from a HTTP request.
 #[async_trait]
@@ -77,35 +78,37 @@ where
     }
 }
 
-fn parse_webhook_event(request: Parts, body: &[u8]) -> anyhow::Result<Option<WebhookContent>> {
+fn parse_webhook_event(request: Parts, body: &[u8]) -> anyhow::Result<Option<WebhookEvent>> {
     let Some(event_type) = request.headers.get("x-github-event") else {
          return Err(anyhow::anyhow!("x-github-event header not found"));
     };
 
-    let repository: WebhookEventRepository = serde_json::from_slice(body)?;
-    let repo_name = repository.repository.name;
-    let Some(repo_owner) = repository
-        .repository
-        .owner
-        .map(|u| u.login) else {
-        return Err(anyhow::anyhow!("Owner for repo {repo_name} is missing"));
-    };
-    let repository_key = GithubRepoName::new(&repo_owner, &repo_name);
-
-    let event = match event_type.as_bytes() {
+    match event_type.as_bytes() {
         b"issue_comment" => {
+            let repository: WebhookEventRepository = serde_json::from_slice(body)?;
+            let repo_name = repository.repository.name;
+            let Some(repo_owner) = repository
+                .repository
+                .owner
+                .map(|u| u.login) else {
+                return Err(anyhow::anyhow!("Owner for repo {repo_name} is missing"));
+            };
+            let repository_name = GithubRepoName::new(&repo_owner, &repo_name);
+
             let event: IssueCommentEventPayload = serde_json::from_slice(body)?;
-            WebhookEvent::Comment(event)
+            Ok(Some(WebhookEvent::Comment(WebhookCommentEvent {
+                repository: repository_name,
+                payload: event,
+            })))
+        }
+        b"installation_repositories" | b"installation" => {
+            Ok(Some(WebhookEvent::InstallationsChanged))
         }
         _ => {
             log::debug!("Ignoring unknown event type {:?}", event_type.to_str());
-            return Ok(None);
+            Ok(None)
         }
-    };
-    Ok(Some(WebhookContent {
-        repository: repository_key,
-        event,
-    }))
+    }
 }
 
 type HmacSha256 = Hmac<Sha256>;

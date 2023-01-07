@@ -48,7 +48,7 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
         .build()
         .context("Cannot build tokio runtime")?;
 
-    let access = runtime.block_on(GithubAppClient::load_repositories(
+    let access = runtime.block_on(GithubAppClient::load(
         opts.app_id.into(),
         opts.private_key.into_bytes().into(),
     ))?;
