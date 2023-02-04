@@ -1,12 +1,17 @@
+mod try_cmd;
+
 use std::future::Future;
 
 use anyhow::Context;
+use octocrab::models::pulls::PullRequest;
 use tokio::sync::mpsc;
 
 use crate::command::parser::{parse_commands, CommandParseError};
 use crate::command::BorsCommand;
+use crate::github::api::operations::post_pr_comment;
 use crate::github::api::{GithubAppClient, RepositoryClient};
 use crate::github::event::{PullRequestComment, WebhookEvent};
+use crate::github::service::try_cmd::try_command;
 
 pub type WebhookSender = mpsc::Sender<WebhookEvent>;
 
@@ -56,20 +61,27 @@ async fn handle_comment(
 
     let pr_number = comment.pr_number;
     let commands = parse_commands(&comment.text);
+    let pull_request = repo
+        .client()
+        .pulls(&repo.name().owner, &repo.name().name)
+        .get(pr_number)
+        .await
+        .map_err(|error| {
+            anyhow::anyhow!("Could not get PR {}/{pr_number}: {error:?}", repo.name())
+        })?;
 
     log::info!(
         "Received comment at https://github.com/{}/{}/issues/{}, commands: {:?}",
-        repo.repository().owner,
-        repo.repository().name,
+        repo.name().owner,
+        repo.name().name,
         pr_number,
         commands
     );
     for command in commands {
         match command {
-            Ok(BorsCommand::Ping) => execute_bors_command(repo, BorsCommand::Ping, pr_number)
+            Ok(command) => execute_bors_command(repo, command, pull_request.clone())
                 .await
                 .context("Could not execute bors command")?,
-            Ok(_) => {}
             Err(error) => {
                 let error_msg = match error {
                     CommandParseError::MissingCommand => "Missing command.".to_string(),
@@ -78,7 +90,7 @@ async fn handle_comment(
                     }
                 };
 
-                repo.post_pr_comment(pr_number, &error_msg)
+                post_pr_comment(repo, pr_number, &error_msg)
                     .await
                     .context("Could not reply to PR comment")?;
             }
@@ -90,14 +102,16 @@ async fn handle_comment(
 async fn execute_bors_command(
     repo: &RepositoryClient,
     command: BorsCommand,
-    pr_number: u64,
+    pr: PullRequest,
 ) -> anyhow::Result<()> {
     match command {
         BorsCommand::Ping => {
             log::debug!("Executing ping");
-            repo.post_pr_comment(pr_number, "Pong 🏓!").await?;
+            post_pr_comment(repo, pr.id.0, "Pong 🏓!").await?;
         }
-        BorsCommand::Try => {}
+        BorsCommand::Try => {
+            try_command(repo, pr).await?;
+        }
     }
     Ok(())
 }

@@ -1,9 +1,10 @@
+pub mod operations;
+
 use std::collections::HashMap;
 
 use crate::github::event::PullRequestComment;
 use anyhow::Context;
-use octocrab::models::issues::Comment;
-use octocrab::models::{App, AppId, InstallationRepositories};
+use octocrab::models::{App, AppId, InstallationRepositories, Repository};
 use octocrab::Octocrab;
 use secrecy::{ExposeSecret, SecretVec};
 
@@ -82,19 +83,20 @@ pub async fn load_repositories(
             {
                 Ok(repos) => {
                     for repo in repos.repositories {
-                        let Some(owner) = repo.owner else { continue; };
-                        let repository = GithubRepoName::new(&owner.login, &repo.name);
+                        let Some(owner) = repo.owner.clone() else { continue; };
+                        let name = GithubRepoName::new(&owner.login, &repo.name);
                         let access = RepositoryClient {
                             client: installation_client.clone(),
-                            repository: repository.clone(),
+                            repo_name: name.clone(),
+                            repository: repo,
                         };
 
-                        log::info!("Found repository {repository}");
+                        log::info!("Found repository {name}");
 
-                        if let Some(existing) = repositories.insert(repository, access) {
+                        if let Some(existing) = repositories.insert(name, access) {
                             return Err(anyhow::anyhow!(
                                 "Repository {} found in multiple installations!",
-                                existing.repository
+                                existing.repo_name
                             ));
                         }
                     }
@@ -117,18 +119,22 @@ pub struct RepositoryClient {
     /// The client caches the access token for this given repository and refreshes it once it
     /// expires.
     client: Octocrab,
-    repository: GithubRepoName,
+    // We store the name separately, because repository has an optional owner, but at this point
+    // we must always have some owner of the repo.
+    repo_name: GithubRepoName,
+    repository: Repository,
 }
 
 impl RepositoryClient {
-    pub async fn post_pr_comment(&self, issue: u64, content: &str) -> octocrab::Result<Comment> {
-        self.client
-            .issues(&self.repository.owner, &self.repository.name)
-            .create_comment(issue, content)
-            .await
+    pub fn client(&self) -> &Octocrab {
+        &self.client
     }
 
-    pub fn repository(&self) -> &GithubRepoName {
+    pub fn name(&self) -> &GithubRepoName {
+        &self.repo_name
+    }
+
+    pub fn repository(&self) -> &Repository {
         &self.repository
     }
 }
