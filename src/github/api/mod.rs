@@ -1,9 +1,12 @@
+mod config;
 pub mod operations;
 
 use std::collections::HashMap;
 
+use crate::github::api::config::{RepositoryConfig, CONFIG_FILE_PATH};
 use crate::github::event::PullRequestComment;
 use anyhow::Context;
+use base64::Engine;
 use octocrab::models::{App, AppId, InstallationRepositories, Repository};
 use octocrab::Octocrab;
 use secrecy::{ExposeSecret, SecretVec};
@@ -61,6 +64,33 @@ impl GithubAppClient {
     }
 }
 
+/// Provides access to a single app installation (repository).
+#[derive(Debug)]
+pub struct RepositoryClient {
+    /// The client caches the access token for this given repository and refreshes it once it
+    /// expires.
+    client: Octocrab,
+    // We store the name separately, because repository has an optional owner, but at this point
+    // we must always have some owner of the repo.
+    repo_name: GithubRepoName,
+    repository: Repository,
+    config: RepositoryConfig,
+}
+
+impl RepositoryClient {
+    pub fn client(&self) -> &Octocrab {
+        &self.client
+    }
+
+    pub fn name(&self) -> &GithubRepoName {
+        &self.repo_name
+    }
+
+    pub fn repository(&self) -> &Repository {
+        &self.repository
+    }
+}
+
 /// Loads repositories that are connected to the given GitHub App client.
 pub async fn load_repositories(
     client: &Octocrab,
@@ -83,17 +113,12 @@ pub async fn load_repositories(
             {
                 Ok(repos) => {
                     for repo in repos.repositories {
-                        let Some(owner) = repo.owner.clone() else { continue; };
-                        let name = GithubRepoName::new(&owner.login, &repo.name);
-                        let access = RepositoryClient {
-                            client: installation_client.clone(),
-                            repo_name: name.clone(),
-                            repository: repo,
-                        };
+                        let Some(repo_client) = load_repository(installation_client.clone(), repo).await else { continue; };
+                        log::info!("Loaded repository {}", repo_client.name());
 
-                        log::info!("Found repository {name}");
-
-                        if let Some(existing) = repositories.insert(name, access) {
+                        if let Some(existing) =
+                            repositories.insert(repo_client.name().clone(), repo_client)
+                        {
                             return Err(anyhow::anyhow!(
                                 "Repository {} found in multiple installations!",
                                 existing.repo_name
@@ -113,28 +138,61 @@ pub async fn load_repositories(
     Ok(repositories)
 }
 
-/// Provides access to a single app installation (repository).
-#[derive(Debug)]
-pub struct RepositoryClient {
-    /// The client caches the access token for this given repository and refreshes it once it
-    /// expires.
-    client: Octocrab,
-    // We store the name separately, because repository has an optional owner, but at this point
-    // we must always have some owner of the repo.
-    repo_name: GithubRepoName,
-    repository: Repository,
+async fn load_repository(repo_client: Octocrab, repo: Repository) -> Option<RepositoryClient> {
+    let Some(owner) = repo.owner.clone() else {
+        return None;
+    };
+
+    let name = GithubRepoName::new(&owner.login, &repo.name);
+    log::info!("Found repository {name}");
+
+    let config = match load_repository_config(&repo_client, &name).await {
+        Ok(config) => {
+            log::debug!("Loaded repository config for {name}: {config:#?}");
+            config
+        }
+        Err(error) => {
+            log::error!("Could not load repository config for {name}: {error:?}");
+            return None;
+        }
+    };
+    Some(RepositoryClient {
+        client: repo_client,
+        repo_name: name,
+        repository: repo,
+        config,
+    })
 }
 
-impl RepositoryClient {
-    pub fn client(&self) -> &Octocrab {
-        &self.client
-    }
+/// Loads repository configuration from a file located at `[CONFIG_FILE_PATH]` in the main
+/// branch.
+async fn load_repository_config(
+    gh_client: &Octocrab,
+    repo: &GithubRepoName,
+) -> anyhow::Result<RepositoryConfig> {
+    let mut response = gh_client
+        .repos(&repo.owner, &repo.name)
+        .get_content()
+        .path(CONFIG_FILE_PATH)
+        .send()
+        .await
+        .map_err(|error| {
+            anyhow::anyhow!("Could not fetch {CONFIG_FILE_PATH} from {repo}: {error:?}")
+        })?;
 
-    pub fn name(&self) -> &GithubRepoName {
-        &self.repo_name
-    }
-
-    pub fn repository(&self) -> &Repository {
-        &self.repository
-    }
+    let engine = base64::engine::general_purpose::STANDARD;
+    response
+        .take_items()
+        .into_iter()
+        .next()
+        .and_then(|content| content.content)
+        .ok_or_else(|| anyhow::anyhow!("Configuration file not found"))
+        .and_then(|content| Ok(engine.decode(content.trim())?))
+        .and_then(|content| Ok(String::from_utf8(content)?))
+        .and_then(|content| {
+            let config: RepositoryConfig = toml::from_str(&content).map_err(|error| {
+                anyhow::anyhow!("Could not deserialize repository config: {error:?}")
+            })?;
+            Ok(config)
+        })
 }
