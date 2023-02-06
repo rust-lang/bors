@@ -12,6 +12,7 @@ use octocrab::Octocrab;
 use secrecy::{ExposeSecret, SecretVec};
 
 use crate::github::GithubRepoName;
+use crate::permissions::TeamApiPermissionResolver;
 
 /// Provides access to managed GitHub repositories.
 pub struct GithubAppClient {
@@ -65,7 +66,6 @@ impl GithubAppClient {
 }
 
 /// Provides access to a single app installation (repository).
-#[derive(Debug)]
 pub struct RepositoryClient {
     /// The client caches the access token for this given repository and refreshes it once it
     /// expires.
@@ -75,6 +75,7 @@ pub struct RepositoryClient {
     repo_name: GithubRepoName,
     repository: Repository,
     config: RepositoryConfig,
+    permissions: TeamApiPermissionResolver,
 }
 
 impl RepositoryClient {
@@ -113,7 +114,15 @@ pub async fn load_repositories(
             {
                 Ok(repos) => {
                     for repo in repos.repositories {
-                        let Some(repo_client) = load_repository(installation_client.clone(), repo).await else { continue; };
+                        let repo_client =
+                            load_repository(installation_client.clone(), repo.clone())
+                                .await
+                                .map_err(|error| {
+                                    anyhow::anyhow!(
+                                        "Cannot load repository {:?}: {error:?}",
+                                        repo.full_name
+                                    )
+                                })?;
                         log::info!("Loaded repository {}", repo_client.name());
 
                         if let Some(existing) =
@@ -138,9 +147,12 @@ pub async fn load_repositories(
     Ok(repositories)
 }
 
-async fn load_repository(repo_client: Octocrab, repo: Repository) -> Option<RepositoryClient> {
+async fn load_repository(
+    repo_client: Octocrab,
+    repo: Repository,
+) -> anyhow::Result<RepositoryClient> {
     let Some(owner) = repo.owner.clone() else {
-        return None;
+        return Err(anyhow::anyhow!("Repository {} has no owner", repo.name));
     };
 
     let name = GithubRepoName::new(&owner.login, &repo.name);
@@ -152,14 +164,21 @@ async fn load_repository(repo_client: Octocrab, repo: Repository) -> Option<Repo
             config
         }
         Err(error) => {
-            log::error!("Could not load repository config for {name}: {error:?}");
-            return None;
+            return Err(anyhow::anyhow!(
+                "Could not load repository config for {name}: {error:?}"
+            ));
         }
     };
-    Some(RepositoryClient {
+
+    let permissions = TeamApiPermissionResolver::load(name.clone())
+        .await
+        .map_err(|error| anyhow::anyhow!("Could not load permissions for {name}: {error:?}"))?;
+
+    Ok(RepositoryClient {
         client: repo_client,
         repo_name: name,
         repository: repo,
+        permissions,
         config,
     })
 }

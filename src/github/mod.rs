@@ -23,6 +23,14 @@ impl GithubRepoName {
             name: name.to_lowercase(),
         }
     }
+
+    pub fn owner(&self) -> &str {
+        &self.owner
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
 }
 
 impl Display for GithubRepoName {
