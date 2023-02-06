@@ -57,7 +57,7 @@ impl GithubAppClient {
 
     /// Returns true if the comment was made by this bot.
     pub fn is_comment_internal(&self, comment: &PullRequestComment) -> bool {
-        comment.user.html_url == self.app.html_url
+        comment.author.html_url == self.app.html_url
     }
 }
 
