@@ -86,8 +86,7 @@ fn parse_webhook_event(request: Parts, body: &[u8]) -> anyhow::Result<Option<Web
             let repository_name = GithubRepoName::new(&repo_owner, &repo_name);
 
             let event: IssueCommentEventPayload = serde_json::from_slice(body)?;
-            let comment =
-                parse_pr_comment(repository_name, event).map(|c| WebhookEvent::Comment(c));
+            let comment = parse_pr_comment(repository_name, event).map(WebhookEvent::Comment);
             Ok(comment)
         }
         b"installation_repositories" | b"installation" => {
@@ -142,4 +141,114 @@ fn verify_gh_signature(
         HmacSha256::new_from_slice(secret.expose().as_bytes()).expect("Cannot create HMAC key");
     mac.update(body);
     mac.verify_slice(&signature).is_ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::extract::FromRequest;
+    use axum::http::{HeaderValue, Method};
+    use hmac::Mac;
+    use hyper::{Request, StatusCode};
+    use tokio::sync::mpsc;
+
+    use crate::github::server::{ServerState, ServerStateRef};
+    use crate::github::webhook::{GitHubWebhook, HmacSha256, WebhookEvent};
+    use crate::github::WebhookSecret;
+    use crate::tests::io::load_test_file;
+
+    #[tokio::test]
+    async fn test_installation_suspend() {
+        assert_eq!(
+            check_webhook("webhook/installation-suspend.json", "installation",).await,
+            Ok(GitHubWebhook(WebhookEvent::InstallationsChanged))
+        );
+    }
+
+    #[tokio::test]
+    async fn test_installation_unsuspend() {
+        assert_eq!(
+            check_webhook("webhook/installation-unsuspend.json", "installation",).await,
+            Ok(GitHubWebhook(WebhookEvent::InstallationsChanged))
+        );
+    }
+
+    #[tokio::test]
+    async fn test_issue_comment() {
+        insta::assert_debug_snapshot!(
+            check_webhook("webhook/issue-comment.json", "issue_comment").await,
+            @r###"
+        Ok(
+            GitHubWebhook(
+                Comment(
+                    PullRequestComment {
+                        repository: GithubRepoName {
+                            owner: "kobzol",
+                            name: "bors-kindergarten",
+                        },
+                        user: GithubUser {
+                            username: "Kobzol",
+                            html_url: Url {
+                                scheme: "https",
+                                cannot_be_a_base: false,
+                                username: "",
+                                password: None,
+                                host: Some(
+                                    Domain(
+                                        "github.com",
+                                    ),
+                                ),
+                                port: None,
+                                path: "/Kobzol",
+                                query: None,
+                                fragment: None,
+                            },
+                        },
+                        pr_number: 5,
+                        text: "hello bors",
+                    },
+                ),
+            ),
+        )
+        "###
+        );
+    }
+
+    #[tokio::test]
+    async fn test_unknown_event() {
+        assert_eq!(
+            check_webhook("webhook/push.json", "push").await,
+            Err(StatusCode::OK)
+        );
+    }
+
+    async fn check_webhook(file: &str, event: &str) -> Result<GitHubWebhook, StatusCode> {
+        let body = load_test_file(file);
+        let body_length = body.len();
+
+        let secret = "ABCDEF".to_string();
+        let mut mac =
+            HmacSha256::new_from_slice(secret.as_bytes()).expect("Cannot create HMAC key");
+        mac.update(body.as_bytes());
+        let hash = mac.finalize().into_bytes();
+        let hash = hex::encode(hash);
+        let signature = format!("sha256={hash}");
+
+        let mut request = Request::new(body.clone());
+        *request.method_mut() = Method::POST;
+        let headers = request.headers_mut();
+        headers.insert("content-type", HeaderValue::from_static("application-json"));
+        headers.insert(
+            "content-length",
+            HeaderValue::from_str(&body_length.to_string()).unwrap(),
+        );
+        headers.insert("x-github-event", HeaderValue::from_str(event).unwrap());
+        headers.insert(
+            "x-hub-signature-256",
+            HeaderValue::from_str(&signature).unwrap(),
+        );
+
+        let (tx, _) = mpsc::channel(1024);
+        let server_ref = ServerStateRef::new(ServerState::new(tx, WebhookSecret::new(secret)));
+        GitHubWebhook::from_request(request, &server_ref).await
+    }
 }

@@ -49,7 +49,7 @@ async fn handle_comment(
     comment: PullRequestComment,
 ) -> anyhow::Result<()> {
     // We want to ignore comments made by this bot
-    if client.is_comment_internal(&comment.user) {
+    if client.is_comment_internal(&comment) {
         log::trace!("Ignoring comment {comment:?} because it was authored by this bot");
         return Ok(());
     }

@@ -28,3 +28,6 @@ sha2 = "0.10"
 hmac = "0.12"
 hex = "0.4"
 secrecy = "0.8"
+
+[dev-dependencies]
+insta = "1.26"
