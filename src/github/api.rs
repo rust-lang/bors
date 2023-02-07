@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use crate::github::event::GithubUser;
 use anyhow::Context;
 use octocrab::models::issues::Comment;
 use octocrab::models::{App, AppId, InstallationRepositories};
@@ -54,8 +55,8 @@ impl GithubAppClient {
     }
 
     /// Returns true if the comment was made by this bot.
-    pub fn is_comment_internal(&self, comment: &Comment) -> bool {
-        comment.user.html_url == self.app.html_url
+    pub fn is_comment_internal(&self, user: &GithubUser) -> bool {
+        user.html_url == self.app.html_url
     }
 }
 

@@ -1,3 +1,5 @@
+use std::fmt::Debug;
+
 use axum::body::{Bytes, HttpBody};
 use axum::extract::FromRequest;
 use axum::http::request::Parts;
@@ -7,8 +9,8 @@ use hmac::{Hmac, Mac};
 use octocrab::models::events::payload::IssueCommentEventPayload;
 use octocrab::models::Repository;
 use sha2::Sha256;
-use std::fmt::Debug;
 
+use crate::github::event::{GithubUser, PullRequestComment, WebhookEvent};
 use crate::github::server::ServerStateRef;
 use crate::github::{GithubRepoName, WebhookSecret};
 
@@ -19,20 +21,8 @@ pub struct WebhookEventRepository {
     pub repository: Repository,
 }
 
-#[derive(Debug)]
-pub struct WebhookCommentEvent {
-    pub repository: GithubRepoName,
-    pub payload: IssueCommentEventPayload,
-}
-
-#[derive(Debug)]
-pub enum WebhookEvent {
-    Comment(WebhookCommentEvent),
-    InstallationsChanged,
-}
-
 /// axum extractor for GitHub webhook events.
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct GitHubWebhook(pub WebhookEvent);
 
 /// Extracts a webhook event from a HTTP request.
@@ -96,10 +86,9 @@ fn parse_webhook_event(request: Parts, body: &[u8]) -> anyhow::Result<Option<Web
             let repository_name = GithubRepoName::new(&repo_owner, &repo_name);
 
             let event: IssueCommentEventPayload = serde_json::from_slice(body)?;
-            Ok(Some(WebhookEvent::Comment(WebhookCommentEvent {
-                repository: repository_name,
-                payload: event,
-            })))
+            let comment =
+                parse_pr_comment(repository_name, event).map(|c| WebhookEvent::Comment(c));
+            Ok(comment)
         }
         b"installation_repositories" | b"installation" => {
             Ok(Some(WebhookEvent::InstallationsChanged))
@@ -109,6 +98,29 @@ fn parse_webhook_event(request: Parts, body: &[u8]) -> anyhow::Result<Option<Web
             Ok(None)
         }
     }
+}
+
+fn parse_pr_comment(
+    repo: GithubRepoName,
+    payload: IssueCommentEventPayload,
+) -> Option<PullRequestComment> {
+    // We only care about pull request comments
+    if payload.issue.pull_request.is_none() {
+        log::debug!("Ignoring event {payload:?} because it does not belong to a pull request");
+        return None;
+    }
+
+    let user = GithubUser {
+        username: payload.comment.user.login,
+        html_url: payload.comment.user.html_url,
+    };
+
+    Some(PullRequestComment {
+        repository: repo,
+        user,
+        text: payload.comment.body.unwrap_or_default(),
+        pr_number: payload.issue.number,
+    })
 }
 
 type HmacSha256 = Hmac<Sha256>;
