@@ -4,7 +4,12 @@ use std::time::{Duration, SystemTime};
 use crate::github::GithubRepoName;
 
 /// For how long should the permissions be cached.
-const CACHE_DURATION: Duration = Duration::from_secs(60 * 5);
+const CACHE_DURATION: Duration = Duration::from_secs(60 * 1);
+
+pub enum PermissionType {
+    Review,
+    Try,
+}
 
 pub struct TeamApiPermissionResolver {
     repo: GithubRepoName,
@@ -21,24 +26,23 @@ impl TeamApiPermissionResolver {
         })
     }
 
-    pub async fn is_try_allowed(&mut self, username: &str) -> bool {
-        self.reload_permissions().await;
-        self.permissions.permissions.try_users.contains(username)
-    }
+    pub async fn has_permission(&mut self, username: &str, permission: PermissionType) -> bool {
+        if self.permissions.is_stale() {
+            self.reload_permissions().await;
+        }
 
-    pub async fn is_review_allowed(&mut self, username: &str) -> bool {
-        self.reload_permissions().await;
-        self.permissions.permissions.review_users.contains(username)
+        match permission {
+            PermissionType::Review => self.permissions.permissions.try_users.contains(username),
+            PermissionType::Try => self.permissions.permissions.review_users.contains(username),
+        }
     }
 
     async fn reload_permissions(&mut self) {
-        if self.permissions.is_stale() {
-            let result = load_permissions(&self.repo).await;
-            match result {
-                Ok(perms) => self.permissions = CachedUserPermissions::new(perms),
-                Err(error) => {
-                    log::error!("Cannot reload permissions for {}: {error:?}", self.repo);
-                }
+        let result = load_permissions(&self.repo).await;
+        match result {
+            Ok(perms) => self.permissions = CachedUserPermissions::new(perms),
+            Err(error) => {
+                log::error!("Cannot reload permissions for {}: {error:?}", self.repo);
             }
         }
     }
@@ -72,38 +76,39 @@ impl CachedUserPermissions {
 async fn load_permissions(repo: &GithubRepoName) -> anyhow::Result<UserPermissions> {
     log::info!("Reloading permissions for repository {repo}");
 
-    let review_url = format!(
-        "https://team-api.infra.rust-lang.org/v1/permissions/bors.{}.review.json",
-        repo.name()
-    );
-    let review_users = load_users(&review_url)
+    let review_users = load_users(repo.name(), PermissionType::Review)
         .await
         .map_err(|error| anyhow::anyhow!("Cannot load review users: {error:?}"))?;
 
-    let try_url = format!(
-        "https://team-api.infra.rust-lang.org/v1/permissions/bors.{}.try.json",
-        repo.name()
-    );
-    let try_users = load_users(&try_url)
+    let try_users = load_users(repo.name(), PermissionType::Try)
         .await
         .map_err(|error| anyhow::anyhow!("Cannot load try users: {error:?}"))?;
     Ok(UserPermissions {
-        review_users: review_users.into_iter().collect(),
-        try_users: try_users.into_iter().collect(),
+        review_users,
+        try_users,
     })
 }
 
 #[derive(serde::Deserialize)]
 struct UserPermissionsResponse {
-    github_users: Vec<String>,
+    github_users: HashSet<String>,
 }
 
 /// Loads users that are allowed to perform try/review from the Rust Team API.
-async fn load_users(url: &str) -> anyhow::Result<Vec<String>> {
+async fn load_users(
+    repository_name: &str,
+    permission: PermissionType,
+) -> anyhow::Result<HashSet<String>> {
+    let permission = match permission {
+        PermissionType::Review => "review",
+        PermissionType::Try => "try",
+    };
+
+    let url = format!("https://team-api.infra.rust-lang.org/v1/permissions/bors.{repository_name}.{permission}.json");
     let users = reqwest::get(url)
         .await
+        .and_then(|res| res.error_for_status())
         .map_err(|error| anyhow::anyhow!("Cannot load users from team API: {error:?}"))?
-        .error_for_status()?
         .json::<UserPermissionsResponse>()
         .await
         .map_err(|error| anyhow::anyhow!("Cannot deserialize users from team API: {error:?}"))?;
