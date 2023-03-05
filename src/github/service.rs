@@ -6,7 +6,7 @@ use tokio::sync::mpsc;
 use crate::command::parser::{parse_commands, CommandParseError};
 use crate::command::BorsCommand;
 use crate::github::api::{GithubAppClient, RepositoryClient};
-use crate::github::webhook::{WebhookCommentEvent, WebhookEvent};
+use crate::github::event::{PullRequestComment, WebhookEvent};
 
 pub type WebhookSender = mpsc::Sender<WebhookEvent>;
 
@@ -23,7 +23,7 @@ pub fn github_webhook_process(
             match event {
                 WebhookEvent::Comment(event) => match client.get_repo_client(&event.repository) {
                     Some(repo) => {
-                        if let Err(error) = handle_webhook_event(&client, repo, event).await {
+                        if let Err(error) = handle_comment(&client, repo, event).await {
                             log::warn!("Error occured while handling event: {error:?}");
                         }
                     }
@@ -43,28 +43,19 @@ pub fn github_webhook_process(
     (tx, service)
 }
 
-async fn handle_webhook_event(
+async fn handle_comment(
     client: &GithubAppClient,
     repo: &RepositoryClient,
-    event: WebhookCommentEvent,
+    comment: PullRequestComment,
 ) -> anyhow::Result<()> {
-    let payload = event.payload;
-
-    // We only care about pull request comments
-    if payload.issue.pull_request.is_none() {
-        log::trace!("Ignoring event {payload:?} because it does not belong to a pull request");
-        return Ok(());
-    }
-
     // We want to ignore comments made by this bot
-    if client.is_comment_internal(&payload.comment) {
-        log::trace!("Ignoring event {payload:?} because it was authored by this bot");
+    if client.is_comment_internal(&comment) {
+        log::trace!("Ignoring comment {comment:?} because it was authored by this bot");
         return Ok(());
     }
 
-    let pr_number = payload.issue.number;
-    let comment_text = payload.comment.body.unwrap_or_default();
-    let commands = parse_commands(&comment_text);
+    let pr_number = comment.pr_number;
+    let commands = parse_commands(&comment.text);
 
     log::info!(
         "Received comment at https://github.com/{}/{}/issues/{}, commands: {:?}",
