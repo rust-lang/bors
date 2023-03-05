@@ -8,8 +8,8 @@ use clap::Parser;
 use tower::limit::ConcurrencyLimitLayer;
 
 use bors::github::api::GithubAppClient;
+use bors::github::process::github_webhook_process;
 use bors::github::server::{github_webhook_handler, ServerState};
-use bors::github::service::github_webhook_process;
 use bors::github::WebhookSecret;
 
 #[derive(clap::Parser)]

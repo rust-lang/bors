@@ -5,8 +5,8 @@ use url::Url;
 
 pub mod api;
 pub mod event;
+pub mod process;
 pub mod server;
-pub mod service;
 pub mod webhook;
 
 /// Unique identifier of a GitHub repository
