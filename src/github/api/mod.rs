@@ -1,9 +1,8 @@
-mod config;
 pub mod operations;
 
 use std::collections::HashMap;
 
-use crate::github::api::config::{RepositoryConfig, CONFIG_FILE_PATH};
+use crate::config::{RepositoryConfig, CONFIG_FILE_PATH};
 use crate::github::event::PullRequestComment;
 use anyhow::Context;
 use base64::Engine;
