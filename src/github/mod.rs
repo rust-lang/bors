@@ -1,6 +1,7 @@
 use std::fmt::{Display, Formatter};
 
 use secrecy::{ExposeSecret, SecretString};
+use url::Url;
 
 pub mod api;
 pub mod event;
@@ -41,4 +42,10 @@ impl WebhookSecret {
     pub fn expose(&self) -> &str {
         self.0.expose_secret().as_str()
     }
+}
+
+#[derive(Debug, PartialEq)]
+pub struct GithubUser {
+    pub username: String,
+    pub html_url: Url,
 }

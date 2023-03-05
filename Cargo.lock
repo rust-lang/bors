@@ -171,6 +171,7 @@ dependencies = [
  "jsonwebtoken",
  "log",
  "octocrab",
+ "reqwest",
  "secrecy",
  "serde",
  "serde_json",
