@@ -1,4 +1,4 @@
-use crate::github::service::WebhookSender;
+use crate::github::process::WebhookSender;
 use crate::github::webhook::GitHubWebhook;
 use crate::github::WebhookSecret;
 use axum::extract::State;

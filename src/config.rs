@@ -5,5 +5,5 @@ pub const CONFIG_FILE_PATH: &str = "rust-bors.toml";
 #[derive(serde::Deserialize, Debug)]
 pub struct RepositoryConfig {
     /// List of CI checks that should pass before merging a PR.
-    checks: Vec<String>,
+    pub checks: Vec<String>,
 }

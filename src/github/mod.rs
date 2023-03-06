@@ -4,9 +4,8 @@ use secrecy::{ExposeSecret, SecretString};
 use url::Url;
 
 pub mod api;
-pub mod event;
+pub mod process;
 pub mod server;
-pub mod service;
 pub mod webhook;
 
 /// Unique identifier of a GitHub repository
@@ -56,4 +55,12 @@ impl WebhookSecret {
 pub struct GithubUser {
     pub username: String,
     pub html_url: Url,
+}
+
+#[derive(Clone, Debug)]
+pub struct PullRequest {
+    pub number: u64,
+    pub head_label: String,
+    pub head_ref: String,
+    pub base_ref: String,
 }
