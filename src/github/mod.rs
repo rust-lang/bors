@@ -56,3 +56,11 @@ pub struct GithubUser {
     pub username: String,
     pub html_url: Url,
 }
+
+#[derive(Clone, Debug)]
+pub struct PullRequest {
+    pub number: u64,
+    pub head_label: String,
+    pub head_ref: String,
+    pub base_ref: String,
+}

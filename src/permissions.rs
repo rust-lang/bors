@@ -1,5 +1,6 @@
 use axum::async_trait;
 use std::collections::HashSet;
+use std::sync::Mutex;
 use std::time::{Duration, SystemTime};
 
 use crate::github::GithubRepoName;
@@ -11,7 +12,7 @@ pub enum PermissionType {
 
 #[async_trait]
 pub trait PermissionResolver {
-    async fn has_permission(&mut self, username: &str, permission: PermissionType) -> bool;
+    async fn has_permission(&self, username: &str, permission: PermissionType) -> bool;
 }
 
 /// For how long should the permissions be cached.
@@ -19,7 +20,7 @@ const CACHE_DURATION: Duration = Duration::from_secs(60 * 1);
 
 pub struct TeamApiPermissionResolver {
     repo: GithubRepoName,
-    permissions: CachedUserPermissions,
+    permissions: Mutex<CachedUserPermissions>,
 }
 
 impl TeamApiPermissionResolver {
@@ -28,14 +29,14 @@ impl TeamApiPermissionResolver {
 
         Ok(Self {
             repo,
-            permissions: CachedUserPermissions::new(permissions),
+            permissions: Mutex::new(CachedUserPermissions::new(permissions)),
         })
     }
 
-    async fn reload_permissions(&mut self) {
+    async fn reload_permissions(&self) {
         let result = load_permissions(&self.repo).await;
         match result {
-            Ok(perms) => self.permissions = CachedUserPermissions::new(perms),
+            Ok(perms) => *self.permissions.lock().unwrap() = CachedUserPermissions::new(perms),
             Err(error) => {
                 log::error!("Cannot reload permissions for {}: {error:?}", self.repo);
             }
@@ -45,21 +46,31 @@ impl TeamApiPermissionResolver {
 
 #[async_trait]
 impl PermissionResolver for TeamApiPermissionResolver {
-    async fn has_permission(&mut self, username: &str, permission: PermissionType) -> bool {
-        if self.permissions.is_stale() {
+    async fn has_permission(&self, username: &str, permission: PermissionType) -> bool {
+        if self.permissions.lock().unwrap().is_stale() {
             self.reload_permissions().await;
         }
 
-        match permission {
-            PermissionType::Review => self.permissions.permissions.review_users.contains(username),
-            PermissionType::Try => self.permissions.permissions.try_users.contains(username),
-        }
+        self.permissions
+            .lock()
+            .unwrap()
+            .permissions
+            .has_permission(username, permission)
     }
 }
 
-struct UserPermissions {
+pub struct UserPermissions {
     review_users: HashSet<String>,
     try_users: HashSet<String>,
+}
+
+impl UserPermissions {
+    fn has_permission(&self, username: &str, permission: PermissionType) -> bool {
+        match permission {
+            PermissionType::Review => self.review_users.contains(username),
+            PermissionType::Try => self.try_users.contains(username),
+        }
+    }
 }
 
 struct CachedUserPermissions {

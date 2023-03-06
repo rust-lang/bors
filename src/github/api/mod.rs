@@ -1,5 +1,4 @@
-mod client;
-pub mod operations;
+pub mod client;
 
 use std::collections::HashMap;
 
@@ -16,11 +15,13 @@ use crate::github::GithubRepoName;
 use crate::handler::BorsHandler;
 use crate::permissions::TeamApiPermissionResolver;
 
+type HandlerMap = HashMap<GithubRepoName, BorsHandler<GithubRepositoryClient>>;
+
 /// Provides access to managed GitHub repositories.
 pub struct GithubAppClient {
     app: App,
     client: Octocrab,
-    repositories: HashMap<GithubRepoName, BorsHandler>,
+    handlers: HandlerMap,
 }
 
 impl GithubAppClient {
@@ -47,22 +48,21 @@ impl GithubAppClient {
         Ok(GithubAppClient {
             app,
             client,
-            repositories,
+            handlers: repositories,
         })
     }
 
     /// Re-download information about repositories connected to this GitHub app.
     pub async fn reload_repositories(&mut self) -> anyhow::Result<()> {
-        self.repositories = load_repositories(&self.client).await?;
+        self.handlers = load_repositories(&self.client).await?;
         Ok(())
     }
 
-    pub fn get_bors_handler(&self, key: &GithubRepoName) -> Option<&BorsHandler> {
-        self.repositories.get(key)
-    }
-
-    pub fn get_bors_handler_mut(&mut self, key: &GithubRepoName) -> Option<&mut BorsHandler> {
-        self.repositories.get_mut(key)
+    pub fn get_bors_handler(
+        &self,
+        key: &GithubRepoName,
+    ) -> Option<&BorsHandler<GithubRepositoryClient>> {
+        self.handlers.get(key)
     }
 
     /// Returns true if the comment was made by this bot.
@@ -72,9 +72,7 @@ impl GithubAppClient {
 }
 
 /// Loads repositories that are connected to the given GitHub App client.
-pub async fn load_repositories(
-    client: &Octocrab,
-) -> anyhow::Result<HashMap<GithubRepoName, BorsHandler>> {
+pub async fn load_repositories(client: &Octocrab) -> anyhow::Result<HandlerMap> {
     let installations = client
         .apps()
         .installations()
@@ -129,7 +127,7 @@ pub async fn load_repositories(
 async fn create_bors_handler(
     repo_client: Octocrab,
     repo: Repository,
-) -> anyhow::Result<BorsHandler> {
+) -> anyhow::Result<BorsHandler<GithubRepositoryClient>> {
     let Some(owner) = repo.owner.clone() else {
         return Err(anyhow::anyhow!("Repository {} has no owner", repo.name));
     };
@@ -163,7 +161,7 @@ async fn create_bors_handler(
         name,
         config,
         Box::new(permissions),
-        Box::new(client),
+        client,
     ))
 }
 

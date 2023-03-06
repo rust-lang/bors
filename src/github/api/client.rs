@@ -2,8 +2,8 @@ use axum::async_trait;
 use octocrab::models::Repository;
 use octocrab::Octocrab;
 
-use crate::github::GithubRepoName;
-use crate::handler::{PullRequest, RepositoryClient};
+use crate::github::{GithubRepoName, PullRequest};
+use crate::handler::RepositoryClient;
 
 /// Provides access to a single app installation (repository).
 pub struct GithubRepositoryClient {

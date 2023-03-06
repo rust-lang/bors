@@ -1,8 +1,10 @@
 use crate::command::parser::{parse_commands, CommandParseError};
 use crate::command::BorsCommand;
+use crate::github::api::client::GithubRepositoryClient;
 use crate::github::api::GithubAppClient;
 use crate::github::webhook::{PullRequestComment, WebhookEvent};
-use crate::handler::{BorsHandler, PullRequest};
+use crate::github::PullRequest;
+use crate::handler::{BorsHandler, RepositoryClient};
 use anyhow::Context;
 use std::future::Future;
 use tokio::sync::mpsc;
@@ -44,7 +46,7 @@ pub fn github_webhook_process(
 
 async fn handle_comment(
     client: &GithubAppClient,
-    handler: &BorsHandler,
+    handler: &BorsHandler<GithubRepositoryClient>,
     comment: PullRequestComment,
 ) -> anyhow::Result<()> {
     // We want to ignore comments made by this bot
@@ -55,17 +57,18 @@ async fn handle_comment(
 
     let pr_number = comment.pr_number;
     let commands = parse_commands(&comment.text);
-    /*let pull_request = handler
-    .client()
-    .pulls(handler.repository().owner(), handler.repository().name())
-    .get(pr_number)
-    .await
-    .map_err(|error| {
-        anyhow::anyhow!(
-            "Could not get PR {}/{pr_number}: {error:?}",
-            handler.repository()
-        )
-    })?;*/
+    let pull_request = handler
+        .client()
+        .client
+        .pulls(handler.repository().owner(), handler.repository().name())
+        .get(pr_number)
+        .await
+        .map_err(|error| {
+            anyhow::anyhow!(
+                "Could not get PR {}/{pr_number}: {error:?}",
+                handler.repository()
+            )
+        })?;
 
     log::info!(
         "Received comment at https://github.com/{}/{}/issues/{}, commands: {:?}",
@@ -75,19 +78,16 @@ async fn handle_comment(
         commands
     );
 
-    let pull_request = PullRequest {
-        number: pr_number as u32,
-    };
+    let pull_request = github_pr_to_pr(pull_request);
     for command in commands {
         match command {
             Ok(command) => {
                 let result = match command {
-                    BorsCommand::Ping => handler.ping(pull_request.clone()).await,
+                    BorsCommand::Ping => handler.ping(&pull_request).await,
                     BorsCommand::Try => {
-                        todo!();
-                        // service
-                        //     .try_merge(repo, &comment.author, pull_request.clone())
-                        //     .await
+                        handler
+                            .enqueue_try_build(&pull_request, &comment.author)
+                            .await
                     }
                 };
                 if result.is_err() {
@@ -111,4 +111,13 @@ async fn handle_comment(
         }
     }
     Ok(())
+}
+
+fn github_pr_to_pr(pr: octocrab::models::pulls::PullRequest) -> PullRequest {
+    PullRequest {
+        number: pr.number,
+        head_label: pr.head.label.unwrap_or_else(|| "<unknown>".to_string()),
+        head_ref: pr.head.ref_field,
+        base_ref: pr.base.ref_field,
+    }
 }
