@@ -3,7 +3,7 @@ use crate::handlers::RepositoryClient;
 use crate::permissions::{PermissionResolver, PermissionType};
 
 pub async fn command_try_build<Client: RepositoryClient, Perms: PermissionResolver>(
-    client: &Client,
+    client: &mut Client,
     perms: &Perms,
     pr: &PullRequest,
     author: &GithubUser,
@@ -18,7 +18,7 @@ pub async fn command_try_build<Client: RepositoryClient, Perms: PermissionResolv
 }
 
 async fn check_try_permissions<Client: RepositoryClient, Perms: PermissionResolver>(
-    client: &Client,
+    client: &mut Client,
     permission_resolver: &Perms,
     pr: &PullRequest,
     author: &GithubUser,
@@ -52,10 +52,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_try_no_permission() {
-        let client = test_client();
-        command_try_build(&client, &NoPermissions, &create_pr(1), &create_user("foo"))
-            .await
-            .unwrap();
+        let mut client = test_client();
+        command_try_build(
+            &mut client,
+            &NoPermissions,
+            &create_pr(1),
+            &create_user("foo"),
+        )
+        .await
+        .unwrap();
         client.check_comments(
             1,
             &["@foo: :key: Insufficient privileges: not in try users"],

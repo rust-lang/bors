@@ -16,7 +16,7 @@ pub type WebhookSender = mpsc::Sender<WebhookEvent>;
 
 /// Asynchronous process that receives webhooks and reacts to them.
 pub fn github_webhook_process(
-    mut client: GithubAppState,
+    mut state: GithubAppState,
 ) -> (WebhookSender, impl Future<Output = ()>) {
     let (tx, mut rx) = mpsc::channel::<WebhookEvent>(1024);
 
@@ -25,21 +25,29 @@ pub fn github_webhook_process(
             log::trace!("Received webhook: {event:#?}");
 
             match event {
-                WebhookEvent::Comment(event) => {
-                    match client.get_repository_state(&event.repository) {
+                WebhookEvent::Comment(comment) => {
+                    // We want to ignore comments made by this bot
+                    if state.is_comment_internal(&comment) {
+                        log::trace!(
+                            "Ignoring comment {comment:?} because it was authored by this bot"
+                        );
+                        continue;
+                    }
+
+                    match state.get_repository_state_mut(&comment.repository) {
                         Some(repo) => {
-                            if let Err(error) = handle_comment(&client, repo, event).await {
+                            if let Err(error) = handle_comment(repo, comment).await {
                                 log::warn!("Error occured while handling event: {error:?}");
                             }
                         }
                         None => {
-                            log::warn!("Repository {} not found", event.repository);
+                            log::warn!("Repository {} not found", comment.repository);
                         }
                     }
                 }
                 WebhookEvent::InstallationsChanged => {
                     log::info!("Reloading installation repositories");
-                    if let Err(error) = client.reload_repositories().await {
+                    if let Err(error) = state.reload_repositories().await {
                         log::error!("Could not reload installation repositories: {error:?}");
                     }
                 }
@@ -50,16 +58,9 @@ pub fn github_webhook_process(
 }
 
 async fn handle_comment(
-    client: &GithubAppState,
-    repo: &RepositoryState,
+    repo: &mut RepositoryState,
     comment: PullRequestComment,
 ) -> anyhow::Result<()> {
-    // We want to ignore comments made by this bot
-    if client.is_comment_internal(&comment) {
-        log::trace!("Ignoring comment {comment:?} because it was authored by this bot");
-        return Ok(());
-    }
-
     let pr_number = comment.pr_number;
     let commands = parse_commands(&comment.text);
     let pull_request = repo
@@ -88,10 +89,10 @@ async fn handle_comment(
         match command {
             Ok(command) => {
                 let result = match command {
-                    BorsCommand::Ping => command_ping(&repo.client, &pull_request).await,
+                    BorsCommand::Ping => command_ping(&mut repo.client, &pull_request).await,
                     BorsCommand::Try => {
                         command_try_build(
-                            &repo.client,
+                            &mut repo.client,
                             &repo.permissions_resolver,
                             &pull_request,
                             &comment.author,

@@ -2,7 +2,7 @@ use crate::github::PullRequest;
 use crate::handlers::RepositoryClient;
 
 pub async fn command_ping<Client: RepositoryClient>(
-    client: &Client,
+    client: &mut Client,
     pr: &PullRequest,
 ) -> anyhow::Result<()> {
     log::debug!("Executing ping on {}", client.repository());
@@ -18,8 +18,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_ping() {
-        let client = test_client();
-        command_ping(&client, &create_pr(1)).await.unwrap();
+        let mut client = test_client();
+        command_ping(&mut client, &create_pr(1)).await.unwrap();
         client.check_comments(1, &["Pong 🏓!"]);
     }
 }

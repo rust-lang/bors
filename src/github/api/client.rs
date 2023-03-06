@@ -38,7 +38,7 @@ impl RepositoryClient for GithubRepositoryClient {
 
     /// Post a comment to the pull request with the given number.
     /// The comment will be posted as the Github App user of the bot.
-    async fn post_comment(&self, pr: &PullRequest, text: &str) -> anyhow::Result<()> {
+    async fn post_comment(&mut self, pr: &PullRequest, text: &str) -> anyhow::Result<()> {
         self.client
             .issues(&self.name().owner, &self.name().name)
             .create_comment(pr.number, text)

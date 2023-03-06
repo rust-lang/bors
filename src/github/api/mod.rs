@@ -61,8 +61,11 @@ impl GithubAppState {
         Ok(())
     }
 
-    pub fn get_repository_state(&self, key: &GithubRepoName) -> Option<&RepositoryState> {
-        self.repositories.get(key)
+    pub fn get_repository_state_mut(
+        &mut self,
+        key: &GithubRepoName,
+    ) -> Option<&mut RepositoryState> {
+        self.repositories.get_mut(key)
     }
 
     /// Returns true if the comment was made by this bot.

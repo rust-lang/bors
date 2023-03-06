@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::sync::Mutex;
 
 use axum::async_trait;
 
@@ -8,13 +7,13 @@ use crate::handlers::RepositoryClient;
 
 pub struct TestRepositoryClient {
     name: GithubRepoName,
-    comments: Mutex<HashMap<u64, Vec<String>>>,
+    comments: HashMap<u64, Vec<String>>,
 }
 
 impl TestRepositoryClient {
     pub fn check_comments(&self, pr_number: u64, comments: &[&str]) {
         assert_eq!(
-            self.comments.lock().unwrap().get(&pr_number).unwrap(),
+            self.comments.get(&pr_number).unwrap(),
             &comments
                 .into_iter()
                 .map(|&s| String::from(s))
@@ -36,10 +35,8 @@ impl RepositoryClient for TestRepositoryClient {
         &self.name
     }
 
-    async fn post_comment(&self, pr: &PullRequest, text: &str) -> anyhow::Result<()> {
+    async fn post_comment(&mut self, pr: &PullRequest, text: &str) -> anyhow::Result<()> {
         self.comments
-            .lock()
-            .unwrap()
             .entry(pr.number)
             .or_default()
             .push(text.to_string());

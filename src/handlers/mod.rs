@@ -10,5 +10,5 @@ pub mod trybuild;
 pub trait RepositoryClient {
     fn repository(&self) -> &GithubRepoName;
 
-    async fn post_comment(&self, pr: &PullRequest, text: &str) -> anyhow::Result<()>;
+    async fn post_comment(&mut self, pr: &PullRequest, text: &str) -> anyhow::Result<()>;
 }
