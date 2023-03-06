@@ -12,24 +12,27 @@ use octocrab::Octocrab;
 use secrecy::{ExposeSecret, SecretVec};
 
 use crate::github::GithubRepoName;
-use crate::handler::BorsHandler;
 use crate::permissions::TeamApiPermissionResolver;
 
-type HandlerMap = HashMap<GithubRepoName, BorsHandler<GithubRepositoryClient>>;
-
-/// Provides access to managed GitHub repositories.
-pub struct GithubAppClient {
-    app: App,
-    client: Octocrab,
-    handlers: HandlerMap,
+pub struct RepositoryState {
+    pub repository: GithubRepoName,
+    pub client: GithubRepositoryClient,
+    pub permissions_resolver: TeamApiPermissionResolver,
+    pub config: RepositoryConfig,
 }
 
-impl GithubAppClient {
+type RepositoryMap = HashMap<GithubRepoName, RepositoryState>;
+
+/// Provides access to managed GitHub repositories.
+pub struct GithubAppState {
+    app: App,
+    client: Octocrab,
+    repositories: RepositoryMap,
+}
+
+impl GithubAppState {
     /// Loads repositories managed by the Bors GitHub app with the given ID.
-    pub async fn load(
-        app_id: AppId,
-        private_key: SecretVec<u8>,
-    ) -> anyhow::Result<GithubAppClient> {
+    pub async fn load(app_id: AppId, private_key: SecretVec<u8>) -> anyhow::Result<GithubAppState> {
         let key = jsonwebtoken::EncodingKey::from_rsa_pem(private_key.expose_secret().as_ref())
             .context("Could not encode private key")?;
 
@@ -45,24 +48,21 @@ impl GithubAppClient {
             .context("Could not load Github App")?;
 
         let repositories = load_repositories(&client).await?;
-        Ok(GithubAppClient {
+        Ok(GithubAppState {
             app,
             client,
-            handlers: repositories,
+            repositories,
         })
     }
 
     /// Re-download information about repositories connected to this GitHub app.
     pub async fn reload_repositories(&mut self) -> anyhow::Result<()> {
-        self.handlers = load_repositories(&self.client).await?;
+        self.repositories = load_repositories(&self.client).await?;
         Ok(())
     }
 
-    pub fn get_bors_handler(
-        &self,
-        key: &GithubRepoName,
-    ) -> Option<&BorsHandler<GithubRepositoryClient>> {
-        self.handlers.get(key)
+    pub fn get_repository_state(&self, key: &GithubRepoName) -> Option<&RepositoryState> {
+        self.repositories.get(key)
     }
 
     /// Returns true if the comment was made by this bot.
@@ -72,7 +72,7 @@ impl GithubAppClient {
 }
 
 /// Loads repositories that are connected to the given GitHub App client.
-pub async fn load_repositories(client: &Octocrab) -> anyhow::Result<HandlerMap> {
+pub async fn load_repositories(client: &Octocrab) -> anyhow::Result<RepositoryMap> {
     let installations = client
         .apps()
         .installations()
@@ -91,8 +91,8 @@ pub async fn load_repositories(client: &Octocrab) -> anyhow::Result<HandlerMap> 
             {
                 Ok(repos) => {
                     for repo in repos.repositories {
-                        let bors_handler =
-                            create_bors_handler(installation_client.clone(), repo.clone())
+                        let repo_state =
+                            create_repo_state(installation_client.clone(), repo.clone())
                                 .await
                                 .map_err(|error| {
                                     anyhow::anyhow!(
@@ -100,14 +100,14 @@ pub async fn load_repositories(client: &Octocrab) -> anyhow::Result<HandlerMap> 
                                         repo.full_name
                                     )
                                 })?;
-                        log::info!("Loaded repository {}", bors_handler.repository());
+                        log::info!("Loaded repository {}", repo_state.repository);
 
                         if let Some(existing) =
-                            repositories.insert(bors_handler.repository().clone(), bors_handler)
+                            repositories.insert(repo_state.repository.clone(), repo_state)
                         {
                             return Err(anyhow::anyhow!(
                                 "Repository {} found in multiple installations!",
-                                existing.repository()
+                                existing.repository
                             ));
                         }
                     }
@@ -124,10 +124,10 @@ pub async fn load_repositories(client: &Octocrab) -> anyhow::Result<HandlerMap> 
     Ok(repositories)
 }
 
-async fn create_bors_handler(
+async fn create_repo_state(
     repo_client: Octocrab,
     repo: Repository,
-) -> anyhow::Result<BorsHandler<GithubRepositoryClient>> {
+) -> anyhow::Result<RepositoryState> {
     let Some(owner) = repo.owner.clone() else {
         return Err(anyhow::anyhow!("Repository {} has no owner", repo.name));
     };
@@ -147,7 +147,7 @@ async fn create_bors_handler(
         }
     };
 
-    let permissions = TeamApiPermissionResolver::load(name.clone())
+    let permissions_resolver = TeamApiPermissionResolver::load(name.clone())
         .await
         .map_err(|error| anyhow::anyhow!("Could not load permissions for {name}: {error:?}"))?;
 
@@ -157,12 +157,12 @@ async fn create_bors_handler(
         repository: repo,
     };
 
-    Ok(BorsHandler::new(
-        name,
-        config,
-        Box::new(permissions),
+    Ok(RepositoryState {
+        repository: name,
         client,
-    ))
+        config,
+        permissions_resolver,
+    })
 }
 
 /// Loads repository configuration from a file located at `[CONFIG_FILE_PATH]` in the main

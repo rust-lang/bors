@@ -7,7 +7,7 @@ use axum::Router;
 use clap::Parser;
 use tower::limit::ConcurrencyLimitLayer;
 
-use bors::github::api::GithubAppClient;
+use bors::github::api::GithubAppState;
 use bors::github::process::github_webhook_process;
 use bors::github::server::{github_webhook_handler, ServerState};
 use bors::github::WebhookSecret;
@@ -48,7 +48,7 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
         .build()
         .context("Cannot build tokio runtime")?;
 
-    let access = runtime.block_on(GithubAppClient::load(
+    let access = runtime.block_on(GithubAppState::load(
         opts.app_id.into(),
         opts.private_key.into_bytes().into(),
     ))?;

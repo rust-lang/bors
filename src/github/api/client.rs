@@ -3,7 +3,7 @@ use octocrab::models::Repository;
 use octocrab::Octocrab;
 
 use crate::github::{GithubRepoName, PullRequest};
-use crate::handler::RepositoryClient;
+use crate::handlers::RepositoryClient;
 
 /// Provides access to a single app installation (repository).
 pub struct GithubRepositoryClient {
@@ -32,12 +32,16 @@ impl GithubRepositoryClient {
 
 #[async_trait]
 impl RepositoryClient for GithubRepositoryClient {
+    fn repository(&self) -> &GithubRepoName {
+        self.name()
+    }
+
     /// Post a comment to the pull request with the given number.
     /// The comment will be posted as the Github App user of the bot.
     async fn post_comment(&self, pr: &PullRequest, text: &str) -> anyhow::Result<()> {
         self.client
             .issues(&self.name().owner, &self.name().name)
-            .create_comment(pr.number as u64, text)
+            .create_comment(pr.number, text)
             .await?;
         Ok(())
     }

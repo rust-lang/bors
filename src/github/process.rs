@@ -1,19 +1,22 @@
+use std::future::Future;
+
+use anyhow::Context;
+use tokio::sync::mpsc;
+
 use crate::command::parser::{parse_commands, CommandParseError};
 use crate::command::BorsCommand;
-use crate::github::api::client::GithubRepositoryClient;
-use crate::github::api::GithubAppClient;
+use crate::github::api::{GithubAppState, RepositoryState};
 use crate::github::webhook::{PullRequestComment, WebhookEvent};
 use crate::github::PullRequest;
-use crate::handler::{BorsHandler, RepositoryClient};
-use anyhow::Context;
-use std::future::Future;
-use tokio::sync::mpsc;
+use crate::handlers::ping::command_ping;
+use crate::handlers::trybuild::command_try_build;
+use crate::handlers::RepositoryClient;
 
 pub type WebhookSender = mpsc::Sender<WebhookEvent>;
 
 /// Asynchronous process that receives webhooks and reacts to them.
 pub fn github_webhook_process(
-    mut client: GithubAppClient,
+    mut client: GithubAppState,
 ) -> (WebhookSender, impl Future<Output = ()>) {
     let (tx, mut rx) = mpsc::channel::<WebhookEvent>(1024);
 
@@ -22,16 +25,18 @@ pub fn github_webhook_process(
             log::trace!("Received webhook: {event:#?}");
 
             match event {
-                WebhookEvent::Comment(event) => match client.get_bors_handler(&event.repository) {
-                    Some(repo) => {
-                        if let Err(error) = handle_comment(&client, repo, event).await {
-                            log::warn!("Error occured while handling event: {error:?}");
+                WebhookEvent::Comment(event) => {
+                    match client.get_repository_state(&event.repository) {
+                        Some(repo) => {
+                            if let Err(error) = handle_comment(&client, repo, event).await {
+                                log::warn!("Error occured while handling event: {error:?}");
+                            }
+                        }
+                        None => {
+                            log::warn!("Repository {} not found", event.repository);
                         }
                     }
-                    None => {
-                        log::warn!("Repository {} not found", event.repository);
-                    }
-                },
+                }
                 WebhookEvent::InstallationsChanged => {
                     log::info!("Reloading installation repositories");
                     if let Err(error) = client.reload_repositories().await {
@@ -45,8 +50,8 @@ pub fn github_webhook_process(
 }
 
 async fn handle_comment(
-    client: &GithubAppClient,
-    handler: &BorsHandler<GithubRepositoryClient>,
+    client: &GithubAppState,
+    repo: &RepositoryState,
     comment: PullRequestComment,
 ) -> anyhow::Result<()> {
     // We want to ignore comments made by this bot
@@ -57,23 +62,23 @@ async fn handle_comment(
 
     let pr_number = comment.pr_number;
     let commands = parse_commands(&comment.text);
-    let pull_request = handler
-        .client()
+    let pull_request = repo
         .client
-        .pulls(handler.repository().owner(), handler.repository().name())
+        .client
+        .pulls(repo.repository.owner(), repo.repository.name())
         .get(pr_number)
         .await
         .map_err(|error| {
             anyhow::anyhow!(
                 "Could not get PR {}/{pr_number}: {error:?}",
-                handler.repository()
+                repo.repository
             )
         })?;
 
     log::info!(
         "Received comment at https://github.com/{}/{}/issues/{}, commands: {:?}",
-        handler.repository().owner(),
-        handler.repository().name(),
+        repo.repository.owner(),
+        repo.repository.name(),
         pr_number,
         commands
     );
@@ -83,11 +88,15 @@ async fn handle_comment(
         match command {
             Ok(command) => {
                 let result = match command {
-                    BorsCommand::Ping => handler.ping(&pull_request).await,
+                    BorsCommand::Ping => command_ping(&repo.client, &pull_request).await,
                     BorsCommand::Try => {
-                        handler
-                            .enqueue_try_build(&pull_request, &comment.author)
-                            .await
+                        command_try_build(
+                            &repo.client,
+                            &repo.permissions_resolver,
+                            &pull_request,
+                            &comment.author,
+                        )
+                        .await
                     }
                 };
                 if result.is_err() {
@@ -102,8 +111,7 @@ async fn handle_comment(
                     }
                 };
 
-                handler
-                    .client()
+                repo.client
                     .post_comment(&pull_request, &error_msg)
                     .await
                     .context("Could not reply to PR comment")?;
