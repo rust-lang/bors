@@ -4,7 +4,6 @@ use secrecy::{ExposeSecret, SecretString};
 use url::Url;
 
 pub mod api;
-pub mod event;
 pub mod process;
 pub mod server;
 pub mod webhook;

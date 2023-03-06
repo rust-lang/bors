@@ -1,7 +1,6 @@
-use octocrab::models::issues::Comment;
 use reqwest::StatusCode;
 
-use crate::github::api::RepositoryClient;
+use crate::github::api::client::GithubRepositoryClient;
 
 #[derive(Debug)]
 pub enum MergeError {
@@ -23,7 +22,7 @@ struct MergeRequest<'a, 'b, 'c> {
 ///
 /// Documentation: https://docs.github.com/en/rest/branches/branches?apiVersion=2022-11-28#merge-a-branch
 pub async fn merge_branches(
-    repo: &RepositoryClient,
+    repo: &GithubRepositoryClient,
     base_ref: &str,
     head_ref: &str,
     commit_message: &str,
@@ -76,18 +75,4 @@ pub async fn merge_branches(
             Err(MergeError::NetworkError(error))
         }
     }
-}
-
-/// Post a comment to the pull request with the given number.
-/// The comment will be posted as the Github App user of the bot.
-pub async fn post_pr_comment(
-    client: &RepositoryClient,
-    pr_number: u64,
-    content: &str,
-) -> octocrab::Result<Comment> {
-    client
-        .client()
-        .issues(&client.name().owner, &client.name().name)
-        .create_comment(pr_number, content)
-        .await
 }

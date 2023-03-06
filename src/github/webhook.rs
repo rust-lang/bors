@@ -10,9 +10,22 @@ use octocrab::models::events::payload::IssueCommentEventPayload;
 use octocrab::models::Repository;
 use sha2::Sha256;
 
-use crate::github::event::{PullRequestComment, WebhookEvent};
 use crate::github::server::ServerStateRef;
 use crate::github::{GithubRepoName, GithubUser, WebhookSecret};
+
+#[derive(Debug, PartialEq)]
+pub struct PullRequestComment {
+    pub repository: GithubRepoName,
+    pub author: GithubUser,
+    pub pr_number: u64,
+    pub text: String,
+}
+
+#[derive(Debug, PartialEq)]
+pub enum WebhookEvent {
+    Comment(PullRequestComment),
+    InstallationsChanged,
+}
 
 /// This struct is used to extract the repository and user from a GitHub webhook event.
 /// The wrapper exists because octocrab doesn't expose/parse the repository field.

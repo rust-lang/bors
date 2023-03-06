@@ -1,15 +1,21 @@
+use axum::async_trait;
 use std::collections::HashSet;
 use std::time::{Duration, SystemTime};
 
 use crate::github::GithubRepoName;
 
-/// For how long should the permissions be cached.
-const CACHE_DURATION: Duration = Duration::from_secs(60 * 1);
-
 pub enum PermissionType {
     Review,
     Try,
 }
+
+#[async_trait]
+pub trait PermissionResolver {
+    async fn has_permission(&mut self, username: &str, permission: PermissionType) -> bool;
+}
+
+/// For how long should the permissions be cached.
+const CACHE_DURATION: Duration = Duration::from_secs(60 * 1);
 
 pub struct TeamApiPermissionResolver {
     repo: GithubRepoName,
@@ -26,17 +32,6 @@ impl TeamApiPermissionResolver {
         })
     }
 
-    pub async fn has_permission(&mut self, username: &str, permission: PermissionType) -> bool {
-        if self.permissions.is_stale() {
-            self.reload_permissions().await;
-        }
-
-        match permission {
-            PermissionType::Review => self.permissions.permissions.try_users.contains(username),
-            PermissionType::Try => self.permissions.permissions.review_users.contains(username),
-        }
-    }
-
     async fn reload_permissions(&mut self) {
         let result = load_permissions(&self.repo).await;
         match result {
@@ -44,6 +39,20 @@ impl TeamApiPermissionResolver {
             Err(error) => {
                 log::error!("Cannot reload permissions for {}: {error:?}", self.repo);
             }
+        }
+    }
+}
+
+#[async_trait]
+impl PermissionResolver for TeamApiPermissionResolver {
+    async fn has_permission(&mut self, username: &str, permission: PermissionType) -> bool {
+        if self.permissions.is_stale() {
+            self.reload_permissions().await;
+        }
+
+        match permission {
+            PermissionType::Review => self.permissions.permissions.review_users.contains(username),
+            PermissionType::Try => self.permissions.permissions.try_users.contains(username),
         }
     }
 }
@@ -76,11 +85,11 @@ impl CachedUserPermissions {
 async fn load_permissions(repo: &GithubRepoName) -> anyhow::Result<UserPermissions> {
     log::info!("Reloading permissions for repository {repo}");
 
-    let review_users = load_users(repo.name(), PermissionType::Review)
+    let review_users = load_users_from_team_api(repo.name(), PermissionType::Review)
         .await
         .map_err(|error| anyhow::anyhow!("Cannot load review users: {error:?}"))?;
 
-    let try_users = load_users(repo.name(), PermissionType::Try)
+    let try_users = load_users_from_team_api(repo.name(), PermissionType::Try)
         .await
         .map_err(|error| anyhow::anyhow!("Cannot load try users: {error:?}"))?;
     Ok(UserPermissions {
@@ -95,7 +104,7 @@ struct UserPermissionsResponse {
 }
 
 /// Loads users that are allowed to perform try/review from the Rust Team API.
-async fn load_users(
+async fn load_users_from_team_api(
     repository_name: &str,
     permission: PermissionType,
 ) -> anyhow::Result<HashSet<String>> {

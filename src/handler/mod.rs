@@ -1,23 +1,57 @@
+use crate::config::RepositoryConfig;
+use crate::github::GithubRepoName;
+use crate::permissions::PermissionResolver;
 use axum::async_trait;
 
+#[derive(Clone, Debug)]
 pub struct PullRequest {
-    number: u32,
+    pub number: u32,
 }
 
 /// Provides functionality for working with a remote repository.
 #[async_trait]
-trait RepositoryAccess {
+pub trait RepositoryClient {
     async fn post_comment(&self, pr: &PullRequest, text: &str) -> anyhow::Result<()>;
 }
 
-pub struct BorsService;
+/// Service that handles BORS requests for a single repository.
+pub struct BorsHandler {
+    repository: GithubRepoName,
+    config: RepositoryConfig,
+    permission_resolver: Box<dyn PermissionResolver>,
+    client: Box<dyn RepositoryClient>,
+}
 
-impl BorsService {
-    async fn ping(&self, repo: &dyn RepositoryAccess, pr: PullRequest) -> anyhow::Result<()> {
+impl BorsHandler {
+    pub fn new(
+        repository: GithubRepoName,
+        config: RepositoryConfig,
+        permission_resolver: Box<dyn PermissionResolver>,
+        client: Box<dyn RepositoryClient>,
+    ) -> Self {
+        Self {
+            repository,
+            config,
+            permission_resolver,
+            client,
+        }
+    }
+
+    pub fn repository(&self) -> &GithubRepoName {
+        &self.repository
+    }
+
+    pub fn client(&self) -> &dyn RepositoryClient {
+        self.client.as_ref()
+    }
+
+    pub async fn ping(&self, pr: PullRequest) -> anyhow::Result<()> {
         log::debug!("Executing ping");
-        repo.post_comment(&pr, "Pong 🏓!").await?;
+        self.client.post_comment(&pr, "Pong 🏓!").await?;
         Ok(())
     }
+
+    async fn enqueue_try_build(&self, pr: &PullRequest) {}
 
     /*async fn try_merge(
             &self,
@@ -108,22 +142,39 @@ impl BorsService {
 
 #[cfg(test)]
 mod tests {
-    use crate::service::{BorsService, PullRequest, RepositoryAccess};
+    use crate::config::RepositoryConfig;
+    use crate::github::GithubRepoName;
+    use crate::handler::{BorsHandler, PullRequest, RepositoryClient};
+    use crate::permissions::{PermissionResolver, PermissionType};
     use axum::async_trait;
     use std::collections::HashMap;
-    use std::sync::Mutex;
+    use std::sync::{Arc, Mutex};
+
+    struct NoPermissions;
+
+    #[async_trait]
+    impl PermissionResolver for NoPermissions {
+        async fn has_permission(&mut self, username: &str, permission: PermissionType) -> bool {
+            false
+        }
+    }
 
     #[derive(Default)]
-    struct MockAccess {
-        comments: Mutex<HashMap<u32, Vec<String>>>,
+    struct MockRepository {
+        comments: HashMap<u32, Vec<String>>,
+    }
+
+    struct MockClient {
+        repository: Arc<Mutex<MockRepository>>,
     }
 
     #[async_trait]
-    impl RepositoryAccess for MockAccess {
+    impl RepositoryClient for MockClient {
         async fn post_comment(&self, pr: &PullRequest, text: &str) -> anyhow::Result<()> {
-            self.comments
+            self.repository
                 .lock()
                 .unwrap()
+                .comments
                 .entry(pr.number)
                 .or_default()
                 .push(text.to_string());
@@ -133,15 +184,25 @@ mod tests {
 
     #[tokio::test]
     async fn test_ping() {
-        let service = BorsService;
-        let access = MockAccess::default();
-        service
-            .ping(&access, PullRequest { number: 1 })
-            .await
-            .unwrap();
+        let state = create_mock_state();
+        let handler = create_handler(state.clone());
+        handler.ping(PullRequest { number: 1 }).await.unwrap();
         assert_eq!(
-            access.comments.lock().unwrap().get(&1).unwrap(),
+            state.lock().unwrap().comments.get(&1).unwrap(),
             &vec!["Pong 🏓!".to_string()]
         );
+    }
+
+    fn create_mock_state() -> Arc<Mutex<MockRepository>> {
+        Arc::new(Mutex::new(MockRepository::default()))
+    }
+
+    fn create_handler(repository: Arc<Mutex<MockRepository>>) -> BorsHandler {
+        BorsHandler::new(
+            GithubRepoName::new("foo", "bar"),
+            RepositoryConfig { checks: vec![] },
+            Box::new(NoPermissions),
+            Box::new(MockClient { repository }),
+        )
     }
 }
