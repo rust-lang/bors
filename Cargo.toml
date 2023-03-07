@@ -32,7 +32,5 @@ hex = "0.4"
 secrecy = "0.8"
 base64 = "0.21"
 
-sqlx = { version = "0.6", features = [ "runtime-tokio-native-tls" , "sqlite" ] }
-
 [dev-dependencies]
 insta = "1.26"
