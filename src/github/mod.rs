@@ -1,5 +1,6 @@
 use std::fmt::{Display, Formatter};
 
+use crate::database::RepositoryId;
 use secrecy::{ExposeSecret, SecretString};
 use url::Url;
 
@@ -35,6 +36,12 @@ impl GithubRepoName {
 impl Display for GithubRepoName {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.write_fmt(format_args!("{}/{}", self.owner, self.name))
+    }
+}
+
+impl From<&GithubRepoName> for RepositoryId {
+    fn from(value: &GithubRepoName) -> Self {
+        RepositoryId(format!("{}/{}", value.owner, value.name))
     }
 }
 
