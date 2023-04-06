@@ -7,17 +7,15 @@ use crate::command::parser::{parse_commands, CommandParseError};
 use crate::command::BorsCommand;
 use crate::github::api::{GithubAppState, RepositoryState};
 use crate::github::webhook::{PullRequestComment, WebhookEvent};
-use crate::github::PullRequest;
+use crate::github::{Branch, PullRequest};
 use crate::handlers::ping::command_ping;
 use crate::handlers::trybuild::command_try_build;
 use crate::handlers::RepositoryClient;
 
 pub type WebhookSender = mpsc::Sender<WebhookEvent>;
 
-/// Asynchronous process that receives webhooks and reacts to them.
-pub fn github_webhook_process(
-    mut state: GithubAppState,
-) -> (WebhookSender, impl Future<Output = ()>) {
+/// Creates a future with a Bors process that receives webhook events and reacts to them.
+pub fn create_bors_process(mut state: GithubAppState) -> (WebhookSender, impl Future<Output = ()>) {
     let (tx, mut rx) = mpsc::channel::<WebhookEvent>(1024);
 
     let service = async move {
@@ -126,7 +124,13 @@ fn github_pr_to_pr(pr: octocrab::models::pulls::PullRequest) -> PullRequest {
     PullRequest {
         number: pr.number,
         head_label: pr.head.label.unwrap_or_else(|| "<unknown>".to_string()),
-        head_ref: pr.head.ref_field,
-        base_ref: pr.base.ref_field,
+        head: Branch {
+            name: pr.head.ref_field,
+            sha: pr.head.sha.into(),
+        },
+        base: Branch {
+            name: pr.base.ref_field,
+            sha: pr.base.sha.into(),
+        },
     }
 }

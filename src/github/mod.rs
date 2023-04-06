@@ -1,4 +1,4 @@
-use std::fmt::{Display, Formatter};
+use std::fmt::{Debug, Display, Formatter};
 
 use secrecy::{ExposeSecret, SecretString};
 use url::Url;
@@ -58,9 +58,35 @@ pub struct GithubUser {
 }
 
 #[derive(Clone, Debug)]
+pub struct CommitSha(pub String);
+
+impl From<String> for CommitSha {
+    fn from(value: String) -> Self {
+        Self(value)
+    }
+}
+impl AsRef<str> for CommitSha {
+    fn as_ref(&self) -> &str {
+        self.0.as_str()
+    }
+}
+impl Display for CommitSha {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        Display::fmt(&self.0, f)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct Branch {
+    pub name: String,
+    pub sha: CommitSha,
+}
+
+#[derive(Clone, Debug)]
 pub struct PullRequest {
     pub number: u64,
+    // <author>:<branch>
     pub head_label: String,
-    pub head_ref: String,
-    pub base_ref: String,
+    pub head: Branch,
+    pub base: Branch,
 }

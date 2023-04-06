@@ -9,3 +9,12 @@ impl PermissionResolver for NoPermissions {
         false
     }
 }
+
+pub struct AllPermissions;
+
+#[async_trait]
+impl PermissionResolver for AllPermissions {
+    async fn has_permission(&self, _username: &str, _permission: PermissionType) -> bool {
+        true
+    }
+}
