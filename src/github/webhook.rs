@@ -173,7 +173,7 @@ fn parse_repository_name(repository: &Repository) -> anyhow::Result<GithubRepoNa
         .map(|u| &u.login) else {
         return Err(anyhow::anyhow!("Owner for repo {repo_name} is missing"));
     };
-    Ok(GithubRepoName::new(&repo_owner, &repo_name))
+    Ok(GithubRepoName::new(repo_owner, repo_name))
 }
 
 type HmacSha256 = Hmac<Sha256>;

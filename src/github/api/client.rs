@@ -11,9 +11,9 @@ use crate::handlers::RepositoryClient;
 
 pub struct PullRequestNumber(pub u64);
 
-impl Into<PullRequestNumber> for u64 {
-    fn into(self) -> PullRequestNumber {
-        PullRequestNumber(self)
+impl From<u64> for PullRequestNumber {
+    fn from(value: u64) -> Self {
+        Self(value)
     }
 }
 

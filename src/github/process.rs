@@ -165,5 +165,7 @@ fn github_pr_to_pr(pr: octocrab::models::pulls::PullRequest) -> PullRequest {
             name: pr.base.ref_field,
             sha: pr.base.sha.into(),
         },
+        title: pr.title.unwrap_or_default(),
+        message: pr.body.unwrap_or_default(),
     }
 }

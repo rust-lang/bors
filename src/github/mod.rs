@@ -89,4 +89,6 @@ pub struct PullRequest {
     pub head_label: String,
     pub head: Branch,
     pub base: Branch,
+    pub title: String,
+    pub message: String,
 }

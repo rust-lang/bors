@@ -39,7 +39,7 @@ pub async fn command_try_build<Client: RepositoryClient, Perms: PermissionResolv
         .merge_branches(
             TRY_MERGE_BRANCH_NAME,
             &pr.head.sha,
-            &format!("Merge {}", pr.number),
+            &auto_merge_commit_message(pr, "<try>"),
         )
         .await
     {
@@ -118,6 +118,19 @@ Build commit: {sha} (`{sha}`)"#,
     client.post_comment(pr.into(), &message).await?;
 
     Ok(true)
+}
+
+fn auto_merge_commit_message(pr: &PullRequest, reviewer: &str) -> String {
+    let pr_number = pr.number;
+    format!(
+        r#"Auto merge of #{pr_number} - {pr_label}, r={reviewer}
+{pr_title}
+
+{pr_message}"#,
+        pr_label = pr.head_label,
+        pr_title = pr.title,
+        pr_message = pr.message
+    )
 }
 
 fn merge_conflict_message(branch: &str) -> String {

@@ -12,6 +12,10 @@ pub struct PR {
     head: BranchBuilder,
     #[builder(default)]
     base: BranchBuilder,
+    #[builder(default)]
+    title: String,
+    #[builder(default)]
+    message: String,
 }
 
 impl PRBuilder {
@@ -21,6 +25,8 @@ impl PRBuilder {
             head_label,
             head,
             base,
+            title,
+            message,
         } = self.build().unwrap();
 
         PullRequest {
@@ -28,6 +34,8 @@ impl PRBuilder {
             head_label,
             head: head.create(),
             base: base.create(),
+            title,
+            message,
         }
     }
 }
