@@ -1,8 +1,18 @@
+use anyhow::anyhow;
+
+use crate::database::DbClient;
 use crate::github::api::operations::MergeError;
 use crate::github::{GithubUser, PullRequest};
 use crate::handlers::RepositoryClient;
 use crate::permissions::{PermissionResolver, PermissionType};
 
+// This branch serves for preparing the final commit.
+// It will be reset to master and merged with the branch that should be tested.
+// Because this action (reset + merge) is not atomic, this branch should not run CI checks to avoid
+// starting them twice.
+const TRY_MERGE_BRANCH_NAME: &str = "automation/bors/try-merge";
+
+// This branch should run CI checks.
 const TRY_BRANCH_NAME: &str = "automation/bors/try";
 
 /// Performs a so-called try build - merges the PR branch into a special branch designed
@@ -10,6 +20,7 @@ const TRY_BRANCH_NAME: &str = "automation/bors/try";
 pub async fn command_try_build<Client: RepositoryClient, Perms: PermissionResolver>(
     client: &mut Client,
     perms: &Perms,
+    database: &mut dyn DbClient,
     pr: &PullRequest,
     author: &GithubUser,
 ) -> anyhow::Result<()> {
@@ -20,17 +31,23 @@ pub async fn command_try_build<Client: RepositoryClient, Perms: PermissionResolv
     }
 
     client
-        .set_branch_to_sha(TRY_BRANCH_NAME, &pr.base.sha)
-        .await?;
+        .set_branch_to_sha(TRY_MERGE_BRANCH_NAME, &pr.base.sha)
+        .await
+        .map_err(|error| anyhow!("Cannot set try merge branch to main branch"))?;
     match client
         .merge_branches(
-            TRY_BRANCH_NAME,
+            TRY_MERGE_BRANCH_NAME,
             &pr.head.sha,
             &format!("Merge {}", pr.number),
         )
         .await
     {
         Ok(merge_sha) => {
+            client
+                .set_branch_to_sha(TRY_BRANCH_NAME, &merge_sha)
+                .await
+                .map_err(|error| anyhow!("Cannot set try branch to main branch"))?;
+
             client
                 .post_comment(
                     pr,
@@ -114,10 +131,12 @@ async fn check_try_permissions<Client: RepositoryClient, Perms: PermissionResolv
 
 #[cfg(test)]
 mod tests {
+    use crate::database::DbClient;
     use crate::github::api::operations::MergeError;
     use crate::github::CommitSha;
     use crate::handlers::trybuild::command_try_build;
     use crate::tests::client::test_client;
+    use crate::tests::database::create_inmemory_db;
     use crate::tests::github::{create_user, BranchBuilder, PRBuilder};
     use crate::tests::permissions::{AllPermissions, NoPermissions};
 
