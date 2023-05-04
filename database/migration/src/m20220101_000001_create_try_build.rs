@@ -32,6 +32,13 @@ impl MigrationTrait for Migration {
                             .timestamp()
                             .default(SimpleExpr::Keyword(Keyword::CurrentTimestamp)),
                     )
+                    .index(
+                        Index::create()
+                            .unique()
+                            .name("repo-pr-unique")
+                            .col(TryBuild::Repository)
+                            .col(TryBuild::PullRequestNumber),
+                    )
                     .to_owned(),
             )
             .await

@@ -31,6 +31,22 @@ pub async fn command_try_build<Client: RepositoryClient, Perms: PermissionResolv
         return Ok(());
     }
 
+    if database
+        .find_try_build_for_pr(client.repository(), pr.number.into())
+        .await?
+        .is_some()
+    {
+        client
+            .post_comment(
+                pr.number.into(),
+                &format!(
+                    ":exclamation: A try build is currently in progress. You can cancel it using @bors try cancel.",
+                ),
+            )
+            .await?;
+        return Ok(());
+    }
+
     client
         .set_branch_to_sha(TRY_MERGE_BRANCH_NAME, &pr.base.sha)
         .await
@@ -50,7 +66,7 @@ pub async fn command_try_build<Client: RepositoryClient, Perms: PermissionResolv
                 .map_err(|error| anyhow!("Cannot set try branch to main branch: {error:?}"))?;
 
             database
-                .insert_try_build(client.repository(), pr.number, merge_sha.clone())
+                .insert_try_build(client.repository(), pr.number.into(), merge_sha.clone())
                 .await?;
 
             client
@@ -84,7 +100,7 @@ pub async fn handle_workflow_try_build<Client: RepositoryClient>(
     }
 
     let try_build = match database
-        .find_try_build(&event.repository, &event.commit_sha)
+        .find_try_build_by_commit(&event.repository, &event.commit_sha)
         .await?
     {
         Some(try_build) => try_build,
@@ -266,11 +282,46 @@ mod tests {
         .unwrap();
 
         let result = db
-            .find_try_build(&client.name, &CommitSha("sha1".to_string()))
+            .find_try_build_by_commit(&client.name, &CommitSha("sha1".to_string()))
             .await
             .unwrap()
             .unwrap();
         assert_eq!(result.pull_request_number, 42);
+    }
+
+    #[tokio::test]
+    async fn test_try_merge_active_build() {
+        let mut client = test_client();
+        client.merge_branches_fn = Box::new(|| Ok(CommitSha("sha1".to_string())));
+
+        let mut db = create_test_db().await;
+
+        let pr = PRBuilder::default()
+            .number(42)
+            .head(BranchBuilder::default().sha("head1".to_string()))
+            .create();
+        command_try_build(
+            &mut client,
+            &AllPermissions,
+            &mut db,
+            &pr,
+            &create_user("foo"),
+        )
+        .await
+        .unwrap();
+
+        // Try to start another try build, while the previous one is in progress
+        command_try_build(
+            &mut client,
+            &AllPermissions,
+            &mut db,
+            &pr,
+            &create_user("foo"),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(client.get_comment(42, 1), ":exclamation: A try build is currently in progress. You can cancel it using @bors try cancel.");
     }
 
     #[tokio::test]
@@ -380,7 +431,7 @@ mod tests {
 Build commit: sha1 (`sha1`)"#
         );
         assert!(db
-            .find_try_build(&client.name, &commit)
+            .find_try_build_by_commit(&client.name, &commit)
             .await
             .unwrap()
             .is_none());
@@ -427,7 +478,7 @@ Build commit: sha1 (`sha1`)"#
             ":broken_heart: Test failed - [checks-actions](http://bors.com/)"
         );
         assert!(db
-            .find_try_build(&client.name, &commit)
+            .find_try_build_by_commit(&client.name, &commit)
             .await
             .unwrap()
             .is_none());
