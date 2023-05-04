@@ -49,6 +49,9 @@ pub fn create_bors_process(mut state: GithubAppState) -> (WebhookSender, impl Fu
                         log::error!("Could not reload installation repositories: {error:?}");
                     }
                 }
+                WebhookEvent::WorkflowFinished(payload) => {
+                    todo!();
+                }
             }
         }
     };

@@ -7,13 +7,13 @@ use axum::http::{HeaderMap, HeaderValue, Request, StatusCode};
 use axum::{async_trait, RequestExt};
 use hmac::{Hmac, Mac};
 use octocrab::models::events::payload::IssueCommentEventPayload;
-use octocrab::models::Repository;
+use octocrab::models::{workflows, Repository};
 use sha2::Sha256;
 
 use crate::github::server::ServerStateRef;
-use crate::github::{GithubRepoName, GithubUser, WebhookSecret};
+use crate::github::{CommitSha, GithubRepoName, GithubUser, WebhookSecret};
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 pub struct PullRequestComment {
     pub repository: GithubRepoName,
     pub author: GithubUser,
@@ -21,21 +21,38 @@ pub struct PullRequestComment {
     pub text: String,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
+pub struct WorkflowFinished {
+    pub repository: GithubRepoName,
+    pub name: String,
+    pub success: bool,
+    pub commit_sha: CommitSha,
+    pub branch: String,
+}
+
+#[derive(Debug)]
 pub enum WebhookEvent {
     Comment(PullRequestComment),
     InstallationsChanged,
+    WorkflowFinished(WorkflowFinished),
 }
 
 /// This struct is used to extract the repository and user from a GitHub webhook event.
 /// The wrapper exists because octocrab doesn't expose/parse the repository field.
 #[derive(serde::Deserialize, Debug)]
 pub struct WebhookEventRepository {
-    pub repository: Repository,
+    repository: Repository,
+}
+
+#[derive(serde::Deserialize, Debug)]
+pub struct WebhookWorkflowRun<'a> {
+    action: &'a str,
+    repository: Repository,
+    workflow_run: workflows::Run,
 }
 
 /// axum extractor for GitHub webhook events.
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 pub struct GitHubWebhook(pub WebhookEvent);
 
 /// Extracts a webhook event from a HTTP request.
@@ -89,14 +106,7 @@ fn parse_webhook_event(request: Parts, body: &[u8]) -> anyhow::Result<Option<Web
     match event_type.as_bytes() {
         b"issue_comment" => {
             let repository: WebhookEventRepository = serde_json::from_slice(body)?;
-            let repo_name = repository.repository.name;
-            let Some(repo_owner) = repository
-                .repository
-                .owner
-                .map(|u| u.login) else {
-                return Err(anyhow::anyhow!("Owner for repo {repo_name} is missing"));
-            };
-            let repository_name = GithubRepoName::new(&repo_owner, &repo_name);
+            let repository_name = parse_repository_name(&repository.repository)?;
 
             let event: IssueCommentEventPayload = serde_json::from_slice(body)?;
             let comment = parse_pr_comment(repository_name, event).map(WebhookEvent::Comment);
@@ -104,6 +114,24 @@ fn parse_webhook_event(request: Parts, body: &[u8]) -> anyhow::Result<Option<Web
         }
         b"installation_repositories" | b"installation" => {
             Ok(Some(WebhookEvent::InstallationsChanged))
+        }
+        b"workflow_run" => {
+            let content = std::str::from_utf8(body).unwrap();
+            let workflow = serde_json::from_slice::<WebhookWorkflowRun>(body)?;
+            if workflow.action == "completed" {
+                let repository_name = parse_repository_name(&workflow.repository)?;
+
+                let event = WebhookEvent::WorkflowFinished(WorkflowFinished {
+                    repository: repository_name,
+                    name: workflow.workflow_run.name,
+                    success: workflow.workflow_run.conclusion.as_deref() == Some("success"),
+                    commit_sha: CommitSha(workflow.workflow_run.head_sha),
+                    branch: workflow.workflow_run.head_branch,
+                });
+                Ok(Some(event))
+            } else {
+                Ok(None)
+            }
         }
         _ => {
             log::debug!("Ignoring unknown event type {:?}", event_type.to_str());
@@ -133,6 +161,17 @@ fn parse_pr_comment(
         text: payload.comment.body.unwrap_or_default(),
         pr_number: payload.issue.number,
     })
+}
+
+fn parse_repository_name(repository: &Repository) -> anyhow::Result<GithubRepoName> {
+    let repo_name = &repository.name;
+    let Some(repo_owner) = repository
+        .owner
+        .as_ref()
+        .map(|u| &u.login) else {
+        return Err(anyhow::anyhow!("Owner for repo {repo_name} is missing"));
+    };
+    Ok(GithubRepoName::new(&repo_owner, &repo_name))
 }
 
 type HmacSha256 = Hmac<Sha256>;
@@ -171,18 +210,18 @@ mod tests {
 
     #[tokio::test]
     async fn test_installation_suspend() {
-        assert_eq!(
+        assert!(matches!(
             check_webhook("webhook/installation-suspend.json", "installation",).await,
             Ok(GitHubWebhook(WebhookEvent::InstallationsChanged))
-        );
+        ));
     }
 
     #[tokio::test]
     async fn test_installation_unsuspend() {
-        assert_eq!(
+        assert!(matches!(
             check_webhook("webhook/installation-unsuspend.json", "installation",).await,
             Ok(GitHubWebhook(WebhookEvent::InstallationsChanged))
-        );
+        ));
     }
 
     #[tokio::test]
@@ -227,10 +266,39 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_workflow_completed() {
+        insta::assert_debug_snapshot!(
+            check_webhook("webhook/workflow-run-completed.json", "workflow_run").await,
+            @r###"
+        Ok(
+            GitHubWebhook(
+                WorkflowFinished(
+                    WorkflowFinished {
+                        repository: GithubRepoName {
+                            owner: "kobzol",
+                            name: "bors-kindergarten",
+                        },
+                        name: "Test",
+                        success: true,
+                        commit_sha: CommitSha(
+                            "6f4293ec58da3560fff934b5a62e2390d08563cb",
+                        ),
+                        branch: "automation/bors/try",
+                    },
+                ),
+            ),
+        )
+        "###
+        );
+    }
+
+    #[tokio::test]
     async fn test_unknown_event() {
         assert_eq!(
-            check_webhook("webhook/push.json", "push").await,
-            Err(StatusCode::OK)
+            check_webhook("webhook/push.json", "push")
+                .await
+                .unwrap_err(),
+            StatusCode::OK
         );
     }
 
