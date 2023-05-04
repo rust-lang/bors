@@ -9,6 +9,7 @@ use hmac::{Hmac, Mac};
 use octocrab::models::events::payload::IssueCommentEventPayload;
 use octocrab::models::{workflows, Repository};
 use sha2::Sha256;
+use url::Url;
 
 use crate::github::server::ServerStateRef;
 use crate::github::{CommitSha, GithubRepoName, GithubUser, WebhookSecret};
@@ -28,6 +29,7 @@ pub struct WorkflowFinished {
     pub success: bool,
     pub commit_sha: CommitSha,
     pub branch: String,
+    pub workflow_url: Url,
 }
 
 #[derive(Debug)]
@@ -116,7 +118,6 @@ fn parse_webhook_event(request: Parts, body: &[u8]) -> anyhow::Result<Option<Web
             Ok(Some(WebhookEvent::InstallationsChanged))
         }
         b"workflow_run" => {
-            let content = std::str::from_utf8(body).unwrap();
             let workflow = serde_json::from_slice::<WebhookWorkflowRun>(body)?;
             if workflow.action == "completed" {
                 let repository_name = parse_repository_name(&workflow.repository)?;
@@ -127,6 +128,7 @@ fn parse_webhook_event(request: Parts, body: &[u8]) -> anyhow::Result<Option<Web
                     success: workflow.workflow_run.conclusion.as_deref() == Some("success"),
                     commit_sha: CommitSha(workflow.workflow_run.head_sha),
                     branch: workflow.workflow_run.head_branch,
+                    workflow_url: workflow.workflow_run.html_url,
                 });
                 Ok(Some(event))
             } else {
@@ -284,6 +286,21 @@ mod tests {
                             "6f4293ec58da3560fff934b5a62e2390d08563cb",
                         ),
                         branch: "automation/bors/try",
+                        workflow_url: Url {
+                            scheme: "https",
+                            cannot_be_a_base: false,
+                            username: "",
+                            password: None,
+                            host: Some(
+                                Domain(
+                                    "github.com",
+                                ),
+                            ),
+                            port: None,
+                            path: "/Kobzol/bors-kindergarten/actions/runs/4880990477",
+                            query: None,
+                            fragment: None,
+                        },
                     },
                 ),
             ),

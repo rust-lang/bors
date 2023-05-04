@@ -2,6 +2,7 @@ use crate::database::DbClient;
 use crate::github::{CommitSha, GithubRepoName};
 use axum::async_trait;
 use entity::try_build;
+use entity::try_build::Model;
 use migration::sea_orm::DatabaseConnection;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter};
@@ -37,17 +38,24 @@ impl DbClient for SeaORMClient {
     async fn find_try_build(
         &self,
         repo: &GithubRepoName,
-        commit: CommitSha,
+        commit: &CommitSha,
     ) -> anyhow::Result<Option<try_build::Model>> {
         let mut entries = try_build::Entity::find()
             .filter(
                 try_build::Column::Repository
                     .eq(full_repo_name(repo))
-                    .and(try_build::Column::CommitSha.eq(commit.0)),
+                    .and(try_build::Column::CommitSha.eq(&commit.0)),
             )
             .all(&self.db)
             .await?;
         Ok(entries.pop())
+    }
+
+    async fn delete_try_build(&self, model: Model) -> anyhow::Result<()> {
+        try_build::Entity::delete_by_id(model.id)
+            .exec(&self.db)
+            .await?;
+        Ok(())
     }
 }
 

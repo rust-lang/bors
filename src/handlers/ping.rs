@@ -6,7 +6,7 @@ pub async fn command_ping<Client: RepositoryClient>(
     pr: &PullRequest,
 ) -> anyhow::Result<()> {
     log::debug!("Executing ping on {}", client.repository());
-    client.post_comment(pr, "Pong 🏓!").await?;
+    client.post_comment(pr.number.into(), "Pong 🏓!").await?;
     Ok(())
 }
 

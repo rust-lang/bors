@@ -18,6 +18,8 @@ pub trait DbClient {
     async fn find_try_build(
         &self,
         repo: &GithubRepoName,
-        commit: CommitSha,
+        commit: &CommitSha,
     ) -> anyhow::Result<Option<try_build::Model>>;
+
+    async fn delete_try_build(&self, model: try_build::Model) -> anyhow::Result<()>;
 }

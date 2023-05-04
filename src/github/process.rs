@@ -7,10 +7,10 @@ use crate::command::parser::{parse_commands, CommandParseError};
 use crate::command::BorsCommand;
 use crate::database::{DbClient, SeaORMClient};
 use crate::github::api::{GithubAppState, RepositoryState};
-use crate::github::webhook::{PullRequestComment, WebhookEvent};
+use crate::github::webhook::{PullRequestComment, WebhookEvent, WorkflowFinished};
 use crate::github::{Branch, PullRequest};
 use crate::handlers::ping::command_ping;
-use crate::handlers::trybuild::command_try_build;
+use crate::handlers::trybuild::{command_try_build, handle_workflow_try_build};
 use crate::handlers::RepositoryClient;
 
 pub type WebhookSender = mpsc::Sender<WebhookEvent>;
@@ -39,7 +39,7 @@ pub fn create_bors_process(
                     match state.get_repository_state_mut(&comment.repository) {
                         Some(repo) => {
                             if let Err(error) = handle_comment(repo, comment, &mut database).await {
-                                log::warn!("Error occured while handling event: {error:?}");
+                                log::warn!("Error occured while handling comment: {error:?}");
                             }
                         }
                         None => {
@@ -54,12 +54,36 @@ pub fn create_bors_process(
                     }
                 }
                 WebhookEvent::WorkflowFinished(payload) => {
-                    todo!();
+                    if let Err(error) =
+                        handle_workflow_event(payload, &mut state, &mut database).await
+                    {
+                        log::error!(
+                            "Error occured while handing workflow finished event: {error:?}"
+                        );
+                    }
                 }
             }
         }
     };
     (tx, service)
+}
+
+async fn handle_workflow_event(
+    event: WorkflowFinished,
+    state: &mut GithubAppState,
+    database: &mut dyn DbClient,
+) -> anyhow::Result<()> {
+    match state.get_repository_state_mut(&event.repository) {
+        Some(repo) => {
+            if handle_workflow_try_build(&event, &mut repo.client, database).await? {
+                return Ok(());
+            }
+        }
+        None => {
+            log::warn!("Repository {} not found", event.repository);
+        }
+    }
+    Ok(())
 }
 
 async fn handle_comment(
@@ -120,7 +144,7 @@ async fn handle_comment(
                 };
 
                 repo.client
-                    .post_comment(&pull_request, &error_msg)
+                    .post_comment(pull_request.number.into(), &error_msg)
                     .await
                     .context("Could not reply to PR comment")?;
             }

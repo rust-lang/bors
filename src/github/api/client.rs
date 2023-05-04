@@ -1,11 +1,27 @@
+use std::fmt::{Display, Formatter};
+
 use anyhow::Context;
 use axum::async_trait;
 use octocrab::models::Repository;
 use octocrab::Octocrab;
 
 use crate::github::api::operations::{merge_branches, set_branch_to_commit, MergeError};
-use crate::github::{CommitSha, GithubRepoName, PullRequest};
+use crate::github::{CommitSha, GithubRepoName};
 use crate::handlers::RepositoryClient;
+
+pub struct PullRequestNumber(pub u64);
+
+impl Into<PullRequestNumber> for u64 {
+    fn into(self) -> PullRequestNumber {
+        PullRequestNumber(self)
+    }
+}
+
+impl Display for PullRequestNumber {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
 
 /// Provides access to a single app installation (repository).
 pub struct GithubRepositoryClient {
@@ -31,13 +47,8 @@ impl GithubRepositoryClient {
         &self.repository
     }
 
-    fn format_pr(&self, pr: &PullRequest) -> String {
-        format!(
-            "{}/{}/{}",
-            self.name().owner(),
-            self.name().name(),
-            pr.number
-        )
+    fn format_pr(&self, pr: PullRequestNumber) -> String {
+        format!("{}/{}/{}", self.name().owner(), self.name().name(), pr)
     }
 }
 
@@ -48,10 +59,10 @@ impl RepositoryClient for GithubRepositoryClient {
     }
 
     /// The comment will be posted as the Github App user of the bot.
-    async fn post_comment(&mut self, pr: &PullRequest, text: &str) -> anyhow::Result<()> {
+    async fn post_comment(&mut self, pr: PullRequestNumber, text: &str) -> anyhow::Result<()> {
         self.client
             .issues(&self.name().owner, &self.name().name)
-            .create_comment(pr.number, text)
+            .create_comment(pr.0, text)
             .await
             .with_context(|| format!("Cannot post comment to {}", self.format_pr(pr)))?;
         Ok(())

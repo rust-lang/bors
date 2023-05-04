@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 
 use axum::async_trait;
-use octocrab::models::pulls::Merge;
 
+use crate::github::api::client::PullRequestNumber;
 use crate::github::api::operations::MergeError;
-use crate::github::{CommitSha, GithubRepoName, PullRequest};
+use crate::github::{CommitSha, GithubRepoName};
 use crate::handlers::RepositoryClient;
 
 pub struct TestRepositoryClient {
@@ -42,23 +42,23 @@ impl RepositoryClient for TestRepositoryClient {
         &self.name
     }
 
-    async fn post_comment(&mut self, pr: &PullRequest, text: &str) -> anyhow::Result<()> {
+    async fn post_comment(&mut self, pr: PullRequestNumber, text: &str) -> anyhow::Result<()> {
         self.comments
-            .entry(pr.number)
+            .entry(pr.0)
             .or_default()
             .push(text.to_string());
         Ok(())
     }
 
-    async fn set_branch_to_sha(&mut self, branch: &str, sha: &CommitSha) -> anyhow::Result<()> {
+    async fn set_branch_to_sha(&mut self, _branch: &str, _sha: &CommitSha) -> anyhow::Result<()> {
         Ok(())
     }
 
     async fn merge_branches(
         &mut self,
-        base: &str,
-        head: &CommitSha,
-        commit_message: &str,
+        _base: &str,
+        _head: &CommitSha,
+        _commit_message: &str,
     ) -> Result<CommitSha, MergeError> {
         (self.merge_branches_fn)()
     }
