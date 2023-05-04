@@ -5,6 +5,7 @@ use tokio::sync::mpsc;
 
 use crate::command::parser::{parse_commands, CommandParseError};
 use crate::command::BorsCommand;
+use crate::database::{DbClient, SeaORMClient};
 use crate::github::api::{GithubAppState, RepositoryState};
 use crate::github::webhook::{PullRequestComment, WebhookEvent};
 use crate::github::{Branch, PullRequest};
@@ -15,7 +16,10 @@ use crate::handlers::RepositoryClient;
 pub type WebhookSender = mpsc::Sender<WebhookEvent>;
 
 /// Creates a future with a Bors process that receives webhook events and reacts to them.
-pub fn create_bors_process(mut state: GithubAppState) -> (WebhookSender, impl Future<Output = ()>) {
+pub fn create_bors_process(
+    mut state: GithubAppState,
+    mut database: SeaORMClient,
+) -> (WebhookSender, impl Future<Output = ()>) {
     let (tx, mut rx) = mpsc::channel::<WebhookEvent>(1024);
 
     let service = async move {
@@ -34,7 +38,7 @@ pub fn create_bors_process(mut state: GithubAppState) -> (WebhookSender, impl Fu
 
                     match state.get_repository_state_mut(&comment.repository) {
                         Some(repo) => {
-                            if let Err(error) = handle_comment(repo, comment).await {
+                            if let Err(error) = handle_comment(repo, comment, &mut database).await {
                                 log::warn!("Error occured while handling event: {error:?}");
                             }
                         }
@@ -61,6 +65,7 @@ pub fn create_bors_process(mut state: GithubAppState) -> (WebhookSender, impl Fu
 async fn handle_comment(
     repo: &mut RepositoryState,
     comment: PullRequestComment,
+    database: &mut dyn DbClient,
 ) -> anyhow::Result<()> {
     let pr_number = comment.pr_number;
     let commands = parse_commands(&comment.text);
@@ -95,6 +100,7 @@ async fn handle_comment(
                         command_try_build(
                             &mut repo.client,
                             &repo.permissions_resolver,
+                            database,
                             &pull_request,
                             &comment.author,
                         )

@@ -48,6 +48,10 @@ pub async fn command_try_build<Client: RepositoryClient, Perms: PermissionResolv
                 .await
                 .map_err(|error| anyhow!("Cannot set try branch to main branch"))?;
 
+            database
+                .insert_try_build(client.repository(), pr.number, merge_sha.clone())
+                .await?;
+
             client
                 .post_comment(
                     pr,
@@ -146,6 +150,7 @@ mod tests {
         command_try_build(
             &mut client,
             &NoPermissions,
+            &mut create_inmemory_db().await,
             &PRBuilder::default().number(42).create(),
             &create_user("foo"),
         )
@@ -165,6 +170,7 @@ mod tests {
         command_try_build(
             &mut client,
             &AllPermissions,
+            &mut create_inmemory_db().await,
             &PRBuilder::default()
                 .head(BranchBuilder::default().sha("head1".to_string()))
                 .create(),
@@ -177,6 +183,34 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_try_merge_insert_into_db() {
+        let mut client = test_client();
+        client.merge_branches_fn = Box::new(|| Ok(CommitSha("sha1".to_string())));
+
+        let mut db = create_inmemory_db().await;
+
+        command_try_build(
+            &mut client,
+            &AllPermissions,
+            &mut db,
+            &PRBuilder::default()
+                .number(42)
+                .head(BranchBuilder::default().sha("head1".to_string()))
+                .create(),
+            &create_user("foo"),
+        )
+        .await
+        .unwrap();
+
+        let result = db
+            .find_try_build(&client.name, CommitSha("sha1".to_string()))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(result.pull_request_number, 42);
+    }
+
+    #[tokio::test]
     async fn test_try_merge_conflict() {
         let mut client = test_client();
         client.merge_branches_fn = Box::new(|| Err(MergeError::Conflict));
@@ -184,6 +218,7 @@ mod tests {
         command_try_build(
             &mut client,
             &AllPermissions,
+            &mut create_inmemory_db().await,
             &PRBuilder::default()
                 .head(BranchBuilder::default().name("pr-1".to_string()))
                 .create(),

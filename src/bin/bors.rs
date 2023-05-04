@@ -5,12 +5,15 @@ use anyhow::Context;
 use axum::routing::post;
 use axum::Router;
 use clap::Parser;
+use sea_orm::Database;
 use tower::limit::ConcurrencyLimitLayer;
 
+use bors::database::SeaORMClient;
 use bors::github::api::GithubAppState;
-use bors::github::process::github_webhook_process;
+use bors::github::process::create_bors_process;
 use bors::github::server::{github_webhook_handler, ServerState};
 use bors::github::WebhookSecret;
+use migration::{Migrator, MigratorTrait};
 
 #[derive(clap::Parser)]
 struct Opts {
@@ -25,6 +28,10 @@ struct Opts {
     /// Private key used to authenticate as a Github App.
     #[arg(long, env = "PRIVATE_KEY")]
     private_key: String,
+
+    /// Database connection string.
+    #[arg(long, env = "DATABASE")]
+    db: String,
 }
 
 async fn server(state: ServerState) -> anyhow::Result<()> {
@@ -42,13 +49,23 @@ async fn server(state: ServerState) -> anyhow::Result<()> {
     Ok(())
 }
 
+async fn initialize_db(connection_string: &str) -> anyhow::Result<SeaORMClient> {
+    let db = Database::connect(connection_string).await?;
+    Migrator::up(&db, None).await?;
+    Ok(SeaORMClient::new(db))
+}
+
 fn try_main(opts: Opts) -> anyhow::Result<()> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
         .context("Cannot build tokio runtime")?;
 
-    let access = runtime.block_on(GithubAppState::load(
+    let db = runtime
+        .block_on(initialize_db(&opts.db))
+        .context("Cannot initialize database")?;
+
+    let mut access = runtime.block_on(GithubAppState::load(
         opts.app_id.into(),
         opts.private_key.into_bytes().into(),
     ))?;
@@ -59,7 +76,7 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
 
     runtime.block_on(async move {
         tokio::select! {
-            () = gh_process => {
+            () = process => {
                 log::warn!("Github webhook process has ended");
                 Ok(())
             },

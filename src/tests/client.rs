@@ -8,7 +8,7 @@ use crate::github::{CommitSha, GithubRepoName, PullRequest};
 use crate::handlers::RepositoryClient;
 
 pub struct TestRepositoryClient {
-    name: GithubRepoName,
+    pub name: GithubRepoName,
     comments: HashMap<u64, Vec<String>>,
     pub merge_branches_fn: Box<dyn Fn() -> Result<CommitSha, MergeError> + Send>,
 }

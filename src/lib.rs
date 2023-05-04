@@ -1,7 +1,8 @@
-pub mod command;
+mod command;
 mod config;
+pub mod database;
 pub mod github;
-pub mod handlers;
-pub mod permissions;
+mod handlers;
+mod permissions;
 
-pub(crate) mod tests;
+mod tests;
