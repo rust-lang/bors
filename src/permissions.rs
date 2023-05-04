@@ -1,7 +1,7 @@
 use axum::async_trait;
 use std::collections::HashSet;
-use std::sync::Mutex;
 use std::time::{Duration, SystemTime};
+use tokio::sync::Mutex;
 
 use crate::github::GithubRepoName;
 
@@ -36,7 +36,7 @@ impl TeamApiPermissionResolver {
     async fn reload_permissions(&self) {
         let result = load_permissions(&self.repo).await;
         match result {
-            Ok(perms) => *self.permissions.lock().unwrap() = CachedUserPermissions::new(perms),
+            Ok(perms) => *self.permissions.lock().await = CachedUserPermissions::new(perms),
             Err(error) => {
                 log::error!("Cannot reload permissions for {}: {error:?}", self.repo);
             }
@@ -53,7 +53,7 @@ impl PermissionResolver for TeamApiPermissionResolver {
 
         self.permissions
             .lock()
-            .unwrap()
+            .await
             .permissions
             .has_permission(username, permission)
     }

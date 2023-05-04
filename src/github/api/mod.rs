@@ -1,4 +1,5 @@
 pub mod client;
+pub mod operations;
 
 use std::collections::HashMap;
 

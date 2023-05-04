@@ -14,12 +14,14 @@ pub async fn command_ping<Client: RepositoryClient>(
 mod tests {
     use crate::handlers::ping::command_ping;
     use crate::tests::client::test_client;
-    use crate::tests::model::create_pr;
+    use crate::tests::github::PRBuilder;
 
     #[tokio::test]
     async fn test_ping() {
         let mut client = test_client();
-        command_ping(&mut client, &create_pr(1)).await.unwrap();
+        command_ping(&mut client, &PRBuilder::default().number(1).create())
+            .await
+            .unwrap();
         client.check_comments(1, &["Pong 🏓!"]);
     }
 }
