@@ -8,7 +8,6 @@ use crate::command::BorsCommand;
 use crate::database::{DbClient, SeaORMClient};
 use crate::github::api::{GithubAppState, RepositoryState};
 use crate::github::webhook::{PullRequestComment, WebhookEvent, WorkflowFinished};
-use crate::github::{Branch, PullRequest};
 use crate::handlers::ping::command_ping;
 use crate::handlers::trybuild::{command_try_build, handle_workflow_try_build};
 use crate::handlers::RepositoryClient;
@@ -75,7 +74,7 @@ async fn handle_workflow_event(
 ) -> anyhow::Result<()> {
     match state.get_repository_state_mut(&event.repository) {
         Some(repo) => {
-            if handle_workflow_try_build(&event, &mut repo.client, database).await? {
+            if handle_workflow_try_build(&event, repo, database).await? {
                 return Ok(());
             }
         }
@@ -86,25 +85,14 @@ async fn handle_workflow_event(
     Ok(())
 }
 
-async fn handle_comment(
-    repo: &mut RepositoryState,
+async fn handle_comment<Client: RepositoryClient>(
+    repo: &mut RepositoryState<Client>,
     comment: PullRequestComment,
     database: &mut dyn DbClient,
 ) -> anyhow::Result<()> {
     let pr_number = comment.pr_number;
     let commands = parse_commands(&comment.text);
-    let pull_request = repo
-        .client
-        .client
-        .pulls(repo.repository.owner(), repo.repository.name())
-        .get(pr_number)
-        .await
-        .map_err(|error| {
-            anyhow::anyhow!(
-                "Could not get PR {}/{pr_number}: {error:?}",
-                repo.repository
-            )
-        })?;
+    let pull_request = repo.client.get_pull_request(pr_number.into()).await?;
 
     log::info!(
         "Received comment at https://github.com/{}/{}/issues/{}, commands: {:?}",
@@ -114,21 +102,13 @@ async fn handle_comment(
         commands
     );
 
-    let pull_request = github_pr_to_pr(pull_request);
     for command in commands {
         match command {
             Ok(command) => {
                 let result = match command {
-                    BorsCommand::Ping => command_ping(&mut repo.client, &pull_request).await,
+                    BorsCommand::Ping => command_ping(repo, &pull_request).await,
                     BorsCommand::Try => {
-                        command_try_build(
-                            &mut repo.client,
-                            &repo.permissions_resolver,
-                            database,
-                            &pull_request,
-                            &comment.author,
-                        )
-                        .await
+                        command_try_build(repo, database, &pull_request, &comment.author).await
                     }
                 };
                 if result.is_err() {
@@ -151,21 +131,4 @@ async fn handle_comment(
         }
     }
     Ok(())
-}
-
-fn github_pr_to_pr(pr: octocrab::models::pulls::PullRequest) -> PullRequest {
-    PullRequest {
-        number: pr.number,
-        head_label: pr.head.label.unwrap_or_else(|| "<unknown>".to_string()),
-        head: Branch {
-            name: pr.head.ref_field,
-            sha: pr.head.sha.into(),
-        },
-        base: Branch {
-            name: pr.base.ref_field,
-            sha: pr.base.sha.into(),
-        },
-        title: pr.title.unwrap_or_default(),
-        message: pr.body.unwrap_or_default(),
-    }
 }

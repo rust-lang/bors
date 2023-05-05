@@ -2,7 +2,7 @@ use axum::async_trait;
 
 use crate::github::api::client::PullRequestNumber;
 use crate::github::api::operations::MergeError;
-use crate::github::{CommitSha, GithubRepoName};
+use crate::github::{CommitSha, GithubRepoName, PullRequest};
 
 pub mod ping;
 pub mod trybuild;
@@ -11,6 +11,9 @@ pub mod trybuild;
 #[async_trait]
 pub trait RepositoryClient {
     fn repository(&self) -> &GithubRepoName;
+
+    /// Resolve a pull request from this repository by it's number.
+    async fn get_pull_request(&mut self, pr: PullRequestNumber) -> anyhow::Result<PullRequest>;
 
     /// Post a comment to the pull request with the given number.
     async fn post_comment(&mut self, pr: PullRequestNumber, text: &str) -> anyhow::Result<()>;

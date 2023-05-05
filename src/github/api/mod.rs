@@ -1,28 +1,31 @@
-pub mod client;
-pub mod operations;
-
 use std::collections::HashMap;
 
-use crate::config::{RepositoryConfig, CONFIG_FILE_PATH};
-use crate::github::webhook::PullRequestComment;
 use anyhow::Context;
 use base64::Engine;
-use client::GithubRepositoryClient;
 use octocrab::models::{App, AppId, InstallationRepositories, Repository};
 use octocrab::Octocrab;
 use secrecy::{ExposeSecret, SecretVec};
 
-use crate::github::GithubRepoName;
-use crate::permissions::TeamApiPermissionResolver;
+use client::GithubRepositoryClient;
 
-pub struct RepositoryState {
+use crate::config::{RepositoryConfig, CONFIG_FILE_PATH};
+use crate::github::webhook::PullRequestComment;
+use crate::github::GithubRepoName;
+use crate::permissions::{PermissionResolver, TeamApiPermissionResolver};
+
+pub mod client;
+pub mod operations;
+
+pub struct RepositoryState<Client> {
     pub repository: GithubRepoName,
-    pub client: GithubRepositoryClient,
-    pub permissions_resolver: TeamApiPermissionResolver,
+    pub client: Client,
+    pub permissions_resolver: Box<dyn PermissionResolver>,
     pub config: RepositoryConfig,
 }
 
-type RepositoryMap = HashMap<GithubRepoName, RepositoryState>;
+type GHRepositoryState = RepositoryState<GithubRepositoryClient>;
+
+type RepositoryMap = HashMap<GithubRepoName, GHRepositoryState>;
 
 /// Provides access to managed GitHub repositories.
 pub struct GithubAppState {
@@ -65,7 +68,7 @@ impl GithubAppState {
     pub fn get_repository_state_mut(
         &mut self,
         key: &GithubRepoName,
-    ) -> Option<&mut RepositoryState> {
+    ) -> Option<&mut GHRepositoryState> {
         self.repositories.get_mut(key)
     }
 
@@ -131,7 +134,7 @@ pub async fn load_repositories(client: &Octocrab) -> anyhow::Result<RepositoryMa
 async fn create_repo_state(
     repo_client: Octocrab,
     repo: Repository,
-) -> anyhow::Result<RepositoryState> {
+) -> anyhow::Result<GHRepositoryState> {
     let Some(owner) = repo.owner.clone() else {
         return Err(anyhow::anyhow!("Repository {} has no owner", repo.name));
     };
@@ -165,7 +168,7 @@ async fn create_repo_state(
         repository: name,
         client,
         config,
-        permissions_resolver,
+        permissions_resolver: Box::new(permissions_resolver),
     })
 }
 
