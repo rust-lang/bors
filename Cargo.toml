@@ -5,6 +5,12 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[workspace]
+members = [".", "database/entity", "database/migration"]
+
+[workspace.dependencies]
+sea-orm = { version = "^0" }
+
 [dependencies]
 # CLI
 clap = { version = "4.0", features = ["env", "derive"] }
@@ -40,6 +46,14 @@ hmac = "0.12"
 hex = "0.4"
 secrecy = "0.8"
 base64 = "0.21"
+
+# Database
+sqlx = { version = "0.6", features = [ "runtime-tokio-native-tls" , "sqlite" ] }
+sea-orm = { workspace = true }
+
+# Local
+entity = { path = "database/entity" }
+migration = { path = "database/migration" }
 
 [dev-dependencies]
 insta = "1.26"
