@@ -1,3 +1,4 @@
+use crate::m20230505_165859_create_build::Build;
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_query::types::Keyword;
 use sea_orm_migration::sea_query::SimpleExpr;
@@ -11,33 +12,35 @@ impl MigrationTrait for Migration {
         manager
             .create_table(
                 Table::create()
-                    .table(TryBuild::Table)
+                    .table(PullRequest::Table)
                     .if_not_exists()
                     .col(
-                        ColumnDef::new(TryBuild::Id)
+                        ColumnDef::new(PullRequest::Id)
                             .integer()
                             .not_null()
                             .auto_increment()
                             .primary_key(),
                     )
-                    .col(ColumnDef::new(TryBuild::Repository).string().not_null())
-                    .col(
-                        ColumnDef::new(TryBuild::PullRequestNumber)
-                            .integer()
-                            .not_null(),
+                    .col(ColumnDef::new(PullRequest::Repository).string().not_null())
+                    .col(ColumnDef::new(PullRequest::Number).integer().not_null())
+                    .col(ColumnDef::new(PullRequest::TryBuild).integer().null())
+                    .foreign_key(
+                        ForeignKey::create()
+                            .name("fk-pr-try-build")
+                            .from(PullRequest::Table, PullRequest::TryBuild)
+                            .to(Build::Table, Build::Id),
                     )
-                    .col(ColumnDef::new(TryBuild::CommitSha).string().not_null())
                     .col(
-                        ColumnDef::new(TryBuild::CreatedAt)
+                        ColumnDef::new(PullRequest::CreatedAt)
                             .timestamp()
                             .default(SimpleExpr::Keyword(Keyword::CurrentTimestamp)),
                     )
                     .index(
                         Index::create()
                             .unique()
-                            .name("repo-pr-unique")
-                            .col(TryBuild::Repository)
-                            .col(TryBuild::PullRequestNumber),
+                            .name("unique-repo-number")
+                            .col(PullRequest::Repository)
+                            .col(PullRequest::Number),
                     )
                     .to_owned(),
             )
@@ -46,18 +49,18 @@ impl MigrationTrait for Migration {
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         manager
-            .drop_table(Table::drop().table(TryBuild::Table).to_owned())
+            .drop_table(Table::drop().table(PullRequest::Table).to_owned())
             .await
     }
 }
 
 /// Learn more at https://docs.rs/sea-query#iden
 #[derive(Iden)]
-enum TryBuild {
+enum PullRequest {
     Table,
     Id,
     Repository,
-    PullRequestNumber,
-    CommitSha,
+    Number,
+    TryBuild,
     CreatedAt,
 }
