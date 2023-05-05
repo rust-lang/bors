@@ -1,11 +1,9 @@
 use anyhow::anyhow;
 
+use crate::bors::RepositoryClient;
+use crate::bors::RepositoryState;
 use crate::database::DbClient;
-use crate::github::api::operations::MergeError;
-use crate::github::api::RepositoryState;
-use crate::github::webhook::WorkflowFinished;
-use crate::github::{GithubUser, PullRequest};
-use crate::handlers::RepositoryClient;
+use crate::github::{GithubUser, MergeError, PullRequest};
 use crate::permissions::PermissionType;
 
 // This branch serves for preparing the final commit.
@@ -93,52 +91,6 @@ pub async fn command_try_build<Client: RepositoryClient>(
     Ok(())
 }
 
-pub async fn handle_workflow_try_build<Client: RepositoryClient>(
-    event: &WorkflowFinished,
-    repo: &mut RepositoryState<Client>,
-    database: &mut dyn DbClient,
-) -> anyhow::Result<bool> {
-    if event.branch != TRY_BRANCH_NAME {
-        return Ok(false);
-    }
-
-    //     let try_build = match database
-    //         .find_try_build_by_commit(&event.repository, &event.commit_sha)
-    //         .await?
-    //     {
-    //         Some(try_build) => try_build,
-    //         None => {
-    //             log::warn!(
-    //                 "{}: Try workflow finished for unknown try build (branch {}, commit {})",
-    //                 event.repository,
-    //                 event.branch,
-    //                 event.commit_sha
-    //             );
-    //             return Ok(false);
-    //         }
-    //     };
-    //
-    //     let pr = try_build.pull_request_number as u64;
-    //     database.delete_try_build(try_build).await?;
-    //
-    //     let message = if event.success {
-    //         let sha = &event.commit_sha;
-    //         format!(
-    //             r#":sunny: Try build successful - [checks-actions]({})
-    // Build commit: {sha} (`{sha}`)"#,
-    //             event.workflow_url,
-    //         )
-    //     } else {
-    //         format!(
-    //             ":broken_heart: Test failed - [checks-actions]({})",
-    //             event.workflow_url
-    //         )
-    //     };
-    //     repo.client.post_comment(pr.into(), &message).await?;
-
-    Ok(true)
-}
-
 fn auto_merge_commit_message(pr: &PullRequest, reviewer: &str) -> String {
     let pr_number = pr.number;
     format!(
@@ -214,13 +166,9 @@ async fn check_try_permissions<Client: RepositoryClient>(
 
 #[cfg(test)]
 mod tests {
+    use crate::bors::handlers::trybuild::command_try_build;
     use crate::database::DbClient;
-    use crate::github::api::operations::MergeError;
-    use crate::github::webhook::WorkflowFinished;
-    use crate::github::{CommitSha, GithubRepoName};
-    use crate::handlers::trybuild::{
-        command_try_build, handle_workflow_try_build, TRY_BRANCH_NAME,
-    };
+    use crate::github::{CommitSha, MergeError};
     use crate::tests::client::RepoBuilder;
     use crate::tests::database::create_test_db;
     use crate::tests::github::{create_user, BranchBuilder, PRBuilder};
@@ -360,85 +308,5 @@ mod tests {
             .unwrap();
 
         assert_eq!(repo.client.get_comment(42, 1), ":exclamation: A try build is currently in progress. You can cancel it using @bors try cancel.");
-    }
-
-    // #[tokio::test]
-    // async fn test_try_merge_workflow_unknown_branch() {
-    //     let mut repo = RepoBuilder::default().create();
-    //     repo.client.merge_branches_fn = Box::new(|| Ok(CommitSha("sha1".to_string())));
-    //
-    //     let mut db = create_test_db().await;
-    //
-    //     command_try_build(
-    //         &mut repo,
-    //         &mut db,
-    //         &PRBuilder::default()
-    //             .number(42)
-    //             .head(BranchBuilder::default().sha("head1".to_string()))
-    //             .create(),
-    //         &create_user("foo"),
-    //     )
-    //     .await
-    //     .unwrap();
-    //
-    //     // Check that the bot doesn't crash
-    //     assert!(!handle_workflow_try_build(
-    //         &&workflow_finished_event(&repo.repository, true, "sha1", "foo", "http://bors.com"),
-    //         &mut repo,
-    //         &mut db,
-    //     )
-    //     .await
-    //     .unwrap());
-    // }
-    //
-    // #[tokio::test]
-    // async fn test_try_merge_workflow_unknown_commit() {
-    //     let mut repo = RepoBuilder::default().create();
-    //     repo.client.merge_branches_fn = Box::new(|| Ok(CommitSha("sha1".to_string())));
-    //
-    //     let mut db = create_test_db().await;
-    //
-    //     command_try_build(
-    //         &mut repo,
-    //         &mut db,
-    //         &PRBuilder::default()
-    //             .number(42)
-    //             .head(BranchBuilder::default().sha("head1".to_string()))
-    //             .create(),
-    //         &create_user("foo"),
-    //     )
-    //     .await
-    //     .unwrap();
-    //
-    //     assert!(!handle_workflow_try_build(
-    //         &workflow_finished_event(
-    //             &repo.repository,
-    //             true,
-    //             "unknown",
-    //             TRY_BRANCH_NAME,
-    //             "http://bors.com"
-    //         ),
-    //         &mut repo,
-    //         &mut db,
-    //     )
-    //     .await
-    //     .unwrap());
-    // }
-
-    fn workflow_finished_event(
-        name: &GithubRepoName,
-        success: bool,
-        commit: &str,
-        branch: &str,
-        url: &str,
-    ) -> WorkflowFinished {
-        WorkflowFinished {
-            repository: name.clone(),
-            name: "Check".to_string(),
-            success,
-            commit_sha: CommitSha(commit.to_string()),
-            branch: branch.to_string(),
-            workflow_url: url.parse().unwrap(),
-        }
     }
 }

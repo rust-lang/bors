@@ -1,6 +1,6 @@
 //! Defines parsers for bors commands.
 
-use crate::command::BorsCommand;
+use crate::bors::command::BorsCommand;
 use std::iter::Peekable;
 use std::str::SplitWhitespace;
 
@@ -89,8 +89,8 @@ fn parse_exact<'a>(
 
 #[cfg(test)]
 mod tests {
-    use crate::command::parser::{parse_commands, CommandParseError};
-    use crate::command::BorsCommand;
+    use crate::bors::command::parser::{parse_commands, CommandParseError};
+    use crate::bors::command::BorsCommand;
 
     #[test]
     fn test_no_commands() {

@@ -5,11 +5,10 @@ use axum::async_trait;
 use derive_builder::Builder;
 
 use super::permissions::AllPermissions;
-use crate::github::api::client::PullRequestNumber;
-use crate::github::api::operations::MergeError;
-use crate::github::api::RepositoryState;
+use crate::bors::RepositoryClient;
+use crate::bors::RepositoryState;
 use crate::github::{Branch, CommitSha, GithubRepoName, PullRequest};
-use crate::handlers::RepositoryClient;
+use crate::github::{MergeError, PullRequestNumber};
 use crate::permissions::PermissionResolver;
 
 #[derive(Builder)]

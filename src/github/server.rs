@@ -1,10 +1,15 @@
-use crate::github::process::WebhookSender;
+use crate::bors::event::BorsEvent;
+use crate::bors::handle_bors_event;
+use crate::database::SeaORMClient;
+use crate::github::api::GithubAppState;
 use crate::github::webhook::GitHubWebhook;
-use crate::github::WebhookSecret;
+use crate::github::webhook::WebhookSecret;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
+use std::future::Future;
 use std::sync::Arc;
+use tokio::sync::mpsc;
 
 pub struct ServerState {
     webhook_sender: WebhookSender,
@@ -37,4 +42,24 @@ pub async fn github_webhook_handler(
             (StatusCode::INTERNAL_SERVER_ERROR, "")
         }
     }
+}
+
+type WebhookSender = mpsc::Sender<BorsEvent>;
+
+/// Creates a future with a Bors process that receives webhook events and reacts to them.
+pub fn create_bors_process(
+    mut state: GithubAppState,
+    mut database: SeaORMClient,
+) -> (WebhookSender, impl Future<Output = ()>) {
+    let (tx, mut rx) = mpsc::channel::<BorsEvent>(1024);
+
+    let service = async move {
+        while let Some(event) = rx.recv().await {
+            log::trace!("Received event: {event:#?}");
+            if let Err(error) = handle_bors_event(event, &mut state, &mut database).await {
+                log::error!("Error while handling event: {error:?}");
+            }
+        }
+    };
+    (tx, service)
 }

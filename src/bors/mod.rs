@@ -1,11 +1,14 @@
+use crate::config::RepositoryConfig;
 use axum::async_trait;
 
-use crate::github::api::client::PullRequestNumber;
-use crate::github::api::operations::MergeError;
-use crate::github::{CommitSha, GithubRepoName, PullRequest};
+use crate::github::{CommitSha, GithubRepoName, MergeError, PullRequest, PullRequestNumber};
+use crate::permissions::PermissionResolver;
 
-pub mod ping;
-pub mod trybuild;
+mod command;
+pub mod event;
+mod handlers;
+
+pub use handlers::handle_bors_event;
 
 /// Provides functionality for working with a remote repository.
 #[async_trait]
@@ -28,4 +31,11 @@ pub trait RepositoryClient {
         head: &CommitSha,
         commit_message: &str,
     ) -> Result<CommitSha, MergeError>;
+}
+
+pub struct RepositoryState<Client> {
+    pub repository: GithubRepoName,
+    pub client: Client,
+    pub permissions_resolver: Box<dyn PermissionResolver>,
+    pub config: RepositoryConfig,
 }

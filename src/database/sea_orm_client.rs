@@ -9,7 +9,7 @@ use entity::{build, pull_request};
 use migration::sea_orm::DatabaseConnection;
 
 use crate::database::DbClient;
-use crate::github::api::client::PullRequestNumber;
+use crate::github::PullRequestNumber;
 use crate::github::{CommitSha, GithubRepoName};
 
 pub struct SeaORMClient {

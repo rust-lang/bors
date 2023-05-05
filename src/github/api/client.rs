@@ -1,27 +1,11 @@
-use std::fmt::{Display, Formatter};
-
 use anyhow::Context;
 use axum::async_trait;
 use octocrab::models::Repository;
 use octocrab::Octocrab;
 
+use crate::bors::RepositoryClient;
 use crate::github::api::operations::{merge_branches, set_branch_to_commit, MergeError};
-use crate::github::{Branch, CommitSha, GithubRepoName, PullRequest};
-use crate::handlers::RepositoryClient;
-
-pub struct PullRequestNumber(pub u64);
-
-impl From<u64> for PullRequestNumber {
-    fn from(value: u64) -> Self {
-        Self(value)
-    }
-}
-
-impl Display for PullRequestNumber {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(f)
-    }
-}
+use crate::github::{Branch, CommitSha, GithubRepoName, PullRequest, PullRequestNumber};
 
 /// Provides access to a single app installation (repository).
 pub struct GithubRepositoryClient {

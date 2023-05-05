@@ -1,6 +1,6 @@
-use crate::github::api::RepositoryState;
+use crate::bors::RepositoryClient;
+use crate::bors::RepositoryState;
 use crate::github::PullRequest;
-use crate::handlers::RepositoryClient;
 
 pub async fn command_ping<Client: RepositoryClient>(
     repo: &mut RepositoryState<Client>,
@@ -15,7 +15,7 @@ pub async fn command_ping<Client: RepositoryClient>(
 
 #[cfg(test)]
 mod tests {
-    use crate::handlers::ping::command_ping;
+    use crate::bors::handlers::ping::command_ping;
     use crate::tests::client::RepoBuilder;
     use crate::tests::github::PRBuilder;
 

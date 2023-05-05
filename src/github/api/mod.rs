@@ -8,20 +8,14 @@ use secrecy::{ExposeSecret, SecretVec};
 
 use client::GithubRepositoryClient;
 
+use crate::bors::event::PullRequestComment;
+use crate::bors::RepositoryState;
 use crate::config::{RepositoryConfig, CONFIG_FILE_PATH};
-use crate::github::webhook::PullRequestComment;
 use crate::github::GithubRepoName;
-use crate::permissions::{PermissionResolver, TeamApiPermissionResolver};
+use crate::permissions::TeamApiPermissionResolver;
 
-pub mod client;
-pub mod operations;
-
-pub struct RepositoryState<Client> {
-    pub repository: GithubRepoName,
-    pub client: Client,
-    pub permissions_resolver: Box<dyn PermissionResolver>,
-    pub config: RepositoryConfig,
-}
+mod client;
+pub(crate) mod operations;
 
 type GHRepositoryState = RepositoryState<GithubRepositoryClient>;
 
