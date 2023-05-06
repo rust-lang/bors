@@ -63,7 +63,7 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
         .block_on(initialize_db(&opts.db))
         .context("Cannot initialize database")?;
 
-    let mut access = runtime.block_on(GithubAppState::load(
+    let mut state = runtime.block_on(GithubAppState::load(
         opts.app_id.into(),
         opts.private_key.into_bytes().into(),
     ))?;

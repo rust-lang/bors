@@ -1,15 +1,75 @@
 use std::collections::HashMap;
+use std::future::Future;
+use std::pin::Pin;
+use std::string::ToString;
 
 use crate::config::RepositoryConfig;
 use axum::async_trait;
 use derive_builder::Builder;
 
 use super::permissions::AllPermissions;
-use crate::bors::RepositoryClient;
-use crate::bors::RepositoryState;
-use crate::github::{Branch, CommitSha, GithubRepoName, PullRequest};
+use crate::bors::event::{BorsEvent, PullRequestComment};
+use crate::bors::{handle_bors_event, RepositoryState};
+use crate::bors::{BorsState, RepositoryClient};
+use crate::database::{DbClient, SeaORMClient};
+use crate::github::{Branch, CommitSha, GithubRepoName, GithubUser, PullRequest};
 use crate::github::{MergeError, PullRequestNumber};
 use crate::permissions::PermissionResolver;
+use crate::tests::database::create_test_db;
+
+pub fn test_bot_user() -> GithubUser {
+    GithubUser {
+        username: "<test-bot>".to_string(),
+        html_url: "https://test-bors.bot.com".parse().unwrap(),
+    }
+}
+
+pub fn default_repo_name() -> GithubRepoName {
+    GithubRepoName::new("owner", "name")
+}
+
+pub struct TestBorsState {
+    repos: HashMap<GithubRepoName, RepositoryState<TestRepositoryClient>>,
+    db: SeaORMClient,
+}
+
+impl TestBorsState {
+    /// Returns the default test client
+    pub fn client(&mut self) -> &mut TestRepositoryClient {
+        &mut self.repos.get_mut(&default_repo_name()).unwrap().client
+    }
+
+    /// Execute an event.
+    pub async fn event(&mut self, event: BorsEvent) {
+        handle_bors_event(event, self).await.unwrap();
+    }
+
+    pub async fn comment<T: Into<PullRequestComment>>(&mut self, comment: T) {
+        self.event(BorsEvent::Comment(comment.into())).await;
+    }
+}
+
+impl BorsState<TestRepositoryClient> for TestBorsState {
+    fn is_comment_internal(&self, comment: &PullRequestComment) -> bool {
+        comment.author == test_bot_user()
+    }
+
+    fn get_repo_state_mut(
+        &mut self,
+        repo: &GithubRepoName,
+    ) -> Option<(
+        &mut RepositoryState<TestRepositoryClient>,
+        &mut dyn DbClient,
+    )> {
+        self.repos
+            .get_mut(repo)
+            .map(|repo| (repo, (&mut self.db) as &mut dyn DbClient))
+    }
+
+    fn reload_repositories(&mut self) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + '_>> {
+        Box::pin(async move { Ok(()) })
+    }
+}
 
 #[derive(Builder)]
 #[builder(pattern = "owned")]
@@ -23,6 +83,9 @@ pub struct Repo {
 }
 
 impl RepoBuilder {
+    pub async fn create_state(self) -> TestBorsState {
+        self.create().into_state().await
+    }
     pub fn create(self) -> RepositoryState<TestRepositoryClient> {
         let Repo {
             name,
@@ -30,7 +93,7 @@ impl RepoBuilder {
             config,
         } = self.build().unwrap();
 
-        let name = name.unwrap_or_else(|| GithubRepoName::new("owner", "name"));
+        let name = name.unwrap_or_else(default_repo_name);
         RepositoryState {
             repository: name.clone(),
             client: TestRepositoryClient {
@@ -40,6 +103,17 @@ impl RepoBuilder {
             },
             permissions_resolver: permission_resolver,
             config: config.unwrap_or_else(|| RepositoryConfig { checks: vec![] }),
+        }
+    }
+}
+
+impl RepositoryState<TestRepositoryClient> {
+    pub async fn into_state(self) -> TestBorsState {
+        let mut repos = HashMap::new();
+        repos.insert(self.repository.clone(), self);
+        TestBorsState {
+            repos,
+            db: create_test_db().await,
         }
     }
 }
@@ -56,9 +130,9 @@ impl TestRepositoryClient {
     }
     pub fn check_comments(&self, pr_number: u64, comments: &[&str]) {
         assert_eq!(
-            self.comments.get(&pr_number).unwrap(),
-            &comments
-                .into_iter()
+            self.comments.get(&pr_number).cloned().unwrap_or_default(),
+            comments
+                .iter()
                 .map(|&s| String::from(s))
                 .collect::<Vec<_>>()
         );

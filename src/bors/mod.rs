@@ -1,5 +1,7 @@
 use crate::config::RepositoryConfig;
 use axum::async_trait;
+use std::future::Future;
+use std::pin::Pin;
 
 use crate::github::{CommitSha, GithubRepoName, MergeError, PullRequest, PullRequestNumber};
 use crate::permissions::PermissionResolver;
@@ -8,6 +10,8 @@ mod command;
 pub mod event;
 mod handlers;
 
+use crate::bors::event::PullRequestComment;
+use crate::database::DbClient;
 pub use handlers::handle_bors_event;
 
 /// Provides functionality for working with a remote repository.
@@ -33,7 +37,21 @@ pub trait RepositoryClient {
     ) -> Result<CommitSha, MergeError>;
 }
 
-pub struct RepositoryState<Client> {
+pub trait BorsState<Client: RepositoryClient> {
+    /// Was the comment created by the bot?
+    fn is_comment_internal(&self, comment: &PullRequestComment) -> bool;
+
+    /// Get repository and database state for the given repository name.
+    fn get_repo_state_mut(
+        &mut self,
+        repo: &GithubRepoName,
+    ) -> Option<(&mut RepositoryState<Client>, &mut dyn DbClient)>;
+
+    /// Reload state of repositories due to some external change.
+    fn reload_repositories(&mut self) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + '_>>;
+}
+
+pub struct RepositoryState<Client: RepositoryClient> {
     pub repository: GithubRepoName,
     pub client: Client,
     pub permissions_resolver: Box<dyn PermissionResolver>,

@@ -1,20 +1,19 @@
+use anyhow::Context;
+
 use crate::bors::command::parser::{parse_commands, CommandParseError};
 use crate::bors::command::BorsCommand;
 use crate::bors::event::{BorsEvent, PullRequestComment};
 use crate::bors::handlers::ping::command_ping;
 use crate::bors::handlers::trybuild::command_try_build;
-use crate::bors::{RepositoryClient, RepositoryState};
+use crate::bors::{BorsState, RepositoryClient, RepositoryState};
 use crate::database::DbClient;
-use crate::github::GithubAppState;
-use anyhow::Context;
 
 mod ping;
 mod trybuild;
 
-pub async fn handle_bors_event(
+pub async fn handle_bors_event<Client: RepositoryClient>(
     event: BorsEvent,
-    state: &mut GithubAppState,
-    database: &mut dyn DbClient,
+    state: &mut dyn BorsState<Client>,
 ) -> anyhow::Result<()> {
     match event {
         BorsEvent::Comment(comment) => {
@@ -24,9 +23,9 @@ pub async fn handle_bors_event(
                 return Ok(());
             }
 
-            match state.get_repository_state_mut(&comment.repository) {
-                Some(repo) => {
-                    if let Err(error) = handle_comment(repo, comment, database).await {
+            match state.get_repo_state_mut(&comment.repository) {
+                Some((repo, db)) => {
+                    if let Err(error) = handle_comment(repo, db, comment).await {
                         log::warn!("Error occured while handling comment: {error:?}");
                     }
                 }
@@ -47,8 +46,8 @@ pub async fn handle_bors_event(
 
 async fn handle_comment<Client: RepositoryClient>(
     repo: &mut RepositoryState<Client>,
-    comment: PullRequestComment,
     database: &mut dyn DbClient,
+    comment: PullRequestComment,
 ) -> anyhow::Result<()> {
     let pr_number = comment.pr_number;
     let commands = parse_commands(&comment.text);
@@ -91,4 +90,19 @@ async fn handle_comment<Client: RepositoryClient>(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::tests::event::comment;
+    use crate::tests::state::{test_bot_user, RepoBuilder};
+
+    #[tokio::test]
+    async fn test_ignore_bot_comment() {
+        let mut state = RepoBuilder::default().create_state().await;
+        state
+            .comment(comment("@bors ping").author(test_bot_user()).create())
+            .await;
+        state.client().check_comments(0, &[]);
+    }
 }

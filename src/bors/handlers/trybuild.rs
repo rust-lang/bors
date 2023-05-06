@@ -169,10 +169,10 @@ mod tests {
     use crate::bors::handlers::trybuild::command_try_build;
     use crate::database::DbClient;
     use crate::github::{CommitSha, MergeError};
-    use crate::tests::client::RepoBuilder;
     use crate::tests::database::create_test_db;
     use crate::tests::github::{create_user, BranchBuilder, PRBuilder};
     use crate::tests::permissions::NoPermissions;
+    use crate::tests::state::RepoBuilder;
 
     #[tokio::test]
     async fn test_try_no_permission() {
