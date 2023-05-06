@@ -15,16 +15,15 @@ pub async fn command_ping<Client: RepositoryClient>(
 
 #[cfg(test)]
 mod tests {
-    use crate::bors::handlers::ping::command_ping;
-    use crate::tests::client::RepoBuilder;
-    use crate::tests::github::PRBuilder;
+    use crate::tests::event::default_pr_number;
+    use crate::tests::state::ClientBuilder;
 
     #[tokio::test]
     async fn test_ping() {
-        let mut repo = RepoBuilder::default().create();
-        command_ping(&mut repo, &PRBuilder::default().number(1).create())
-            .await
-            .unwrap();
-        repo.client.check_comments(1, &["Pong 🏓!"]);
+        let mut state = ClientBuilder::default().create_state().await;
+        state.comment("@bors ping").await;
+        state
+            .client()
+            .check_comments(default_pr_number(), &["Pong 🏓!"]);
     }
 }

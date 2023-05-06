@@ -166,70 +166,52 @@ async fn check_try_permissions<Client: RepositoryClient>(
 
 #[cfg(test)]
 mod tests {
-    use crate::bors::handlers::trybuild::command_try_build;
     use crate::database::DbClient;
     use crate::github::{CommitSha, MergeError};
-    use crate::tests::client::RepoBuilder;
-    use crate::tests::database::create_test_db;
-    use crate::tests::github::{create_user, BranchBuilder, PRBuilder};
+    use crate::tests::event::default_pr_number;
+    use crate::tests::github::{BranchBuilder, PRBuilder};
     use crate::tests::permissions::NoPermissions;
+    use crate::tests::state::{default_repo_name, ClientBuilder};
 
     #[tokio::test]
     async fn test_try_no_permission() {
-        let mut repo = RepoBuilder::default()
+        let mut state = ClientBuilder::default()
             .permission_resolver(Box::new(NoPermissions))
-            .create();
-        command_try_build(
-            &mut repo,
-            &mut create_test_db().await,
-            &PRBuilder::default().number(42).create(),
-            &create_user("foo"),
-        )
-        .await
-        .unwrap();
-        repo.client.check_comments(
-            42,
-            &["@foo: :key: Insufficient privileges: not in try users"],
+            .create_state()
+            .await;
+        state.comment("@bors try").await;
+        state.client().check_comments(
+            default_pr_number(),
+            &["@<user>: :key: Insufficient privileges: not in try users"],
         );
     }
 
     #[tokio::test]
     async fn test_try_merge_comment() {
-        let mut repo = RepoBuilder::default().create();
-        repo.client.merge_branches_fn = Box::new(|| Ok(CommitSha("sha1".to_string())));
+        let mut state = ClientBuilder::default().create_state().await;
+        state.client().merge_branches_fn = Box::new(|| Ok(CommitSha("sha1".to_string())));
+        state.client().get_pr_fn = Box::new(|pr| {
+            Ok(PRBuilder::default()
+                .number(pr.0)
+                .head(BranchBuilder::default().sha("head1".to_string()).create())
+                .create())
+        });
 
-        command_try_build(
-            &mut repo,
-            &mut create_test_db().await,
-            &PRBuilder::default()
-                .head(BranchBuilder::default().sha("head1".to_string()))
-                .create(),
-            &create_user("foo"),
-        )
-        .await
-        .unwrap();
+        state.comment("@bors try").await;
 
-        repo.client
-            .check_comments(1, &[":hourglass: Trying commit head1 with merge sha1…"]);
+        state.client().check_comments(
+            default_pr_number(),
+            &[":hourglass: Trying commit head1 with merge sha1…"],
+        );
     }
 
     #[tokio::test]
     async fn test_try_merge_conflict() {
-        let mut repo = RepoBuilder::default().create();
-        repo.client.merge_branches_fn = Box::new(|| Err(MergeError::Conflict));
+        let mut state = ClientBuilder::default().create_state().await;
+        state.client().merge_branches_fn = Box::new(|| Err(MergeError::Conflict));
+        state.comment("@bors try").await;
 
-        command_try_build(
-            &mut repo,
-            &mut create_test_db().await,
-            &PRBuilder::default()
-                .head(BranchBuilder::default().name("pr-1".to_string()))
-                .create(),
-            &create_user("foo"),
-        )
-        .await
-        .unwrap();
-
-        insta::assert_snapshot!(repo.client.get_comment(1, 0), @r###"
+        insta::assert_snapshot!(state.client().get_comment(default_pr_number(), 0), @r###"
         :lock: Merge conflict
 
         This pull request and the master branch diverged in a way that cannot
@@ -263,25 +245,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_try_merge_insert_into_db() {
-        let mut repo = RepoBuilder::default().create();
-        repo.client.merge_branches_fn = Box::new(|| Ok(CommitSha("sha1".to_string())));
+        let mut state = ClientBuilder::default().create_state().await;
+        state.client().merge_branches_fn = Box::new(|| Ok(CommitSha("sha1".to_string())));
 
-        let mut db = create_test_db().await;
+        state.comment("@bors try").await;
 
-        command_try_build(
-            &mut repo,
-            &mut db,
-            &PRBuilder::default()
-                .number(42)
-                .head(BranchBuilder::default().sha("head1".to_string()))
-                .create(),
-            &create_user("foo"),
-        )
-        .await
-        .unwrap();
-
-        assert!(db
-            .find_build_by_commit(&repo.repository, CommitSha("sha1".to_string()))
+        assert!(state
+            .db
+            .find_build_by_commit(&default_repo_name(), CommitSha("sha1".to_string()))
             .await
             .unwrap()
             .is_some());
@@ -289,24 +260,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_try_merge_active_build() {
-        let mut repo = RepoBuilder::default().create();
-        repo.client.merge_branches_fn = Box::new(|| Ok(CommitSha("sha1".to_string())));
+        let mut state = ClientBuilder::default().create_state().await;
+        state.client().merge_branches_fn = Box::new(|| Ok(CommitSha("sha1".to_string())));
 
-        let mut db = create_test_db().await;
+        state.comment("@bors try").await;
+        state.comment("@bors try").await;
 
-        let pr = PRBuilder::default()
-            .number(42)
-            .head(BranchBuilder::default().sha("head1".to_string()))
-            .create();
-        command_try_build(&mut repo, &mut db, &pr, &create_user("foo"))
-            .await
-            .unwrap();
-
-        // Try to start another try build, while the previous one is in progress
-        command_try_build(&mut repo, &mut db, &pr, &create_user("foo"))
-            .await
-            .unwrap();
-
-        assert_eq!(repo.client.get_comment(42, 1), ":exclamation: A try build is currently in progress. You can cancel it using @bors try cancel.");
+        assert_eq!(state.client().get_comment(default_pr_number(), 1), ":exclamation: A try build is currently in progress. You can cancel it using @bors try cancel.");
     }
 }

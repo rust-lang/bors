@@ -1,6 +1,5 @@
 use crate::bors::event::BorsEvent;
 use crate::bors::handle_bors_event;
-use crate::database::SeaORMClient;
 use crate::github::api::GithubAppState;
 use crate::github::webhook::GitHubWebhook;
 use crate::github::webhook::WebhookSecret;
@@ -47,16 +46,13 @@ pub async fn github_webhook_handler(
 type WebhookSender = mpsc::Sender<BorsEvent>;
 
 /// Creates a future with a Bors process that receives webhook events and reacts to them.
-pub fn create_bors_process(
-    mut state: GithubAppState,
-    mut database: SeaORMClient,
-) -> (WebhookSender, impl Future<Output = ()>) {
+pub fn create_bors_process(mut state: GithubAppState) -> (WebhookSender, impl Future<Output = ()>) {
     let (tx, mut rx) = mpsc::channel::<BorsEvent>(1024);
 
     let service = async move {
         while let Some(event) = rx.recv().await {
             log::trace!("Received event: {event:#?}");
-            if let Err(error) = handle_bors_event(event, &mut state, &mut database).await {
+            if let Err(error) = handle_bors_event(event, &mut state).await {
                 log::error!("Error while handling event: {error:?}");
             }
         }

@@ -217,48 +217,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_workflow_completed() {
-        insta::assert_debug_snapshot!(
-            check_webhook("webhook/workflow-run-completed.json", "workflow_run").await,
-            @r###"
-        Ok(
-            GitHubWebhook(
-                WorkflowFinished(
-                    WorkflowFinished {
-                        repository: GithubRepoName {
-                            owner: "kobzol",
-                            name: "bors-kindergarten",
-                        },
-                        name: "Test",
-                        success: true,
-                        commit_sha: CommitSha(
-                            "6f4293ec58da3560fff934b5a62e2390d08563cb",
-                        ),
-                        branch: "automation/bors/try",
-                        workflow_url: Url {
-                            scheme: "https",
-                            cannot_be_a_base: false,
-                            username: "",
-                            password: None,
-                            host: Some(
-                                Domain(
-                                    "github.com",
-                                ),
-                            ),
-                            port: None,
-                            path: "/Kobzol/bors-kindergarten/actions/runs/4880990477",
-                            query: None,
-                            fragment: None,
-                        },
-                    },
-                ),
-            ),
-        )
-        "###
-        );
-    }
-
-    #[tokio::test]
     async fn test_unknown_event() {
         assert_eq!(
             check_webhook("webhook/push.json", "push")

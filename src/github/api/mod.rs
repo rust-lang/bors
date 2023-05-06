@@ -1,4 +1,6 @@
 use std::collections::HashMap;
+use std::future::Future;
+use std::pin::Pin;
 
 use anyhow::Context;
 use base64::Engine;
@@ -9,8 +11,9 @@ use secrecy::{ExposeSecret, SecretVec};
 use client::GithubRepositoryClient;
 
 use crate::bors::event::PullRequestComment;
-use crate::bors::RepositoryState;
+use crate::bors::{BorsState, RepositoryState};
 use crate::config::{RepositoryConfig, CONFIG_FILE_PATH};
+use crate::database::{DbClient, SeaORMClient};
 use crate::github::GithubRepoName;
 use crate::permissions::TeamApiPermissionResolver;
 
@@ -26,11 +29,16 @@ pub struct GithubAppState {
     app: App,
     client: Octocrab,
     repositories: RepositoryMap,
+    db: SeaORMClient,
 }
 
 impl GithubAppState {
     /// Loads repositories managed by the Bors GitHub app with the given ID.
-    pub async fn load(app_id: AppId, private_key: SecretVec<u8>) -> anyhow::Result<GithubAppState> {
+    pub async fn load(
+        app_id: AppId,
+        private_key: SecretVec<u8>,
+        db: SeaORMClient,
+    ) -> anyhow::Result<GithubAppState> {
         let key = jsonwebtoken::EncodingKey::from_rsa_pem(private_key.expose_secret().as_ref())
             .context("Could not encode private key")?;
 
@@ -50,25 +58,8 @@ impl GithubAppState {
             app,
             client,
             repositories,
+            db,
         })
-    }
-
-    /// Re-download information about repositories connected to this GitHub app.
-    pub async fn reload_repositories(&mut self) -> anyhow::Result<()> {
-        self.repositories = load_repositories(&self.client).await?;
-        Ok(())
-    }
-
-    pub fn get_repository_state_mut(
-        &mut self,
-        key: &GithubRepoName,
-    ) -> Option<&mut GHRepositoryState> {
-        self.repositories.get_mut(key)
-    }
-
-    /// Returns true if the comment was made by this bot.
-    pub fn is_comment_internal(&self, comment: &PullRequestComment) -> bool {
-        comment.author.html_url == self.app.html_url
     }
 }
 
@@ -197,4 +188,30 @@ async fn load_repository_config(
             })?;
             Ok(config)
         })
+}
+
+impl BorsState<GithubRepositoryClient> for GithubAppState {
+    fn is_comment_internal(&self, comment: &PullRequestComment) -> bool {
+        comment.author.html_url == self.app.html_url
+    }
+
+    fn get_repo_state_mut(
+        &mut self,
+        repo: &GithubRepoName,
+    ) -> Option<(
+        &mut RepositoryState<GithubRepositoryClient>,
+        &mut dyn DbClient,
+    )> {
+        self.repositories
+            .get_mut(repo)
+            .map(|repo| (repo, (&mut self.db) as &mut dyn DbClient))
+    }
+
+    /// Re-download information about repositories connected to this GitHub app.
+    fn reload_repositories(&mut self) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + '_>> {
+        Box::pin(async move {
+            self.repositories = load_repositories(&self.client).await?;
+            Ok(())
+        })
+    }
 }
