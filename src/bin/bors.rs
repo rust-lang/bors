@@ -9,10 +9,8 @@ use sea_orm::Database;
 use tower::limit::ConcurrencyLimitLayer;
 
 use bors::database::SeaORMClient;
-use bors::github::api::GithubAppState;
-use bors::github::process::create_bors_process;
-use bors::github::server::{github_webhook_handler, ServerState};
-use bors::github::WebhookSecret;
+use bors::github::server::{create_bors_process, github_webhook_handler, ServerState};
+use bors::github::{GithubAppState, WebhookSecret};
 use migration::{Migrator, MigratorTrait};
 
 #[derive(clap::Parser)]

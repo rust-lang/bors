@@ -3,9 +3,9 @@ use axum::async_trait;
 use octocrab::models::Repository;
 use octocrab::Octocrab;
 
+use crate::bors::RepositoryClient;
 use crate::github::api::operations::{merge_branches, set_branch_to_commit, MergeError};
-use crate::github::{CommitSha, GithubRepoName, PullRequest};
-use crate::handlers::RepositoryClient;
+use crate::github::{Branch, CommitSha, GithubRepoName, PullRequest, PullRequestNumber};
 
 /// Provides access to a single app installation (repository).
 pub struct GithubRepositoryClient {
@@ -27,17 +27,8 @@ impl GithubRepositoryClient {
         &self.repo_name
     }
 
-    pub fn repository(&self) -> &Repository {
-        &self.repository
-    }
-
-    fn format_pr(&self, pr: &PullRequest) -> String {
-        format!(
-            "{}/{}/{}",
-            self.name().owner(),
-            self.name().name(),
-            pr.number
-        )
+    fn format_pr(&self, pr: PullRequestNumber) -> String {
+        format!("{}/{}/{}", self.name().owner(), self.name().name(), pr)
     }
 }
 
@@ -47,11 +38,23 @@ impl RepositoryClient for GithubRepositoryClient {
         self.name()
     }
 
+    async fn get_pull_request(&mut self, pr: PullRequestNumber) -> anyhow::Result<PullRequest> {
+        let pr = self
+            .client
+            .pulls(self.repository().owner(), self.repository().name())
+            .get(pr.0)
+            .await
+            .map_err(|error| {
+                anyhow::anyhow!("Could not get PR {}/{}: {error:?}", self.repository(), pr.0)
+            })?;
+        Ok(github_pr_to_pr(pr))
+    }
+
     /// The comment will be posted as the Github App user of the bot.
-    async fn post_comment(&mut self, pr: &PullRequest, text: &str) -> anyhow::Result<()> {
+    async fn post_comment(&mut self, pr: PullRequestNumber, text: &str) -> anyhow::Result<()> {
         self.client
             .issues(&self.name().owner, &self.name().name)
-            .create_comment(pr.number, text)
+            .create_comment(pr.0, text)
             .await
             .with_context(|| format!("Cannot post comment to {}", self.format_pr(pr)))?;
         Ok(())
@@ -68,5 +71,22 @@ impl RepositoryClient for GithubRepositoryClient {
         commit_message: &str,
     ) -> Result<CommitSha, MergeError> {
         Ok(merge_branches(self, base, head, commit_message).await?)
+    }
+}
+
+fn github_pr_to_pr(pr: octocrab::models::pulls::PullRequest) -> PullRequest {
+    PullRequest {
+        number: pr.number,
+        head_label: pr.head.label.unwrap_or_else(|| "<unknown>".to_string()),
+        head: Branch {
+            name: pr.head.ref_field,
+            sha: pr.head.sha.into(),
+        },
+        base: Branch {
+            name: pr.base.ref_field,
+            sha: pr.base.sha.into(),
+        },
+        title: pr.title.unwrap_or_default(),
+        message: pr.body.unwrap_or_default(),
     }
 }

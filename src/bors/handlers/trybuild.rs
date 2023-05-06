@@ -1,10 +1,10 @@
 use anyhow::anyhow;
 
+use crate::bors::RepositoryClient;
+use crate::bors::RepositoryState;
 use crate::database::DbClient;
-use crate::github::api::operations::MergeError;
-use crate::github::{GithubUser, PullRequest};
-use crate::handlers::RepositoryClient;
-use crate::permissions::{PermissionResolver, PermissionType};
+use crate::github::{GithubUser, MergeError, PullRequest};
+use crate::permissions::PermissionType;
 
 // This branch serves for preparing the final commit.
 // It will be reset to master and merged with the branch that should be tested.
@@ -17,44 +17,62 @@ const TRY_BRANCH_NAME: &str = "automation/bors/try";
 
 /// Performs a so-called try build - merges the PR branch into a special branch designed
 /// for running CI checks.
-pub async fn command_try_build<Client: RepositoryClient, Perms: PermissionResolver>(
-    client: &mut Client,
-    perms: &Perms,
+pub async fn command_try_build<Client: RepositoryClient>(
+    repo: &mut RepositoryState<Client>,
     database: &mut dyn DbClient,
     pr: &PullRequest,
     author: &GithubUser,
 ) -> anyhow::Result<()> {
-    log::debug!("Executing try on {}/{}", client.repository(), pr.number);
+    log::debug!(
+        "Executing try on {}/{}",
+        repo.client.repository(),
+        pr.number
+    );
 
-    if !check_try_permissions(client, perms, pr, author).await? {
+    if !check_try_permissions(repo, pr, author).await? {
         return Ok(());
     }
 
-    client
+    let pull_request_row = database
+        .get_or_create_pull_request(repo.client.repository(), pr.number.into())
+        .await?;
+
+    if pull_request_row.try_build.is_some() {
+        repo.client
+            .post_comment(
+                pr.number.into(),
+                ":exclamation: A try build is currently in progress. You can cancel it using @bors try cancel.",
+            )
+            .await?;
+        return Ok(());
+    }
+
+    repo.client
         .set_branch_to_sha(TRY_MERGE_BRANCH_NAME, &pr.base.sha)
         .await
-        .map_err(|error| anyhow!("Cannot set try merge branch to main branch"))?;
-    match client
+        .map_err(|error| anyhow!("Cannot set try merge branch to main branch: {error:?}"))?;
+    match repo
+        .client
         .merge_branches(
             TRY_MERGE_BRANCH_NAME,
             &pr.head.sha,
-            &format!("Merge {}", pr.number),
+            &auto_merge_commit_message(pr, "<try>"),
         )
         .await
     {
         Ok(merge_sha) => {
-            client
+            repo.client
                 .set_branch_to_sha(TRY_BRANCH_NAME, &merge_sha)
                 .await
-                .map_err(|error| anyhow!("Cannot set try branch to main branch"))?;
+                .map_err(|error| anyhow!("Cannot set try branch to main branch: {error:?}"))?;
 
             database
-                .insert_try_build(client.repository(), pr.number, merge_sha.clone())
+                .attach_try_build(pull_request_row, merge_sha.clone())
                 .await?;
 
-            client
+            repo.client
                 .post_comment(
-                    pr,
+                    pr.number.into(),
                     &format!(
                         ":hourglass: Trying commit {} with merge {merge_sha}…",
                         pr.head.sha
@@ -63,14 +81,27 @@ pub async fn command_try_build<Client: RepositoryClient, Perms: PermissionResolv
                 .await?;
         }
         Err(MergeError::Conflict) => {
-            client
-                .post_comment(pr, &merge_conflict_message(&pr.head.name))
+            repo.client
+                .post_comment(pr.number.into(), &merge_conflict_message(&pr.head.name))
                 .await?;
         }
         Err(error) => return Err(error.into()),
     }
 
     Ok(())
+}
+
+fn auto_merge_commit_message(pr: &PullRequest, reviewer: &str) -> String {
+    let pr_number = pr.number;
+    format!(
+        r#"Auto merge of #{pr_number} - {pr_label}, r={reviewer}
+{pr_title}
+
+{pr_message}"#,
+        pr_label = pr.head_label,
+        pr_title = pr.title,
+        pr_message = pr.message
+    )
 }
 
 fn merge_conflict_message(branch: &str) -> String {
@@ -107,19 +138,19 @@ handled during merge and rebase. This is normal, and you should still perform st
     )
 }
 
-async fn check_try_permissions<Client: RepositoryClient, Perms: PermissionResolver>(
-    client: &mut Client,
-    permission_resolver: &Perms,
+async fn check_try_permissions<Client: RepositoryClient>(
+    repo: &mut RepositoryState<Client>,
     pr: &PullRequest,
     author: &GithubUser,
 ) -> anyhow::Result<bool> {
-    let result = if !permission_resolver
+    let result = if !repo
+        .permissions_resolver
         .has_permission(&author.username, PermissionType::Try)
         .await
     {
-        client
+        repo.client
             .post_comment(
-                pr,
+                pr.number.into(),
                 &format!(
                     "@{}: :key: Insufficient privileges: not in try users",
                     author.username
@@ -135,28 +166,28 @@ async fn check_try_permissions<Client: RepositoryClient, Perms: PermissionResolv
 
 #[cfg(test)]
 mod tests {
+    use crate::bors::handlers::trybuild::command_try_build;
     use crate::database::DbClient;
-    use crate::github::api::operations::MergeError;
-    use crate::github::CommitSha;
-    use crate::handlers::trybuild::command_try_build;
-    use crate::tests::client::test_client;
-    use crate::tests::database::create_inmemory_db;
+    use crate::github::{CommitSha, MergeError};
+    use crate::tests::client::RepoBuilder;
+    use crate::tests::database::create_test_db;
     use crate::tests::github::{create_user, BranchBuilder, PRBuilder};
-    use crate::tests::permissions::{AllPermissions, NoPermissions};
+    use crate::tests::permissions::NoPermissions;
 
     #[tokio::test]
     async fn test_try_no_permission() {
-        let mut client = test_client();
+        let mut repo = RepoBuilder::default()
+            .permission_resolver(Box::new(NoPermissions))
+            .create();
         command_try_build(
-            &mut client,
-            &NoPermissions,
-            &mut create_inmemory_db().await,
+            &mut repo,
+            &mut create_test_db().await,
             &PRBuilder::default().number(42).create(),
             &create_user("foo"),
         )
         .await
         .unwrap();
-        client.check_comments(
+        repo.client.check_comments(
             42,
             &["@foo: :key: Insufficient privileges: not in try users"],
         );
@@ -164,13 +195,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_try_merge_comment() {
-        let mut client = test_client();
-        client.merge_branches_fn = Box::new(|| Ok(CommitSha("sha1".to_string())));
+        let mut repo = RepoBuilder::default().create();
+        repo.client.merge_branches_fn = Box::new(|| Ok(CommitSha("sha1".to_string())));
 
         command_try_build(
-            &mut client,
-            &AllPermissions,
-            &mut create_inmemory_db().await,
+            &mut repo,
+            &mut create_test_db().await,
             &PRBuilder::default()
                 .head(BranchBuilder::default().sha("head1".to_string()))
                 .create(),
@@ -179,46 +209,18 @@ mod tests {
         .await
         .unwrap();
 
-        client.check_comments(1, &[":hourglass: Trying commit head1 with merge sha1…"]);
-    }
-
-    #[tokio::test]
-    async fn test_try_merge_insert_into_db() {
-        let mut client = test_client();
-        client.merge_branches_fn = Box::new(|| Ok(CommitSha("sha1".to_string())));
-
-        let mut db = create_inmemory_db().await;
-
-        command_try_build(
-            &mut client,
-            &AllPermissions,
-            &mut db,
-            &PRBuilder::default()
-                .number(42)
-                .head(BranchBuilder::default().sha("head1".to_string()))
-                .create(),
-            &create_user("foo"),
-        )
-        .await
-        .unwrap();
-
-        let result = db
-            .find_try_build(&client.name, CommitSha("sha1".to_string()))
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(result.pull_request_number, 42);
+        repo.client
+            .check_comments(1, &[":hourglass: Trying commit head1 with merge sha1…"]);
     }
 
     #[tokio::test]
     async fn test_try_merge_conflict() {
-        let mut client = test_client();
-        client.merge_branches_fn = Box::new(|| Err(MergeError::Conflict));
+        let mut repo = RepoBuilder::default().create();
+        repo.client.merge_branches_fn = Box::new(|| Err(MergeError::Conflict));
 
         command_try_build(
-            &mut client,
-            &AllPermissions,
-            &mut create_inmemory_db().await,
+            &mut repo,
+            &mut create_test_db().await,
             &PRBuilder::default()
                 .head(BranchBuilder::default().name("pr-1".to_string()))
                 .create(),
@@ -227,7 +229,7 @@ mod tests {
         .await
         .unwrap();
 
-        insta::assert_snapshot!(client.get_comment(1, 0), @r###"
+        insta::assert_snapshot!(repo.client.get_comment(1, 0), @r###"
         :lock: Merge conflict
 
         This pull request and the master branch diverged in a way that cannot
@@ -255,7 +257,56 @@ mod tests {
         Sometimes step 4 will complete without asking for resolution. This is usually due to difference between how `Cargo.lock` conflict is
         handled during merge and rebase. This is normal, and you should still perform step 5 to update this PR.
 
-        </details>  
+        </details>
         "###);
+    }
+
+    #[tokio::test]
+    async fn test_try_merge_insert_into_db() {
+        let mut repo = RepoBuilder::default().create();
+        repo.client.merge_branches_fn = Box::new(|| Ok(CommitSha("sha1".to_string())));
+
+        let mut db = create_test_db().await;
+
+        command_try_build(
+            &mut repo,
+            &mut db,
+            &PRBuilder::default()
+                .number(42)
+                .head(BranchBuilder::default().sha("head1".to_string()))
+                .create(),
+            &create_user("foo"),
+        )
+        .await
+        .unwrap();
+
+        assert!(db
+            .find_build_by_commit(&repo.repository, CommitSha("sha1".to_string()))
+            .await
+            .unwrap()
+            .is_some());
+    }
+
+    #[tokio::test]
+    async fn test_try_merge_active_build() {
+        let mut repo = RepoBuilder::default().create();
+        repo.client.merge_branches_fn = Box::new(|| Ok(CommitSha("sha1".to_string())));
+
+        let mut db = create_test_db().await;
+
+        let pr = PRBuilder::default()
+            .number(42)
+            .head(BranchBuilder::default().sha("head1".to_string()))
+            .create();
+        command_try_build(&mut repo, &mut db, &pr, &create_user("foo"))
+            .await
+            .unwrap();
+
+        // Try to start another try build, while the previous one is in progress
+        command_try_build(&mut repo, &mut db, &pr, &create_user("foo"))
+            .await
+            .unwrap();
+
+        assert_eq!(repo.client.get_comment(42, 1), ":exclamation: A try build is currently in progress. You can cancel it using @bors try cancel.");
     }
 }

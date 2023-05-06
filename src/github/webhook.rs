@@ -1,5 +1,8 @@
 use std::fmt::Debug;
 
+use crate::bors::event::{BorsEvent, PullRequestComment};
+use crate::github::server::ServerStateRef;
+use crate::github::{GithubRepoName, GithubUser};
 use axum::body::{Bytes, HttpBody};
 use axum::extract::FromRequest;
 use axum::http::request::Parts;
@@ -7,35 +10,9 @@ use axum::http::{HeaderMap, HeaderValue, Request, StatusCode};
 use axum::{async_trait, RequestExt};
 use hmac::{Hmac, Mac};
 use octocrab::models::events::payload::IssueCommentEventPayload;
-use octocrab::models::{workflows, Repository};
+use octocrab::models::Repository;
+use secrecy::{ExposeSecret, SecretString};
 use sha2::Sha256;
-
-use crate::github::server::ServerStateRef;
-use crate::github::{CommitSha, GithubRepoName, GithubUser, WebhookSecret};
-
-#[derive(Debug)]
-pub struct PullRequestComment {
-    pub repository: GithubRepoName,
-    pub author: GithubUser,
-    pub pr_number: u64,
-    pub text: String,
-}
-
-#[derive(Debug)]
-pub struct WorkflowFinished {
-    pub repository: GithubRepoName,
-    pub name: String,
-    pub success: bool,
-    pub commit_sha: CommitSha,
-    pub branch: String,
-}
-
-#[derive(Debug)]
-pub enum WebhookEvent {
-    Comment(PullRequestComment),
-    InstallationsChanged,
-    WorkflowFinished(WorkflowFinished),
-}
 
 /// This struct is used to extract the repository and user from a GitHub webhook event.
 /// The wrapper exists because octocrab doesn't expose/parse the repository field.
@@ -44,16 +21,9 @@ pub struct WebhookEventRepository {
     repository: Repository,
 }
 
-#[derive(serde::Deserialize, Debug)]
-pub struct WebhookWorkflowRun<'a> {
-    action: &'a str,
-    repository: Repository,
-    workflow_run: workflows::Run,
-}
-
 /// axum extractor for GitHub webhook events.
 #[derive(Debug)]
-pub struct GitHubWebhook(pub WebhookEvent);
+pub struct GitHubWebhook(pub BorsEvent);
 
 /// Extracts a webhook event from a HTTP request.
 #[async_trait]
@@ -98,7 +68,7 @@ where
     }
 }
 
-fn parse_webhook_event(request: Parts, body: &[u8]) -> anyhow::Result<Option<WebhookEvent>> {
+fn parse_webhook_event(request: Parts, body: &[u8]) -> anyhow::Result<Option<BorsEvent>> {
     let Some(event_type) = request.headers.get("x-github-event") else {
          return Err(anyhow::anyhow!("x-github-event header not found"));
     };
@@ -109,30 +79,10 @@ fn parse_webhook_event(request: Parts, body: &[u8]) -> anyhow::Result<Option<Web
             let repository_name = parse_repository_name(&repository.repository)?;
 
             let event: IssueCommentEventPayload = serde_json::from_slice(body)?;
-            let comment = parse_pr_comment(repository_name, event).map(WebhookEvent::Comment);
+            let comment = parse_pr_comment(repository_name, event).map(BorsEvent::Comment);
             Ok(comment)
         }
-        b"installation_repositories" | b"installation" => {
-            Ok(Some(WebhookEvent::InstallationsChanged))
-        }
-        b"workflow_run" => {
-            let content = std::str::from_utf8(body).unwrap();
-            let workflow = serde_json::from_slice::<WebhookWorkflowRun>(body)?;
-            if workflow.action == "completed" {
-                let repository_name = parse_repository_name(&workflow.repository)?;
-
-                let event = WebhookEvent::WorkflowFinished(WorkflowFinished {
-                    repository: repository_name,
-                    name: workflow.workflow_run.name,
-                    success: workflow.workflow_run.conclusion.as_deref() == Some("success"),
-                    commit_sha: CommitSha(workflow.workflow_run.head_sha),
-                    branch: workflow.workflow_run.head_branch,
-                });
-                Ok(Some(event))
-            } else {
-                Ok(None)
-            }
-        }
+        b"installation_repositories" | b"installation" => Ok(Some(BorsEvent::InstallationsChanged)),
         _ => {
             log::debug!("Ignoring unknown event type {:?}", event_type.to_str());
             Ok(None)
@@ -171,7 +121,7 @@ fn parse_repository_name(repository: &Repository) -> anyhow::Result<GithubRepoNa
         .map(|u| &u.login) else {
         return Err(anyhow::anyhow!("Owner for repo {repo_name} is missing"));
     };
-    Ok(GithubRepoName::new(&repo_owner, &repo_name))
+    Ok(GithubRepoName::new(repo_owner, repo_name))
 }
 
 type HmacSha256 = Hmac<Sha256>;
@@ -197,6 +147,7 @@ fn verify_gh_signature(
 
 #[cfg(test)]
 mod tests {
+    use crate::bors::event::BorsEvent;
     use axum::extract::FromRequest;
     use axum::http::{HeaderValue, Method};
     use hmac::Mac;
@@ -204,15 +155,15 @@ mod tests {
     use tokio::sync::mpsc;
 
     use crate::github::server::{ServerState, ServerStateRef};
-    use crate::github::webhook::{GitHubWebhook, HmacSha256, WebhookEvent};
-    use crate::github::WebhookSecret;
+    use crate::github::webhook::WebhookSecret;
+    use crate::github::webhook::{GitHubWebhook, HmacSha256};
     use crate::tests::io::load_test_file;
 
     #[tokio::test]
     async fn test_installation_suspend() {
         assert!(matches!(
             check_webhook("webhook/installation-suspend.json", "installation",).await,
-            Ok(GitHubWebhook(WebhookEvent::InstallationsChanged))
+            Ok(GitHubWebhook(BorsEvent::InstallationsChanged))
         ));
     }
 
@@ -220,7 +171,7 @@ mod tests {
     async fn test_installation_unsuspend() {
         assert!(matches!(
             check_webhook("webhook/installation-unsuspend.json", "installation",).await,
-            Ok(GitHubWebhook(WebhookEvent::InstallationsChanged))
+            Ok(GitHubWebhook(BorsEvent::InstallationsChanged))
         ));
     }
 
@@ -284,6 +235,21 @@ mod tests {
                             "6f4293ec58da3560fff934b5a62e2390d08563cb",
                         ),
                         branch: "automation/bors/try",
+                        workflow_url: Url {
+                            scheme: "https",
+                            cannot_be_a_base: false,
+                            username: "",
+                            password: None,
+                            host: Some(
+                                Domain(
+                                    "github.com",
+                                ),
+                            ),
+                            port: None,
+                            path: "/Kobzol/bors-kindergarten/actions/runs/4880990477",
+                            query: None,
+                            fragment: None,
+                        },
                     },
                 ),
             ),
@@ -331,5 +297,18 @@ mod tests {
         let (tx, _) = mpsc::channel(1024);
         let server_ref = ServerStateRef::new(ServerState::new(tx, WebhookSecret::new(secret)));
         GitHubWebhook::from_request(request, &server_ref).await
+    }
+}
+
+/// Wrapper for a secret which is zeroed on drop and can be exposed only through the [`WebhookSecret::expose`] method.
+pub struct WebhookSecret(SecretString);
+
+impl WebhookSecret {
+    pub fn new(secret: String) -> Self {
+        Self(secret.into())
+    }
+
+    pub fn expose(&self) -> &str {
+        self.0.expose_secret().as_str()
     }
 }

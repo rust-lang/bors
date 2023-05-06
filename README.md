@@ -18,11 +18,11 @@ $ export DATABASE_URL=sqlite://bors.db?mode=rwc
   ```console
   $ sea-orm-cli migrate -d database/migration/ generate <name>
   ```
-- Re-generate entities (run this after generating and manually modifying a new migration)
-  ```console
-  $ sea-orm-cli generate entity -o database/entity/src --lib
-  ```
 - Apply migrations
   ```console
   $ sea-orm-cli migrate -d database/migration/ up
+  ```
+- Re-generate entities (run this after generating and manually modifying a new migration and then applying it)
+  ```console
+  $ sea-orm-cli generate entity -o database/entity/src --lib
   ```

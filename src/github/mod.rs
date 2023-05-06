@@ -1,12 +1,14 @@
 use std::fmt::{Debug, Display, Formatter};
 
-use secrecy::{ExposeSecret, SecretString};
 use url::Url;
 
-pub mod api;
-pub mod process;
+mod api;
 pub mod server;
-pub mod webhook;
+mod webhook;
+
+pub use api::operations::MergeError;
+pub use api::GithubAppState;
+pub use webhook::WebhookSecret;
 
 /// Unique identifier of a GitHub repository
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
@@ -35,19 +37,6 @@ impl GithubRepoName {
 impl Display for GithubRepoName {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.write_fmt(format_args!("{}/{}", self.owner, self.name))
-    }
-}
-
-/// Wrapper for a secret which is zeroed on drop and can be exposed only through the [`WebhookSecret::expose`] method.
-pub struct WebhookSecret(SecretString);
-
-impl WebhookSecret {
-    pub fn new(secret: String) -> Self {
-        Self(secret.into())
-    }
-
-    pub fn expose(&self) -> &str {
-        self.0.expose_secret().as_str()
     }
 }
 
@@ -89,4 +78,20 @@ pub struct PullRequest {
     pub head_label: String,
     pub head: Branch,
     pub base: Branch,
+    pub title: String,
+    pub message: String,
+}
+
+pub struct PullRequestNumber(pub u64);
+
+impl From<u64> for PullRequestNumber {
+    fn from(value: u64) -> Self {
+        Self(value)
+    }
+}
+
+impl Display for PullRequestNumber {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        <u64 as Display>::fmt(&self.0, f)
+    }
 }

@@ -16,7 +16,7 @@ pub trait PermissionResolver {
 }
 
 /// For how long should the permissions be cached.
-const CACHE_DURATION: Duration = Duration::from_secs(60 * 1);
+const CACHE_DURATION: Duration = Duration::from_secs(60);
 
 pub struct TeamApiPermissionResolver {
     repo: GithubRepoName,
