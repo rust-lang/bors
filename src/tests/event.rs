@@ -55,6 +55,12 @@ impl From<&str> for PullRequestComment {
     }
 }
 
+impl From<CommentBuilder> for PullRequestComment {
+    fn from(value: CommentBuilder) -> Self {
+        value.create()
+    }
+}
+
 pub fn comment(text: &str) -> CommentBuilder {
     CommentBuilder::default().text(text.to_string())
 }

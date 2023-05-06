@@ -90,7 +90,11 @@ impl DbClient for SeaORMClient {
         commit_sha: CommitSha,
     ) -> anyhow::Result<Option<Model>> {
         Ok(build::Entity::find()
-            .filter(build::Column::CommitSha.eq(commit_sha.0))
+            .filter(
+                build::Column::Repository
+                    .eq(full_repo_name(repo))
+                    .and(build::Column::CommitSha.eq(commit_sha.0)),
+            )
             .one(&self.db)
             .await?)
     }

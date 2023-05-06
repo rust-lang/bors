@@ -94,15 +94,15 @@ async fn handle_comment<Client: RepositoryClient>(
 
 #[cfg(test)]
 mod tests {
-    use crate::tests::event::comment;
-    use crate::tests::state::{test_bot_user, RepoBuilder};
+    use crate::tests::event::{comment, default_pr_number};
+    use crate::tests::state::{test_bot_user, ClientBuilder};
 
     #[tokio::test]
     async fn test_ignore_bot_comment() {
-        let mut state = RepoBuilder::default().create_state().await;
+        let mut state = ClientBuilder::default().create_state().await;
         state
             .comment(comment("@bors ping").author(test_bot_user()).create())
             .await;
-        state.client().check_comments(0, &[]);
+        state.client().check_comments(default_pr_number(), &[]);
     }
 }

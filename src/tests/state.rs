@@ -12,10 +12,11 @@ use crate::bors::event::{BorsEvent, PullRequestComment};
 use crate::bors::{handle_bors_event, RepositoryState};
 use crate::bors::{BorsState, RepositoryClient};
 use crate::database::{DbClient, SeaORMClient};
-use crate::github::{Branch, CommitSha, GithubRepoName, GithubUser, PullRequest};
+use crate::github::{CommitSha, GithubRepoName, GithubUser, PullRequest};
 use crate::github::{MergeError, PullRequestNumber};
 use crate::permissions::PermissionResolver;
 use crate::tests::database::create_test_db;
+use crate::tests::github::PRBuilder;
 
 pub fn test_bot_user() -> GithubUser {
     GithubUser {
@@ -30,7 +31,7 @@ pub fn default_repo_name() -> GithubRepoName {
 
 pub struct TestBorsState {
     repos: HashMap<GithubRepoName, RepositoryState<TestRepositoryClient>>,
-    db: SeaORMClient,
+    pub db: SeaORMClient,
 }
 
 impl TestBorsState {
@@ -73,7 +74,7 @@ impl BorsState<TestRepositoryClient> for TestBorsState {
 
 #[derive(Builder)]
 #[builder(pattern = "owned")]
-pub struct Repo {
+pub struct Client {
     #[builder(default)]
     name: Option<GithubRepoName>,
     #[builder(default = "Box::new(AllPermissions)")]
@@ -82,12 +83,12 @@ pub struct Repo {
     config: Option<RepositoryConfig>,
 }
 
-impl RepoBuilder {
+impl ClientBuilder {
     pub async fn create_state(self) -> TestBorsState {
         self.create().into_state().await
     }
     pub fn create(self) -> RepositoryState<TestRepositoryClient> {
-        let Repo {
+        let Client {
             name,
             permission_resolver,
             config,
@@ -100,6 +101,7 @@ impl RepoBuilder {
                 comments: Default::default(),
                 name,
                 merge_branches_fn: Box::new(|| Ok(CommitSha("foo".to_string()))),
+                get_pr_fn: Box::new(move |pr| Ok(PRBuilder::default().number(pr.0).create())),
             },
             permissions_resolver: permission_resolver,
             config: config.unwrap_or_else(|| RepositoryConfig { checks: vec![] }),
@@ -122,6 +124,7 @@ pub struct TestRepositoryClient {
     pub name: GithubRepoName,
     comments: HashMap<u64, Vec<String>>,
     pub merge_branches_fn: Box<dyn Fn() -> Result<CommitSha, MergeError> + Send>,
+    pub get_pr_fn: Box<dyn Fn(PullRequestNumber) -> anyhow::Result<PullRequest> + Send>,
 }
 
 impl TestRepositoryClient {
@@ -146,20 +149,7 @@ impl RepositoryClient for TestRepositoryClient {
     }
 
     async fn get_pull_request(&mut self, pr: PullRequestNumber) -> anyhow::Result<PullRequest> {
-        Ok(PullRequest {
-            number: pr.0,
-            head_label: "label".to_string(),
-            head: Branch {
-                name: "head".to_string(),
-                sha: CommitSha("head-sha".to_string()),
-            },
-            base: Branch {
-                name: "base".to_string(),
-                sha: CommitSha("base".to_string()),
-            },
-            title: "title".to_string(),
-            message: "message".to_string(),
-        })
+        (self.get_pr_fn)(pr)
     }
 
     async fn post_comment(&mut self, pr: PullRequestNumber, text: &str) -> anyhow::Result<()> {

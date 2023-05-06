@@ -1,25 +1,26 @@
-use crate::github::{Branch as GHBranch, GithubUser, PullRequest};
 use derive_builder::Builder;
 
+use crate::github::{Branch as GHBranch, PullRequest};
+use crate::tests::event::default_pr_number;
+
 #[derive(Builder)]
-#[builder(pattern = "owned")]
 pub struct PR {
-    #[builder(default = "1")]
+    #[builder(default = "default_pr_number()")]
     number: u64,
-    #[builder(default)]
+    #[builder(default = "\"head-label\".to_string()")]
     head_label: String,
-    #[builder(default)]
-    head: BranchBuilder,
-    #[builder(default)]
-    base: BranchBuilder,
-    #[builder(default)]
+    #[builder(default = "self.default_head()")]
+    head: GHBranch,
+    #[builder(default = "self.default_base()")]
+    base: GHBranch,
+    #[builder(default = "\"PR title\".to_string()")]
     title: String,
-    #[builder(default)]
+    #[builder(default = "\"PR message\".to_string()")]
     message: String,
 }
 
 impl PRBuilder {
-    pub fn create(self) -> PullRequest {
+    pub fn create(&mut self) -> PullRequest {
         let PR {
             number,
             head_label,
@@ -32,36 +33,45 @@ impl PRBuilder {
         PullRequest {
             number,
             head_label,
-            head: head.create(),
-            base: base.create(),
+            head,
+            base,
             title,
             message,
         }
     }
+
+    fn default_head(&self) -> GHBranch {
+        BranchBuilder::default()
+            .name(format!(
+                "pr-{}",
+                self.number.unwrap_or_else(|| default_pr_number())
+            ))
+            .sha("pr-sha".to_string())
+            .create()
+    }
+
+    fn default_base(&self) -> GHBranch {
+        BranchBuilder::default()
+            .name("main-branch".to_string())
+            .sha("main-sha".to_string())
+            .create()
+    }
 }
 
 #[derive(Builder)]
-#[builder(pattern = "owned")]
 pub struct Branch {
-    #[builder(default)]
+    #[builder(default = "\"branch-1\".to_string()")]
     name: String,
-    #[builder(default)]
+    #[builder(default = "\"sha-1\".to_string()")]
     sha: String,
 }
 
 impl BranchBuilder {
-    pub fn create(self) -> GHBranch {
+    pub fn create(&mut self) -> GHBranch {
         let Branch { name, sha } = self.build().unwrap();
         GHBranch {
             name,
             sha: sha.into(),
         }
-    }
-}
-
-pub fn create_user(username: &str) -> GithubUser {
-    GithubUser {
-        username: username.to_string(),
-        html_url: format!("https://github.com/{username}").parse().unwrap(),
     }
 }
