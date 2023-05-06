@@ -13,6 +13,7 @@ type PrimaryKey = i32;
 pub struct BuildModel {
     pub id: PrimaryKey,
     pub repository: String,
+    pub branch: String,
     pub commit_sha: String,
     pub created_at: DateTime<Utc>,
 }
@@ -22,6 +23,21 @@ pub struct PullRequestModel {
     pub repository: String,
     pub number: PullRequestNumber,
     pub try_build: Option<BuildModel>,
+    pub created_at: DateTime<Utc>,
+}
+
+pub enum CheckSuiteStatus {
+    Started,
+    Success,
+    Failure,
+}
+
+pub struct CheckSuiteModel {
+    pub id: PrimaryKey,
+    pub build: BuildModel,
+    pub check_suite_id: u64,
+    pub workflow_run_id: Option<u64>,
+    pub status: CheckSuiteStatus,
     pub created_at: DateTime<Utc>,
 }
 
@@ -35,17 +51,28 @@ pub trait DbClient {
         pr_number: PullRequestNumber,
     ) -> anyhow::Result<PullRequestModel>;
 
-    /// Creates a new Build row and attaches it as a try build to the given PR.
+    /// Attaches an existing build to the given PR.
     async fn attach_try_build(
         &self,
         pr: PullRequestModel,
+        branch: String,
         commit_sha: CommitSha,
     ) -> anyhow::Result<()>;
 
-    /// Finds a new Build row by its commit SHA.
-    async fn find_build_by_commit(
+    /// Finds a Build row by its repository, commit SHA and branch.
+    async fn find_build(
         &self,
         repo: &GithubRepoName,
+        branch: String,
         commit_sha: CommitSha,
     ) -> anyhow::Result<Option<BuildModel>>;
+
+    /// Creates a new check suite attached to a build.
+    async fn create_check_suite(
+        &self,
+        build: &BuildModel,
+        check_suite_id: u64,
+        workflow_run_id: u64,
+        status: CheckSuiteStatus,
+    ) -> anyhow::Result<()>;
 }

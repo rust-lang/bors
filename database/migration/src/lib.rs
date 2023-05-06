@@ -1,7 +1,8 @@
 pub use sea_orm_migration::prelude::*;
 
-mod m20220101_000001_create_pr;
 mod m20230505_165859_create_build;
+mod m20230506_075859_create_pr;
+mod m20230506_102008_create_check_suite;
 
 pub struct Migrator;
 
@@ -9,8 +10,9 @@ pub struct Migrator;
 impl MigratorTrait for Migrator {
     fn migrations() -> Vec<Box<dyn MigrationTrait>> {
         vec![
-            Box::new(m20220101_000001_create_pr::Migration),
             Box::new(m20230505_165859_create_build::Migration),
+            Box::new(m20230506_075859_create_pr::Migration),
+            Box::new(m20230506_102008_create_check_suite::Migration),
         ]
     }
 }

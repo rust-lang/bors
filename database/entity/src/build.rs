@@ -8,14 +8,23 @@ pub struct Model {
     #[sea_orm(primary_key)]
     pub id: i32,
     pub repository: String,
+    pub branch: String,
     pub commit_sha: String,
-    pub created_at: Option<String>,
+    pub created_at: DateTime,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
+    #[sea_orm(has_many = "super::check_suite::Entity")]
+    CheckSuite,
     #[sea_orm(has_many = "super::pull_request::Entity")]
     PullRequest,
+}
+
+impl Related<super::check_suite::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::CheckSuite.def()
+    }
 }
 
 impl Related<super::pull_request::Entity> for Entity {

@@ -1,7 +1,8 @@
+use crate::bors::event;
 use derive_builder::Builder;
 
 use crate::bors::event::PullRequestComment;
-use crate::github::{GithubRepoName, GithubUser};
+use crate::github::{CommitSha, GithubRepoName, GithubUser};
 use crate::tests::state::default_repo_name;
 
 fn default_user() -> GithubUser {
@@ -63,4 +64,47 @@ impl From<CommentBuilder> for PullRequestComment {
 
 pub fn comment(text: &str) -> CommentBuilder {
     CommentBuilder::default().text(text.to_string())
+}
+
+#[derive(Builder)]
+#[builder(pattern = "owned")]
+pub struct WorkflowStarted {
+    #[builder(default = "default_repo_name()")]
+    repo: GithubRepoName,
+    #[builder(default = "\"workflow-name\".to_string()")]
+    name: String,
+    branch: String,
+    commit_sha: String,
+    #[builder(default = "1")]
+    run_id: u64,
+    #[builder(default = "1")]
+    check_suite_id: u64,
+}
+
+impl WorkflowStartedBuilder {
+    pub fn create(self) -> event::WorkflowStarted {
+        let WorkflowStarted {
+            repo,
+            name,
+            branch,
+            commit_sha,
+            run_id,
+            check_suite_id,
+        } = self.build().unwrap();
+
+        event::WorkflowStarted {
+            repository: repo,
+            name,
+            branch,
+            commit_sha: CommitSha(commit_sha),
+            workflow_run_id: run_id,
+            check_suite_id,
+        }
+    }
+}
+
+impl From<WorkflowStartedBuilder> for event::WorkflowStarted {
+    fn from(value: WorkflowStartedBuilder) -> Self {
+        value.create()
+    }
 }

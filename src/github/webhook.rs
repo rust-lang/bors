@@ -1,8 +1,8 @@
 use std::fmt::Debug;
 
-use crate::bors::event::{BorsEvent, PullRequestComment};
+use crate::bors::event::{BorsEvent, PullRequestComment, WorkflowStarted};
 use crate::github::server::ServerStateRef;
-use crate::github::{GithubRepoName, GithubUser};
+use crate::github::{CommitSha, GithubRepoName, GithubUser};
 use axum::body::{Bytes, HttpBody};
 use axum::extract::FromRequest;
 use axum::http::request::Parts;
@@ -10,14 +10,28 @@ use axum::http::{HeaderMap, HeaderValue, Request, StatusCode};
 use axum::{async_trait, RequestExt};
 use hmac::{Hmac, Mac};
 use octocrab::models::events::payload::IssueCommentEventPayload;
-use octocrab::models::Repository;
+use octocrab::models::{workflows, Repository};
 use secrecy::{ExposeSecret, SecretString};
 use sha2::Sha256;
 
 /// This struct is used to extract the repository and user from a GitHub webhook event.
 /// The wrapper exists because octocrab doesn't expose/parse the repository field.
 #[derive(serde::Deserialize, Debug)]
-pub struct WebhookEventRepository {
+pub struct WebhookRepository {
+    repository: Repository,
+}
+
+#[derive(serde::Deserialize, Debug)]
+pub struct WorkflowRunInner {
+    #[serde(flatten)]
+    run: workflows::Run,
+    check_suite_id: u64,
+}
+
+#[derive(serde::Deserialize, Debug)]
+pub struct WebhookWorkflowRun<'a> {
+    action: &'a str,
+    workflow_run: WorkflowRunInner,
     repository: Repository,
 }
 
@@ -75,7 +89,7 @@ fn parse_webhook_event(request: Parts, body: &[u8]) -> anyhow::Result<Option<Bor
 
     match event_type.as_bytes() {
         b"issue_comment" => {
-            let repository: WebhookEventRepository = serde_json::from_slice(body)?;
+            let repository: WebhookRepository = serde_json::from_slice(body)?;
             let repository_name = parse_repository_name(&repository.repository)?;
 
             let event: IssueCommentEventPayload = serde_json::from_slice(body)?;
@@ -83,6 +97,22 @@ fn parse_webhook_event(request: Parts, body: &[u8]) -> anyhow::Result<Option<Bor
             Ok(comment)
         }
         b"installation_repositories" | b"installation" => Ok(Some(BorsEvent::InstallationsChanged)),
+        b"workflow_run" => {
+            let payload: WebhookWorkflowRun = serde_json::from_slice(body)?;
+            let repository_name = parse_repository_name(&payload.repository)?;
+            if payload.action == "requested" {
+                Ok(Some(BorsEvent::WorkflowStarted(WorkflowStarted {
+                    repository: repository_name,
+                    name: payload.workflow_run.run.name,
+                    branch: payload.workflow_run.run.head_branch,
+                    commit_sha: CommitSha(payload.workflow_run.run.head_sha),
+                    workflow_run_id: payload.workflow_run.run.id.0,
+                    check_suite_id: payload.workflow_run.check_suite_id,
+                })))
+            } else {
+                Ok(None)
+            }
+        }
         _ => {
             log::debug!("Ignoring unknown event type {:?}", event_type.to_str());
             Ok(None)
@@ -208,6 +238,34 @@ mod tests {
                         },
                         pr_number: 5,
                         text: "hello bors",
+                    },
+                ),
+            ),
+        )
+        "###
+        );
+    }
+
+    #[tokio::test]
+    async fn test_workflow_run_requested() {
+        insta::assert_debug_snapshot!(
+            check_webhook("webhook/workflow-run-requested.json", "workflow_run").await,
+            @r###"
+        Ok(
+            GitHubWebhook(
+                WorkflowStarted(
+                    WorkflowStarted {
+                        repository: GithubRepoName {
+                            owner: "kobzol",
+                            name: "bors-kindergarten",
+                        },
+                        name: "Workflow 2",
+                        branch: "automation/bors/try",
+                        commit_sha: CommitSha(
+                            "c9abcadf285659684c0975cead8bf982fa84e123",
+                        ),
+                        workflow_run_id: 4900979074,
+                        check_suite_id: 12717696199,
                     },
                 ),
             ),

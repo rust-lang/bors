@@ -3,12 +3,12 @@ use axum::async_trait;
 use chrono::{DateTime, NaiveDateTime, Utc};
 use sea_orm::sea_query::OnConflict;
 use sea_orm::ActiveValue::{Set, Unchanged};
-use sea_orm::{ActiveModelTrait, ColumnTrait, DbErr, EntityTrait, QueryFilter};
+use sea_orm::{ActiveModelTrait, ColumnTrait, DbErr, EntityTrait, QueryFilter, TransactionTrait};
 
-use entity::{build, pull_request};
+use entity::{build, check_suite, pull_request};
 use migration::sea_orm::DatabaseConnection;
 
-use crate::database::{BuildModel, DbClient, PullRequestModel};
+use crate::database::{BuildModel, CheckSuiteStatus, DbClient, PullRequestModel};
 use crate::github::PullRequestNumber;
 use crate::github::{CommitSha, GithubRepoName};
 
@@ -19,6 +19,10 @@ pub struct SeaORMClient {
 impl SeaORMClient {
     pub fn new(connection: DatabaseConnection) -> Self {
         Self { db: connection }
+    }
+
+    pub fn connection(&mut self) -> &mut DatabaseConnection {
+        &mut self.db
     }
 }
 
@@ -64,23 +68,27 @@ impl DbClient for SeaORMClient {
             id: pr.id,
             repository: pr.repository,
             number: PullRequestNumber(pr.number as u64),
-            try_build: build.map(from_db_build),
-            created_at: from_db_datetime(pr.created_at),
+            try_build: build.map(build_from_db),
+            created_at: datetime_from_db(pr.created_at),
         })
     }
 
     async fn attach_try_build(
         &self,
         pr: PullRequestModel,
+        branch: String,
         commit_sha: CommitSha,
     ) -> anyhow::Result<()> {
         let build = build::ActiveModel {
-            commit_sha: Set(commit_sha.0),
             repository: Set(pr.repository.clone()),
+            branch: Set(branch),
+            commit_sha: Set(commit_sha.0),
             ..Default::default()
         };
+
+        let tx = self.db.begin().await?;
         let build = build::Entity::insert(build)
-            .exec_with_returning(&self.db)
+            .exec_with_returning(&tx)
             .await
             .map_err(|error| anyhow!("Cannot insert build into DB: {error:?}"))?;
 
@@ -89,38 +97,69 @@ impl DbClient for SeaORMClient {
             try_build: Set(Some(build.id)),
             ..Default::default()
         };
-        pr_model.update(&self.db).await?;
+        pr_model.update(&tx).await?;
+        tx.commit().await?;
 
         Ok(())
     }
 
-    async fn find_build_by_commit(
+    async fn find_build(
         &self,
         repo: &GithubRepoName,
+        branch: String,
         commit_sha: CommitSha,
     ) -> anyhow::Result<Option<BuildModel>> {
         let build = build::Entity::find()
             .filter(
                 build::Column::Repository
                     .eq(full_repo_name(repo))
+                    .and(build::Column::Branch.eq(branch))
                     .and(build::Column::CommitSha.eq(commit_sha.0)),
             )
             .one(&self.db)
             .await?;
-        Ok(build.map(from_db_build))
+        Ok(build.map(build_from_db))
+    }
+
+    async fn create_check_suite(
+        &self,
+        build: &BuildModel,
+        check_suite_id: u64,
+        workflow_run_id: u64,
+        status: CheckSuiteStatus,
+    ) -> anyhow::Result<()> {
+        let model = check_suite::ActiveModel {
+            build: Set(build.id),
+            check_suite_id: Set(check_suite_id as i64),
+            workflow_run_id: Set(Some(workflow_run_id as i64)),
+            status: Set(check_suite_status_to_db(&status).to_string()),
+            ..Default::default()
+        };
+        model.insert(&self.db).await?;
+
+        Ok(())
     }
 }
 
-fn from_db_build(model: build::Model) -> BuildModel {
+fn check_suite_status_to_db(status: &CheckSuiteStatus) -> &'static str {
+    match status {
+        CheckSuiteStatus::Started => "started",
+        CheckSuiteStatus::Success => "success",
+        CheckSuiteStatus::Failure => "failure",
+    }
+}
+
+fn build_from_db(model: build::Model) -> BuildModel {
     BuildModel {
         id: model.id,
         repository: model.repository,
+        branch: model.branch,
         commit_sha: model.commit_sha,
-        created_at: from_db_datetime(model.created_at),
+        created_at: datetime_from_db(model.created_at),
     }
 }
 
-fn from_db_datetime(datetime: NaiveDateTime) -> DateTime<Utc> {
+fn datetime_from_db(datetime: NaiveDateTime) -> DateTime<Utc> {
     DateTime::from_utc(datetime, Utc)
 }
 

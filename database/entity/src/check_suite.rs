@@ -3,13 +3,14 @@
 use sea_orm::entity::prelude::*;
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
-#[sea_orm(table_name = "pull_request")]
+#[sea_orm(table_name = "check_suite")]
 pub struct Model {
     #[sea_orm(primary_key)]
     pub id: i32,
-    pub repository: String,
-    pub number: i32,
-    pub try_build: Option<i32>,
+    pub build: i32,
+    pub check_suite_id: i64,
+    pub workflow_run_id: Option<i64>,
+    pub status: String,
     pub created_at: DateTime,
 }
 
@@ -17,7 +18,7 @@ pub struct Model {
 pub enum Relation {
     #[sea_orm(
         belongs_to = "super::build::Entity",
-        from = "Column::TryBuild",
+        from = "Column::Build",
         to = "super::build::Column::Id",
         on_update = "NoAction",
         on_delete = "NoAction"

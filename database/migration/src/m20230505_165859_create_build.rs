@@ -19,11 +19,21 @@ impl MigrationTrait for Migration {
                             .primary_key(),
                     )
                     .col(ColumnDef::new(Build::Repository).string().not_null())
+                    .col(ColumnDef::new(Build::Branch).string().not_null())
                     .col(ColumnDef::new(Build::CommitSha).string().not_null())
                     .col(
                         ColumnDef::new(Build::CreatedAt)
                             .timestamp()
-                            .default(SimpleExpr::Keyword(Keyword::CurrentTimestamp)),
+                            .default(SimpleExpr::Keyword(Keyword::CurrentTimestamp))
+                            .not_null(),
+                    )
+                    .index(
+                        Index::create()
+                            .unique()
+                            .name("unique-repo-branch-sha")
+                            .col(Build::Repository)
+                            .col(Build::Branch)
+                            .col(Build::CommitSha),
                     )
                     .to_owned(),
             )
@@ -43,6 +53,7 @@ pub enum Build {
     Table,
     Id,
     Repository,
+    Branch,
     CommitSha,
     CreatedAt,
 }

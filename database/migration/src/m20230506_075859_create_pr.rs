@@ -33,7 +33,8 @@ impl MigrationTrait for Migration {
                     .col(
                         ColumnDef::new(PullRequest::CreatedAt)
                             .timestamp()
-                            .default(SimpleExpr::Keyword(Keyword::CurrentTimestamp)),
+                            .default(SimpleExpr::Keyword(Keyword::CurrentTimestamp))
+                            .not_null(),
                     )
                     .index(
                         Index::create()

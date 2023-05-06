@@ -13,11 +13,11 @@ use crate::permissions::PermissionType;
 const TRY_MERGE_BRANCH_NAME: &str = "automation/bors/try-merge";
 
 // This branch should run CI checks.
-const TRY_BRANCH_NAME: &str = "automation/bors/try";
+pub(super) const TRY_BRANCH_NAME: &str = "automation/bors/try";
 
 /// Performs a so-called try build - merges the PR branch into a special branch designed
 /// for running CI checks.
-pub async fn command_try_build<Client: RepositoryClient>(
+pub(super) async fn command_try_build<Client: RepositoryClient>(
     repo: &mut RepositoryState<Client>,
     database: &mut dyn DbClient,
     pr: &PullRequest,
@@ -67,7 +67,11 @@ pub async fn command_try_build<Client: RepositoryClient>(
                 .map_err(|error| anyhow!("Cannot set try branch to main branch: {error:?}"))?;
 
             database
-                .attach_try_build(pull_request_model, merge_sha.clone())
+                .attach_try_build(
+                    pull_request_model,
+                    TRY_BRANCH_NAME.to_string(),
+                    merge_sha.clone(),
+                )
                 .await?;
 
             repo.client
@@ -166,6 +170,7 @@ async fn check_try_permissions<Client: RepositoryClient>(
 
 #[cfg(test)]
 mod tests {
+    use crate::bors::handlers::trybuild::TRY_BRANCH_NAME;
     use crate::database::DbClient;
     use crate::github::{CommitSha, MergeError};
     use crate::tests::event::default_pr_number;
@@ -252,7 +257,11 @@ mod tests {
 
         assert!(state
             .db
-            .find_build_by_commit(&default_repo_name(), CommitSha("sha1".to_string()))
+            .find_build(
+                &default_repo_name(),
+                TRY_BRANCH_NAME.to_string(),
+                CommitSha("sha1".to_string())
+            )
             .await
             .unwrap()
             .is_some());

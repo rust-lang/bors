@@ -8,7 +8,7 @@ use axum::async_trait;
 use derive_builder::Builder;
 
 use super::permissions::AllPermissions;
-use crate::bors::event::{BorsEvent, PullRequestComment};
+use crate::bors::event::{BorsEvent, PullRequestComment, WorkflowStarted};
 use crate::bors::{handle_bors_event, RepositoryState};
 use crate::bors::{BorsState, RepositoryClient};
 use crate::database::{DbClient, SeaORMClient};
@@ -47,6 +47,10 @@ impl TestBorsState {
 
     pub async fn comment<T: Into<PullRequestComment>>(&mut self, comment: T) {
         self.event(BorsEvent::Comment(comment.into())).await;
+    }
+
+    pub async fn workflow_started<T: Into<WorkflowStarted>>(&mut self, payload: T) {
+        self.event(BorsEvent::WorkflowStarted(payload.into())).await;
     }
 }
 

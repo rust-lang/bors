@@ -5,11 +5,14 @@ use crate::bors::command::BorsCommand;
 use crate::bors::event::{BorsEvent, PullRequestComment};
 use crate::bors::handlers::ping::command_ping;
 use crate::bors::handlers::trybuild::command_try_build;
+use crate::bors::handlers::workflow::handle_workflow_started;
 use crate::bors::{BorsState, RepositoryClient, RepositoryState};
 use crate::database::DbClient;
+use crate::github::GithubRepoName;
 
 mod ping;
 mod trybuild;
+mod workflow;
 
 pub async fn handle_bors_event<Client: RepositoryClient>(
     event: BorsEvent,
@@ -23,14 +26,9 @@ pub async fn handle_bors_event<Client: RepositoryClient>(
                 return Ok(());
             }
 
-            match state.get_repo_state_mut(&comment.repository) {
-                Some((repo, db)) => {
-                    if let Err(error) = handle_comment(repo, db, comment).await {
-                        log::warn!("Error occured while handling comment: {error:?}");
-                    }
-                }
-                None => {
-                    log::warn!("Repository {} not found", comment.repository);
+            if let Some((repo, db)) = get_repo_state(state, &comment.repository) {
+                if let Err(error) = handle_comment(repo, db, comment).await {
+                    log::warn!("Error occured while handling comment: {error:?}");
                 }
             }
         }
@@ -40,8 +38,28 @@ pub async fn handle_bors_event<Client: RepositoryClient>(
                 log::error!("Could not reload installation repositories: {error:?}");
             }
         }
+        BorsEvent::WorkflowStarted(payload) => {
+            if let Some((_, db)) = get_repo_state(state, &payload.repository) {
+                if let Err(error) = handle_workflow_started(db, payload).await {
+                    log::warn!("Error occured while handling workflow started event: {error:?}");
+                }
+            }
+        }
     }
     Ok(())
+}
+
+fn get_repo_state<'a, Client: RepositoryClient>(
+    state: &'a mut dyn BorsState<Client>,
+    repo: &GithubRepoName,
+) -> Option<(&'a mut RepositoryState<Client>, &'a mut dyn DbClient)> {
+    match state.get_repo_state_mut(repo) {
+        Some(result) => Some(result),
+        None => {
+            log::warn!("Repository {} not found", repo);
+            None
+        }
+    }
 }
 
 async fn handle_comment<Client: RepositoryClient>(

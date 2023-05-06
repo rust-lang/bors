@@ -3,4 +3,5 @@
 pub mod prelude;
 
 pub mod build;
+pub mod check_suite;
 pub mod pull_request;
