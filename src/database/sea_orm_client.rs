@@ -1,14 +1,14 @@
 use anyhow::anyhow;
 use axum::async_trait;
+use chrono::{DateTime, NaiveDateTime, Utc};
 use sea_orm::sea_query::OnConflict;
-use sea_orm::ActiveValue::Set;
-use sea_orm::{ActiveModelTrait, ColumnTrait, DbErr, EntityTrait, IntoActiveModel, QueryFilter};
+use sea_orm::ActiveValue::{Set, Unchanged};
+use sea_orm::{ActiveModelTrait, ColumnTrait, DbErr, EntityTrait, QueryFilter};
 
-use entity::build::Model;
 use entity::{build, pull_request};
 use migration::sea_orm::DatabaseConnection;
 
-use crate::database::DbClient;
+use crate::database::{BuildModel, DbClient, PullRequestModel};
 use crate::github::PullRequestNumber;
 use crate::github::{CommitSha, GithubRepoName};
 
@@ -28,7 +28,7 @@ impl DbClient for SeaORMClient {
         &self,
         repo: &GithubRepoName,
         pr_number: PullRequestNumber,
-    ) -> anyhow::Result<pull_request::Model> {
+    ) -> anyhow::Result<PullRequestModel> {
         let pr = pull_request::ActiveModel {
             repository: Set(full_repo_name(repo)),
             number: Set(pr_number.0 as i32),
@@ -38,7 +38,7 @@ impl DbClient for SeaORMClient {
         // Try to insert first
         match pull_request::Entity::insert(pr)
             .on_conflict(OnConflict::new().do_nothing().to_owned())
-            .exec_with_returning(&self.db)
+            .exec_without_returning(&self.db)
             .await
         {
             Ok(_) => {}
@@ -49,22 +49,29 @@ impl DbClient for SeaORMClient {
         };
 
         // Resolve the PR row
-        let pr = pull_request::Entity::find()
+        let (pr, build) = pull_request::Entity::find()
             .filter(
                 pull_request::Column::Repository
                     .eq(full_repo_name(repo))
                     .and(pull_request::Column::Number.eq(pr_number.0)),
             )
+            .find_also_related(build::Entity)
             .one(&self.db)
             .await?
             .ok_or_else(|| anyhow!("Cannot find PR row"))?;
 
-        Ok(pr)
+        Ok(PullRequestModel {
+            id: pr.id,
+            repository: pr.repository,
+            number: PullRequestNumber(pr.number as u64),
+            try_build: build.map(from_db_build),
+            created_at: from_db_datetime(pr.created_at),
+        })
     }
 
     async fn attach_try_build(
         &self,
-        pr: pull_request::Model,
+        pr: PullRequestModel,
         commit_sha: CommitSha,
     ) -> anyhow::Result<()> {
         let build = build::ActiveModel {
@@ -77,8 +84,11 @@ impl DbClient for SeaORMClient {
             .await
             .map_err(|error| anyhow!("Cannot insert build into DB: {error:?}"))?;
 
-        let mut pr_model = pr.into_active_model();
-        pr_model.try_build = Set(Some(build.id));
+        let pr_model = pull_request::ActiveModel {
+            id: Unchanged(pr.id),
+            try_build: Set(Some(build.id)),
+            ..Default::default()
+        };
         pr_model.update(&self.db).await?;
 
         Ok(())
@@ -88,55 +98,30 @@ impl DbClient for SeaORMClient {
         &self,
         repo: &GithubRepoName,
         commit_sha: CommitSha,
-    ) -> anyhow::Result<Option<Model>> {
-        Ok(build::Entity::find()
+    ) -> anyhow::Result<Option<BuildModel>> {
+        let build = build::Entity::find()
             .filter(
                 build::Column::Repository
                     .eq(full_repo_name(repo))
                     .and(build::Column::CommitSha.eq(commit_sha.0)),
             )
             .one(&self.db)
-            .await?)
+            .await?;
+        Ok(build.map(from_db_build))
     }
+}
 
-    // async fn find_try_build_by_commit(
-    //     &self,
-    //     repo: &GithubRepoName,
-    //     commit: &CommitSha,
-    // ) -> anyhow::Result<Option<try_build::Model>> {
-    //     let mut entries = try_build::Entity::find()
-    //         .filter(
-    //             try_build::Column::Repository
-    //                 .eq(full_repo_name(repo))
-    //                 .and(try_build::Column::CommitSha.eq(&commit.0)),
-    //         )
-    //         .all(&self.db)
-    //         .await?;
-    //     Ok(entries.pop())
-    // }
-    //
-    // async fn find_try_build_for_pr(
-    //     &self,
-    //     repo: &GithubRepoName,
-    //     pr_number: PullRequestNumber,
-    // ) -> anyhow::Result<Option<try_build::Model>> {
-    //     let mut entries = try_build::Entity::find()
-    //         .filter(
-    //             try_build::Column::Repository
-    //                 .eq(full_repo_name(repo))
-    //                 .and(try_build::Column::PullRequestNumber.eq(pr_number.0)),
-    //         )
-    //         .all(&self.db)
-    //         .await?;
-    //     Ok(entries.pop())
-    // }
-    //
-    // async fn delete_try_build(&self, model: try_build::Model) -> anyhow::Result<()> {
-    //     try_build::Entity::delete_by_id(model.id)
-    //         .exec(&self.db)
-    //         .await?;
-    //     Ok(())
-    // }
+fn from_db_build(model: build::Model) -> BuildModel {
+    BuildModel {
+        id: model.id,
+        repository: model.repository,
+        commit_sha: model.commit_sha,
+        created_at: from_db_datetime(model.created_at),
+    }
+}
+
+fn from_db_datetime(datetime: NaiveDateTime) -> DateTime<Utc> {
+    DateTime::from_utc(datetime, Utc)
 }
 
 fn full_repo_name(repo: &GithubRepoName) -> String {

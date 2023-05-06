@@ -1,11 +1,29 @@
 use axum::async_trait;
-use entity::{build, pull_request};
+use chrono::{DateTime, Utc};
 
-mod sea_orm_client;
+pub use sea_orm_client::SeaORMClient;
 
 use crate::github::PullRequestNumber;
 use crate::github::{CommitSha, GithubRepoName};
-pub use sea_orm_client::SeaORMClient;
+
+mod sea_orm_client;
+
+type PrimaryKey = i32;
+
+pub struct BuildModel {
+    pub id: PrimaryKey,
+    pub repository: String,
+    pub commit_sha: String,
+    pub created_at: DateTime<Utc>,
+}
+
+pub struct PullRequestModel {
+    pub id: PrimaryKey,
+    pub repository: String,
+    pub number: PullRequestNumber,
+    pub try_build: Option<BuildModel>,
+    pub created_at: DateTime<Utc>,
+}
 
 #[async_trait]
 pub trait DbClient {
@@ -15,12 +33,12 @@ pub trait DbClient {
         &self,
         repo: &GithubRepoName,
         pr_number: PullRequestNumber,
-    ) -> anyhow::Result<pull_request::Model>;
+    ) -> anyhow::Result<PullRequestModel>;
 
     /// Creates a new Build row and attaches it as a try build to the given PR.
     async fn attach_try_build(
         &self,
-        pr: pull_request::Model,
+        pr: PullRequestModel,
         commit_sha: CommitSha,
     ) -> anyhow::Result<()>;
 
@@ -29,19 +47,5 @@ pub trait DbClient {
         &self,
         repo: &GithubRepoName,
         commit_sha: CommitSha,
-    ) -> anyhow::Result<Option<build::Model>>;
-
-    // async fn find_try_build_by_commit(
-    //     &self,
-    //     repo: &GithubRepoName,
-    //     commit: &CommitSha,
-    // ) -> anyhow::Result<Option<try_build::Model>>;
-    //
-    // async fn find_try_build_for_pr(
-    //     &self,
-    //     repo: &GithubRepoName,
-    //     pr_number: PullRequestNumber,
-    // ) -> anyhow::Result<Option<try_build::Model>>;
-    //
-    // async fn delete_try_build(&self, model: try_build::Model) -> anyhow::Result<()>;
+    ) -> anyhow::Result<Option<BuildModel>>;
 }

@@ -33,11 +33,11 @@ pub async fn command_try_build<Client: RepositoryClient>(
         return Ok(());
     }
 
-    let pull_request_row = database
+    let pull_request_model = database
         .get_or_create_pull_request(repo.client.repository(), pr.number.into())
         .await?;
 
-    if pull_request_row.try_build.is_some() {
+    if pull_request_model.try_build.is_some() {
         repo.client
             .post_comment(
                 pr.number.into(),
@@ -67,7 +67,7 @@ pub async fn command_try_build<Client: RepositoryClient>(
                 .map_err(|error| anyhow!("Cannot set try branch to main branch: {error:?}"))?;
 
             database
-                .attach_try_build(pull_request_row, merge_sha.clone())
+                .attach_try_build(pull_request_model, merge_sha.clone())
                 .await?;
 
             repo.client
