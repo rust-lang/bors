@@ -63,18 +63,19 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
         .block_on(initialize_db(&opts.db))
         .context("Cannot initialize database")?;
 
-    let mut state = runtime.block_on(GithubAppState::load(
+    let state = runtime.block_on(GithubAppState::load(
         opts.app_id.into(),
         opts.private_key.into_bytes().into(),
+        db,
     ))?;
-    let (tx, gh_process) = github_webhook_process(access);
+    let (tx, gh_process) = create_bors_process(state);
 
     let state = ServerState::new(tx, WebhookSecret::new(opts.webhook_secret));
     let server_process = server(state);
 
     runtime.block_on(async move {
         tokio::select! {
-            () = process => {
+            () = gh_process => {
                 log::warn!("Github webhook process has ended");
                 Ok(())
             },

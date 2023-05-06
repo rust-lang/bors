@@ -47,7 +47,7 @@ impl TeamApiPermissionResolver {
 #[async_trait]
 impl PermissionResolver for TeamApiPermissionResolver {
     async fn has_permission(&self, username: &str, permission: PermissionType) -> bool {
-        if self.permissions.lock().unwrap().is_stale() {
+        if self.permissions.lock().await.is_stale() {
             self.reload_permissions().await;
         }
 
