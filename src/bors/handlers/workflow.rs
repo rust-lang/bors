@@ -184,12 +184,11 @@ mod tests {
 
     use crate::bors::handlers::trybuild::TRY_BRANCH_NAME;
     use crate::database::WorkflowStatus;
-    use crate::github::CommitSha;
     use crate::tests::event::{
         default_pr_number, suite_failure, suite_pending, suite_success, CheckSuiteCompletedBuilder,
         WorkflowCompletedBuilder, WorkflowStartedBuilder,
     };
-    use crate::tests::state::ClientBuilder;
+    use crate::tests::state::{default_merge_sha, ClientBuilder};
 
     #[tokio::test]
     async fn test_unknown_build() {
@@ -212,14 +211,12 @@ mod tests {
     #[tokio::test]
     async fn test_try_workflow_started() {
         let mut state = ClientBuilder::default().create_state().await;
-        state.client().merge_branches_fn = Box::new(|| Ok(CommitSha("sha1".to_string())));
         state.comment("@bors try").await;
 
         state
             .workflow_started(
                 WorkflowStartedBuilder::default()
                     .branch(TRY_BRANCH_NAME.to_string())
-                    .commit_sha("sha1".to_string())
                     .run_id(Some(42)),
             )
             .await;
@@ -234,13 +231,11 @@ mod tests {
     #[tokio::test]
     async fn test_try_workflow_start_twice() {
         let mut state = ClientBuilder::default().create_state().await;
-        state.client().merge_branches_fn = Box::new(|| Ok(CommitSha("sha1".to_string())));
         state.comment("@bors try").await;
 
         let event = || {
             WorkflowStartedBuilder::default()
                 .branch(TRY_BRANCH_NAME.to_string())
-                .commit_sha("sha1".to_string())
                 .run_id(Some(42))
         };
         state.workflow_started(event()).await;
@@ -270,12 +265,18 @@ mod tests {
     #[tokio::test]
     async fn test_try_success() {
         let mut state = ClientBuilder::default().create_state().await;
-        state.client().merge_branches_fn = Box::new(|| Ok(CommitSha("sha1".to_string())));
-        state.client().set_checks("sha1", vec![suite_success()]);
+        state
+            .client()
+            .set_checks(&default_merge_sha(), vec![suite_success()]);
 
         state.comment("@bors try").await;
         state
-            .perform_workflow_events(1, TRY_BRANCH_NAME, "sha1", WorkflowStatus::Success)
+            .perform_workflow_events(
+                1,
+                TRY_BRANCH_NAME,
+                &default_merge_sha(),
+                WorkflowStatus::Success,
+            )
             .await;
 
         insta::assert_snapshot!(
@@ -283,7 +284,7 @@ mod tests {
             @r###"
         :sunny: Try build successful
         - [workflow-1](https://workflow-1.com) :white_check_mark:
-        Build commit: sha1 (`sha1`)
+        Build commit: sha-merged (`sha-merged`)
         "###
         );
     }
@@ -291,12 +292,18 @@ mod tests {
     #[tokio::test]
     async fn test_try_failure() {
         let mut state = ClientBuilder::default().create_state().await;
-        state.client().merge_branches_fn = Box::new(|| Ok(CommitSha("sha1".to_string())));
-        state.client().set_checks("sha1", vec![suite_failure()]);
+        state
+            .client()
+            .set_checks(&default_merge_sha(), vec![suite_failure()]);
 
         state.comment("@bors try").await;
         state
-            .perform_workflow_events(1, TRY_BRANCH_NAME, "sha1", WorkflowStatus::Failure)
+            .perform_workflow_events(
+                1,
+                TRY_BRANCH_NAME,
+                &default_merge_sha(),
+                WorkflowStatus::Failure,
+            )
             .await;
 
         insta::assert_snapshot!(
@@ -311,50 +318,68 @@ mod tests {
     #[tokio::test]
     async fn test_try_success_multiple_suites() {
         let mut state = ClientBuilder::default().create_state().await;
-        state.client().merge_branches_fn = Box::new(|| Ok(CommitSha("sha1".to_string())));
         state
             .client()
-            .set_checks("sha1", vec![suite_success(), suite_pending()]);
+            .set_checks(&default_merge_sha(), vec![suite_success(), suite_pending()]);
 
         state.comment("@bors try").await;
         state
-            .perform_workflow_events(1, TRY_BRANCH_NAME, "sha1", WorkflowStatus::Success)
+            .perform_workflow_events(
+                1,
+                TRY_BRANCH_NAME,
+                &default_merge_sha(),
+                WorkflowStatus::Success,
+            )
             .await;
         state.client().check_comment_count(default_pr_number(), 1);
 
         state
             .client()
-            .set_checks("sha1", vec![suite_success(), suite_success()]);
+            .set_checks(&default_merge_sha(), vec![suite_success(), suite_success()]);
         state
-            .perform_workflow_events(2, TRY_BRANCH_NAME, "sha1", WorkflowStatus::Success)
+            .perform_workflow_events(
+                2,
+                TRY_BRANCH_NAME,
+                &default_merge_sha(),
+                WorkflowStatus::Success,
+            )
             .await;
         insta::assert_snapshot!(state.client().get_last_comment(default_pr_number()), @r###"
         :sunny: Try build successful
         - [workflow-1](https://workflow-1.com) :white_check_mark:
         - [workflow-2](https://workflow-2.com) :white_check_mark:
-        Build commit: sha1 (`sha1`)
+        Build commit: sha-merged (`sha-merged`)
         "###);
     }
 
     #[tokio::test]
     async fn test_try_failure_multiple_suites() {
         let mut state = ClientBuilder::default().create_state().await;
-        state.client().merge_branches_fn = Box::new(|| Ok(CommitSha("sha1".to_string())));
         state
             .client()
-            .set_checks("sha1", vec![suite_success(), suite_pending()]);
+            .set_checks(&default_merge_sha(), vec![suite_success(), suite_pending()]);
 
         state.comment("@bors try").await;
         state
-            .perform_workflow_events(1, TRY_BRANCH_NAME, "sha1", WorkflowStatus::Success)
+            .perform_workflow_events(
+                1,
+                TRY_BRANCH_NAME,
+                &default_merge_sha(),
+                WorkflowStatus::Success,
+            )
             .await;
         state.client().check_comment_count(default_pr_number(), 1);
 
         state
             .client()
-            .set_checks("sha1", vec![suite_success(), suite_failure()]);
+            .set_checks(&default_merge_sha(), vec![suite_success(), suite_failure()]);
         state
-            .perform_workflow_events(2, TRY_BRANCH_NAME, "sha1", WorkflowStatus::Failure)
+            .perform_workflow_events(
+                2,
+                TRY_BRANCH_NAME,
+                &default_merge_sha(),
+                WorkflowStatus::Failure,
+            )
             .await;
         insta::assert_snapshot!(state.client().get_last_comment(default_pr_number()), @r###"
         :broken_heart: Test failed
@@ -366,25 +391,20 @@ mod tests {
     #[tokio::test]
     async fn test_try_suite_completed_received_before_workflow_completed() {
         let mut state = ClientBuilder::default().create_state().await;
-        state.client().merge_branches_fn = Box::new(|| Ok(CommitSha("sha1".to_string())));
-        state.client().set_checks("sha1", vec![suite_success()]);
+        state
+            .client()
+            .set_checks(&default_merge_sha(), vec![suite_success()]);
 
         state.comment("@bors try").await;
         state
-            .workflow_started(
-                WorkflowStartedBuilder::default()
-                    .branch(TRY_BRANCH_NAME.to_string())
-                    .commit_sha("sha1".to_string()),
-            )
+            .workflow_started(WorkflowStartedBuilder::default().branch(TRY_BRANCH_NAME.to_string()))
             .await;
 
         // Check suite completed received before the workflow has finished.
         // We should wait until workflow finished is received before posting the comment.
         state
             .check_suite_completed(
-                CheckSuiteCompletedBuilder::default()
-                    .branch(TRY_BRANCH_NAME.to_string())
-                    .commit_sha("sha1".to_string()),
+                CheckSuiteCompletedBuilder::default().branch(TRY_BRANCH_NAME.to_string()),
             )
             .await;
         state.client().check_comment_count(default_pr_number(), 1);
@@ -393,7 +413,6 @@ mod tests {
             .workflow_completed(
                 WorkflowCompletedBuilder::default()
                     .branch(TRY_BRANCH_NAME.to_string())
-                    .commit_sha("sha1".to_string())
                     .status(WorkflowStatus::Success),
             )
             .await;
@@ -401,23 +420,18 @@ mod tests {
         insta::assert_snapshot!(state.client().get_last_comment(default_pr_number()), @r###"
         :sunny: Try build successful
         - [workflow-name](https://workflow.com) :white_check_mark:
-        Build commit: sha1 (`sha1`)
+        Build commit: sha-merged (`sha-merged`)
         "###);
     }
 
     #[tokio::test]
     async fn test_try_check_suite_finished_twice() {
         let mut state = ClientBuilder::default().create_state().await;
-        state.client().merge_branches_fn = Box::new(|| Ok(CommitSha("sha1".to_string())));
         state
             .client()
-            .set_checks("sha1", vec![suite_success(), suite_success()]);
+            .set_checks(&default_merge_sha(), vec![suite_success(), suite_success()]);
 
-        let event = || {
-            CheckSuiteCompletedBuilder::default()
-                .branch(TRY_BRANCH_NAME.to_string())
-                .commit_sha("sha1".to_string())
-        };
+        let event = || CheckSuiteCompletedBuilder::default().branch(TRY_BRANCH_NAME.to_string());
 
         state.comment("@bors try").await;
         state.check_suite_completed(event()).await;

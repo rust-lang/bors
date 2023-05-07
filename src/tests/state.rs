@@ -34,6 +34,10 @@ pub fn default_repo_name() -> GithubRepoName {
     GithubRepoName::new("owner", "name")
 }
 
+pub fn default_merge_sha() -> String {
+    "sha-merged".to_string()
+}
+
 pub struct TestBorsState {
     repos: HashMap<GithubRepoName, RepositoryState<TestRepositoryClient>>,
     pub db: SeaORMClient,
@@ -152,7 +156,7 @@ impl ClientBuilder {
             client: TestRepositoryClient {
                 comments: Default::default(),
                 name,
-                merge_branches_fn: Box::new(|| Ok(CommitSha("foo".to_string()))),
+                merge_branches_fn: Box::new(|| Ok(CommitSha(default_merge_sha().to_string()))),
                 get_pr_fn: Box::new(move |pr| Ok(PRBuilder::default().number(pr.0).create())),
                 check_suites: Default::default(),
             },

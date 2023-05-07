@@ -4,7 +4,7 @@ use crate::bors::event::PullRequestComment;
 use crate::bors::{event, CheckSuite, CheckSuiteStatus};
 use crate::database::WorkflowStatus;
 use crate::github::{CommitSha, GithubRepoName, GithubUser};
-use crate::tests::state::default_repo_name;
+use crate::tests::state::{default_merge_sha, default_repo_name};
 
 fn default_user() -> GithubUser {
     GithubUser {
@@ -93,6 +93,7 @@ pub struct WorkflowStarted {
     #[builder(default = "\"workflow-name\".to_string()")]
     name: String,
     branch: String,
+    #[builder(default = "default_merge_sha()")]
     commit_sha: String,
     #[builder(default = "Some(1)")]
     run_id: Option<u64>,
@@ -134,6 +135,7 @@ pub struct WorkflowCompleted {
     #[builder(default = "default_repo_name()")]
     repo: GithubRepoName,
     branch: String,
+    #[builder(default = "default_merge_sha()")]
     commit_sha: String,
     #[builder(default = "1")]
     run_id: u64,
@@ -172,6 +174,7 @@ pub struct CheckSuiteCompleted {
     #[builder(default = "default_repo_name()")]
     repo: GithubRepoName,
     branch: String,
+    #[builder(default = "default_merge_sha()")]
     commit_sha: String,
 }
 
