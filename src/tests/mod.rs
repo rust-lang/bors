@@ -1,12 +1,6 @@
-#[cfg(test)]
-pub mod database;
-#[cfg(test)]
-pub mod event;
-#[cfg(test)]
-pub mod github;
-#[cfg(test)]
-pub mod io;
-#[cfg(test)]
-pub mod permissions;
-#[cfg(test)]
-pub mod state;
+pub(crate) mod database;
+pub(crate) mod event;
+pub(crate) mod github;
+pub(crate) mod io;
+pub(crate) mod permissions;
+pub(crate) mod state;

@@ -16,6 +16,7 @@ use crate::database::{
 use crate::github::PullRequestNumber;
 use crate::github::{CommitSha, GithubRepoName};
 
+/// Provides access to a database using SeaORM mapping.
 pub struct SeaORMClient {
     db: DatabaseConnection,
 }

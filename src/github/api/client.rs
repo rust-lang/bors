@@ -7,7 +7,7 @@ use crate::bors::{CheckSuite, CheckSuiteStatus, RepositoryClient};
 use crate::github::api::operations::{merge_branches, set_branch_to_commit, MergeError};
 use crate::github::{Branch, CommitSha, GithubRepoName, PullRequest, PullRequestNumber};
 
-/// Provides access to a single app installation (repository).
+/// Provides access to a single app installation (repository) using the GitHub API.
 pub struct GithubRepositoryClient {
     /// The client caches the access token for this given repository and refreshes it once it
     /// expires.

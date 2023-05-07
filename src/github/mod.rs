@@ -1,3 +1,5 @@
+//! Contains definitions of common types (pull request, user, repository name) needed
+//! for working with (GitHub) repositories.
 use std::fmt::{Debug, Display, Formatter};
 
 use url::Url;
