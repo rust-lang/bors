@@ -159,6 +159,16 @@ impl TestRepositoryClient {
                 .collect::<Vec<_>>()
         );
     }
+    pub fn check_comment_count(&self, pr_number: u64, count: usize) {
+        assert_eq!(
+            self.comments
+                .get(&pr_number)
+                .cloned()
+                .unwrap_or_default()
+                .len(),
+            count
+        );
+    }
 }
 
 #[async_trait]

@@ -21,6 +21,7 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Build::Repository).string().not_null())
                     .col(ColumnDef::new(Build::Branch).string().not_null())
                     .col(ColumnDef::new(Build::CommitSha).string().not_null())
+                    .col(ColumnDef::new(Build::Status).string().not_null())
                     .col(
                         ColumnDef::new(Build::CreatedAt)
                             .timestamp()
@@ -55,5 +56,6 @@ pub enum Build {
     Repository,
     Branch,
     CommitSha,
+    Status,
     CreatedAt,
 }

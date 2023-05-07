@@ -10,6 +10,7 @@ pub struct Model {
     pub repository: String,
     pub branch: String,
     pub commit_sha: String,
+    pub status: String,
     pub created_at: DateTime,
 }
 

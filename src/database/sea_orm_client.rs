@@ -8,7 +8,7 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, DbErr, EntityTrait, QueryFilter, Tr
 use entity::{build, pull_request, workflow};
 use migration::sea_orm::DatabaseConnection;
 
-use crate::database::{BuildModel, DbClient, PullRequestModel, WorkflowStatus};
+use crate::database::{BuildModel, BuildStatus, DbClient, PullRequestModel, WorkflowStatus};
 use crate::github::PullRequestNumber;
 use crate::github::{CommitSha, GithubRepoName};
 
@@ -89,6 +89,7 @@ impl DbClient for SeaORMClient {
             repository: Set(pr.repository.clone()),
             branch: Set(branch),
             commit_sha: Set(commit_sha.0),
+            status: Set(build_status_to_db(BuildStatus::Pending).to_string()),
             ..Default::default()
         };
 
@@ -127,6 +128,20 @@ impl DbClient for SeaORMClient {
         Ok(build.map(build_from_db))
     }
 
+    async fn update_build_status(
+        &self,
+        build: &BuildModel,
+        status: BuildStatus,
+    ) -> anyhow::Result<()> {
+        let model = build::ActiveModel {
+            id: Unchanged(build.id),
+            status: Set(build_status_to_db(status).to_string()),
+            ..Default::default()
+        };
+        model.update(&self.db).await?;
+        Ok(())
+    }
+
     async fn create_workflow(
         &self,
         build: &BuildModel,
@@ -148,6 +163,26 @@ impl DbClient for SeaORMClient {
     }
 }
 
+fn build_status_to_db(status: BuildStatus) -> &'static str {
+    match status {
+        BuildStatus::Pending => "pending",
+        BuildStatus::Success => "success",
+        BuildStatus::Failure => "failure",
+    }
+}
+
+fn build_status_from_db(status: String) -> BuildStatus {
+    match status.as_str() {
+        "pending" => BuildStatus::Pending,
+        "success" => BuildStatus::Success,
+        "failure" => BuildStatus::Failure,
+        _ => {
+            log::warn!("Encountered unknown build status in DB: {status}");
+            BuildStatus::Pending
+        }
+    }
+}
+
 fn workflow_status_to_db(status: &WorkflowStatus) -> &'static str {
     match status {
         WorkflowStatus::Pending => "pending",
@@ -162,6 +197,7 @@ fn build_from_db(model: build::Model) -> BuildModel {
         repository: model.repository,
         branch: model.branch,
         commit_sha: model.commit_sha,
+        status: build_status_from_db(model.status),
         created_at: datetime_from_db(model.created_at),
     }
 }

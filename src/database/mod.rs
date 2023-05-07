@@ -10,11 +10,19 @@ mod sea_orm_client;
 
 type PrimaryKey = i32;
 
+#[derive(PartialEq)]
+pub enum BuildStatus {
+    Pending,
+    Success,
+    Failure,
+}
+
 pub struct BuildModel {
     pub id: PrimaryKey,
     pub repository: String,
     pub branch: String,
     pub commit_sha: String,
+    pub status: BuildStatus,
     pub created_at: DateTime<Utc>,
 }
 
@@ -73,6 +81,13 @@ pub trait DbClient {
         branch: String,
         commit_sha: CommitSha,
     ) -> anyhow::Result<Option<BuildModel>>;
+
+    /// Updates the status of this build in the DB.
+    async fn update_build_status(
+        &self,
+        build: &BuildModel,
+        status: BuildStatus,
+    ) -> anyhow::Result<()>;
 
     /// Creates a new workflow attached to a build.
     async fn create_workflow(

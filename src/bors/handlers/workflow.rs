@@ -1,7 +1,7 @@
 use crate::bors::event::{CheckSuiteCompleted, WorkflowStarted};
 use crate::bors::handlers::is_bors_observed_branch;
 use crate::bors::{self, RepositoryClient, RepositoryState};
-use crate::database::{DbClient, WorkflowStatus};
+use crate::database::{BuildStatus, DbClient, WorkflowStatus};
 
 pub(super) async fn handle_workflow_started(
     db: &mut dyn DbClient,
@@ -47,6 +47,12 @@ pub(super) async fn handle_check_suite_completed<Client: RepositoryClient>(
         log::warn!("Received check suite finished for an unknown build: {}/{}", payload.repository, payload.commit_sha);
         return Ok(());
     };
+
+    // If the build has already been marked with a conclusion, ignore this event
+    if build.status != BuildStatus::Pending {
+        return Ok(());
+    }
+
     let Some(pr) = db.find_pr_by_build(&build).await? else {
         log::warn!("Cannot find PR for build {}", build.commit_sha);
         return Ok(());
@@ -80,6 +86,13 @@ Build commit: {sha} (`{sha}`)"#,
     };
     repo.client.post_comment(pr.number, &message).await?;
 
+    let status = if has_failure {
+        BuildStatus::Failure
+    } else {
+        BuildStatus::Success
+    };
+    db.update_build_status(&build, status).await?;
+
     Ok(())
 }
 
@@ -87,6 +100,7 @@ Build commit: {sha} (`{sha}`)"#,
 mod tests {
     use entity::workflow;
     use sea_orm::EntityTrait;
+    use std::{assert_eq, vec};
 
     use crate::bors::handlers::trybuild::TRY_BRANCH_NAME;
     use crate::github::CommitSha;
@@ -249,5 +263,26 @@ mod tests {
             state.client().get_last_comment(default_pr_number()),
             ":sunny: Try build successful\nBuild commit: sha1 (`sha1`)"
         );
+    }
+
+    #[tokio::test]
+    async fn test_try_check_suite_finished_twice() {
+        let mut state = ClientBuilder::default().create_state().await;
+        state.client().merge_branches_fn = Box::new(|| Ok(CommitSha("sha1".to_string())));
+        state
+            .client()
+            .check_suites
+            .insert("sha1".to_string(), vec![suite_success(), suite_success()]);
+
+        let event = || {
+            CheckSuiteCompletedBuilder::default()
+                .branch(TRY_BRANCH_NAME.to_string())
+                .commit_sha("sha1".to_string())
+        };
+
+        state.comment("@bors try").await;
+        state.check_suite_completed(event()).await;
+        state.check_suite_completed(event()).await;
+        state.client().check_comment_count(default_pr_number(), 2);
     }
 }
