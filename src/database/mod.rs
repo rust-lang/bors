@@ -37,6 +37,12 @@ pub struct PullRequestModel {
 }
 
 #[derive(Debug, PartialEq)]
+pub enum WorkflowType {
+    Github,
+    External,
+}
+
+#[derive(Debug, PartialEq)]
 pub enum WorkflowStatus {
     Pending,
     Success,
@@ -48,7 +54,8 @@ pub struct WorkflowModel {
     pub build: BuildModel,
     pub name: String,
     pub url: String,
-    pub run_id: Option<RunId>,
+    pub run_id: RunId,
+    pub workflow_type: WorkflowType,
     pub status: WorkflowStatus,
     pub created_at: DateTime<Utc>,
 }
@@ -98,7 +105,8 @@ pub trait DbClient {
         build: &BuildModel,
         name: String,
         url: String,
-        run_id: Option<u64>,
+        run_id: RunId,
+        workflow_type: WorkflowType,
         status: WorkflowStatus,
     ) -> anyhow::Result<()>;
 

@@ -1,5 +1,6 @@
-use crate::database::WorkflowStatus;
+use crate::database::{WorkflowStatus, WorkflowType};
 use crate::github::{CommitSha, GithubRepoName, GithubUser};
+use octocrab::models::RunId;
 
 #[derive(Debug)]
 pub enum BorsEvent {
@@ -30,7 +31,8 @@ pub struct WorkflowStarted {
     pub name: String,
     pub branch: String,
     pub commit_sha: CommitSha,
-    pub run_id: Option<u64>,
+    pub run_id: RunId,
+    pub workflow_type: WorkflowType,
     pub url: String,
 }
 

@@ -7,11 +7,6 @@ pub(super) async fn handle_workflow_started(
     db: &mut dyn DbClient,
     payload: WorkflowStarted,
 ) -> anyhow::Result<()> {
-    if payload.run_id.is_none() {
-        log::warn!("Ignoring workflow from external CI");
-        return Ok(());
-    }
-
     if !is_bors_observed_branch(&payload.branch) {
         return Ok(());
     }
@@ -32,6 +27,7 @@ pub(super) async fn handle_workflow_started(
         payload.name,
         payload.url,
         payload.run_id,
+        payload.workflow_type,
         WorkflowStatus::Pending,
     )
     .await?;
@@ -213,7 +209,7 @@ mod tests {
             .workflow_started(
                 WorkflowStartedBuilder::default()
                     .branch(TRY_BRANCH_NAME.to_string())
-                    .run_id(Some(42)),
+                    .run_id(42),
             )
             .await;
         let suite = workflow::Entity::find()
@@ -232,7 +228,7 @@ mod tests {
         let event = || {
             WorkflowStartedBuilder::default()
                 .branch(TRY_BRANCH_NAME.to_string())
-                .run_id(Some(42))
+                .run_id(42)
         };
         state.workflow_started(event()).await;
         state.workflow_started(event()).await;

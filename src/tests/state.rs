@@ -87,7 +87,7 @@ impl TestBorsState {
                 .commit_sha(commit.to_string())
                 .name(name.to_string())
                 .url(Some(format!("https://{name}.com")))
-                .run_id(Some(run_id)),
+                .run_id(run_id),
         )
         .await;
         self.workflow_completed(

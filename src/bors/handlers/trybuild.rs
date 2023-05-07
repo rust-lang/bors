@@ -2,7 +2,9 @@ use anyhow::anyhow;
 
 use crate::bors::RepositoryClient;
 use crate::bors::RepositoryState;
-use crate::database::{BuildModel, BuildStatus, DbClient, PullRequestModel, WorkflowStatus};
+use crate::database::{
+    BuildModel, BuildStatus, DbClient, PullRequestModel, WorkflowStatus, WorkflowType,
+};
 use crate::github::{GithubUser, MergeError, PullRequest, PullRequestNumber};
 use crate::permissions::PermissionType;
 
@@ -122,8 +124,8 @@ pub(super) async fn command_try_cancel<Client: RepositoryClient>(
         .get_workflows_for_build(&build)
         .await?
         .into_iter()
-        .filter(|w| w.status == WorkflowStatus::Pending)
-        .filter_map(|w| w.run_id)
+        .filter(|w| w.status == WorkflowStatus::Pending && w.workflow_type == WorkflowType::Github)
+        .map(|w| w.run_id)
         .collect::<Vec<_>>();
 
     if let Err(error) = repo.client.cancel_workflows(pending_workflows).await {
@@ -225,7 +227,7 @@ async fn check_try_permissions<Client: RepositoryClient>(
 #[cfg(test)]
 mod tests {
     use crate::bors::handlers::trybuild::TRY_BRANCH_NAME;
-    use crate::database::{BuildStatus, DbClient, WorkflowStatus};
+    use crate::database::{BuildStatus, DbClient, WorkflowStatus, WorkflowType};
     use crate::github::{CommitSha, MergeError};
     use crate::tests::event::{
         default_pr_number, suite_failure, suite_pending, suite_success, WorkflowStartedBuilder,
@@ -403,14 +405,14 @@ mod tests {
             .workflow_started(
                 WorkflowStartedBuilder::default()
                     .branch(TRY_BRANCH_NAME.to_string())
-                    .run_id(Some(123)),
+                    .run_id(123),
             )
             .await;
         state
             .workflow_started(
                 WorkflowStartedBuilder::default()
                     .branch(TRY_BRANCH_NAME.to_string())
-                    .run_id(Some(124)),
+                    .run_id(124),
             )
             .await;
         state.comment("@bors try cancel").await;
@@ -446,10 +448,30 @@ mod tests {
             .workflow_started(
                 WorkflowStartedBuilder::default()
                     .branch(TRY_BRANCH_NAME.to_string())
-                    .run_id(Some(123)),
+                    .run_id(123),
             )
             .await;
         state.comment("@bors try cancel").await;
         state.client().check_cancelled_workflows(&[123]);
+    }
+
+    #[tokio::test]
+    async fn test_try_cancel_ignore_external_workflows() {
+        let mut state = ClientBuilder::default().create_state().await;
+        state
+            .client()
+            .set_checks(&default_merge_sha(), &[suite_success()]);
+
+        state.comment("@bors try").await;
+        state
+            .workflow_started(
+                WorkflowStartedBuilder::default()
+                    .branch(TRY_BRANCH_NAME.to_string())
+                    .run_id(123)
+                    .workflow_type(WorkflowType::External),
+            )
+            .await;
+        state.comment("@bors try cancel").await;
+        state.client().check_cancelled_workflows(&[]);
     }
 }
