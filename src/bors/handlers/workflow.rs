@@ -39,7 +39,8 @@ pub(super) async fn handle_workflow_started(
     Ok(())
 }
 
-pub(super) async fn handle_workflow_completed(
+pub(super) async fn handle_workflow_completed<Client: RepositoryClient>(
+    repo: &mut RepositoryState<Client>,
     db: &mut dyn DbClient,
     payload: WorkflowCompleted,
 ) -> anyhow::Result<()> {
@@ -51,10 +52,24 @@ pub(super) async fn handle_workflow_completed(
     db.update_workflow_status(payload.run_id, payload.status)
         .await?;
 
-    Ok(())
+    // Try to complete the build
+    let event = CheckSuiteCompleted {
+        repository: payload.repository,
+        branch: payload.branch,
+        commit_sha: payload.commit_sha,
+    };
+    try_complete_build(repo, db, event).await
 }
 
 pub(super) async fn handle_check_suite_completed<Client: RepositoryClient>(
+    repo: &mut RepositoryState<Client>,
+    db: &mut dyn DbClient,
+    payload: CheckSuiteCompleted,
+) -> anyhow::Result<()> {
+    try_complete_build(repo, db, payload).await
+}
+
+async fn try_complete_build<Client: RepositoryClient>(
     repo: &mut RepositoryState<Client>,
     db: &mut dyn DbClient,
     payload: CheckSuiteCompleted,
@@ -108,10 +123,14 @@ pub(super) async fn handle_check_suite_completed<Client: RepositoryClient>(
     let mut workflows = db.get_workflows_for_build(&build).await?;
     workflows.sort_by(|a, b| a.name.cmp(&b.name));
 
-    // If this happens, there is a race condition in GH webhooks that we have to handle in the bot.
-    // It is not handled currently, therefore the assert is present.
-    for workflow in &workflows {
-        assert_ne!(workflow.status, WorkflowStatus::Pending);
+    // If this happens, there is a race condition in GH webhooks and we haven't received a workflow
+    // finished/failed event for some workflow yet. In this case, wait for that event before
+    // posting the PR comment.
+    if workflows
+        .iter()
+        .any(|w| w.status == WorkflowStatus::Pending)
+    {
+        return Ok(());
     }
 
     let workflow_list = workflows
@@ -152,7 +171,6 @@ Build commit: {sha} (`{sha}`)"#
         BuildStatus::Success
     };
     db.update_build_status(&build, status).await?;
-
     Ok(())
 }
 
@@ -169,7 +187,7 @@ mod tests {
     use crate::github::CommitSha;
     use crate::tests::event::{
         default_pr_number, suite_failure, suite_pending, suite_success, CheckSuiteCompletedBuilder,
-        WorkflowStartedBuilder,
+        WorkflowCompletedBuilder, WorkflowStartedBuilder,
     };
     use crate::tests::state::ClientBuilder;
 
@@ -342,6 +360,48 @@ mod tests {
         :broken_heart: Test failed
         - [workflow-1](https://workflow-1.com) :white_check_mark:
         - [workflow-2](https://workflow-2.com) :x:
+        "###);
+    }
+
+    #[tokio::test]
+    async fn test_try_suite_completed_received_before_workflow_completed() {
+        let mut state = ClientBuilder::default().create_state().await;
+        state.client().merge_branches_fn = Box::new(|| Ok(CommitSha("sha1".to_string())));
+        state.client().set_checks("sha1", vec![suite_success()]);
+
+        state.comment("@bors try").await;
+        state
+            .workflow_started(
+                WorkflowStartedBuilder::default()
+                    .branch(TRY_BRANCH_NAME.to_string())
+                    .commit_sha("sha1".to_string()),
+            )
+            .await;
+
+        // Check suite completed received before the workflow has finished.
+        // We should wait until workflow finished is received before posting the comment.
+        state
+            .check_suite_completed(
+                CheckSuiteCompletedBuilder::default()
+                    .branch(TRY_BRANCH_NAME.to_string())
+                    .commit_sha("sha1".to_string()),
+            )
+            .await;
+        state.client().check_comment_count(default_pr_number(), 1);
+
+        state
+            .workflow_completed(
+                WorkflowCompletedBuilder::default()
+                    .branch(TRY_BRANCH_NAME.to_string())
+                    .commit_sha("sha1".to_string())
+                    .status(WorkflowStatus::Success),
+            )
+            .await;
+
+        insta::assert_snapshot!(state.client().get_last_comment(default_pr_number()), @r###"
+        :sunny: Try build successful
+        - [workflow-name](https://workflow.com) :white_check_mark:
+        Build commit: sha1 (`sha1`)
         "###);
     }
 

@@ -133,6 +133,8 @@ impl From<WorkflowStartedBuilder> for event::WorkflowStarted {
 pub struct WorkflowCompleted {
     #[builder(default = "default_repo_name()")]
     repo: GithubRepoName,
+    branch: String,
+    commit_sha: String,
     #[builder(default = "1")]
     run_id: u64,
     status: WorkflowStatus,
@@ -142,12 +144,16 @@ impl WorkflowCompletedBuilder {
     pub fn create(self) -> event::WorkflowCompleted {
         let crate::tests::event::WorkflowCompleted {
             repo,
+            branch,
+            commit_sha,
             run_id,
             status,
         } = self.build().unwrap();
 
         event::WorkflowCompleted {
             repository: repo,
+            branch,
+            commit_sha: CommitSha(commit_sha),
             run_id,
             status,
         }

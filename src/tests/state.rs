@@ -87,6 +87,8 @@ impl TestBorsState {
         .await;
         self.workflow_completed(
             WorkflowCompletedBuilder::default()
+                .branch(branch.to_string())
+                .commit_sha(commit.to_string())
                 .run_id(run_id)
                 .status(status),
         )

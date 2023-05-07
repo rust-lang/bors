@@ -48,8 +48,8 @@ pub async fn handle_bors_event<Client: RepositoryClient>(
             }
         }
         BorsEvent::WorkflowCompleted(payload) => {
-            if let Some((_, db)) = get_repo_state(state, &payload.repository) {
-                if let Err(error) = handle_workflow_completed(db, payload).await {
+            if let Some((repo, db)) = get_repo_state(state, &payload.repository) {
+                if let Err(error) = handle_workflow_completed(repo, db, payload).await {
                     log::warn!("Error occured while handling workflow completed event: {error:?}");
                 }
             }

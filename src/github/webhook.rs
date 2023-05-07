@@ -154,6 +154,8 @@ fn parse_webhook_event(request: Parts, body: &[u8]) -> anyhow::Result<Option<Bor
                 })),
                 "completed" => Some(BorsEvent::WorkflowCompleted(WorkflowCompleted {
                     repository: repository_name,
+                    branch: payload.workflow_run.head_branch,
+                    commit_sha: CommitSha(payload.workflow_run.head_sha),
                     run_id: payload.workflow_run.id.0,
                     status: match payload.workflow_run.conclusion.unwrap_or_default().as_str() {
                         "success" => WorkflowStatus::Success,
@@ -376,6 +378,10 @@ mod tests {
                             owner: "kobzol",
                             name: "bors-kindergarten",
                         },
+                        branch: "automation/bors/try",
+                        commit_sha: CommitSha(
+                            "c9abcadf285659684c0975cead8bf982fa84e123",
+                        ),
                         run_id: 4900979072,
                         status: Failure,
                     },
