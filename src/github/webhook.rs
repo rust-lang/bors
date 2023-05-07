@@ -85,7 +85,10 @@ where
 
         // Parse webhook content
         match parse_webhook_event(parts, &body) {
-            Ok(Some(event)) => Ok(GitHubWebhook(event)),
+            Ok(Some(event)) => {
+                log::debug!("Received webhook event {event:?}");
+                Ok(GitHubWebhook(event))
+            }
             Ok(None) => Err(StatusCode::OK),
             Err(error) => {
                 log::error!("Cannot parse webhook event: {error:?}");

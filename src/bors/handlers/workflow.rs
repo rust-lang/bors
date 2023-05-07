@@ -1,4 +1,5 @@
 use crate::bors::event::{CheckSuiteCompleted, WorkflowStarted};
+use crate::bors::handlers::is_bors_observed_branch;
 use crate::bors::{self, RepositoryClient, RepositoryState};
 use crate::database;
 use crate::database::DbClient;
@@ -7,6 +8,10 @@ pub(super) async fn handle_workflow_started(
     db: &mut dyn DbClient,
     payload: WorkflowStarted,
 ) -> anyhow::Result<()> {
+    if !is_bors_observed_branch(&payload.branch) {
+        return Ok(());
+    }
+
     let Some(build) = db.find_build(&payload.repository, payload.branch.clone(), payload.commit_sha.clone()).await? else {
         log::warn!("Build for workflow {}/{}/{} not found", payload.repository, payload.branch, payload.commit_sha);
         return Ok(());
@@ -28,6 +33,10 @@ pub(super) async fn handle_check_suite_completed<Client: RepositoryClient>(
     db: &mut dyn DbClient,
     payload: CheckSuiteCompleted,
 ) -> anyhow::Result<()> {
+    if !is_bors_observed_branch(&payload.branch) {
+        return Ok(());
+    }
+
     let Some(build) = db
         .find_build(
             &payload.repository,

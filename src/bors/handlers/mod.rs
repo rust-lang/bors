@@ -4,7 +4,7 @@ use crate::bors::command::parser::{parse_commands, CommandParseError};
 use crate::bors::command::BorsCommand;
 use crate::bors::event::{BorsEvent, PullRequestComment};
 use crate::bors::handlers::ping::command_ping;
-use crate::bors::handlers::trybuild::command_try_build;
+use crate::bors::handlers::trybuild::{command_try_build, TRY_BRANCH_NAME};
 use crate::bors::handlers::workflow::{handle_check_suite_completed, handle_workflow_started};
 use crate::bors::{BorsState, RepositoryClient, RepositoryState};
 use crate::database::DbClient;
@@ -117,6 +117,10 @@ async fn handle_comment<Client: RepositoryClient>(
         }
     }
     Ok(())
+}
+
+fn is_bors_observed_branch(branch: &str) -> bool {
+    branch == TRY_BRANCH_NAME
 }
 
 #[cfg(test)]
