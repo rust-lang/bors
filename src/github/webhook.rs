@@ -11,7 +11,10 @@ use octocrab::models::{workflows, App, CheckRun, Repository};
 use secrecy::{ExposeSecret, SecretString};
 use sha2::Sha256;
 
-use crate::bors::event::{BorsEvent, CheckSuiteCompleted, PullRequestComment, WorkflowStarted};
+use crate::bors::event::{
+    BorsEvent, CheckSuiteCompleted, PullRequestComment, WorkflowCompleted, WorkflowStarted,
+};
+use crate::database::WorkflowStatus;
 use crate::github::server::ServerStateRef;
 use crate::github::{CommitSha, GithubRepoName, GithubUser};
 
@@ -110,7 +113,7 @@ where
         // Parse webhook content
         match parse_webhook_event(parts, &body) {
             Ok(Some(event)) => {
-                log::debug!("Received webhook event {event:?}");
+                log::trace!("Received webhook event {event:?}");
                 Ok(GitHubWebhook(event))
             }
             Ok(None) => Err(StatusCode::OK),
@@ -140,18 +143,26 @@ fn parse_webhook_event(request: Parts, body: &[u8]) -> anyhow::Result<Option<Bor
         b"workflow_run" => {
             let payload: WebhookWorkflowRun = serde_json::from_slice(body)?;
             let repository_name = parse_repository_name(&payload.repository)?;
-            if payload.action == "requested" {
-                Ok(Some(BorsEvent::WorkflowStarted(WorkflowStarted {
+            let result = match payload.action {
+                "requested" => Some(BorsEvent::WorkflowStarted(WorkflowStarted {
                     repository: repository_name,
                     name: payload.workflow_run.name,
                     branch: payload.workflow_run.head_branch,
                     commit_sha: CommitSha(payload.workflow_run.head_sha),
                     run_id: Some(payload.workflow_run.id.0),
                     url: payload.workflow_run.html_url.into(),
-                })))
-            } else {
-                Ok(None)
-            }
+                })),
+                "completed" => Some(BorsEvent::WorkflowCompleted(WorkflowCompleted {
+                    repository: repository_name,
+                    run_id: payload.workflow_run.id.0,
+                    status: match payload.workflow_run.conclusion.unwrap_or_default().as_str() {
+                        "success" => WorkflowStatus::Success,
+                        _ => WorkflowStatus::Failure,
+                    },
+                })),
+                _ => None,
+            };
+            Ok(result)
         }
         b"check_run" => {
             let payload: WebhookCheckRun = serde_json::from_slice(body).unwrap();
@@ -344,6 +355,29 @@ mod tests {
                             4900979074,
                         ),
                         url: "https://github.com/Kobzol/bors-kindergarten/actions/runs/4900979074",
+                    },
+                ),
+            ),
+        )
+        "###
+        );
+    }
+
+    #[tokio::test]
+    async fn test_workflow_run_completed() {
+        insta::assert_debug_snapshot!(
+            check_webhook("webhook/workflow-run-completed.json", "workflow_run").await,
+            @r###"
+        Ok(
+            GitHubWebhook(
+                WorkflowCompleted(
+                    WorkflowCompleted {
+                        repository: GithubRepoName {
+                            owner: "kobzol",
+                            name: "bors-kindergarten",
+                        },
+                        run_id: 4900979072,
+                        status: Failure,
                     },
                 ),
             ),

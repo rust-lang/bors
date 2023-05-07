@@ -75,6 +75,7 @@ impl RepositoryClient for GithubRepositoryClient {
 
     async fn get_check_suites_for_commit(
         &mut self,
+        branch: &str,
         sha: &CommitSha,
     ) -> anyhow::Result<Vec<CheckSuite>> {
         let response = self
@@ -90,22 +91,28 @@ impl RepositoryClient for GithubRepositoryClient {
             )
             .await?;
 
-        #[derive(serde::Deserialize)]
-        struct CheckSuitePayload {
-            conclusion: Option<String>,
+        #[derive(serde::Deserialize, Debug)]
+        struct CheckSuitePayload<'a> {
+            conclusion: Option<&'a str>,
+            head_branch: &'a str,
         }
 
-        #[derive(serde::Deserialize)]
-        struct CheckSuiteResponse {
-            check_suites: Vec<CheckSuitePayload>,
+        #[derive(serde::Deserialize, Debug)]
+        struct CheckSuiteResponse<'a> {
+            #[serde(borrow)]
+            check_suites: Vec<CheckSuitePayload<'a>>,
         }
-        let response: CheckSuiteResponse = response.json().await?;
-        Ok(response
+
+        // `response.json()` is not used because of the 'a lifetime
+        let text = response.text().await?;
+        let response: CheckSuiteResponse = serde_json::from_str(&text)?;
+        let suites = response
             .check_suites
             .into_iter()
+            .filter(|suite| suite.head_branch == branch)
             .map(|suite| CheckSuite {
                 status: match suite.conclusion {
-                    Some(status) => match status.as_str() {
+                    Some(status) => match status {
                         "success" => CheckSuiteStatus::Success,
                         "failure" | "neutral" | "cancelled" | "skipped" | "timed_out"
                         | "action_required" | "startup_failure" | "stale" => {
@@ -123,7 +130,8 @@ impl RepositoryClient for GithubRepositoryClient {
                     None => CheckSuiteStatus::Pending,
                 },
             })
-            .collect())
+            .collect();
+        Ok(suites)
     }
 }
 

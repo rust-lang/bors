@@ -10,7 +10,7 @@ mod sea_orm_client;
 
 type PrimaryKey = i32;
 
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq)]
 pub enum BuildStatus {
     Pending,
     Success,
@@ -34,6 +34,7 @@ pub struct PullRequestModel {
     pub created_at: DateTime<Utc>,
 }
 
+#[derive(Debug)]
 pub enum WorkflowStatus {
     Pending,
     Success,
@@ -96,6 +97,13 @@ pub trait DbClient {
         name: String,
         url: String,
         run_id: Option<u64>,
+        status: WorkflowStatus,
+    ) -> anyhow::Result<()>;
+
+    /// Updates the status of a workflow with the given run ID in the DB.
+    async fn update_workflow_status(
+        &self,
+        run_id: u64,
         status: WorkflowStatus,
     ) -> anyhow::Result<()>;
 }

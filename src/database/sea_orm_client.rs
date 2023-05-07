@@ -161,6 +161,23 @@ impl DbClient for SeaORMClient {
         model.insert(&self.db).await?;
         Ok(())
     }
+
+    async fn update_workflow_status(
+        &self,
+        run_id: u64,
+        status: WorkflowStatus,
+    ) -> anyhow::Result<()> {
+        let model = workflow::ActiveModel {
+            status: Set(workflow_status_to_db(&status).to_string()),
+            ..Default::default()
+        };
+        workflow::Entity::update_many()
+            .set(model)
+            .filter(workflow::Column::RunId.eq(run_id))
+            .exec(&self.db)
+            .await?;
+        Ok(())
+    }
 }
 
 fn build_status_to_db(status: BuildStatus) -> &'static str {

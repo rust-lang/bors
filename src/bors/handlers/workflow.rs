@@ -1,4 +1,4 @@
-use crate::bors::event::{CheckSuiteCompleted, WorkflowStarted};
+use crate::bors::event::{CheckSuiteCompleted, WorkflowCompleted, WorkflowStarted};
 use crate::bors::handlers::is_bors_observed_branch;
 use crate::bors::{self, RepositoryClient, RepositoryState};
 use crate::database::{BuildStatus, DbClient, WorkflowStatus};
@@ -7,6 +7,11 @@ pub(super) async fn handle_workflow_started(
     db: &mut dyn DbClient,
     payload: WorkflowStarted,
 ) -> anyhow::Result<()> {
+    if payload.run_id.is_none() {
+        log::warn!("Ignoring workflow from external CI");
+        return Ok(());
+    }
+
     if !is_bors_observed_branch(&payload.branch) {
         return Ok(());
     }
@@ -16,6 +21,12 @@ pub(super) async fn handle_workflow_started(
         return Ok(());
     };
 
+    log::info!(
+        "Storing workflow started into DB (name={}, url={}, run_id={:?})",
+        payload.name,
+        payload.url,
+        payload.run_id
+    );
     db.create_workflow(
         &build,
         payload.name,
@@ -24,6 +35,21 @@ pub(super) async fn handle_workflow_started(
         WorkflowStatus::Pending,
     )
     .await?;
+
+    Ok(())
+}
+
+pub(super) async fn handle_workflow_completed(
+    db: &mut dyn DbClient,
+    payload: WorkflowCompleted,
+) -> anyhow::Result<()> {
+    log::info!(
+        "Updating status of workflow with run ID {} to {:?}",
+        payload.run_id,
+        payload.status
+    );
+    db.update_workflow_status(payload.run_id, payload.status)
+        .await?;
 
     Ok(())
 }
@@ -40,7 +66,7 @@ pub(super) async fn handle_check_suite_completed<Client: RepositoryClient>(
     let Some(build) = db
         .find_build(
             &payload.repository,
-            payload.branch,
+            payload.branch.clone(),
             payload.commit_sha.clone(),
         )
         .await? else {
@@ -50,6 +76,10 @@ pub(super) async fn handle_check_suite_completed<Client: RepositoryClient>(
 
     // If the build has already been marked with a conclusion, ignore this event
     if build.status != BuildStatus::Pending {
+        log::warn!(
+            "Received check suite completed event for a build that already status {:?}",
+            build.status
+        );
         return Ok(());
     }
 
@@ -60,7 +90,7 @@ pub(super) async fn handle_check_suite_completed<Client: RepositoryClient>(
 
     let checks = repo
         .client
-        .get_check_suites_for_commit(&payload.commit_sha)
+        .get_check_suites_for_commit(&payload.branch, &payload.commit_sha)
         .await?;
 
     // Some checks are still running, let's wait for the next event

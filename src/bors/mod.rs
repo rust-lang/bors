@@ -36,9 +36,10 @@ pub trait RepositoryClient {
         commit_message: &str,
     ) -> Result<CommitSha, MergeError>;
 
-    /// Find all check suites attached to the given commit.
+    /// Find all check suites attached to the given commit and branch.
     async fn get_check_suites_for_commit(
         &mut self,
+        branch: &str,
         sha: &CommitSha,
     ) -> anyhow::Result<Vec<CheckSuite>>;
 }

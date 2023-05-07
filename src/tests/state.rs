@@ -204,6 +204,7 @@ impl RepositoryClient for TestRepositoryClient {
 
     async fn get_check_suites_for_commit(
         &mut self,
+        _branch: &str,
         sha: &CommitSha,
     ) -> anyhow::Result<Vec<CheckSuite>> {
         Ok(self.check_suites.get(&sha.0).cloned().unwrap_or_default())
