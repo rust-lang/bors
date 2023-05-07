@@ -1,3 +1,4 @@
+//! This module handles parsing webhooks and generating [`BorsEvent`]s from them.
 use std::fmt::Debug;
 
 use axum::body::{Bytes, HttpBody};

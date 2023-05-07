@@ -55,11 +55,15 @@ pub enum CheckSuiteStatus {
     Success,
 }
 
+/// A GitHub check suite.
+/// Corresponds to a single GitHub actions workflow run, or to a single external CI check run.
 #[derive(Clone)]
 pub struct CheckSuite {
     pub(crate) status: CheckSuiteStatus,
 }
 
+/// Main state holder for the bot.
+/// It is behind a trait to allow easier mocking in tests.
 pub trait BorsState<Client: RepositoryClient> {
     /// Was the comment created by the bot?
     fn is_comment_internal(&self, comment: &PullRequestComment) -> bool;
@@ -74,6 +78,9 @@ pub trait BorsState<Client: RepositoryClient> {
     fn reload_repositories(&mut self) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + '_>>;
 }
 
+/// An access point to a single repository.
+/// Can be used to query permissions for the repository, and also to perform various
+/// actions using the stored client.
 pub struct RepositoryState<Client: RepositoryClient> {
     pub repository: GithubRepoName,
     pub client: Client,

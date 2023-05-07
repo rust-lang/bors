@@ -6,10 +6,13 @@ use tokio::sync::Mutex;
 use crate::github::GithubRepoName;
 
 pub enum PermissionType {
+    /// Can perform commands like r+.
     Review,
+    /// Can start a try build.
     Try,
 }
 
+/// Decides if a GitHub user can perform various actions using the bot.
 #[async_trait]
 pub trait PermissionResolver {
     async fn has_permission(&self, username: &str, permission: PermissionType) -> bool;
@@ -18,6 +21,7 @@ pub trait PermissionResolver {
 /// For how long should the permissions be cached.
 const CACHE_DURATION: Duration = Duration::from_secs(60);
 
+/// Loads permission information from the Rust Team API.
 pub struct TeamApiPermissionResolver {
     repo: GithubRepoName,
     permissions: Mutex<CachedUserPermissions>,

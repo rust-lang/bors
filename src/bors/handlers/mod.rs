@@ -16,6 +16,7 @@ mod ping;
 mod trybuild;
 mod workflow;
 
+/// This function performs a single BORS event, it is the main execution function of the bot.
 pub async fn handle_bors_event<Client: RepositoryClient>(
     event: BorsEvent,
     state: &mut dyn BorsState<Client>,
@@ -131,6 +132,7 @@ async fn handle_comment<Client: RepositoryClient>(
     Ok(())
 }
 
+/// Is this branch interesting for the bot?
 fn is_bors_observed_branch(branch: &str) -> bool {
     branch == TRY_BRANCH_NAME
 }

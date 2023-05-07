@@ -10,6 +10,7 @@ use std::future::Future;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
+/// Shared server state for all axum handlers.
 pub struct ServerState {
     webhook_sender: WebhookSender,
     webhook_secret: WebhookSecret,
@@ -30,6 +31,7 @@ impl ServerState {
 
 pub type ServerStateRef = Arc<ServerState>;
 
+/// Axum handler that receives a webhook and sends it to a webhook channel.
 pub async fn github_webhook_handler(
     State(state): State<ServerStateRef>,
     GitHubWebhook(event): GitHubWebhook,
@@ -45,7 +47,8 @@ pub async fn github_webhook_handler(
 
 type WebhookSender = mpsc::Sender<BorsEvent>;
 
-/// Creates a future with a Bors process that receives webhook events and reacts to them.
+/// Creates a future with a Bors process that continuously receives webhook events and reacts to
+/// them.
 pub fn create_bors_process(mut state: GithubAppState) -> (WebhookSender, impl Future<Output = ()>) {
     let (tx, mut rx) = mpsc::channel::<BorsEvent>(1024);
 
