@@ -163,7 +163,7 @@ impl ClientBuilder {
                 cancelled_workflows: Default::default(),
             },
             permissions_resolver: permission_resolver,
-            config: config.unwrap_or_else(|| RepositoryConfig { checks: vec![] }),
+            config: config.unwrap_or_else(|| RepositoryConfig {}),
         }
     }
 }
