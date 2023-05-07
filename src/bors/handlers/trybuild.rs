@@ -235,6 +235,8 @@ mod tests {
     use crate::tests::github::{BranchBuilder, PRBuilder};
     use crate::tests::permissions::NoPermissions;
     use crate::tests::state::{default_merge_sha, default_repo_name, ClientBuilder};
+    use entity::workflow;
+    use sea_orm::EntityTrait;
 
     #[tokio::test]
     async fn test_try_no_permission() {
@@ -473,5 +475,31 @@ mod tests {
             .await;
         state.comment("@bors try cancel").await;
         state.client().check_cancelled_workflows(&[]);
+    }
+
+    #[tokio::test]
+    async fn test_try_workflow_start_after_cancel() {
+        let mut state = ClientBuilder::default().create_state().await;
+        state
+            .client()
+            .set_checks(&default_merge_sha(), &[suite_success()]);
+
+        state.comment("@bors try").await;
+        state.comment("@bors try cancel").await;
+        state
+            .workflow_started(
+                WorkflowStartedBuilder::default()
+                    .branch(TRY_BRANCH_NAME.to_string())
+                    .run_id(123),
+            )
+            .await;
+        assert_eq!(
+            workflow::Entity::find()
+                .all(state.db.connection())
+                .await
+                .unwrap()
+                .len(),
+            0
+        );
     }
 }

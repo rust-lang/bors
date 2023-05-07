@@ -16,6 +16,15 @@ pub(super) async fn handle_workflow_started(
         return Ok(());
     };
 
+    // This can happen e.g. if the build is cancelled quickly
+    if build.status != BuildStatus::Pending {
+        log::warn!(
+            "Received workflow started for an already completed build ({})",
+            payload.repository
+        );
+        return Ok(());
+    }
+
     log::info!(
         "Storing workflow started into DB (name={}, url={}, run_id={:?})",
         payload.name,
