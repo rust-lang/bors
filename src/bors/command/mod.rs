@@ -5,4 +5,5 @@ pub mod parser;
 pub enum BorsCommand {
     Ping,
     Try,
+    TryCancel,
 }

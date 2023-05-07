@@ -17,7 +17,9 @@ pub const BOT_PREFIX: &str = "@bors";
 /// Assumes that each command spands at most one line and that there are not more commands on
 /// each line.
 pub fn parse_commands(text: &str) -> Vec<Result<BorsCommand, CommandParseError>> {
-    let parsers: Vec<fn(Tokenizer) -> ParseResult> = vec![parser_ping, parser_try];
+    // The order of the parsers in the vector is important
+    let parsers: Vec<fn(Tokenizer) -> ParseResult> =
+        vec![parser_ping, parser_try_cancel, parser_try];
 
     text.lines()
         .filter_map(|line| match line.find(BOT_PREFIX) {
@@ -49,6 +51,10 @@ impl<'a> Tokenizer<'a> {
     fn peek(&mut self) -> Option<&'a str> {
         self.iter.peek().copied()
     }
+
+    fn next(&mut self) -> Option<&'a str> {
+        self.iter.next()
+    }
 }
 
 type ParseResult<'a> = Option<Result<BorsCommand, CommandParseError<'a>>>;
@@ -63,6 +69,11 @@ fn parser_ping(tokenizer: Tokenizer) -> ParseResult {
 /// Parses "@bors try".
 fn parser_try(tokenizer: Tokenizer) -> ParseResult {
     parse_exact("try", BorsCommand::Try, tokenizer)
+}
+
+/// Parses "@bors try cancel".
+fn parser_try_cancel(tokenizer: Tokenizer) -> ParseResult {
+    parse_list(&["try", "cancel"], BorsCommand::TryCancel, tokenizer)
 }
 
 /// Returns either missing or unknown command error.
@@ -85,6 +96,25 @@ fn parse_exact<'a>(
         Some(word) if word == needle => Some(Ok(result)),
         _ => None,
     }
+}
+
+/// Checks if the tokenizer parses the following items in a sequence.
+/// If it does, the parser will return `result`.
+fn parse_list<'a>(
+    needles: &[&'static str],
+    result: BorsCommand,
+    mut tokenizer: Tokenizer<'a>,
+) -> ParseResult<'a> {
+    for needle in needles {
+        eprint!("{needle}, {:?}", tokenizer.peek());
+        match tokenizer.peek() {
+            Some(word) if word == *needle => {
+                tokenizer.next();
+            }
+            _ => return None,
+        }
+    }
+    Some(Ok(result))
 }
 
 #[cfg(test)]
@@ -151,5 +181,12 @@ line two
         );
         assert_eq!(cmds.len(), 1);
         assert!(matches!(cmds[0], Ok(BorsCommand::Try)));
+    }
+
+    #[test]
+    fn test_parse_try_cancel() {
+        let cmds = parse_commands("@bors try cancel");
+        assert_eq!(cmds.len(), 1);
+        assert!(matches!(cmds[0], Ok(BorsCommand::TryCancel)));
     }
 }

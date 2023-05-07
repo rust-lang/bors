@@ -15,6 +15,7 @@ pub enum BuildStatus {
     Pending,
     Success,
     Failure,
+    Cancelled,
 }
 
 pub struct BuildModel {

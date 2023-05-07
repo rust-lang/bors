@@ -202,6 +202,7 @@ fn build_status_to_db(status: BuildStatus) -> &'static str {
         BuildStatus::Pending => "pending",
         BuildStatus::Success => "success",
         BuildStatus::Failure => "failure",
+        BuildStatus::Cancelled => "cancelled",
     }
 }
 
@@ -210,6 +211,7 @@ fn build_status_from_db(status: String) -> BuildStatus {
         "pending" => BuildStatus::Pending,
         "success" => BuildStatus::Success,
         "failure" => BuildStatus::Failure,
+        "cancelled" => BuildStatus::Cancelled,
         _ => {
             log::warn!("Encountered unknown build status in DB: {status}");
             BuildStatus::Pending

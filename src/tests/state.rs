@@ -156,7 +156,7 @@ impl ClientBuilder {
             client: TestRepositoryClient {
                 comments: Default::default(),
                 name,
-                merge_branches_fn: Box::new(|| Ok(CommitSha(default_merge_sha().to_string()))),
+                merge_branches_fn: Box::new(|| Ok(CommitSha(default_merge_sha()))),
                 get_pr_fn: Box::new(move |pr| Ok(PRBuilder::default().number(pr.0).create())),
                 check_suites: Default::default(),
             },

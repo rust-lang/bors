@@ -82,6 +82,7 @@ pub struct PullRequest {
     pub message: String,
 }
 
+#[derive(Clone, Copy, Debug)]
 pub struct PullRequestNumber(pub u64);
 
 impl From<u64> for PullRequestNumber {
