@@ -28,9 +28,10 @@ impl MigrationTrait for Migration {
                             .to(Build::Table, Build::Id),
                     )
                     .col(ColumnDef::new(Workflow::Name).string().not_null())
-                    .col(ColumnDef::new(Workflow::RunId).big_unsigned().null())
+                    .col(ColumnDef::new(Workflow::RunId).big_unsigned().not_null())
                     .col(ColumnDef::new(Workflow::Url).string().not_null())
                     .col(ColumnDef::new(Workflow::Status).string().not_null())
+                    .col(ColumnDef::new(Workflow::Type).string().not_null())
                     .col(
                         ColumnDef::new(Workflow::CreatedAt)
                             .timestamp()
@@ -66,5 +67,6 @@ enum Workflow {
     RunId,
     Url,
     Status,
+    Type,
     CreatedAt,
 }

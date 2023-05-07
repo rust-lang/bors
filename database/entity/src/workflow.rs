@@ -9,9 +9,10 @@ pub struct Model {
     pub id: i32,
     pub build: i32,
     pub name: String,
-    pub run_id: Option<i64>,
+    pub run_id: i64,
     pub url: String,
     pub status: String,
+    pub r#type: String,
     pub created_at: DateTime,
 }
 

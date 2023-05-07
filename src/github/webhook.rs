@@ -7,14 +7,14 @@ use axum::http::{HeaderMap, HeaderValue, Request, StatusCode};
 use axum::{async_trait, RequestExt};
 use hmac::{Hmac, Mac};
 use octocrab::models::events::payload::IssueCommentEventPayload;
-use octocrab::models::{workflows, App, CheckRun, Repository};
+use octocrab::models::{workflows, App, CheckRun, Repository, RunId};
 use secrecy::{ExposeSecret, SecretString};
 use sha2::Sha256;
 
 use crate::bors::event::{
     BorsEvent, CheckSuiteCompleted, PullRequestComment, WorkflowCompleted, WorkflowStarted,
 };
-use crate::database::WorkflowStatus;
+use crate::database::{WorkflowStatus, WorkflowType};
 use crate::github::server::ServerStateRef;
 use crate::github::{CommitSha, GithubRepoName, GithubUser};
 
@@ -149,7 +149,8 @@ fn parse_webhook_event(request: Parts, body: &[u8]) -> anyhow::Result<Option<Bor
                     name: payload.workflow_run.name,
                     branch: payload.workflow_run.head_branch,
                     commit_sha: CommitSha(payload.workflow_run.head_sha),
-                    run_id: Some(payload.workflow_run.id.0),
+                    run_id: RunId(payload.workflow_run.id.0),
+                    workflow_type: WorkflowType::Github,
                     url: payload.workflow_run.html_url.into(),
                 })),
                 "completed" => Some(BorsEvent::WorkflowCompleted(WorkflowCompleted {
@@ -182,7 +183,8 @@ fn parse_webhook_event(request: Parts, body: &[u8]) -> anyhow::Result<Option<Bor
                     name: payload.check_run.name.to_string(),
                     branch: payload.check_run.check_suite.head_branch,
                     commit_sha: CommitSha(payload.check_run.check_suite.head_sha),
-                    run_id: None,
+                    run_id: RunId(payload.check_run.check_run.id.map(|v| v.0).unwrap_or(0)),
+                    workflow_type: WorkflowType::External,
                     url: payload.check_run.check_run.html_url.unwrap_or_default(),
                 })))
             } else {
@@ -353,9 +355,10 @@ mod tests {
                         commit_sha: CommitSha(
                             "c9abcadf285659684c0975cead8bf982fa84e123",
                         ),
-                        run_id: Some(
+                        run_id: RunId(
                             4900979074,
                         ),
+                        workflow_type: Github,
                         url: "https://github.com/Kobzol/bors-kindergarten/actions/runs/4900979074",
                     },
                 ),
@@ -410,7 +413,10 @@ mod tests {
                         commit_sha: CommitSha(
                             "3d5258c8dd4fce72a4ea67387499fe69ea410928",
                         ),
-                        run_id: None,
+                        run_id: RunId(
+                            13293850093,
+                        ),
+                        workflow_type: External,
                         url: "https://github.com/Kobzol/bors-kindergarten/runs/13293850093",
                     },
                 ),

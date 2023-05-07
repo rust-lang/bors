@@ -1,8 +1,9 @@
 use derive_builder::Builder;
+use octocrab::models::RunId;
 
 use crate::bors::event::PullRequestComment;
 use crate::bors::{event, CheckSuite, CheckSuiteStatus};
-use crate::database::WorkflowStatus;
+use crate::database::{WorkflowStatus, WorkflowType};
 use crate::github::{CommitSha, GithubRepoName, GithubUser};
 use crate::tests::state::{default_merge_sha, default_repo_name};
 
@@ -95,10 +96,12 @@ pub struct WorkflowStarted {
     branch: String,
     #[builder(default = "default_merge_sha()")]
     commit_sha: String,
-    #[builder(default = "Some(1)")]
-    run_id: Option<u64>,
-    #[builder(default = "\"https://workflow.com\".to_string()")]
-    url: String,
+    #[builder(default = "1")]
+    run_id: u64,
+    #[builder(default)]
+    url: Option<String>,
+    #[builder(default = "WorkflowType::Github")]
+    workflow_type: WorkflowType,
 }
 
 impl WorkflowStartedBuilder {
@@ -110,14 +113,17 @@ impl WorkflowStartedBuilder {
             commit_sha,
             run_id,
             url,
+            workflow_type,
         } = self.build().unwrap();
 
+        let url = url.unwrap_or_else(|| format!("https://{name}-{run_id}"));
         event::WorkflowStarted {
             repository: repo,
             name,
             branch,
             commit_sha: CommitSha(commit_sha),
-            run_id,
+            run_id: RunId(run_id),
+            workflow_type,
             url,
         }
     }

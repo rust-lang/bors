@@ -4,7 +4,7 @@ use crate::bors::command::parser::{parse_commands, CommandParseError};
 use crate::bors::command::BorsCommand;
 use crate::bors::event::{BorsEvent, PullRequestComment};
 use crate::bors::handlers::ping::command_ping;
-use crate::bors::handlers::trybuild::{command_try_build, TRY_BRANCH_NAME};
+use crate::bors::handlers::trybuild::{command_try_build, command_try_cancel, TRY_BRANCH_NAME};
 use crate::bors::handlers::workflow::{
     handle_check_suite_completed, handle_workflow_completed, handle_workflow_started,
 };
@@ -104,6 +104,9 @@ async fn handle_comment<Client: RepositoryClient>(
                     BorsCommand::Ping => command_ping(repo, &pull_request).await,
                     BorsCommand::Try => {
                         command_try_build(repo, database, &pull_request, &comment.author).await
+                    }
+                    BorsCommand::TryCancel => {
+                        command_try_cancel(repo, database, &pull_request, &comment.author).await
                     }
                 };
                 if result.is_err() {

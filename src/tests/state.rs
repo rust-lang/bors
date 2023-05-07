@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::pin::Pin;
 use std::string::ToString;
@@ -6,6 +6,7 @@ use std::string::ToString;
 use crate::config::RepositoryConfig;
 use axum::async_trait;
 use derive_builder::Builder;
+use octocrab::models::RunId;
 
 use super::permissions::AllPermissions;
 use crate::bors::event::{
@@ -85,8 +86,8 @@ impl TestBorsState {
                 .branch(branch.to_string())
                 .commit_sha(commit.to_string())
                 .name(name.to_string())
-                .url(format!("https://{name}.com"))
-                .run_id(Some(run_id)),
+                .url(Some(format!("https://{name}.com")))
+                .run_id(run_id),
         )
         .await;
         self.workflow_completed(
@@ -156,12 +157,13 @@ impl ClientBuilder {
             client: TestRepositoryClient {
                 comments: Default::default(),
                 name,
-                merge_branches_fn: Box::new(|| Ok(CommitSha(default_merge_sha().to_string()))),
+                merge_branches_fn: Box::new(|| Ok(CommitSha(default_merge_sha()))),
                 get_pr_fn: Box::new(move |pr| Ok(PRBuilder::default().number(pr.0).create())),
                 check_suites: Default::default(),
+                cancelled_workflows: Default::default(),
             },
             permissions_resolver: permission_resolver,
-            config: config.unwrap_or_else(|| RepositoryConfig { checks: vec![] }),
+            config: config.unwrap_or_else(|| RepositoryConfig {}),
         }
     }
 }
@@ -183,9 +185,11 @@ pub struct TestRepositoryClient {
     pub merge_branches_fn: Box<dyn Fn() -> Result<CommitSha, MergeError> + Send>,
     pub get_pr_fn: Box<dyn Fn(PullRequestNumber) -> anyhow::Result<PullRequest> + Send>,
     pub check_suites: HashMap<String, Vec<CheckSuite>>,
+    pub cancelled_workflows: HashSet<u64>,
 }
 
 impl TestRepositoryClient {
+    // Getters
     pub fn get_comment(&self, pr_number: u64, comment_index: usize) -> &str {
         &self.comments.get(&pr_number).unwrap()[comment_index]
     }
@@ -197,6 +201,14 @@ impl TestRepositoryClient {
             .unwrap()
             .as_str()
     }
+
+    // Setters
+    pub fn set_checks(&mut self, commit: &str, checks: &[CheckSuite]) {
+        self.check_suites
+            .insert(commit.to_string(), checks.to_vec());
+    }
+
+    // Checks
     pub fn check_comments(&self, pr_number: u64, comments: &[&str]) {
         assert_eq!(
             self.comments.get(&pr_number).cloned().unwrap_or_default(),
@@ -217,8 +229,9 @@ impl TestRepositoryClient {
         );
     }
 
-    pub fn set_checks(&mut self, commit: &str, checks: Vec<CheckSuite>) {
-        self.check_suites.insert(commit.to_string(), checks);
+    pub fn check_cancelled_workflows(&self, cancelled: &[u64]) {
+        let set = cancelled.iter().copied().collect::<HashSet<_>>();
+        assert_eq!(self.cancelled_workflows, set);
     }
 }
 
@@ -259,5 +272,11 @@ impl RepositoryClient for TestRepositoryClient {
         sha: &CommitSha,
     ) -> anyhow::Result<Vec<CheckSuite>> {
         Ok(self.check_suites.get(&sha.0).cloned().unwrap_or_default())
+    }
+
+    async fn cancel_workflows(&mut self, run_ids: Vec<RunId>) -> anyhow::Result<()> {
+        self.cancelled_workflows
+            .extend(run_ids.into_iter().map(|id| id.0));
+        Ok(())
     }
 }

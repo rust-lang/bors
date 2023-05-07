@@ -1,6 +1,7 @@
 use anyhow::anyhow;
 use axum::async_trait;
 use chrono::{DateTime, NaiveDateTime, Utc};
+use octocrab::models::RunId;
 use sea_orm::sea_query::OnConflict;
 use sea_orm::ActiveValue::{Set, Unchanged};
 use sea_orm::{ActiveModelTrait, ColumnTrait, DbErr, EntityTrait, QueryFilter, TransactionTrait};
@@ -10,6 +11,7 @@ use migration::sea_orm::DatabaseConnection;
 
 use crate::database::{
     BuildModel, BuildStatus, DbClient, PullRequestModel, WorkflowModel, WorkflowStatus,
+    WorkflowType,
 };
 use crate::github::PullRequestNumber;
 use crate::github::{CommitSha, GithubRepoName};
@@ -149,14 +151,16 @@ impl DbClient for SeaORMClient {
         build: &BuildModel,
         name: String,
         url: String,
-        run_id: Option<u64>,
+        run_id: RunId,
+        workflow_type: WorkflowType,
         status: WorkflowStatus,
     ) -> anyhow::Result<()> {
         let model = workflow::ActiveModel {
             build: Set(build.id),
             name: Set(name),
             url: Set(url),
-            run_id: Set(run_id.map(|v| v as i64)),
+            run_id: Set(run_id.0 as i64),
+            r#type: Set(workflow_type_to_db(workflow_type).to_string()),
             status: Set(workflow_status_to_db(&status).to_string()),
             ..Default::default()
         };
@@ -197,26 +201,6 @@ impl DbClient for SeaORMClient {
     }
 }
 
-fn build_status_to_db(status: BuildStatus) -> &'static str {
-    match status {
-        BuildStatus::Pending => "pending",
-        BuildStatus::Success => "success",
-        BuildStatus::Failure => "failure",
-    }
-}
-
-fn build_status_from_db(status: String) -> BuildStatus {
-    match status.as_str() {
-        "pending" => BuildStatus::Pending,
-        "success" => BuildStatus::Success,
-        "failure" => BuildStatus::Failure,
-        _ => {
-            log::warn!("Encountered unknown build status in DB: {status}");
-            BuildStatus::Pending
-        }
-    }
-}
-
 fn workflow_status_to_db(status: &WorkflowStatus) -> &'static str {
     match status {
         WorkflowStatus::Pending => "pending",
@@ -237,6 +221,24 @@ fn workflow_status_from_db(status: String) -> WorkflowStatus {
     }
 }
 
+fn workflow_type_to_db(workflow_type: WorkflowType) -> &'static str {
+    match workflow_type {
+        WorkflowType::Github => "github",
+        WorkflowType::External => "external",
+    }
+}
+
+fn workflow_type_from_db(workflow_type: String) -> WorkflowType {
+    match workflow_type.as_str() {
+        "github" => WorkflowType::Github,
+        "external" => WorkflowType::External,
+        _ => {
+            log::warn!("Encountered unknown workflow type in DB: {workflow_type}");
+            WorkflowType::External
+        }
+    }
+}
+
 fn workflow_from_db(workflow: workflow::Model, build: Option<build::Model>) -> WorkflowModel {
     WorkflowModel {
         id: workflow.id,
@@ -245,9 +247,32 @@ fn workflow_from_db(workflow: workflow::Model, build: Option<build::Model>) -> W
             .expect("Workflow without attached build"),
         name: workflow.name,
         url: workflow.url,
-        run_id: workflow.run_id.map(|v| v as u64),
+        run_id: RunId(workflow.run_id as u64),
+        workflow_type: workflow_type_from_db(workflow.r#type),
         status: workflow_status_from_db(workflow.status),
         created_at: datetime_from_db(workflow.created_at),
+    }
+}
+
+fn build_status_to_db(status: BuildStatus) -> &'static str {
+    match status {
+        BuildStatus::Pending => "pending",
+        BuildStatus::Success => "success",
+        BuildStatus::Failure => "failure",
+        BuildStatus::Cancelled => "cancelled",
+    }
+}
+
+fn build_status_from_db(status: String) -> BuildStatus {
+    match status.as_str() {
+        "pending" => BuildStatus::Pending,
+        "success" => BuildStatus::Success,
+        "failure" => BuildStatus::Failure,
+        "cancelled" => BuildStatus::Cancelled,
+        _ => {
+            log::warn!("Encountered unknown build status in DB: {status}");
+            BuildStatus::Pending
+        }
     }
 }
 

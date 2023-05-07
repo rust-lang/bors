@@ -1,5 +1,6 @@
 use crate::config::RepositoryConfig;
 use axum::async_trait;
+use octocrab::models::RunId;
 use std::future::Future;
 use std::pin::Pin;
 
@@ -42,6 +43,9 @@ pub trait RepositoryClient {
         branch: &str,
         sha: &CommitSha,
     ) -> anyhow::Result<Vec<CheckSuite>>;
+
+    /// Cancels Github Actions workflows.
+    async fn cancel_workflows(&mut self, run_ids: Vec<RunId>) -> anyhow::Result<()>;
 }
 
 #[derive(Clone)]
