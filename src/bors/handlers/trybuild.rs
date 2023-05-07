@@ -2,7 +2,7 @@ use anyhow::anyhow;
 
 use crate::bors::RepositoryClient;
 use crate::bors::RepositoryState;
-use crate::database::DbClient;
+use crate::database::{BuildStatus, DbClient};
 use crate::github::{GithubUser, MergeError, PullRequest};
 use crate::permissions::PermissionType;
 
@@ -33,18 +33,20 @@ pub(super) async fn command_try_build<Client: RepositoryClient>(
         return Ok(());
     }
 
-    let pull_request_model = database
+    let pr_model = database
         .get_or_create_pull_request(repo.client.repository(), pr.number.into())
         .await?;
 
-    if pull_request_model.try_build.is_some() {
-        repo.client
-            .post_comment(
-                pr.number.into(),
-                ":exclamation: A try build is currently in progress. You can cancel it using @bors try cancel.",
-            )
-            .await?;
-        return Ok(());
+    if let Some(ref build) = pr_model.try_build {
+        if build.status == BuildStatus::Pending {
+            repo.client
+                .post_comment(
+                    pr.number.into(),
+                    ":exclamation: A try build is currently in progress. You can cancel it using @bors try cancel.",
+                )
+                .await?;
+            return Ok(());
+        }
     }
 
     repo.client
@@ -67,11 +69,7 @@ pub(super) async fn command_try_build<Client: RepositoryClient>(
                 .map_err(|error| anyhow!("Cannot set try branch to main branch: {error:?}"))?;
 
             database
-                .attach_try_build(
-                    pull_request_model,
-                    TRY_BRANCH_NAME.to_string(),
-                    merge_sha.clone(),
-                )
+                .attach_try_build(pr_model, TRY_BRANCH_NAME.to_string(), merge_sha.clone())
                 .await?;
 
             repo.client

@@ -91,10 +91,6 @@ async fn try_complete_build<Client: RepositoryClient>(
 
     // If the build has already been marked with a conclusion, ignore this event
     if build.status != BuildStatus::Pending {
-        log::warn!(
-            "Received check suite completed event for a build that already status {:?}",
-            build.status
-        );
         return Ok(());
     }
 
@@ -179,11 +175,13 @@ mod tests {
     use std::{assert_eq, vec};
 
     use sea_orm::EntityTrait;
+    use tracing::event;
 
     use entity::workflow;
 
     use crate::bors::handlers::trybuild::TRY_BRANCH_NAME;
     use crate::database::WorkflowStatus;
+    use crate::github::CommitSha;
     use crate::tests::event::{
         default_pr_number, suite_failure, suite_pending, suite_success, CheckSuiteCompletedBuilder,
         WorkflowCompletedBuilder, WorkflowStartedBuilder,
@@ -437,5 +435,38 @@ mod tests {
         state.check_suite_completed(event()).await;
         state.check_suite_completed(event()).await;
         state.client().check_comment_count(default_pr_number(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_try_again_after_checks_finish() {
+        let mut state = ClientBuilder::default().create_state().await;
+        state
+            .client()
+            .set_checks(&default_merge_sha(), vec![suite_success()]);
+
+        state.comment("@bors try").await;
+        state
+            .perform_workflow_events(
+                1,
+                TRY_BRANCH_NAME,
+                &default_merge_sha(),
+                WorkflowStatus::Success,
+            )
+            .await;
+        state.client().check_comment_count(default_pr_number(), 2);
+
+        state.client().merge_branches_fn = Box::new(|| Ok(CommitSha("merge2".to_string())));
+        state.comment("@bors try").await;
+        insta::assert_snapshot!(state.client().get_last_comment(default_pr_number()), @":hourglass: Trying commit pr-sha with merge merge2…");
+
+        state.client().set_checks("merge2", vec![suite_success()]);
+        state
+            .perform_workflow_events(2, TRY_BRANCH_NAME, "merge2", WorkflowStatus::Success)
+            .await;
+        insta::assert_snapshot!(state.client().get_last_comment(default_pr_number()), @r###"
+        :sunny: Try build successful
+        - [workflow-2](https://workflow-2.com) :white_check_mark:
+        Build commit: merge2 (`merge2`)
+        "###);
     }
 }
