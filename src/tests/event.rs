@@ -97,8 +97,8 @@ pub struct WorkflowStarted {
     commit_sha: String,
     #[builder(default = "Some(1)")]
     run_id: Option<u64>,
-    #[builder(default = "\"https://workflow.com\".to_string()")]
-    url: String,
+    #[builder(default)]
+    url: Option<String>,
 }
 
 impl WorkflowStartedBuilder {
@@ -112,6 +112,7 @@ impl WorkflowStartedBuilder {
             url,
         } = self.build().unwrap();
 
+        let url = url.unwrap_or_else(|| format!("https://{}-{}", name, run_id.unwrap_or(1)));
         event::WorkflowStarted {
             repository: repo,
             name,

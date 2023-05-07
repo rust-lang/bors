@@ -247,7 +247,7 @@ fn workflow_from_db(workflow: workflow::Model, build: Option<build::Model>) -> W
             .expect("Workflow without attached build"),
         name: workflow.name,
         url: workflow.url,
-        run_id: workflow.run_id.map(|v| v as u64),
+        run_id: workflow.run_id.map(|v| (v as u64).into()),
         status: workflow_status_from_db(workflow.status),
         created_at: datetime_from_db(workflow.created_at),
     }

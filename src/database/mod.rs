@@ -1,5 +1,6 @@
 use axum::async_trait;
 use chrono::{DateTime, Utc};
+use octocrab::models::RunId;
 
 pub use sea_orm_client::SeaORMClient;
 
@@ -47,7 +48,7 @@ pub struct WorkflowModel {
     pub build: BuildModel,
     pub name: String,
     pub url: String,
-    pub run_id: Option<u64>,
+    pub run_id: Option<RunId>,
     pub status: WorkflowStatus,
     pub created_at: DateTime<Utc>,
 }

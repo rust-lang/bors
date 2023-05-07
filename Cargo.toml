@@ -33,8 +33,11 @@ toml = "0.7"
 # GitHub
 octocrab = "0.18"
 
-# Web
+# Async
 tokio = { version = "1.21", features = ["full"] }
+futures = "0.3"
+
+# Web
 hyper = "0.14"
 axum = "0.6"
 tower = { version = "0.4", features = ["limit"] }

@@ -172,7 +172,7 @@ Build commit: {sha} (`{sha}`)"#
 
 #[cfg(test)]
 mod tests {
-    use std::{assert_eq, vec};
+    use std::assert_eq;
 
     use sea_orm::EntityTrait;
 
@@ -263,7 +263,7 @@ mod tests {
         let mut state = ClientBuilder::default().create_state().await;
         state
             .client()
-            .set_checks(&default_merge_sha(), vec![suite_success()]);
+            .set_checks(&default_merge_sha(), &[suite_success()]);
 
         state.comment("@bors try").await;
         state
@@ -290,7 +290,7 @@ mod tests {
         let mut state = ClientBuilder::default().create_state().await;
         state
             .client()
-            .set_checks(&default_merge_sha(), vec![suite_failure()]);
+            .set_checks(&default_merge_sha(), &[suite_failure()]);
 
         state.comment("@bors try").await;
         state
@@ -316,7 +316,7 @@ mod tests {
         let mut state = ClientBuilder::default().create_state().await;
         state
             .client()
-            .set_checks(&default_merge_sha(), vec![suite_success(), suite_pending()]);
+            .set_checks(&default_merge_sha(), &[suite_success(), suite_pending()]);
 
         state.comment("@bors try").await;
         state
@@ -331,7 +331,7 @@ mod tests {
 
         state
             .client()
-            .set_checks(&default_merge_sha(), vec![suite_success(), suite_success()]);
+            .set_checks(&default_merge_sha(), &[suite_success(), suite_success()]);
         state
             .perform_workflow_events(
                 2,
@@ -353,7 +353,7 @@ mod tests {
         let mut state = ClientBuilder::default().create_state().await;
         state
             .client()
-            .set_checks(&default_merge_sha(), vec![suite_success(), suite_pending()]);
+            .set_checks(&default_merge_sha(), &[suite_success(), suite_pending()]);
 
         state.comment("@bors try").await;
         state
@@ -368,7 +368,7 @@ mod tests {
 
         state
             .client()
-            .set_checks(&default_merge_sha(), vec![suite_success(), suite_failure()]);
+            .set_checks(&default_merge_sha(), &[suite_success(), suite_failure()]);
         state
             .perform_workflow_events(
                 2,
@@ -389,7 +389,7 @@ mod tests {
         let mut state = ClientBuilder::default().create_state().await;
         state
             .client()
-            .set_checks(&default_merge_sha(), vec![suite_success()]);
+            .set_checks(&default_merge_sha(), &[suite_success()]);
 
         state.comment("@bors try").await;
         state
@@ -415,7 +415,7 @@ mod tests {
 
         insta::assert_snapshot!(state.client().get_last_comment(default_pr_number()), @r###"
         :sunny: Try build successful
-        - [workflow-name](https://workflow.com) :white_check_mark:
+        - [workflow-name](https://workflow-name-1) :white_check_mark:
         Build commit: sha-merged (`sha-merged`)
         "###);
     }
@@ -425,7 +425,7 @@ mod tests {
         let mut state = ClientBuilder::default().create_state().await;
         state
             .client()
-            .set_checks(&default_merge_sha(), vec![suite_success(), suite_success()]);
+            .set_checks(&default_merge_sha(), &[suite_success(), suite_success()]);
 
         let event = || CheckSuiteCompletedBuilder::default().branch(TRY_BRANCH_NAME.to_string());
 

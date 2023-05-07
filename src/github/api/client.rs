@@ -1,6 +1,6 @@
 use anyhow::Context;
 use axum::async_trait;
-use octocrab::models::Repository;
+use octocrab::models::{Repository, RunId};
 use octocrab::Octocrab;
 
 use crate::bors::{CheckSuite, CheckSuiteStatus, RepositoryClient};
@@ -132,6 +132,20 @@ impl RepositoryClient for GithubRepositoryClient {
             })
             .collect();
         Ok(suites)
+    }
+
+    async fn cancel_workflows(&mut self, run_ids: Vec<RunId>) -> anyhow::Result<()> {
+        let actions = self.client.actions();
+
+        // Cancel all workflows in parallel
+        futures::future::join_all(run_ids.into_iter().map(|run_id| {
+            actions.cancel_workflow_run(self.repo_name.owner(), self.repo_name.name(), run_id)
+        }))
+        .await
+        .into_iter()
+        .collect::<Result<Vec<_>, octocrab::Error>>()?;
+
+        Ok(())
     }
 }
 

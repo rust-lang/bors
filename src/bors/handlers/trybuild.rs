@@ -2,7 +2,7 @@ use anyhow::anyhow;
 
 use crate::bors::RepositoryClient;
 use crate::bors::RepositoryState;
-use crate::database::{BuildModel, BuildStatus, DbClient, PullRequestModel};
+use crate::database::{BuildModel, BuildStatus, DbClient, PullRequestModel, WorkflowStatus};
 use crate::github::{GithubUser, MergeError, PullRequest, PullRequestNumber};
 use crate::permissions::PermissionType;
 
@@ -118,11 +118,27 @@ pub(super) async fn command_try_cancel<Client: RepositoryClient>(
         return Ok(());
     };
 
+    let pending_workflows = db
+        .get_workflows_for_build(&build)
+        .await?
+        .into_iter()
+        .filter(|w| w.status == WorkflowStatus::Pending)
+        .filter_map(|w| w.run_id)
+        .collect::<Vec<_>>();
+
+    if let Err(error) = repo.client.cancel_workflows(pending_workflows).await {
+        log::error!(
+            "Could not cancel workflows for {}/{}: {error:?}",
+            repo.repository,
+            build.commit_sha
+        );
+    }
+
     db.update_build_status(&build, BuildStatus::Cancelled)
         .await?;
 
     repo.client
-        .post_comment(pr_number, "Try build cancelled")
+        .post_comment(pr_number, "Try build cancelled.")
         .await?;
 
     Ok(())
@@ -211,7 +227,9 @@ mod tests {
     use crate::bors::handlers::trybuild::TRY_BRANCH_NAME;
     use crate::database::{BuildStatus, DbClient, WorkflowStatus};
     use crate::github::{CommitSha, MergeError};
-    use crate::tests::event::{default_pr_number, suite_success};
+    use crate::tests::event::{
+        default_pr_number, suite_failure, suite_pending, suite_success, WorkflowStartedBuilder,
+    };
     use crate::tests::github::{BranchBuilder, PRBuilder};
     use crate::tests::permissions::NoPermissions;
     use crate::tests::state::{default_merge_sha, default_repo_name, ClientBuilder};
@@ -317,7 +335,7 @@ mod tests {
         let mut state = ClientBuilder::default().create_state().await;
         state
             .client()
-            .set_checks(&default_merge_sha(), vec![suite_success()]);
+            .set_checks(&default_merge_sha(), &[suite_success()]);
 
         state.comment("@bors try").await;
         state
@@ -334,7 +352,7 @@ mod tests {
         state.comment("@bors try").await;
         insta::assert_snapshot!(state.client().get_last_comment(default_pr_number()), @":hourglass: Trying commit pr-sha with merge merge2…");
 
-        state.client().set_checks("merge2", vec![suite_success()]);
+        state.client().set_checks("merge2", &[suite_success()]);
         state
             .perform_workflow_events(2, TRY_BRANCH_NAME, "merge2", WorkflowStatus::Success)
             .await;
@@ -361,6 +379,8 @@ mod tests {
         state.comment("@bors try").await;
         state.comment("@bors try cancel").await;
 
+        insta::assert_snapshot!(state.client().get_last_comment(default_pr_number()), @"Try build cancelled.");
+
         let build = state
             .db
             .find_build(
@@ -372,5 +392,64 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(build.status, BuildStatus::Cancelled);
+    }
+
+    #[tokio::test]
+    async fn test_try_cancel_cancel_workflows() {
+        let mut state = ClientBuilder::default().create_state().await;
+
+        state.comment("@bors try").await;
+        state
+            .workflow_started(
+                WorkflowStartedBuilder::default()
+                    .branch(TRY_BRANCH_NAME.to_string())
+                    .run_id(Some(123)),
+            )
+            .await;
+        state
+            .workflow_started(
+                WorkflowStartedBuilder::default()
+                    .branch(TRY_BRANCH_NAME.to_string())
+                    .run_id(Some(124)),
+            )
+            .await;
+        state.comment("@bors try cancel").await;
+        state.client().check_cancelled_workflows(&[123, 124]);
+    }
+
+    #[tokio::test]
+    async fn test_try_cancel_ignore_finished_workflows() {
+        let mut state = ClientBuilder::default().create_state().await;
+        state.client().set_checks(
+            &default_merge_sha(),
+            &[suite_success(), suite_failure(), suite_pending()],
+        );
+
+        state.comment("@bors try").await;
+        state
+            .perform_workflow_events(
+                1,
+                TRY_BRANCH_NAME,
+                &default_merge_sha(),
+                WorkflowStatus::Success,
+            )
+            .await;
+        state
+            .perform_workflow_events(
+                2,
+                TRY_BRANCH_NAME,
+                &default_merge_sha(),
+                WorkflowStatus::Failure,
+            )
+            .await;
+        state
+            .workflow_started(
+                WorkflowStartedBuilder::default()
+                    .branch(TRY_BRANCH_NAME.to_string())
+                    .run_id(Some(123)),
+            )
+            .await;
+        state.comment("@bors try cancel").await;
+        state.client().check_cancelled_workflows(&[123]);
     }
 }
