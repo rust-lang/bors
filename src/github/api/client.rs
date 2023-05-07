@@ -3,7 +3,7 @@ use axum::async_trait;
 use octocrab::models::Repository;
 use octocrab::Octocrab;
 
-use crate::bors::RepositoryClient;
+use crate::bors::{CheckSuite, CheckSuiteStatus, RepositoryClient};
 use crate::github::api::operations::{merge_branches, set_branch_to_commit, MergeError};
 use crate::github::{Branch, CommitSha, GithubRepoName, PullRequest, PullRequestNumber};
 
@@ -71,6 +71,67 @@ impl RepositoryClient for GithubRepositoryClient {
         commit_message: &str,
     ) -> Result<CommitSha, MergeError> {
         Ok(merge_branches(self, base, head, commit_message).await?)
+    }
+
+    async fn get_check_suites_for_commit(
+        &mut self,
+        branch: &str,
+        sha: &CommitSha,
+    ) -> anyhow::Result<Vec<CheckSuite>> {
+        let response = self
+            .client
+            ._get(
+                self.client.base_url.join(&format!(
+                    "/repos/{}/{}/commits/{}/check-suites",
+                    self.repo_name.owner(),
+                    self.repo_name.name(),
+                    sha.0
+                ))?,
+                None::<&()>,
+            )
+            .await?;
+
+        #[derive(serde::Deserialize, Debug)]
+        struct CheckSuitePayload<'a> {
+            conclusion: Option<&'a str>,
+            head_branch: &'a str,
+        }
+
+        #[derive(serde::Deserialize, Debug)]
+        struct CheckSuiteResponse<'a> {
+            #[serde(borrow)]
+            check_suites: Vec<CheckSuitePayload<'a>>,
+        }
+
+        // `response.json()` is not used because of the 'a lifetime
+        let text = response.text().await?;
+        let response: CheckSuiteResponse = serde_json::from_str(&text)?;
+        let suites = response
+            .check_suites
+            .into_iter()
+            .filter(|suite| suite.head_branch == branch)
+            .map(|suite| CheckSuite {
+                status: match suite.conclusion {
+                    Some(status) => match status {
+                        "success" => CheckSuiteStatus::Success,
+                        "failure" | "neutral" | "cancelled" | "skipped" | "timed_out"
+                        | "action_required" | "startup_failure" | "stale" => {
+                            CheckSuiteStatus::Failure
+                        }
+                        _ => {
+                            log::warn!(
+                                "Received unknown check suite status for {}/{}: {status}",
+                                self.repo_name,
+                                sha
+                            );
+                            CheckSuiteStatus::Pending
+                        }
+                    },
+                    None => CheckSuiteStatus::Pending,
+                },
+            })
+            .collect();
+        Ok(suites)
     }
 }
 

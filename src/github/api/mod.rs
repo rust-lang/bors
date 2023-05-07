@@ -17,7 +17,7 @@ use crate::database::{DbClient, SeaORMClient};
 use crate::github::GithubRepoName;
 use crate::permissions::TeamApiPermissionResolver;
 
-mod client;
+pub mod client;
 pub(crate) mod operations;
 
 type GHRepositoryState = RepositoryState<GithubRepositoryClient>;

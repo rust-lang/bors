@@ -2,3 +2,4 @@
 
 pub use super::build::Entity as Build;
 pub use super::pull_request::Entity as PullRequest;
+pub use super::workflow::Entity as Workflow;

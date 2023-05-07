@@ -2,7 +2,7 @@ use crate::bors::RepositoryClient;
 use crate::bors::RepositoryState;
 use crate::github::PullRequest;
 
-pub async fn command_ping<Client: RepositoryClient>(
+pub(super) async fn command_ping<Client: RepositoryClient>(
     repo: &mut RepositoryState<Client>,
     pr: &PullRequest,
 ) -> anyhow::Result<()> {

@@ -8,19 +8,29 @@ pub struct Model {
     #[sea_orm(primary_key)]
     pub id: i32,
     pub repository: String,
+    pub branch: String,
     pub commit_sha: String,
-    pub created_at: Option<String>,
+    pub status: String,
+    pub created_at: DateTime,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
     #[sea_orm(has_many = "super::pull_request::Entity")]
     PullRequest,
+    #[sea_orm(has_many = "super::workflow::Entity")]
+    Workflow,
 }
 
 impl Related<super::pull_request::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::PullRequest.def()
+    }
+}
+
+impl Related<super::workflow::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::Workflow.def()
     }
 }
 

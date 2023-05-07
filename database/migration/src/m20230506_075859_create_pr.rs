@@ -1,4 +1,7 @@
+use crate::m20230505_165859_create_build::Build;
 use sea_orm_migration::prelude::*;
+use sea_orm_migration::sea_query::types::Keyword;
+use sea_orm_migration::sea_query::SimpleExpr;
 
 #[derive(DeriveMigrationName)]
 pub struct Migration;
@@ -9,21 +12,26 @@ impl MigrationTrait for Migration {
         manager
             .create_table(
                 Table::create()
-                    .table(Build::Table)
+                    .table(PullRequest::Table)
                     .if_not_exists()
                     .col(
-                        ColumnDef::new(Build::Id)
+                        ColumnDef::new(PullRequest::Id)
                             .integer()
                             .not_null()
                             .auto_increment()
                             .primary_key(),
                     )
-                    .col(ColumnDef::new(Build::Repository).string().not_null())
-                    .col(ColumnDef::new(Build::Branch).string().not_null())
-                    .col(ColumnDef::new(Build::CommitSha).string().not_null())
-                    .col(ColumnDef::new(Build::Status).string().not_null())
+                    .col(ColumnDef::new(PullRequest::Repository).string().not_null())
+                    .col(ColumnDef::new(PullRequest::Number).integer().not_null())
+                    .col(ColumnDef::new(PullRequest::TryBuild).integer().null())
+                    .foreign_key(
+                        ForeignKey::create()
+                            .name("fk-pr-try-build")
+                            .from(PullRequest::Table, PullRequest::TryBuild)
+                            .to(Build::Table, Build::Id),
+                    )
                     .col(
-                        ColumnDef::new(Build::CreatedAt)
+                        ColumnDef::new(PullRequest::CreatedAt)
                             .timestamp()
                             .default(SimpleExpr::Keyword(Keyword::CurrentTimestamp))
                             .not_null(),
@@ -31,10 +39,9 @@ impl MigrationTrait for Migration {
                     .index(
                         Index::create()
                             .unique()
-                            .name("unique-build-repo-branch-commit")
-                            .col(Build::Repository)
-                            .col(Build::Branch)
-                            .col(Build::CommitSha),
+                            .name("unique-repo-number")
+                            .col(PullRequest::Repository)
+                            .col(PullRequest::Number),
                     )
                     .to_owned(),
             )
@@ -43,19 +50,18 @@ impl MigrationTrait for Migration {
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         manager
-            .drop_table(Table::drop().table(Build::Table).to_owned())
+            .drop_table(Table::drop().table(PullRequest::Table).to_owned())
             .await
     }
 }
 
 /// Learn more at https://docs.rs/sea-query#iden
 #[derive(Iden)]
-pub enum Build {
+enum PullRequest {
     Table,
     Id,
     Repository,
-    Branch,
-    CommitSha,
-    Status,
+    Number,
+    TryBuild,
     CreatedAt,
 }

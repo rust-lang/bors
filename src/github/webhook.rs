@@ -1,8 +1,5 @@
 use std::fmt::Debug;
 
-use crate::bors::event::{BorsEvent, PullRequestComment};
-use crate::github::server::ServerStateRef;
-use crate::github::{GithubRepoName, GithubUser};
 use axum::body::{Bytes, HttpBody};
 use axum::extract::FromRequest;
 use axum::http::request::Parts;
@@ -10,14 +7,71 @@ use axum::http::{HeaderMap, HeaderValue, Request, StatusCode};
 use axum::{async_trait, RequestExt};
 use hmac::{Hmac, Mac};
 use octocrab::models::events::payload::IssueCommentEventPayload;
-use octocrab::models::Repository;
+use octocrab::models::{workflows, App, CheckRun, Repository};
 use secrecy::{ExposeSecret, SecretString};
 use sha2::Sha256;
+
+use crate::bors::event::{
+    BorsEvent, CheckSuiteCompleted, PullRequestComment, WorkflowCompleted, WorkflowStarted,
+};
+use crate::database::WorkflowStatus;
+use crate::github::server::ServerStateRef;
+use crate::github::{CommitSha, GithubRepoName, GithubUser};
+
+/// Wrapper for a secret which is zeroed on drop and can be exposed only through the
+/// [`WebhookSecret::expose`] method.
+pub struct WebhookSecret(SecretString);
+
+impl WebhookSecret {
+    pub fn new(secret: String) -> Self {
+        Self(secret.into())
+    }
+
+    pub fn expose(&self) -> &str {
+        self.0.expose_secret().as_str()
+    }
+}
 
 /// This struct is used to extract the repository and user from a GitHub webhook event.
 /// The wrapper exists because octocrab doesn't expose/parse the repository field.
 #[derive(serde::Deserialize, Debug)]
-pub struct WebhookEventRepository {
+pub struct WebhookRepository {
+    repository: Repository,
+}
+
+#[derive(serde::Deserialize, Debug)]
+pub struct WebhookWorkflowRun<'a> {
+    action: &'a str,
+    workflow_run: workflows::Run,
+    repository: Repository,
+}
+
+#[derive(serde::Deserialize, Debug)]
+pub struct CheckRunInner {
+    #[serde(flatten)]
+    check_run: CheckRun,
+    name: String,
+    check_suite: CheckSuiteInner,
+    app: App,
+}
+
+#[derive(serde::Deserialize, Debug)]
+pub struct WebhookCheckRun<'a> {
+    action: &'a str,
+    check_run: CheckRunInner,
+    repository: Repository,
+}
+
+#[derive(serde::Deserialize, Debug)]
+pub struct CheckSuiteInner {
+    head_branch: String,
+    head_sha: String,
+}
+
+#[derive(serde::Deserialize, Debug)]
+pub struct WebhookCheckSuite<'a> {
+    action: &'a str,
+    check_suite: CheckSuiteInner,
     repository: Repository,
 }
 
@@ -58,7 +112,10 @@ where
 
         // Parse webhook content
         match parse_webhook_event(parts, &body) {
-            Ok(Some(event)) => Ok(GitHubWebhook(event)),
+            Ok(Some(event)) => {
+                log::trace!("Received webhook event {event:?}");
+                Ok(GitHubWebhook(event))
+            }
             Ok(None) => Err(StatusCode::OK),
             Err(error) => {
                 log::error!("Cannot parse webhook event: {error:?}");
@@ -75,7 +132,7 @@ fn parse_webhook_event(request: Parts, body: &[u8]) -> anyhow::Result<Option<Bor
 
     match event_type.as_bytes() {
         b"issue_comment" => {
-            let repository: WebhookEventRepository = serde_json::from_slice(body)?;
+            let repository: WebhookRepository = serde_json::from_slice(body)?;
             let repository_name = parse_repository_name(&repository.repository)?;
 
             let event: IssueCommentEventPayload = serde_json::from_slice(body)?;
@@ -83,6 +140,68 @@ fn parse_webhook_event(request: Parts, body: &[u8]) -> anyhow::Result<Option<Bor
             Ok(comment)
         }
         b"installation_repositories" | b"installation" => Ok(Some(BorsEvent::InstallationsChanged)),
+        b"workflow_run" => {
+            let payload: WebhookWorkflowRun = serde_json::from_slice(body)?;
+            let repository_name = parse_repository_name(&payload.repository)?;
+            let result = match payload.action {
+                "requested" => Some(BorsEvent::WorkflowStarted(WorkflowStarted {
+                    repository: repository_name,
+                    name: payload.workflow_run.name,
+                    branch: payload.workflow_run.head_branch,
+                    commit_sha: CommitSha(payload.workflow_run.head_sha),
+                    run_id: Some(payload.workflow_run.id.0),
+                    url: payload.workflow_run.html_url.into(),
+                })),
+                "completed" => Some(BorsEvent::WorkflowCompleted(WorkflowCompleted {
+                    repository: repository_name,
+                    branch: payload.workflow_run.head_branch,
+                    commit_sha: CommitSha(payload.workflow_run.head_sha),
+                    run_id: payload.workflow_run.id.0,
+                    status: match payload.workflow_run.conclusion.unwrap_or_default().as_str() {
+                        "success" => WorkflowStatus::Success,
+                        _ => WorkflowStatus::Failure,
+                    },
+                })),
+                _ => None,
+            };
+            Ok(result)
+        }
+        b"check_run" => {
+            let payload: WebhookCheckRun = serde_json::from_slice(body).unwrap();
+
+            // We are only interested in check runs from external CI services.
+            // These basically correspond to workflow runs from GHA.
+            if payload.check_run.app.owner.login == "github" {
+                return Ok(None);
+            }
+
+            let repository_name = parse_repository_name(&payload.repository)?;
+            if payload.action == "created" {
+                Ok(Some(BorsEvent::WorkflowStarted(WorkflowStarted {
+                    repository: repository_name,
+                    name: payload.check_run.name.to_string(),
+                    branch: payload.check_run.check_suite.head_branch,
+                    commit_sha: CommitSha(payload.check_run.check_suite.head_sha),
+                    run_id: None,
+                    url: payload.check_run.check_run.html_url.unwrap_or_default(),
+                })))
+            } else {
+                Ok(None)
+            }
+        }
+        b"check_suite" => {
+            let payload: WebhookCheckSuite = serde_json::from_slice(body)?;
+            let repository_name = parse_repository_name(&payload.repository)?;
+            if payload.action == "completed" {
+                Ok(Some(BorsEvent::CheckSuiteCompleted(CheckSuiteCompleted {
+                    repository: repository_name,
+                    branch: payload.check_suite.head_branch,
+                    commit_sha: CommitSha(payload.check_suite.head_sha),
+                })))
+            } else {
+                Ok(None)
+            }
+        }
         _ => {
             log::debug!("Ignoring unknown event type {:?}", event_type.to_str());
             Ok(None)
@@ -147,13 +266,13 @@ fn verify_gh_signature(
 
 #[cfg(test)]
 mod tests {
-    use crate::bors::event::BorsEvent;
     use axum::extract::FromRequest;
     use axum::http::{HeaderValue, Method};
     use hmac::Mac;
     use hyper::{Request, StatusCode};
     use tokio::sync::mpsc;
 
+    use crate::bors::event::BorsEvent;
     use crate::github::server::{ServerState, ServerStateRef};
     use crate::github::webhook::WebhookSecret;
     use crate::github::webhook::{GitHubWebhook, HmacSha256};
@@ -217,6 +336,99 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_workflow_run_requested() {
+        insta::assert_debug_snapshot!(
+            check_webhook("webhook/workflow-run-requested.json", "workflow_run").await,
+            @r###"
+        Ok(
+            GitHubWebhook(
+                WorkflowStarted(
+                    WorkflowStarted {
+                        repository: GithubRepoName {
+                            owner: "kobzol",
+                            name: "bors-kindergarten",
+                        },
+                        name: "Workflow 2",
+                        branch: "automation/bors/try",
+                        commit_sha: CommitSha(
+                            "c9abcadf285659684c0975cead8bf982fa84e123",
+                        ),
+                        run_id: Some(
+                            4900979074,
+                        ),
+                        url: "https://github.com/Kobzol/bors-kindergarten/actions/runs/4900979074",
+                    },
+                ),
+            ),
+        )
+        "###
+        );
+    }
+
+    #[tokio::test]
+    async fn test_workflow_run_completed() {
+        insta::assert_debug_snapshot!(
+            check_webhook("webhook/workflow-run-completed.json", "workflow_run").await,
+            @r###"
+        Ok(
+            GitHubWebhook(
+                WorkflowCompleted(
+                    WorkflowCompleted {
+                        repository: GithubRepoName {
+                            owner: "kobzol",
+                            name: "bors-kindergarten",
+                        },
+                        branch: "automation/bors/try",
+                        commit_sha: CommitSha(
+                            "c9abcadf285659684c0975cead8bf982fa84e123",
+                        ),
+                        run_id: 4900979072,
+                        status: Failure,
+                    },
+                ),
+            ),
+        )
+        "###
+        );
+    }
+
+    #[tokio::test]
+    async fn test_check_run_created_external() {
+        insta::assert_debug_snapshot!(
+            check_webhook("webhook/check-run-created-external.json", "check_run").await,
+            @r###"
+        Ok(
+            GitHubWebhook(
+                WorkflowStarted(
+                    WorkflowStarted {
+                        repository: GithubRepoName {
+                            owner: "kobzol",
+                            name: "bors-kindergarten",
+                        },
+                        name: "check",
+                        branch: "automation/bors/try-merge",
+                        commit_sha: CommitSha(
+                            "3d5258c8dd4fce72a4ea67387499fe69ea410928",
+                        ),
+                        run_id: None,
+                        url: "https://github.com/Kobzol/bors-kindergarten/runs/13293850093",
+                    },
+                ),
+            ),
+        )
+        "###
+        );
+    }
+
+    #[tokio::test]
+    async fn test_check_run_created_gha() {
+        assert!(matches!(
+            check_webhook("webhook/check-run-created-gha.json", "check_run").await,
+            Err(StatusCode::OK)
+        ));
+    }
+
+    #[tokio::test]
     async fn test_unknown_event() {
         assert_eq!(
             check_webhook("webhook/push.json", "push")
@@ -255,18 +467,5 @@ mod tests {
         let (tx, _) = mpsc::channel(1024);
         let server_ref = ServerStateRef::new(ServerState::new(tx, WebhookSecret::new(secret)));
         GitHubWebhook::from_request(request, &server_ref).await
-    }
-}
-
-/// Wrapper for a secret which is zeroed on drop and can be exposed only through the [`WebhookSecret::expose`] method.
-pub struct WebhookSecret(SecretString);
-
-impl WebhookSecret {
-    pub fn new(secret: String) -> Self {
-        Self(secret.into())
-    }
-
-    pub fn expose(&self) -> &str {
-        self.0.expose_secret().as_str()
     }
 }

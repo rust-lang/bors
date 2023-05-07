@@ -8,14 +8,19 @@ use axum::async_trait;
 use derive_builder::Builder;
 
 use super::permissions::AllPermissions;
-use crate::bors::event::{BorsEvent, PullRequestComment};
-use crate::bors::{handle_bors_event, RepositoryState};
+use crate::bors::event::{
+    BorsEvent, CheckSuiteCompleted, PullRequestComment, WorkflowCompleted, WorkflowStarted,
+};
+use crate::bors::{handle_bors_event, CheckSuite, RepositoryState};
 use crate::bors::{BorsState, RepositoryClient};
-use crate::database::{DbClient, SeaORMClient};
+use crate::database::{DbClient, SeaORMClient, WorkflowStatus};
 use crate::github::{CommitSha, GithubRepoName, GithubUser, PullRequest};
 use crate::github::{MergeError, PullRequestNumber};
 use crate::permissions::PermissionResolver;
 use crate::tests::database::create_test_db;
+use crate::tests::event::{
+    CheckSuiteCompletedBuilder, WorkflowCompletedBuilder, WorkflowStartedBuilder,
+};
 use crate::tests::github::PRBuilder;
 
 pub fn test_bot_user() -> GithubUser {
@@ -27,6 +32,10 @@ pub fn test_bot_user() -> GithubUser {
 
 pub fn default_repo_name() -> GithubRepoName {
     GithubRepoName::new("owner", "name")
+}
+
+pub fn default_merge_sha() -> String {
+    "sha-merged".to_string()
 }
 
 pub struct TestBorsState {
@@ -47,6 +56,53 @@ impl TestBorsState {
 
     pub async fn comment<T: Into<PullRequestComment>>(&mut self, comment: T) {
         self.event(BorsEvent::Comment(comment.into())).await;
+    }
+
+    pub async fn workflow_started<T: Into<WorkflowStarted>>(&mut self, payload: T) {
+        self.event(BorsEvent::WorkflowStarted(payload.into())).await;
+    }
+
+    pub async fn workflow_completed<T: Into<WorkflowCompleted>>(&mut self, payload: T) {
+        self.event(BorsEvent::WorkflowCompleted(payload.into()))
+            .await;
+    }
+
+    pub async fn check_suite_completed<T: Into<CheckSuiteCompleted>>(&mut self, payload: T) {
+        self.event(BorsEvent::CheckSuiteCompleted(payload.into()))
+            .await;
+    }
+
+    pub(crate) async fn perform_workflow_events(
+        &mut self,
+        run_id: u64,
+        branch: &str,
+        commit: &str,
+        status: WorkflowStatus,
+    ) {
+        let name = format!("workflow-{run_id}");
+        self.workflow_started(
+            WorkflowStartedBuilder::default()
+                .branch(branch.to_string())
+                .commit_sha(commit.to_string())
+                .name(name.to_string())
+                .url(format!("https://{name}.com"))
+                .run_id(Some(run_id)),
+        )
+        .await;
+        self.workflow_completed(
+            WorkflowCompletedBuilder::default()
+                .branch(branch.to_string())
+                .commit_sha(commit.to_string())
+                .run_id(run_id)
+                .status(status),
+        )
+        .await;
+        self.check_suite_completed(
+            CheckSuiteCompletedBuilder::default()
+                .branch(branch.to_string())
+                .commit_sha(commit.to_string()),
+        )
+        .await;
     }
 }
 
@@ -100,8 +156,9 @@ impl ClientBuilder {
             client: TestRepositoryClient {
                 comments: Default::default(),
                 name,
-                merge_branches_fn: Box::new(|| Ok(CommitSha("foo".to_string()))),
+                merge_branches_fn: Box::new(|| Ok(CommitSha(default_merge_sha().to_string()))),
                 get_pr_fn: Box::new(move |pr| Ok(PRBuilder::default().number(pr.0).create())),
+                check_suites: Default::default(),
             },
             permissions_resolver: permission_resolver,
             config: config.unwrap_or_else(|| RepositoryConfig { checks: vec![] }),
@@ -125,11 +182,20 @@ pub struct TestRepositoryClient {
     comments: HashMap<u64, Vec<String>>,
     pub merge_branches_fn: Box<dyn Fn() -> Result<CommitSha, MergeError> + Send>,
     pub get_pr_fn: Box<dyn Fn(PullRequestNumber) -> anyhow::Result<PullRequest> + Send>,
+    pub check_suites: HashMap<String, Vec<CheckSuite>>,
 }
 
 impl TestRepositoryClient {
     pub fn get_comment(&self, pr_number: u64, comment_index: usize) -> &str {
         &self.comments.get(&pr_number).unwrap()[comment_index]
+    }
+    pub fn get_last_comment(&self, pr_number: u64) -> &str {
+        self.comments
+            .get(&pr_number)
+            .unwrap()
+            .last()
+            .unwrap()
+            .as_str()
     }
     pub fn check_comments(&self, pr_number: u64, comments: &[&str]) {
         assert_eq!(
@@ -139,6 +205,20 @@ impl TestRepositoryClient {
                 .map(|&s| String::from(s))
                 .collect::<Vec<_>>()
         );
+    }
+    pub fn check_comment_count(&self, pr_number: u64, count: usize) {
+        assert_eq!(
+            self.comments
+                .get(&pr_number)
+                .cloned()
+                .unwrap_or_default()
+                .len(),
+            count
+        );
+    }
+
+    pub fn set_checks(&mut self, commit: &str, checks: Vec<CheckSuite>) {
+        self.check_suites.insert(commit.to_string(), checks);
     }
 }
 
@@ -171,5 +251,13 @@ impl RepositoryClient for TestRepositoryClient {
         _commit_message: &str,
     ) -> Result<CommitSha, MergeError> {
         (self.merge_branches_fn)()
+    }
+
+    async fn get_check_suites_for_commit(
+        &mut self,
+        _branch: &str,
+        sha: &CommitSha,
+    ) -> anyhow::Result<Vec<CheckSuite>> {
+        Ok(self.check_suites.get(&sha.0).cloned().unwrap_or_default())
     }
 }

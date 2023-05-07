@@ -2,7 +2,7 @@ use std::fmt::{Debug, Display, Formatter};
 
 use url::Url;
 
-mod api;
+pub mod api;
 pub mod server;
 mod webhook;
 

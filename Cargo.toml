@@ -18,6 +18,8 @@ clap = { version = "4.0", features = ["env", "derive"] }
 # Logging
 log = "0.4"
 env_logger = "0.10"
+tracing = "0.1"
+tracing-subscriber = "0.3"
 
 # Errors
 anyhow = "1.0"
@@ -48,8 +50,11 @@ secrecy = "0.8"
 base64 = "0.21"
 
 # Database
-sqlx = { version = "0.6", features = [ "runtime-tokio-native-tls" , "sqlite" ] }
+sqlx = { version = "0.6", features = [ "runtime-tokio-native-tls" , "sqlite", "postgres" ] }
 sea-orm = { workspace = true }
+
+# Time
+chrono = "0.4"
 
 # Local
 entity = { path = "database/entity" }

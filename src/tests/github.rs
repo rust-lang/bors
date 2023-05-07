@@ -44,7 +44,7 @@ impl PRBuilder {
         BranchBuilder::default()
             .name(format!(
                 "pr-{}",
-                self.number.unwrap_or_else(|| default_pr_number())
+                self.number.unwrap_or_else(default_pr_number)
             ))
             .sha("pr-sha".to_string())
             .create()

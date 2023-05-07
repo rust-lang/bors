@@ -13,11 +13,11 @@ use crate::permissions::PermissionType;
 const TRY_MERGE_BRANCH_NAME: &str = "automation/bors/try-merge";
 
 // This branch should run CI checks.
-const TRY_BRANCH_NAME: &str = "automation/bors/try";
+pub(super) const TRY_BRANCH_NAME: &str = "automation/bors/try";
 
 /// Performs a so-called try build - merges the PR branch into a special branch designed
 /// for running CI checks.
-pub async fn command_try_build<Client: RepositoryClient>(
+pub(super) async fn command_try_build<Client: RepositoryClient>(
     repo: &mut RepositoryState<Client>,
     database: &mut dyn DbClient,
     pr: &PullRequest,
@@ -33,11 +33,11 @@ pub async fn command_try_build<Client: RepositoryClient>(
         return Ok(());
     }
 
-    let pull_request_row = database
+    let pull_request_model = database
         .get_or_create_pull_request(repo.client.repository(), pr.number.into())
         .await?;
 
-    if pull_request_row.try_build.is_some() {
+    if pull_request_model.try_build.is_some() {
         repo.client
             .post_comment(
                 pr.number.into(),
@@ -67,7 +67,11 @@ pub async fn command_try_build<Client: RepositoryClient>(
                 .map_err(|error| anyhow!("Cannot set try branch to main branch: {error:?}"))?;
 
             database
-                .attach_try_build(pull_request_row, merge_sha.clone())
+                .attach_try_build(
+                    pull_request_model,
+                    TRY_BRANCH_NAME.to_string(),
+                    merge_sha.clone(),
+                )
                 .await?;
 
             repo.client
@@ -166,12 +170,13 @@ async fn check_try_permissions<Client: RepositoryClient>(
 
 #[cfg(test)]
 mod tests {
+    use crate::bors::handlers::trybuild::TRY_BRANCH_NAME;
     use crate::database::DbClient;
     use crate::github::{CommitSha, MergeError};
     use crate::tests::event::default_pr_number;
     use crate::tests::github::{BranchBuilder, PRBuilder};
     use crate::tests::permissions::NoPermissions;
-    use crate::tests::state::{default_repo_name, ClientBuilder};
+    use crate::tests::state::{default_merge_sha, default_repo_name, ClientBuilder};
 
     #[tokio::test]
     async fn test_try_no_permission() {
@@ -189,7 +194,6 @@ mod tests {
     #[tokio::test]
     async fn test_try_merge_comment() {
         let mut state = ClientBuilder::default().create_state().await;
-        state.client().merge_branches_fn = Box::new(|| Ok(CommitSha("sha1".to_string())));
         state.client().get_pr_fn = Box::new(|pr| {
             Ok(PRBuilder::default()
                 .number(pr.0)
@@ -201,7 +205,7 @@ mod tests {
 
         state.client().check_comments(
             default_pr_number(),
-            &[":hourglass: Trying commit head1 with merge sha1…"],
+            &[":hourglass: Trying commit head1 with merge sha-merged…"],
         );
     }
 
@@ -246,13 +250,15 @@ mod tests {
     #[tokio::test]
     async fn test_try_merge_insert_into_db() {
         let mut state = ClientBuilder::default().create_state().await;
-        state.client().merge_branches_fn = Box::new(|| Ok(CommitSha("sha1".to_string())));
-
         state.comment("@bors try").await;
 
         assert!(state
             .db
-            .find_build_by_commit(&default_repo_name(), CommitSha("sha1".to_string()))
+            .find_build(
+                &default_repo_name(),
+                TRY_BRANCH_NAME.to_string(),
+                CommitSha(default_merge_sha().to_string())
+            )
             .await
             .unwrap()
             .is_some());
@@ -261,7 +267,6 @@ mod tests {
     #[tokio::test]
     async fn test_try_merge_active_build() {
         let mut state = ClientBuilder::default().create_state().await;
-        state.client().merge_branches_fn = Box::new(|| Ok(CommitSha("sha1".to_string())));
 
         state.comment("@bors try").await;
         state.comment("@bors try").await;

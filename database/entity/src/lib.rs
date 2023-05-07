@@ -4,3 +4,4 @@ pub mod prelude;
 
 pub mod build;
 pub mod pull_request;
+pub mod workflow;

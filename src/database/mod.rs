@@ -1,11 +1,55 @@
 use axum::async_trait;
-use entity::{build, pull_request};
+use chrono::{DateTime, Utc};
 
-mod sea_orm_client;
+pub use sea_orm_client::SeaORMClient;
 
 use crate::github::PullRequestNumber;
 use crate::github::{CommitSha, GithubRepoName};
-pub use sea_orm_client::SeaORMClient;
+
+mod sea_orm_client;
+
+type PrimaryKey = i32;
+
+#[derive(Debug, PartialEq)]
+pub enum BuildStatus {
+    Pending,
+    Success,
+    Failure,
+}
+
+pub struct BuildModel {
+    pub id: PrimaryKey,
+    pub repository: String,
+    pub branch: String,
+    pub commit_sha: String,
+    pub status: BuildStatus,
+    pub created_at: DateTime<Utc>,
+}
+
+pub struct PullRequestModel {
+    pub id: PrimaryKey,
+    pub repository: String,
+    pub number: PullRequestNumber,
+    pub try_build: Option<BuildModel>,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, PartialEq)]
+pub enum WorkflowStatus {
+    Pending,
+    Success,
+    Failure,
+}
+
+pub struct WorkflowModel {
+    pub id: PrimaryKey,
+    pub build: BuildModel,
+    pub name: String,
+    pub url: String,
+    pub run_id: Option<u64>,
+    pub status: WorkflowStatus,
+    pub created_at: DateTime<Utc>,
+}
 
 #[async_trait]
 pub trait DbClient {
@@ -15,33 +59,57 @@ pub trait DbClient {
         &self,
         repo: &GithubRepoName,
         pr_number: PullRequestNumber,
-    ) -> anyhow::Result<pull_request::Model>;
+    ) -> anyhow::Result<PullRequestModel>;
 
-    /// Creates a new Build row and attaches it as a try build to the given PR.
+    /// Finds a Pull request by a build (either a try or merge one).
+    async fn find_pr_by_build(
+        &self,
+        build: &BuildModel,
+    ) -> anyhow::Result<Option<PullRequestModel>>;
+
+    /// Attaches an existing build to the given PR.
     async fn attach_try_build(
         &self,
-        pr: pull_request::Model,
+        pr: PullRequestModel,
+        branch: String,
         commit_sha: CommitSha,
     ) -> anyhow::Result<()>;
 
-    /// Finds a new Build row by its commit SHA.
-    async fn find_build_by_commit(
+    /// Finds a Build row by its repository, commit SHA and branch.
+    async fn find_build(
         &self,
         repo: &GithubRepoName,
+        branch: String,
         commit_sha: CommitSha,
-    ) -> anyhow::Result<Option<build::Model>>;
+    ) -> anyhow::Result<Option<BuildModel>>;
 
-    // async fn find_try_build_by_commit(
-    //     &self,
-    //     repo: &GithubRepoName,
-    //     commit: &CommitSha,
-    // ) -> anyhow::Result<Option<try_build::Model>>;
-    //
-    // async fn find_try_build_for_pr(
-    //     &self,
-    //     repo: &GithubRepoName,
-    //     pr_number: PullRequestNumber,
-    // ) -> anyhow::Result<Option<try_build::Model>>;
-    //
-    // async fn delete_try_build(&self, model: try_build::Model) -> anyhow::Result<()>;
+    /// Updates the status of this build in the DB.
+    async fn update_build_status(
+        &self,
+        build: &BuildModel,
+        status: BuildStatus,
+    ) -> anyhow::Result<()>;
+
+    /// Creates a new workflow attached to a build.
+    async fn create_workflow(
+        &self,
+        build: &BuildModel,
+        name: String,
+        url: String,
+        run_id: Option<u64>,
+        status: WorkflowStatus,
+    ) -> anyhow::Result<()>;
+
+    /// Updates the status of a workflow with the given run ID in the DB.
+    async fn update_workflow_status(
+        &self,
+        run_id: u64,
+        status: WorkflowStatus,
+    ) -> anyhow::Result<()>;
+
+    /// Get all workflows attached to a build.
+    async fn get_workflows_for_build(
+        &self,
+        build: &BuildModel,
+    ) -> anyhow::Result<Vec<WorkflowModel>>;
 }
