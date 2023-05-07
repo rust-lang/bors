@@ -1,7 +1,7 @@
-use crate::bors::event;
 use derive_builder::Builder;
 
 use crate::bors::event::PullRequestComment;
+use crate::bors::{event, CheckSuite, CheckSuiteStatus};
 use crate::github::{CommitSha, GithubRepoName, GithubUser};
 use crate::tests::state::default_repo_name;
 
@@ -66,6 +66,24 @@ pub fn comment(text: &str) -> CommentBuilder {
     CommentBuilder::default().text(text.to_string())
 }
 
+pub fn suite_success() -> CheckSuite {
+    CheckSuite {
+        status: CheckSuiteStatus::Success,
+    }
+}
+
+pub fn suite_failure() -> CheckSuite {
+    CheckSuite {
+        status: CheckSuiteStatus::Failure,
+    }
+}
+
+pub fn suite_pending() -> CheckSuite {
+    CheckSuite {
+        status: CheckSuiteStatus::Pending,
+    }
+}
+
 #[derive(Builder)]
 #[builder(pattern = "owned")]
 pub struct WorkflowStarted {
@@ -105,6 +123,37 @@ impl WorkflowStartedBuilder {
 
 impl From<WorkflowStartedBuilder> for event::WorkflowStarted {
     fn from(value: WorkflowStartedBuilder) -> Self {
+        value.create()
+    }
+}
+
+#[derive(Builder)]
+#[builder(pattern = "owned")]
+pub struct CheckSuiteCompleted {
+    #[builder(default = "default_repo_name()")]
+    repo: GithubRepoName,
+    branch: String,
+    commit_sha: String,
+}
+
+impl CheckSuiteCompletedBuilder {
+    pub fn create(self) -> event::CheckSuiteCompleted {
+        let crate::tests::event::CheckSuiteCompleted {
+            repo,
+            branch,
+            commit_sha,
+        } = self.build().unwrap();
+
+        event::CheckSuiteCompleted {
+            repository: repo,
+            branch,
+            commit_sha: CommitSha(commit_sha),
+        }
+    }
+}
+
+impl From<CheckSuiteCompletedBuilder> for event::CheckSuiteCompleted {
+    fn from(value: CheckSuiteCompletedBuilder) -> Self {
         value.create()
     }
 }

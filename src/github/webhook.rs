@@ -1,6 +1,6 @@
 use std::fmt::Debug;
 
-use crate::bors::event::{BorsEvent, PullRequestComment, WorkflowStarted};
+use crate::bors::event::{BorsEvent, CheckSuiteCompleted, PullRequestComment, WorkflowStarted};
 use crate::github::server::ServerStateRef;
 use crate::github::{CommitSha, GithubRepoName, GithubUser};
 use axum::body::{Bytes, HttpBody};
@@ -32,6 +32,19 @@ pub struct WorkflowRunInner {
 pub struct WebhookWorkflowRun<'a> {
     action: &'a str,
     workflow_run: WorkflowRunInner,
+    repository: Repository,
+}
+
+#[derive(serde::Deserialize, Debug)]
+pub struct CheckSuiteInner {
+    head_branch: String,
+    head_sha: String,
+}
+
+#[derive(serde::Deserialize, Debug)]
+pub struct WebhookCheckSuite<'a> {
+    action: &'a str,
+    check_suite: CheckSuiteInner,
     repository: Repository,
 }
 
@@ -108,6 +121,19 @@ fn parse_webhook_event(request: Parts, body: &[u8]) -> anyhow::Result<Option<Bor
                     commit_sha: CommitSha(payload.workflow_run.run.head_sha),
                     workflow_run_id: payload.workflow_run.run.id.0,
                     check_suite_id: payload.workflow_run.check_suite_id,
+                })))
+            } else {
+                Ok(None)
+            }
+        }
+        b"check_suite" => {
+            let payload: WebhookCheckSuite = serde_json::from_slice(body)?;
+            let repository_name = parse_repository_name(&payload.repository)?;
+            if payload.action == "completed" {
+                Ok(Some(BorsEvent::CheckSuiteCompleted(CheckSuiteCompleted {
+                    repository: repository_name,
+                    branch: payload.check_suite.head_branch,
+                    commit_sha: CommitSha(payload.check_suite.head_sha),
                 })))
             } else {
                 Ok(None)

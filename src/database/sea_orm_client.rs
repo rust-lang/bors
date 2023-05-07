@@ -64,13 +64,19 @@ impl DbClient for SeaORMClient {
             .await?
             .ok_or_else(|| anyhow!("Cannot find PR row"))?;
 
-        Ok(PullRequestModel {
-            id: pr.id,
-            repository: pr.repository,
-            number: PullRequestNumber(pr.number as u64),
-            try_build: build.map(build_from_db),
-            created_at: datetime_from_db(pr.created_at),
-        })
+        Ok(pr_from_db(pr, build))
+    }
+
+    async fn find_pr_by_build(
+        &self,
+        build: &BuildModel,
+    ) -> anyhow::Result<Option<PullRequestModel>> {
+        let result = pull_request::Entity::find()
+            .filter(pull_request::Column::TryBuild.eq(build.id))
+            .find_also_related(build::Entity)
+            .one(&self.db)
+            .await?;
+        Ok(result.map(|(pr, build)| pr_from_db(pr, build)))
     }
 
     async fn attach_try_build(
@@ -143,7 +149,7 @@ impl DbClient for SeaORMClient {
 
 fn check_suite_status_to_db(status: &CheckSuiteStatus) -> &'static str {
     match status {
-        CheckSuiteStatus::Started => "started",
+        CheckSuiteStatus::Pending => "started",
         CheckSuiteStatus::Success => "success",
         CheckSuiteStatus::Failure => "failure",
     }
@@ -156,6 +162,16 @@ fn build_from_db(model: build::Model) -> BuildModel {
         branch: model.branch,
         commit_sha: model.commit_sha,
         created_at: datetime_from_db(model.created_at),
+    }
+}
+
+fn pr_from_db(pr: pull_request::Model, build: Option<build::Model>) -> PullRequestModel {
+    PullRequestModel {
+        id: pr.id,
+        repository: pr.repository,
+        number: PullRequestNumber(pr.number as u64),
+        try_build: build.map(build_from_db),
+        created_at: datetime_from_db(pr.created_at),
     }
 }
 

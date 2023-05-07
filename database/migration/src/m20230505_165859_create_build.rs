@@ -30,7 +30,7 @@ impl MigrationTrait for Migration {
                     .index(
                         Index::create()
                             .unique()
-                            .name("unique-repo-branch-sha")
+                            .name("unique-build-repo-branch-commit")
                             .col(Build::Repository)
                             .col(Build::Branch)
                             .col(Build::CommitSha),

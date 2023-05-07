@@ -27,7 +27,7 @@ pub struct PullRequestModel {
 }
 
 pub enum CheckSuiteStatus {
-    Started,
+    Pending,
     Success,
     Failure,
 }
@@ -50,6 +50,12 @@ pub trait DbClient {
         repo: &GithubRepoName,
         pr_number: PullRequestNumber,
     ) -> anyhow::Result<PullRequestModel>;
+
+    /// Finds a Pull request by a build (either a try or merge one).
+    async fn find_pr_by_build(
+        &self,
+        build: &BuildModel,
+    ) -> anyhow::Result<Option<PullRequestModel>>;
 
     /// Attaches an existing build to the given PR.
     async fn attach_try_build(

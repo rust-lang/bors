@@ -5,7 +5,7 @@ use crate::bors::command::BorsCommand;
 use crate::bors::event::{BorsEvent, PullRequestComment};
 use crate::bors::handlers::ping::command_ping;
 use crate::bors::handlers::trybuild::command_try_build;
-use crate::bors::handlers::workflow::handle_workflow_started;
+use crate::bors::handlers::workflow::{handle_check_suite_completed, handle_workflow_started};
 use crate::bors::{BorsState, RepositoryClient, RepositoryState};
 use crate::database::DbClient;
 use crate::github::GithubRepoName;
@@ -42,6 +42,15 @@ pub async fn handle_bors_event<Client: RepositoryClient>(
             if let Some((_, db)) = get_repo_state(state, &payload.repository) {
                 if let Err(error) = handle_workflow_started(db, payload).await {
                     log::warn!("Error occured while handling workflow started event: {error:?}");
+                }
+            }
+        }
+        BorsEvent::CheckSuiteCompleted(payload) => {
+            if let Some((repo, db)) = get_repo_state(state, &payload.repository) {
+                if let Err(error) = handle_check_suite_completed(repo, db, payload).await {
+                    log::warn!(
+                        "Error occured while handling check suite completed event: {error:?}"
+                    );
                 }
             }
         }

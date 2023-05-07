@@ -47,7 +47,7 @@ impl MigrationTrait for Migration {
                     .index(
                         Index::create()
                             .unique()
-                            .name("unique-repo-branch-sha")
+                            .name("unique-check-suite-build-check-suite-id")
                             .col(CheckSuite::Build)
                             .col(CheckSuite::CheckSuiteId),
                     )

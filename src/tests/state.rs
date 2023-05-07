@@ -8,8 +8,8 @@ use axum::async_trait;
 use derive_builder::Builder;
 
 use super::permissions::AllPermissions;
-use crate::bors::event::{BorsEvent, PullRequestComment, WorkflowStarted};
-use crate::bors::{handle_bors_event, RepositoryState};
+use crate::bors::event::{BorsEvent, CheckSuiteCompleted, PullRequestComment, WorkflowStarted};
+use crate::bors::{handle_bors_event, CheckSuite, RepositoryState};
 use crate::bors::{BorsState, RepositoryClient};
 use crate::database::{DbClient, SeaORMClient};
 use crate::github::{CommitSha, GithubRepoName, GithubUser, PullRequest};
@@ -51,6 +51,11 @@ impl TestBorsState {
 
     pub async fn workflow_started<T: Into<WorkflowStarted>>(&mut self, payload: T) {
         self.event(BorsEvent::WorkflowStarted(payload.into())).await;
+    }
+
+    pub async fn check_suite_completed<T: Into<CheckSuiteCompleted>>(&mut self, payload: T) {
+        self.event(BorsEvent::CheckSuiteCompleted(payload.into()))
+            .await;
     }
 }
 
@@ -106,6 +111,7 @@ impl ClientBuilder {
                 name,
                 merge_branches_fn: Box::new(|| Ok(CommitSha("foo".to_string()))),
                 get_pr_fn: Box::new(move |pr| Ok(PRBuilder::default().number(pr.0).create())),
+                check_suites: Default::default(),
             },
             permissions_resolver: permission_resolver,
             config: config.unwrap_or_else(|| RepositoryConfig { checks: vec![] }),
@@ -129,11 +135,20 @@ pub struct TestRepositoryClient {
     comments: HashMap<u64, Vec<String>>,
     pub merge_branches_fn: Box<dyn Fn() -> Result<CommitSha, MergeError> + Send>,
     pub get_pr_fn: Box<dyn Fn(PullRequestNumber) -> anyhow::Result<PullRequest> + Send>,
+    pub check_suites: HashMap<String, Vec<CheckSuite>>,
 }
 
 impl TestRepositoryClient {
     pub fn get_comment(&self, pr_number: u64, comment_index: usize) -> &str {
         &self.comments.get(&pr_number).unwrap()[comment_index]
+    }
+    pub fn get_last_comment(&self, pr_number: u64) -> &str {
+        self.comments
+            .get(&pr_number)
+            .unwrap()
+            .last()
+            .unwrap()
+            .as_str()
     }
     pub fn check_comments(&self, pr_number: u64, comments: &[&str]) {
         assert_eq!(
@@ -175,5 +190,12 @@ impl RepositoryClient for TestRepositoryClient {
         _commit_message: &str,
     ) -> Result<CommitSha, MergeError> {
         (self.merge_branches_fn)()
+    }
+
+    async fn get_check_suites_for_commit(
+        &mut self,
+        sha: &CommitSha,
+    ) -> anyhow::Result<Vec<CheckSuite>> {
+        Ok(self.check_suites.get(&sha.0).cloned().unwrap_or_default())
     }
 }

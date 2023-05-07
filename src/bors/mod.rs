@@ -35,6 +35,24 @@ pub trait RepositoryClient {
         head: &CommitSha,
         commit_message: &str,
     ) -> Result<CommitSha, MergeError>;
+
+    /// Find all check suites attached to the given commit.
+    async fn get_check_suites_for_commit(
+        &mut self,
+        sha: &CommitSha,
+    ) -> anyhow::Result<Vec<CheckSuite>>;
+}
+
+#[derive(Clone)]
+pub enum CheckSuiteStatus {
+    Pending,
+    Failure,
+    Success,
+}
+
+#[derive(Clone)]
+pub struct CheckSuite {
+    pub(crate) status: CheckSuiteStatus,
 }
 
 pub trait BorsState<Client: RepositoryClient> {
