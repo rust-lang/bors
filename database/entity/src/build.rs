@@ -15,21 +15,21 @@ pub struct Model {
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
-    #[sea_orm(has_many = "super::check_suite::Entity")]
-    CheckSuite,
     #[sea_orm(has_many = "super::pull_request::Entity")]
     PullRequest,
-}
-
-impl Related<super::check_suite::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::CheckSuite.def()
-    }
+    #[sea_orm(has_many = "super::workflow::Entity")]
+    Workflow,
 }
 
 impl Related<super::pull_request::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::PullRequest.def()
+    }
+}
+
+impl Related<super::workflow::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::Workflow.def()
     }
 }
 

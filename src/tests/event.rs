@@ -93,10 +93,10 @@ pub struct WorkflowStarted {
     name: String,
     branch: String,
     commit_sha: String,
-    #[builder(default = "1")]
-    run_id: u64,
-    #[builder(default = "1")]
-    check_suite_id: u64,
+    #[builder(default = "Some(1)")]
+    run_id: Option<u64>,
+    #[builder(default = "\"https://workflow.com\".to_string()")]
+    url: String,
 }
 
 impl WorkflowStartedBuilder {
@@ -107,7 +107,7 @@ impl WorkflowStartedBuilder {
             branch,
             commit_sha,
             run_id,
-            check_suite_id,
+            url,
         } = self.build().unwrap();
 
         event::WorkflowStarted {
@@ -115,8 +115,8 @@ impl WorkflowStartedBuilder {
             name,
             branch,
             commit_sha: CommitSha(commit_sha),
-            workflow_run_id: run_id,
-            check_suite_id,
+            run_id,
+            url,
         }
     }
 }

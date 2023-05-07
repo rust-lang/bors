@@ -4,7 +4,8 @@ use crate::github::{CommitSha, GithubRepoName, GithubUser};
 pub enum BorsEvent {
     /// A comment was posted on a pull request.
     Comment(PullRequestComment),
-    /// A workflow run on Github Actions has started.
+    /// A workflow run on Github Actions has started, or a check run from an external CI has
+    /// started.
     WorkflowStarted(WorkflowStarted),
     /// A check suite has been completed, either as a workflow run on Github Actions, or as a
     /// workflow from some external CI system.
@@ -27,8 +28,8 @@ pub struct WorkflowStarted {
     pub name: String,
     pub branch: String,
     pub commit_sha: CommitSha,
-    pub workflow_run_id: u64,
-    pub check_suite_id: u64,
+    pub run_id: Option<u64>,
+    pub url: String,
 }
 
 #[derive(Debug)]

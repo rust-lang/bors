@@ -11,35 +11,28 @@ impl MigrationTrait for Migration {
         manager
             .create_table(
                 Table::create()
-                    .table(CheckSuite::Table)
+                    .table(Workflow::Table)
                     .if_not_exists()
                     .col(
-                        ColumnDef::new(CheckSuite::Id)
+                        ColumnDef::new(Workflow::Id)
                             .integer()
                             .not_null()
                             .auto_increment()
                             .primary_key(),
                     )
-                    .col(ColumnDef::new(CheckSuite::Build).integer().not_null())
+                    .col(ColumnDef::new(Workflow::Build).integer().not_null())
                     .foreign_key(
                         ForeignKey::create()
                             .name("fk-workflow-build")
-                            .from(CheckSuite::Table, CheckSuite::Build)
+                            .from(Workflow::Table, Workflow::Build)
                             .to(Build::Table, Build::Id),
                     )
+                    .col(ColumnDef::new(Workflow::Name).string().not_null())
+                    .col(ColumnDef::new(Workflow::RunId).big_unsigned().null())
+                    .col(ColumnDef::new(Workflow::Url).string().not_null())
+                    .col(ColumnDef::new(Workflow::Status).string().not_null())
                     .col(
-                        ColumnDef::new(CheckSuite::CheckSuiteId)
-                            .big_unsigned()
-                            .not_null(),
-                    )
-                    .col(
-                        ColumnDef::new(CheckSuite::WorkflowRunId)
-                            .big_unsigned()
-                            .null(),
-                    )
-                    .col(ColumnDef::new(CheckSuite::Status).string().not_null())
-                    .col(
-                        ColumnDef::new(CheckSuite::CreatedAt)
+                        ColumnDef::new(Workflow::CreatedAt)
                             .timestamp()
                             .default(SimpleExpr::Keyword(Keyword::CurrentTimestamp))
                             .not_null(),
@@ -47,9 +40,9 @@ impl MigrationTrait for Migration {
                     .index(
                         Index::create()
                             .unique()
-                            .name("unique-check-suite-build-check-suite-id")
-                            .col(CheckSuite::Build)
-                            .col(CheckSuite::CheckSuiteId),
+                            .name("unique-workflow-build-url")
+                            .col(Workflow::Build)
+                            .col(Workflow::Url),
                     )
                     .to_owned(),
             )
@@ -58,19 +51,20 @@ impl MigrationTrait for Migration {
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         manager
-            .drop_table(Table::drop().table(CheckSuite::Table).to_owned())
+            .drop_table(Table::drop().table(Workflow::Table).to_owned())
             .await
     }
 }
 
 /// Learn more at https://docs.rs/sea-query#iden
 #[derive(Iden)]
-enum CheckSuite {
+enum Workflow {
     Table,
     Id,
     Build,
-    CheckSuiteId,
-    WorkflowRunId,
+    Name,
+    RunId,
+    Url,
     Status,
     CreatedAt,
 }

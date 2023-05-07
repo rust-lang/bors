@@ -5,10 +5,10 @@ use sea_orm::sea_query::OnConflict;
 use sea_orm::ActiveValue::{Set, Unchanged};
 use sea_orm::{ActiveModelTrait, ColumnTrait, DbErr, EntityTrait, QueryFilter, TransactionTrait};
 
-use entity::{build, check_suite, pull_request};
+use entity::{build, pull_request, workflow};
 use migration::sea_orm::DatabaseConnection;
 
-use crate::database::{BuildModel, CheckSuiteStatus, DbClient, PullRequestModel};
+use crate::database::{BuildModel, DbClient, PullRequestModel, WorkflowStatus};
 use crate::github::PullRequestNumber;
 use crate::github::{CommitSha, GithubRepoName};
 
@@ -127,31 +127,32 @@ impl DbClient for SeaORMClient {
         Ok(build.map(build_from_db))
     }
 
-    async fn create_check_suite(
+    async fn create_workflow(
         &self,
         build: &BuildModel,
-        check_suite_id: u64,
-        workflow_run_id: u64,
-        status: CheckSuiteStatus,
+        name: String,
+        url: String,
+        run_id: Option<u64>,
+        status: WorkflowStatus,
     ) -> anyhow::Result<()> {
-        let model = check_suite::ActiveModel {
+        let model = workflow::ActiveModel {
             build: Set(build.id),
-            check_suite_id: Set(check_suite_id as i64),
-            workflow_run_id: Set(Some(workflow_run_id as i64)),
-            status: Set(check_suite_status_to_db(&status).to_string()),
+            name: Set(name),
+            url: Set(url),
+            run_id: Set(run_id.map(|v| v as i64)),
+            status: Set(workflow_status_to_db(&status).to_string()),
             ..Default::default()
         };
         model.insert(&self.db).await?;
-
         Ok(())
     }
 }
 
-fn check_suite_status_to_db(status: &CheckSuiteStatus) -> &'static str {
+fn workflow_status_to_db(status: &WorkflowStatus) -> &'static str {
     match status {
-        CheckSuiteStatus::Pending => "started",
-        CheckSuiteStatus::Success => "success",
-        CheckSuiteStatus::Failure => "failure",
+        WorkflowStatus::Pending => "pending",
+        WorkflowStatus::Success => "success",
+        WorkflowStatus::Failure => "failure",
     }
 }
 

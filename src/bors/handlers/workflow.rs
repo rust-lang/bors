@@ -1,8 +1,7 @@
 use crate::bors::event::{CheckSuiteCompleted, WorkflowStarted};
 use crate::bors::handlers::is_bors_observed_branch;
 use crate::bors::{self, RepositoryClient, RepositoryState};
-use crate::database;
-use crate::database::DbClient;
+use crate::database::{DbClient, WorkflowStatus};
 
 pub(super) async fn handle_workflow_started(
     db: &mut dyn DbClient,
@@ -17,11 +16,12 @@ pub(super) async fn handle_workflow_started(
         return Ok(());
     };
 
-    db.create_check_suite(
+    db.create_workflow(
         &build,
-        payload.check_suite_id,
-        payload.workflow_run_id,
-        database::CheckSuiteStatus::Pending,
+        payload.name,
+        payload.url,
+        payload.run_id,
+        WorkflowStatus::Pending,
     )
     .await?;
 
@@ -85,9 +85,8 @@ Build commit: {sha} (`{sha}`)"#,
 
 #[cfg(test)]
 mod tests {
+    use entity::workflow;
     use sea_orm::EntityTrait;
-
-    use entity::check_suite;
 
     use crate::bors::handlers::trybuild::TRY_BRANCH_NAME;
     use crate::github::CommitSha;
@@ -108,7 +107,7 @@ mod tests {
                     .commit_sha("unknown-sha-".to_string()),
             )
             .await;
-        assert!(check_suite::Entity::find()
+        assert!(workflow::Entity::find()
             .one(state.db.connection())
             .await
             .unwrap()
@@ -126,17 +125,15 @@ mod tests {
                 WorkflowStartedBuilder::default()
                     .branch(TRY_BRANCH_NAME.to_string())
                     .commit_sha("sha1".to_string())
-                    .run_id(42)
-                    .check_suite_id(102),
+                    .run_id(Some(42)),
             )
             .await;
-        let suite = check_suite::Entity::find()
+        let suite = workflow::Entity::find()
             .one(state.db.connection())
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(suite.workflow_run_id, Some(42));
-        assert_eq!(suite.check_suite_id, 102);
+        assert_eq!(suite.status, "pending");
     }
 
     #[tokio::test]
@@ -149,13 +146,12 @@ mod tests {
             WorkflowStartedBuilder::default()
                 .branch(TRY_BRANCH_NAME.to_string())
                 .commit_sha("sha1".to_string())
-                .run_id(42)
-                .check_suite_id(102)
+                .run_id(Some(42))
         };
         state.workflow_started(event()).await;
         state.workflow_started(event()).await;
         assert_eq!(
-            check_suite::Entity::find()
+            workflow::Entity::find()
                 .all(state.db.connection())
                 .await
                 .unwrap()

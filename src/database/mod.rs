@@ -26,18 +26,19 @@ pub struct PullRequestModel {
     pub created_at: DateTime<Utc>,
 }
 
-pub enum CheckSuiteStatus {
+pub enum WorkflowStatus {
     Pending,
     Success,
     Failure,
 }
 
-pub struct CheckSuiteModel {
+pub struct WorkflowModel {
     pub id: PrimaryKey,
     pub build: BuildModel,
-    pub check_suite_id: u64,
-    pub workflow_run_id: Option<u64>,
-    pub status: CheckSuiteStatus,
+    pub name: String,
+    pub url: String,
+    pub run_id: Option<u64>,
+    pub status: WorkflowStatus,
     pub created_at: DateTime<Utc>,
 }
 
@@ -73,12 +74,13 @@ pub trait DbClient {
         commit_sha: CommitSha,
     ) -> anyhow::Result<Option<BuildModel>>;
 
-    /// Creates a new check suite attached to a build.
-    async fn create_check_suite(
+    /// Creates a new workflow attached to a build.
+    async fn create_workflow(
         &self,
         build: &BuildModel,
-        check_suite_id: u64,
-        workflow_run_id: u64,
-        status: CheckSuiteStatus,
+        name: String,
+        url: String,
+        run_id: Option<u64>,
+        status: WorkflowStatus,
     ) -> anyhow::Result<()>;
 }
