@@ -8,7 +8,9 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, DbErr, EntityTrait, QueryFilter, Tr
 use entity::{build, pull_request, workflow};
 use migration::sea_orm::DatabaseConnection;
 
-use crate::database::{BuildModel, BuildStatus, DbClient, PullRequestModel, WorkflowStatus};
+use crate::database::{
+    BuildModel, BuildStatus, DbClient, PullRequestModel, WorkflowModel, WorkflowStatus,
+};
 use crate::github::PullRequestNumber;
 use crate::github::{CommitSha, GithubRepoName};
 
@@ -178,6 +180,21 @@ impl DbClient for SeaORMClient {
             .await?;
         Ok(())
     }
+
+    async fn get_workflows_for_build(
+        &self,
+        build: &BuildModel,
+    ) -> anyhow::Result<Vec<WorkflowModel>> {
+        let workflows = workflow::Entity::find()
+            .filter(workflow::Column::Build.eq(build.id))
+            .find_also_related(build::Entity)
+            .all(&self.db)
+            .await?;
+        Ok(workflows
+            .into_iter()
+            .map(|(workflow, build)| workflow_from_db(workflow, build))
+            .collect())
+    }
 }
 
 fn build_status_to_db(status: BuildStatus) -> &'static str {
@@ -205,6 +222,32 @@ fn workflow_status_to_db(status: &WorkflowStatus) -> &'static str {
         WorkflowStatus::Pending => "pending",
         WorkflowStatus::Success => "success",
         WorkflowStatus::Failure => "failure",
+    }
+}
+
+fn workflow_status_from_db(status: String) -> WorkflowStatus {
+    match status.as_str() {
+        "pending" => WorkflowStatus::Pending,
+        "success" => WorkflowStatus::Success,
+        "failure" => WorkflowStatus::Failure,
+        _ => {
+            log::warn!("Encountered unknown workflow status in DB: {status}");
+            WorkflowStatus::Pending
+        }
+    }
+}
+
+fn workflow_from_db(workflow: workflow::Model, build: Option<build::Model>) -> WorkflowModel {
+    WorkflowModel {
+        id: workflow.id,
+        build: build
+            .map(build_from_db)
+            .expect("Workflow without attached build"),
+        name: workflow.name,
+        url: workflow.url,
+        run_id: workflow.run_id.map(|v| v as u64),
+        status: workflow_status_from_db(workflow.status),
+        created_at: datetime_from_db(workflow.created_at),
     }
 }
 

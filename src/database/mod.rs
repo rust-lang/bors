@@ -34,7 +34,7 @@ pub struct PullRequestModel {
     pub created_at: DateTime<Utc>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum WorkflowStatus {
     Pending,
     Success,
@@ -106,4 +106,10 @@ pub trait DbClient {
         run_id: u64,
         status: WorkflowStatus,
     ) -> anyhow::Result<()>;
+
+    /// Get all workflows attached to a build.
+    async fn get_workflows_for_build(
+        &self,
+        build: &BuildModel,
+    ) -> anyhow::Result<Vec<WorkflowModel>>;
 }

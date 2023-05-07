@@ -8,14 +8,19 @@ use axum::async_trait;
 use derive_builder::Builder;
 
 use super::permissions::AllPermissions;
-use crate::bors::event::{BorsEvent, CheckSuiteCompleted, PullRequestComment, WorkflowStarted};
+use crate::bors::event::{
+    BorsEvent, CheckSuiteCompleted, PullRequestComment, WorkflowCompleted, WorkflowStarted,
+};
 use crate::bors::{handle_bors_event, CheckSuite, RepositoryState};
 use crate::bors::{BorsState, RepositoryClient};
-use crate::database::{DbClient, SeaORMClient};
+use crate::database::{DbClient, SeaORMClient, WorkflowStatus};
 use crate::github::{CommitSha, GithubRepoName, GithubUser, PullRequest};
 use crate::github::{MergeError, PullRequestNumber};
 use crate::permissions::PermissionResolver;
 use crate::tests::database::create_test_db;
+use crate::tests::event::{
+    CheckSuiteCompletedBuilder, WorkflowCompletedBuilder, WorkflowStartedBuilder,
+};
 use crate::tests::github::PRBuilder;
 
 pub fn test_bot_user() -> GithubUser {
@@ -53,9 +58,45 @@ impl TestBorsState {
         self.event(BorsEvent::WorkflowStarted(payload.into())).await;
     }
 
+    pub async fn workflow_completed<T: Into<WorkflowCompleted>>(&mut self, payload: T) {
+        self.event(BorsEvent::WorkflowCompleted(payload.into()))
+            .await;
+    }
+
     pub async fn check_suite_completed<T: Into<CheckSuiteCompleted>>(&mut self, payload: T) {
         self.event(BorsEvent::CheckSuiteCompleted(payload.into()))
             .await;
+    }
+
+    pub(crate) async fn perform_workflow_events(
+        &mut self,
+        run_id: u64,
+        branch: &str,
+        commit: &str,
+        status: WorkflowStatus,
+    ) {
+        let name = format!("workflow-{run_id}");
+        self.workflow_started(
+            WorkflowStartedBuilder::default()
+                .branch(branch.to_string())
+                .commit_sha(commit.to_string())
+                .name(name.to_string())
+                .url(format!("https://{name}.com"))
+                .run_id(Some(run_id)),
+        )
+        .await;
+        self.workflow_completed(
+            WorkflowCompletedBuilder::default()
+                .run_id(run_id)
+                .status(status),
+        )
+        .await;
+        self.check_suite_completed(
+            CheckSuiteCompletedBuilder::default()
+                .branch(branch.to_string())
+                .commit_sha(commit.to_string()),
+        )
+        .await;
     }
 }
 
@@ -168,6 +209,10 @@ impl TestRepositoryClient {
                 .len(),
             count
         );
+    }
+
+    pub fn set_checks(&mut self, commit: &str, checks: Vec<CheckSuite>) {
+        self.check_suites.insert(commit.to_string(), checks);
     }
 }
 

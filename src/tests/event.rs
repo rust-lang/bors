@@ -2,6 +2,7 @@ use derive_builder::Builder;
 
 use crate::bors::event::PullRequestComment;
 use crate::bors::{event, CheckSuite, CheckSuiteStatus};
+use crate::database::WorkflowStatus;
 use crate::github::{CommitSha, GithubRepoName, GithubUser};
 use crate::tests::state::default_repo_name;
 
@@ -123,6 +124,38 @@ impl WorkflowStartedBuilder {
 
 impl From<WorkflowStartedBuilder> for event::WorkflowStarted {
     fn from(value: WorkflowStartedBuilder) -> Self {
+        value.create()
+    }
+}
+
+#[derive(Builder)]
+#[builder(pattern = "owned")]
+pub struct WorkflowCompleted {
+    #[builder(default = "default_repo_name()")]
+    repo: GithubRepoName,
+    #[builder(default = "1")]
+    run_id: u64,
+    status: WorkflowStatus,
+}
+
+impl WorkflowCompletedBuilder {
+    pub fn create(self) -> event::WorkflowCompleted {
+        let crate::tests::event::WorkflowCompleted {
+            repo,
+            run_id,
+            status,
+        } = self.build().unwrap();
+
+        event::WorkflowCompleted {
+            repository: repo,
+            run_id,
+            status,
+        }
+    }
+}
+
+impl From<WorkflowCompletedBuilder> for event::WorkflowCompleted {
+    fn from(value: WorkflowCompletedBuilder) -> Self {
         value.create()
     }
 }
