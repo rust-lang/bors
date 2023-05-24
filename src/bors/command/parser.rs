@@ -106,7 +106,6 @@ fn parse_list<'a>(
     mut tokenizer: Tokenizer<'a>,
 ) -> ParseResult<'a> {
     for needle in needles {
-        eprint!("{needle}, {:?}", tokenizer.peek());
         match tokenizer.peek() {
             Some(word) if word == *needle => {
                 tokenizer.next();

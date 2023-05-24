@@ -216,7 +216,7 @@ fn workflow_status_from_db(status: String) -> WorkflowStatus {
         "success" => WorkflowStatus::Success,
         "failure" => WorkflowStatus::Failure,
         _ => {
-            log::warn!("Encountered unknown workflow status in DB: {status}");
+            tracing::warn!("Encountered unknown workflow status in DB: {status}");
             WorkflowStatus::Pending
         }
     }
@@ -234,7 +234,7 @@ fn workflow_type_from_db(workflow_type: String) -> WorkflowType {
         "github" => WorkflowType::Github,
         "external" => WorkflowType::External,
         _ => {
-            log::warn!("Encountered unknown workflow type in DB: {workflow_type}");
+            tracing::warn!("Encountered unknown workflow type in DB: {workflow_type}");
             WorkflowType::External
         }
     }
@@ -271,7 +271,7 @@ fn build_status_from_db(status: String) -> BuildStatus {
         "failure" => BuildStatus::Failure,
         "cancelled" => BuildStatus::Cancelled,
         _ => {
-            log::warn!("Encountered unknown build status in DB: {status}");
+            tracing::warn!("Encountered unknown build status in DB: {status}");
             BuildStatus::Pending
         }
     }

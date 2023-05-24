@@ -41,7 +41,7 @@ pub struct WorkflowCompleted {
     pub repository: GithubRepoName,
     pub branch: String,
     pub commit_sha: CommitSha,
-    pub run_id: u64,
+    pub run_id: RunId,
     pub status: WorkflowStatus,
 }
 

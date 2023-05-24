@@ -3,12 +3,14 @@ use crate::bors::handle_bors_event;
 use crate::github::api::GithubAppState;
 use crate::github::webhook::GitHubWebhook;
 use crate::github::webhook::WebhookSecret;
+use crate::utils::logging::LogError;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use std::future::Future;
 use std::sync::Arc;
 use tokio::sync::mpsc;
+use tracing::Instrument;
 
 /// Shared server state for all axum handlers.
 pub struct ServerState {
@@ -39,7 +41,7 @@ pub async fn github_webhook_handler(
     match state.webhook_sender.send(event).await {
         Ok(_) => (StatusCode::OK, ""),
         Err(err) => {
-            log::error!("Could not handle webhook event: {err:?}");
+            tracing::error!("Could not send webhook event: {err:?}");
             (StatusCode::INTERNAL_SERVER_ERROR, "")
         }
     }
@@ -54,9 +56,14 @@ pub fn create_bors_process(mut state: GithubAppState) -> (WebhookSender, impl Fu
 
     let service = async move {
         while let Some(event) = rx.recv().await {
-            log::trace!("Received event: {event:#?}");
-            if let Err(error) = handle_bors_event(event, &mut state).await {
-                log::error!("Error while handling event: {error:?}");
+            tracing::trace!("Received event: {event:#?}");
+
+            let span = tracing::info_span!("Event");
+            if let Err(error) = handle_bors_event(event, &mut state)
+                .instrument(span.clone())
+                .await
+            {
+                span.log_error(error);
             }
         }
     };

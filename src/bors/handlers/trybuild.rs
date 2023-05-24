@@ -25,12 +25,6 @@ pub(super) async fn command_try_build<Client: RepositoryClient>(
     pr: &PullRequest,
     author: &GithubUser,
 ) -> anyhow::Result<()> {
-    log::debug!(
-        "Executing try on {}/{}",
-        repo.client.repository(),
-        pr.number
-    );
-
     if !check_try_permissions(repo, pr, author).await? {
         return Ok(());
     }
@@ -41,6 +35,7 @@ pub(super) async fn command_try_build<Client: RepositoryClient>(
 
     if let Some(ref build) = pr_model.try_build {
         if build.status == BuildStatus::Pending {
+            tracing::warn!("Try build already in progress");
             repo.client
                 .post_comment(
                     pr.number.into(),
@@ -65,6 +60,7 @@ pub(super) async fn command_try_build<Client: RepositoryClient>(
         .await
     {
         Ok(merge_sha) => {
+            tracing::debug!("Merge successful, SHA: {merge_sha}");
             repo.client
                 .set_branch_to_sha(TRY_BRANCH_NAME, &merge_sha)
                 .await
@@ -72,6 +68,7 @@ pub(super) async fn command_try_build<Client: RepositoryClient>(
 
             db.attach_try_build(pr_model, TRY_BRANCH_NAME.to_string(), merge_sha.clone())
                 .await?;
+            tracing::info!("Try build started");
 
             repo.client
                 .post_comment(
@@ -84,6 +81,7 @@ pub(super) async fn command_try_build<Client: RepositoryClient>(
                 .await?;
         }
         Err(MergeError::Conflict) => {
+            tracing::warn!("Merge conflict");
             repo.client
                 .post_comment(pr.number.into(), &merge_conflict_message(&pr.head.name))
                 .await?;
@@ -100,12 +98,6 @@ pub(super) async fn command_try_cancel<Client: RepositoryClient>(
     pr: &PullRequest,
     author: &GithubUser,
 ) -> anyhow::Result<()> {
-    log::debug!(
-        "Executing try cancel on {}/{}",
-        repo.client.repository(),
-        pr.number
-    );
-
     if !check_try_permissions(repo, pr, author).await? {
         return Ok(());
     }
@@ -116,6 +108,7 @@ pub(super) async fn command_try_cancel<Client: RepositoryClient>(
         .await?;
 
     let Some(build) = get_pending_build(pr) else {
+        tracing::warn!("No build found");
         repo.client.post_comment(pr_number, ":exclamation: There is currently no try build in progress.").await?;
         return Ok(());
     };
@@ -128,16 +121,18 @@ pub(super) async fn command_try_cancel<Client: RepositoryClient>(
         .map(|w| w.run_id)
         .collect::<Vec<_>>();
 
+    tracing::info!("Cancelling workflows {:?}", pending_workflows);
     if let Err(error) = repo.client.cancel_workflows(pending_workflows).await {
-        log::error!(
-            "Could not cancel workflows for {}/{}: {error:?}",
-            repo.repository,
+        tracing::error!(
+            "Could not cancel workflows for SHA {}: {error:?}",
             build.commit_sha
         );
     }
 
     db.update_build_status(&build, BuildStatus::Cancelled)
         .await?;
+
+    tracing::info!("Try build cancelled");
 
     repo.client
         .post_comment(pr_number, "Try build cancelled.")
@@ -208,6 +203,7 @@ async fn check_try_permissions<Client: RepositoryClient>(
         .has_permission(&author.username, PermissionType::Try)
         .await
     {
+        tracing::info!("Permission denied");
         repo.client
             .post_comment(
                 pr.number.into(),

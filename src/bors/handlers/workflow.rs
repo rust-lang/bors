@@ -11,26 +11,26 @@ pub(super) async fn handle_workflow_started(
         return Ok(());
     }
 
+    tracing::info!(
+        "Handling workflow started (name={}, url={}, branch={}, commit={})",
+        payload.name,
+        payload.url,
+        payload.branch,
+        payload.commit_sha
+    );
+
     let Some(build) = db.find_build(&payload.repository, payload.branch.clone(), payload.commit_sha.clone()).await? else {
-        log::warn!("Build for workflow {}/{}/{} not found", payload.repository, payload.branch, payload.commit_sha);
+        tracing::warn!("Build for workflow not found");
         return Ok(());
     };
 
     // This can happen e.g. if the build is cancelled quickly
     if build.status != BuildStatus::Pending {
-        log::warn!(
-            "Received workflow started for an already completed build ({})",
-            payload.repository
-        );
+        tracing::warn!("Received workflow started for an already completed build");
         return Ok(());
     }
 
-    log::info!(
-        "Storing workflow started into DB (name={}, url={}, run_id={:?})",
-        payload.name,
-        payload.url,
-        payload.run_id
-    );
+    tracing::info!("Storing workflow started into DB");
     db.create_workflow(
         &build,
         payload.name,
@@ -49,12 +49,8 @@ pub(super) async fn handle_workflow_completed<Client: RepositoryClient>(
     db: &mut dyn DbClient,
     payload: WorkflowCompleted,
 ) -> anyhow::Result<()> {
-    log::info!(
-        "Updating status of workflow with run ID {} to {:?}",
-        payload.run_id,
-        payload.status
-    );
-    db.update_workflow_status(payload.run_id, payload.status)
+    tracing::info!("Updating status of workflow to {:?}", payload.status);
+    db.update_workflow_status(*payload.run_id, payload.status)
         .await?;
 
     // Try to complete the build
@@ -71,6 +67,11 @@ pub(super) async fn handle_check_suite_completed<Client: RepositoryClient>(
     db: &mut dyn DbClient,
     payload: CheckSuiteCompleted,
 ) -> anyhow::Result<()> {
+    tracing::info!(
+        "Received check suite completed (branch={}, commit={})",
+        payload.branch,
+        payload.commit_sha
+    );
     try_complete_build(repo, db, payload).await
 }
 
@@ -90,7 +91,7 @@ async fn try_complete_build<Client: RepositoryClient>(
             payload.commit_sha.clone(),
         )
         .await? else {
-        log::warn!("Received check suite finished for an unknown build: {}/{}", payload.repository, payload.commit_sha);
+        tracing::warn!("Received check suite finished for an unknown build: {}", payload.commit_sha);
         return Ok(());
     };
 
@@ -100,7 +101,7 @@ async fn try_complete_build<Client: RepositoryClient>(
     }
 
     let Some(pr) = db.find_pr_by_build(&build).await? else {
-        log::warn!("Cannot find PR for build {}", build.commit_sha);
+        tracing::warn!("Cannot find PR for build {}", build.commit_sha);
         return Ok(());
     };
 
@@ -131,6 +132,7 @@ async fn try_complete_build<Client: RepositoryClient>(
         .iter()
         .any(|w| w.status == WorkflowStatus::Pending)
     {
+        tracing::warn!("All checks are finished, but some workflows are still pending");
         return Ok(());
     }
 
@@ -152,6 +154,8 @@ async fn try_complete_build<Client: RepositoryClient>(
         .join("\n");
 
     let message = if !has_failure {
+        tracing::info!("Workflow succeeded");
+
         let sha = &payload.commit_sha;
         format!(
             r#":sunny: Try build successful
@@ -159,6 +163,7 @@ async fn try_complete_build<Client: RepositoryClient>(
 Build commit: {sha} (`{sha}`)"#
         )
     } else {
+        tracing::info!("Workflow failed");
         format!(
             r#":broken_heart: Test failed
 {workflow_list}"#

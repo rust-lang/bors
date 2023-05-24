@@ -92,7 +92,7 @@ pub async fn load_repositories(client: &Octocrab) -> anyhow::Result<RepositoryMa
                                         repo.full_name
                                     )
                                 })?;
-                        log::info!("Loaded repository {}", repo_state.repository);
+                        tracing::info!("Loaded repository {}", repo_state.repository);
 
                         if let Some(existing) =
                             repositories.insert(repo_state.repository.clone(), repo_state)
@@ -105,7 +105,7 @@ pub async fn load_repositories(client: &Octocrab) -> anyhow::Result<RepositoryMa
                     }
                 }
                 Err(error) => {
-                    log::error!(
+                    tracing::error!(
                         "Could not load repositories of installation {}: {error}",
                         installation.id
                     );
@@ -125,11 +125,11 @@ async fn create_repo_state(
     };
 
     let name = GithubRepoName::new(&owner.login, &repo.name);
-    log::info!("Found repository {name}");
+    tracing::info!("Found repository {name}");
 
     let config = match load_repository_config(&repo_client, &name).await {
         Ok(config) => {
-            log::debug!("Loaded repository config for {name}: {config:#?}");
+            tracing::debug!("Loaded repository config for {name}: {config:#?}");
             config
         }
         Err(error) => {
