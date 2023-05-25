@@ -16,8 +16,6 @@ sea-orm = { version = "^0" }
 clap = { version = "4.0", features = ["env", "derive"] }
 
 # Logging
-log = "0.4"
-env_logger = "0.10"
 tracing = "0.1"
 tracing-subscriber = "0.3"
 

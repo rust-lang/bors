@@ -5,7 +5,8 @@ use anyhow::Context;
 use axum::routing::post;
 use axum::Router;
 use clap::Parser;
-use sea_orm::Database;
+use sea_orm::{ConnectOptions, Database};
+use tokio::task::LocalSet;
 use tower::limit::ConcurrencyLimitLayer;
 
 use bors::database::SeaORMClient;
@@ -73,24 +74,32 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
     let state = ServerState::new(tx, WebhookSecret::new(opts.webhook_secret));
     let server_process = server(state);
 
-    runtime.block_on(async move {
+    let fut = async move {
         tokio::select! {
             () = gh_process => {
-                log::warn!("Github webhook process has ended");
+                tracing::warn!("Github webhook process has ended");
                 Ok(())
             },
             res = server_process => {
-                log::warn!("Server has ended: {res:?}");
+                tracing::warn!("Server has ended: {res:?}");
                 res
             }
         }
-    })?;
+    };
+
+    runtime.block_on(async move {
+        let set = LocalSet::new();
+        set.run_until(fut).await.unwrap();
+    });
 
     Ok(())
 }
 
 fn main() {
-    env_logger::init();
+    tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::INFO)
+        .with_target(false)
+        .init();
 
     let opts = Opts::parse();
     if let Err(error) = try_main(opts) {

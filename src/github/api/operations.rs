@@ -67,7 +67,7 @@ pub async fn merge_branches(
             let status = response.status();
             let text = response.text().await.unwrap_or_default();
 
-            log::trace!(
+            tracing::trace!(
                 "Response from merging `{head_sha}` into `{base_ref}` in `{}`: {status} ({text})",
                 repo.name(),
             );
@@ -89,7 +89,7 @@ pub async fn merge_branches(
             }
         }
         Err(error) => {
-            log::debug!(
+            tracing::debug!(
                 "Merging `{head_sha}` into `{base_ref}` in `{}` failed: {error:?}",
                 repo.name()
             );
@@ -170,7 +170,7 @@ async fn update_branch(
         .await?;
 
     let status = res.status();
-    log::trace!(
+    tracing::trace!(
         "Updating branch response: status={}, text={:?}",
         status,
         res.text().await

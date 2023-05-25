@@ -162,7 +162,7 @@ impl WorkflowCompletedBuilder {
             repository: repo,
             branch,
             commit_sha: CommitSha(commit_sha),
-            run_id,
+            run_id: RunId(run_id),
             status,
         }
     }

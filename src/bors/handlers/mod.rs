@@ -1,4 +1,5 @@
 use anyhow::Context;
+use tracing::Instrument;
 
 use crate::bors::command::parser::{parse_commands, CommandParseError};
 use crate::bors::command::BorsCommand;
@@ -11,6 +12,7 @@ use crate::bors::handlers::workflow::{
 use crate::bors::{BorsState, RepositoryClient, RepositoryState};
 use crate::database::DbClient;
 use crate::github::GithubRepoName;
+use crate::utils::logging::LogError;
 
 mod ping;
 mod trybuild;
@@ -25,42 +27,71 @@ pub async fn handle_bors_event<Client: RepositoryClient>(
         BorsEvent::Comment(comment) => {
             // We want to ignore comments made by this bot
             if state.is_comment_internal(&comment) {
-                log::trace!("Ignoring comment {comment:?} because it was authored by this bot");
+                tracing::trace!("Ignoring comment {comment:?} because it was authored by this bot");
                 return Ok(());
             }
 
             if let Some((repo, db)) = get_repo_state(state, &comment.repository) {
-                if let Err(error) = handle_comment(repo, db, comment).await {
-                    log::warn!("Error occured while handling comment: {error:?}");
+                let span = tracing::info_span!(
+                    "Comment",
+                    pr = format!("{}#{}", comment.repository, comment.pr_number),
+                    author = comment.author.username
+                );
+                if let Err(error) = handle_comment(repo, db, comment)
+                    .instrument(span.clone())
+                    .await
+                {
+                    span.log_error(error);
                 }
             }
         }
         BorsEvent::InstallationsChanged => {
-            log::info!("Reloading installation repositories");
-            if let Err(error) = state.reload_repositories().await {
-                log::error!("Could not reload installation repositories: {error:?}");
+            let span = tracing::info_span!("Repository reload");
+            if let Err(error) = state.reload_repositories().instrument(span.clone()).await {
+                span.log_error(error);
             }
         }
         BorsEvent::WorkflowStarted(payload) => {
             if let Some((_, db)) = get_repo_state(state, &payload.repository) {
-                if let Err(error) = handle_workflow_started(db, payload).await {
-                    log::warn!("Error occured while handling workflow started event: {error:?}");
+                let span = tracing::info_span!(
+                    "Workflow started",
+                    repo = payload.repository.to_string(),
+                    id = payload.run_id.into_inner()
+                );
+                if let Err(error) = handle_workflow_started(db, payload)
+                    .instrument(span.clone())
+                    .await
+                {
+                    span.log_error(error);
                 }
             }
         }
         BorsEvent::WorkflowCompleted(payload) => {
             if let Some((repo, db)) = get_repo_state(state, &payload.repository) {
-                if let Err(error) = handle_workflow_completed(repo, db, payload).await {
-                    log::warn!("Error occured while handling workflow completed event: {error:?}");
+                let span = tracing::info_span!(
+                    "Workflow completed",
+                    repo = payload.repository.to_string(),
+                    id = payload.run_id.into_inner()
+                );
+                if let Err(error) = handle_workflow_completed(repo, db, payload)
+                    .instrument(span.clone())
+                    .await
+                {
+                    span.log_error(error);
                 }
             }
         }
         BorsEvent::CheckSuiteCompleted(payload) => {
             if let Some((repo, db)) = get_repo_state(state, &payload.repository) {
-                if let Err(error) = handle_check_suite_completed(repo, db, payload).await {
-                    log::warn!(
-                        "Error occured while handling check suite completed event: {error:?}"
-                    );
+                let span = tracing::info_span!(
+                    "Check suite completed",
+                    repo = payload.repository.to_string(),
+                );
+                if let Err(error) = handle_check_suite_completed(repo, db, payload)
+                    .instrument(span.clone())
+                    .await
+                {
+                    span.log_error(error);
                 }
             }
         }
@@ -75,7 +106,7 @@ fn get_repo_state<'a, Client: RepositoryClient>(
     match state.get_repo_state_mut(repo) {
         Some(result) => Some(result),
         None => {
-            log::warn!("Repository {} not found", repo);
+            tracing::warn!("Repository {} not found", repo);
             None
         }
     }
@@ -90,24 +121,28 @@ async fn handle_comment<Client: RepositoryClient>(
     let commands = parse_commands(&comment.text);
     let pull_request = repo.client.get_pull_request(pr_number.into()).await?;
 
-    log::info!(
-        "Received comment at https://github.com/{}/{}/issues/{}, commands: {:?}",
-        repo.repository.owner(),
-        repo.repository.name(),
-        pr_number,
-        commands
-    );
+    tracing::debug!("Commands: {:?}", comment.author.username);
+    tracing::trace!("Text: {}", comment.text);
 
     for command in commands {
         match command {
             Ok(command) => {
                 let result = match command {
-                    BorsCommand::Ping => command_ping(repo, &pull_request).await,
+                    BorsCommand::Ping => {
+                        let span = tracing::info_span!("Ping");
+                        command_ping(repo, &pull_request).instrument(span).await
+                    }
                     BorsCommand::Try => {
-                        command_try_build(repo, database, &pull_request, &comment.author).await
+                        let span = tracing::info_span!("Try");
+                        command_try_build(repo, database, &pull_request, &comment.author)
+                            .instrument(span)
+                            .await
                     }
                     BorsCommand::TryCancel => {
-                        command_try_cancel(repo, database, &pull_request, &comment.author).await
+                        let span = tracing::info_span!("Cancel try");
+                        command_try_cancel(repo, database, &pull_request, &comment.author)
+                            .instrument(span)
+                            .await
                     }
                 };
                 if result.is_err() {
@@ -121,6 +156,8 @@ async fn handle_comment<Client: RepositoryClient>(
                         format!(r#"Unknown command "{command}"."#)
                     }
                 };
+
+                tracing::warn!("{error_msg}");
 
                 repo.client
                     .post_comment(pull_request.number.into(), &error_msg)

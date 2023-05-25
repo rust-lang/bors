@@ -101,25 +101,25 @@ where
 
         // Eagerly load body
         let body: Bytes = hyper::body::to_bytes(body).await.map_err(|error| {
-            log::error!("Parsing webhook body failed: {error:?}");
+            tracing::error!("Parsing webhook body failed: {error:?}");
             StatusCode::BAD_REQUEST
         })?;
 
         // Verify that the request is valid
         if !verify_gh_signature(&parts.headers, &body, state.get_webhook_secret()) {
-            log::error!("Webhook request failed, could not authenticate webhook");
+            tracing::error!("Webhook request failed, could not authenticate webhook");
             return Err(StatusCode::BAD_REQUEST);
         }
 
         // Parse webhook content
         match parse_webhook_event(parts, &body) {
             Ok(Some(event)) => {
-                log::trace!("Received webhook event {event:?}");
+                tracing::trace!("Received webhook event {event:?}");
                 Ok(GitHubWebhook(event))
             }
             Ok(None) => Err(StatusCode::OK),
             Err(error) => {
-                log::error!("Cannot parse webhook event: {error:?}");
+                tracing::error!("Cannot parse webhook event: {error:?}");
                 Err(StatusCode::BAD_REQUEST)
             }
         }
@@ -158,7 +158,7 @@ fn parse_webhook_event(request: Parts, body: &[u8]) -> anyhow::Result<Option<Bor
                     repository: repository_name,
                     branch: payload.workflow_run.head_branch,
                     commit_sha: CommitSha(payload.workflow_run.head_sha),
-                    run_id: payload.workflow_run.id.0,
+                    run_id: RunId(payload.workflow_run.id.0),
                     status: match payload.workflow_run.conclusion.unwrap_or_default().as_str() {
                         "success" => WorkflowStatus::Success,
                         _ => WorkflowStatus::Failure,
@@ -206,7 +206,7 @@ fn parse_webhook_event(request: Parts, body: &[u8]) -> anyhow::Result<Option<Bor
             }
         }
         _ => {
-            log::debug!("Ignoring unknown event type {:?}", event_type.to_str());
+            tracing::debug!("Ignoring unknown event type {:?}", event_type.to_str());
             Ok(None)
         }
     }
@@ -218,7 +218,7 @@ fn parse_pr_comment(
 ) -> Option<PullRequestComment> {
     // We only care about pull request comments
     if payload.issue.pull_request.is_none() {
-        log::debug!("Ignoring event {payload:?} because it does not belong to a pull request");
+        tracing::debug!("Ignoring event {payload:?} because it does not belong to a pull request");
         return None;
     }
 
@@ -386,7 +386,9 @@ mod tests {
                         commit_sha: CommitSha(
                             "c9abcadf285659684c0975cead8bf982fa84e123",
                         ),
-                        run_id: 4900979072,
+                        run_id: RunId(
+                            4900979072,
+                        ),
                         status: Failure,
                     },
                 ),

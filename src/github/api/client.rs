@@ -119,7 +119,7 @@ impl RepositoryClient for GithubRepositoryClient {
                             CheckSuiteStatus::Failure
                         }
                         _ => {
-                            log::warn!(
+                            tracing::warn!(
                                 "Received unknown check suite status for {}/{}: {status}",
                                 self.repo_name,
                                 sha
