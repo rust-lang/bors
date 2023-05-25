@@ -51,7 +51,6 @@ impl TeamApiPermissionResolver {
 #[async_trait]
 impl PermissionResolver for TeamApiPermissionResolver {
     async fn has_permission(&self, username: &str, permission: PermissionType) -> bool {
-        return true;
         if self.permissions.lock().await.is_stale() {
             self.reload_permissions().await;
         }
@@ -99,7 +98,7 @@ impl CachedUserPermissions {
 }
 
 async fn load_permissions(repo: &GithubRepoName) -> anyhow::Result<UserPermissions> {
-    log::info!("Reloading permissions for repository {repo}");
+    tracing::info!("Reloading permissions for repository {repo}");
 
     let review_users = load_users_from_team_api(repo.name(), PermissionType::Review)
         .await
