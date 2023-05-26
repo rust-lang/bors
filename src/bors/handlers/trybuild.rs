@@ -113,16 +113,7 @@ pub(super) async fn command_try_cancel<Client: RepositoryClient>(
         return Ok(());
     };
 
-    let pending_workflows = db
-        .get_workflows_for_build(&build)
-        .await?
-        .into_iter()
-        .filter(|w| w.status == WorkflowStatus::Pending && w.workflow_type == WorkflowType::Github)
-        .map(|w| w.run_id)
-        .collect::<Vec<_>>();
-
-    tracing::info!("Cancelling workflows {:?}", pending_workflows);
-    if let Err(error) = repo.client.cancel_workflows(pending_workflows).await {
+    if let Err(error) = cancel_build_workflows(repo, db, &build).await {
         tracing::error!(
             "Could not cancel workflows for SHA {}: {error:?}",
             build.commit_sha
@@ -139,6 +130,23 @@ pub(super) async fn command_try_cancel<Client: RepositoryClient>(
         .await?;
 
     Ok(())
+}
+
+pub async fn cancel_build_workflows<Client: RepositoryClient>(
+    repo: &mut RepositoryState<Client>,
+    db: &dyn DbClient,
+    build: &BuildModel,
+) -> anyhow::Result<()> {
+    let pending_workflows = db
+        .get_workflows_for_build(build)
+        .await?
+        .into_iter()
+        .filter(|w| w.status == WorkflowStatus::Pending && w.workflow_type == WorkflowType::Github)
+        .map(|w| w.run_id)
+        .collect::<Vec<_>>();
+
+    tracing::info!("Cancelling workflows {:?}", pending_workflows);
+    repo.client.cancel_workflows(pending_workflows).await
 }
 
 fn get_pending_build(pr: PullRequestModel) -> Option<BuildModel> {

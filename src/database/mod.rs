@@ -28,6 +28,8 @@ pub enum BuildStatus {
     Failure,
     /// The build has been manually cancelled by a user.
     Cancelled,
+    /// The build ran for too long and was timeouted by the bot.
+    Timeouted,
 }
 
 /// Represents a single (merged) commit.
@@ -105,13 +107,16 @@ pub trait DbClient {
         commit_sha: CommitSha,
     ) -> anyhow::Result<()>;
 
-    /// Finds a Build row by its repository, commit SHA and branch.
+    /// Finds a build row by its repository, commit SHA and branch.
     async fn find_build(
         &self,
         repo: &GithubRepoName,
         branch: String,
         commit_sha: CommitSha,
     ) -> anyhow::Result<Option<BuildModel>>;
+
+    /// Returns all builds that have not been completed yet.
+    async fn get_running_builds(&self, repo: &GithubRepoName) -> anyhow::Result<Vec<BuildModel>>;
 
     /// Updates the status of this build in the DB.
     async fn update_build_status(

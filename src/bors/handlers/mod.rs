@@ -5,6 +5,7 @@ use crate::bors::command::parser::{parse_commands, CommandParseError};
 use crate::bors::command::BorsCommand;
 use crate::bors::event::{BorsEvent, PullRequestComment};
 use crate::bors::handlers::ping::command_ping;
+use crate::bors::handlers::refresh::refresh_repository;
 use crate::bors::handlers::trybuild::{command_try_build, command_try_cancel, TRY_BRANCH_NAME};
 use crate::bors::handlers::workflow::{
     handle_check_suite_completed, handle_workflow_completed, handle_workflow_started,
@@ -15,6 +16,7 @@ use crate::github::GithubRepoName;
 use crate::utils::logging::LogError;
 
 mod ping;
+mod refresh;
 mod trybuild;
 mod workflow;
 
@@ -94,6 +96,16 @@ pub async fn handle_bors_event<Client: RepositoryClient>(
                     span.log_error(error);
                 }
             }
+        }
+        BorsEvent::Refresh => {
+            let span = tracing::info_span!("Refresh");
+            let (repos, db) = state.get_all_repos_mut();
+            futures::future::join_all(repos.into_iter().map(|repo| async {
+                let subspan = tracing::info_span!("Repo", repo = repo.repository.to_string());
+                refresh_repository(repo, db).instrument(subspan).await
+            }))
+            .instrument(span)
+            .await;
         }
     }
     Ok(())

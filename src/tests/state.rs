@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::pin::Pin;
 use std::string::ToString;
+use std::time::Duration;
 
 use crate::config::RepositoryConfig;
 use axum::async_trait;
@@ -73,7 +74,11 @@ impl TestBorsState {
             .await;
     }
 
-    pub(crate) async fn perform_workflow_events(
+    pub async fn refresh(&mut self) {
+        self.event(BorsEvent::Refresh).await;
+    }
+
+    pub async fn perform_workflow_events(
         &mut self,
         run_id: u64,
         branch: &str,
@@ -124,8 +129,34 @@ impl BorsState<TestRepositoryClient> for TestBorsState {
             .map(|repo| (repo, (&mut self.db) as &mut dyn DbClient))
     }
 
+    fn get_all_repos_mut(
+        &mut self,
+    ) -> (
+        Vec<&mut RepositoryState<TestRepositoryClient>>,
+        &mut dyn DbClient,
+    ) {
+        (
+            self.repos.values_mut().collect(),
+            (&mut self.db) as &mut dyn DbClient,
+        )
+    }
+
     fn reload_repositories(&mut self) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + '_>> {
         Box::pin(async move { Ok(()) })
+    }
+}
+
+#[derive(Builder)]
+#[builder(pattern = "owned")]
+pub struct RepoConfig {
+    #[builder(default = "Duration::from_secs(3600)")]
+    timeout: Duration,
+}
+
+impl RepoConfigBuilder {
+    pub fn create(self) -> RepositoryConfig {
+        let RepoConfig { timeout } = self.build().unwrap();
+        RepositoryConfig { timeout }
     }
 }
 
@@ -137,7 +168,7 @@ pub struct Client {
     #[builder(default = "Box::new(AllPermissions)")]
     permission_resolver: Box<dyn PermissionResolver>,
     #[builder(default)]
-    config: Option<RepositoryConfig>,
+    config: RepoConfigBuilder,
 }
 
 impl ClientBuilder {
@@ -163,7 +194,7 @@ impl ClientBuilder {
                 cancelled_workflows: Default::default(),
             },
             permissions_resolver: permission_resolver,
-            config: config.unwrap_or_else(|| RepositoryConfig {}),
+            config: config.create(),
         }
     }
 }
