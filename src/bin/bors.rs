@@ -1,5 +1,6 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::Context;
 use axum::routing::post;
@@ -9,10 +10,14 @@ use sea_orm::{ConnectOptions, Database};
 use tokio::task::LocalSet;
 use tower::limit::ConcurrencyLimitLayer;
 
+use bors::bors::event::BorsEvent;
 use bors::database::SeaORMClient;
 use bors::github::server::{create_bors_process, github_webhook_handler, ServerState};
 use bors::github::{GithubAppState, WebhookSecret};
 use migration::{Migrator, MigratorTrait};
+
+/// How often should the bot check DB state, e.g. for handling timeouts.
+const PERIODIC_REFRESH: Duration = Duration::from_secs(120);
 
 #[derive(clap::Parser)]
 struct Opts {
@@ -71,6 +76,14 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
     ))?;
     let (tx, gh_process) = create_bors_process(state);
 
+    let refresh_tx = tx.clone();
+    let refresh_process = async move {
+        loop {
+            tokio::time::sleep(PERIODIC_REFRESH).await;
+            refresh_tx.send(BorsEvent::Refresh).await?;
+        }
+    };
+
     let state = ServerState::new(tx, WebhookSecret::new(opts.webhook_secret));
     let server_process = server(state);
 
@@ -80,6 +93,10 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
                 tracing::warn!("Github webhook process has ended");
                 Ok(())
             },
+            res = refresh_process => {
+                tracing::warn!("Refresh generator has ended");
+                res
+            }
             res = server_process => {
                 tracing::warn!("Server has ended: {res:?}");
                 res

@@ -133,6 +133,18 @@ impl DbClient for SeaORMClient {
         Ok(build.map(build_from_db))
     }
 
+    async fn get_running_builds(&self, repo: &GithubRepoName) -> anyhow::Result<Vec<BuildModel>> {
+        let builds = build::Entity::find()
+            .filter(
+                build::Column::Repository
+                    .eq(full_repo_name(repo))
+                    .and(build::Column::Status.eq(build_status_to_db(BuildStatus::Pending))),
+            )
+            .all(&self.db)
+            .await?;
+        Ok(builds.into_iter().map(build_from_db).collect())
+    }
+
     async fn update_build_status(
         &self,
         build: &BuildModel,
@@ -233,10 +245,7 @@ fn workflow_type_from_db(workflow_type: String) -> WorkflowType {
     match workflow_type.as_str() {
         "github" => WorkflowType::Github,
         "external" => WorkflowType::External,
-        _ => {
-            tracing::warn!("Encountered unknown workflow type in DB: {workflow_type}");
-            WorkflowType::External
-        }
+        _ => panic!("Encountered unknown workflow type in DB: {workflow_type}"),
     }
 }
 
@@ -261,6 +270,7 @@ fn build_status_to_db(status: BuildStatus) -> &'static str {
         BuildStatus::Success => "success",
         BuildStatus::Failure => "failure",
         BuildStatus::Cancelled => "cancelled",
+        BuildStatus::Timeouted => "timeouted",
     }
 }
 
@@ -270,10 +280,8 @@ fn build_status_from_db(status: String) -> BuildStatus {
         "success" => BuildStatus::Success,
         "failure" => BuildStatus::Failure,
         "cancelled" => BuildStatus::Cancelled,
-        _ => {
-            tracing::warn!("Encountered unknown build status in DB: {status}");
-            BuildStatus::Pending
-        }
+        "timeouted" => BuildStatus::Timeouted,
+        _ => panic!("Encountered unknown build status in DB: {status}"),
     }
 }
 

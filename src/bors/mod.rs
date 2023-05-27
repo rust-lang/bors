@@ -74,6 +74,9 @@ pub trait BorsState<Client: RepositoryClient> {
         repo: &GithubRepoName,
     ) -> Option<(&mut RepositoryState<Client>, &mut dyn DbClient)>;
 
+    /// Get all repositories.
+    fn get_all_repos_mut(&mut self) -> (Vec<&mut RepositoryState<Client>>, &mut dyn DbClient);
+
     /// Reload state of repositories due to some external change.
     fn reload_repositories(&mut self) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + '_>>;
 }

@@ -15,6 +15,8 @@ pub enum BorsEvent {
     CheckSuiteCompleted(CheckSuiteCompleted),
     /// The configuration of some repository has been changed for the bot's Github App.
     InstallationsChanged,
+    /// Periodic event that serves for checking e.g. timeouts.
+    Refresh,
 }
 
 #[derive(Debug)]

@@ -129,7 +129,7 @@ async fn create_repo_state(
 
     let config = match load_repository_config(&repo_client, &name).await {
         Ok(config) => {
-            tracing::debug!("Loaded repository config for {name}: {config:#?}");
+            tracing::info!("Loaded repository config for {name}: {config:#?}");
             config
         }
         Err(error) => {
@@ -205,6 +205,18 @@ impl BorsState<GithubRepositoryClient> for GithubAppState {
         self.repositories
             .get_mut(repo)
             .map(|repo| (repo, (&mut self.db) as &mut dyn DbClient))
+    }
+
+    fn get_all_repos_mut(
+        &mut self,
+    ) -> (
+        Vec<&mut RepositoryState<GithubRepositoryClient>>,
+        &mut dyn DbClient,
+    ) {
+        (
+            self.repositories.values_mut().collect(),
+            (&mut self.db) as &mut dyn DbClient,
+        )
     }
 
     /// Re-download information about repositories connected to this GitHub app.
