@@ -13,7 +13,7 @@ use super::permissions::AllPermissions;
 use crate::bors::event::{
     BorsEvent, CheckSuiteCompleted, PullRequestComment, WorkflowCompleted, WorkflowStarted,
 };
-use crate::bors::{handle_bors_event, CheckSuite, RepositoryState};
+use crate::bors::{handle_bors_event, BorsContext, CheckSuite, CommandParser, RepositoryState};
 use crate::bors::{BorsState, RepositoryClient};
 use crate::database::{DbClient, SeaORMClient, WorkflowStatus};
 use crate::github::{CommitSha, GithubRepoName, GithubUser, PullRequest};
@@ -53,7 +53,13 @@ impl TestBorsState {
 
     /// Execute an event.
     pub async fn event(&mut self, event: BorsEvent) {
-        handle_bors_event(event, self).await.unwrap();
+        handle_bors_event(
+            event,
+            self,
+            &BorsContext::new(CommandParser::new("@bors".to_string())),
+        )
+        .await
+        .unwrap();
     }
 
     pub async fn comment<T: Into<PullRequestComment>>(&mut self, comment: T) {
