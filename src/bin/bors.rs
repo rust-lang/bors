@@ -5,8 +5,9 @@ use std::time::Duration;
 use anyhow::Context;
 use axum::routing::post;
 use axum::Router;
+use bors::bors::{BorsContext, CommandParser};
 use clap::Parser;
-use sea_orm::{ConnectOptions, Database};
+use sea_orm::Database;
 use tokio::task::LocalSet;
 use tower::limit::ConcurrencyLimitLayer;
 
@@ -36,6 +37,10 @@ struct Opts {
     /// Database connection string.
     #[arg(long, env = "DATABASE")]
     db: String,
+
+    /// Prefix used for bot commands in PR comments.
+    #[arg(long, env = "CMD_PREFIX", default_value = "@bors")]
+    cmd_prefix: String,
 }
 
 async fn server(state: ServerState) -> anyhow::Result<()> {
@@ -74,7 +79,8 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
         opts.private_key.into_bytes().into(),
         db,
     ))?;
-    let (tx, gh_process) = create_bors_process(state);
+    let ctx = BorsContext::new(CommandParser::new(opts.cmd_prefix));
+    let (tx, gh_process) = create_bors_process(state, ctx);
 
     let refresh_tx = tx.clone();
     let refresh_process = async move {

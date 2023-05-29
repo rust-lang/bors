@@ -1,4 +1,5 @@
-pub mod parser;
+mod parser;
+pub use parser::{CommandParseError, CommandParser};
 
 /// Bors command specified by a user.
 #[derive(Debug)]

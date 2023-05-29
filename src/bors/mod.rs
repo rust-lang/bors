@@ -8,11 +8,14 @@ use crate::github::{CommitSha, GithubRepoName, MergeError, PullRequest, PullRequ
 use crate::permissions::PermissionResolver;
 
 mod command;
+mod context;
 pub mod event;
 mod handlers;
 
 use crate::bors::event::PullRequestComment;
 use crate::database::DbClient;
+pub use command::CommandParser;
+pub use context::BorsContext;
 pub use handlers::handle_bors_event;
 
 /// Provides functionality for working with a remote repository.

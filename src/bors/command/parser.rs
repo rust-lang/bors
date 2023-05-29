@@ -10,31 +10,42 @@ pub enum CommandParseError<'a> {
     UnknownCommand(&'a str),
 }
 
-pub const BOT_PREFIX: &str = "@bors";
+pub struct CommandParser {
+    prefix: String,
+}
 
-/// Parses bors commands from the given string.
-///
-/// Assumes that each command spands at most one line and that there are not more commands on
-/// each line.
-pub fn parse_commands(text: &str) -> Vec<Result<BorsCommand, CommandParseError>> {
-    // The order of the parsers in the vector is important
-    let parsers: Vec<fn(Tokenizer) -> ParseResult> =
-        vec![parser_ping, parser_try_cancel, parser_try];
+impl CommandParser {
+    pub fn new(prefix: String) -> Self {
+        Self { prefix }
+    }
 
-    text.lines()
-        .filter_map(|line| match line.find(BOT_PREFIX) {
-            Some(index) => {
-                let command = &line[index + BOT_PREFIX.len()..];
-                for parser in &parsers {
-                    if let Some(result) = parser(Tokenizer::new(command)) {
-                        return Some(result);
+    /// Parses bors commands from the given string.
+    ///
+    /// Assumes that each command spands at most one line and that there are not more commands on
+    /// each line.
+    pub fn parse_commands<'a>(
+        &self,
+        text: &'a str,
+    ) -> Vec<Result<BorsCommand, CommandParseError<'a>>> {
+        // The order of the parsers in the vector is important
+        let parsers: Vec<fn(Tokenizer) -> ParseResult> =
+            vec![parser_ping, parser_try_cancel, parser_try];
+
+        text.lines()
+            .filter_map(|line| match line.find(&self.prefix) {
+                Some(index) => {
+                    let command = &line[index + self.prefix.len()..];
+                    for parser in &parsers {
+                        if let Some(result) = parser(Tokenizer::new(command)) {
+                            return Some(result);
+                        }
                     }
+                    parser_wildcard(Tokenizer::new(command))
                 }
-                parser_wildcard(Tokenizer::new(command))
-            }
-            None => None,
-        })
-        .collect()
+                None => None,
+            })
+            .collect()
+    }
 }
 
 struct Tokenizer<'a> {
@@ -118,7 +129,7 @@ fn parse_list<'a>(
 
 #[cfg(test)]
 mod tests {
-    use crate::bors::command::parser::{parse_commands, CommandParseError};
+    use crate::bors::command::parser::{CommandParseError, CommandParser};
     use crate::bors::command::BorsCommand;
 
     #[test]
@@ -187,5 +198,9 @@ line two
         let cmds = parse_commands("@bors try cancel");
         assert_eq!(cmds.len(), 1);
         assert!(matches!(cmds[0], Ok(BorsCommand::TryCancel)));
+    }
+
+    fn parse_commands(text: &str) -> Vec<Result<BorsCommand, CommandParseError>> {
+        CommandParser::new("@bors".to_string()).parse_commands(text)
     }
 }

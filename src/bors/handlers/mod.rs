@@ -1,8 +1,8 @@
 use anyhow::Context;
 use tracing::Instrument;
 
-use crate::bors::command::parser::{parse_commands, CommandParseError};
 use crate::bors::command::BorsCommand;
+use crate::bors::command::CommandParseError;
 use crate::bors::event::{BorsEvent, PullRequestComment};
 use crate::bors::handlers::ping::command_ping;
 use crate::bors::handlers::refresh::refresh_repository;
@@ -10,7 +10,7 @@ use crate::bors::handlers::trybuild::{command_try_build, command_try_cancel, TRY
 use crate::bors::handlers::workflow::{
     handle_check_suite_completed, handle_workflow_completed, handle_workflow_started,
 };
-use crate::bors::{BorsState, RepositoryClient, RepositoryState};
+use crate::bors::{BorsContext, BorsState, RepositoryClient, RepositoryState};
 use crate::database::DbClient;
 use crate::github::GithubRepoName;
 use crate::utils::logging::LogError;
@@ -24,6 +24,7 @@ mod workflow;
 pub async fn handle_bors_event<Client: RepositoryClient>(
     event: BorsEvent,
     state: &mut dyn BorsState<Client>,
+    ctx: &BorsContext,
 ) -> anyhow::Result<()> {
     match event {
         BorsEvent::Comment(comment) => {
@@ -39,7 +40,7 @@ pub async fn handle_bors_event<Client: RepositoryClient>(
                     pr = format!("{}#{}", comment.repository, comment.pr_number),
                     author = comment.author.username
                 );
-                if let Err(error) = handle_comment(repo, db, comment)
+                if let Err(error) = handle_comment(repo, db, ctx, comment)
                     .instrument(span.clone())
                     .await
                 {
@@ -127,10 +128,11 @@ fn get_repo_state<'a, Client: RepositoryClient>(
 async fn handle_comment<Client: RepositoryClient>(
     repo: &mut RepositoryState<Client>,
     database: &mut dyn DbClient,
+    ctx: &BorsContext,
     comment: PullRequestComment,
 ) -> anyhow::Result<()> {
     let pr_number = comment.pr_number;
-    let commands = parse_commands(&comment.text);
+    let commands = ctx.parser.parse_commands(&comment.text);
     let pull_request = repo.client.get_pull_request(pr_number.into()).await?;
 
     tracing::debug!("Commands: {:?}", comment.author.username);
