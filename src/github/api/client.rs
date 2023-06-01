@@ -151,7 +151,7 @@ impl RepositoryClient for GithubRepositoryClient {
 
 fn github_pr_to_pr(pr: octocrab::models::pulls::PullRequest) -> PullRequest {
     PullRequest {
-        number: pr.number,
+        number: pr.number.into(),
         head_label: pr.head.label.unwrap_or_else(|| "<unknown>".to_string()),
         head: Branch {
             name: pr.head.ref_field,

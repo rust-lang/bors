@@ -77,7 +77,7 @@ pub struct Branch {
 
 #[derive(Clone, Debug)]
 pub struct PullRequest {
-    pub number: u64,
+    pub number: PullRequestNumber,
     // <author>:<branch>
     pub head_label: String,
     pub head: Branch,

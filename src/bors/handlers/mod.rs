@@ -174,7 +174,7 @@ async fn handle_comment<Client: RepositoryClient>(
                 tracing::warn!("{error_msg}");
 
                 repo.client
-                    .post_comment(pull_request.number.into(), &error_msg)
+                    .post_comment(pull_request.number, &error_msg)
                     .await
                     .context("Could not reply to PR comment")?;
             }

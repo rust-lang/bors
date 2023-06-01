@@ -30,7 +30,7 @@ pub(super) async fn command_try_build<Client: RepositoryClient>(
     }
 
     let pr_model = db
-        .get_or_create_pull_request(repo.client.repository(), pr.number.into())
+        .get_or_create_pull_request(repo.client.repository(), pr.number)
         .await?;
 
     if let Some(ref build) = pr_model.try_build {
@@ -38,7 +38,7 @@ pub(super) async fn command_try_build<Client: RepositoryClient>(
             tracing::warn!("Try build already in progress");
             repo.client
                 .post_comment(
-                    pr.number.into(),
+                    pr.number,
                     ":exclamation: A try build is currently in progress. You can cancel it using @bors try cancel.",
                 )
                 .await?;
@@ -72,7 +72,7 @@ pub(super) async fn command_try_build<Client: RepositoryClient>(
 
             repo.client
                 .post_comment(
-                    pr.number.into(),
+                    pr.number,
                     &format!(
                         ":hourglass: Trying commit {} with merge {merge_sha}…",
                         pr.head.sha
@@ -83,7 +83,7 @@ pub(super) async fn command_try_build<Client: RepositoryClient>(
         Err(MergeError::Conflict) => {
             tracing::warn!("Merge conflict");
             repo.client
-                .post_comment(pr.number.into(), &merge_conflict_message(&pr.head.name))
+                .post_comment(pr.number, &merge_conflict_message(&pr.head.name))
                 .await?;
         }
         Err(error) => return Err(error.into()),
@@ -102,7 +102,7 @@ pub(super) async fn command_try_cancel<Client: RepositoryClient>(
         return Ok(());
     }
 
-    let pr_number: PullRequestNumber = pr.number.into();
+    let pr_number: PullRequestNumber = pr.number;
     let pr = db
         .get_or_create_pull_request(repo.client.repository(), pr_number)
         .await?;
@@ -214,7 +214,7 @@ async fn check_try_permissions<Client: RepositoryClient>(
         tracing::info!("Permission denied");
         repo.client
             .post_comment(
-                pr.number.into(),
+                pr.number,
                 &format!(
                     "@{}: :key: Insufficient privileges: not in try users",
                     author.username
