@@ -162,7 +162,10 @@ pub struct RepoConfig {
 impl RepoConfigBuilder {
     pub fn create(self) -> RepositoryConfig {
         let RepoConfig { timeout } = self.build().unwrap();
-        RepositoryConfig { timeout }
+        RepositoryConfig {
+            timeout,
+            labels: Default::default(),
+        }
     }
 }
 
