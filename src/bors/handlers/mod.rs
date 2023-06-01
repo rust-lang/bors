@@ -15,6 +15,7 @@ use crate::database::DbClient;
 use crate::github::GithubRepoName;
 use crate::utils::logging::LogError;
 
+mod labels;
 mod ping;
 mod refresh;
 mod trybuild;

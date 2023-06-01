@@ -1,7 +1,8 @@
 use anyhow::Context;
 use axum::async_trait;
 use octocrab::models::{Repository, RunId};
-use octocrab::Octocrab;
+use octocrab::{Error, Octocrab};
+use tracing::log;
 
 use crate::bors::{CheckSuite, CheckSuiteStatus, RepositoryClient};
 use crate::github::api::operations::{merge_branches, set_branch_to_commit, MergeError};
@@ -143,7 +144,51 @@ impl RepositoryClient for GithubRepositoryClient {
         }))
         .await
         .into_iter()
-        .collect::<Result<Vec<_>, octocrab::Error>>()?;
+        .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(())
+    }
+
+    async fn add_labels(&mut self, pr: PullRequestNumber, labels: &[String]) -> anyhow::Result<()> {
+        let client = self.client.issues(self.name().owner(), self.name().name());
+        if !labels.is_empty() {
+            client
+                .add_labels(pr.0, labels)
+                .await
+                .context("Cannot add label(s) to PR")?;
+        }
+
+        Ok(())
+    }
+
+    async fn remove_labels(
+        &mut self,
+        pr: PullRequestNumber,
+        labels: &[String],
+    ) -> anyhow::Result<()> {
+        let client = self.client.issues(self.name().owner(), self.name().name());
+        // The GitHub API only allows removing labels one by one, so we remove all of them in
+        // parallel to speed it up a little.
+        let labels_to_remove_futures = labels.iter().map(|label| client.remove_label(pr.0, label));
+        futures::future::join_all(labels_to_remove_futures)
+            .await
+            .into_iter()
+            .filter(|result| match result {
+                Ok(_) => false,
+                Err(error) => match error {
+                    // This error is returned if we try to remove a label that does not exist on the issue.
+                    // This should be a no-op, rather than an error, therefore we swallow this error.
+                    Error::GitHub { source, .. }
+                        if source.message.contains("Label does not exist") =>
+                    {
+                        log::trace!("Trying to remove label which does not exist on PR {pr}");
+                        false
+                    }
+                    _ => true,
+                },
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .context("Cannot remove label(s) from PR")?;
 
         Ok(())
     }

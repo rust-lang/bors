@@ -16,7 +16,9 @@ use crate::bors::event::{
 use crate::bors::{handle_bors_event, BorsContext, CheckSuite, CommandParser, RepositoryState};
 use crate::bors::{BorsState, RepositoryClient};
 use crate::database::{DbClient, SeaORMClient, WorkflowStatus};
-use crate::github::{CommitSha, GithubRepoName, GithubUser, PullRequest};
+use crate::github::{
+    CommitSha, GithubRepoName, GithubUser, LabelModification, LabelTrigger, PullRequest,
+};
 use crate::github::{MergeError, PullRequestNumber};
 use crate::permissions::PermissionResolver;
 use crate::tests::database::create_test_db;
@@ -157,15 +159,30 @@ impl BorsState<TestRepositoryClient> for TestBorsState {
 pub struct RepoConfig {
     #[builder(default = "Duration::from_secs(3600)")]
     timeout: Duration,
+    #[builder(field(type = "HashMap<LabelTrigger, Vec<LabelModification>>"))]
+    labels: HashMap<LabelTrigger, Vec<LabelModification>>,
 }
 
 impl RepoConfigBuilder {
+    pub fn add_label(mut self, trigger: LabelTrigger, label: &str) -> Self {
+        self.labels
+            .entry(trigger)
+            .or_default()
+            .push(LabelModification::Add(label.to_string()));
+        self
+    }
+
+    pub fn remove_label(mut self, trigger: LabelTrigger, label: &str) -> Self {
+        self.labels
+            .entry(trigger)
+            .or_default()
+            .push(LabelModification::Remove(label.to_string()));
+        self
+    }
+
     pub fn create(self) -> RepositoryConfig {
-        let RepoConfig { timeout } = self.build().unwrap();
-        RepositoryConfig {
-            timeout,
-            labels: Default::default(),
-        }
+        let RepoConfig { timeout, labels } = self.build().unwrap();
+        RepositoryConfig { timeout, labels }
     }
 }
 
@@ -201,6 +218,8 @@ impl ClientBuilder {
                 get_pr_fn: Box::new(move |pr| Ok(PRBuilder::default().number(pr.0).create())),
                 check_suites: Default::default(),
                 cancelled_workflows: Default::default(),
+                added_labels: Default::default(),
+                removed_labels: Default::default(),
             },
             permissions_resolver: permission_resolver,
             config: config.create(),
@@ -226,6 +245,8 @@ pub struct TestRepositoryClient {
     pub get_pr_fn: Box<dyn Fn(PullRequestNumber) -> anyhow::Result<PullRequest> + Send>,
     pub check_suites: HashMap<String, Vec<CheckSuite>>,
     pub cancelled_workflows: HashSet<u64>,
+    added_labels: HashMap<u64, Vec<String>>,
+    removed_labels: HashMap<u64, Vec<String>>,
 }
 
 impl TestRepositoryClient {
@@ -267,6 +288,15 @@ impl TestRepositoryClient {
                 .len(),
             count
         );
+    }
+
+    pub fn check_added_labels(&self, pr: u64, added: &[&str]) -> &Self {
+        assert_eq!(self.added_labels[&pr], added);
+        self
+    }
+    pub fn check_removed_labels(&self, pr: u64, removed: &[&str]) -> &Self {
+        assert_eq!(self.removed_labels[&pr], removed);
+        self
     }
 
     pub fn check_cancelled_workflows(&self, cancelled: &[u64]) {
@@ -317,6 +347,26 @@ impl RepositoryClient for TestRepositoryClient {
     async fn cancel_workflows(&mut self, run_ids: Vec<RunId>) -> anyhow::Result<()> {
         self.cancelled_workflows
             .extend(run_ids.into_iter().map(|id| id.0));
+        Ok(())
+    }
+
+    async fn add_labels(&mut self, pr: PullRequestNumber, labels: &[String]) -> anyhow::Result<()> {
+        self.added_labels
+            .entry(pr.0)
+            .or_default()
+            .extend(labels.to_vec());
+        Ok(())
+    }
+
+    async fn remove_labels(
+        &mut self,
+        pr: PullRequestNumber,
+        labels: &[String],
+    ) -> anyhow::Result<()> {
+        self.removed_labels
+            .entry(pr.0)
+            .or_default()
+            .extend(labels.to_vec());
         Ok(())
     }
 }

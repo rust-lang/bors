@@ -57,6 +57,8 @@ sea-orm = { workspace = true }
 # Time
 chrono = "0.4"
 
+itertools = "0.10"
+
 # Local
 entity = { path = "database/entity" }
 migration = { path = "database/migration" }

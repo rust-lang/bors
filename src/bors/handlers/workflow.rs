@@ -1,7 +1,9 @@
 use crate::bors::event::{CheckSuiteCompleted, WorkflowCompleted, WorkflowStarted};
 use crate::bors::handlers::is_bors_observed_branch;
+use crate::bors::handlers::labels::handle_label_trigger;
 use crate::bors::{self, RepositoryClient, RepositoryState};
 use crate::database::{BuildStatus, DbClient, WorkflowStatus};
+use crate::github::LabelTrigger;
 
 pub(super) async fn handle_workflow_started(
     db: &mut dyn DbClient,
@@ -171,12 +173,14 @@ Build commit: {sha} (`{sha}`)"#
     };
     repo.client.post_comment(pr.number, &message).await?;
 
-    let status = if has_failure {
-        BuildStatus::Failure
+    let (status, trigger) = if has_failure {
+        (BuildStatus::Failure, LabelTrigger::TryBuildFailed)
     } else {
-        BuildStatus::Success
+        (BuildStatus::Success, LabelTrigger::TryBuildSucceeded)
     };
     db.update_build_status(&build, status).await?;
+
+    handle_label_trigger(repo, pr.number, trigger).await?;
     Ok(())
 }
 

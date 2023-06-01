@@ -1,3 +1,4 @@
+use crate::bors::handlers::labels::handle_label_trigger;
 use anyhow::anyhow;
 
 use crate::bors::RepositoryClient;
@@ -5,7 +6,7 @@ use crate::bors::RepositoryState;
 use crate::database::{
     BuildModel, BuildStatus, DbClient, PullRequestModel, WorkflowStatus, WorkflowType,
 };
-use crate::github::{GithubUser, MergeError, PullRequest, PullRequestNumber};
+use crate::github::{GithubUser, LabelTrigger, MergeError, PullRequest, PullRequestNumber};
 use crate::permissions::PermissionType;
 
 // This branch serves for preparing the final commit.
@@ -70,6 +71,8 @@ pub(super) async fn command_try_build<Client: RepositoryClient>(
                 .await?;
             tracing::info!("Try build started");
 
+            handle_label_trigger(repo, pr.number, LabelTrigger::TryBuildStarted).await?;
+
             repo.client
                 .post_comment(
                     pr.number,
@@ -79,17 +82,17 @@ pub(super) async fn command_try_build<Client: RepositoryClient>(
                     ),
                 )
                 .await?;
+            Ok(())
         }
         Err(MergeError::Conflict) => {
             tracing::warn!("Merge conflict");
             repo.client
                 .post_comment(pr.number, &merge_conflict_message(&pr.head.name))
                 .await?;
+            Ok(())
         }
-        Err(error) => return Err(error.into()),
+        Err(error) => Err(error.into()),
     }
-
-    Ok(())
 }
 
 pub(super) async fn command_try_cancel<Client: RepositoryClient>(
@@ -232,13 +235,15 @@ async fn check_try_permissions<Client: RepositoryClient>(
 mod tests {
     use crate::bors::handlers::trybuild::TRY_BRANCH_NAME;
     use crate::database::{BuildStatus, DbClient, WorkflowStatus, WorkflowType};
-    use crate::github::{CommitSha, MergeError};
+    use crate::github::{CommitSha, LabelTrigger, MergeError};
     use crate::tests::event::{
         default_pr_number, suite_failure, suite_pending, suite_success, WorkflowStartedBuilder,
     };
     use crate::tests::github::{BranchBuilder, PRBuilder};
     use crate::tests::permissions::NoPermissions;
-    use crate::tests::state::{default_merge_sha, default_repo_name, ClientBuilder};
+    use crate::tests::state::{
+        default_merge_sha, default_repo_name, ClientBuilder, RepoConfigBuilder,
+    };
     use entity::workflow;
     use sea_orm::EntityTrait;
 
@@ -505,5 +510,84 @@ mod tests {
                 .len(),
             0
         );
+    }
+
+    #[tokio::test]
+    async fn test_try_build_start_modify_labels() {
+        let mut state = ClientBuilder::default()
+            .config(
+                RepoConfigBuilder::default()
+                    .add_label(LabelTrigger::TryBuildStarted, "foo")
+                    .add_label(LabelTrigger::TryBuildStarted, "bar")
+                    .remove_label(LabelTrigger::TryBuildStarted, "baz"),
+            )
+            .create_state()
+            .await;
+
+        state.comment("@bors try").await;
+        state
+            .client()
+            .check_added_labels(default_pr_number(), &["foo", "bar"])
+            .check_removed_labels(default_pr_number(), &["baz"]);
+    }
+
+    #[tokio::test]
+    async fn test_try_build_succeeded_modify_labels() {
+        let mut state = ClientBuilder::default()
+            .config(
+                RepoConfigBuilder::default()
+                    .add_label(LabelTrigger::TryBuildSucceeded, "foo")
+                    .add_label(LabelTrigger::TryBuildSucceeded, "bar")
+                    .remove_label(LabelTrigger::TryBuildSucceeded, "baz"),
+            )
+            .create_state()
+            .await;
+        state
+            .client()
+            .set_checks(&default_merge_sha(), &[suite_success()]);
+
+        state.comment("@bors try").await;
+        state
+            .perform_workflow_events(
+                1,
+                TRY_BRANCH_NAME,
+                &default_merge_sha(),
+                WorkflowStatus::Success,
+            )
+            .await;
+        state
+            .client()
+            .check_added_labels(default_pr_number(), &["foo", "bar"])
+            .check_removed_labels(default_pr_number(), &["baz"]);
+    }
+
+    #[tokio::test]
+    async fn test_try_build_failed_modify_labels() {
+        let mut state = ClientBuilder::default()
+            .config(
+                RepoConfigBuilder::default()
+                    .add_label(LabelTrigger::TryBuildFailed, "foo")
+                    .add_label(LabelTrigger::TryBuildFailed, "bar")
+                    .remove_label(LabelTrigger::TryBuildFailed, "baz"),
+            )
+            .create_state()
+            .await;
+        state
+            .client()
+            .set_checks(&default_merge_sha(), &[suite_failure()]);
+
+        state.comment("@bors try").await;
+        state
+            .perform_workflow_events(
+                1,
+                TRY_BRANCH_NAME,
+                &default_merge_sha(),
+                WorkflowStatus::Failure,
+            )
+            .await;
+        state
+            .client()
+            .check_added_labels(default_pr_number(), &["foo", "bar"])
+            .check_removed_labels(default_pr_number(), &["baz"]);
     }
 }
