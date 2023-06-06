@@ -31,7 +31,7 @@ impl PRBuilder {
         } = self.build().unwrap();
 
         PullRequest {
-            number,
+            number: number.into(),
             head_label,
             head,
             base,

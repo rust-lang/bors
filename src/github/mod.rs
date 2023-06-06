@@ -5,11 +5,13 @@ use std::fmt::{Debug, Display, Formatter};
 use url::Url;
 
 pub mod api;
+mod labels;
 pub mod server;
 mod webhook;
 
 pub use api::operations::MergeError;
 pub use api::GithubAppState;
+pub use labels::{LabelModification, LabelTrigger};
 pub use webhook::WebhookSecret;
 
 /// Unique identifier of a GitHub repository
@@ -75,7 +77,7 @@ pub struct Branch {
 
 #[derive(Clone, Debug)]
 pub struct PullRequest {
-    pub number: u64,
+    pub number: PullRequestNumber,
     // <author>:<branch>
     pub head_label: String,
     pub head: Branch,

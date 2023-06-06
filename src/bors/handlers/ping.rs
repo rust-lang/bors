@@ -6,9 +6,7 @@ pub(super) async fn command_ping<Client: RepositoryClient>(
     repo: &mut RepositoryState<Client>,
     pr: &PullRequest,
 ) -> anyhow::Result<()> {
-    repo.client
-        .post_comment(pr.number.into(), "Pong 🏓!")
-        .await?;
+    repo.client.post_comment(pr.number, "Pong 🏓!").await?;
     Ok(())
 }
 

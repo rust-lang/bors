@@ -49,6 +49,16 @@ pub trait RepositoryClient {
 
     /// Cancels Github Actions workflows.
     async fn cancel_workflows(&mut self, run_ids: Vec<RunId>) -> anyhow::Result<()>;
+
+    /// Add a set of labels to a PR.
+    async fn add_labels(&mut self, pr: PullRequestNumber, labels: &[String]) -> anyhow::Result<()>;
+
+    /// Remove a set of labels from a PR.
+    async fn remove_labels(
+        &mut self,
+        pr: PullRequestNumber,
+        labels: &[String],
+    ) -> anyhow::Result<()>;
 }
 
 #[derive(Clone)]
