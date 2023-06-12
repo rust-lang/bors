@@ -30,19 +30,19 @@ impl CommandParser {
         // The order of the parsers in the vector is important
         let parsers: Vec<fn(Tokenizer) -> ParseResult> =
             vec![parser_ping, parser_try_cancel, parser_try];
-
+    
         text.lines()
-            .filter_map(|line| match line.find(&self.prefix) {
-                Some(index) => {
-                    let command = &line[index + self.prefix.len()..];
+            .filter_map(|line| {
+                if let Some((command, kv_pairs)) = parse_key_value(line) {
                     for parser in &parsers {
-                        if let Some(result) = parser(Tokenizer::new(command)) {
+                        if let Some(result) = parser(Tokenizer::new(command, kv_pairs)) {
                             return Some(result);
                         }
                     }
-                    parser_wildcard(Tokenizer::new(command))
+                    parser_wildcard(Tokenizer::new(command, kv_pairs))
+                } else {
+                    None
                 }
-                None => None,
             })
             .collect()
     }
@@ -69,6 +69,27 @@ impl<'a> Tokenizer<'a> {
 }
 
 type ParseResult<'a> = Option<Result<BorsCommand, CommandParseError<'a>>>;
+
+
+//  parse a line of text into command and key-value pairs
+fn parse_key_value(line: &str) -> Option<(&str, Vec<(&str, &str)>)> {
+    let mut parts = line.split_whitespace();
+    let command = parts.next()?;
+
+    let mut kv_pairs = Vec::new();
+    for part in parts {
+        if part.starts_with('@') {
+            break;
+        }
+        let mut kv = part.splitn(2, '=');
+        let key = kv.next()?;
+        let value = kv.next()?;
+        kv_pairs.push((key, value));
+    }
+
+    Some((command, kv_pairs))
+}
+
 
 /// Parsers
 
