@@ -7,8 +7,8 @@ use axum::http::request::Parts;
 use axum::http::{HeaderMap, HeaderValue, Request, StatusCode};
 use axum::{async_trait, RequestExt};
 use hmac::{Hmac, Mac};
-use octocrab::models::events::payload::IssueCommentEventPayload;
-use octocrab::models::{workflows, App, CheckRun, Repository, RunId};
+use octocrab::models::events::payload::{IssueCommentEventPayload, PullRequestReviewEventPayload};
+use octocrab::models::{workflows, App, CheckRun, Repository, RunId, User};
 use secrecy::{ExposeSecret, SecretString};
 use sha2::Sha256;
 
@@ -140,6 +140,11 @@ fn parse_webhook_event(request: Parts, body: &[u8]) -> anyhow::Result<Option<Bor
             let comment = parse_pr_comment(repository_name, event).map(BorsEvent::Comment);
             Ok(comment)
         }
+        b"pull_request_review" => {
+            let payload: PullRequestReviewEventPayload = serde_json::from_slice(body)?;
+            let comment = parse_comment_from_pr_review(payload)?;
+            Ok(Some(BorsEvent::Comment(comment)))
+        }
         b"installation_repositories" | b"installation" => Ok(Some(BorsEvent::InstallationsChanged)),
         b"workflow_run" => {
             let payload: WebhookWorkflowRun = serde_json::from_slice(body)?;
@@ -212,6 +217,27 @@ fn parse_webhook_event(request: Parts, body: &[u8]) -> anyhow::Result<Option<Bor
     }
 }
 
+fn parse_comment_from_pr_review(
+    payload: PullRequestReviewEventPayload,
+) -> anyhow::Result<PullRequestComment> {
+    let repository_name = parse_repository_name(&payload.repository)?;
+    let user = parse_user(payload.sender);
+
+    Ok(PullRequestComment {
+        repository: repository_name,
+        author: user,
+        pr_number: PullRequestNumber(payload.pull_request.number),
+        text: payload.review.body.unwrap_or_default(),
+    })
+}
+
+fn parse_user(user: User) -> GithubUser {
+    GithubUser {
+        username: user.login,
+        html_url: user.html_url,
+    }
+}
+
 fn parse_pr_comment(
     repo: GithubRepoName,
     payload: IssueCommentEventPayload,
@@ -222,14 +248,9 @@ fn parse_pr_comment(
         return None;
     }
 
-    let user = GithubUser {
-        username: payload.comment.user.login,
-        html_url: payload.comment.user.html_url,
-    };
-
     Some(PullRequestComment {
         repository: repo,
-        author: user,
+        author: parse_user(payload.comment.user),
         text: payload.comment.body.unwrap_or_default(),
         pr_number: PullRequestNumber(payload.issue.number),
     })
@@ -332,6 +353,49 @@ mod tests {
                             5,
                         ),
                         text: "hello bors",
+                    },
+                ),
+            ),
+        )
+        "###
+        );
+    }
+
+    #[tokio::test]
+    async fn test_pull_request_review() {
+        insta::assert_debug_snapshot!(
+            check_webhook("webhook/pull-request-review.json", "pull_request_review").await,
+            @r###"
+        Ok(
+            GitHubWebhook(
+                Comment(
+                    PullRequestComment {
+                        repository: GithubRepoName {
+                            owner: "kobzol",
+                            name: "bors-kindergarten",
+                        },
+                        author: GithubUser {
+                            username: "Kobzol",
+                            html_url: Url {
+                                scheme: "https",
+                                cannot_be_a_base: false,
+                                username: "",
+                                password: None,
+                                host: Some(
+                                    Domain(
+                                        "github.com",
+                                    ),
+                                ),
+                                port: None,
+                                path: "/Kobzol",
+                                query: None,
+                                fragment: None,
+                            },
+                        },
+                        pr_number: PullRequestNumber(
+                            6,
+                        ),
+                        text: "review comment",
                     },
                 ),
             ),
