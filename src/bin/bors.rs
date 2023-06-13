@@ -10,6 +10,7 @@ use clap::Parser;
 use sea_orm::Database;
 use tokio::task::LocalSet;
 use tower::limit::ConcurrencyLimitLayer;
+use tracing_subscriber::EnvFilter;
 
 use bors::bors::event::BorsEvent;
 use bors::database::SeaORMClient;
@@ -122,6 +123,7 @@ fn main() {
     tracing_subscriber::fmt()
         .with_max_level(tracing::Level::INFO)
         .with_target(false)
+        .with_env_filter(EnvFilter::from_default_env())
         .init();
 
     let opts = Opts::parse();
