@@ -8,8 +8,10 @@ use axum::http::{HeaderMap, HeaderValue, Request, StatusCode};
 use axum::{async_trait, RequestExt};
 use hmac::{Hmac, Mac};
 use octocrab::models::events::payload::{
-    IssueCommentEventPayload, PullRequestReviewCommentEventPayload, PullRequestReviewEventPayload,
+    IssueCommentEventAction, IssueCommentEventPayload, PullRequestReviewCommentEventAction,
+    PullRequestReviewCommentEventPayload,
 };
+use octocrab::models::pulls::{PullRequest, Review};
 use octocrab::models::{workflows, App, CheckRun, Repository, RunId, User};
 use secrecy::{ExposeSecret, SecretString};
 use sha2::Sha256;
@@ -76,6 +78,15 @@ pub struct WebhookCheckSuite<'a> {
     action: &'a str,
     check_suite: CheckSuiteInner,
     repository: Repository,
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct WebhookPullRequestReviewEvent<'a> {
+    action: &'a str,
+    pull_request: PullRequest,
+    review: Review,
+    repository: Repository,
+    sender: User,
 }
 
 /// axum extractor for GitHub webhook events.
@@ -145,21 +156,33 @@ fn parse_webhook_event(request: Parts, body: &[u8]) -> anyhow::Result<Option<Bor
             let repository_name = parse_repository_name(&repository.repository)?;
 
             let event: IssueCommentEventPayload = serde_json::from_slice(body)?;
-            let comment = parse_pr_comment(repository_name, event).map(BorsEvent::Comment);
-            Ok(comment)
+            if event.action == IssueCommentEventAction::Created {
+                let comment = parse_pr_comment(repository_name, event).map(BorsEvent::Comment);
+                Ok(comment)
+            } else {
+                Ok(None)
+            }
         }
         b"pull_request_review" => {
-            let payload: PullRequestReviewEventPayload = serde_json::from_slice(body)?;
-            let comment = parse_comment_from_pr_review(payload)?;
-            Ok(Some(BorsEvent::Comment(comment)))
+            let payload: WebhookPullRequestReviewEvent = serde_json::from_slice(body)?;
+            if payload.action == "submitted" {
+                let comment = parse_comment_from_pr_review(payload)?;
+                Ok(Some(BorsEvent::Comment(comment)))
+            } else {
+                Ok(None)
+            }
         }
         b"pull_request_review_comment" => {
             let repository: WebhookRepository = serde_json::from_slice(body)?;
             let repository_name = parse_repository_name(&repository.repository)?;
 
             let payload: PullRequestReviewCommentEventPayload = serde_json::from_slice(body)?;
-            let comment = parse_pr_review_comment(repository_name, payload);
-            Ok(Some(BorsEvent::Comment(comment)))
+            if payload.action == PullRequestReviewCommentEventAction::Created {
+                let comment = parse_pr_review_comment(repository_name, payload);
+                Ok(Some(BorsEvent::Comment(comment)))
+            } else {
+                Ok(None)
+            }
         }
         b"installation_repositories" | b"installation" => Ok(Some(BorsEvent::InstallationsChanged)),
         b"workflow_run" => {
@@ -248,7 +271,7 @@ fn parse_pr_review_comment(
 }
 
 fn parse_comment_from_pr_review(
-    payload: PullRequestReviewEventPayload,
+    payload: WebhookPullRequestReviewEvent<'_>,
 ) -> anyhow::Result<PullRequestComment> {
     let repository_name = parse_repository_name(&payload.repository)?;
     let user = parse_user(payload.sender);
