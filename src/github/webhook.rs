@@ -7,7 +7,9 @@ use axum::http::request::Parts;
 use axum::http::{HeaderMap, HeaderValue, Request, StatusCode};
 use axum::{async_trait, RequestExt};
 use hmac::{Hmac, Mac};
-use octocrab::models::events::payload::{IssueCommentEventPayload, PullRequestReviewEventPayload};
+use octocrab::models::events::payload::{
+    IssueCommentEventPayload, PullRequestReviewCommentEventPayload, PullRequestReviewEventPayload,
+};
 use octocrab::models::{workflows, App, CheckRun, Repository, RunId, User};
 use secrecy::{ExposeSecret, SecretString};
 use sha2::Sha256;
@@ -131,6 +133,12 @@ fn parse_webhook_event(request: Parts, body: &[u8]) -> anyhow::Result<Option<Bor
          return Err(anyhow::anyhow!("x-github-event header not found"));
     };
 
+    tracing::trace!(
+        "Webhook: event_type `{}`, payload\n{}",
+        event_type.to_str().unwrap_or_default(),
+        std::str::from_utf8(&body).unwrap_or_default()
+    );
+
     match event_type.as_bytes() {
         b"issue_comment" => {
             let repository: WebhookRepository = serde_json::from_slice(body)?;
@@ -143,6 +151,14 @@ fn parse_webhook_event(request: Parts, body: &[u8]) -> anyhow::Result<Option<Bor
         b"pull_request_review" => {
             let payload: PullRequestReviewEventPayload = serde_json::from_slice(body)?;
             let comment = parse_comment_from_pr_review(payload)?;
+            Ok(Some(BorsEvent::Comment(comment)))
+        }
+        b"pull_request_review_comment" => {
+            let repository: WebhookRepository = serde_json::from_slice(body)?;
+            let repository_name = parse_repository_name(&repository.repository)?;
+
+            let payload: PullRequestReviewCommentEventPayload = serde_json::from_slice(body)?;
+            let comment = parse_pr_review_comment(repository_name, payload);
             Ok(Some(BorsEvent::Comment(comment)))
         }
         b"installation_repositories" | b"installation" => Ok(Some(BorsEvent::InstallationsChanged)),
@@ -212,8 +228,22 @@ fn parse_webhook_event(request: Parts, body: &[u8]) -> anyhow::Result<Option<Bor
         }
         _ => {
             tracing::debug!("Ignoring unknown event type {:?}", event_type.to_str());
+            std::fs::write(format!("{}.json", event_type.to_str().unwrap()), body).unwrap();
             Ok(None)
         }
+    }
+}
+
+fn parse_pr_review_comment(
+    repo: GithubRepoName,
+    payload: PullRequestReviewCommentEventPayload,
+) -> PullRequestComment {
+    let user = parse_user(payload.comment.user);
+    PullRequestComment {
+        repository: repo,
+        author: user,
+        pr_number: PullRequestNumber(payload.pull_request.number),
+        text: payload.comment.body.unwrap_or_default(),
     }
 }
 
@@ -396,6 +426,49 @@ mod tests {
                             6,
                         ),
                         text: "review comment",
+                    },
+                ),
+            ),
+        )
+        "###
+        );
+    }
+
+    #[tokio::test]
+    async fn test_pull_request_review_comment() {
+        insta::assert_debug_snapshot!(
+            check_webhook("webhook/pull-request-review-comment.json", "pull_request_review_comment").await,
+            @r###"
+        Ok(
+            GitHubWebhook(
+                Comment(
+                    PullRequestComment {
+                        repository: GithubRepoName {
+                            owner: "kobzol",
+                            name: "bors-kindergarten",
+                        },
+                        author: GithubUser {
+                            username: "Kobzol",
+                            html_url: Url {
+                                scheme: "https",
+                                cannot_be_a_base: false,
+                                username: "",
+                                password: None,
+                                host: Some(
+                                    Domain(
+                                        "github.com",
+                                    ),
+                                ),
+                                port: None,
+                                path: "/Kobzol",
+                                query: None,
+                                fragment: None,
+                            },
+                        },
+                        pr_number: PullRequestNumber(
+                            6,
+                        ),
+                        text: "Foo",
                     },
                 ),
             ),
