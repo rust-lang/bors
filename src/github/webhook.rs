@@ -17,7 +17,7 @@ use crate::bors::event::{
 };
 use crate::database::{WorkflowStatus, WorkflowType};
 use crate::github::server::ServerStateRef;
-use crate::github::{CommitSha, GithubRepoName, GithubUser};
+use crate::github::{CommitSha, GithubRepoName, GithubUser, PullRequestNumber};
 
 /// Wrapper for a secret which is zeroed on drop and can be exposed only through the
 /// [`WebhookSecret::expose`] method.
@@ -231,7 +231,7 @@ fn parse_pr_comment(
         repository: repo,
         author: user,
         text: payload.comment.body.unwrap_or_default(),
-        pr_number: payload.issue.number,
+        pr_number: PullRequestNumber(payload.issue.number),
     })
 }
 
@@ -328,7 +328,9 @@ mod tests {
                                 fragment: None,
                             },
                         },
-                        pr_number: 5,
+                        pr_number: PullRequestNumber(
+                            5,
+                        ),
                         text: "hello bors",
                     },
                 ),

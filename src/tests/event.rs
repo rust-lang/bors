@@ -4,7 +4,7 @@ use octocrab::models::RunId;
 use crate::bors::event::PullRequestComment;
 use crate::bors::{event, CheckSuite, CheckSuiteStatus};
 use crate::database::{WorkflowStatus, WorkflowType};
-use crate::github::{CommitSha, GithubRepoName, GithubUser};
+use crate::github::{CommitSha, GithubRepoName, GithubUser, PullRequestNumber};
 use crate::tests::state::{default_merge_sha, default_repo_name};
 
 fn default_user() -> GithubUser {
@@ -40,7 +40,7 @@ impl CommentBuilder {
         } = self.build().unwrap();
         PullRequestComment {
             repository: repo,
-            pr_number,
+            pr_number: PullRequestNumber(pr_number),
             text,
             author,
         }
@@ -52,7 +52,7 @@ impl From<&str> for PullRequestComment {
         Self {
             repository: default_repo_name(),
             author: default_user(),
-            pr_number: default_pr_number(),
+            pr_number: PullRequestNumber(default_pr_number()),
             text: value.to_string(),
         }
     }
