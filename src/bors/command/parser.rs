@@ -3,6 +3,7 @@
 use crate::bors::command::BorsCommand;
 use std::iter::Peekable;
 use std::str::SplitWhitespace;
+use std::collections::HashMap;
 
 #[derive(Debug)]
 pub enum CommandParseError<'a> {
@@ -30,22 +31,26 @@ impl CommandParser {
         // The order of the parsers in the vector is important
         let parsers: Vec<fn(Tokenizer) -> ParseResult> =
             vec![parser_ping, parser_try_cancel, parser_try];
-    
+        
         text.lines()
-            .filter_map(|line| {
-                if let Some((command, kv_pairs)) = parse_key_value(line) {
+            .filter_map(|line| match line.find(&self.prefix) {
+                Some(index) => {
+                    let command = &line[index + self.prefix.len()..];
+                    let (command_line, remaining) = command.split_once(' ').unwrap_or((command, ""));
+                    // let key_value_pairs =  parse_key_value(remaining).unwrap_or_else(|_| HashMap::new());
+                    let mut tokenizer = Tokenizer::new(command);
                     for parser in &parsers {
-                        if let Some(result) = parser(Tokenizer::new(command, kv_pairs)) {
+                        if let Some(result) = parser(Tokenizer::new(command)) {
                             return Some(result);
                         }
                     }
-                    parser_wildcard(Tokenizer::new(command, kv_pairs))
-                } else {
-                    None
+                    parser_wildcard(Tokenizer::new(command))
                 }
+                None => None,
             })
             .collect()
-    }
+    } 
+    
 }
 
 struct Tokenizer<'a> {
@@ -70,25 +75,6 @@ impl<'a> Tokenizer<'a> {
 
 type ParseResult<'a> = Option<Result<BorsCommand, CommandParseError<'a>>>;
 
-
-//  parse a line of text into command and key-value pairs
-fn parse_key_value(line: &str) -> Option<(&str, Vec<(&str, &str)>)> {
-    let mut parts = line.split_whitespace();
-    let command = parts.next()?;
-
-    let mut kv_pairs = Vec::new();
-    for part in parts {
-        if part.starts_with('@') {
-            break;
-        }
-        let mut kv = part.splitn(2, '=');
-        let key = kv.next()?;
-        let value = kv.next()?;
-        kv_pairs.push((key, value));
-    }
-
-    Some((command, kv_pairs))
-}
 
 
 /// Parsers
@@ -148,10 +134,29 @@ fn parse_list<'a>(
     Some(Ok(result))
 }
 
+pub fn parse_key_value(input: &str) -> Result<HashMap<String, String>, String> {
+    let mut kv_pairs = HashMap::new();
+
+    for pair in input.split_whitespace() {
+        if let Some((key, value)) = pair.split_once('=') {
+            kv_pairs.insert(key.to_string(), value.to_string());
+        }
+    }
+
+    if kv_pairs.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    Ok(kv_pairs)
+}
+
 #[cfg(test)]
 mod tests {
     use crate::bors::command::parser::{CommandParseError, CommandParser};
     use crate::bors::command::BorsCommand;
+    use crate::bors::command::parser::parse_key_value;
+    use std::collections::HashMap;
+
 
     #[test]
     fn test_no_commands() {
@@ -202,6 +207,39 @@ line two
         assert_eq!(cmds.len(), 1);
         assert!(matches!(cmds[0], Ok(BorsCommand::Try)));
     }
+    
+    #[test]
+    fn test_parse_key_value_empty_input() {
+        assert_eq!(parse_key_value(""), Ok(HashMap::new()));
+    }
+    
+    #[test]
+    fn test_parse_key_value_valid_input() {
+        assert_eq!(
+            parse_key_value("key1=value1 key2=value2"),
+            Ok(
+                vec![
+                    ("key1".to_string(), "value1".to_string()),
+                    ("key2".to_string(), "value2".to_string()),
+                ]
+                .into_iter()
+                .collect()
+            )
+        );
+    }
+    
+    #[test]
+    fn test_parse_key_value_duplicate_keys() {
+        assert_eq!(
+            parse_key_value("key=value1 key=value2"),
+            Ok(
+                vec![("key".to_string(), "value2".to_string())]
+                    .into_iter()
+                    .collect()
+            )
+        );
+    }
+    
 
     #[test]
     fn test_parse_try_with_rust_timer() {
