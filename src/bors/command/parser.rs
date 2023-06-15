@@ -36,10 +36,6 @@ impl CommandParser {
             .filter_map(|line| match line.find(&self.prefix) {
                 Some(index) => {
                     let command = &line[index + self.prefix.len()..];
-                    let (command_line, remaining) =
-                        command.split_once(' ').unwrap_or((command, ""));
-                    // let key_value_pairs =  parse_key_value(remaining).unwrap_or_else(|_| HashMap::new());
-                    let mut tokenizer = Tokenizer::new(command);
                     for parser in &parsers {
                         if let Some(result) = parser(Tokenizer::new(command)) {
                             return Some(result);
