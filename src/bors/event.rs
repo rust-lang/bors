@@ -1,5 +1,5 @@
 use crate::database::{WorkflowStatus, WorkflowType};
-use crate::github::{CommitSha, GithubRepoName, GithubUser};
+use crate::github::{CommitSha, GithubRepoName, GithubUser, PullRequestNumber};
 use octocrab::models::RunId;
 
 #[derive(Debug)]
@@ -23,7 +23,7 @@ pub enum BorsEvent {
 pub struct PullRequestComment {
     pub repository: GithubRepoName,
     pub author: GithubUser,
-    pub pr_number: u64,
+    pub pr_number: PullRequestNumber,
     pub text: String,
 }
 

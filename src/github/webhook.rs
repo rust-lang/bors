@@ -7,8 +7,12 @@ use axum::http::request::Parts;
 use axum::http::{HeaderMap, HeaderValue, Request, StatusCode};
 use axum::{async_trait, RequestExt};
 use hmac::{Hmac, Mac};
-use octocrab::models::events::payload::IssueCommentEventPayload;
-use octocrab::models::{workflows, App, CheckRun, Repository, RunId};
+use octocrab::models::events::payload::{
+    IssueCommentEventAction, IssueCommentEventPayload, PullRequestReviewCommentEventAction,
+    PullRequestReviewCommentEventPayload,
+};
+use octocrab::models::pulls::{PullRequest, Review};
+use octocrab::models::{workflows, App, CheckRun, Repository, RunId, User};
 use secrecy::{ExposeSecret, SecretString};
 use sha2::Sha256;
 
@@ -17,7 +21,7 @@ use crate::bors::event::{
 };
 use crate::database::{WorkflowStatus, WorkflowType};
 use crate::github::server::ServerStateRef;
-use crate::github::{CommitSha, GithubRepoName, GithubUser};
+use crate::github::{CommitSha, GithubRepoName, GithubUser, PullRequestNumber};
 
 /// Wrapper for a secret which is zeroed on drop and can be exposed only through the
 /// [`WebhookSecret::expose`] method.
@@ -76,6 +80,15 @@ pub struct WebhookCheckSuite<'a> {
     repository: Repository,
 }
 
+#[derive(Debug, serde::Deserialize)]
+pub struct WebhookPullRequestReviewEvent<'a> {
+    action: &'a str,
+    pull_request: PullRequest,
+    review: Review,
+    repository: Repository,
+    sender: User,
+}
+
 /// axum extractor for GitHub webhook events.
 #[derive(Debug)]
 pub struct GitHubWebhook(pub BorsEvent);
@@ -131,14 +144,45 @@ fn parse_webhook_event(request: Parts, body: &[u8]) -> anyhow::Result<Option<Bor
          return Err(anyhow::anyhow!("x-github-event header not found"));
     };
 
+    tracing::trace!(
+        "Webhook: event_type `{}`, payload\n{}",
+        event_type.to_str().unwrap_or_default(),
+        std::str::from_utf8(&body).unwrap_or_default()
+    );
+
     match event_type.as_bytes() {
         b"issue_comment" => {
             let repository: WebhookRepository = serde_json::from_slice(body)?;
             let repository_name = parse_repository_name(&repository.repository)?;
 
             let event: IssueCommentEventPayload = serde_json::from_slice(body)?;
-            let comment = parse_pr_comment(repository_name, event).map(BorsEvent::Comment);
-            Ok(comment)
+            if event.action == IssueCommentEventAction::Created {
+                let comment = parse_pr_comment(repository_name, event).map(BorsEvent::Comment);
+                Ok(comment)
+            } else {
+                Ok(None)
+            }
+        }
+        b"pull_request_review" => {
+            let payload: WebhookPullRequestReviewEvent = serde_json::from_slice(body)?;
+            if payload.action == "submitted" {
+                let comment = parse_comment_from_pr_review(payload)?;
+                Ok(Some(BorsEvent::Comment(comment)))
+            } else {
+                Ok(None)
+            }
+        }
+        b"pull_request_review_comment" => {
+            let repository: WebhookRepository = serde_json::from_slice(body)?;
+            let repository_name = parse_repository_name(&repository.repository)?;
+
+            let payload: PullRequestReviewCommentEventPayload = serde_json::from_slice(body)?;
+            if payload.action == PullRequestReviewCommentEventAction::Created {
+                let comment = parse_pr_review_comment(repository_name, payload);
+                Ok(Some(BorsEvent::Comment(comment)))
+            } else {
+                Ok(None)
+            }
         }
         b"installation_repositories" | b"installation" => Ok(Some(BorsEvent::InstallationsChanged)),
         b"workflow_run" => {
@@ -207,8 +251,43 @@ fn parse_webhook_event(request: Parts, body: &[u8]) -> anyhow::Result<Option<Bor
         }
         _ => {
             tracing::debug!("Ignoring unknown event type {:?}", event_type.to_str());
+            std::fs::write(format!("{}.json", event_type.to_str().unwrap()), body).unwrap();
             Ok(None)
         }
+    }
+}
+
+fn parse_pr_review_comment(
+    repo: GithubRepoName,
+    payload: PullRequestReviewCommentEventPayload,
+) -> PullRequestComment {
+    let user = parse_user(payload.comment.user);
+    PullRequestComment {
+        repository: repo,
+        author: user,
+        pr_number: PullRequestNumber(payload.pull_request.number),
+        text: payload.comment.body.unwrap_or_default(),
+    }
+}
+
+fn parse_comment_from_pr_review(
+    payload: WebhookPullRequestReviewEvent<'_>,
+) -> anyhow::Result<PullRequestComment> {
+    let repository_name = parse_repository_name(&payload.repository)?;
+    let user = parse_user(payload.sender);
+
+    Ok(PullRequestComment {
+        repository: repository_name,
+        author: user,
+        pr_number: PullRequestNumber(payload.pull_request.number),
+        text: payload.review.body.unwrap_or_default(),
+    })
+}
+
+fn parse_user(user: User) -> GithubUser {
+    GithubUser {
+        username: user.login,
+        html_url: user.html_url,
     }
 }
 
@@ -222,16 +301,11 @@ fn parse_pr_comment(
         return None;
     }
 
-    let user = GithubUser {
-        username: payload.comment.user.login,
-        html_url: payload.comment.user.html_url,
-    };
-
     Some(PullRequestComment {
         repository: repo,
-        author: user,
+        author: parse_user(payload.comment.user),
         text: payload.comment.body.unwrap_or_default(),
-        pr_number: payload.issue.number,
+        pr_number: PullRequestNumber(payload.issue.number),
     })
 }
 
@@ -328,8 +402,96 @@ mod tests {
                                 fragment: None,
                             },
                         },
-                        pr_number: 5,
+                        pr_number: PullRequestNumber(
+                            5,
+                        ),
                         text: "hello bors",
+                    },
+                ),
+            ),
+        )
+        "###
+        );
+    }
+
+    #[tokio::test]
+    async fn test_pull_request_review() {
+        insta::assert_debug_snapshot!(
+            check_webhook("webhook/pull-request-review.json", "pull_request_review").await,
+            @r###"
+        Ok(
+            GitHubWebhook(
+                Comment(
+                    PullRequestComment {
+                        repository: GithubRepoName {
+                            owner: "kobzol",
+                            name: "bors-kindergarten",
+                        },
+                        author: GithubUser {
+                            username: "Kobzol",
+                            html_url: Url {
+                                scheme: "https",
+                                cannot_be_a_base: false,
+                                username: "",
+                                password: None,
+                                host: Some(
+                                    Domain(
+                                        "github.com",
+                                    ),
+                                ),
+                                port: None,
+                                path: "/Kobzol",
+                                query: None,
+                                fragment: None,
+                            },
+                        },
+                        pr_number: PullRequestNumber(
+                            6,
+                        ),
+                        text: "review comment",
+                    },
+                ),
+            ),
+        )
+        "###
+        );
+    }
+
+    #[tokio::test]
+    async fn test_pull_request_review_comment() {
+        insta::assert_debug_snapshot!(
+            check_webhook("webhook/pull-request-review-comment.json", "pull_request_review_comment").await,
+            @r###"
+        Ok(
+            GitHubWebhook(
+                Comment(
+                    PullRequestComment {
+                        repository: GithubRepoName {
+                            owner: "kobzol",
+                            name: "bors-kindergarten",
+                        },
+                        author: GithubUser {
+                            username: "Kobzol",
+                            html_url: Url {
+                                scheme: "https",
+                                cannot_be_a_base: false,
+                                username: "",
+                                password: None,
+                                host: Some(
+                                    Domain(
+                                        "github.com",
+                                    ),
+                                ),
+                                port: None,
+                                path: "/Kobzol",
+                                query: None,
+                                fragment: None,
+                            },
+                        },
+                        pr_number: PullRequestNumber(
+                            6,
+                        ),
+                        text: "Foo",
                     },
                 ),
             ),
