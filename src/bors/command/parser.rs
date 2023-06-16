@@ -1,6 +1,7 @@
 //! Defines parsers for bors commands.
 
 use crate::bors::command::BorsCommand;
+use std::collections::HashMap;
 use std::iter::Peekable;
 use std::str::SplitWhitespace;
 
@@ -127,10 +128,25 @@ fn parse_list<'a>(
     Some(Ok(result))
 }
 
+#[allow(unused)]
+pub fn parse_key_value(input: &str) -> Result<HashMap<String, String>, String> {
+    let mut kv_pairs = HashMap::new();
+
+    for pair in input.split_whitespace() {
+        if let Some((key, value)) = pair.split_once('=') {
+            kv_pairs.insert(key.to_string(), value.to_string());
+        }
+    }
+
+    Ok(kv_pairs)
+}
+
 #[cfg(test)]
 mod tests {
+    use crate::bors::command::parser::parse_key_value;
     use crate::bors::command::parser::{CommandParseError, CommandParser};
     use crate::bors::command::BorsCommand;
+    use std::collections::HashMap;
 
     #[test]
     fn test_no_commands() {
@@ -180,6 +196,34 @@ line two
         let cmds = parse_commands("@bors try");
         assert_eq!(cmds.len(), 1);
         assert!(matches!(cmds[0], Ok(BorsCommand::Try)));
+    }
+
+    #[test]
+    fn test_parse_key_value_empty_input() {
+        assert_eq!(parse_key_value(""), Ok(HashMap::new()));
+    }
+
+    #[test]
+    fn test_parse_key_value_valid_input() {
+        assert_eq!(
+            parse_key_value("key1=value1 key2=value2"),
+            Ok(vec![
+                ("key1".to_string(), "value1".to_string()),
+                ("key2".to_string(), "value2".to_string()),
+            ]
+            .into_iter()
+            .collect())
+        );
+    }
+
+    #[test]
+    fn test_parse_key_value_duplicate_keys() {
+        assert_eq!(
+            parse_key_value("key=value1 key=value2"),
+            Ok(vec![("key".to_string(), "value2".to_string())]
+                .into_iter()
+                .collect())
+        );
     }
 
     #[test]
