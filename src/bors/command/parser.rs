@@ -12,6 +12,7 @@ pub enum CommandParseError<'a> {
     MissingArgValue { arg: &'a str },
     UnknownArg(&'a str),
     DuplicateArg(&'a str),
+    ValidationError(String),
 }
 
 /// Part of a command, either a bare string like `try` or a key value like `parent=<sha>`.
@@ -116,6 +117,13 @@ fn parser_ping<'a>(command: &'a str, _parts: &[CommandPart<'a>]) -> ParseResult<
     }
 }
 
+fn parse_sha(input: &str) -> Result<CommitSha, String> {
+    if input.len() != 40 {
+        return Err("SHA must have exactly 40 characters".to_string());
+    }
+    Ok(CommitSha(input.to_string()))
+}
+
 /// Parses "@bors try <parent=sha>".
 fn parser_try<'a>(command: &'a str, parts: &[CommandPart<'a>]) -> ParseResult<'a> {
     if command != "try" {
@@ -131,16 +139,21 @@ fn parser_try<'a>(command: &'a str, parts: &[CommandPart<'a>]) -> ParseResult<'a
             }
             CommandPart::KeyValue { key, value } => {
                 if *key == "parent" {
-                    parent = Some(value);
+                    parent = match parse_sha(value) {
+                        Ok(sha) => Some(sha),
+                        Err(error) => {
+                            return Some(Err(CommandParseError::ValidationError(format!(
+                                "Try parent has to be a valid commit SHA: {error}"
+                            ))));
+                        }
+                    };
                 } else {
                     return Some(Err(CommandParseError::UnknownArg(key)));
                 }
             }
         }
     }
-    Some(Ok(BorsCommand::Try {
-        parent: parent.map(|v| CommitSha(v.to_string())),
-    }))
+    Some(Ok(BorsCommand::Try { parent }))
 }
 
 /// Parses "@bors try cancel".
@@ -234,14 +247,29 @@ line two
 
     #[test]
     fn parse_try_parent() {
-        let cmds = parse_commands("@bors try parent=foo");
+        let cmds = parse_commands("@bors try parent=ea9c1b050cc8b420c2c211d2177811e564a4dc60");
         assert_eq!(cmds.len(), 1);
         assert_eq!(
             cmds[0],
             Ok(BorsCommand::Try {
-                parent: Some(CommitSha("foo".to_string()))
+                parent: Some(CommitSha(
+                    "ea9c1b050cc8b420c2c211d2177811e564a4dc60".to_string()
+                ))
             })
         );
+    }
+
+    #[test]
+    fn parse_try_parent_invalid() {
+        let cmds = parse_commands("@bors try parent=foo");
+        assert_eq!(cmds.len(), 1);
+        insta::assert_debug_snapshot!(cmds[0], @r###"
+        Err(
+            ValidationError(
+                "Try parent has to be a valid commit SHA: SHA must have exactly 40 characters",
+            ),
+        )
+        "###);
     }
 
     #[test]
