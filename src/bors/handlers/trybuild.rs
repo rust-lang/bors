@@ -1,12 +1,14 @@
-use crate::bors::handlers::labels::handle_label_trigger;
 use anyhow::anyhow;
 
+use crate::bors::handlers::labels::handle_label_trigger;
 use crate::bors::RepositoryClient;
 use crate::bors::RepositoryState;
 use crate::database::{
     BuildModel, BuildStatus, DbClient, PullRequestModel, WorkflowStatus, WorkflowType,
 };
-use crate::github::{GithubUser, LabelTrigger, MergeError, PullRequest, PullRequestNumber};
+use crate::github::{
+    CommitSha, GithubUser, LabelTrigger, MergeError, PullRequest, PullRequestNumber,
+};
 use crate::permissions::PermissionType;
 
 // This branch serves for preparing the final commit.
@@ -20,11 +22,15 @@ pub(super) const TRY_BRANCH_NAME: &str = "automation/bors/try";
 
 /// Performs a so-called try build - merges the PR branch into a special branch designed
 /// for running CI checks.
+///
+/// If `parent` is set, it will use it as a base commit for the merge.
+/// Otherwise, it will use the latest commit on the main repository branch.
 pub(super) async fn command_try_build<Client: RepositoryClient>(
     repo: &mut RepositoryState<Client>,
     db: &mut dyn DbClient,
     pr: &PullRequest,
     author: &GithubUser,
+    parent: Option<CommitSha>,
 ) -> anyhow::Result<()> {
     if !check_try_permissions(repo, pr, author).await? {
         return Ok(());
@@ -47,10 +53,22 @@ pub(super) async fn command_try_build<Client: RepositoryClient>(
         }
     }
 
+    let base_sha = parent.as_ref().unwrap_or(&pr.base.sha);
+
+    // First set the try branch to our base commit (either the selected parent or the main branch).
     repo.client
-        .set_branch_to_sha(TRY_MERGE_BRANCH_NAME, &pr.base.sha)
+        .set_branch_to_sha(TRY_MERGE_BRANCH_NAME, base_sha)
         .await
-        .map_err(|error| anyhow!("Cannot set try merge branch to main branch: {error:?}"))?;
+        .map_err(|error| {
+            let base = if let Some(ref parent) = parent {
+                parent.0.as_str()
+            } else {
+                "main branch"
+            };
+            anyhow!("Cannot set try merge branch to {base}: {error:?}")
+        })?;
+
+    // Then merge the PR commit into the try branch
     match repo
         .client
         .merge_branches(
@@ -62,6 +80,8 @@ pub(super) async fn command_try_build<Client: RepositoryClient>(
     {
         Ok(merge_sha) => {
             tracing::debug!("Merge successful, SHA: {merge_sha}");
+            // If the merge was succesful, then set the actual try branch that will run CI to the
+            // merged commit.
             repo.client
                 .set_branch_to_sha(TRY_BRANCH_NAME, &merge_sha)
                 .await
@@ -298,6 +318,15 @@ mod tests {
         state
             .client()
             .check_branch_history(TRY_BRANCH_NAME, &[&default_merge_sha()]);
+    }
+
+    #[tokio::test]
+    async fn test_try_merge_explicit_parent() {
+        let mut state = ClientBuilder::default().create_state().await;
+        state.comment("@bors try parent=foo").await;
+        state
+            .client()
+            .check_branch_history(TRY_MERGE_BRANCH_NAME, &["foo", &default_merge_sha()]);
     }
 
     #[tokio::test]

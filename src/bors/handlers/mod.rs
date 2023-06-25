@@ -147,9 +147,9 @@ async fn handle_comment<Client: RepositoryClient>(
                         let span = tracing::info_span!("Ping");
                         command_ping(repo, &pull_request).instrument(span).await
                     }
-                    BorsCommand::Try { parent: _parent } => {
+                    BorsCommand::Try { parent } => {
                         let span = tracing::info_span!("Try");
-                        command_try_build(repo, database, &pull_request, &comment.author)
+                        command_try_build(repo, database, &pull_request, &comment.author, parent)
                             .instrument(span)
                             .await
                     }
