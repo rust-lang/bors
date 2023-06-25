@@ -220,6 +220,7 @@ impl ClientBuilder {
                 cancelled_workflows: Default::default(),
                 added_labels: Default::default(),
                 removed_labels: Default::default(),
+                branch_history: Default::default(),
             },
             permissions_resolver: permission_resolver,
             config: config.create(),
@@ -247,6 +248,8 @@ pub struct TestRepositoryClient {
     pub cancelled_workflows: HashSet<u64>,
     added_labels: HashMap<u64, Vec<String>>,
     removed_labels: HashMap<u64, Vec<String>>,
+    // Branch name -> history of SHAs
+    branch_history: HashMap<String, Vec<CommitSha>>,
 }
 
 impl TestRepositoryClient {
@@ -303,6 +306,26 @@ impl TestRepositoryClient {
         let set = cancelled.iter().copied().collect::<HashSet<_>>();
         assert_eq!(self.cancelled_workflows, set);
     }
+
+    pub fn check_branch_history(&self, branch: &str, sha: &[&str]) {
+        let history = self
+            .branch_history
+            .get(branch)
+            .unwrap_or_else(|| panic!("Branch {branch} not found"));
+        assert_eq!(
+            history,
+            &sha.into_iter()
+                .map(|s| CommitSha(s.to_string()))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    fn add_branch_sha(&mut self, branch: &str, sha: &str) {
+        self.branch_history
+            .entry(branch.to_string())
+            .or_default()
+            .push(CommitSha(sha.to_string()));
+    }
 }
 
 #[async_trait]
@@ -323,17 +346,22 @@ impl RepositoryClient for TestRepositoryClient {
         Ok(())
     }
 
-    async fn set_branch_to_sha(&mut self, _branch: &str, _sha: &CommitSha) -> anyhow::Result<()> {
+    async fn set_branch_to_sha(&mut self, branch: &str, sha: &CommitSha) -> anyhow::Result<()> {
+        self.add_branch_sha(branch, &sha.0);
         Ok(())
     }
 
     async fn merge_branches(
         &mut self,
-        _base: &str,
+        base: &str,
         _head: &CommitSha,
         _commit_message: &str,
     ) -> Result<CommitSha, MergeError> {
-        (self.merge_branches_fn)()
+        let res = (self.merge_branches_fn)();
+        if let Ok(ref sha) = res {
+            self.add_branch_sha(base, &sha.0);
+        }
+        res
     }
 
     async fn get_check_suites_for_commit(
