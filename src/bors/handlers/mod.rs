@@ -41,11 +41,19 @@ pub async fn handle_bors_event<Client: RepositoryClient>(
                     pr = format!("{}#{}", comment.repository, comment.pr_number),
                     author = comment.author.username
                 );
+                let pr_number = comment.pr_number;
                 if let Err(error) = handle_comment(repo, db, ctx, comment)
                     .instrument(span.clone())
                     .await
                 {
                     span.log_error(error);
+                    repo.client
+                        .post_comment(
+                            pr_number,
+                            ":x: Encountered an error while executing command",
+                        )
+                        .await
+                        .context("Cannot send comment reacting to an error")?;
                 }
             }
         }
