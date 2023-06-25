@@ -187,6 +187,9 @@ async fn handle_comment<Client: RepositoryClient>(
                     CommandParseError::DuplicateArg(arg) => {
                         format!(r#"Argument "{arg}" found multiple times."#)
                     }
+                    CommandParseError::ValidationError(error) => {
+                        format!("Invalid command: {error}")
+                    }
                 };
 
                 tracing::warn!("{error_msg}");

@@ -323,10 +323,16 @@ mod tests {
     #[tokio::test]
     async fn test_try_merge_explicit_parent() {
         let mut state = ClientBuilder::default().create_state().await;
-        state.comment("@bors try parent=foo").await;
         state
-            .client()
-            .check_branch_history(TRY_MERGE_BRANCH_NAME, &["foo", &default_merge_sha()]);
+            .comment("@bors try parent=ea9c1b050cc8b420c2c211d2177811e564a4dc60")
+            .await;
+        state.client().check_branch_history(
+            TRY_MERGE_BRANCH_NAME,
+            &[
+                "ea9c1b050cc8b420c2c211d2177811e564a4dc60",
+                &default_merge_sha(),
+            ],
+        );
     }
 
     #[tokio::test]
