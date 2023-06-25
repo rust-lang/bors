@@ -134,7 +134,7 @@ async fn handle_comment<Client: RepositoryClient>(
 ) -> anyhow::Result<()> {
     let pr_number = comment.pr_number;
     let commands = ctx.parser.parse_commands(&comment.text);
-    let pull_request = repo.client.get_pull_request(pr_number.into()).await?;
+    let pull_request = repo.client.get_pull_request(pr_number).await?;
 
     tracing::debug!("Commands: {commands:?}");
     tracing::trace!("Text: {}", comment.text);

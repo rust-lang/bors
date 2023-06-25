@@ -147,7 +147,7 @@ fn parse_webhook_event(request: Parts, body: &[u8]) -> anyhow::Result<Option<Bor
     tracing::trace!(
         "Webhook: event_type `{}`, payload\n{}",
         event_type.to_str().unwrap_or_default(),
-        std::str::from_utf8(&body).unwrap_or_default()
+        std::str::from_utf8(body).unwrap_or_default()
     );
 
     match event_type.as_bytes() {
