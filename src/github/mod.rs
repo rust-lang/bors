@@ -50,7 +50,7 @@ pub struct GithubUser {
     pub html_url: Url,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct CommitSha(pub String);
 
 impl From<String> for CommitSha {

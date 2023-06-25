@@ -1,14 +1,24 @@
 //! Defines parsers for bors commands.
 
-use crate::bors::command::BorsCommand;
-use std::collections::HashMap;
-use std::iter::Peekable;
-use std::str::SplitWhitespace;
+use std::collections::HashSet;
 
-#[derive(Debug)]
+use crate::bors::command::BorsCommand;
+use crate::github::CommitSha;
+
+#[derive(Debug, PartialEq)]
 pub enum CommandParseError<'a> {
     MissingCommand,
     UnknownCommand(&'a str),
+    MissingArgValue { arg: &'a str },
+    UnknownArg(&'a str),
+    DuplicateArg(&'a str),
+}
+
+/// Part of a command, either a bare string like `try` or a key value like `parent=<sha>`.
+#[derive(PartialEq)]
+enum CommandPart<'a> {
+    Bare(&'a str),
+    KeyValue { key: &'a str, value: &'a str },
 }
 
 pub struct CommandParser {
@@ -29,19 +39,36 @@ impl CommandParser {
         text: &'a str,
     ) -> Vec<Result<BorsCommand, CommandParseError<'a>>> {
         // The order of the parsers in the vector is important
-        let parsers: Vec<fn(Tokenizer) -> ParseResult> =
+        let parsers: Vec<for<'b> fn(&'b str, &[CommandPart<'b>]) -> ParseResult<'b>> =
             vec![parser_ping, parser_try_cancel, parser_try];
 
         text.lines()
             .filter_map(|line| match line.find(&self.prefix) {
                 Some(index) => {
                     let command = &line[index + self.prefix.len()..];
-                    for parser in &parsers {
-                        if let Some(result) = parser(Tokenizer::new(command)) {
-                            return Some(result);
+                    match parse_parts(command) {
+                        Ok(parts) => {
+                            if parts.is_empty() {
+                                Some(Err(CommandParseError::MissingCommand))
+                            } else {
+                                let (command, rest) = parts.split_at(1);
+                                match command[0] {
+                                    CommandPart::Bare(command) => {
+                                        for parser in &parsers {
+                                            if let Some(result) = parser(command, rest) {
+                                                return Some(result);
+                                            }
+                                        }
+                                        Some(Err(CommandParseError::UnknownCommand(command)))
+                                    }
+                                    CommandPart::KeyValue { .. } => {
+                                        Some(Err(CommandParseError::MissingCommand))
+                                    }
+                                }
+                            }
                         }
+                        Err(error) => Some(Err(error)),
                     }
-                    parser_wildcard(Tokenizer::new(command))
                 }
                 None => None,
             })
@@ -49,120 +76,103 @@ impl CommandParser {
     }
 }
 
-struct Tokenizer<'a> {
-    iter: Peekable<SplitWhitespace<'a>>,
-}
+type ParseResult<'a> = Option<Result<BorsCommand, CommandParseError<'a>>>;
 
-impl<'a> Tokenizer<'a> {
-    fn new(input: &'a str) -> Self {
-        Self {
-            iter: input.split_whitespace().peekable(),
+fn parse_parts(input: &str) -> Result<Vec<CommandPart>, CommandParseError> {
+    let mut parts = vec![];
+    let mut seen_keys = HashSet::new();
+
+    for item in input.split_whitespace() {
+        // Stop parsing, as this is a command for another bot, such as `@rust-timer queue`.
+        if item.starts_with('@') {
+            break;
+        }
+
+        match item.split_once('=') {
+            Some((key, value)) => {
+                if value.is_empty() {
+                    return Err(CommandParseError::MissingArgValue { arg: key });
+                }
+                if seen_keys.contains(key) {
+                    return Err(CommandParseError::DuplicateArg(key));
+                }
+                seen_keys.insert(key);
+                parts.push(CommandPart::KeyValue { key, value });
+            }
+            None => parts.push(CommandPart::Bare(item)),
         }
     }
-
-    fn peek(&mut self) -> Option<&'a str> {
-        self.iter.peek().copied()
-    }
-
-    fn next(&mut self) -> Option<&'a str> {
-        self.iter.next()
-    }
+    Ok(parts)
 }
-
-type ParseResult<'a> = Option<Result<BorsCommand, CommandParseError<'a>>>;
 
 /// Parsers
 
 /// Parses "@bors ping".
-fn parser_ping(tokenizer: Tokenizer) -> ParseResult {
-    parse_exact("ping", BorsCommand::Ping, tokenizer)
+fn parser_ping<'a>(command: &'a str, _parts: &[CommandPart<'a>]) -> ParseResult<'a> {
+    if command == "ping" {
+        Some(Ok(BorsCommand::Ping))
+    } else {
+        None
+    }
 }
 
-/// Parses "@bors try".
-fn parser_try(tokenizer: Tokenizer) -> ParseResult {
-    parse_exact("try", BorsCommand::Try, tokenizer)
+/// Parses "@bors try <parent=sha>".
+fn parser_try<'a>(command: &'a str, parts: &[CommandPart<'a>]) -> ParseResult<'a> {
+    if command != "try" {
+        return None;
+    }
+
+    let mut parent = None;
+
+    for part in parts {
+        match part {
+            CommandPart::Bare(key) => {
+                return Some(Err(CommandParseError::UnknownArg(key)));
+            }
+            CommandPart::KeyValue { key, value } => {
+                if *key == "parent" {
+                    parent = Some(value);
+                } else {
+                    return Some(Err(CommandParseError::UnknownArg(key)));
+                }
+            }
+        }
+    }
+    Some(Ok(BorsCommand::Try {
+        parent: parent.map(|v| CommitSha(v.to_string())),
+    }))
 }
 
 /// Parses "@bors try cancel".
-fn parser_try_cancel(tokenizer: Tokenizer) -> ParseResult {
-    parse_list(&["try", "cancel"], BorsCommand::TryCancel, tokenizer)
-}
-
-/// Returns either missing or unknown command error.
-fn parser_wildcard(mut tokenizer: Tokenizer) -> ParseResult {
-    let result = match tokenizer.peek() {
-        Some(arg) => Err(CommandParseError::UnknownCommand(arg)),
-        None => Err(CommandParseError::MissingCommand),
-    };
-    Some(result)
-}
-
-/// Checks if the tokenizer returns exactly `needle`.
-/// If it does, the parser will return `result`.
-fn parse_exact<'a>(
-    needle: &'static str,
-    result: BorsCommand,
-    mut tokenizer: Tokenizer<'a>,
-) -> ParseResult<'a> {
-    match tokenizer.peek() {
-        Some(word) if word == needle => Some(Ok(result)),
-        _ => None,
+fn parser_try_cancel<'a>(command: &'a str, parts: &[CommandPart<'a>]) -> ParseResult<'a> {
+    if command == "try" && parts.get(0) == Some(&CommandPart::Bare("cancel")) {
+        Some(Ok(BorsCommand::TryCancel))
+    } else {
+        None
     }
-}
-
-/// Checks if the tokenizer parses the following items in a sequence.
-/// If it does, the parser will return `result`.
-fn parse_list<'a>(
-    needles: &[&'static str],
-    result: BorsCommand,
-    mut tokenizer: Tokenizer<'a>,
-) -> ParseResult<'a> {
-    for needle in needles {
-        match tokenizer.peek() {
-            Some(word) if word == *needle => {
-                tokenizer.next();
-            }
-            _ => return None,
-        }
-    }
-    Some(Ok(result))
-}
-
-#[allow(unused)]
-pub fn parse_key_value(input: &str) -> Result<HashMap<String, String>, String> {
-    let mut kv_pairs = HashMap::new();
-
-    for pair in input.split_whitespace() {
-        if let Some((key, value)) = pair.split_once('=') {
-            kv_pairs.insert(key.to_string(), value.to_string());
-        }
-    }
-
-    Ok(kv_pairs)
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::bors::command::parser::parse_key_value;
     use crate::bors::command::parser::{CommandParseError, CommandParser};
     use crate::bors::command::BorsCommand;
-    use std::collections::HashMap;
+    use crate::github::CommitSha;
 
     #[test]
-    fn test_no_commands() {
+    fn no_commands() {
         let cmds = parse_commands(r#"Hi, this PR looks nice!"#);
         assert_eq!(cmds.len(), 0);
     }
 
     #[test]
-    fn test_missing_command() {
+    fn missing_command() {
         let cmds = parse_commands("@bors");
         assert_eq!(cmds.len(), 1);
         assert!(matches!(cmds[0], Err(CommandParseError::MissingCommand)));
     }
 
     #[test]
-    fn test_unknown_command() {
+    fn unknown_command() {
         let cmds = parse_commands("@bors foo");
         assert_eq!(cmds.len(), 1);
         assert!(matches!(
@@ -172,14 +182,38 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_ping() {
+    fn parse_arg_no_value() {
+        let cmds = parse_commands("@bors ping a=");
+        assert_eq!(cmds.len(), 1);
+        assert!(matches!(
+            cmds[0],
+            Err(CommandParseError::MissingArgValue { arg: "a" })
+        ));
+    }
+
+    #[test]
+    fn parse_duplicate_key() {
+        let cmds = parse_commands("@bors ping a=b a=c");
+        assert_eq!(cmds.len(), 1);
+        assert!(matches!(cmds[0], Err(CommandParseError::DuplicateArg("a"))));
+    }
+
+    #[test]
+    fn parse_ping() {
         let cmds = parse_commands("@bors ping");
         assert_eq!(cmds.len(), 1);
         assert!(matches!(cmds[0], Ok(BorsCommand::Ping)));
     }
 
     #[test]
-    fn test_parse_command_multiline() {
+    fn parse_ping_unknown_arg() {
+        let cmds = parse_commands("@bors ping a");
+        assert_eq!(cmds.len(), 1);
+        assert!(matches!(cmds[0], Ok(BorsCommand::Ping)));
+    }
+
+    #[test]
+    fn parse_command_multiline() {
         let cmds = parse_commands(
             r#"
 line one
@@ -188,57 +222,55 @@ line two
 "#,
         );
         assert_eq!(cmds.len(), 1);
-        assert!(matches!(cmds[0], Ok(BorsCommand::Try)));
+        assert!(matches!(cmds[0], Ok(BorsCommand::Try { parent: None })));
     }
 
     #[test]
-    fn test_parse_try() {
+    fn parse_try() {
         let cmds = parse_commands("@bors try");
         assert_eq!(cmds.len(), 1);
-        assert!(matches!(cmds[0], Ok(BorsCommand::Try)));
+        assert!(matches!(cmds[0], Ok(BorsCommand::Try { parent: None })));
     }
 
     #[test]
-    fn test_parse_key_value_empty_input() {
-        assert_eq!(parse_key_value(""), Ok(HashMap::new()));
-    }
-
-    #[test]
-    fn test_parse_key_value_valid_input() {
+    fn parse_try_parent() {
+        let cmds = parse_commands("@bors try parent=foo");
+        assert_eq!(cmds.len(), 1);
         assert_eq!(
-            parse_key_value("key1=value1 key2=value2"),
-            Ok(vec![
-                ("key1".to_string(), "value1".to_string()),
-                ("key2".to_string(), "value2".to_string()),
-            ]
-            .into_iter()
-            .collect())
+            cmds[0],
+            Ok(BorsCommand::Try {
+                parent: Some(CommitSha("foo".to_string()))
+            })
         );
     }
 
     #[test]
-    fn test_parse_key_value_duplicate_keys() {
-        assert_eq!(
-            parse_key_value("key=value1 key=value2"),
-            Ok(vec![("key".to_string(), "value2".to_string())]
-                .into_iter()
-                .collect())
-        );
+    fn parse_try_unknown_arg() {
+        let cmds = parse_commands("@bors try a");
+        assert_eq!(cmds.len(), 1);
+        assert!(matches!(cmds[0], Err(CommandParseError::UnknownArg("a"))));
     }
 
     #[test]
-    fn test_parse_try_with_rust_timer() {
+    fn parse_try_unknown_kv_arg() {
+        let cmds = parse_commands("@bors try a=b");
+        assert_eq!(cmds.len(), 1);
+        assert!(matches!(cmds[0], Err(CommandParseError::UnknownArg("a"))));
+    }
+
+    #[test]
+    fn parse_try_with_rust_timer() {
         let cmds = parse_commands(
             r#"
 @bors try @rust-timer queue
 "#,
         );
         assert_eq!(cmds.len(), 1);
-        assert!(matches!(cmds[0], Ok(BorsCommand::Try)));
+        assert!(matches!(cmds[0], Ok(BorsCommand::Try { parent: None })));
     }
 
     #[test]
-    fn test_parse_try_cancel() {
+    fn parse_try_cancel() {
         let cmds = parse_commands("@bors try cancel");
         assert_eq!(cmds.len(), 1);
         assert!(matches!(cmds[0], Ok(BorsCommand::TryCancel)));

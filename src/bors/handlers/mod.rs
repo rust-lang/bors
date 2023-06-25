@@ -147,7 +147,7 @@ async fn handle_comment<Client: RepositoryClient>(
                         let span = tracing::info_span!("Ping");
                         command_ping(repo, &pull_request).instrument(span).await
                     }
-                    BorsCommand::Try => {
+                    BorsCommand::Try { parent: _parent } => {
                         let span = tracing::info_span!("Try");
                         command_try_build(repo, database, &pull_request, &comment.author)
                             .instrument(span)
@@ -169,6 +169,15 @@ async fn handle_comment<Client: RepositoryClient>(
                     CommandParseError::MissingCommand => "Missing command.".to_string(),
                     CommandParseError::UnknownCommand(command) => {
                         format!(r#"Unknown command "{command}"."#)
+                    }
+                    CommandParseError::MissingArgValue { arg } => {
+                        format!(r#"Unknown value for argument "{arg}"."#)
+                    }
+                    CommandParseError::UnknownArg(arg) => {
+                        format!(r#"Unknown argument "{arg}"."#)
+                    }
+                    CommandParseError::DuplicateArg(arg) => {
+                        format!(r#"Argument "{arg}" found multiple times."#)
                     }
                 };
 
