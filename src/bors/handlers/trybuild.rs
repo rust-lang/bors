@@ -233,7 +233,11 @@ async fn check_try_permissions<Client: RepositoryClient>(
 
 #[cfg(test)]
 mod tests {
-    use crate::bors::handlers::trybuild::TRY_BRANCH_NAME;
+    use sea_orm::EntityTrait;
+
+    use entity::workflow;
+
+    use crate::bors::handlers::trybuild::{TRY_BRANCH_NAME, TRY_MERGE_BRANCH_NAME};
     use crate::database::{BuildStatus, DbClient, WorkflowStatus, WorkflowType};
     use crate::github::{CommitSha, LabelTrigger, MergeError};
     use crate::tests::event::{
@@ -244,8 +248,6 @@ mod tests {
     use crate::tests::state::{
         default_merge_sha, default_repo_name, ClientBuilder, RepoConfigBuilder,
     };
-    use entity::workflow;
-    use sea_orm::EntityTrait;
 
     #[tokio::test]
     async fn test_try_no_permission() {
@@ -276,6 +278,26 @@ mod tests {
             default_pr_number(),
             &[":hourglass: Trying commit head1 with merge sha-merged…"],
         );
+    }
+
+    #[tokio::test]
+    async fn test_try_merge_branch_history() {
+        let mut state = ClientBuilder::default().create_state().await;
+        state.client().get_pr_fn = Box::new(|pr| {
+            Ok(PRBuilder::default()
+                .number(pr.0)
+                .base(BranchBuilder::default().sha("main1".to_string()).create())
+                .head(BranchBuilder::default().sha("head1".to_string()).create())
+                .create())
+        });
+
+        state.comment("@bors try").await;
+        state
+            .client()
+            .check_branch_history(TRY_MERGE_BRANCH_NAME, &["main1", &default_merge_sha()]);
+        state
+            .client()
+            .check_branch_history(TRY_BRANCH_NAME, &[&default_merge_sha()]);
     }
 
     #[tokio::test]
