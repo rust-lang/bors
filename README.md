@@ -1,5 +1,5 @@
 # Bors
-Home of a (WIP) rewrite of the [`homu`](https://github.com/rust-lang/homu) bors implemntation in Rust.
+Home of a (WIP) rewrite of the [`homu`](https://github.com/rust-lang/homu) bors implementation in Rust.
 
 ## Architecture
 - An `axum` web server listens on a `/github` endpoint for webhooks related to a GitHub app of the bot.
