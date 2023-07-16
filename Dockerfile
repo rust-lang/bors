@@ -1,4 +1,4 @@
-FROM rust:1.69 as base
+FROM rust:1.70 as base
 
 ENV CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse
 
@@ -24,7 +24,7 @@ COPY database database
 
 RUN cargo build --release
 
-FROM ubuntu:23.04 as runtime
+FROM ubuntu:20.04 as runtime
 
 WORKDIR /
 
