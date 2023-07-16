@@ -30,6 +30,8 @@ WORKDIR /
 
 COPY --from=build /app/target/release/bors .
 
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates libssl-dev
+
 EXPOSE 80
 
 ENTRYPOINT ["./bors"]
