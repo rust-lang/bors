@@ -36,4 +36,4 @@ jobs:
           docker push $REGISTRY/$REPOSITORY:$IMAGE_TAG
 
       - name: Kick ECS to deploy new version
-        run: aws ecs update-service --service bors --cluster bors --forceNewDeployment
+        run: aws ecs update-service --service bors --cluster bors --force-new-deployment
