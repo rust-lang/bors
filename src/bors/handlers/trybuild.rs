@@ -132,7 +132,12 @@ pub(super) async fn command_try_cancel<Client: RepositoryClient>(
 
     let Some(build) = get_pending_build(pr) else {
         tracing::warn!("No build found");
-        repo.client.post_comment(pr_number, ":exclamation: There is currently no try build in progress.").await?;
+        repo.client
+            .post_comment(
+                pr_number,
+                ":exclamation: There is currently no try build in progress.",
+            )
+            .await?;
         return Ok(());
     };
 

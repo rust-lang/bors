@@ -1,3 +1,4 @@
+use std::io::IsTerminal;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -124,6 +125,7 @@ fn main() {
         .with_max_level(tracing::Level::INFO)
         .with_target(false)
         .with_env_filter(EnvFilter::from_default_env())
+        .with_ansi(std::io::stdout().is_terminal())
         .init();
 
     let opts = Opts::parse();
