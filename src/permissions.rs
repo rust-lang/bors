@@ -128,7 +128,8 @@ async fn load_users_from_team_api(
         PermissionType::Try => "try",
     };
 
-    let url = format!("https://team-api.infra.rust-lang.org/v1/permissions/bors.{repository_name}.{permission}.json");
+    let normalized_name = repository_name.replace("-", "_");
+    let url = format!("https://team-api.infra.rust-lang.org/v1/permissions/bors.{normalized_name}.{permission}.json");
     let users = reqwest::get(url)
         .await
         .and_then(|res| res.error_for_status())
