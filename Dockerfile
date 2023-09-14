@@ -28,9 +28,9 @@ FROM ubuntu:20.04 as runtime
 
 WORKDIR /
 
-COPY --from=build /app/target/release/bors .
-
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates libssl-dev
+
+COPY --from=build /app/target/release/bors .
 
 EXPOSE 80
 

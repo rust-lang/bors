@@ -26,14 +26,19 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v1
 
-      - name: Build, tag, and push docker image to Amazon ECR
+      - uses: docker/setup-buildx-action@v2
+      - name: Build and tag the Docker image
         env:
           REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           REPOSITORY: bors
           IMAGE_TAG: latest
-        run: |
-          docker build -t $REGISTRY/$REPOSITORY:$IMAGE_TAG .
-          docker push $REGISTRY/$REPOSITORY:$IMAGE_TAG
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          tags: ${{ env.REGISTRY }}/${{ env.REPOSITORY }}:${{ env.IMAGE_TAG }}
+          push: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       - name: Kick ECS to deploy new version
         run: aws ecs update-service --service bors --cluster bors --force-new-deployment
