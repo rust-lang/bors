@@ -24,10 +24,6 @@ const PERIODIC_REFRESH: Duration = Duration::from_secs(120);
 
 #[derive(clap::Parser)]
 struct Opts {
-    /// Secret used to authenticate webhooks.
-    #[arg(long, env = "WEBHOOK_SECRET")]
-    webhook_secret: String,
-
     /// Github App ID.
     #[arg(long, env = "APP_ID")]
     app_id: u64,
@@ -35,6 +31,10 @@ struct Opts {
     /// Private key used to authenticate as a Github App.
     #[arg(long, env = "PRIVATE_KEY")]
     private_key: String,
+
+    /// Secret used to authenticate webhooks.
+    #[arg(long, env = "WEBHOOK_SECRET")]
+    webhook_secret: String,
 
     /// Database connection string.
     #[arg(long, env = "DATABASE")]
