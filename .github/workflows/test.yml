@@ -48,3 +48,16 @@ jobs:
         with:
           command: fmt
           args: --all -- --check
+  docker:
+    name: Test Docker
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+      - uses: docker/setup-buildx-action@v2
+      - name: Build the Docker image
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
