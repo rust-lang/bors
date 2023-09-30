@@ -83,30 +83,38 @@ pub async fn load_repositories(client: &Octocrab) -> anyhow::Result<RepositoryMa
             {
                 Ok(repos) => {
                     for repo in repos.repositories {
-                        let repo_state =
-                            create_repo_state(installation_client.clone(), repo.clone())
-                                .await
-                                .map_err(|error| {
-                                    anyhow::anyhow!(
-                                        "Cannot load repository {:?}: {error:?}",
-                                        repo.full_name
-                                    )
-                                })?;
-                        tracing::info!("Loaded repository {}", repo_state.repository);
+                        match create_repo_state(installation_client.clone(), repo.clone())
+                            .await
+                            .map_err(|error| {
+                                anyhow::anyhow!(
+                                    "Cannot load repository {:?}: {error:?}",
+                                    repo.full_name
+                                )
+                            }) {
+                            Ok(repo_state) => {
+                                tracing::info!("Loaded repository {}", repo_state.repository);
 
-                        if let Some(existing) =
-                            repositories.insert(repo_state.repository.clone(), repo_state)
-                        {
-                            return Err(anyhow::anyhow!(
-                                "Repository {} found in multiple installations!",
-                                existing.repository
-                            ));
+                                if let Some(existing) =
+                                    repositories.insert(repo_state.repository.clone(), repo_state)
+                                {
+                                    return Err(anyhow::anyhow!(
+                                        "Repository {} found in multiple installations!",
+                                        existing.repository
+                                    ));
+                                }
+                            }
+                            Err(error) => {
+                                tracing::error!(
+                                    "Could not load repository {}: {error:?}",
+                                    repo.full_name.unwrap_or_default()
+                                );
+                            }
                         }
                     }
                 }
                 Err(error) => {
                     tracing::error!(
-                        "Could not load repositories of installation {}: {error}",
+                        "Could not load repositories of installation {}: {error:?}",
                         installation.id
                     );
                 }
