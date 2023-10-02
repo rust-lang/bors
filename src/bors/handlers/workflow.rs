@@ -212,12 +212,31 @@ mod tests {
     use crate::tests::state::{default_merge_sha, ClientBuilder};
 
     #[tokio::test]
-    async fn test_unknown_build() {
+    async fn test_workflow_started_unknown_build() {
         let mut state = ClientBuilder::default().create_state().await;
 
         state
             .workflow_started(
                 WorkflowStartedBuilder::default()
+                    .branch("unknown".to_string())
+                    .commit_sha("unknown-sha-".to_string()),
+            )
+            .await;
+        assert!(workflow::Entity::find()
+            .one(state.db.connection())
+            .await
+            .unwrap()
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn test_workflow_completed_unknown_build() {
+        let mut state = ClientBuilder::default().create_state().await;
+
+        state
+            .workflow_completed(
+                WorkflowCompletedBuilder::default()
+                    .status(WorkflowStatus::Success)
                     .branch("unknown".to_string())
                     .commit_sha("unknown-sha-".to_string()),
             )
