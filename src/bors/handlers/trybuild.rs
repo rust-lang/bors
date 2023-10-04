@@ -1,4 +1,4 @@
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 
 use crate::bors::handlers::labels::handle_label_trigger;
 use crate::bors::RepositoryClient;
@@ -38,7 +38,8 @@ pub(super) async fn command_try_build<Client: RepositoryClient>(
 
     let pr_model = db
         .get_or_create_pull_request(repo.client.repository(), pr.number)
-        .await?;
+        .await
+        .context("Cannot find or create PR")?;
 
     if let Some(ref build) = pr_model.try_build {
         if build.status == BuildStatus::Pending {
@@ -53,17 +54,24 @@ pub(super) async fn command_try_build<Client: RepositoryClient>(
         }
     }
 
-    let base_sha = parent.as_ref().unwrap_or(&pr.base.sha);
+    let base_sha = match parent.clone() {
+        Some(parent) => parent,
+        None => repo
+            .client
+            .get_branch_sha(&pr.base.name)
+            .await
+            .with_context(|| format!("Cannot get SHA for branch {}", pr.base.name))?,
+    };
 
     // First set the try branch to our base commit (either the selected parent or the main branch).
     repo.client
-        .set_branch_to_sha(TRY_MERGE_BRANCH_NAME, base_sha)
+        .set_branch_to_sha(TRY_MERGE_BRANCH_NAME, &base_sha)
         .await
         .map_err(|error| {
             let base = if let Some(ref parent) = parent {
                 parent.0.as_str()
             } else {
-                "main branch"
+                &pr.base.name
             };
             anyhow!("Cannot set try merge branch to {base}: {error:?}")
         })?;
@@ -132,7 +140,12 @@ pub(super) async fn command_try_cancel<Client: RepositoryClient>(
 
     let Some(build) = get_pending_build(pr) else {
         tracing::warn!("No build found");
-        repo.client.post_comment(pr_number, ":exclamation: There is currently no try build in progress.").await?;
+        repo.client
+            .post_comment(
+                pr_number,
+                ":exclamation: There is currently no try build in progress.",
+            )
+            .await?;
         return Ok(());
     };
 
@@ -301,20 +314,52 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_try_merge_branch_history() {
+    async fn test_try_merge_unknown_base_branch() {
         let mut state = ClientBuilder::default().create_state().await;
         state.client().get_pr_fn = Box::new(|pr| {
             Ok(PRBuilder::default()
                 .number(pr.0)
-                .base(BranchBuilder::default().sha("main1".to_string()).create())
+                .base(
+                    BranchBuilder::default()
+                        .name("nonexistent".to_string())
+                        .create(),
+                )
                 .head(BranchBuilder::default().sha("head1".to_string()).create())
                 .create())
         });
 
         state.comment("@bors try").await;
+
+        state.client().check_comments(
+            default_pr_number(),
+            &[":x: Encountered an error while executing command"],
+        );
+    }
+
+    #[tokio::test]
+    async fn test_try_merge_branch_history() {
+        let mut state = ClientBuilder::default().create_state().await;
+        let main_sha = "main1-sha";
+        let main_name = "main1";
+
+        state.client().get_pr_fn = Box::new(|pr| {
+            Ok(PRBuilder::default()
+                .number(pr.0)
+                .base(
+                    BranchBuilder::default()
+                        .sha(main_sha.to_string())
+                        .name(main_name.to_string())
+                        .create(),
+                )
+                .head(BranchBuilder::default().sha("head1".to_string()).create())
+                .create())
+        });
+        state.client().add_branch_sha(main_name, main_sha);
+
+        state.comment("@bors try").await;
         state
             .client()
-            .check_branch_history(TRY_MERGE_BRANCH_NAME, &["main1", &default_merge_sha()]);
+            .check_branch_history(TRY_MERGE_BRANCH_NAME, &[main_sha, &default_merge_sha()]);
         state
             .client()
             .check_branch_history(TRY_BRANCH_NAME, &[&default_merge_sha()]);

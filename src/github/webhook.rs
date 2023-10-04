@@ -141,7 +141,7 @@ where
 
 fn parse_webhook_event(request: Parts, body: &[u8]) -> anyhow::Result<Option<BorsEvent>> {
     let Some(event_type) = request.headers.get("x-github-event") else {
-         return Err(anyhow::anyhow!("x-github-event header not found"));
+        return Err(anyhow::anyhow!("x-github-event header not found"));
     };
 
     tracing::trace!(
@@ -311,10 +311,7 @@ fn parse_pr_comment(
 
 fn parse_repository_name(repository: &Repository) -> anyhow::Result<GithubRepoName> {
     let repo_name = &repository.name;
-    let Some(repo_owner) = repository
-        .owner
-        .as_ref()
-        .map(|u| &u.login) else {
+    let Some(repo_owner) = repository.owner.as_ref().map(|u| &u.login) else {
         return Err(anyhow::anyhow!("Owner for repo {repo_name} is missing"));
     };
     Ok(GithubRepoName::new(repo_owner, repo_name))
@@ -331,7 +328,10 @@ fn verify_gh_signature(
     let Some(signature) = headers.get("x-hub-signature-256").map(|v| v.as_bytes()) else {
         return false;
     };
-    let Some(signature) = signature.get(b"sha256=".len()..).and_then(|v| hex::decode(v).ok()) else {
+    let Some(signature) = signature
+        .get(b"sha256=".len()..)
+        .and_then(|v| hex::decode(v).ok())
+    else {
         return false;
     };
 

@@ -21,7 +21,14 @@ pub(super) async fn handle_workflow_started(
         payload.commit_sha
     );
 
-    let Some(build) = db.find_build(&payload.repository, payload.branch.clone(), payload.commit_sha.clone()).await? else {
+    let Some(build) = db
+        .find_build(
+            &payload.repository,
+            payload.branch.clone(),
+            payload.commit_sha.clone(),
+        )
+        .await?
+    else {
         tracing::warn!("Build for workflow not found");
         return Ok(());
     };
@@ -92,8 +99,12 @@ async fn try_complete_build<Client: RepositoryClient>(
             payload.branch.clone(),
             payload.commit_sha.clone(),
         )
-        .await? else {
-        tracing::warn!("Received check suite finished for an unknown build: {}", payload.commit_sha);
+        .await?
+    else {
+        tracing::warn!(
+            "Received check suite finished for an unknown build: {}",
+            payload.commit_sha
+        );
         return Ok(());
     };
 
