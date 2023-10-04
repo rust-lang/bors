@@ -11,7 +11,7 @@ pub struct PR {
     head_label: String,
     #[builder(default = "self.default_head()")]
     head: GHBranch,
-    #[builder(default = "self.default_base()")]
+    #[builder(default = "default_base_branch()")]
     base: GHBranch,
     #[builder(default = "\"PR title\".to_string()")]
     title: String,
@@ -49,13 +49,13 @@ impl PRBuilder {
             .sha("pr-sha".to_string())
             .create()
     }
+}
 
-    fn default_base(&self) -> GHBranch {
-        BranchBuilder::default()
-            .name("main-branch".to_string())
-            .sha("main-sha".to_string())
-            .create()
-    }
+pub fn default_base_branch() -> GHBranch {
+    BranchBuilder::default()
+        .name("main-branch".to_string())
+        .sha("main-sha".to_string())
+        .create()
 }
 
 #[derive(Builder)]

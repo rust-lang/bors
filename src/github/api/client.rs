@@ -39,6 +39,24 @@ impl RepositoryClient for GithubRepositoryClient {
         self.name()
     }
 
+    async fn get_branch_sha(&mut self, name: &str) -> anyhow::Result<CommitSha> {
+        // https://docs.github.com/en/rest/branches/branches?apiVersion=2022-11-28#get-a-branch
+        let response = self
+            .client
+            ._get(
+                self.client.base_url.join(&format!(
+                    "/repos/{}/{}/branches/{name}",
+                    self.repo_name.owner(),
+                    self.repo_name.name(),
+                ))?,
+                None::<&()>,
+            )
+            .await?;
+        let branch: octocrab::models::repos::Branch =
+            response.json().await.context("Cannot deserialize branch")?;
+        Ok(CommitSha(branch.commit.sha))
+    }
+
     async fn get_pull_request(&mut self, pr: PullRequestNumber) -> anyhow::Result<PullRequest> {
         let pr = self
             .client

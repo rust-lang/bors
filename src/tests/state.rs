@@ -25,7 +25,7 @@ use crate::tests::database::create_test_db;
 use crate::tests::event::{
     CheckSuiteCompletedBuilder, WorkflowCompletedBuilder, WorkflowStartedBuilder,
 };
-use crate::tests::github::PRBuilder;
+use crate::tests::github::{default_base_branch, PRBuilder};
 
 pub fn test_bot_user() -> GithubUser {
     GithubUser {
@@ -208,6 +208,10 @@ impl ClientBuilder {
             config,
         } = self.build().unwrap();
 
+        let mut branch_history = HashMap::default();
+        let default_base_branch = default_base_branch();
+        branch_history.insert(default_base_branch.name, vec![default_base_branch.sha]);
+
         let name = name.unwrap_or_else(default_repo_name);
         RepositoryState {
             repository: name.clone(),
@@ -220,7 +224,7 @@ impl ClientBuilder {
                 cancelled_workflows: Default::default(),
                 added_labels: Default::default(),
                 removed_labels: Default::default(),
-                branch_history: Default::default(),
+                branch_history,
             },
             permissions_resolver: permission_resolver,
             config: config.create(),
@@ -320,7 +324,7 @@ impl TestRepositoryClient {
         );
     }
 
-    fn add_branch_sha(&mut self, branch: &str, sha: &str) {
+    pub fn add_branch_sha(&mut self, branch: &str, sha: &str) {
         self.branch_history
             .entry(branch.to_string())
             .or_default()
@@ -332,6 +336,14 @@ impl TestRepositoryClient {
 impl RepositoryClient for TestRepositoryClient {
     fn repository(&self) -> &GithubRepoName {
         &self.name
+    }
+
+    async fn get_branch_sha(&mut self, name: &str) -> anyhow::Result<CommitSha> {
+        let sha = self
+            .branch_history
+            .get(name)
+            .and_then(|history| history.last().cloned());
+        sha.ok_or(anyhow::anyhow!("Branch {name} not found"))
     }
 
     async fn get_pull_request(&mut self, pr: PullRequestNumber) -> anyhow::Result<PullRequest> {
