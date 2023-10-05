@@ -55,8 +55,9 @@ describes the file can be found in `src/config.rs`. Here is an example configura
     try_failed = []
     ```
 2) Install the GitHub app corresponding to this bot to the corresponding repository. You can use the
-`https://github.com/settings/apps/<app-name>/installations` link.
+`https://github.com/settings/apps/<app-name>/installations` link (to be automated via `team` repo).
 3) Configure a CI workflow on push to the `automation/bors/try` branch.
+4) Give the bot permissions to push to `automation/bors/try` and `automation/bors/try-merge` (to be automated via `team` repo).
 
 ## Development
 Directory structure:
