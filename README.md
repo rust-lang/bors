@@ -56,6 +56,7 @@ describes the file can be found in `src/config.rs`. Here is an example configura
     ```
 2) Install the GitHub app corresponding to this bot to the corresponding repository. You can use the
 `https://github.com/settings/apps/<app-name>/installations` link.
+3) Configure a CI workflow on push to the `automation/bors/try` branch.
 
 ## Development
 Directory structure:
