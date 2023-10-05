@@ -63,6 +63,8 @@ pub(super) async fn command_try_build<Client: RepositoryClient>(
             .with_context(|| format!("Cannot get SHA for branch {}", pr.base.name))?,
     };
 
+    tracing::debug!("Attempting to merge with base SHA {base_sha}");
+
     // First set the try branch to our base commit (either the selected parent or the main branch).
     repo.client
         .set_branch_to_sha(TRY_MERGE_BRANCH_NAME, &base_sha)
