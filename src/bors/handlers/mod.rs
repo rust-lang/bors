@@ -142,10 +142,21 @@ async fn handle_comment<Client: RepositoryClient>(
 ) -> anyhow::Result<()> {
     let pr_number = comment.pr_number;
     let commands = ctx.parser.parse_commands(&comment.text);
-    let pull_request = repo.client.get_pull_request(pr_number).await?;
 
     tracing::debug!("Commands: {commands:?}");
     tracing::trace!("Text: {}", comment.text);
+
+    // When we can't load the PR from github, just end the comment handling.
+    // We should not return an error to avoid the top level handler to post a comment that
+    // an error has occured.
+    // FIXME: retry the call if it fails
+    let pull_request = match repo.client.get_pull_request(pr_number).await {
+        Ok(pr) => pr,
+        Err(error) => {
+            tracing::error!("Cannot get PR information: {error:?}");
+            return Ok(());
+        }
+    };
 
     for command in commands {
         match command {
@@ -220,6 +231,14 @@ mod tests {
         state
             .comment(comment("@bors ping").author(test_bot_user()).create())
             .await;
+        state.client().check_comments(default_pr_number(), &[]);
+    }
+
+    #[tokio::test]
+    async fn test_do_not_comment_when_pr_fetch_fails() {
+        let mut state = ClientBuilder::default().create_state().await;
+        state.client().get_pr_fn = Box::new(|pr| Err(anyhow::anyhow!("Foo")));
+        state.comment(comment("foo").create()).await;
         state.client().check_comments(default_pr_number(), &[]);
     }
 }
