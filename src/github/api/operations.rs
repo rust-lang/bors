@@ -148,16 +148,16 @@ async fn update_branch(
     branch_name: String,
     sha: &CommitSha,
 ) -> Result<(), BranchUpdateError> {
-    let url = repo
-        .client()
-        .base_url
-        .join(&format!(
-            "repos/{}/{}/git/refs/{}",
-            repo.name().owner(),
-            repo.name().name(),
-            Reference::Branch(branch_name.clone()).ref_url()
-        ))
-        .unwrap();
+    let url = format!(
+        "repos/{}/{}/git/refs/{}",
+        repo.name().owner(),
+        repo.name().name(),
+        Reference::Branch(branch_name.clone()).ref_url()
+    );
+
+    tracing::debug!("Updating branch {} to SHA {}", url, sha.as_ref());
+
+    let url = repo.client().base_url.join(&url).unwrap();
     let res: reqwest::Response = repo
         .client
         ._patch(
