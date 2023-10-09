@@ -58,6 +58,10 @@ pub(super) async fn handle_workflow_completed<Client: RepositoryClient>(
     db: &mut dyn DbClient,
     payload: WorkflowCompleted,
 ) -> anyhow::Result<()> {
+    if !is_bors_observed_branch(&payload.branch) {
+        return Ok(());
+    }
+
     tracing::info!("Updating status of workflow to {:?}", payload.status);
     db.update_workflow_status(*payload.run_id, payload.status)
         .await?;
@@ -76,6 +80,10 @@ pub(super) async fn handle_check_suite_completed<Client: RepositoryClient>(
     db: &mut dyn DbClient,
     payload: CheckSuiteCompleted,
 ) -> anyhow::Result<()> {
+    if !is_bors_observed_branch(&payload.branch) {
+        return Ok(());
+    }
+
     tracing::info!(
         "Received check suite completed (branch={}, commit={})",
         payload.branch,
