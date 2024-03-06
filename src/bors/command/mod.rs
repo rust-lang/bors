@@ -5,6 +5,8 @@ pub use parser::{CommandParseError, CommandParser};
 /// Bors command specified by a user.
 #[derive(Debug, PartialEq)]
 pub enum BorsCommand {
+    /// Print help
+    Help,
     /// Ping the bot.
     Ping,
     /// Perform a try build.

@@ -41,7 +41,7 @@ impl CommandParser {
     ) -> Vec<Result<BorsCommand, CommandParseError<'a>>> {
         // The order of the parsers in the vector is important
         let parsers: Vec<for<'b> fn(&'b str, &[CommandPart<'b>]) -> ParseResult<'b>> =
-            vec![parser_ping, parser_try_cancel, parser_try];
+            vec![parser_help, parser_ping, parser_try_cancel, parser_try];
 
         text.lines()
             .filter_map(|line| match line.find(&self.prefix) {
@@ -107,6 +107,15 @@ fn parse_parts(input: &str) -> Result<Vec<CommandPart>, CommandParseError> {
 }
 
 /// Parsers
+
+/// Parses "@bors help".
+fn parser_help<'a>(command: &'a str, _parts: &[CommandPart<'a>]) -> ParseResult<'a> {
+    if command == "help" {
+        Some(Ok(BorsCommand::Help))
+    } else {
+        None
+    }
+}
 
 /// Parses "@bors ping".
 fn parser_ping<'a>(command: &'a str, _parts: &[CommandPart<'a>]) -> ParseResult<'a> {
@@ -209,6 +218,20 @@ mod tests {
         let cmds = parse_commands("@bors ping a=b a=c");
         assert_eq!(cmds.len(), 1);
         assert!(matches!(cmds[0], Err(CommandParseError::DuplicateArg("a"))));
+    }
+
+    #[test]
+    fn parse_help() {
+        let cmds = parse_commands("@bors help");
+        assert_eq!(cmds.len(), 1);
+        assert!(matches!(cmds[0], Ok(BorsCommand::Help)));
+    }
+
+    #[test]
+    fn parse_help_unknown_arg() {
+        let cmds = parse_commands("@bors help a");
+        assert_eq!(cmds.len(), 1);
+        assert!(matches!(cmds[0], Ok(BorsCommand::Help)));
     }
 
     #[test]
