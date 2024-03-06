@@ -4,6 +4,7 @@ use tracing::Instrument;
 use crate::bors::command::BorsCommand;
 use crate::bors::command::CommandParseError;
 use crate::bors::event::{BorsEvent, PullRequestComment};
+use crate::bors::handlers::help::command_help;
 use crate::bors::handlers::ping::command_ping;
 use crate::bors::handlers::refresh::refresh_repository;
 use crate::bors::handlers::trybuild::{command_try_build, command_try_cancel, TRY_BRANCH_NAME};
@@ -15,6 +16,7 @@ use crate::database::DbClient;
 use crate::github::GithubRepoName;
 use crate::utils::logging::LogError;
 
+mod help;
 mod labels;
 mod ping;
 mod refresh;
@@ -162,6 +164,10 @@ async fn handle_comment<Client: RepositoryClient>(
         match command {
             Ok(command) => {
                 let result = match command {
+                    BorsCommand::Help => {
+                        let span = tracing::info_span!("Help");
+                        command_help(repo, &pull_request).instrument(span).await
+                    }
                     BorsCommand::Ping => {
                         let span = tracing::info_span!("Ping");
                         command_ping(repo, &pull_request).instrument(span).await
