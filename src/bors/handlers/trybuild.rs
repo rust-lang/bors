@@ -1,5 +1,6 @@
 use anyhow::{anyhow, Context};
 
+use crate::bors::command::Parent;
 use crate::bors::handlers::labels::handle_label_trigger;
 use crate::bors::RepositoryClient;
 use crate::bors::RepositoryState;
@@ -30,7 +31,7 @@ pub(super) async fn command_try_build<Client: RepositoryClient>(
     db: &mut dyn DbClient,
     pr: &PullRequest,
     author: &GithubUser,
-    parent: Option<CommitSha>,
+    parent: Option<Parent>,
 ) -> anyhow::Result<()> {
     if !check_try_permissions(repo, pr, author).await? {
         return Ok(());
@@ -41,7 +42,7 @@ pub(super) async fn command_try_build<Client: RepositoryClient>(
         .await
         .context("Cannot find or create PR")?;
 
-    if let Some(ref build) = pr_model.try_build {
+    let last_parent = if let Some(ref build) = pr_model.try_build {
         if build.status == BuildStatus::Pending {
             tracing::warn!("Try build already in progress");
             repo.client
@@ -52,10 +53,27 @@ pub(super) async fn command_try_build<Client: RepositoryClient>(
                 .await?;
             return Ok(());
         }
-    }
+        Some(CommitSha(build.parent.clone()))
+    } else {
+        None
+    };
 
     let base_sha = match parent.clone() {
-        Some(parent) => parent,
+        Some(parent) => match parent {
+            Parent::Last => match last_parent {
+                None => {
+                    repo.client
+                        .post_comment(
+                            pr.number,
+                            ":exclamation: There was no previous build. Please set an explicit parent or remove the parent option to use a default value.",
+                        )
+                    .await?;
+                    return Ok(());
+                }
+                Some(last_parent) => last_parent,
+            },
+            Parent::CommitSha(parent) => parent,
+        },
         None => repo
             .client
             .get_branch_sha(&pr.base.name)
@@ -69,14 +87,7 @@ pub(super) async fn command_try_build<Client: RepositoryClient>(
     repo.client
         .set_branch_to_sha(TRY_MERGE_BRANCH_NAME, &base_sha)
         .await
-        .map_err(|error| {
-            let base = if let Some(ref parent) = parent {
-                parent.0.as_str()
-            } else {
-                &pr.base.name
-            };
-            anyhow!("Cannot set try merge branch to {base}: {error:?}")
-        })?;
+        .map_err(|error| anyhow!("Cannot set try merge branch to {}: {error:?}", base_sha.0))?;
 
     // Then merge the PR commit into the try branch
     match repo
@@ -97,8 +108,13 @@ pub(super) async fn command_try_build<Client: RepositoryClient>(
                 .await
                 .map_err(|error| anyhow!("Cannot set try branch to main branch: {error:?}"))?;
 
-            db.attach_try_build(pr_model, TRY_BRANCH_NAME.to_string(), merge_sha.clone())
-                .await?;
+            db.attach_try_build(
+                pr_model,
+                TRY_BRANCH_NAME.to_string(),
+                merge_sha.clone(),
+                base_sha.clone(),
+            )
+            .await?;
             tracing::info!("Try build started");
 
             handle_label_trigger(repo, pr.number, LabelTrigger::TryBuildStarted).await?;
@@ -379,6 +395,50 @@ mod tests {
                 "ea9c1b050cc8b420c2c211d2177811e564a4dc60",
                 &default_merge_sha(),
             ],
+        );
+    }
+
+    #[tokio::test]
+    async fn test_try_merge_last_parent() {
+        let mut state = ClientBuilder::default().create_state().await;
+
+        state
+            .comment("@bors try parent=ea9c1b050cc8b420c2c211d2177811e564a4dc60")
+            .await;
+        state.client().check_branch_history(
+            TRY_MERGE_BRANCH_NAME,
+            &[
+                "ea9c1b050cc8b420c2c211d2177811e564a4dc60",
+                &default_merge_sha(),
+            ],
+        );
+        state
+            .perform_workflow_events(
+                1,
+                TRY_BRANCH_NAME,
+                &default_merge_sha(),
+                WorkflowStatus::Success,
+            )
+            .await;
+        state.client().check_comment_count(default_pr_number(), 2);
+        state.comment("@bors try parent=last").await;
+        state.client().check_branch_history(
+            TRY_MERGE_BRANCH_NAME,
+            &[
+                "ea9c1b050cc8b420c2c211d2177811e564a4dc60",
+                &default_merge_sha(),
+            ],
+        );
+    }
+
+    #[tokio::test]
+    async fn test_try_merge_last_parent_unknown() {
+        let mut state = ClientBuilder::default().create_state().await;
+
+        state.comment("@bors try parent=last").await;
+        state.client().check_comments(
+            default_pr_number(),
+            &[":exclamation: There was no previous build. Please set an explicit parent or remove the parent option to use a default value."],
         );
     }
 

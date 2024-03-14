@@ -359,7 +359,16 @@ impl RepositoryClient for TestRepositoryClient {
     }
 
     async fn set_branch_to_sha(&mut self, branch: &str, sha: &CommitSha) -> anyhow::Result<()> {
-        self.add_branch_sha(branch, &sha.0);
+        let branch_history = self.branch_history.entry(branch.to_string()).or_default();
+        let position = branch_history.iter().position(|s| s == sha);
+        match position {
+            None => branch_history.push(sha.clone()),
+            Some(p) => {
+                let (his, _) = branch_history.split_at(p + 1);
+                let his = his.to_vec();
+                self.branch_history.insert(branch.to_string(), his);
+            }
+        }
         Ok(())
     }
 

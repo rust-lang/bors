@@ -2,7 +2,7 @@
 
 use std::collections::HashSet;
 
-use crate::bors::command::BorsCommand;
+use crate::bors::command::{BorsCommand, Parent};
 use crate::github::CommitSha;
 
 #[derive(Debug, PartialEq)]
@@ -148,14 +148,18 @@ fn parser_try<'a>(command: &'a str, parts: &[CommandPart<'a>]) -> ParseResult<'a
             }
             CommandPart::KeyValue { key, value } => {
                 if *key == "parent" {
-                    parent = match parse_sha(value) {
-                        Ok(sha) => Some(sha),
-                        Err(error) => {
-                            return Some(Err(CommandParseError::ValidationError(format!(
-                                "Try parent has to be a valid commit SHA: {error}"
-                            ))));
+                    parent = if *value == "last" {
+                        Some(Parent::Last)
+                    } else {
+                        match parse_sha(value) {
+                            Ok(sha) => Some(Parent::CommitSha(sha)),
+                            Err(error) => {
+                                return Some(Err(CommandParseError::ValidationError(format!(
+                                    "Try parent has to be a valid commit SHA: {error}"
+                                ))));
+                            }
                         }
-                    };
+                    }
                 } else {
                     return Some(Err(CommandParseError::UnknownArg(key)));
                 }
@@ -177,7 +181,7 @@ fn parser_try_cancel<'a>(command: &'a str, parts: &[CommandPart<'a>]) -> ParseRe
 #[cfg(test)]
 mod tests {
     use crate::bors::command::parser::{CommandParseError, CommandParser};
-    use crate::bors::command::BorsCommand;
+    use crate::bors::command::{BorsCommand, Parent};
     use crate::github::CommitSha;
 
     #[test]
@@ -275,9 +279,21 @@ line two
         assert_eq!(
             cmds[0],
             Ok(BorsCommand::Try {
-                parent: Some(CommitSha(
+                parent: Some(Parent::CommitSha(CommitSha(
                     "ea9c1b050cc8b420c2c211d2177811e564a4dc60".to_string()
-                ))
+                )))
+            })
+        );
+    }
+
+    #[test]
+    fn parse_try_parent_last() {
+        let cmds = parse_commands("@bors try parent=last");
+        assert_eq!(cmds.len(), 1);
+        assert_eq!(
+            cmds[0],
+            Ok(BorsCommand::Try {
+                parent: Some(Parent::Last)
             })
         );
     }
