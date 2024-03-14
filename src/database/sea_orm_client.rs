@@ -89,11 +89,13 @@ impl DbClient for SeaORMClient {
         pr: PullRequestModel,
         branch: String,
         commit_sha: CommitSha,
+        parent: CommitSha,
     ) -> anyhow::Result<()> {
         let build = build::ActiveModel {
             repository: Set(pr.repository.clone()),
             branch: Set(branch),
             commit_sha: Set(commit_sha.0),
+            parent: Set(parent.0),
             status: Set(build_status_to_db(BuildStatus::Pending).to_string()),
             ..Default::default()
         };
@@ -291,6 +293,7 @@ fn build_from_db(model: build::Model) -> BuildModel {
         repository: model.repository,
         branch: model.branch,
         commit_sha: model.commit_sha,
+        parent: model.parent,
         status: build_status_from_db(model.status),
         created_at: datetime_from_db(model.created_at),
     }

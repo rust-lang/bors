@@ -12,6 +12,7 @@ pub struct Model {
     pub commit_sha: String,
     pub status: String,
     pub created_at: DateTime,
+    pub parent: String,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

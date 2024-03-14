@@ -33,11 +33,13 @@ pub enum BuildStatus {
 }
 
 /// Represents a single (merged) commit.
+#[derive(Debug)]
 pub struct BuildModel {
     pub id: PrimaryKey,
     pub repository: String,
     pub branch: String,
     pub commit_sha: String,
+    pub parent: String,
     pub status: BuildStatus,
     pub created_at: DateTime<Utc>,
 }
@@ -105,6 +107,7 @@ pub trait DbClient {
         pr: PullRequestModel,
         branch: String,
         commit_sha: CommitSha,
+        parent: CommitSha,
     ) -> anyhow::Result<()>;
 
     /// Finds a build row by its repository, commit SHA and branch.
