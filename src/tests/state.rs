@@ -159,7 +159,7 @@ impl BorsState<TestRepositoryClient> for TestBorsState {
 pub struct RepoConfig {
     #[builder(default = "Duration::from_secs(3600)")]
     timeout: Duration,
-    #[builder(field(type = "HashMap<LabelTrigger, Vec<LabelModification>>"))]
+    #[builder(field(ty = "HashMap<LabelTrigger, Vec<LabelModification>>"))]
     labels: HashMap<LabelTrigger, Vec<LabelModification>>,
 }
 

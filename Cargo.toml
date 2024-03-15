@@ -51,7 +51,7 @@ secrecy = "0.8"
 base64 = "0.21"
 
 # Database
-sqlx = { version = "0.6", features = [ "runtime-tokio-native-tls" , "sqlite", "postgres" ] }
+sqlx = { version = "0.6", features = ["runtime-tokio-native-tls", "sqlite", "postgres"] }
 sea-orm = { workspace = true }
 
 # Time
@@ -65,4 +65,4 @@ migration = { path = "database/migration" }
 
 [dev-dependencies]
 insta = "1.26"
-derive_builder = "0.12"
+derive_builder = "0.20.0"
