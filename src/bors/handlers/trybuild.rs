@@ -427,6 +427,8 @@ mod tests {
             &[
                 "ea9c1b050cc8b420c2c211d2177811e564a4dc60",
                 &default_merge_sha(),
+                "ea9c1b050cc8b420c2c211d2177811e564a4dc60",
+                &default_merge_sha(),
             ],
         );
     }
