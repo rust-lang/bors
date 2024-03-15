@@ -5,6 +5,7 @@ use octocrab::{Error, Octocrab};
 use tracing::log;
 
 use crate::bors::{CheckSuite, CheckSuiteStatus, RepositoryClient};
+use crate::github::api::base_github_url;
 use crate::github::api::operations::{merge_branches, set_branch_to_commit, MergeError};
 use crate::github::{Branch, CommitSha, GithubRepoName, PullRequest, PullRequestNumber};
 
@@ -41,19 +42,20 @@ impl RepositoryClient for GithubRepositoryClient {
 
     async fn get_branch_sha(&mut self, name: &str) -> anyhow::Result<CommitSha> {
         // https://docs.github.com/en/rest/branches/branches?apiVersion=2022-11-28#get-a-branch
-        let response = self
+        let branch: octocrab::models::repos::Branch = self
             .client
-            ._get(
-                self.client.base_url.join(&format!(
-                    "/repos/{}/{}/branches/{name}",
-                    self.repo_name.owner(),
-                    self.repo_name.name(),
-                ))?,
+            .get(
+                base_github_url()
+                    .join(&format!(
+                        "/repos/{}/{}/branches/{name}",
+                        self.repo_name.owner(),
+                        self.repo_name.name(),
+                    ))?
+                    .as_str(),
                 None::<&()>,
             )
-            .await?;
-        let branch: octocrab::models::repos::Branch =
-            response.json().await.context("Cannot deserialize branch")?;
+            .await
+            .context("Cannot deserialize branch")?;
         Ok(CommitSha(branch.commit.sha))
     }
 
@@ -97,41 +99,40 @@ impl RepositoryClient for GithubRepositoryClient {
         branch: &str,
         sha: &CommitSha,
     ) -> anyhow::Result<Vec<CheckSuite>> {
-        let response = self
+        #[derive(serde::Deserialize, Debug)]
+        struct CheckSuitePayload {
+            conclusion: Option<String>,
+            head_branch: String,
+        }
+
+        #[derive(serde::Deserialize, Debug)]
+        struct CheckSuiteResponse {
+            check_suites: Vec<CheckSuitePayload>,
+        }
+
+        let response: CheckSuiteResponse = self
             .client
-            ._get(
-                self.client.base_url.join(&format!(
-                    "/repos/{}/{}/commits/{}/check-suites",
-                    self.repo_name.owner(),
-                    self.repo_name.name(),
-                    sha.0
-                ))?,
+            .get(
+                base_github_url()
+                    .join(&format!(
+                        "/repos/{}/{}/commits/{}/check-suites",
+                        self.repo_name.owner(),
+                        self.repo_name.name(),
+                        sha.0
+                    ))?
+                    .as_str(),
                 None::<&()>,
             )
-            .await?;
+            .await
+            .context("Cannot fetch CheckSuiteResponse")?;
 
-        #[derive(serde::Deserialize, Debug)]
-        struct CheckSuitePayload<'a> {
-            conclusion: Option<&'a str>,
-            head_branch: &'a str,
-        }
-
-        #[derive(serde::Deserialize, Debug)]
-        struct CheckSuiteResponse<'a> {
-            #[serde(borrow)]
-            check_suites: Vec<CheckSuitePayload<'a>>,
-        }
-
-        // `response.json()` is not used because of the 'a lifetime
-        let text = response.text().await?;
-        let response: CheckSuiteResponse = serde_json::from_str(&text)?;
         let suites = response
             .check_suites
             .into_iter()
             .filter(|suite| suite.head_branch == branch)
             .map(|suite| CheckSuite {
                 status: match suite.conclusion {
-                    Some(status) => match status {
+                    Some(status) => match status.as_str() {
                         "success" => CheckSuiteStatus::Success,
                         "failure" | "neutral" | "cancelled" | "skipped" | "timed_out"
                         | "action_required" | "startup_failure" | "stale" => {
