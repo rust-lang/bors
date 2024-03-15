@@ -22,7 +22,7 @@ COPY Cargo.lock .
 COPY src src
 COPY database database
 
-RUN CARGO_PROFILE_RELEASE_DEBUG=1 cargo build --release
+RUN cargo build --release
 
 FROM ubuntu:20.04 as runtime
 
