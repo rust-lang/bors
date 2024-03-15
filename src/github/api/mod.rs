@@ -7,6 +7,7 @@ use base64::Engine;
 use octocrab::models::{App, AppId, InstallationRepositories, Repository};
 use octocrab::Octocrab;
 use secrecy::{ExposeSecret, SecretVec};
+use url::Url;
 
 use client::GithubRepositoryClient;
 
@@ -23,6 +24,12 @@ pub(crate) mod operations;
 type GHRepositoryState = RepositoryState<GithubRepositoryClient>;
 
 type RepositoryMap = HashMap<GithubRepoName, GHRepositoryState>;
+
+fn base_github_url() -> Url {
+    let url = std::cell::OnceCell::new();
+    url.get_or_init(|| Url::parse("https://api.github.com").expect("Cannot parse base GitHub URL"))
+        .clone()
+}
 
 /// Provides access to managed GitHub repositories.
 pub struct GithubAppState {

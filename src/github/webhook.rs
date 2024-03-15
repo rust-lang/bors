@@ -12,7 +12,7 @@ use octocrab::models::events::payload::{
     PullRequestReviewCommentEventPayload,
 };
 use octocrab::models::pulls::{PullRequest, Review};
-use octocrab::models::{workflows, App, CheckRun, Repository, RunId, User};
+use octocrab::models::{workflows, App, Author, CheckRun, Repository, RunId};
 use secrecy::{ExposeSecret, SecretString};
 use sha2::Sha256;
 
@@ -86,7 +86,7 @@ pub struct WebhookPullRequestReviewEvent<'a> {
     pull_request: PullRequest,
     review: Review,
     repository: Repository,
-    sender: User,
+    sender: Author,
 }
 
 /// axum extractor for GitHub webhook events.
@@ -280,7 +280,7 @@ fn parse_comment_from_pr_review(
     })
 }
 
-fn parse_user(user: User) -> GithubUser {
+fn parse_user(user: Author) -> GithubUser {
     GithubUser {
         username: user.login,
         html_url: user.html_url,

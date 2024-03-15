@@ -1,5 +1,6 @@
+use crate::github::api::base_github_url;
+use http::StatusCode;
 use octocrab::params::repos::Reference;
-use reqwest::StatusCode;
 use thiserror::Error;
 
 use crate::github::api::client::GithubRepositoryClient;
@@ -49,7 +50,7 @@ pub async fn merge_branches(
         .unwrap_or_else(|| {
             format!(
                 "{}/repos/{}/{}/merges",
-                client.base_url,
+                base_github_url(),
                 repo.name().owner,
                 repo.name().name
             )
@@ -65,7 +66,7 @@ pub async fn merge_branches(
     match response {
         Ok(response) => {
             let status = response.status();
-            let text = response.text().await.unwrap_or_default();
+            let text = client.body_to_string(response).await.unwrap_or_default();
 
             tracing::trace!(
                 "Response from merging `{head_sha}` into `{base_ref}` in `{}`: {status} ({text})",
@@ -157,11 +158,11 @@ async fn update_branch(
 
     tracing::debug!("Updating branch {} to SHA {}", url, sha.as_ref());
 
-    let url = repo.client().base_url.join(&url).unwrap();
-    let res: reqwest::Response = repo
+    let url = base_github_url().join(&url).unwrap();
+    let res = repo
         .client
         ._patch(
-            url,
+            url.as_str(),
             Some(&serde_json::json!({
                 "sha": sha.as_ref(),
                 "force": true
@@ -173,7 +174,7 @@ async fn update_branch(
     tracing::trace!(
         "Updating branch response: status={}, text={:?}",
         status,
-        res.text().await
+        repo.client.body_to_string(res).await
     );
 
     match status {
