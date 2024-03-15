@@ -68,3 +68,6 @@ migration = { path = "database/migration" }
 [dev-dependencies]
 insta = "1.26"
 derive_builder = "0.20.0"
+
+[profile.release]
+debug = 1
