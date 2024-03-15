@@ -53,10 +53,11 @@ async fn server(state: ServerState) -> anyhow::Result<()> {
         .layer(ConcurrencyLimitLayer::new(100))
         .with_state(state);
     let addr = SocketAddr::from(([0, 0, 0, 0], 8080));
+    let listener = tokio::net::TcpListener::bind(addr)
+        .await
+        .context("Cannot create TCP/IP server socket")?;
 
-    axum::Server::bind(&addr)
-        .serve(app.into_make_service())
-        .await?;
+    axum::serve(listener, app.into_make_service()).await?;
     Ok(())
 }
 
