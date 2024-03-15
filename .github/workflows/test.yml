@@ -61,3 +61,10 @@ jobs:
           context: .
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          tags: bors
+          load: true
+      - name: Run Docker image
+        run: |
+          # Check that the service starts
+          docker run bors &
+          timeout 20 bash -c 'until nc -z localhost 8080; do sleep 1; done'
