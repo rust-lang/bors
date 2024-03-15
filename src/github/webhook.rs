@@ -1,10 +1,10 @@
 //! This module handles parsing webhooks and generating [`BorsEvent`]s from them.
 use std::fmt::Debug;
 
-use axum::body::{Bytes, HttpBody};
+use axum::body::Bytes;
 use axum::extract::FromRequest;
 use axum::http::request::Parts;
-use axum::http::{HeaderMap, HeaderValue, Request, StatusCode};
+use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::{async_trait, RequestExt};
 use hmac::{Hmac, Mac};
 use octocrab::models::events::payload::{
@@ -93,30 +93,26 @@ pub struct WebhookPullRequestReviewEvent<'a> {
 #[derive(Debug)]
 pub struct GitHubWebhook(pub BorsEvent);
 
+const REQUEST_BODY_LIMIT: usize = 10 * 1024 * 1024;
+
 /// Extracts a webhook event from a HTTP request.
 #[async_trait]
-impl<B> FromRequest<ServerStateRef, B> for GitHubWebhook
-where
-    B: HttpBody + Send + Debug + 'static,
-    B::Data: Send,
-    B::Error: std::error::Error + Send + Sync + 'static,
-{
+impl FromRequest<ServerStateRef> for GitHubWebhook {
     type Rejection = StatusCode;
 
     async fn from_request(
-        request: Request<B>,
+        request: axum::extract::Request,
         state: &ServerStateRef,
     ) -> Result<Self, Self::Rejection> {
-        let (parts, body) = request
-            .with_limited_body()
-            .expect("There should be a body size limit")
-            .into_parts();
+        let (parts, body) = request.with_limited_body().into_parts();
 
         // Eagerly load body
-        let body: Bytes = hyper::body::to_bytes(body).await.map_err(|error| {
-            tracing::error!("Parsing webhook body failed: {error:?}");
-            StatusCode::BAD_REQUEST
-        })?;
+        let body: Bytes = axum::body::to_bytes(body, REQUEST_BODY_LIMIT)
+            .await
+            .map_err(|error| {
+                tracing::error!("Parsing webhook body failed: {error:?}");
+                StatusCode::BAD_REQUEST
+            })?;
 
         // Verify that the request is valid
         if !verify_gh_signature(&parts.headers, &body, state.get_webhook_secret()) {
@@ -621,7 +617,7 @@ mod tests {
         let hash = hex::encode(hash);
         let signature = format!("sha256={hash}");
 
-        let mut request = Request::new(body.clone());
+        let mut request = Request::new(axum::body::Body::from(body));
         *request.method_mut() = Method::POST;
         let headers = request.headers_mut();
         headers.insert("content-type", HeaderValue::from_static("application-json"));
