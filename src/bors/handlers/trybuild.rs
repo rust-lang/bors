@@ -65,7 +65,7 @@ pub(super) async fn command_try_build<Client: RepositoryClient>(
                     repo.client
                         .post_comment(
                             pr.number,
-                            ":exclamation: There was no previous build. Please set an explicit parent or remove the parent option to use a default value.",
+                            ":exclamation: There was no previous build. Please set an explicit parent or remove the `parent=last` argument to use the default parent.",
                         )
                     .await?;
                     return Ok(());
@@ -438,7 +438,7 @@ mod tests {
         state.comment("@bors try parent=last").await;
         state.client().check_comments(
             default_pr_number(),
-            &[":exclamation: There was no previous build. Please set an explicit parent or remove the parent option to use a default value."],
+            &[":exclamation: There was no previous build. Please set an explicit parent or remove the `parent=last` argument to use the default parent."],
         );
     }
 
