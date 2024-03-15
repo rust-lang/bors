@@ -42,7 +42,7 @@ axum = "0.7.4"
 tower = { version = "0.4", features = ["limit"] }
 jsonwebtoken = "9.2.0"
 url = "2.3"
-reqwest = { version = "0.11", features = ["json"] }
+reqwest = { version = "0.11", features = ["json", "rustls-tls"], default-features = false }
 http = "1.1.0"
 
 # Cryptography
@@ -53,7 +53,7 @@ secrecy = "0.8"
 base64 = "0.22.0"
 
 # Database
-sqlx = { version = "0.7.4", features = ["runtime-tokio-native-tls", "sqlite", "postgres"] }
+sqlx = { version = "0.7.4", features = ["runtime-tokio-rustls", "sqlite", "postgres"] }
 sea-orm = { workspace = true }
 
 # Time
