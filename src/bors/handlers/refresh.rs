@@ -10,12 +10,21 @@ pub async fn refresh_repository<Client: RepositoryClient>(
     repo: &mut RepositoryState<Client>,
     db: &dyn DbClient,
 ) -> anyhow::Result<()> {
-    let timeout = repo.config.timeout;
+    cancel_timed_out_builds(repo, db).await?;
+    reload_permission(repo).await;
 
+    Ok(())
+}
+
+async fn cancel_timed_out_builds<Client: RepositoryClient>(
+    repo: &mut RepositoryState<Client>,
+    db: &dyn DbClient,
+) -> anyhow::Result<()> {
     let running_builds = db.get_running_builds(&repo.repository).await?;
     tracing::info!("Found {} running build(s)", running_builds.len());
 
     for build in running_builds {
+        let timeout = repo.config.timeout;
         if elapsed_time(build.created_at) >= timeout {
             tracing::info!("Cancelling build {}", build.commit_sha);
 
@@ -41,8 +50,11 @@ pub async fn refresh_repository<Client: RepositoryClient>(
             }
         }
     }
-
     Ok(())
+}
+
+async fn reload_permission<Client: RepositoryClient>(repo: &mut RepositoryState<Client>) {
+    repo.permissions_resolver.reload().await
 }
 
 #[cfg(not(test))]
