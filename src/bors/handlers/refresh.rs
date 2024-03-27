@@ -10,10 +10,10 @@ pub async fn refresh_repository<Client: RepositoryClient>(
     repo: &mut RepositoryState<Client>,
     db: &dyn DbClient,
 ) -> anyhow::Result<()> {
-    cancel_timed_out_builds(repo, db).await?;
+    let res = cancel_timed_out_builds(repo, db).await;
     reload_permission(repo).await;
 
-    Ok(())
+    res
 }
 
 async fn cancel_timed_out_builds<Client: RepositoryClient>(
