@@ -12,6 +12,7 @@ pub async fn refresh_repository<Client: RepositoryClient>(
 ) -> anyhow::Result<()> {
     let res = cancel_timed_out_builds(repo, db).await;
     reload_permission(repo).await;
+    reload_config(repo).await?;
 
     res
 }
@@ -55,6 +56,14 @@ async fn cancel_timed_out_builds<Client: RepositoryClient>(
 
 async fn reload_permission<Client: RepositoryClient>(repo: &mut RepositoryState<Client>) {
     repo.permissions_resolver.reload().await
+}
+
+async fn reload_config<Client: RepositoryClient>(
+    repo: &mut RepositoryState<Client>,
+) -> anyhow::Result<()> {
+    let config = repo.client.load_config().await?;
+    repo.config = config;
+    Ok(())
 }
 
 #[cfg(not(test))]
