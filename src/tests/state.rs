@@ -409,4 +409,8 @@ impl RepositoryClient for TestRepositoryClient {
             .extend(labels.to_vec());
         Ok(())
     }
+
+    async fn load_config(&mut self) -> anyhow::Result<RepositoryConfig> {
+        Ok(RepoConfigBuilder::default().create())
+    }
 }

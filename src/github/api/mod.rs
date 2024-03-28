@@ -3,7 +3,6 @@ use std::future::Future;
 use std::pin::Pin;
 
 use anyhow::Context;
-use base64::Engine;
 use octocrab::models::{App, AppId, InstallationRepositories, Repository};
 use octocrab::Octocrab;
 use secrecy::{ExposeSecret, SecretVec};
@@ -12,8 +11,7 @@ use url::Url;
 use client::GithubRepositoryClient;
 
 use crate::bors::event::PullRequestComment;
-use crate::bors::{BorsState, RepositoryState};
-use crate::config::{RepositoryConfig, CONFIG_FILE_PATH};
+use crate::bors::{BorsState, RepositoryClient, RepositoryState};
 use crate::database::{DbClient, SeaORMClient};
 use crate::github::GithubRepoName;
 use crate::permissions::TeamApiPermissionResolver;
@@ -142,7 +140,13 @@ async fn create_repo_state(
     let name = GithubRepoName::new(&owner.login, &repo.name);
     tracing::info!("Found repository {name}");
 
-    let config = match load_repository_config(&repo_client, &name).await {
+    let mut client = GithubRepositoryClient {
+        client: repo_client,
+        repo_name: name.clone(),
+        repository: repo,
+    };
+
+    let config = match client.load_config().await {
         Ok(config) => {
             tracing::info!("Loaded repository config for {name}: {config:#?}");
             config
@@ -158,51 +162,12 @@ async fn create_repo_state(
         .await
         .map_err(|error| anyhow::anyhow!("Could not load permissions for {name}: {error:?}"))?;
 
-    let client = GithubRepositoryClient {
-        client: repo_client,
-        repo_name: name.clone(),
-        repository: repo,
-    };
-
     Ok(RepositoryState {
         repository: name,
         client,
         config,
         permissions_resolver: Box::new(permissions_resolver),
     })
-}
-
-/// Loads repository configuration from a file located at `[CONFIG_FILE_PATH]` in the main
-/// branch.
-async fn load_repository_config(
-    gh_client: &Octocrab,
-    repo: &GithubRepoName,
-) -> anyhow::Result<RepositoryConfig> {
-    let mut response = gh_client
-        .repos(&repo.owner, &repo.name)
-        .get_content()
-        .path(CONFIG_FILE_PATH)
-        .send()
-        .await
-        .map_err(|error| {
-            anyhow::anyhow!("Could not fetch {CONFIG_FILE_PATH} from {repo}: {error:?}")
-        })?;
-
-    let engine = base64::engine::general_purpose::STANDARD;
-    response
-        .take_items()
-        .into_iter()
-        .next()
-        .and_then(|content| content.content)
-        .ok_or_else(|| anyhow::anyhow!("Configuration file not found"))
-        .and_then(|content| Ok(engine.decode(content.trim())?))
-        .and_then(|content| Ok(String::from_utf8(content)?))
-        .and_then(|content| {
-            let config: RepositoryConfig = toml::from_str(&content).map_err(|error| {
-                anyhow::anyhow!("Could not deserialize repository config: {error:?}")
-            })?;
-            Ok(config)
-        })
 }
 
 impl BorsState<GithubRepositoryClient> for GithubAppState {
