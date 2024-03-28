@@ -22,13 +22,13 @@ COPY Cargo.lock .
 COPY src src
 COPY database database
 
-RUN CARGO_PROFILE_RELEASE_DEBUG=1 cargo build --release
+RUN cargo build --release
 
-FROM ubuntu:20.04 as runtime
+FROM ubuntu:22.04 as runtime
 
 WORKDIR /
 
-RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates libssl-dev
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates
 
 COPY --from=build /app/target/release/bors .
 

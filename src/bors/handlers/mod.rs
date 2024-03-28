@@ -243,7 +243,7 @@ mod tests {
     #[tokio::test]
     async fn test_do_not_comment_when_pr_fetch_fails() {
         let mut state = ClientBuilder::default().create_state().await;
-        state.client().get_pr_fn = Box::new(|pr| Err(anyhow::anyhow!("Foo")));
+        state.client().get_pr_fn = Box::new(|_| Err(anyhow::anyhow!("Foo")));
         state.comment(comment("foo").create()).await;
         state.client().check_comments(default_pr_number(), &[]);
     }

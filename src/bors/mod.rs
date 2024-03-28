@@ -23,6 +23,9 @@ pub use handlers::handle_bors_event;
 pub trait RepositoryClient {
     fn repository(&self) -> &GithubRepoName;
 
+    /// load repository config
+    async fn load_config(&mut self) -> anyhow::Result<RepositoryConfig>;
+
     /// Return the current SHA of the given branch.
     async fn get_branch_sha(&mut self, name: &str) -> anyhow::Result<CommitSha>;
 

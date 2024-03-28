@@ -1,6 +1,5 @@
 use axum::async_trait;
 use std::collections::HashSet;
-use std::time::{Duration, SystemTime};
 use tokio::sync::Mutex;
 
 use crate::github::GithubRepoName;
@@ -16,15 +15,13 @@ pub enum PermissionType {
 #[async_trait]
 pub trait PermissionResolver {
     async fn has_permission(&self, username: &str, permission: PermissionType) -> bool;
+    async fn reload(&self);
 }
-
-/// For how long should the permissions be cached.
-const CACHE_DURATION: Duration = Duration::from_secs(60);
 
 /// Loads permission information from the Rust Team API.
 pub struct TeamApiPermissionResolver {
     repo: GithubRepoName,
-    permissions: Mutex<CachedUserPermissions>,
+    permissions: Mutex<UserPermissions>,
 }
 
 impl TeamApiPermissionResolver {
@@ -33,14 +30,13 @@ impl TeamApiPermissionResolver {
 
         Ok(Self {
             repo,
-            permissions: Mutex::new(CachedUserPermissions::new(permissions)),
+            permissions: Mutex::new(permissions),
         })
     }
-
     async fn reload_permissions(&self) {
         let result = load_permissions(&self.repo).await;
         match result {
-            Ok(perms) => *self.permissions.lock().await = CachedUserPermissions::new(perms),
+            Ok(perms) => *self.permissions.lock().await = perms,
             Err(error) => {
                 tracing::error!("Cannot reload permissions for {}: {error:?}", self.repo);
             }
@@ -51,15 +47,14 @@ impl TeamApiPermissionResolver {
 #[async_trait]
 impl PermissionResolver for TeamApiPermissionResolver {
     async fn has_permission(&self, username: &str, permission: PermissionType) -> bool {
-        if self.permissions.lock().await.is_stale() {
-            self.reload_permissions().await;
-        }
-
         self.permissions
             .lock()
             .await
-            .permissions
             .has_permission(username, permission)
+    }
+
+    async fn reload(&self) {
+        self.reload_permissions().await
     }
 }
 
@@ -74,26 +69,6 @@ impl UserPermissions {
             PermissionType::Review => self.review_users.contains(username),
             PermissionType::Try => self.try_users.contains(username),
         }
-    }
-}
-
-struct CachedUserPermissions {
-    permissions: UserPermissions,
-    created_at: SystemTime,
-}
-impl CachedUserPermissions {
-    fn new(permissions: UserPermissions) -> Self {
-        Self {
-            permissions,
-            created_at: SystemTime::now(),
-        }
-    }
-
-    fn is_stale(&self) -> bool {
-        self.created_at
-            .elapsed()
-            .map(|duration| duration > CACHE_DURATION)
-            .unwrap_or(true)
     }
 }
 

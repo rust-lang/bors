@@ -159,7 +159,7 @@ impl BorsState<TestRepositoryClient> for TestBorsState {
 pub struct RepoConfig {
     #[builder(default = "Duration::from_secs(3600)")]
     timeout: Duration,
-    #[builder(field(type = "HashMap<LabelTrigger, Vec<LabelModification>>"))]
+    #[builder(field(ty = "HashMap<LabelTrigger, Vec<LabelModification>>"))]
     labels: HashMap<LabelTrigger, Vec<LabelModification>>,
 }
 
@@ -408,5 +408,9 @@ impl RepositoryClient for TestRepositoryClient {
             .or_default()
             .extend(labels.to_vec());
         Ok(())
+    }
+
+    async fn load_config(&mut self) -> anyhow::Result<RepositoryConfig> {
+        Ok(RepoConfigBuilder::default().create())
     }
 }

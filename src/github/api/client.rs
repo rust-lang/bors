@@ -1,10 +1,13 @@
 use anyhow::Context;
 use axum::async_trait;
+use base64::Engine;
 use octocrab::models::{Repository, RunId};
 use octocrab::{Error, Octocrab};
 use tracing::log;
 
 use crate::bors::{CheckSuite, CheckSuiteStatus, RepositoryClient};
+use crate::config::{RepositoryConfig, CONFIG_FILE_PATH};
+use crate::github::api::base_github_url;
 use crate::github::api::operations::{merge_branches, set_branch_to_commit, MergeError};
 use crate::github::{Branch, CommitSha, GithubRepoName, PullRequest, PullRequestNumber};
 
@@ -39,21 +42,56 @@ impl RepositoryClient for GithubRepositoryClient {
         self.name()
     }
 
+    /// Loads repository configuration from a file located at `[CONFIG_FILE_PATH]` in the main
+    /// branch.
+    async fn load_config(&mut self) -> anyhow::Result<RepositoryConfig> {
+        let mut response = self
+            .client
+            .repos(&self.repo_name.owner, &self.repo_name.name)
+            .get_content()
+            .path(CONFIG_FILE_PATH)
+            .send()
+            .await
+            .map_err(|error| {
+                anyhow::anyhow!(
+                    "Could not fetch {CONFIG_FILE_PATH} from {}: {error:?}",
+                    self.repo_name
+                )
+            })?;
+
+        let engine = base64::engine::general_purpose::STANDARD;
+        response
+            .take_items()
+            .into_iter()
+            .next()
+            .and_then(|content| content.content)
+            .ok_or_else(|| anyhow::anyhow!("Configuration file not found"))
+            .and_then(|content| Ok(engine.decode(content.trim())?))
+            .and_then(|content| Ok(String::from_utf8(content)?))
+            .and_then(|content| {
+                let config: RepositoryConfig = toml::from_str(&content).map_err(|error| {
+                    anyhow::anyhow!("Could not deserialize repository config: {error:?}")
+                })?;
+                Ok(config)
+            })
+    }
+
     async fn get_branch_sha(&mut self, name: &str) -> anyhow::Result<CommitSha> {
         // https://docs.github.com/en/rest/branches/branches?apiVersion=2022-11-28#get-a-branch
-        let response = self
+        let branch: octocrab::models::repos::Branch = self
             .client
-            ._get(
-                self.client.base_url.join(&format!(
-                    "/repos/{}/{}/branches/{name}",
-                    self.repo_name.owner(),
-                    self.repo_name.name(),
-                ))?,
+            .get(
+                base_github_url()
+                    .join(&format!(
+                        "/repos/{}/{}/branches/{name}",
+                        self.repo_name.owner(),
+                        self.repo_name.name(),
+                    ))?
+                    .as_str(),
                 None::<&()>,
             )
-            .await?;
-        let branch: octocrab::models::repos::Branch =
-            response.json().await.context("Cannot deserialize branch")?;
+            .await
+            .context("Cannot deserialize branch")?;
         Ok(CommitSha(branch.commit.sha))
     }
 
@@ -97,41 +135,40 @@ impl RepositoryClient for GithubRepositoryClient {
         branch: &str,
         sha: &CommitSha,
     ) -> anyhow::Result<Vec<CheckSuite>> {
-        let response = self
+        #[derive(serde::Deserialize, Debug)]
+        struct CheckSuitePayload {
+            conclusion: Option<String>,
+            head_branch: String,
+        }
+
+        #[derive(serde::Deserialize, Debug)]
+        struct CheckSuiteResponse {
+            check_suites: Vec<CheckSuitePayload>,
+        }
+
+        let response: CheckSuiteResponse = self
             .client
-            ._get(
-                self.client.base_url.join(&format!(
-                    "/repos/{}/{}/commits/{}/check-suites",
-                    self.repo_name.owner(),
-                    self.repo_name.name(),
-                    sha.0
-                ))?,
+            .get(
+                base_github_url()
+                    .join(&format!(
+                        "/repos/{}/{}/commits/{}/check-suites",
+                        self.repo_name.owner(),
+                        self.repo_name.name(),
+                        sha.0
+                    ))?
+                    .as_str(),
                 None::<&()>,
             )
-            .await?;
+            .await
+            .context("Cannot fetch CheckSuiteResponse")?;
 
-        #[derive(serde::Deserialize, Debug)]
-        struct CheckSuitePayload<'a> {
-            conclusion: Option<&'a str>,
-            head_branch: &'a str,
-        }
-
-        #[derive(serde::Deserialize, Debug)]
-        struct CheckSuiteResponse<'a> {
-            #[serde(borrow)]
-            check_suites: Vec<CheckSuitePayload<'a>>,
-        }
-
-        // `response.json()` is not used because of the 'a lifetime
-        let text = response.text().await?;
-        let response: CheckSuiteResponse = serde_json::from_str(&text)?;
         let suites = response
             .check_suites
             .into_iter()
             .filter(|suite| suite.head_branch == branch)
             .map(|suite| CheckSuite {
                 status: match suite.conclusion {
-                    Some(status) => match status {
+                    Some(status) => match status.as_str() {
                         "success" => CheckSuiteStatus::Success,
                         "failure" | "neutral" | "cancelled" | "skipped" | "timed_out"
                         | "action_required" | "startup_failure" | "stale" => {
