@@ -1,5 +1,5 @@
 use derive_builder::Builder;
-use octocrab::models::RunId;
+use octocrab::models::{RunId, UserId};
 
 use crate::bors::event::PullRequestComment;
 use crate::bors::{event, CheckSuite, CheckSuiteStatus};
@@ -9,6 +9,7 @@ use crate::tests::state::{default_merge_sha, default_repo_name};
 
 fn default_user() -> GithubUser {
     GithubUser {
+        id: UserId(1),
         username: "<user>".to_string(),
         html_url: "https://user.com".parse().unwrap(),
     }

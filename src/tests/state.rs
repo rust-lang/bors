@@ -7,7 +7,7 @@ use std::time::Duration;
 use crate::config::RepositoryConfig;
 use axum::async_trait;
 use derive_builder::Builder;
-use octocrab::models::RunId;
+use octocrab::models::{RunId, UserId};
 
 use super::permissions::AllPermissions;
 use crate::bors::event::{
@@ -29,6 +29,8 @@ use crate::tests::github::{default_base_branch, PRBuilder};
 
 pub fn test_bot_user() -> GithubUser {
     GithubUser {
+        // just a random one, to reduce the chance of duplicate id
+        id: UserId(517237103),
         username: "<test-bot>".to_string(),
         html_url: "https://test-bors.bot.com".parse().unwrap(),
     }

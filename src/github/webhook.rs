@@ -282,6 +282,7 @@ fn parse_comment_from_pr_review(
 
 fn parse_user(user: Author) -> GithubUser {
     GithubUser {
+        id: user.id,
         username: user.login,
         html_url: user.html_url,
     }
@@ -381,6 +382,9 @@ mod tests {
                             name: "bors-kindergarten",
                         },
                         author: GithubUser {
+                            id: UserId(
+                                4539057,
+                            ),
                             username: "Kobzol",
                             html_url: Url {
                                 scheme: "https",
@@ -424,6 +428,9 @@ mod tests {
                             name: "bors-kindergarten",
                         },
                         author: GithubUser {
+                            id: UserId(
+                                4539057,
+                            ),
                             username: "Kobzol",
                             html_url: Url {
                                 scheme: "https",
@@ -467,6 +474,9 @@ mod tests {
                             name: "bors-kindergarten",
                         },
                         author: GithubUser {
+                            id: UserId(
+                                4539057,
+                            ),
                             username: "Kobzol",
                             html_url: Url {
                                 scheme: "https",

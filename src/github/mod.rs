@@ -2,6 +2,7 @@
 //! for working with (GitHub) repositories.
 use std::fmt::{Debug, Display, Formatter};
 
+use octocrab::models::UserId;
 use url::Url;
 
 pub mod api;
@@ -46,6 +47,7 @@ impl Display for GithubRepoName {
 
 #[derive(Debug, PartialEq)]
 pub struct GithubUser {
+    pub id: UserId,
     pub username: String,
     pub html_url: Url,
 }

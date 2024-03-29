@@ -2,12 +2,13 @@ use std::sync::{Arc, Mutex};
 
 use crate::permissions::{PermissionResolver, PermissionType};
 use axum::async_trait;
+use octocrab::models::UserId;
 
 pub struct NoPermissions;
 
 #[async_trait]
 impl PermissionResolver for NoPermissions {
-    async fn has_permission(&self, _username: &str, _permission: PermissionType) -> bool {
+    async fn has_permission(&self, _username: &UserId, _permission: PermissionType) -> bool {
         false
     }
     async fn reload(&self) {}
@@ -17,7 +18,7 @@ pub struct AllPermissions;
 
 #[async_trait]
 impl PermissionResolver for AllPermissions {
-    async fn has_permission(&self, _username: &str, _permission: PermissionType) -> bool {
+    async fn has_permission(&self, _username: &UserId, _permission: PermissionType) -> bool {
         true
     }
     async fn reload(&self) {}
@@ -37,7 +38,7 @@ impl Default for MockPermissions {
 
 #[async_trait]
 impl PermissionResolver for Arc<Mutex<MockPermissions>> {
-    async fn has_permission(&self, _username: &str, _permission: PermissionType) -> bool {
+    async fn has_permission(&self, _username: &UserId, _permission: PermissionType) -> bool {
         false
     }
     async fn reload(&self) {
