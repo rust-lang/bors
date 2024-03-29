@@ -1,4 +1,5 @@
 use axum::async_trait;
+use octocrab::models::UserId;
 use std::collections::HashSet;
 use tokio::sync::Mutex;
 
@@ -14,7 +15,7 @@ pub enum PermissionType {
 /// Decides if a GitHub user can perform various actions using the bot.
 #[async_trait]
 pub trait PermissionResolver {
-    async fn has_permission(&self, username: &str, permission: PermissionType) -> bool;
+    async fn has_permission(&self, _username: &UserId, _permission: PermissionType) -> bool;
     async fn reload(&self);
 }
 
@@ -46,11 +47,11 @@ impl TeamApiPermissionResolver {
 
 #[async_trait]
 impl PermissionResolver for TeamApiPermissionResolver {
-    async fn has_permission(&self, username: &str, permission: PermissionType) -> bool {
+    async fn has_permission(&self, user_id: &UserId, permission: PermissionType) -> bool {
         self.permissions
             .lock()
             .await
-            .has_permission(username, permission)
+            .has_permission(user_id, permission)
     }
 
     async fn reload(&self) {
@@ -59,15 +60,15 @@ impl PermissionResolver for TeamApiPermissionResolver {
 }
 
 pub struct UserPermissions {
-    review_users: HashSet<String>,
-    try_users: HashSet<String>,
+    review_users: HashSet<UserId>,
+    try_users: HashSet<UserId>,
 }
 
 impl UserPermissions {
-    fn has_permission(&self, username: &str, permission: PermissionType) -> bool {
+    fn has_permission(&self, user_id: &UserId, permission: PermissionType) -> bool {
         match permission {
-            PermissionType::Review => self.review_users.contains(username),
-            PermissionType::Try => self.try_users.contains(username),
+            PermissionType::Review => self.review_users.contains(user_id),
+            PermissionType::Try => self.try_users.contains(user_id),
         }
     }
 }
@@ -90,14 +91,14 @@ async fn load_permissions(repo: &GithubRepoName) -> anyhow::Result<UserPermissio
 
 #[derive(serde::Deserialize)]
 struct UserPermissionsResponse {
-    github_users: HashSet<String>,
+    github_ids: HashSet<UserId>,
 }
 
 /// Loads users that are allowed to perform try/review from the Rust Team API.
 async fn load_users_from_team_api(
     repository_name: &str,
     permission: PermissionType,
-) -> anyhow::Result<HashSet<String>> {
+) -> anyhow::Result<HashSet<UserId>> {
     let permission = match permission {
         PermissionType::Review => "review",
         PermissionType::Try => "try",
@@ -112,5 +113,5 @@ async fn load_users_from_team_api(
         .json::<UserPermissionsResponse>()
         .await
         .map_err(|error| anyhow::anyhow!("Cannot deserialize users from team API: {error:?}"))?;
-    Ok(users.github_users)
+    Ok(users.github_ids)
 }

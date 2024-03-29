@@ -262,7 +262,7 @@ async fn check_try_permissions<Client: RepositoryClient>(
 ) -> anyhow::Result<bool> {
     let result = if !repo
         .permissions_resolver
-        .has_permission(&author.username, PermissionType::Try)
+        .has_permission(&author.id, PermissionType::Try)
         .await
     {
         tracing::info!("Permission denied");
