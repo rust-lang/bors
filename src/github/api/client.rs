@@ -7,8 +7,8 @@ use tracing::log;
 
 use crate::bors::{CheckSuite, CheckSuiteStatus, RepositoryClient};
 use crate::config::{RepositoryConfig, CONFIG_FILE_PATH};
-use crate::github::api::base_github_url;
 use crate::github::api::operations::{merge_branches, set_branch_to_commit, MergeError};
+use crate::github::api::{base_github_html_url, base_github_url};
 use crate::github::{Branch, CommitSha, GithubRepoName, PullRequest, PullRequestNumber};
 
 /// Provides access to a single app installation (repository) using the GitHub API.
@@ -190,12 +190,16 @@ impl RepositoryClient for GithubRepositoryClient {
         Ok(suites)
     }
 
-    async fn cancel_workflows(&mut self, run_ids: Vec<RunId>) -> anyhow::Result<()> {
+    async fn cancel_workflows(&mut self, run_ids: &[RunId]) -> anyhow::Result<()> {
         let actions = self.client.actions();
 
         // Cancel all workflows in parallel
-        futures::future::join_all(run_ids.into_iter().map(|run_id| {
-            actions.cancel_workflow_run(self.repo_name.owner(), self.repo_name.name(), run_id)
+        futures::future::join_all(run_ids.iter().map(|run_id| {
+            actions.cancel_workflow_run(
+                self.repo_name.owner(),
+                self.repo_name.name(),
+                run_id.clone(),
+            )
         }))
         .await
         .into_iter()
@@ -246,6 +250,23 @@ impl RepositoryClient for GithubRepositoryClient {
             .context("Cannot remove label(s) from PR")?;
 
         Ok(())
+    }
+
+    async fn get_workflow_url(&mut self, run_id: RunId) -> String {
+        let html_url = self
+            .repository
+            .html_url
+            .as_ref()
+            .map(|url| url.to_string())
+            .unwrap_or_else(|| {
+                format!(
+                    "{}/{}/{}",
+                    base_github_html_url(),
+                    self.name().owner,
+                    self.name().name
+                )
+            });
+        format!("{}/actions/runs/{}", html_url, run_id)
     }
 }
 
