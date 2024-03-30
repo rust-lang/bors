@@ -23,6 +23,12 @@ type GHRepositoryState = RepositoryState<GithubRepositoryClient>;
 
 type RepositoryMap = HashMap<GithubRepoName, GHRepositoryState>;
 
+fn base_github_html_url() -> Url {
+    let url = std::cell::OnceCell::new();
+    url.get_or_init(|| Url::parse("https://github.com").expect("Cannot parse base GitHub URL"))
+        .clone()
+}
+
 fn base_github_url() -> Url {
     let url = std::cell::OnceCell::new();
     url.get_or_init(|| Url::parse("https://api.github.com").expect("Cannot parse base GitHub URL"))

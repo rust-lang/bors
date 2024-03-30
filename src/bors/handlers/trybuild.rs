@@ -1,4 +1,5 @@
 use anyhow::{anyhow, Context};
+use octocrab::models::RunId;
 
 use crate::bors::command::Parent;
 use crate::bors::handlers::labels::handle_label_trigger;
@@ -167,21 +168,29 @@ pub(super) async fn command_try_cancel<Client: RepositoryClient>(
         return Ok(());
     };
 
-    if let Err(error) = cancel_build_workflows(repo, db, &build).await {
-        tracing::error!(
+    match cancel_build_workflows(repo, db, &build).await {
+        Err(error) => tracing::error!(
             "Could not cancel workflows for SHA {}: {error:?}",
             build.commit_sha
-        );
+        ),
+        Ok(workflow_ids) => {
+            db.update_build_status(&build, BuildStatus::Cancelled)
+                .await?;
+
+            tracing::info!("Try build cancelled");
+
+            let mut try_build_cancelled_comment = r#"Try build cancelled.
+Cancelled workflows:"#
+                .to_string();
+            for id in workflow_ids {
+                let url = repo.client.get_workflow_url(id).await;
+                try_build_cancelled_comment += format!("\n- {}", url).as_str();
+            }
+            repo.client
+                .post_comment(pr_number, &try_build_cancelled_comment)
+                .await?
+        }
     }
-
-    db.update_build_status(&build, BuildStatus::Cancelled)
-        .await?;
-
-    tracing::info!("Try build cancelled");
-
-    repo.client
-        .post_comment(pr_number, "Try build cancelled.")
-        .await?;
 
     Ok(())
 }
@@ -190,7 +199,7 @@ pub async fn cancel_build_workflows<Client: RepositoryClient>(
     repo: &mut RepositoryState<Client>,
     db: &dyn DbClient,
     build: &BuildModel,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<Vec<RunId>> {
     let pending_workflows = db
         .get_workflows_for_build(build)
         .await?
@@ -200,7 +209,8 @@ pub async fn cancel_build_workflows<Client: RepositoryClient>(
         .collect::<Vec<_>>();
 
     tracing::info!("Cancelling workflows {:?}", pending_workflows);
-    repo.client.cancel_workflows(pending_workflows).await
+    repo.client.cancel_workflows(&pending_workflows).await?;
+    Ok(pending_workflows)
 }
 
 fn get_pending_build(pr: PullRequestModel) -> Option<BuildModel> {
@@ -552,28 +562,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_try_cancel_running_build() {
-        let mut state = ClientBuilder::default().create_state().await;
-
-        state.comment("@bors try").await;
-        state.comment("@bors try cancel").await;
-
-        insta::assert_snapshot!(state.client().get_last_comment(default_pr_number()), @"Try build cancelled.");
-
-        let build = state
-            .db
-            .find_build(
-                &default_repo_name(),
-                TRY_BRANCH_NAME.to_string(),
-                default_merge_sha().into(),
-            )
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(build.status, BuildStatus::Cancelled);
-    }
-
-    #[tokio::test]
     async fn test_try_cancel_cancel_workflows() {
         let mut state = ClientBuilder::default().create_state().await;
 
@@ -594,6 +582,13 @@ mod tests {
             .await;
         state.comment("@bors try cancel").await;
         state.client().check_cancelled_workflows(&[123, 124]);
+
+        insta::assert_snapshot!(state.client().get_last_comment(default_pr_number()), @r###"
+        Try build cancelled.
+        Cancelled workflows:
+        - https://github.com/owner/name/actions/runs/123
+        - https://github.com/owner/name/actions/runs/124
+        "###);
     }
 
     #[tokio::test]

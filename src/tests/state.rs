@@ -8,6 +8,7 @@ use crate::config::RepositoryConfig;
 use axum::async_trait;
 use derive_builder::Builder;
 use octocrab::models::{RunId, UserId};
+use url::Url;
 
 use super::permissions::AllPermissions;
 use crate::bors::event::{
@@ -386,7 +387,7 @@ impl RepositoryClient for TestRepositoryClient {
         Ok(self.check_suites.get(&sha.0).cloned().unwrap_or_default())
     }
 
-    async fn cancel_workflows(&mut self, run_ids: Vec<RunId>) -> anyhow::Result<()> {
+    async fn cancel_workflows(&mut self, run_ids: &[RunId]) -> anyhow::Result<()> {
         self.cancelled_workflows
             .extend(run_ids.into_iter().map(|id| id.0));
         Ok(())
@@ -414,5 +415,19 @@ impl RepositoryClient for TestRepositoryClient {
 
     async fn load_config(&mut self) -> anyhow::Result<RepositoryConfig> {
         Ok(RepoConfigBuilder::default().create())
+    }
+
+    async fn get_workflow_url(&mut self, run_id: RunId) -> String {
+        let mut url = Url::parse("https://github.com").expect("Cannot parse base GitHub URL");
+        url.set_path(
+            format!(
+                "{}/{}/actions/runs/{}",
+                self.repository().owner(),
+                self.repository().name(),
+                run_id
+            )
+            .as_str(),
+        );
+        url.to_string()
     }
 }
