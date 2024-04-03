@@ -169,14 +169,21 @@ pub(super) async fn command_try_cancel<Client: RepositoryClient>(
     };
 
     match cancel_build_workflows(repo, db, &build).await {
-        Err(error) => tracing::error!(
-            "Could not cancel workflows for SHA {}: {error:?}",
-            build.commit_sha
-        ),
-        Ok(workflow_ids) => {
+        Err(error) => {
+            tracing::error!(
+                "Could not cancel workflows for SHA {}: {error:?}",
+                build.commit_sha
+            );
             db.update_build_status(&build, BuildStatus::Cancelled)
                 .await?;
 
+            repo.client
+                .post_comment(pr_number, "There was an error cancelling try build!")
+                .await?
+        }
+        Ok(workflow_ids) => {
+            db.update_build_status(&build, BuildStatus::Cancelled)
+                .await?;
             tracing::info!("Try build cancelled");
 
             let mut try_build_cancelled_comment = r#"Try build cancelled.
@@ -294,13 +301,15 @@ async fn check_try_permissions<Client: RepositoryClient>(
 
 #[cfg(test)]
 mod tests {
+    use anyhow::anyhow;
     use sea_orm::EntityTrait;
 
     use entity::workflow;
 
     use crate::bors::handlers::trybuild::{TRY_BRANCH_NAME, TRY_MERGE_BRANCH_NAME};
     use crate::database::{BuildStatus, DbClient, WorkflowStatus, WorkflowType};
-    use crate::github::{CommitSha, LabelTrigger, MergeError};
+    use crate::github::{CommitSha, LabelTrigger, MergeError, PullRequestNumber};
+    use crate::tests::database::create_test_db;
     use crate::tests::event::{
         default_pr_number, suite_failure, suite_pending, suite_success, WorkflowStartedBuilder,
     };
@@ -589,6 +598,26 @@ mod tests {
         - https://github.com/owner/name/actions/runs/123
         - https://github.com/owner/name/actions/runs/124
         "###);
+    }
+
+    #[tokio::test]
+    async fn test_try_cancel_error() {
+        let mut db = create_test_db().await;
+        db.get_workflows_for_build = Some(Box::new(|| Err(anyhow::anyhow!("Errr"))));
+        let mut state = ClientBuilder::default().db(Some(db)).create_state().await;
+
+        state.comment("@bors try").await;
+        state.comment("@bors try cancel").await;
+        let name = default_repo_name();
+        let pr = state
+            .db
+            .get_or_create_pull_request(&name, PullRequestNumber(default_pr_number()))
+            .await
+            .unwrap();
+        let build = pr.try_build.unwrap();
+        assert_eq!(build.status, BuildStatus::Cancelled);
+
+        insta::assert_snapshot!(state.client().get_last_comment(default_pr_number()), @"There was an error cancelling try build!");
     }
 
     #[tokio::test]
