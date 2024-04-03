@@ -195,11 +195,7 @@ impl RepositoryClient for GithubRepositoryClient {
 
         // Cancel all workflows in parallel
         futures::future::join_all(run_ids.iter().map(|run_id| {
-            actions.cancel_workflow_run(
-                self.repo_name.owner(),
-                self.repo_name.name(),
-                run_id.clone(),
-            )
+            actions.cancel_workflow_run(self.repo_name.owner(), self.repo_name.name(), *run_id)
         }))
         .await
         .into_iter()
@@ -266,7 +262,7 @@ impl RepositoryClient for GithubRepositoryClient {
                     self.name().name
                 )
             });
-        format!("{}/actions/runs/{}", html_url, run_id)
+        format!("{html_url}/actions/runs/{run_id}")
     }
 }
 
