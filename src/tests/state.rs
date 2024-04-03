@@ -10,6 +10,7 @@ use derive_builder::Builder;
 use octocrab::models::{RunId, UserId};
 use url::Url;
 
+use super::database::MockedDBClient;
 use super::permissions::AllPermissions;
 use crate::bors::event::{
     BorsEvent, CheckSuiteCompleted, PullRequestComment, WorkflowCompleted, WorkflowStarted,
@@ -47,7 +48,7 @@ pub fn default_merge_sha() -> String {
 
 pub struct TestBorsState {
     repos: HashMap<GithubRepoName, RepositoryState<TestRepositoryClient>>,
-    pub db: SeaORMClient,
+    pub db: MockedDBClient,
 }
 
 impl TestBorsState {
@@ -192,35 +193,35 @@ impl RepoConfigBuilder {
 #[derive(Builder)]
 #[builder(pattern = "owned")]
 pub struct Client {
-    #[builder(default)]
-    name: Option<GithubRepoName>,
+    #[builder(default = "default_repo_name()")]
+    name: GithubRepoName,
     #[builder(default = "Box::new(AllPermissions)")]
     permission_resolver: Box<dyn PermissionResolver>,
     #[builder(default)]
     config: RepoConfigBuilder,
+    #[builder(default)]
+    db: Option<MockedDBClient>,
 }
 
 impl ClientBuilder {
     pub async fn create_state(self) -> TestBorsState {
-        self.create().into_state().await
-    }
-    pub fn create(self) -> RepositoryState<TestRepositoryClient> {
         let Client {
             name,
             permission_resolver,
             config,
+            db,
         } = self.build().unwrap();
 
         let mut branch_history = HashMap::default();
         let default_base_branch = default_base_branch();
         branch_history.insert(default_base_branch.name, vec![default_base_branch.sha]);
+        let db = db.unwrap_or(create_test_db().await);
 
-        let name = name.unwrap_or_else(default_repo_name);
-        RepositoryState {
+        let repo_state = RepositoryState {
             repository: name.clone(),
             client: TestRepositoryClient {
                 comments: Default::default(),
-                name,
+                name: name.clone(),
                 merge_branches_fn: Box::new(|| Ok(CommitSha(default_merge_sha()))),
                 get_pr_fn: Box::new(move |pr| Ok(PRBuilder::default().number(pr.0).create())),
                 check_suites: Default::default(),
@@ -231,18 +232,10 @@ impl ClientBuilder {
             },
             permissions_resolver: permission_resolver,
             config: config.create(),
-        }
-    }
-}
-
-impl RepositoryState<TestRepositoryClient> {
-    pub async fn into_state(self) -> TestBorsState {
+        };
         let mut repos = HashMap::new();
-        repos.insert(self.repository.clone(), self);
-        TestBorsState {
-            repos,
-            db: create_test_db().await,
-        }
+        repos.insert(name.clone(), repo_state);
+        TestBorsState { repos, db }
     }
 }
 
