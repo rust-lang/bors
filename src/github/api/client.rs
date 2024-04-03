@@ -81,13 +81,13 @@ impl RepositoryClient for GithubRepositoryClient {
         let branch: octocrab::models::repos::Branch = self
             .client
             .get(
-                base_github_url()
-                    .join(&format!(
-                        "/repos/{}/{}/branches/{name}",
-                        self.repo_name.owner(),
-                        self.repo_name.name(),
-                    ))?
-                    .as_str(),
+                format!(
+                    "{}/repos/{}/{}/branches/{name}",
+                    base_github_url(),
+                    self.repo_name.owner(),
+                    self.repo_name.name(),
+                )
+                .as_str(),
                 None::<&()>,
             )
             .await
@@ -149,14 +149,14 @@ impl RepositoryClient for GithubRepositoryClient {
         let response: CheckSuiteResponse = self
             .client
             .get(
-                base_github_url()
-                    .join(&format!(
-                        "/repos/{}/{}/commits/{}/check-suites",
-                        self.repo_name.owner(),
-                        self.repo_name.name(),
-                        sha.0
-                    ))?
-                    .as_str(),
+                format!(
+                    "{}/repos/{}/{}/commits/{}/check-suites",
+                    base_github_url(),
+                    self.repo_name.owner(),
+                    self.repo_name.name(),
+                    sha.0
+                )
+                .as_str(),
                 None::<&()>,
             )
             .await

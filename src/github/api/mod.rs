@@ -6,7 +6,6 @@ use anyhow::Context;
 use octocrab::models::{App, AppId, InstallationRepositories, Repository};
 use octocrab::Octocrab;
 use secrecy::{ExposeSecret, SecretVec};
-use url::Url;
 
 use client::GithubRepositoryClient;
 
@@ -23,16 +22,12 @@ type GHRepositoryState = RepositoryState<GithubRepositoryClient>;
 
 type RepositoryMap = HashMap<GithubRepoName, GHRepositoryState>;
 
-fn base_github_html_url() -> Url {
-    let url = std::cell::OnceCell::new();
-    url.get_or_init(|| Url::parse("https://github.com").expect("Cannot parse base GitHub URL"))
-        .clone()
+fn base_github_html_url() -> &'static str {
+    "https://github.com"
 }
 
-fn base_github_url() -> Url {
-    let url = std::cell::OnceCell::new();
-    url.get_or_init(|| Url::parse("https://api.github.com").expect("Cannot parse base GitHub URL"))
-        .clone()
+fn base_github_url() -> &'static str {
+    "https://api.github.com"
 }
 
 /// Provides access to managed GitHub repositories.
