@@ -178,7 +178,10 @@ pub(super) async fn command_try_cancel<Client: RepositoryClient>(
                 .await?;
 
             repo.client
-                .post_comment(pr_number, "There was an error cancelling try build!")
+                .post_comment(
+                    pr_number,
+                    "Try build was cancelled. It was not possible to cancel some workflows.",
+                )
                 .await?
         }
         Ok(workflow_ids) => {
@@ -616,7 +619,7 @@ mod tests {
         let build = pr.try_build.unwrap();
         assert_eq!(build.status, BuildStatus::Cancelled);
 
-        insta::assert_snapshot!(state.client().get_last_comment(default_pr_number()), @"There was an error cancelling try build!");
+        insta::assert_snapshot!(state.client().get_last_comment(default_pr_number()), @"Try build was cancelled. It was not possible to cancel some workflows.");
     }
 
     #[tokio::test]
