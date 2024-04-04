@@ -190,7 +190,7 @@ pub(super) async fn command_try_cancel<Client: RepositoryClient>(
 Cancelled workflows:"#
                 .to_string();
             for id in workflow_ids {
-                let url = repo.client.get_workflow_url(id).await;
+                let url = repo.client.get_workflow_url(id);
                 try_build_cancelled_comment += format!("\n- {}", url).as_str();
             }
             repo.client
@@ -301,7 +301,6 @@ async fn check_try_permissions<Client: RepositoryClient>(
 
 #[cfg(test)]
 mod tests {
-    use anyhow::anyhow;
     use sea_orm::EntityTrait;
 
     use entity::workflow;

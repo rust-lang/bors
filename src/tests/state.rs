@@ -17,7 +17,7 @@ use crate::bors::event::{
 };
 use crate::bors::{handle_bors_event, BorsContext, CheckSuite, CommandParser, RepositoryState};
 use crate::bors::{BorsState, RepositoryClient};
-use crate::database::{DbClient, SeaORMClient, WorkflowStatus};
+use crate::database::{DbClient, WorkflowStatus};
 use crate::github::{
     CommitSha, GithubRepoName, GithubUser, LabelModification, LabelTrigger, PullRequest,
 };
@@ -410,7 +410,7 @@ impl RepositoryClient for TestRepositoryClient {
         Ok(RepoConfigBuilder::default().create())
     }
 
-    async fn get_workflow_url(&mut self, run_id: RunId) -> String {
+    fn get_workflow_url(&self, run_id: RunId) -> String {
         let mut url = Url::parse("https://github.com").expect("Cannot parse base GitHub URL");
         url.set_path(
             format!(
