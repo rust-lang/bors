@@ -248,7 +248,7 @@ impl RepositoryClient for GithubRepositoryClient {
         Ok(())
     }
 
-    async fn get_workflow_url(&mut self, run_id: RunId) -> String {
+    fn get_workflow_url(&self, run_id: RunId) -> String {
         let html_url = self
             .repository
             .html_url

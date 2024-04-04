@@ -67,7 +67,7 @@ pub trait RepositoryClient {
     ) -> anyhow::Result<()>;
 
     /// Get a workflow url
-    async fn get_workflow_url(&mut self, run_id: RunId) -> String;
+    fn get_workflow_url(&self, run_id: RunId) -> String;
 }
 
 #[derive(Clone)]
