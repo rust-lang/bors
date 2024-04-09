@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use anyhow::Context;
+use arc_swap::ArcSwap;
 use axum::async_trait;
 use octocrab::models::{App, AppId, InstallationRepositories, Repository};
 use octocrab::Octocrab;
@@ -34,7 +35,7 @@ fn base_github_url() -> &'static str {
 pub struct GithubAppState {
     app: App,
     client: Octocrab,
-    repositories: Arc<RwLock<RepositoryMap>>,
+    repositories: ArcSwap<RepositoryMap>,
     db: Arc<SeaORMClient>,
 }
 
@@ -63,7 +64,7 @@ impl GithubAppState {
         Ok(GithubAppState {
             app,
             client,
-            repositories: Arc::new(RwLock::new(repositories)),
+            repositories: ArcSwap::new(Arc::new(repositories)),
             db: Arc::new(db),
         })
     }
@@ -185,8 +186,7 @@ impl BorsState<GithubRepositoryClient> for GithubAppState {
         Arc<dyn DbClient>,
     )> {
         self.repositories
-            .read()
-            .unwrap()
+            .load()
             .get(repo)
             .map(|repo| (Arc::clone(&repo), Arc::clone(&self.db) as Arc<dyn DbClient>))
     }
@@ -198,19 +198,15 @@ impl BorsState<GithubRepositoryClient> for GithubAppState {
         Arc<dyn DbClient>,
     ) {
         (
-            self.repositories
-                .read()
-                .unwrap()
-                .values()
-                .cloned()
-                .collect(),
+            self.repositories.load().values().cloned().collect(),
             Arc::clone(&self.db) as Arc<dyn DbClient>,
         )
     }
 
     /// Re-download information about repositories connected to this GitHub app.
     async fn reload_repositories(&self) -> anyhow::Result<()> {
-        *self.repositories.write().unwrap() = load_repositories(&self.client).await?;
+        self.repositories
+            .store(Arc::new(load_repositories(&self.client).await?));
         Ok(())
     }
 }
