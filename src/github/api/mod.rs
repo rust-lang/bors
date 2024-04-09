@@ -12,7 +12,6 @@ use client::GithubRepositoryClient;
 
 use crate::bors::event::PullRequestComment;
 use crate::bors::{BorsState, RepositoryClient, RepositoryState};
-use crate::database::{DbClient, SeaORMClient};
 use crate::github::GithubRepoName;
 use crate::permissions::load_permissions;
 
@@ -36,16 +35,11 @@ pub struct GithubAppState {
     app: App,
     client: Octocrab,
     repositories: ArcSwap<RepositoryMap>,
-    db: Arc<SeaORMClient>,
 }
 
 impl GithubAppState {
     /// Loads repositories managed by the Bors GitHub app with the given ID.
-    pub async fn load(
-        app_id: AppId,
-        private_key: SecretVec<u8>,
-        db: SeaORMClient,
-    ) -> anyhow::Result<GithubAppState> {
+    pub async fn load(app_id: AppId, private_key: SecretVec<u8>) -> anyhow::Result<GithubAppState> {
         let key = jsonwebtoken::EncodingKey::from_rsa_pem(private_key.expose_secret().as_ref())
             .context("Could not encode private key")?;
 
@@ -65,7 +59,6 @@ impl GithubAppState {
             app,
             client,
             repositories: ArcSwap::new(Arc::new(repositories)),
-            db: Arc::new(db),
         })
     }
 }
@@ -181,26 +174,15 @@ impl BorsState<GithubRepositoryClient> for GithubAppState {
     fn get_repo_state(
         &self,
         repo: &GithubRepoName,
-    ) -> Option<(
-        Arc<RepositoryState<GithubRepositoryClient>>,
-        Arc<dyn DbClient>,
-    )> {
+    ) -> Option<Arc<RepositoryState<GithubRepositoryClient>>> {
         self.repositories
             .load()
             .get(repo)
-            .map(|repo| (Arc::clone(&repo), Arc::clone(&self.db) as Arc<dyn DbClient>))
+            .map(|repo| Arc::clone(&repo))
     }
 
-    fn get_all_repos(
-        &self,
-    ) -> (
-        Vec<Arc<RepositoryState<GithubRepositoryClient>>>,
-        Arc<dyn DbClient>,
-    ) {
-        (
-            self.repositories.load().values().cloned().collect(),
-            Arc::clone(&self.db) as Arc<dyn DbClient>,
-        )
+    fn get_all_repos(&self) -> Vec<Arc<RepositoryState<GithubRepositoryClient>>> {
+        self.repositories.load().values().cloned().collect()
     }
 
     /// Re-download information about repositories connected to this GitHub app.

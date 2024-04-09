@@ -80,9 +80,8 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
     let state = runtime.block_on(GithubAppState::load(
         opts.app_id.into(),
         opts.private_key.into_bytes().into(),
-        db,
     ))?;
-    let ctx = BorsContext::new(CommandParser::new(opts.cmd_prefix));
+    let ctx = BorsContext::new(CommandParser::new(opts.cmd_prefix), Arc::new(db));
     let (tx, gh_process) = create_bors_process(state, ctx);
 
     let refresh_tx = tx.clone();

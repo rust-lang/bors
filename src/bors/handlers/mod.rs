@@ -30,6 +30,7 @@ pub async fn handle_bors_event<Client: RepositoryClient>(
     state: Arc<dyn BorsState<Client>>,
     ctx: Arc<BorsContext>,
 ) -> anyhow::Result<()> {
+    let db = Arc::clone(&ctx.db);
     match event {
         BorsEvent::Comment(comment) => {
             // We want to ignore comments made by this bot
@@ -38,7 +39,7 @@ pub async fn handle_bors_event<Client: RepositoryClient>(
                 return Ok(());
             }
 
-            if let Some((repo, db)) = get_repo_state(state, &comment.repository) {
+            if let Some(repo) = get_repo_state(state, &comment.repository) {
                 let span = tracing::info_span!(
                     "Comment",
                     pr = format!("{}#{}", comment.repository, comment.pr_number),
@@ -67,7 +68,7 @@ pub async fn handle_bors_event<Client: RepositoryClient>(
             }
         }
         BorsEvent::WorkflowStarted(payload) => {
-            if let Some((_, db)) = get_repo_state(state, &payload.repository) {
+            if let Some(_) = get_repo_state(state, &payload.repository) {
                 let span = tracing::info_span!(
                     "Workflow started",
                     repo = payload.repository.to_string(),
@@ -82,7 +83,7 @@ pub async fn handle_bors_event<Client: RepositoryClient>(
             }
         }
         BorsEvent::WorkflowCompleted(payload) => {
-            if let Some((repo, db)) = get_repo_state(state, &payload.repository) {
+            if let Some(repo) = get_repo_state(state, &payload.repository) {
                 let span = tracing::info_span!(
                     "Workflow completed",
                     repo = payload.repository.to_string(),
@@ -97,7 +98,7 @@ pub async fn handle_bors_event<Client: RepositoryClient>(
             }
         }
         BorsEvent::CheckSuiteCompleted(payload) => {
-            if let Some((repo, db)) = get_repo_state(state, &payload.repository) {
+            if let Some(repo) = get_repo_state(state, &payload.repository) {
                 let span = tracing::info_span!(
                     "Check suite completed",
                     repo = payload.repository.to_string(),
@@ -112,7 +113,7 @@ pub async fn handle_bors_event<Client: RepositoryClient>(
         }
         BorsEvent::Refresh => {
             let span = tracing::info_span!("Refresh");
-            let (repos, db) = state.get_all_repos();
+            let repos = state.get_all_repos();
             futures::future::join_all(repos.into_iter().map(|repo| {
                 let repo = Arc::clone(&repo);
                 async {
@@ -132,7 +133,7 @@ pub async fn handle_bors_event<Client: RepositoryClient>(
 fn get_repo_state<Client: RepositoryClient>(
     state: Arc<dyn BorsState<Client>>,
     repo: &GithubRepoName,
-) -> Option<(Arc<RepositoryState<Client>>, Arc<dyn DbClient>)> {
+) -> Option<Arc<RepositoryState<Client>>> {
     match state.get_repo_state(repo) {
         Some(result) => Some(result),
         None => {

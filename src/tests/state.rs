@@ -66,7 +66,10 @@ impl TestBorsState {
         handle_bors_event(
             event,
             Arc::new(self.clone()),
-            Arc::new(BorsContext::new(CommandParser::new("@bors".to_string()))),
+            Arc::new(BorsContext::new(
+                CommandParser::new("@bors".to_string()),
+                Arc::clone(&self.db) as Arc<dyn DbClient>,
+            )),
         )
         .await
         .unwrap();
@@ -134,20 +137,12 @@ impl BorsState<Arc<TestRepositoryClient>> for TestBorsState {
         comment.author == test_bot_user()
     }
 
-    fn get_repo_state(
-        &self,
-        repo: &GithubRepoName,
-    ) -> Option<(Arc<TestRepositoryState>, Arc<dyn DbClient>)> {
-        self.repos
-            .get(repo)
-            .map(|repo| (Arc::clone(repo), Arc::clone(&self.db) as Arc<dyn DbClient>))
+    fn get_repo_state(&self, repo: &GithubRepoName) -> Option<Arc<TestRepositoryState>> {
+        self.repos.get(repo).map(|repo| Arc::clone(repo))
     }
 
-    fn get_all_repos(&self) -> (Vec<Arc<TestRepositoryState>>, Arc<dyn DbClient>) {
-        (
-            self.repos.values().cloned().collect(),
-            Arc::clone(&self.db) as Arc<dyn DbClient>,
-        )
+    fn get_all_repos(&self) -> Vec<Arc<TestRepositoryState>> {
+        self.repos.values().cloned().collect()
     }
 
     async fn reload_repositories(&self) -> anyhow::Result<()> {

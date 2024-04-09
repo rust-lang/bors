@@ -11,7 +11,6 @@ use octocrab::models::RunId;
 
 use crate::bors::event::PullRequestComment;
 use crate::config::RepositoryConfig;
-use crate::database::DbClient;
 use crate::github::{CommitSha, GithubRepoName, MergeError, PullRequest, PullRequestNumber};
 use crate::permissions::UserPermissions;
 pub use command::CommandParser;
@@ -88,13 +87,10 @@ pub trait BorsState<Client: RepositoryClient>: Send + Sync {
     fn is_comment_internal(&self, comment: &PullRequestComment) -> bool;
 
     /// Get repository and database state for the given repository name.
-    fn get_repo_state(
-        &self,
-        repo: &GithubRepoName,
-    ) -> Option<(Arc<RepositoryState<Client>>, Arc<dyn DbClient>)>;
+    fn get_repo_state(&self, repo: &GithubRepoName) -> Option<Arc<RepositoryState<Client>>>;
 
     /// Get all repositories.
-    fn get_all_repos(&self) -> (Vec<Arc<RepositoryState<Client>>>, Arc<dyn DbClient>);
+    fn get_all_repos(&self) -> Vec<Arc<RepositoryState<Client>>>;
 
     /// Reload state of repositories due to some external change.
     async fn reload_repositories(&self) -> anyhow::Result<()>;
