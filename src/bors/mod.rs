@@ -5,6 +5,7 @@ mod handlers;
 
 use std::sync::{Arc, RwLock};
 
+use axum::async_trait;
 use octocrab::models::RunId;
 
 use crate::bors::event::PullRequestComment;
@@ -80,6 +81,7 @@ pub struct CheckSuite {
 
 /// Main state holder for the bot.
 /// It is behind a trait to allow easier mocking in tests.
+#[async_trait]
 pub trait BorsState<Client: RepositoryClient>: Send + Sync {
     /// Was the comment created by the bot?
     fn is_comment_internal(&self, comment: &PullRequestComment) -> bool;
@@ -94,7 +96,7 @@ pub trait BorsState<Client: RepositoryClient>: Send + Sync {
     fn get_all_repos(&self) -> (Vec<Arc<RepositoryState<Client>>>, Arc<dyn DbClient>);
 
     /// Reload state of repositories due to some external change.
-    fn reload_repositories(&mut self) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + '_>>;
+    async fn reload_repositories(&self) -> anyhow::Result<()>;
 }
 
 /// An access point to a single repository.

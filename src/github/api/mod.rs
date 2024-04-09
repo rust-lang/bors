@@ -171,6 +171,7 @@ async fn create_repo_state(
     })
 }
 
+#[async_trait]
 impl BorsState<GithubRepositoryClient> for GithubAppState {
     fn is_comment_internal(&self, comment: &PullRequestComment) -> bool {
         comment.author.html_url == self.app.html_url
@@ -208,10 +209,8 @@ impl BorsState<GithubRepositoryClient> for GithubAppState {
     }
 
     /// Re-download information about repositories connected to this GitHub app.
-    fn reload_repositories(&mut self) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + '_>> {
-        Box::pin(async move {
-            self.repositories = load_repositories(&self.client).await?;
-            Ok(())
-        })
+    async fn reload_repositories(&self) -> anyhow::Result<()> {
+        *self.repositories.write().unwrap() = load_repositories(&self.client).await?;
+        Ok(())
     }
 }
