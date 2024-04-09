@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
@@ -10,11 +11,17 @@ pub async fn refresh_repository<Client: RepositoryClient>(
     repo: Arc<RepositoryState<Client>>,
     db: Arc<dyn DbClient>,
 ) -> anyhow::Result<()> {
-    let res = cancel_timed_out_builds(repo, db).await;
-    reload_permission(repo).await;
-    reload_config(repo).await?;
-
-    res
+    let repo = repo.as_ref();
+    if let (Ok(_), _, Ok(_)) = tokio::join!(
+        cancel_timed_out_builds(repo, db.as_ref()),
+        reload_permission(repo),
+        reload_config(repo)
+    ) {
+        Ok(())
+    } else {
+        tracing::error!("Failed to refresh repository");
+        anyhow::bail!("Failed to refresh repository")
+    }
 }
 
 async fn cancel_timed_out_builds<Client: RepositoryClient>(
