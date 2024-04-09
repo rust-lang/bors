@@ -241,7 +241,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_ignore_bot_comment() {
-        let mut state = ClientBuilder::default().create_state().await;
+        let state = ClientBuilder::default().create_state().await;
         state
             .comment(comment("@bors ping").author(test_bot_user()).create())
             .await;
@@ -250,8 +250,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_do_not_comment_when_pr_fetch_fails() {
-        let mut state = ClientBuilder::default().create_state().await;
-        state.client().get_pr_fn = Box::new(|_| Err(anyhow::anyhow!("Foo")));
+        let state = ClientBuilder::default().create_state().await;
+        state
+            .client()
+            .set_get_pr_fn(|_| Err(anyhow::anyhow!("Foo")));
         state.comment(comment("foo").create()).await;
         state.client().check_comments(default_pr_number(), &[]);
     }

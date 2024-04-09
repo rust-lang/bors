@@ -32,7 +32,7 @@ impl MockedDBClient {
         }
     }
 
-    pub fn connection(&mut self) -> &mut DatabaseConnection {
+    pub fn connection(&self) -> &DatabaseConnection {
         self.db.connection()
     }
 }

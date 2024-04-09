@@ -19,7 +19,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_ping() {
-        let mut state = ClientBuilder::default().create_state().await;
+        let state = ClientBuilder::default().create_state().await;
         state.comment("@bors ping").await;
         state
             .client()
