@@ -7,8 +7,8 @@ use crate::bors::{RepositoryClient, RepositoryState};
 use crate::database::{BuildStatus, DbClient};
 
 pub async fn refresh_repository<Client: RepositoryClient>(
-    repo: &mut RepositoryState<Client>,
-    db: &dyn DbClient,
+    repo: Arc<RepositoryState<Client>>,
+    db: Arc<dyn DbClient>,
 ) -> anyhow::Result<()> {
     let res = cancel_timed_out_builds(repo, db).await;
     reload_permission(repo).await;
@@ -18,14 +18,14 @@ pub async fn refresh_repository<Client: RepositoryClient>(
 }
 
 async fn cancel_timed_out_builds<Client: RepositoryClient>(
-    repo: &mut RepositoryState<Client>,
+    repo: &RepositoryState<Client>,
     db: &dyn DbClient,
 ) -> anyhow::Result<()> {
     let running_builds = db.get_running_builds(&repo.repository).await?;
     tracing::info!("Found {} running build(s)", running_builds.len());
 
+    let timeout = repo.config.read().unwrap().timeout.clone();
     for build in running_builds {
-        let timeout = repo.config.timeout;
         if elapsed_time(build.created_at) >= timeout {
             tracing::info!("Cancelling build {}", build.commit_sha);
 
@@ -54,15 +54,15 @@ async fn cancel_timed_out_builds<Client: RepositoryClient>(
     Ok(())
 }
 
-async fn reload_permission<Client: RepositoryClient>(repo: &mut RepositoryState<Client>) {
+async fn reload_permission<Client: RepositoryClient>(repo: &RepositoryState<Client>) {
     repo.permissions_resolver.reload().await
 }
 
 async fn reload_config<Client: RepositoryClient>(
-    repo: &mut RepositoryState<Client>,
+    repo: &RepositoryState<Client>,
 ) -> anyhow::Result<()> {
     let config = repo.client.load_config().await?;
-    repo.config = config;
+    *repo.config.write().unwrap() = config;
     Ok(())
 }
 

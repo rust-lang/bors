@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use anyhow::{anyhow, Context};
 use octocrab::models::RunId;
 
@@ -28,12 +30,13 @@ pub(super) const TRY_BRANCH_NAME: &str = "automation/bors/try";
 /// If `parent` is set, it will use it as a base commit for the merge.
 /// Otherwise, it will use the latest commit on the main repository branch.
 pub(super) async fn command_try_build<Client: RepositoryClient>(
-    repo: &mut RepositoryState<Client>,
-    db: &mut dyn DbClient,
+    repo: Arc<RepositoryState<Client>>,
+    db: Arc<dyn DbClient>,
     pr: &PullRequest,
     author: &GithubUser,
     parent: Option<Parent>,
 ) -> anyhow::Result<()> {
+    let repo = repo.as_ref();
     if !check_try_permissions(repo, pr, author).await? {
         return Ok(());
     }
@@ -143,11 +146,12 @@ pub(super) async fn command_try_build<Client: RepositoryClient>(
 }
 
 pub(super) async fn command_try_cancel<Client: RepositoryClient>(
-    repo: &mut RepositoryState<Client>,
-    db: &mut dyn DbClient,
+    repo: Arc<RepositoryState<Client>>,
+    db: Arc<dyn DbClient>,
     pr: &PullRequest,
     author: &GithubUser,
 ) -> anyhow::Result<()> {
+    let repo = repo.as_ref();
     if !check_try_permissions(repo, pr, author).await? {
         return Ok(());
     }
@@ -168,7 +172,7 @@ pub(super) async fn command_try_cancel<Client: RepositoryClient>(
         return Ok(());
     };
 
-    match cancel_build_workflows(repo, db, &build).await {
+    match cancel_build_workflows(repo, db.as_ref(), &build).await {
         Err(error) => {
             tracing::error!(
                 "Could not cancel workflows for SHA {}: {error:?}",
@@ -206,7 +210,7 @@ Cancelled workflows:"#
 }
 
 pub async fn cancel_build_workflows<Client: RepositoryClient>(
-    repo: &mut RepositoryState<Client>,
+    repo: &RepositoryState<Client>,
     db: &dyn DbClient,
     build: &BuildModel,
 ) -> anyhow::Result<Vec<RunId>> {
@@ -276,7 +280,7 @@ handled during merge and rebase. This is normal, and you should still perform st
 }
 
 async fn check_try_permissions<Client: RepositoryClient>(
-    repo: &mut RepositoryState<Client>,
+    repo: &RepositoryState<Client>,
     pr: &PullRequest,
     author: &GithubUser,
 ) -> anyhow::Result<bool> {

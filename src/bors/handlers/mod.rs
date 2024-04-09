@@ -1,4 +1,5 @@
 use anyhow::Context;
+use std::sync::Arc;
 use tracing::Instrument;
 
 use crate::bors::command::BorsCommand;
@@ -26,8 +27,8 @@ mod workflow;
 /// This function performs a single BORS event, it is the main execution function of the bot.
 pub async fn handle_bors_event<Client: RepositoryClient>(
     event: BorsEvent,
-    state: &mut dyn BorsState<Client>,
-    ctx: &BorsContext,
+    state: Arc<dyn BorsState<Client>>,
+    ctx: Arc<BorsContext>,
 ) -> anyhow::Result<()> {
     match event {
         BorsEvent::Comment(comment) => {
@@ -44,7 +45,7 @@ pub async fn handle_bors_event<Client: RepositoryClient>(
                     author = comment.author.username
                 );
                 let pr_number = comment.pr_number;
-                if let Err(error) = handle_comment(repo, db, ctx, comment)
+                if let Err(error) = handle_comment(Arc::clone(&repo), db, ctx, comment)
                     .instrument(span.clone())
                     .await
                 {
@@ -111,10 +112,15 @@ pub async fn handle_bors_event<Client: RepositoryClient>(
         }
         BorsEvent::Refresh => {
             let span = tracing::info_span!("Refresh");
-            let (repos, db) = state.get_all_repos_mut();
-            futures::future::join_all(repos.into_iter().map(|repo| async {
-                let subspan = tracing::info_span!("Repo", repo = repo.repository.to_string());
-                refresh_repository(repo, db).instrument(subspan).await
+            let (repos, db) = state.get_all_repos();
+            futures::future::join_all(repos.into_iter().map(|repo| {
+                let repo = Arc::clone(&repo);
+                async {
+                    let subspan = tracing::info_span!("Repo", repo = repo.repository.to_string());
+                    refresh_repository(repo, Arc::clone(&db))
+                        .instrument(subspan)
+                        .await
+                }
             }))
             .instrument(span)
             .await;
@@ -123,11 +129,11 @@ pub async fn handle_bors_event<Client: RepositoryClient>(
     Ok(())
 }
 
-fn get_repo_state<'a, Client: RepositoryClient>(
-    state: &'a mut dyn BorsState<Client>,
+fn get_repo_state<Client: RepositoryClient>(
+    state: Arc<dyn BorsState<Client>>,
     repo: &GithubRepoName,
-) -> Option<(&'a mut RepositoryState<Client>, &'a mut dyn DbClient)> {
-    match state.get_repo_state_mut(repo) {
+) -> Option<(Arc<RepositoryState<Client>>, Arc<dyn DbClient>)> {
+    match state.get_repo_state(repo) {
         Some(result) => Some(result),
         None => {
             tracing::warn!("Repository {} not found", repo);
@@ -137,9 +143,9 @@ fn get_repo_state<'a, Client: RepositoryClient>(
 }
 
 async fn handle_comment<Client: RepositoryClient>(
-    repo: &mut RepositoryState<Client>,
-    database: &mut dyn DbClient,
-    ctx: &BorsContext,
+    repo: Arc<RepositoryState<Client>>,
+    database: Arc<dyn DbClient>,
+    ctx: Arc<BorsContext>,
     comment: PullRequestComment,
 ) -> anyhow::Result<()> {
     let pr_number = comment.pr_number;
@@ -163,6 +169,8 @@ async fn handle_comment<Client: RepositoryClient>(
     for command in commands {
         match command {
             Ok(command) => {
+                let repo = Arc::clone(&repo);
+                let database = Arc::clone(&database);
                 let result = match command {
                     BorsCommand::Help => {
                         let span = tracing::info_span!("Help");

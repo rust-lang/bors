@@ -1,8 +1,8 @@
 use std::collections::HashMap;
-use std::future::Future;
-use std::pin::Pin;
+use std::sync::{Arc, RwLock};
 
 use anyhow::Context;
+use axum::async_trait;
 use octocrab::models::{App, AppId, InstallationRepositories, Repository};
 use octocrab::Octocrab;
 use secrecy::{ExposeSecret, SecretVec};
@@ -20,7 +20,7 @@ pub(crate) mod operations;
 
 type GHRepositoryState = RepositoryState<GithubRepositoryClient>;
 
-type RepositoryMap = HashMap<GithubRepoName, GHRepositoryState>;
+type RepositoryMap = HashMap<GithubRepoName, Arc<GHRepositoryState>>;
 
 fn base_github_html_url() -> &'static str {
     "https://github.com"
@@ -34,8 +34,8 @@ fn base_github_url() -> &'static str {
 pub struct GithubAppState {
     app: App,
     client: Octocrab,
-    repositories: RepositoryMap,
-    db: SeaORMClient,
+    repositories: Arc<RwLock<RepositoryMap>>,
+    db: Arc<SeaORMClient>,
 }
 
 impl GithubAppState {
@@ -63,8 +63,8 @@ impl GithubAppState {
         Ok(GithubAppState {
             app,
             client,
-            repositories,
-            db,
+            repositories: Arc::new(RwLock::new(repositories)),
+            db: Arc::new(db),
         })
     }
 }
@@ -100,8 +100,8 @@ pub async fn load_repositories(client: &Octocrab) -> anyhow::Result<RepositoryMa
                             Ok(repo_state) => {
                                 tracing::info!("Loaded repository {}", repo_state.repository);
 
-                                if let Some(existing) =
-                                    repositories.insert(repo_state.repository.clone(), repo_state)
+                                if let Some(existing) = repositories
+                                    .insert(repo_state.repository.clone(), Arc::new(repo_state))
                                 {
                                     return Err(anyhow::anyhow!(
                                         "Repository {} found in multiple installations!",
@@ -141,7 +141,7 @@ async fn create_repo_state(
     let name = GithubRepoName::new(&owner.login, &repo.name);
     tracing::info!("Found repository {name}");
 
-    let mut client = GithubRepositoryClient {
+    let client = GithubRepositoryClient {
         client: repo_client,
         repo_name: name.clone(),
         repository: repo,
@@ -166,7 +166,7 @@ async fn create_repo_state(
     Ok(RepositoryState {
         repository: name,
         client,
-        config,
+        config: RwLock::new(config),
         permissions_resolver: Box::new(permissions_resolver),
     })
 }
@@ -176,27 +176,34 @@ impl BorsState<GithubRepositoryClient> for GithubAppState {
         comment.author.html_url == self.app.html_url
     }
 
-    fn get_repo_state_mut(
-        &mut self,
+    fn get_repo_state(
+        &self,
         repo: &GithubRepoName,
     ) -> Option<(
-        &mut RepositoryState<GithubRepositoryClient>,
-        &mut dyn DbClient,
+        Arc<RepositoryState<GithubRepositoryClient>>,
+        Arc<dyn DbClient>,
     )> {
         self.repositories
-            .get_mut(repo)
-            .map(|repo| (repo, (&mut self.db) as &mut dyn DbClient))
+            .read()
+            .unwrap()
+            .get(repo)
+            .map(|repo| (Arc::clone(&repo), Arc::clone(&self.db) as Arc<dyn DbClient>))
     }
 
-    fn get_all_repos_mut(
-        &mut self,
+    fn get_all_repos(
+        &self,
     ) -> (
-        Vec<&mut RepositoryState<GithubRepositoryClient>>,
-        &mut dyn DbClient,
+        Vec<Arc<RepositoryState<GithubRepositoryClient>>>,
+        Arc<dyn DbClient>,
     ) {
         (
-            self.repositories.values_mut().collect(),
-            (&mut self.db) as &mut dyn DbClient,
+            self.repositories
+                .read()
+                .unwrap()
+                .values()
+                .cloned()
+                .collect(),
+            Arc::clone(&self.db) as Arc<dyn DbClient>,
         )
     }
 

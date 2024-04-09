@@ -6,7 +6,7 @@ use crate::database::{BuildStatus, DbClient, WorkflowStatus};
 use crate::github::LabelTrigger;
 
 pub(super) async fn handle_workflow_started(
-    db: &mut dyn DbClient,
+    db: Arc<dyn DbClient>,
     payload: WorkflowStarted,
 ) -> anyhow::Result<()> {
     if !is_bors_observed_branch(&payload.branch) {
@@ -54,8 +54,8 @@ pub(super) async fn handle_workflow_started(
 }
 
 pub(super) async fn handle_workflow_completed<Client: RepositoryClient>(
-    repo: &mut RepositoryState<Client>,
-    db: &mut dyn DbClient,
+    repo: Arc<RepositoryState<Client>>,
+    db: Arc<dyn DbClient>,
     payload: WorkflowCompleted,
 ) -> anyhow::Result<()> {
     if !is_bors_observed_branch(&payload.branch) {
@@ -72,12 +72,12 @@ pub(super) async fn handle_workflow_completed<Client: RepositoryClient>(
         branch: payload.branch,
         commit_sha: payload.commit_sha,
     };
-    try_complete_build(repo, db, event).await
+    try_complete_build(repo.as_ref(), db.as_ref(), event).await
 }
 
 pub(super) async fn handle_check_suite_completed<Client: RepositoryClient>(
-    repo: &mut RepositoryState<Client>,
-    db: &mut dyn DbClient,
+    repo: Arc<RepositoryState<Client>>,
+    db: Arc<dyn DbClient>,
     payload: CheckSuiteCompleted,
 ) -> anyhow::Result<()> {
     if !is_bors_observed_branch(&payload.branch) {
@@ -89,12 +89,12 @@ pub(super) async fn handle_check_suite_completed<Client: RepositoryClient>(
         payload.branch,
         payload.commit_sha
     );
-    try_complete_build(repo, db, payload).await
+    try_complete_build(repo.as_ref(), db.as_ref(), payload).await
 }
 
 async fn try_complete_build<Client: RepositoryClient>(
-    repo: &mut RepositoryState<Client>,
-    db: &mut dyn DbClient,
+    repo: &RepositoryState<Client>,
+    db: &dyn DbClient,
     payload: CheckSuiteCompleted,
 ) -> anyhow::Result<()> {
     if !is_bors_observed_branch(&payload.branch) {

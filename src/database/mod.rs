@@ -86,7 +86,7 @@ pub struct WorkflowModel {
 
 /// Provides access to a database.
 #[async_trait]
-pub trait DbClient {
+pub trait DbClient: Sync + Send {
     /// Finds a Pull request row for the given repository and PR number.
     /// If it doesn't exist, a new row is created.
     async fn get_or_create_pull_request(

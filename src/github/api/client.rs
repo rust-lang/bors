@@ -44,7 +44,7 @@ impl RepositoryClient for GithubRepositoryClient {
 
     /// Loads repository configuration from a file located at `[CONFIG_FILE_PATH]` in the main
     /// branch.
-    async fn load_config(&mut self) -> anyhow::Result<RepositoryConfig> {
+    async fn load_config(&self) -> anyhow::Result<RepositoryConfig> {
         let mut response = self
             .client
             .repos(&self.repo_name.owner, &self.repo_name.name)
@@ -76,7 +76,7 @@ impl RepositoryClient for GithubRepositoryClient {
             })
     }
 
-    async fn get_branch_sha(&mut self, name: &str) -> anyhow::Result<CommitSha> {
+    async fn get_branch_sha(&self, name: &str) -> anyhow::Result<CommitSha> {
         // https://docs.github.com/en/rest/branches/branches?apiVersion=2022-11-28#get-a-branch
         let branch: octocrab::models::repos::Branch = self
             .client
@@ -95,7 +95,7 @@ impl RepositoryClient for GithubRepositoryClient {
         Ok(CommitSha(branch.commit.sha))
     }
 
-    async fn get_pull_request(&mut self, pr: PullRequestNumber) -> anyhow::Result<PullRequest> {
+    async fn get_pull_request(&self, pr: PullRequestNumber) -> anyhow::Result<PullRequest> {
         let pr = self
             .client
             .pulls(self.repository().owner(), self.repository().name())
@@ -108,7 +108,7 @@ impl RepositoryClient for GithubRepositoryClient {
     }
 
     /// The comment will be posted as the Github App user of the bot.
-    async fn post_comment(&mut self, pr: PullRequestNumber, text: &str) -> anyhow::Result<()> {
+    async fn post_comment(&self, pr: PullRequestNumber, text: &str) -> anyhow::Result<()> {
         self.client
             .issues(&self.name().owner, &self.name().name)
             .create_comment(pr.0, text)
@@ -117,12 +117,12 @@ impl RepositoryClient for GithubRepositoryClient {
         Ok(())
     }
 
-    async fn set_branch_to_sha(&mut self, branch: &str, sha: &CommitSha) -> anyhow::Result<()> {
+    async fn set_branch_to_sha(&self, branch: &str, sha: &CommitSha) -> anyhow::Result<()> {
         Ok(set_branch_to_commit(self, branch.to_string(), sha).await?)
     }
 
     async fn merge_branches(
-        &mut self,
+        &self,
         base: &str,
         head: &CommitSha,
         commit_message: &str,
@@ -131,7 +131,7 @@ impl RepositoryClient for GithubRepositoryClient {
     }
 
     async fn get_check_suites_for_commit(
-        &mut self,
+        &self,
         branch: &str,
         sha: &CommitSha,
     ) -> anyhow::Result<Vec<CheckSuite>> {
@@ -190,7 +190,7 @@ impl RepositoryClient for GithubRepositoryClient {
         Ok(suites)
     }
 
-    async fn cancel_workflows(&mut self, run_ids: &[RunId]) -> anyhow::Result<()> {
+    async fn cancel_workflows(&self, run_ids: &[RunId]) -> anyhow::Result<()> {
         let actions = self.client.actions();
 
         // Cancel all workflows in parallel
@@ -204,7 +204,7 @@ impl RepositoryClient for GithubRepositoryClient {
         Ok(())
     }
 
-    async fn add_labels(&mut self, pr: PullRequestNumber, labels: &[String]) -> anyhow::Result<()> {
+    async fn add_labels(&self, pr: PullRequestNumber, labels: &[String]) -> anyhow::Result<()> {
         let client = self.client.issues(self.name().owner(), self.name().name());
         if !labels.is_empty() {
             client
@@ -216,11 +216,7 @@ impl RepositoryClient for GithubRepositoryClient {
         Ok(())
     }
 
-    async fn remove_labels(
-        &mut self,
-        pr: PullRequestNumber,
-        labels: &[String],
-    ) -> anyhow::Result<()> {
+    async fn remove_labels(&self, pr: PullRequestNumber, labels: &[String]) -> anyhow::Result<()> {
         let client = self.client.issues(self.name().owner(), self.name().name());
         // The GitHub API only allows removing labels one by one, so we remove all of them in
         // parallel to speed it up a little.

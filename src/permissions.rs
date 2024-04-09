@@ -14,7 +14,7 @@ pub enum PermissionType {
 
 /// Decides if a GitHub user can perform various actions using the bot.
 #[async_trait]
-pub trait PermissionResolver {
+pub trait PermissionResolver: Sync + Send {
     async fn has_permission(&self, user_id: &UserId, permission: PermissionType) -> bool;
     async fn reload(&self);
 }
