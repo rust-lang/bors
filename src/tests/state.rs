@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::string::ToString;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use arc_swap::ArcSwap;
@@ -10,7 +10,7 @@ use octocrab::models::{RunId, UserId};
 use url::Url;
 
 use super::database::MockedDBClient;
-use super::permissions::AllPermissions;
+use super::event::default_user;
 use crate::bors::event::{
     BorsEvent, CheckSuiteCompleted, PullRequestComment, WorkflowCompleted, WorkflowStarted,
 };
@@ -22,7 +22,7 @@ use crate::github::{
     CommitSha, GithubRepoName, GithubUser, LabelModification, LabelTrigger, PullRequest,
 };
 use crate::github::{MergeError, PullRequestNumber};
-use crate::permissions::PermissionResolver;
+use crate::permissions::UserPermissions;
 use crate::tests::database::create_test_db;
 use crate::tests::event::{
     CheckSuiteCompletedBuilder, WorkflowCompletedBuilder, WorkflowStartedBuilder,
@@ -189,11 +189,36 @@ impl RepoConfigBuilder {
 
 #[derive(Builder)]
 #[builder(pattern = "owned")]
+pub struct Permissions {
+    #[builder(field(ty = "HashSet<UserId>"))]
+    review_users: HashSet<UserId>,
+    #[builder(field(ty = "HashSet<UserId>"))]
+    try_users: HashSet<UserId>,
+}
+
+impl PermissionsBuilder {
+    pub fn create(self) -> UserPermissions {
+        let Permissions {
+            review_users,
+            try_users,
+        } = self.build().unwrap();
+        UserPermissions::new(review_users, try_users)
+    }
+
+    pub fn add_default_users(mut self) -> Self {
+        self.review_users.insert(default_user().id);
+        self.try_users.insert(default_user().id);
+        self
+    }
+}
+
+#[derive(Builder)]
+#[builder(pattern = "owned")]
 pub struct Client {
     #[builder(default = "default_repo_name()")]
     name: GithubRepoName,
-    #[builder(default = "Box::new(AllPermissions)")]
-    permission_resolver: Box<dyn PermissionResolver>,
+    #[builder(default = "PermissionsBuilder::default().add_default_users()")]
+    permissions: PermissionsBuilder,
     #[builder(default)]
     config: RepoConfigBuilder,
     #[builder(default)]
@@ -204,7 +229,7 @@ impl ClientBuilder {
     pub async fn create_state(self) -> TestBorsState {
         let Client {
             name,
-            permission_resolver,
+            permissions,
             config,
             db,
         } = self.build().unwrap();
@@ -231,7 +256,7 @@ impl ClientBuilder {
         let repo_state = RepositoryState {
             repository: name.clone(),
             client: client.clone(),
-            permissions_resolver: permission_resolver,
+            permissions: ArcSwap::new(Arc::new(permissions.create())),
             config: ArcSwap::new(Arc::new(config.create())),
         };
         let mut repos = HashMap::new();

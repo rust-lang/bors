@@ -3,7 +3,7 @@ mod context;
 pub mod event;
 mod handlers;
 
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 use arc_swap::ArcSwap;
 use axum::async_trait;
@@ -13,7 +13,7 @@ use crate::bors::event::PullRequestComment;
 use crate::config::RepositoryConfig;
 use crate::database::DbClient;
 use crate::github::{CommitSha, GithubRepoName, MergeError, PullRequest, PullRequestNumber};
-use crate::permissions::PermissionResolver;
+use crate::permissions::UserPermissions;
 pub use command::CommandParser;
 pub use context::BorsContext;
 pub use handlers::handle_bors_event;
@@ -106,6 +106,6 @@ pub trait BorsState<Client: RepositoryClient>: Send + Sync {
 pub struct RepositoryState<Client: RepositoryClient> {
     pub repository: GithubRepoName,
     pub client: Client,
-    pub permissions_resolver: Box<dyn PermissionResolver>,
+    pub permissions: ArcSwap<UserPermissions>,
     pub config: ArcSwap<RepositoryConfig>,
 }

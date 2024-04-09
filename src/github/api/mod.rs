@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 use anyhow::Context;
 use arc_swap::ArcSwap;
@@ -14,7 +14,7 @@ use crate::bors::event::PullRequestComment;
 use crate::bors::{BorsState, RepositoryClient, RepositoryState};
 use crate::database::{DbClient, SeaORMClient};
 use crate::github::GithubRepoName;
-use crate::permissions::TeamApiPermissionResolver;
+use crate::permissions::load_permissions;
 
 pub mod client;
 pub(crate) mod operations;
@@ -160,15 +160,15 @@ async fn create_repo_state(
         }
     };
 
-    let permissions_resolver = TeamApiPermissionResolver::load(name.clone())
+    let permissions = load_permissions(&name)
         .await
         .map_err(|error| anyhow::anyhow!("Could not load permissions for {name}: {error:?}"))?;
 
     Ok(RepositoryState {
         repository: name,
         client,
-        permissions_resolver: Box::new(permissions_resolver),
         config: ArcSwap::new(Arc::new(config)),
+        permissions: ArcSwap::new(Arc::new(permissions)),
     })
 }
 

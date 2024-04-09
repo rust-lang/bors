@@ -285,9 +285,9 @@ async fn check_try_permissions<Client: RepositoryClient>(
     author: &GithubUser,
 ) -> anyhow::Result<bool> {
     let result = if !repo
-        .permissions_resolver
+        .permissions
+        .load()
         .has_permission(&author.id, PermissionType::Try)
-        .await
     {
         tracing::info!("Permission denied");
         repo.client
@@ -320,15 +320,14 @@ mod tests {
         default_pr_number, suite_failure, suite_pending, suite_success, WorkflowStartedBuilder,
     };
     use crate::tests::github::{BranchBuilder, PRBuilder};
-    use crate::tests::permissions::NoPermissions;
     use crate::tests::state::{
-        default_merge_sha, default_repo_name, ClientBuilder, RepoConfigBuilder,
+        default_merge_sha, default_repo_name, ClientBuilder, PermissionsBuilder, RepoConfigBuilder,
     };
 
     #[tokio::test]
     async fn test_try_no_permission() {
         let state = ClientBuilder::default()
-            .permission_resolver(Box::new(NoPermissions))
+            .permissions(PermissionsBuilder::default())
             .create_state()
             .await;
         state.comment("@bors try").await;

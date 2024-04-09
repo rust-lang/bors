@@ -1,7 +1,5 @@
-use axum::async_trait;
 use octocrab::models::UserId;
 use std::collections::HashSet;
-use tokio::sync::Mutex;
 
 use crate::github::GithubRepoName;
 
@@ -12,60 +10,19 @@ pub enum PermissionType {
     Try,
 }
 
-/// Decides if a GitHub user can perform various actions using the bot.
-#[async_trait]
-pub trait PermissionResolver: Sync + Send {
-    async fn has_permission(&self, user_id: &UserId, permission: PermissionType) -> bool;
-    async fn reload(&self);
-}
-
-/// Loads permission information from the Rust Team API.
-pub struct TeamApiPermissionResolver {
-    repo: GithubRepoName,
-    permissions: Mutex<UserPermissions>,
-}
-
-impl TeamApiPermissionResolver {
-    pub async fn load(repo: GithubRepoName) -> anyhow::Result<Self> {
-        let permissions = load_permissions(&repo).await?;
-
-        Ok(Self {
-            repo,
-            permissions: Mutex::new(permissions),
-        })
-    }
-    async fn reload_permissions(&self) {
-        let result = load_permissions(&self.repo).await;
-        match result {
-            Ok(perms) => *self.permissions.lock().await = perms,
-            Err(error) => {
-                tracing::error!("Cannot reload permissions for {}: {error:?}", self.repo);
-            }
-        }
-    }
-}
-
-#[async_trait]
-impl PermissionResolver for TeamApiPermissionResolver {
-    async fn has_permission(&self, user_id: &UserId, permission: PermissionType) -> bool {
-        self.permissions
-            .lock()
-            .await
-            .has_permission(user_id, permission)
-    }
-
-    async fn reload(&self) {
-        self.reload_permissions().await
-    }
-}
-
 pub struct UserPermissions {
     review_users: HashSet<UserId>,
     try_users: HashSet<UserId>,
 }
 
 impl UserPermissions {
-    fn has_permission(&self, user_id: &UserId, permission: PermissionType) -> bool {
+    pub fn new(review_users: HashSet<UserId>, try_users: HashSet<UserId>) -> Self {
+        Self {
+            review_users,
+            try_users,
+        }
+    }
+    pub fn has_permission(&self, user_id: &UserId, permission: PermissionType) -> bool {
         match permission {
             PermissionType::Review => self.review_users.contains(user_id),
             PermissionType::Try => self.try_users.contains(user_id),
@@ -73,7 +30,7 @@ impl UserPermissions {
     }
 }
 
-async fn load_permissions(repo: &GithubRepoName) -> anyhow::Result<UserPermissions> {
+pub async fn load_permissions(repo: &GithubRepoName) -> anyhow::Result<UserPermissions> {
     tracing::info!("Reloading permissions for repository {repo}");
 
     let review_users = load_users_from_team_api(repo.name(), PermissionType::Review)

@@ -6,6 +6,7 @@ use chrono::{DateTime, Utc};
 use crate::bors::handlers::trybuild::cancel_build_workflows;
 use crate::bors::{RepositoryClient, RepositoryState};
 use crate::database::{BuildStatus, DbClient};
+use crate::permissions::load_permissions;
 
 pub async fn refresh_repository<Client: RepositoryClient>(
     repo: Arc<RepositoryState<Client>>,
@@ -61,8 +62,12 @@ async fn cancel_timed_out_builds<Client: RepositoryClient>(
     Ok(())
 }
 
-async fn reload_permission<Client: RepositoryClient>(repo: &RepositoryState<Client>) {
-    repo.permissions_resolver.reload().await
+async fn reload_permission<Client: RepositoryClient>(
+    repo: &RepositoryState<Client>,
+) -> anyhow::Result<()> {
+    let permissions = load_permissions(&repo.repository).await?;
+    repo.permissions.store(Arc::new(permissions));
+    Ok(())
 }
 
 async fn reload_config<Client: RepositoryClient>(
@@ -96,7 +101,6 @@ fn elapsed_time(date: DateTime<Utc>) -> Duration {
 #[cfg(test)]
 mod tests {
     use std::future::Future;
-    use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
     use chrono::Utc;
@@ -106,24 +110,12 @@ mod tests {
     use crate::bors::handlers::trybuild::TRY_BRANCH_NAME;
     use crate::database::DbClient;
     use crate::tests::event::{default_pr_number, WorkflowStartedBuilder};
-    use crate::tests::permissions::MockPermissions;
     use crate::tests::state::{default_repo_name, ClientBuilder, RepoConfigBuilder};
 
     #[tokio::test(flavor = "current_thread")]
     async fn refresh_no_builds() {
         let mut state = ClientBuilder::default().create_state().await;
         state.refresh().await;
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn refresh_permission() {
-        let permission_resolver = Arc::new(Mutex::new(MockPermissions::default()));
-        let mut state = ClientBuilder::default()
-            .permission_resolver(Box::new(Arc::clone(&permission_resolver)))
-            .create_state()
-            .await;
-        state.refresh().await;
-        assert_eq!(permission_resolver.lock().unwrap().num_reload_called, 1);
     }
 
     #[tokio::test(flavor = "current_thread")]
