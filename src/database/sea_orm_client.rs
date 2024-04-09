@@ -310,7 +310,7 @@ fn pr_from_db(pr: pull_request::Model, build: Option<build::Model>) -> PullReque
 }
 
 fn datetime_from_db(datetime: NaiveDateTime) -> DateTime<Utc> {
-    DateTime::from_utc(datetime, Utc)
+    DateTime::from_naive_utc_and_offset(datetime, Utc)
 }
 
 fn full_repo_name(repo: &GithubRepoName) -> String {
