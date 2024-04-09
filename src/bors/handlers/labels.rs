@@ -13,7 +13,7 @@ pub async fn handle_label_trigger<Client: RepositoryClient>(
 ) -> anyhow::Result<()> {
     let mut add: Vec<String> = Vec::new();
     let mut remove: Vec<String> = Vec::new();
-    if let Some(modifications) = repo.config.read().unwrap().labels.get(&trigger) {
+    if let Some(modifications) = repo.config.load().labels.get(&trigger) {
         log::debug!("Performing label modifications {modifications:?}");
         (add, remove) = modifications
             .iter()

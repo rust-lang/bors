@@ -5,6 +5,7 @@ mod handlers;
 
 use std::sync::{Arc, RwLock};
 
+use arc_swap::ArcSwap;
 use axum::async_trait;
 use octocrab::models::RunId;
 
@@ -106,5 +107,5 @@ pub struct RepositoryState<Client: RepositoryClient> {
     pub repository: GithubRepoName,
     pub client: Client,
     pub permissions_resolver: Box<dyn PermissionResolver>,
-    pub config: RwLock<RepositoryConfig>,
+    pub config: ArcSwap<RepositoryConfig>,
 }

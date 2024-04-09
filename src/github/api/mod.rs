@@ -167,8 +167,8 @@ async fn create_repo_state(
     Ok(RepositoryState {
         repository: name,
         client,
-        config: RwLock::new(config),
         permissions_resolver: Box::new(permissions_resolver),
+        config: ArcSwap::new(Arc::new(config)),
     })
 }
 

@@ -3,6 +3,7 @@ use std::string::ToString;
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 
+use arc_swap::ArcSwap;
 use axum::async_trait;
 use derive_builder::Builder;
 use octocrab::models::{RunId, UserId};
@@ -231,7 +232,7 @@ impl ClientBuilder {
             repository: name.clone(),
             client: client.clone(),
             permissions_resolver: permission_resolver,
-            config: RwLock::new(config.create()),
+            config: ArcSwap::new(Arc::new(config.create())),
         };
         let mut repos = HashMap::new();
         repos.insert(name.clone(), Arc::new(repo_state));
