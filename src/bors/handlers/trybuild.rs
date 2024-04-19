@@ -4,6 +4,13 @@ use anyhow::{anyhow, Context};
 use octocrab::models::RunId;
 
 use crate::bors::command::Parent;
+use crate::bors::comments::InsufficientTryPermissionComment;
+use crate::bors::comments::MergeConflictComment;
+use crate::bors::comments::NoPreviousBuildComment;
+use crate::bors::comments::NoRunningBuildComment;
+use crate::bors::comments::TryBuildCancelledComment;
+use crate::bors::comments::TryBuildInProgressComment;
+use crate::bors::comments::TryBuildStartedComment;
 use crate::bors::handlers::labels::handle_label_trigger;
 use crate::bors::RepositoryClient;
 use crate::bors::RepositoryState;
@@ -50,10 +57,7 @@ pub(super) async fn command_try_build<Client: RepositoryClient>(
         if build.status == BuildStatus::Pending {
             tracing::warn!("Try build already in progress");
             repo.client
-                .post_comment(
-                    pr.number,
-                    ":exclamation: A try build is currently in progress. You can cancel it using @bors try cancel.",
-                )
+                .post_comment(pr.number, Box::new(TryBuildInProgressComment))
                 .await?;
             return Ok(());
         }
@@ -67,11 +71,8 @@ pub(super) async fn command_try_build<Client: RepositoryClient>(
             Parent::Last => match last_parent {
                 None => {
                     repo.client
-                        .post_comment(
-                            pr.number,
-                            ":exclamation: There was no previous build. Please set an explicit parent or remove the `parent=last` argument to use the default parent.",
-                        )
-                    .await?;
+                        .post_comment(pr.number, Box::new(NoPreviousBuildComment))
+                        .await?;
                     return Ok(());
                 }
                 Some(last_parent) => last_parent,
@@ -123,22 +124,19 @@ pub(super) async fn command_try_build<Client: RepositoryClient>(
 
             handle_label_trigger(repo, pr.number, LabelTrigger::TryBuildStarted).await?;
 
-            repo.client
-                .post_comment(
-                    pr.number,
-                    &format!(
-                        ":hourglass: Trying commit {} with merge {merge_sha}…",
-                        pr.head.sha
-                    ),
-                )
-                .await?;
+            let comment = Box::new(TryBuildStartedComment {
+                head_sha: pr.head.sha.clone(),
+                merge_sha,
+            });
+            repo.client.post_comment(pr.number, comment).await?;
             Ok(())
         }
         Err(MergeError::Conflict) => {
             tracing::warn!("Merge conflict");
-            repo.client
-                .post_comment(pr.number, &merge_conflict_message(&pr.head.name))
-                .await?;
+            let comment = Box::new(MergeConflictComment {
+                branch: pr.head.name.clone(),
+            });
+            repo.client.post_comment(pr.number, comment).await?;
             Ok(())
         }
         Err(error) => Err(error.into()),
@@ -164,15 +162,12 @@ pub(super) async fn command_try_cancel<Client: RepositoryClient>(
     let Some(build) = get_pending_build(pr) else {
         tracing::warn!("No build found");
         repo.client
-            .post_comment(
-                pr_number,
-                ":exclamation: There is currently no try build in progress.",
-            )
+            .post_comment(pr_number, Box::new(NoRunningBuildComment))
             .await?;
         return Ok(());
     };
 
-    match cancel_build_workflows(repo, db.as_ref(), &build).await {
+    let comment = match cancel_build_workflows(repo, db.as_ref(), &build).await {
         Err(error) => {
             tracing::error!(
                 "Could not cancel workflows for SHA {}: {error:?}",
@@ -180,31 +175,25 @@ pub(super) async fn command_try_cancel<Client: RepositoryClient>(
             );
             db.update_build_status(&build, BuildStatus::Cancelled)
                 .await?;
-
-            repo.client
-                .post_comment(
-                    pr_number,
-                    "Try build was cancelled. It was not possible to cancel some workflows.",
-                )
-                .await?
+            Box::new(TryBuildCancelledComment {
+                workflow_urls: Err(error),
+            })
         }
         Ok(workflow_ids) => {
             db.update_build_status(&build, BuildStatus::Cancelled)
                 .await?;
             tracing::info!("Try build cancelled");
+            let workflow_urls = workflow_ids
+                .into_iter()
+                .map(|id| repo.client.get_workflow_url(id))
+                .collect::<Vec<_>>();
 
-            let mut try_build_cancelled_comment = r#"Try build cancelled.
-Cancelled workflows:"#
-                .to_string();
-            for id in workflow_ids {
-                let url = repo.client.get_workflow_url(id);
-                try_build_cancelled_comment += format!("\n- {}", url).as_str();
-            }
-            repo.client
-                .post_comment(pr_number, &try_build_cancelled_comment)
-                .await?
+            Box::new(TryBuildCancelledComment {
+                workflow_urls: Ok(workflow_urls),
+            })
         }
-    }
+    };
+    repo.client.post_comment(pr_number, comment).await?;
 
     Ok(())
 }
@@ -245,40 +234,6 @@ fn auto_merge_commit_message(pr: &PullRequest, reviewer: &str) -> String {
     )
 }
 
-fn merge_conflict_message(branch: &str) -> String {
-    format!(
-        r#":lock: Merge conflict
-
-This pull request and the master branch diverged in a way that cannot
- be automatically merged. Please rebase on top of the latest master
- branch, and let the reviewer approve again.
-
-<details><summary>How do I rebase?</summary>
-
-Assuming `self` is your fork and `upstream` is this repository,
- you can resolve the conflict following these steps:
-
-1. `git checkout {branch}` *(switch to your branch)*
-2. `git fetch upstream master` *(retrieve the latest master)*
-3. `git rebase upstream/master -p` *(rebase on top of it)*
-4. Follow the on-screen instruction to resolve conflicts (check `git status` if you got lost).
-5. `git push self {branch} --force-with-lease` *(update this PR)*
-
-You may also read
- [*Git Rebasing to Resolve Conflicts* by Drew Blessing](http://blessing.io/git/git-rebase/open-source/2015/08/23/git-rebasing-to-resolve-conflicts.html)
- for a short tutorial.
-
-Please avoid the ["**Resolve conflicts**" button](https://help.github.com/articles/resolving-a-merge-conflict-on-github/) on GitHub.
- It uses `git merge` instead of `git rebase` which makes the PR commit history more difficult to read.
-
-Sometimes step 4 will complete without asking for resolution. This is usually due to difference between how `Cargo.lock` conflict is
-handled during merge and rebase. This is normal, and you should still perform step 5 to update this PR.
-
-</details>  
-"#
-    )
-}
-
 async fn check_try_permissions<Client: RepositoryClient>(
     repo: &RepositoryState<Client>,
     pr: &PullRequest,
@@ -293,10 +248,9 @@ async fn check_try_permissions<Client: RepositoryClient>(
         repo.client
             .post_comment(
                 pr.number,
-                &format!(
-                    "@{}: :key: Insufficient privileges: not in try users",
-                    author.username
-                ),
+                Box::new(InsufficientTryPermissionComment {
+                    username: author.username.clone(),
+                }),
             )
             .await?;
         false

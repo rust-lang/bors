@@ -3,7 +3,7 @@ use std::sync::Arc;
 use tracing::Instrument;
 
 use crate::bors::command::BorsCommand;
-use crate::bors::command::CommandParseError;
+use crate::bors::comments::CommandParseErrorComment;
 use crate::bors::event::{BorsEvent, PullRequestComment};
 use crate::bors::handlers::help::command_help;
 use crate::bors::handlers::ping::command_ping;
@@ -16,6 +16,8 @@ use crate::bors::{BorsContext, BorsState, RepositoryClient, RepositoryState};
 use crate::database::DbClient;
 use crate::github::GithubRepoName;
 use crate::utils::logging::LogError;
+
+use super::comments::CommandExecuteErrorComment;
 
 mod help;
 mod labels;
@@ -52,10 +54,7 @@ pub async fn handle_bors_event<Client: RepositoryClient>(
                 {
                     span.log_error(error);
                     repo.client
-                        .post_comment(
-                            pr_number,
-                            ":x: Encountered an error while executing command",
-                        )
+                        .post_comment(pr_number, Box::new(CommandExecuteErrorComment))
                         .await
                         .context("Cannot send comment reacting to an error")?;
                 }
@@ -199,29 +198,10 @@ async fn handle_comment<Client: RepositoryClient>(
                 }
             }
             Err(error) => {
-                let error_msg = match error {
-                    CommandParseError::MissingCommand => "Missing command.".to_string(),
-                    CommandParseError::UnknownCommand(command) => {
-                        format!(r#"Unknown command "{command}"."#)
-                    }
-                    CommandParseError::MissingArgValue { arg } => {
-                        format!(r#"Unknown value for argument "{arg}"."#)
-                    }
-                    CommandParseError::UnknownArg(arg) => {
-                        format!(r#"Unknown argument "{arg}"."#)
-                    }
-                    CommandParseError::DuplicateArg(arg) => {
-                        format!(r#"Argument "{arg}" found multiple times."#)
-                    }
-                    CommandParseError::ValidationError(error) => {
-                        format!("Invalid command: {error}")
-                    }
-                };
-
-                tracing::warn!("{error_msg}");
-
+                let comment = CommandParseErrorComment::from(error);
+                tracing::warn!("{}", comment);
                 repo.client
-                    .post_comment(pull_request.number, &error_msg)
+                    .post_comment(pull_request.number, Box::new(comment))
                     .await
                     .context("Could not reply to PR comment")?;
             }

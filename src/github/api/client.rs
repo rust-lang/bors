@@ -5,7 +5,7 @@ use octocrab::models::{Repository, RunId};
 use octocrab::{Error, Octocrab};
 use tracing::log;
 
-use crate::bors::{CheckSuite, CheckSuiteStatus, RepositoryClient};
+use crate::bors::{CheckSuite, CheckSuiteStatus, Comment, RepositoryClient};
 use crate::config::{RepositoryConfig, CONFIG_FILE_PATH};
 use crate::github::api::operations::{merge_branches, set_branch_to_commit, MergeError};
 use crate::github::api::{base_github_html_url, base_github_url};
@@ -108,10 +108,14 @@ impl RepositoryClient for GithubRepositoryClient {
     }
 
     /// The comment will be posted as the Github App user of the bot.
-    async fn post_comment(&self, pr: PullRequestNumber, text: &str) -> anyhow::Result<()> {
+    async fn post_comment(
+        &self,
+        pr: PullRequestNumber,
+        comment: Box<dyn Comment>,
+    ) -> anyhow::Result<()> {
         self.client
             .issues(&self.name().owner, &self.name().name)
-            .create_comment(pr.0, text)
+            .create_comment(pr.0, comment.render().as_str())
             .await
             .with_context(|| format!("Cannot post comment to {}", self.format_pr(pr)))?;
         Ok(())

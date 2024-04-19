@@ -3,6 +3,7 @@ use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 
+use crate::bors::comments::TestTimedOutComment;
 use crate::bors::handlers::trybuild::cancel_build_workflows;
 use crate::bors::{RepositoryClient, RepositoryState};
 use crate::database::{BuildStatus, DbClient};
@@ -49,7 +50,7 @@ async fn cancel_timed_out_builds<Client: RepositoryClient>(
 
                 if let Err(error) = repo
                     .client
-                    .post_comment(pr.number, ":boom: Test timed out")
+                    .post_comment(pr.number, Box::new(TestTimedOutComment))
                     .await
                 {
                     tracing::error!("Could not send comment to PR {}: {error:?}", pr.number);
