@@ -122,9 +122,13 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
 
 fn main() {
     tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::INFO)
         .with_target(false)
-        .with_env_filter(EnvFilter::from_default_env())
+        .with_env_filter(
+            EnvFilter::builder()
+                .with_default_directive(tracing::Level::INFO.into())
+                .from_env()
+                .expect("Cannot load RUST_LOG"),
+        )
         .with_ansi(std::io::stdout().is_terminal())
         .init();
 
