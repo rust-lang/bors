@@ -4,19 +4,15 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context;
-use axum::routing::post;
-use axum::Router;
-use bors::bors::{BorsContext, CommandParser};
+use bors::{
+    create_app, create_bors_process, BorsContext, BorsEvent, CommandParser, GithubAppState,
+    SeaORMClient, ServerState, WebhookSecret,
+};
 use clap::Parser;
 use sea_orm::Database;
 use tokio::task::LocalSet;
-use tower::limit::ConcurrencyLimitLayer;
 use tracing_subscriber::EnvFilter;
 
-use bors::bors::event::BorsEvent;
-use bors::database::SeaORMClient;
-use bors::github::server::{create_bors_process, github_webhook_handler, ServerState};
-use bors::github::{GithubAppState, WebhookSecret};
 use migration::{Migrator, MigratorTrait};
 
 /// How often should the bot check DB state, e.g. for handling timeouts.
@@ -46,18 +42,14 @@ struct Opts {
 }
 
 async fn server(state: ServerState) -> anyhow::Result<()> {
-    let state = Arc::new(state);
+    let app = create_app(state);
 
-    let app = Router::new()
-        .route("/github", post(github_webhook_handler))
-        .layer(ConcurrencyLimitLayer::new(100))
-        .with_state(state);
     let addr = SocketAddr::from(([0, 0, 0, 0], 8080));
     let listener = tokio::net::TcpListener::bind(addr)
         .await
         .context("Cannot create TCP/IP server socket")?;
 
-    axum::serve(listener, app.into_make_service()).await?;
+    axum::serve(listener, app).await?;
     Ok(())
 }
 

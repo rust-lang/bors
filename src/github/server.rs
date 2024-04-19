@@ -7,9 +7,12 @@ use crate::utils::logging::LogError;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
+use axum::routing::post;
+use axum::Router;
 use std::future::Future;
 use std::sync::Arc;
 use tokio::sync::mpsc;
+use tower::limit::ConcurrencyLimitLayer;
 use tracing::Instrument;
 
 /// Shared server state for all axum handlers.
@@ -32,6 +35,13 @@ impl ServerState {
 }
 
 pub type ServerStateRef = Arc<ServerState>;
+
+pub fn create_app(state: ServerState) -> Router {
+    Router::new()
+        .route("/github", post(github_webhook_handler))
+        .layer(ConcurrencyLimitLayer::new(100))
+        .with_state(Arc::new(state))
+}
 
 /// Axum handler that receives a webhook and sends it to a webhook channel.
 pub async fn github_webhook_handler(
