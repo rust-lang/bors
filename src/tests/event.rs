@@ -7,7 +7,7 @@ use crate::database::{WorkflowStatus, WorkflowType};
 use crate::github::{CommitSha, GithubRepoName, GithubUser, PullRequestNumber};
 use crate::tests::state::{default_merge_sha, default_repo_name};
 
-fn default_user() -> GithubUser {
+pub fn default_user() -> GithubUser {
     GithubUser {
         id: UserId(1),
         username: "<user>".to_string(),

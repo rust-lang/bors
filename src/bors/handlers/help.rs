@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::bors::RepositoryClient;
 use crate::bors::RepositoryState;
 use crate::github::PullRequest;
@@ -10,7 +12,7 @@ const HELP_MESSAGE: &str = r#"
 "#;
 
 pub(super) async fn command_help<Client: RepositoryClient>(
-    repo: &mut RepositoryState<Client>,
+    repo: Arc<RepositoryState<Client>>,
     pr: &PullRequest,
 ) -> anyhow::Result<()> {
     repo.client.post_comment(pr.number, HELP_MESSAGE).await?;
@@ -25,7 +27,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_help() {
-        let mut state = ClientBuilder::default().create_state().await;
+        let state = ClientBuilder::default().create_state().await;
         state.comment("@bors help").await;
         state
             .client()

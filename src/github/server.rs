@@ -1,5 +1,5 @@
 use crate::bors::event::BorsEvent;
-use crate::bors::{handle_bors_event, BorsContext};
+use crate::bors::{handle_bors_event, BorsContext, BorsState};
 use crate::github::api::GithubAppState;
 use crate::github::webhook::GitHubWebhook;
 use crate::github::webhook::WebhookSecret;
@@ -52,22 +52,28 @@ type WebhookSender = mpsc::Sender<BorsEvent>;
 /// Creates a future with a Bors process that continuously receives webhook events and reacts to
 /// them.
 pub fn create_bors_process(
-    mut state: GithubAppState,
+    state: GithubAppState,
     ctx: BorsContext,
 ) -> (WebhookSender, impl Future<Output = ()>) {
     let (tx, mut rx) = mpsc::channel::<BorsEvent>(1024);
 
     let service = async move {
+        let state: Arc<dyn BorsState<_>> = Arc::new(state);
+        let ctx = Arc::new(ctx);
         while let Some(event) = rx.recv().await {
             tracing::trace!("Received event: {event:#?}");
+            let state = state.clone();
+            let ctx = ctx.clone();
 
-            let span = tracing::info_span!("Event");
-            if let Err(error) = handle_bors_event(event, &mut state, &ctx)
-                .instrument(span.clone())
-                .await
-            {
-                span.log_error(error);
-            }
+            tokio::spawn(async move {
+                let span = tracing::info_span!("Event");
+                if let Err(error) = handle_bors_event(event, state, ctx)
+                    .instrument(span.clone())
+                    .await
+                {
+                    span.log_error(error);
+                }
+            });
         }
     };
     (tx, service)

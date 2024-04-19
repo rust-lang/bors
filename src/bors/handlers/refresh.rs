@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
@@ -5,27 +6,34 @@ use chrono::{DateTime, Utc};
 use crate::bors::handlers::trybuild::cancel_build_workflows;
 use crate::bors::{RepositoryClient, RepositoryState};
 use crate::database::{BuildStatus, DbClient};
+use crate::permissions::load_permissions;
 
 pub async fn refresh_repository<Client: RepositoryClient>(
-    repo: &mut RepositoryState<Client>,
-    db: &dyn DbClient,
+    repo: Arc<RepositoryState<Client>>,
+    db: Arc<dyn DbClient>,
 ) -> anyhow::Result<()> {
-    let res = cancel_timed_out_builds(repo, db).await;
-    reload_permission(repo).await;
-    reload_config(repo).await?;
-
-    res
+    let repo = repo.as_ref();
+    if let (Ok(_), _, Ok(_)) = tokio::join!(
+        cancel_timed_out_builds(repo, db.as_ref()),
+        reload_permission(repo),
+        reload_config(repo)
+    ) {
+        Ok(())
+    } else {
+        tracing::error!("Failed to refresh repository");
+        anyhow::bail!("Failed to refresh repository")
+    }
 }
 
 async fn cancel_timed_out_builds<Client: RepositoryClient>(
-    repo: &mut RepositoryState<Client>,
+    repo: &RepositoryState<Client>,
     db: &dyn DbClient,
 ) -> anyhow::Result<()> {
     let running_builds = db.get_running_builds(&repo.repository).await?;
     tracing::info!("Found {} running build(s)", running_builds.len());
 
+    let timeout = repo.config.load().timeout.clone();
     for build in running_builds {
-        let timeout = repo.config.timeout;
         if elapsed_time(build.created_at) >= timeout {
             tracing::info!("Cancelling build {}", build.commit_sha);
 
@@ -54,15 +62,19 @@ async fn cancel_timed_out_builds<Client: RepositoryClient>(
     Ok(())
 }
 
-async fn reload_permission<Client: RepositoryClient>(repo: &mut RepositoryState<Client>) {
-    repo.permissions_resolver.reload().await
+async fn reload_permission<Client: RepositoryClient>(
+    repo: &RepositoryState<Client>,
+) -> anyhow::Result<()> {
+    let permissions = load_permissions(&repo.repository).await?;
+    repo.permissions.store(Arc::new(permissions));
+    Ok(())
 }
 
 async fn reload_config<Client: RepositoryClient>(
-    repo: &mut RepositoryState<Client>,
+    repo: &RepositoryState<Client>,
 ) -> anyhow::Result<()> {
     let config = repo.client.load_config().await?;
-    repo.config = config;
+    repo.config.store(Arc::new(config));
     Ok(())
 }
 
@@ -89,7 +101,6 @@ fn elapsed_time(date: DateTime<Utc>) -> Duration {
 #[cfg(test)]
 mod tests {
     use std::future::Future;
-    use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
     use chrono::Utc;
@@ -99,24 +110,12 @@ mod tests {
     use crate::bors::handlers::trybuild::TRY_BRANCH_NAME;
     use crate::database::DbClient;
     use crate::tests::event::{default_pr_number, WorkflowStartedBuilder};
-    use crate::tests::permissions::MockPermissions;
     use crate::tests::state::{default_repo_name, ClientBuilder, RepoConfigBuilder};
 
     #[tokio::test(flavor = "current_thread")]
     async fn refresh_no_builds() {
         let mut state = ClientBuilder::default().create_state().await;
         state.refresh().await;
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn refresh_permission() {
-        let permission_resolver = Arc::new(Mutex::new(MockPermissions::default()));
-        let mut state = ClientBuilder::default()
-            .permission_resolver(Box::new(Arc::clone(&permission_resolver)))
-            .create_state()
-            .await;
-        state.refresh().await;
-        assert_eq!(permission_resolver.lock().unwrap().num_reload_called, 1);
     }
 
     #[tokio::test(flavor = "current_thread")]

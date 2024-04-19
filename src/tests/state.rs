@@ -1,28 +1,28 @@
 use std::collections::{HashMap, HashSet};
-use std::future::Future;
-use std::pin::Pin;
 use std::string::ToString;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use crate::config::RepositoryConfig;
+use arc_swap::ArcSwap;
 use axum::async_trait;
 use derive_builder::Builder;
 use octocrab::models::{RunId, UserId};
 use url::Url;
 
 use super::database::MockedDBClient;
-use super::permissions::AllPermissions;
+use super::event::default_user;
 use crate::bors::event::{
     BorsEvent, CheckSuiteCompleted, PullRequestComment, WorkflowCompleted, WorkflowStarted,
 };
 use crate::bors::{handle_bors_event, BorsContext, CheckSuite, CommandParser, RepositoryState};
 use crate::bors::{BorsState, RepositoryClient};
+use crate::config::RepositoryConfig;
 use crate::database::{DbClient, WorkflowStatus};
 use crate::github::{
     CommitSha, GithubRepoName, GithubUser, LabelModification, LabelTrigger, PullRequest,
 };
 use crate::github::{MergeError, PullRequestNumber};
-use crate::permissions::PermissionResolver;
+use crate::permissions::UserPermissions;
 use crate::tests::database::create_test_db;
 use crate::tests::event::{
     CheckSuiteCompletedBuilder, WorkflowCompletedBuilder, WorkflowStartedBuilder,
@@ -46,42 +46,49 @@ pub fn default_merge_sha() -> String {
     "sha-merged".to_string()
 }
 
+type TestRepositoryState = RepositoryState<Arc<TestRepositoryClient>>;
+
+#[derive(Clone)]
 pub struct TestBorsState {
-    repos: HashMap<GithubRepoName, RepositoryState<TestRepositoryClient>>,
-    pub db: MockedDBClient,
+    default_client: Arc<TestRepositoryClient>,
+    repos: Arc<HashMap<GithubRepoName, Arc<TestRepositoryState>>>,
+    pub db: Arc<MockedDBClient>,
 }
 
 impl TestBorsState {
     /// Returns the default test client
-    pub fn client(&mut self) -> &mut TestRepositoryClient {
-        &mut self.repos.get_mut(&default_repo_name()).unwrap().client
+    pub fn client(&self) -> &TestRepositoryClient {
+        &self.default_client
     }
 
     /// Execute an event.
-    pub async fn event(&mut self, event: BorsEvent) {
+    pub async fn event(&self, event: BorsEvent) {
         handle_bors_event(
             event,
-            self,
-            &BorsContext::new(CommandParser::new("@bors".to_string())),
+            Arc::new(self.clone()),
+            Arc::new(BorsContext::new(
+                CommandParser::new("@bors".to_string()),
+                Arc::clone(&self.db) as Arc<dyn DbClient>,
+            )),
         )
         .await
         .unwrap();
     }
 
-    pub async fn comment<T: Into<PullRequestComment>>(&mut self, comment: T) {
+    pub async fn comment<T: Into<PullRequestComment>>(&self, comment: T) {
         self.event(BorsEvent::Comment(comment.into())).await;
     }
 
-    pub async fn workflow_started<T: Into<WorkflowStarted>>(&mut self, payload: T) {
+    pub async fn workflow_started<T: Into<WorkflowStarted>>(&self, payload: T) {
         self.event(BorsEvent::WorkflowStarted(payload.into())).await;
     }
 
-    pub async fn workflow_completed<T: Into<WorkflowCompleted>>(&mut self, payload: T) {
+    pub async fn workflow_completed<T: Into<WorkflowCompleted>>(&self, payload: T) {
         self.event(BorsEvent::WorkflowCompleted(payload.into()))
             .await;
     }
 
-    pub async fn check_suite_completed<T: Into<CheckSuiteCompleted>>(&mut self, payload: T) {
+    pub async fn check_suite_completed<T: Into<CheckSuiteCompleted>>(&self, payload: T) {
         self.event(BorsEvent::CheckSuiteCompleted(payload.into()))
             .await;
     }
@@ -91,7 +98,7 @@ impl TestBorsState {
     }
 
     pub async fn perform_workflow_events(
-        &mut self,
+        &self,
         run_id: u64,
         branch: &str,
         commit: &str,
@@ -124,37 +131,22 @@ impl TestBorsState {
     }
 }
 
-impl BorsState<TestRepositoryClient> for TestBorsState {
+#[async_trait]
+impl BorsState<Arc<TestRepositoryClient>> for TestBorsState {
     fn is_comment_internal(&self, comment: &PullRequestComment) -> bool {
         comment.author == test_bot_user()
     }
 
-    fn get_repo_state_mut(
-        &mut self,
-        repo: &GithubRepoName,
-    ) -> Option<(
-        &mut RepositoryState<TestRepositoryClient>,
-        &mut dyn DbClient,
-    )> {
-        self.repos
-            .get_mut(repo)
-            .map(|repo| (repo, (&mut self.db) as &mut dyn DbClient))
+    fn get_repo_state(&self, repo: &GithubRepoName) -> Option<Arc<TestRepositoryState>> {
+        self.repos.get(repo).map(|repo| Arc::clone(repo))
     }
 
-    fn get_all_repos_mut(
-        &mut self,
-    ) -> (
-        Vec<&mut RepositoryState<TestRepositoryClient>>,
-        &mut dyn DbClient,
-    ) {
-        (
-            self.repos.values_mut().collect(),
-            (&mut self.db) as &mut dyn DbClient,
-        )
+    fn get_all_repos(&self) -> Vec<Arc<TestRepositoryState>> {
+        self.repos.values().cloned().collect()
     }
 
-    fn reload_repositories(&mut self) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + '_>> {
-        Box::pin(async move { Ok(()) })
+    async fn reload_repositories(&self) -> anyhow::Result<()> {
+        Ok(())
     }
 }
 
@@ -192,11 +184,36 @@ impl RepoConfigBuilder {
 
 #[derive(Builder)]
 #[builder(pattern = "owned")]
+pub struct Permissions {
+    #[builder(field(ty = "HashSet<UserId>"))]
+    review_users: HashSet<UserId>,
+    #[builder(field(ty = "HashSet<UserId>"))]
+    try_users: HashSet<UserId>,
+}
+
+impl PermissionsBuilder {
+    pub fn create(self) -> UserPermissions {
+        let Permissions {
+            review_users,
+            try_users,
+        } = self.build().unwrap();
+        UserPermissions::new(review_users, try_users)
+    }
+
+    pub fn add_default_users(mut self) -> Self {
+        self.review_users.insert(default_user().id);
+        self.try_users.insert(default_user().id);
+        self
+    }
+}
+
+#[derive(Builder)]
+#[builder(pattern = "owned")]
 pub struct Client {
     #[builder(default = "default_repo_name()")]
     name: GithubRepoName,
-    #[builder(default = "Box::new(AllPermissions)")]
-    permission_resolver: Box<dyn PermissionResolver>,
+    #[builder(default = "PermissionsBuilder::default().add_default_users()")]
+    permissions: PermissionsBuilder,
     #[builder(default)]
     config: RepoConfigBuilder,
     #[builder(default)]
@@ -207,7 +224,7 @@ impl ClientBuilder {
     pub async fn create_state(self) -> TestBorsState {
         let Client {
             name,
-            permission_resolver,
+            permissions,
             config,
             db,
         } = self.build().unwrap();
@@ -217,65 +234,101 @@ impl ClientBuilder {
         branch_history.insert(default_base_branch.name, vec![default_base_branch.sha]);
         let db = db.unwrap_or(create_test_db().await);
 
+        let client = Arc::new(TestRepositoryClient {
+            comments: Default::default(),
+            name: name.clone(),
+            merge_branches_fn: Mutex::new(Box::new(|| Ok(CommitSha(default_merge_sha())))),
+            get_pr_fn: Mutex::new(Box::new(|pr| {
+                Ok(PRBuilder::default().number(pr.0).create())
+            })),
+            check_suites: Default::default(),
+            cancelled_workflows: Default::default(),
+            added_labels: Default::default(),
+            removed_labels: Default::default(),
+            branch_history: Mutex::new(branch_history),
+        });
+
         let repo_state = RepositoryState {
             repository: name.clone(),
-            client: TestRepositoryClient {
-                comments: Default::default(),
-                name: name.clone(),
-                merge_branches_fn: Box::new(|| Ok(CommitSha(default_merge_sha()))),
-                get_pr_fn: Box::new(move |pr| Ok(PRBuilder::default().number(pr.0).create())),
-                check_suites: Default::default(),
-                cancelled_workflows: Default::default(),
-                added_labels: Default::default(),
-                removed_labels: Default::default(),
-                branch_history,
-            },
-            permissions_resolver: permission_resolver,
-            config: config.create(),
+            client: client.clone(),
+            permissions: ArcSwap::new(Arc::new(permissions.create())),
+            config: ArcSwap::new(Arc::new(config.create())),
         };
         let mut repos = HashMap::new();
-        repos.insert(name.clone(), repo_state);
-        TestBorsState { repos, db }
+        repos.insert(name.clone(), Arc::new(repo_state));
+        TestBorsState {
+            repos: Arc::new(repos),
+            db: Arc::new(db),
+            default_client: client,
+        }
     }
 }
 
 pub struct TestRepositoryClient {
-    pub name: GithubRepoName,
-    comments: HashMap<u64, Vec<String>>,
-    pub merge_branches_fn: Box<dyn Fn() -> Result<CommitSha, MergeError> + Send>,
-    pub get_pr_fn: Box<dyn Fn(PullRequestNumber) -> anyhow::Result<PullRequest> + Send>,
-    pub check_suites: HashMap<String, Vec<CheckSuite>>,
-    pub cancelled_workflows: HashSet<u64>,
-    added_labels: HashMap<u64, Vec<String>>,
-    removed_labels: HashMap<u64, Vec<String>>,
+    name: GithubRepoName,
+    comments: Mutex<HashMap<u64, Vec<String>>>,
+    merge_branches_fn: Mutex<Box<dyn Fn() -> Result<CommitSha, MergeError> + Send + Sync>>,
+    get_pr_fn: Mutex<Box<dyn Fn(PullRequestNumber) -> anyhow::Result<PullRequest> + Send + Sync>>,
+    check_suites: Mutex<HashMap<String, Vec<CheckSuite>>>,
+    cancelled_workflows: Mutex<HashSet<u64>>,
+    added_labels: Mutex<HashMap<u64, Vec<String>>>,
+    removed_labels: Mutex<HashMap<u64, Vec<String>>>,
     // Branch name -> history of SHAs
-    branch_history: HashMap<String, Vec<CommitSha>>,
+    branch_history: Mutex<HashMap<String, Vec<CommitSha>>>,
 }
 
 impl TestRepositoryClient {
     // Getters
-    pub fn get_comment(&self, pr_number: u64, comment_index: usize) -> &str {
-        &self.comments.get(&pr_number).unwrap()[comment_index]
+    pub fn get_comment(&self, pr_number: u64, comment_index: usize) -> String {
+        self.comments.lock().unwrap().get(&pr_number).unwrap()[comment_index].clone()
     }
-    pub fn get_last_comment(&self, pr_number: u64) -> &str {
+
+    pub fn get_last_comment(&self, pr_number: u64) -> String {
         self.comments
+            .lock()
+            .unwrap()
             .get(&pr_number)
             .unwrap()
             .last()
             .unwrap()
-            .as_str()
+            .clone()
     }
 
     // Setters
-    pub fn set_checks(&mut self, commit: &str, checks: &[CheckSuite]) {
+    pub fn set_checks(&self, commit: &str, checks: &[CheckSuite]) {
         self.check_suites
+            .lock()
+            .unwrap()
             .insert(commit.to_string(), checks.to_vec());
+    }
+
+    pub fn set_get_pr_fn<
+        F: Fn(PullRequestNumber) -> anyhow::Result<PullRequest> + Send + Sync + 'static,
+    >(
+        &self,
+        f: F,
+    ) {
+        *self.get_pr_fn.lock().unwrap() = Box::new(f);
+    }
+
+    pub fn set_merge_branches_fn<
+        F: Fn() -> Result<CommitSha, MergeError> + Send + Sync + 'static,
+    >(
+        &self,
+        f: F,
+    ) {
+        *self.merge_branches_fn.lock().unwrap() = Box::new(f);
     }
 
     // Checks
     pub fn check_comments(&self, pr_number: u64, comments: &[&str]) {
         assert_eq!(
-            self.comments.get(&pr_number).cloned().unwrap_or_default(),
+            self.comments
+                .lock()
+                .unwrap()
+                .get(&pr_number)
+                .cloned()
+                .unwrap_or_default(),
             comments
                 .iter()
                 .map(|&s| String::from(s))
@@ -285,6 +338,8 @@ impl TestRepositoryClient {
     pub fn check_comment_count(&self, pr_number: u64, count: usize) {
         assert_eq!(
             self.comments
+                .lock()
+                .unwrap()
                 .get(&pr_number)
                 .cloned()
                 .unwrap_or_default()
@@ -294,22 +349,22 @@ impl TestRepositoryClient {
     }
 
     pub fn check_added_labels(&self, pr: u64, added: &[&str]) -> &Self {
-        assert_eq!(self.added_labels[&pr], added);
+        assert_eq!(self.added_labels.lock().unwrap()[&pr], added);
         self
     }
     pub fn check_removed_labels(&self, pr: u64, removed: &[&str]) -> &Self {
-        assert_eq!(self.removed_labels[&pr], removed);
+        assert_eq!(self.removed_labels.lock().unwrap()[&pr], removed);
         self
     }
 
     pub fn check_cancelled_workflows(&self, cancelled: &[u64]) {
         let set = cancelled.iter().copied().collect::<HashSet<_>>();
-        assert_eq!(self.cancelled_workflows, set);
+        assert_eq!(*self.cancelled_workflows.lock().unwrap(), set);
     }
 
     pub fn check_branch_history(&self, branch: &str, sha: &[&str]) {
-        let history = self
-            .branch_history
+        let branch_history = self.branch_history.lock().unwrap();
+        let history = branch_history
             .get(branch)
             .unwrap_or_else(|| panic!("Branch {branch} not found"));
         assert_eq!(
@@ -320,8 +375,10 @@ impl TestRepositoryClient {
         );
     }
 
-    pub fn add_branch_sha(&mut self, branch: &str, sha: &str) {
+    pub fn add_branch_sha(&self, branch: &str, sha: &str) {
         self.branch_history
+            .lock()
+            .unwrap()
             .entry(branch.to_string())
             .or_default()
             .push(CommitSha(sha.to_string()));
@@ -329,43 +386,47 @@ impl TestRepositoryClient {
 }
 
 #[async_trait]
-impl RepositoryClient for TestRepositoryClient {
+impl RepositoryClient for Arc<TestRepositoryClient> {
     fn repository(&self) -> &GithubRepoName {
         &self.name
     }
 
-    async fn get_branch_sha(&mut self, name: &str) -> anyhow::Result<CommitSha> {
+    async fn get_branch_sha(&self, name: &str) -> anyhow::Result<CommitSha> {
         let sha = self
             .branch_history
+            .lock()
+            .unwrap()
             .get(name)
             .and_then(|history| history.last().cloned());
         sha.ok_or(anyhow::anyhow!("Branch {name} not found"))
     }
 
-    async fn get_pull_request(&mut self, pr: PullRequestNumber) -> anyhow::Result<PullRequest> {
-        (self.get_pr_fn)(pr)
+    async fn get_pull_request(&self, pr: PullRequestNumber) -> anyhow::Result<PullRequest> {
+        (self.get_pr_fn.lock().unwrap())(pr)
     }
 
-    async fn post_comment(&mut self, pr: PullRequestNumber, text: &str) -> anyhow::Result<()> {
+    async fn post_comment(&self, pr: PullRequestNumber, text: &str) -> anyhow::Result<()> {
         self.comments
+            .lock()
+            .unwrap()
             .entry(pr.0)
             .or_default()
             .push(text.to_string());
         Ok(())
     }
 
-    async fn set_branch_to_sha(&mut self, branch: &str, sha: &CommitSha) -> anyhow::Result<()> {
+    async fn set_branch_to_sha(&self, branch: &str, sha: &CommitSha) -> anyhow::Result<()> {
         self.add_branch_sha(branch, &sha.0);
         Ok(())
     }
 
     async fn merge_branches(
-        &mut self,
+        &self,
         base: &str,
         _head: &CommitSha,
         _commit_message: &str,
     ) -> Result<CommitSha, MergeError> {
-        let res = (self.merge_branches_fn)();
+        let res = (self.merge_branches_fn.lock().unwrap())();
         if let Ok(ref sha) = res {
             self.add_branch_sha(base, &sha.0);
         }
@@ -373,40 +434,48 @@ impl RepositoryClient for TestRepositoryClient {
     }
 
     async fn get_check_suites_for_commit(
-        &mut self,
+        &self,
         _branch: &str,
         sha: &CommitSha,
     ) -> anyhow::Result<Vec<CheckSuite>> {
-        Ok(self.check_suites.get(&sha.0).cloned().unwrap_or_default())
+        Ok(self
+            .check_suites
+            .lock()
+            .unwrap()
+            .get(&sha.0)
+            .cloned()
+            .unwrap_or_default())
     }
 
-    async fn cancel_workflows(&mut self, run_ids: &[RunId]) -> anyhow::Result<()> {
+    async fn cancel_workflows(&self, run_ids: &[RunId]) -> anyhow::Result<()> {
         self.cancelled_workflows
+            .lock()
+            .unwrap()
             .extend(run_ids.into_iter().map(|id| id.0));
         Ok(())
     }
 
-    async fn add_labels(&mut self, pr: PullRequestNumber, labels: &[String]) -> anyhow::Result<()> {
+    async fn add_labels(&self, pr: PullRequestNumber, labels: &[String]) -> anyhow::Result<()> {
         self.added_labels
+            .lock()
+            .unwrap()
             .entry(pr.0)
             .or_default()
             .extend(labels.to_vec());
         Ok(())
     }
 
-    async fn remove_labels(
-        &mut self,
-        pr: PullRequestNumber,
-        labels: &[String],
-    ) -> anyhow::Result<()> {
+    async fn remove_labels(&self, pr: PullRequestNumber, labels: &[String]) -> anyhow::Result<()> {
         self.removed_labels
+            .lock()
+            .unwrap()
             .entry(pr.0)
             .or_default()
             .extend(labels.to_vec());
         Ok(())
     }
 
-    async fn load_config(&mut self) -> anyhow::Result<RepositoryConfig> {
+    async fn load_config(&self) -> anyhow::Result<RepositoryConfig> {
         Ok(RepoConfigBuilder::default().create())
     }
 

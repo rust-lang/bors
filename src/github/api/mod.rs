@@ -1,8 +1,9 @@
 use std::collections::HashMap;
-use std::future::Future;
-use std::pin::Pin;
+use std::sync::Arc;
 
 use anyhow::Context;
+use arc_swap::ArcSwap;
+use axum::async_trait;
 use octocrab::models::{App, AppId, InstallationRepositories, Repository};
 use octocrab::Octocrab;
 use secrecy::{ExposeSecret, SecretVec};
@@ -11,16 +12,15 @@ use client::GithubRepositoryClient;
 
 use crate::bors::event::PullRequestComment;
 use crate::bors::{BorsState, RepositoryClient, RepositoryState};
-use crate::database::{DbClient, SeaORMClient};
 use crate::github::GithubRepoName;
-use crate::permissions::TeamApiPermissionResolver;
+use crate::permissions::load_permissions;
 
 pub mod client;
 pub(crate) mod operations;
 
 type GHRepositoryState = RepositoryState<GithubRepositoryClient>;
 
-type RepositoryMap = HashMap<GithubRepoName, GHRepositoryState>;
+type RepositoryMap = HashMap<GithubRepoName, Arc<GHRepositoryState>>;
 
 fn base_github_html_url() -> &'static str {
     "https://github.com"
@@ -34,17 +34,12 @@ fn base_github_url() -> &'static str {
 pub struct GithubAppState {
     app: App,
     client: Octocrab,
-    repositories: RepositoryMap,
-    db: SeaORMClient,
+    repositories: ArcSwap<RepositoryMap>,
 }
 
 impl GithubAppState {
     /// Loads repositories managed by the Bors GitHub app with the given ID.
-    pub async fn load(
-        app_id: AppId,
-        private_key: SecretVec<u8>,
-        db: SeaORMClient,
-    ) -> anyhow::Result<GithubAppState> {
+    pub async fn load(app_id: AppId, private_key: SecretVec<u8>) -> anyhow::Result<GithubAppState> {
         let key = jsonwebtoken::EncodingKey::from_rsa_pem(private_key.expose_secret().as_ref())
             .context("Could not encode private key")?;
 
@@ -63,8 +58,7 @@ impl GithubAppState {
         Ok(GithubAppState {
             app,
             client,
-            repositories,
-            db,
+            repositories: ArcSwap::new(Arc::new(repositories)),
         })
     }
 }
@@ -100,8 +94,8 @@ pub async fn load_repositories(client: &Octocrab) -> anyhow::Result<RepositoryMa
                             Ok(repo_state) => {
                                 tracing::info!("Loaded repository {}", repo_state.repository);
 
-                                if let Some(existing) =
-                                    repositories.insert(repo_state.repository.clone(), repo_state)
+                                if let Some(existing) = repositories
+                                    .insert(repo_state.repository.clone(), Arc::new(repo_state))
                                 {
                                     return Err(anyhow::anyhow!(
                                         "Repository {} found in multiple installations!",
@@ -141,7 +135,7 @@ async fn create_repo_state(
     let name = GithubRepoName::new(&owner.login, &repo.name);
     tracing::info!("Found repository {name}");
 
-    let mut client = GithubRepositoryClient {
+    let client = GithubRepositoryClient {
         client: repo_client,
         repo_name: name.clone(),
         repository: repo,
@@ -159,52 +153,42 @@ async fn create_repo_state(
         }
     };
 
-    let permissions_resolver = TeamApiPermissionResolver::load(name.clone())
+    let permissions = load_permissions(&name)
         .await
         .map_err(|error| anyhow::anyhow!("Could not load permissions for {name}: {error:?}"))?;
 
     Ok(RepositoryState {
         repository: name,
         client,
-        config,
-        permissions_resolver: Box::new(permissions_resolver),
+        config: ArcSwap::new(Arc::new(config)),
+        permissions: ArcSwap::new(Arc::new(permissions)),
     })
 }
 
+#[async_trait]
 impl BorsState<GithubRepositoryClient> for GithubAppState {
     fn is_comment_internal(&self, comment: &PullRequestComment) -> bool {
         comment.author.html_url == self.app.html_url
     }
 
-    fn get_repo_state_mut(
-        &mut self,
+    fn get_repo_state(
+        &self,
         repo: &GithubRepoName,
-    ) -> Option<(
-        &mut RepositoryState<GithubRepositoryClient>,
-        &mut dyn DbClient,
-    )> {
+    ) -> Option<Arc<RepositoryState<GithubRepositoryClient>>> {
         self.repositories
-            .get_mut(repo)
-            .map(|repo| (repo, (&mut self.db) as &mut dyn DbClient))
+            .load()
+            .get(repo)
+            .map(|repo| Arc::clone(&repo))
     }
 
-    fn get_all_repos_mut(
-        &mut self,
-    ) -> (
-        Vec<&mut RepositoryState<GithubRepositoryClient>>,
-        &mut dyn DbClient,
-    ) {
-        (
-            self.repositories.values_mut().collect(),
-            (&mut self.db) as &mut dyn DbClient,
-        )
+    fn get_all_repos(&self) -> Vec<Arc<RepositoryState<GithubRepositoryClient>>> {
+        self.repositories.load().values().cloned().collect()
     }
 
     /// Re-download information about repositories connected to this GitHub app.
-    fn reload_repositories(&mut self) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + '_>> {
-        Box::pin(async move {
-            self.repositories = load_repositories(&self.client).await?;
-            Ok(())
-        })
+    async fn reload_repositories(&self) -> anyhow::Result<()> {
+        self.repositories
+            .store(Arc::new(load_repositories(&self.client).await?));
+        Ok(())
     }
 }

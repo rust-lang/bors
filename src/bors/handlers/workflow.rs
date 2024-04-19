@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::bors::event::{CheckSuiteCompleted, WorkflowCompleted, WorkflowStarted};
 use crate::bors::handlers::is_bors_observed_branch;
 use crate::bors::handlers::labels::handle_label_trigger;
@@ -6,7 +8,7 @@ use crate::database::{BuildStatus, DbClient, WorkflowStatus};
 use crate::github::LabelTrigger;
 
 pub(super) async fn handle_workflow_started(
-    db: &mut dyn DbClient,
+    db: Arc<dyn DbClient>,
     payload: WorkflowStarted,
 ) -> anyhow::Result<()> {
     if !is_bors_observed_branch(&payload.branch) {
@@ -54,8 +56,8 @@ pub(super) async fn handle_workflow_started(
 }
 
 pub(super) async fn handle_workflow_completed<Client: RepositoryClient>(
-    repo: &mut RepositoryState<Client>,
-    db: &mut dyn DbClient,
+    repo: Arc<RepositoryState<Client>>,
+    db: Arc<dyn DbClient>,
     payload: WorkflowCompleted,
 ) -> anyhow::Result<()> {
     if !is_bors_observed_branch(&payload.branch) {
@@ -72,12 +74,12 @@ pub(super) async fn handle_workflow_completed<Client: RepositoryClient>(
         branch: payload.branch,
         commit_sha: payload.commit_sha,
     };
-    try_complete_build(repo, db, event).await
+    try_complete_build(repo.as_ref(), db.as_ref(), event).await
 }
 
 pub(super) async fn handle_check_suite_completed<Client: RepositoryClient>(
-    repo: &mut RepositoryState<Client>,
-    db: &mut dyn DbClient,
+    repo: Arc<RepositoryState<Client>>,
+    db: Arc<dyn DbClient>,
     payload: CheckSuiteCompleted,
 ) -> anyhow::Result<()> {
     if !is_bors_observed_branch(&payload.branch) {
@@ -89,12 +91,12 @@ pub(super) async fn handle_check_suite_completed<Client: RepositoryClient>(
         payload.branch,
         payload.commit_sha
     );
-    try_complete_build(repo, db, payload).await
+    try_complete_build(repo.as_ref(), db.as_ref(), payload).await
 }
 
 async fn try_complete_build<Client: RepositoryClient>(
-    repo: &mut RepositoryState<Client>,
-    db: &mut dyn DbClient,
+    repo: &RepositoryState<Client>,
+    db: &dyn DbClient,
     payload: CheckSuiteCompleted,
 ) -> anyhow::Result<()> {
     if !is_bors_observed_branch(&payload.branch) {
@@ -221,7 +223,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_workflow_started_unknown_build() {
-        let mut state = ClientBuilder::default().create_state().await;
+        let state = ClientBuilder::default().create_state().await;
 
         state
             .workflow_started(
@@ -239,7 +241,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_workflow_completed_unknown_build() {
-        let mut state = ClientBuilder::default().create_state().await;
+        let state = ClientBuilder::default().create_state().await;
 
         state
             .workflow_completed(
@@ -258,7 +260,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_try_workflow_started() {
-        let mut state = ClientBuilder::default().create_state().await;
+        let state = ClientBuilder::default().create_state().await;
         state.comment("@bors try").await;
 
         state
@@ -278,7 +280,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_try_workflow_start_twice() {
-        let mut state = ClientBuilder::default().create_state().await;
+        let state = ClientBuilder::default().create_state().await;
         state.comment("@bors try").await;
 
         let event = || {
@@ -300,7 +302,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_try_check_suite_finished_missing_build() {
-        let mut state = ClientBuilder::default().create_state().await;
+        let state = ClientBuilder::default().create_state().await;
         state
             .check_suite_completed(
                 CheckSuiteCompletedBuilder::default()
@@ -312,7 +314,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_try_success() {
-        let mut state = ClientBuilder::default().create_state().await;
+        let state = ClientBuilder::default().create_state().await;
         state
             .client()
             .set_checks(&default_merge_sha(), &[suite_success()]);
@@ -339,7 +341,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_try_failure() {
-        let mut state = ClientBuilder::default().create_state().await;
+        let state = ClientBuilder::default().create_state().await;
         state
             .client()
             .set_checks(&default_merge_sha(), &[suite_failure()]);
@@ -365,7 +367,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_try_success_multiple_suites() {
-        let mut state = ClientBuilder::default().create_state().await;
+        let state = ClientBuilder::default().create_state().await;
         state
             .client()
             .set_checks(&default_merge_sha(), &[suite_success(), suite_pending()]);
@@ -402,7 +404,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_try_failure_multiple_suites() {
-        let mut state = ClientBuilder::default().create_state().await;
+        let state = ClientBuilder::default().create_state().await;
         state
             .client()
             .set_checks(&default_merge_sha(), &[suite_success(), suite_pending()]);
@@ -438,7 +440,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_try_suite_completed_received_before_workflow_completed() {
-        let mut state = ClientBuilder::default().create_state().await;
+        let state = ClientBuilder::default().create_state().await;
         state
             .client()
             .set_checks(&default_merge_sha(), &[suite_success()]);
@@ -474,7 +476,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_try_check_suite_finished_twice() {
-        let mut state = ClientBuilder::default().create_state().await;
+        let state = ClientBuilder::default().create_state().await;
         state
             .client()
             .set_checks(&default_merge_sha(), &[suite_success(), suite_success()]);

@@ -1,9 +1,11 @@
+use std::sync::Arc;
+
 use crate::bors::RepositoryClient;
 use crate::bors::RepositoryState;
 use crate::github::PullRequest;
 
 pub(super) async fn command_ping<Client: RepositoryClient>(
-    repo: &mut RepositoryState<Client>,
+    repo: Arc<RepositoryState<Client>>,
     pr: &PullRequest,
 ) -> anyhow::Result<()> {
     repo.client.post_comment(pr.number, "Pong 🏓!").await?;
@@ -17,7 +19,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_ping() {
-        let mut state = ClientBuilder::default().create_state().await;
+        let state = ClientBuilder::default().create_state().await;
         state.comment("@bors ping").await;
         state
             .client()

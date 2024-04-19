@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use anyhow::{anyhow, Context};
 use octocrab::models::RunId;
 
@@ -28,12 +30,13 @@ pub(super) const TRY_BRANCH_NAME: &str = "automation/bors/try";
 /// If `parent` is set, it will use it as a base commit for the merge.
 /// Otherwise, it will use the latest commit on the main repository branch.
 pub(super) async fn command_try_build<Client: RepositoryClient>(
-    repo: &mut RepositoryState<Client>,
-    db: &mut dyn DbClient,
+    repo: Arc<RepositoryState<Client>>,
+    db: Arc<dyn DbClient>,
     pr: &PullRequest,
     author: &GithubUser,
     parent: Option<Parent>,
 ) -> anyhow::Result<()> {
+    let repo = repo.as_ref();
     if !check_try_permissions(repo, pr, author).await? {
         return Ok(());
     }
@@ -143,11 +146,12 @@ pub(super) async fn command_try_build<Client: RepositoryClient>(
 }
 
 pub(super) async fn command_try_cancel<Client: RepositoryClient>(
-    repo: &mut RepositoryState<Client>,
-    db: &mut dyn DbClient,
+    repo: Arc<RepositoryState<Client>>,
+    db: Arc<dyn DbClient>,
     pr: &PullRequest,
     author: &GithubUser,
 ) -> anyhow::Result<()> {
+    let repo = repo.as_ref();
     if !check_try_permissions(repo, pr, author).await? {
         return Ok(());
     }
@@ -168,7 +172,7 @@ pub(super) async fn command_try_cancel<Client: RepositoryClient>(
         return Ok(());
     };
 
-    match cancel_build_workflows(repo, db, &build).await {
+    match cancel_build_workflows(repo, db.as_ref(), &build).await {
         Err(error) => {
             tracing::error!(
                 "Could not cancel workflows for SHA {}: {error:?}",
@@ -206,7 +210,7 @@ Cancelled workflows:"#
 }
 
 pub async fn cancel_build_workflows<Client: RepositoryClient>(
-    repo: &mut RepositoryState<Client>,
+    repo: &RepositoryState<Client>,
     db: &dyn DbClient,
     build: &BuildModel,
 ) -> anyhow::Result<Vec<RunId>> {
@@ -276,14 +280,14 @@ handled during merge and rebase. This is normal, and you should still perform st
 }
 
 async fn check_try_permissions<Client: RepositoryClient>(
-    repo: &mut RepositoryState<Client>,
+    repo: &RepositoryState<Client>,
     pr: &PullRequest,
     author: &GithubUser,
 ) -> anyhow::Result<bool> {
     let result = if !repo
-        .permissions_resolver
+        .permissions
+        .load()
         .has_permission(&author.id, PermissionType::Try)
-        .await
     {
         tracing::info!("Permission denied");
         repo.client
@@ -316,15 +320,14 @@ mod tests {
         default_pr_number, suite_failure, suite_pending, suite_success, WorkflowStartedBuilder,
     };
     use crate::tests::github::{BranchBuilder, PRBuilder};
-    use crate::tests::permissions::NoPermissions;
     use crate::tests::state::{
-        default_merge_sha, default_repo_name, ClientBuilder, RepoConfigBuilder,
+        default_merge_sha, default_repo_name, ClientBuilder, PermissionsBuilder, RepoConfigBuilder,
     };
 
     #[tokio::test]
     async fn test_try_no_permission() {
-        let mut state = ClientBuilder::default()
-            .permission_resolver(Box::new(NoPermissions))
+        let state = ClientBuilder::default()
+            .permissions(PermissionsBuilder::default())
             .create_state()
             .await;
         state.comment("@bors try").await;
@@ -336,8 +339,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_try_merge_comment() {
-        let mut state = ClientBuilder::default().create_state().await;
-        state.client().get_pr_fn = Box::new(|pr| {
+        let state = ClientBuilder::default().create_state().await;
+        state.client().set_get_pr_fn(|pr| {
             Ok(PRBuilder::default()
                 .number(pr.0)
                 .head(BranchBuilder::default().sha("head1".to_string()).create())
@@ -354,8 +357,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_try_merge_unknown_base_branch() {
-        let mut state = ClientBuilder::default().create_state().await;
-        state.client().get_pr_fn = Box::new(|pr| {
+        let state = ClientBuilder::default().create_state().await;
+        state.client().set_get_pr_fn(|pr| {
             Ok(PRBuilder::default()
                 .number(pr.0)
                 .base(
@@ -377,11 +380,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_try_merge_branch_history() {
-        let mut state = ClientBuilder::default().create_state().await;
+        let state = ClientBuilder::default().create_state().await;
         let main_sha = "main1-sha";
         let main_name = "main1";
 
-        state.client().get_pr_fn = Box::new(|pr| {
+        state.client().set_get_pr_fn(|pr| {
             Ok(PRBuilder::default()
                 .number(pr.0)
                 .base(
@@ -393,6 +396,7 @@ mod tests {
                 .head(BranchBuilder::default().sha("head1".to_string()).create())
                 .create())
         });
+
         state.client().add_branch_sha(main_name, main_sha);
 
         state.comment("@bors try").await;
@@ -406,7 +410,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_try_merge_explicit_parent() {
-        let mut state = ClientBuilder::default().create_state().await;
+        let state = ClientBuilder::default().create_state().await;
         state
             .comment("@bors try parent=ea9c1b050cc8b420c2c211d2177811e564a4dc60")
             .await;
@@ -421,7 +425,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_try_merge_last_parent() {
-        let mut state = ClientBuilder::default().create_state().await;
+        let state = ClientBuilder::default().create_state().await;
 
         state
             .comment("@bors try parent=ea9c1b050cc8b420c2c211d2177811e564a4dc60")
@@ -456,7 +460,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_try_merge_last_parent_unknown() {
-        let mut state = ClientBuilder::default().create_state().await;
+        let state = ClientBuilder::default().create_state().await;
 
         state.comment("@bors try parent=last").await;
         state.client().check_comments(
@@ -467,8 +471,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_try_merge_conflict() {
-        let mut state = ClientBuilder::default().create_state().await;
-        state.client().merge_branches_fn = Box::new(|| Err(MergeError::Conflict));
+        let state = ClientBuilder::default().create_state().await;
+        state
+            .client()
+            .set_merge_branches_fn(Box::new(|| Err(MergeError::Conflict)));
         state.comment("@bors try").await;
 
         insta::assert_snapshot!(state.client().get_comment(default_pr_number(), 0), @r###"
@@ -505,7 +511,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_try_merge_insert_into_db() {
-        let mut state = ClientBuilder::default().create_state().await;
+        let state = ClientBuilder::default().create_state().await;
         state.comment("@bors try").await;
 
         assert!(state
@@ -522,7 +528,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_try_merge_active_build() {
-        let mut state = ClientBuilder::default().create_state().await;
+        let state = ClientBuilder::default().create_state().await;
 
         state.comment("@bors try").await;
         state.comment("@bors try").await;
@@ -532,7 +538,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_try_again_after_checks_finish() {
-        let mut state = ClientBuilder::default().create_state().await;
+        let state = ClientBuilder::default().create_state().await;
         state
             .client()
             .set_checks(&default_merge_sha(), &[suite_success()]);
@@ -547,8 +553,10 @@ mod tests {
             )
             .await;
         state.client().check_comment_count(default_pr_number(), 2);
+        state
+            .client()
+            .set_merge_branches_fn(|| Ok(CommitSha("merge2".to_string())));
 
-        state.client().merge_branches_fn = Box::new(|| Ok(CommitSha("merge2".to_string())));
         state.comment("@bors try").await;
         insta::assert_snapshot!(state.client().get_last_comment(default_pr_number()), @":hourglass: Trying commit pr-sha with merge merge2…");
 
@@ -565,7 +573,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_try_cancel_no_running_build() {
-        let mut state = ClientBuilder::default().create_state().await;
+        let state = ClientBuilder::default().create_state().await;
 
         state.comment("@bors try cancel").await;
 
@@ -574,7 +582,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_try_cancel_cancel_workflows() {
-        let mut state = ClientBuilder::default().create_state().await;
+        let state = ClientBuilder::default().create_state().await;
 
         state.comment("@bors try").await;
         state
@@ -606,7 +614,7 @@ mod tests {
     async fn test_try_cancel_error() {
         let mut db = create_test_db().await;
         db.get_workflows_for_build = Some(Box::new(|| Err(anyhow::anyhow!("Errr"))));
-        let mut state = ClientBuilder::default().db(Some(db)).create_state().await;
+        let state = ClientBuilder::default().db(Some(db)).create_state().await;
 
         state.comment("@bors try").await;
         state.comment("@bors try cancel").await;
@@ -624,7 +632,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_try_cancel_ignore_finished_workflows() {
-        let mut state = ClientBuilder::default().create_state().await;
+        let state = ClientBuilder::default().create_state().await;
         state.client().set_checks(
             &default_merge_sha(),
             &[suite_success(), suite_failure(), suite_pending()],
@@ -660,7 +668,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_try_cancel_ignore_external_workflows() {
-        let mut state = ClientBuilder::default().create_state().await;
+        let state = ClientBuilder::default().create_state().await;
         state
             .client()
             .set_checks(&default_merge_sha(), &[suite_success()]);
@@ -680,7 +688,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_try_workflow_start_after_cancel() {
-        let mut state = ClientBuilder::default().create_state().await;
+        let state = ClientBuilder::default().create_state().await;
         state
             .client()
             .set_checks(&default_merge_sha(), &[suite_success()]);
@@ -706,7 +714,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_try_build_start_modify_labels() {
-        let mut state = ClientBuilder::default()
+        let state = ClientBuilder::default()
             .config(
                 RepoConfigBuilder::default()
                     .add_label(LabelTrigger::TryBuildStarted, "foo")
@@ -725,7 +733,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_try_build_succeeded_modify_labels() {
-        let mut state = ClientBuilder::default()
+        let state = ClientBuilder::default()
             .config(
                 RepoConfigBuilder::default()
                     .add_label(LabelTrigger::TryBuildSucceeded, "foo")
@@ -755,7 +763,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_try_build_failed_modify_labels() {
-        let mut state = ClientBuilder::default()
+        let state = ClientBuilder::default()
             .config(
                 RepoConfigBuilder::default()
                     .add_label(LabelTrigger::TryBuildFailed, "foo")

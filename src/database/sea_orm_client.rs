@@ -18,7 +18,7 @@ use crate::github::{CommitSha, GithubRepoName};
 
 /// Provides access to a database using SeaORM mapping.
 pub struct SeaORMClient {
-    db: DatabaseConnection,
+    pub db: DatabaseConnection,
 }
 
 impl SeaORMClient {
@@ -26,8 +26,8 @@ impl SeaORMClient {
         Self { db: connection }
     }
 
-    pub fn connection(&mut self) -> &mut DatabaseConnection {
-        &mut self.db
+    pub fn connection(&self) -> &DatabaseConnection {
+        &self.db
     }
 }
 
@@ -310,7 +310,7 @@ fn pr_from_db(pr: pull_request::Model, build: Option<build::Model>) -> PullReque
 }
 
 fn datetime_from_db(datetime: NaiveDateTime) -> DateTime<Utc> {
-    DateTime::from_utc(datetime, Utc)
+    DateTime::from_naive_utc_and_offset(datetime, Utc)
 }
 
 fn full_repo_name(repo: &GithubRepoName) -> String {
