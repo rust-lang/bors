@@ -1,0 +1,15 @@
+# Maximum duration of CI workflows before they are considered timed out.
+# (Required)
+timeout = 3600
+
+# Labels that should be set on a PR after an event happens.
+# "+<label>" adds the label, while "-<label>" removes the label after the event.
+# Supported events:
+# - try: Try build has started
+# - try_succeed: Try build has finished
+# - try_failed: Try build has failed
+# (Optional)
+[labels]
+try = ["+foo", "-bar"]
+try_succeed = ["+foobar", "+foo", "+baz"]
+try_failed = []
