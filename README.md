@@ -1,8 +1,10 @@
 # Bors
 Home of a (WIP) rewrite of the [`homu`](https://github.com/rust-lang/homu) bors implementation in Rust.
 
-Commands supported by the bot can be found [here](docs/commands.md).
-Design of the bot is described [here](docs/design.md).
+There are a few documents that should help with understanding the bot:
+- [Commands](docs/commands.md) supported by the bot.
+- [Design](docs/design.md) of the bot.
+- [Development guide](docs/development.md).
 
 If you want to help testing the bot, please ask around on the [`#t-infra`](https://rust-lang.zulipchat.com/#narrow/stream/242791-t-infra)
 stream on Rust Zulip.
@@ -41,47 +43,3 @@ describes the file can be found in `src/config.rs`. [Here](rust-bors.example.tom
 `https://github.com/settings/apps/<app-name>/installations` link (to be automated via `team` repo).
 3) Configure a CI workflow on push to the `automation/bors/try` branch.
 4) Give the bot permissions to push to `automation/bors/try` and `automation/bors/try-merge` (to be automated via `team` repo).
-
-## Development
-Directory structure:
-- `database/migration`
-  - `SeaORM` migrations that are the source of truth for database schema
-- `database/entity`
-  - Automatically generated `SeaORM` DB entities, which are generated from a (Postgre) database.
-- `src/bors`
-  - Bors commands and their handlers.
-- `src/database`
-  - Database ORM layer built on top of SeaORM.
-- `src/github`
-  - Communication with the GitHub API and definitions of GitHub webhook messages.
-- `src/config.rs`
-  - Configuration of repositories that want to use bors.
-- `src/permissions.rs`
-  - Handling of user permissions for performing try and review actions.
-
-### Database
-You must have `sea-orm-cli` installed for the following commands to work.
-```console
-$ cargo install sea-orm-cli
-```
-
-You must also set up a `DATABASE_URL` environment variable. **You can use SQLite for local testing,
-but when entities are regenerated, it should be done against a Postgre database!**
-```console
-$ export DATABASE_URL=sqlite://bors.db?mode=rwc
-```
-
-#### Updating the DB schema
-1) Generate a new migration
-    ```console
-    $ sea-orm-cli migrate -d database/migration/ generate <name>
-    ```
-2) Change the migration manually in `database/migration/src/<new-migration>.rs`.
-3) Apply migrations to a **Postgre** DB. (You can use Docker for that).
-    ```console
-    $ sea-orm-cli migrate -d database/migration/ up
-    ```
-4) Re-generate entities, again against a **Postgre** DB.
-    ```console
-    $ sea-orm-cli generate entity -o database/entity/src --lib
-    ```
