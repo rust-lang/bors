@@ -2,7 +2,7 @@
 Home of a (WIP) rewrite of the [`homu`](https://github.com/rust-lang/homu) bors implementation in Rust.
 
 Commands supported by the bot can be found [here](docs/commands.md).
-Architecture of the bot can be found [here](docs/architecture.md).
+Design of the bot is described [here](docs/design.md).
 
 If you want to help testing the bot, please ask around on the [`#t-infra`](https://rust-lang.zulipchat.com/#narrow/stream/242791-t-infra)
 stream on Rust Zulip.

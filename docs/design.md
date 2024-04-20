@@ -1,5 +1,5 @@
-# Architecture
-This document briefly describes the architecture of bors.
+# Bors design
+This document briefly describes does the bors bot work.
 
 `bors` is a binary that launches (an `axum`) web server, which listens on a `/github` endpoint for webhooks related to a
 GitHub app attached to the bot. Once a webhook arrives, and it passes a filter of known webhooks, it is converted to
