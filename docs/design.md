@@ -5,17 +5,18 @@ This document briefly describes does the bors bot work.
 GitHub app attached to the bot. Once a webhook arrives, and it passes a filter of known webhooks, it is converted to
 a `BorsEvent` and passed to a command service that executes it.
 
-> Webhooks can be received concurrently, but the command service will execute them serially (currently without
-any concurrency between the commands).
-
 The command service stores persistent data (like information about ongoing try builds) inside a database and performs
 queries and commands on attached GitHub repositories using the GitHub REST API.
 
-# Repository management
-On startup or when a GitHub app installation is changed, bors will try to load information about all repositories
+The main goal of the bot is to make sure that commits pushed to the main branch of a repository pass all required CI
+checks. Bors takes care of preparing (merge) commits for testing on CI and of actually merging the commits into the
+main branch if all CI tests pass.
+
+## Repository management
+On startup, and when a GitHub app installation is changed, bors will try to load information about all repositories
 attached to the GitHub app. Each such repository **must** contain a `rust-bors.toml` file in its main branch, otherwise
-the bot will fail to start. The bot will load the repository configuration and start listening for webhooks coming from
-loaded each repository.
+the bot will ignore it. The bot will load the repository configuration and start listening for webhooks coming from
+each loaded repository.
 
 ```text
 ..................
@@ -29,21 +30,33 @@ loaded each repository.
 ..................
 ```
 
-# Sending commands
-The bot can be controlled by commands embedded within pull request comments on GitHub. The supported command list 
-can be found [here](commands.md). Each command is delivered as a webhook to the bot, which executes it and posts the result
-back onto the corresponding PR as a comment.
+## Sending commands
+The bot can be controlled by commands embedded within pull request comments on GitHub. The supported command list
+can be found [here](commands.md). Each command is delivered as a webhook to the bot, which parses it,
+executes it and usually posts the result/response back onto the corresponding PR as a comment.
 
-# User permissions
-Users that want to perform bors commands must have the proper permissions set. Permissions are loaded by the bot
-from the [team API](https://github.com/rust-lang/team), more specifically from
+### User permissions
+To perform privileged commands (e.g. starting a try build), users must have the proper permissions set. Permissions are
+loaded by the bot from the [team API](https://github.com/rust-lang/team), more specifically from
 `https://team-api.infra.rust-lang.org/v1/permissions/bors.<repo-name>.[try/review].json`.
-The permissions are currently cached in memory, but they are reloaded from the server every minute.
 
 There are two separate permissions, `try` (for managing try builds), and `review` (for approving PRs).
 
-# Try build lifecycle
-Here is a sequence diagram that describes what happens when a try build is scheduled (generated using
+## Periodic refresh
+Periodically (every few minutes), the bot will perform a refresh action, which will do the following for every attached
+repository:
+- Check the currently running CI workflow. If some of them are running for too long
+(based on the `timeout` configured for the repository), it will cancel them.
+- Reload user permissions from the Team API.
+- Reload `rust-bors.toml` config for the repository from its main branch.
+
+## Concurrency
+The bot is currently listening for GitHub webhooks concurrently, however it handles all commands serially, to avoid
+race conditions. This limitation is expected to be lifted in the future.
+
+## Try builds
+A try build means that you execute a specific CI job on a PR (without merging the PR), to test if the job passes C
+tests. Here is a sequence diagram that describes what happens when a try build is scheduled (generated using
 https://textart.io/sequence).
 
 ```text
@@ -89,11 +102,22 @@ https://textart.io/sequence).
    |                                   |                                     |       |         |
 ```
 
-The merge of the PR branch with a parent branch (usually the main branch) happens in the `automation/bors/try-merge` branch.
-This branch should not have any CI workflows configured! These should be configured for the `automation/bors/try` branch.
-Two branches are needed, because we cannot reset a branch to the parent and merge it with the PR atomically using the
-GitHub API.
+Bors first decides which parent commit to use (usually the latest version of the main branch, but it can be overridden),
+then it merges it with the latest PR commit in `automation/bors/try-merge`, and then force pushes this merged commit
+to `automation/bors/try`, where the CI tests should run. It also stores information about the try build in the DB, so
+that it can handle timed out builds or let the user cancel the build.
 
-# Periodic refresh
-Every few minutes, the bot will check the currently active try builds and if some of them are running for too long
-(based on the `timeout` configured for the repository), it will cancel them (and the whole try build).
+We need two branches, since it is not possible to atomically force set a branch to the parent commit and merge
+it with the PR commit using the GitHub API. Without atomicity, CI would run twice unnecessarily (once after setting
+the branch to parent, and then again after merging the PR commit).
+
+Note that `automation/bors/try-merge` should not have any CI workflows configured! These should be configured for the `automation/bors/try` branch instead.
+
+## Recognizing that CI has succeeded/failed
+With [homu](https://github.com/rust-lang/homu) (the old bors implementation), GitHub actions CI running repositories had
+to use a "fake" job that marked the whole CI workflow as succeeded or failed, to signal to bors if it should consider
+the workflow to be OK or not.
+
+The new bors uses a different approach. It asks GitHub which [check suites](https://docs.github.com/en/rest/checks/suites)
+are attached to a given commit, and then it waits until all of these check suites complete (or until a timeout is reached).
+Thanks to this approach, there is no need to introduce fake CI jobs.
