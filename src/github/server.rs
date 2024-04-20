@@ -74,16 +74,14 @@ pub fn create_bors_process(
             let state = state.clone();
             let ctx = ctx.clone();
 
-            tokio::spawn(async move {
-                let span = tracing::info_span!("Event");
-                tracing::debug!("Received event: {event:#?}");
-                if let Err(error) = handle_bors_event(event, state, ctx)
-                    .instrument(span.clone())
-                    .await
-                {
-                    span.log_error(error);
-                }
-            });
+            let span = tracing::info_span!("Event");
+            tracing::debug!("Received event: {event:#?}");
+            if let Err(error) = handle_bors_event(event, state, ctx)
+                .instrument(span.clone())
+                .await
+            {
+                span.log_error(error);
+            }
         }
     };
     (tx, service)
