@@ -7,9 +7,12 @@ use crate::utils::logging::LogError;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
+use axum::routing::post;
+use axum::Router;
 use std::future::Future;
 use std::sync::Arc;
 use tokio::sync::mpsc;
+use tower::limit::ConcurrencyLimitLayer;
 use tracing::Instrument;
 
 /// Shared server state for all axum handlers.
@@ -32,6 +35,13 @@ impl ServerState {
 }
 
 pub type ServerStateRef = Arc<ServerState>;
+
+pub fn create_app(state: ServerState) -> Router {
+    Router::new()
+        .route("/github", post(github_webhook_handler))
+        .layer(ConcurrencyLimitLayer::new(100))
+        .with_state(Arc::new(state))
+}
 
 /// Axum handler that receives a webhook and sends it to a webhook channel.
 pub async fn github_webhook_handler(
@@ -61,12 +71,12 @@ pub fn create_bors_process(
         let state: Arc<dyn BorsState<_>> = Arc::new(state);
         let ctx = Arc::new(ctx);
         while let Some(event) = rx.recv().await {
-            tracing::trace!("Received event: {event:#?}");
             let state = state.clone();
             let ctx = ctx.clone();
 
             tokio::spawn(async move {
                 let span = tracing::info_span!("Event");
+                tracing::debug!("Received event: {event:#?}");
                 if let Err(error) = handle_bors_event(event, state, ctx)
                     .instrument(span.clone())
                     .await

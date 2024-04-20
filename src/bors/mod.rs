@@ -22,7 +22,7 @@ pub use handlers::handle_bors_event;
 pub trait RepositoryClient: Send + Sync {
     fn repository(&self) -> &GithubRepoName;
 
-    /// load repository config
+    /// Load repository config.
     async fn load_config(&self) -> anyhow::Result<RepositoryConfig>;
 
     /// Return the current SHA of the given branch.
@@ -61,7 +61,7 @@ pub trait RepositoryClient: Send + Sync {
     /// Remove a set of labels from a PR.
     async fn remove_labels(&self, pr: PullRequestNumber, labels: &[String]) -> anyhow::Result<()>;
 
-    /// Get a workflow url
+    /// Get a workflow url.
     fn get_workflow_url(&self, run_id: RunId) -> String;
 }
 

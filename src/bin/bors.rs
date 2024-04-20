@@ -4,19 +4,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context;
-use axum::routing::post;
-use axum::Router;
-use bors::bors::{BorsContext, CommandParser};
+use bors::{
+    create_app, create_bors_process, BorsContext, BorsEvent, CommandParser, GithubAppState,
+    SeaORMClient, ServerState, WebhookSecret,
+};
 use clap::Parser;
 use sea_orm::Database;
-use tokio::task::LocalSet;
-use tower::limit::ConcurrencyLimitLayer;
 use tracing_subscriber::EnvFilter;
 
-use bors::bors::event::BorsEvent;
-use bors::database::SeaORMClient;
-use bors::github::server::{create_bors_process, github_webhook_handler, ServerState};
-use bors::github::{GithubAppState, WebhookSecret};
 use migration::{Migrator, MigratorTrait};
 
 /// How often should the bot check DB state, e.g. for handling timeouts.
@@ -45,19 +40,19 @@ struct Opts {
     cmd_prefix: String,
 }
 
-async fn server(state: ServerState) -> anyhow::Result<()> {
-    let state = Arc::new(state);
+/// Starts a server that receives GitHub webhooks and generates events into a queue
+/// that is then handled by the Bors process.
+async fn webhook_server(state: ServerState) -> anyhow::Result<()> {
+    let app = create_app(state);
 
-    let app = Router::new()
-        .route("/github", post(github_webhook_handler))
-        .layer(ConcurrencyLimitLayer::new(100))
-        .with_state(state);
     let addr = SocketAddr::from(([0, 0, 0, 0], 8080));
     let listener = tokio::net::TcpListener::bind(addr)
         .await
         .context("Cannot create TCP/IP server socket")?;
 
-    axum::serve(listener, app.into_make_service()).await?;
+    tracing::info!("Listening on 0.0.0.0:{}", listener.local_addr()?.port());
+
+    axum::serve(listener, app).await?;
     Ok(())
 }
 
@@ -77,12 +72,14 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
         .block_on(initialize_db(&opts.db))
         .context("Cannot initialize database")?;
 
-    let state = runtime.block_on(GithubAppState::load(
-        opts.app_id.into(),
-        opts.private_key.into_bytes().into(),
-    ))?;
+    let state = runtime
+        .block_on(GithubAppState::load(
+            opts.app_id.into(),
+            opts.private_key.into_bytes().into(),
+        ))
+        .context("Cannot load GitHub repository state")?;
     let ctx = BorsContext::new(CommandParser::new(opts.cmd_prefix), Arc::new(db));
-    let (tx, gh_process) = create_bors_process(state, ctx);
+    let (tx, bors_process) = create_bors_process(state, ctx);
 
     let refresh_tx = tx.clone();
     let refresh_process = async move {
@@ -93,12 +90,12 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
     };
 
     let state = ServerState::new(tx, WebhookSecret::new(opts.webhook_secret));
-    let server_process = server(state);
+    let server_process = webhook_server(state);
 
     let fut = async move {
         tokio::select! {
-            () = gh_process => {
-                tracing::warn!("Github webhook process has ended");
+            () = bors_process => {
+                tracing::warn!("Bors event handling process has ended");
                 Ok(())
             },
             res = refresh_process => {
@@ -106,31 +103,32 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
                 res
             }
             res = server_process => {
-                tracing::warn!("Server has ended: {res:?}");
+                tracing::warn!("GitHub webhook listener has ended: {res:?}");
                 res
             }
         }
     };
 
-    runtime.block_on(async move {
-        let set = LocalSet::new();
-        set.run_until(fut).await.unwrap();
-    });
+    runtime.block_on(fut)?;
 
     Ok(())
 }
 
 fn main() {
     tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::INFO)
         .with_target(false)
-        .with_env_filter(EnvFilter::from_default_env())
+        .with_env_filter(
+            EnvFilter::builder()
+                .with_default_directive(tracing::Level::INFO.into())
+                .from_env()
+                .expect("Cannot load RUST_LOG"),
+        )
         .with_ansi(std::io::stdout().is_terminal())
         .init();
 
     let opts = Opts::parse();
     if let Err(error) = try_main(opts) {
-        eprintln!("Error: {error:?}");
+        tracing::error!("Error: {error:?}");
         std::process::exit(1);
     }
 }

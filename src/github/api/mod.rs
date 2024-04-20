@@ -18,9 +18,9 @@ use crate::permissions::load_permissions;
 pub mod client;
 pub(crate) mod operations;
 
-type GHRepositoryState = RepositoryState<GithubRepositoryClient>;
+type GithubRepositoryState = RepositoryState<GithubRepositoryClient>;
 
-type RepositoryMap = HashMap<GithubRepoName, Arc<GHRepositoryState>>;
+type RepositoryMap = HashMap<GithubRepoName, Arc<GithubRepositoryState>>;
 
 fn base_github_html_url() -> &'static str {
     "https://github.com"
@@ -127,7 +127,7 @@ pub async fn load_repositories(client: &Octocrab) -> anyhow::Result<RepositoryMa
 async fn create_repo_state(
     repo_client: Octocrab,
     repo: Repository,
-) -> anyhow::Result<GHRepositoryState> {
+) -> anyhow::Result<GithubRepositoryState> {
     let Some(owner) = repo.owner.clone() else {
         return Err(anyhow::anyhow!("Repository {} has no owner", repo.name));
     };
