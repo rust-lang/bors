@@ -36,24 +36,7 @@ If you want to attach `bors` to a GitHub app, you should point its webhooks at `
 ### How to add a repository to bors
 Here is a guide on how to add a repository so that this bot can be used on it:
 1) Add a file named `rust-bors.toml` to the root of the main branch of the repository. The configuration struct that
-describes the file can be found in `src/config.rs`. Here is an example configuration file:
-    ```toml
-    # Maximum duration of CI workflows before the are considered timed out.
-    # (Required)
-    timeout = 3600
-   
-    # Labels that should be set on a PR after an event happens.
-    # "+<label>" adds the label, while "-<label>" removes the label after the event.
-    # Supported events:
-    # - try: Try build has started
-    # - try_succeed: Try build has finished
-    # - try_failed: Try build has failed
-    # (Optional)
-    [labels]
-    try = ["+foo", "-bar"]
-    try_succeed = ["+foobar", "+foo", "+baz"]
-    try_failed = []
-    ```
+describes the file can be found in `src/config.rs`. [Here](rust-bors.example.toml) is an example configuration file.
 2) Install the GitHub app corresponding to this bot to the corresponding repository. You can use the
 `https://github.com/settings/apps/<app-name>/installations` link (to be automated via `team` repo).
 3) Configure a CI workflow on push to the `automation/bors/try` branch.
