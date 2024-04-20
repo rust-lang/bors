@@ -71,12 +71,12 @@ pub fn create_bors_process(
         let state: Arc<dyn BorsState<_>> = Arc::new(state);
         let ctx = Arc::new(ctx);
         while let Some(event) = rx.recv().await {
-            tracing::trace!("Received event: {event:#?}");
             let state = state.clone();
             let ctx = ctx.clone();
 
             tokio::spawn(async move {
                 let span = tracing::info_span!("Event");
+                tracing::debug!("Received event: {event:#?}");
                 if let Err(error) = handle_bors_event(event, state, ctx)
                     .instrument(span.clone())
                     .await

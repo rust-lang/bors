@@ -24,7 +24,7 @@ mod refresh;
 mod trybuild;
 mod workflow;
 
-/// This function performs a single BORS event, it is the main execution function of the bot.
+/// This function executes a single BORS event, it is the main execution function of the bot.
 pub async fn handle_bors_event<Client: RepositoryClient>(
     event: BorsEvent,
     state: Arc<dyn BorsState<Client>>,

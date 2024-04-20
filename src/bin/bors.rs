@@ -10,7 +10,6 @@ use bors::{
 };
 use clap::Parser;
 use sea_orm::Database;
-use tokio::task::LocalSet;
 use tracing_subscriber::EnvFilter;
 
 use migration::{Migrator, MigratorTrait};
@@ -110,10 +109,7 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
         }
     };
 
-    runtime.block_on(async move {
-        let set = LocalSet::new();
-        set.run_until(fut).await.unwrap();
-    });
+    runtime.block_on(fut)?;
 
     Ok(())
 }
