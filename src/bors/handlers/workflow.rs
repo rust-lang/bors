@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
-use crate::bors::comments::{TryBuildFailedComment, TryBuildSuccessfulComment};
 use crate::bors::event::{CheckSuiteCompleted, WorkflowCompleted, WorkflowStarted};
 use crate::bors::handlers::is_bors_observed_branch;
 use crate::bors::handlers::labels::handle_label_trigger;
-use crate::bors::{self, Comment, RepositoryClient, RepositoryState};
+use crate::bors::Comment;
+use crate::bors::{self, RepositoryClient, RepositoryState};
 use crate::database::{BuildStatus, DbClient, WorkflowStatus};
 use crate::github::LabelTrigger;
 
@@ -177,14 +177,22 @@ async fn try_complete_build<Client: RepositoryClient>(
         .collect::<Vec<_>>()
         .join("\n");
 
-    let message: Box<dyn Comment> = if !has_failure {
+    let message = if !has_failure {
         tracing::info!("Workflow succeeded");
 
-        let sha = payload.commit_sha;
-        Box::new(TryBuildSuccessfulComment { sha, workflow_list })
+        Comment::new(format!(
+            r#":sunny: Try build successful
+{}
+Build commit: {} (`{}`)"#,
+            workflow_list, payload.commit_sha, payload.commit_sha
+        ))
     } else {
         tracing::info!("Workflow failed");
-        Box::new(TryBuildFailedComment { workflow_list })
+        Comment::new(format!(
+            r#":broken_heart: Test failed
+{}"#,
+            workflow_list
+        ))
     };
     repo.client.post_comment(pr.number, message).await?;
 

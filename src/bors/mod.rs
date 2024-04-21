@@ -1,5 +1,4 @@
 mod command;
-mod comments;
 mod context;
 pub mod event;
 mod handlers;
@@ -15,7 +14,6 @@ use crate::config::RepositoryConfig;
 use crate::github::{CommitSha, GithubRepoName, MergeError, PullRequest, PullRequestNumber};
 use crate::permissions::UserPermissions;
 pub use command::CommandParser;
-pub use comments::Comment;
 pub use context::BorsContext;
 pub use handlers::handle_bors_event;
 
@@ -34,11 +32,7 @@ pub trait RepositoryClient: Send + Sync {
     async fn get_pull_request(&self, pr: PullRequestNumber) -> anyhow::Result<PullRequest>;
 
     /// Post a comment to the pull request with the given number.
-    async fn post_comment(
-        &self,
-        pr: PullRequestNumber,
-        comment: Box<dyn Comment>,
-    ) -> anyhow::Result<()>;
+    async fn post_comment(&self, pr: PullRequestNumber, comment: Comment) -> anyhow::Result<()>;
 
     /// Set the given branch to a commit with the given `sha`.
     async fn set_branch_to_sha(&self, branch: &str, sha: &CommitSha) -> anyhow::Result<()>;
@@ -110,4 +104,18 @@ pub struct RepositoryState<Client: RepositoryClient> {
     pub client: Client,
     pub permissions: ArcSwap<UserPermissions>,
     pub config: ArcSwap<RepositoryConfig>,
+}
+
+/// A comment that can be posted to a pull request.
+pub struct Comment {
+    text: String,
+}
+impl Comment {
+    pub fn new(text: String) -> Self {
+        Self { text }
+    }
+
+    pub fn render(&self) -> &str {
+        &self.text
+    }
 }

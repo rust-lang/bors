@@ -407,17 +407,13 @@ impl RepositoryClient for Arc<TestRepositoryClient> {
         (self.get_pr_fn.lock().unwrap())(pr)
     }
 
-    async fn post_comment(
-        &self,
-        pr: PullRequestNumber,
-        comment: Box<dyn Comment>,
-    ) -> anyhow::Result<()> {
+    async fn post_comment(&self, pr: PullRequestNumber, comment: Comment) -> anyhow::Result<()> {
         self.comments
             .lock()
             .unwrap()
             .entry(pr.0)
             .or_default()
-            .push(comment.render());
+            .push(comment.render().to_string());
         Ok(())
     }
 
