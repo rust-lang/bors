@@ -5,6 +5,7 @@ use octocrab::models::RunId;
 
 use crate::bors::command::Parent;
 use crate::bors::handlers::labels::handle_label_trigger;
+use crate::bors::Comment;
 use crate::bors::RepositoryClient;
 use crate::bors::RepositoryState;
 use crate::database::{
@@ -50,10 +51,7 @@ pub(super) async fn command_try_build<Client: RepositoryClient>(
         if build.status == BuildStatus::Pending {
             tracing::warn!("Try build already in progress");
             repo.client
-                .post_comment(
-                    pr.number,
-                    ":exclamation: A try build is currently in progress. You can cancel it using @bors try cancel.",
-                )
+                .post_comment(pr.number, Comment::new(":exclamation: A try build is currently in progress. You can cancel it using @bors try cancel.".to_string()))
                 .await?;
             return Ok(());
         }
@@ -67,11 +65,8 @@ pub(super) async fn command_try_build<Client: RepositoryClient>(
             Parent::Last => match last_parent {
                 None => {
                     repo.client
-                        .post_comment(
-                            pr.number,
-                            ":exclamation: There was no previous build. Please set an explicit parent or remove the `parent=last` argument to use the default parent.",
-                        )
-                    .await?;
+                        .post_comment(pr.number, Comment::new(":exclamation: There was no previous build. Please set an explicit parent or remove the `parent=last` argument to use the default parent.".to_string()))
+                        .await?;
                     return Ok(());
                 }
                 Some(last_parent) => last_parent,
@@ -123,21 +118,21 @@ pub(super) async fn command_try_build<Client: RepositoryClient>(
 
             handle_label_trigger(repo, pr.number, LabelTrigger::TryBuildStarted).await?;
 
-            repo.client
-                .post_comment(
-                    pr.number,
-                    &format!(
-                        ":hourglass: Trying commit {} with merge {merge_sha}…",
-                        pr.head.sha
-                    ),
-                )
-                .await?;
+            let comment = Comment::new(format!(
+                ":hourglass: Trying commit {} with merge {}…",
+                pr.head.sha.clone(),
+                merge_sha
+            ));
+            repo.client.post_comment(pr.number, comment).await?;
             Ok(())
         }
         Err(MergeError::Conflict) => {
             tracing::warn!("Merge conflict");
             repo.client
-                .post_comment(pr.number, &merge_conflict_message(&pr.head.name))
+                .post_comment(
+                    pr.number,
+                    Comment::new(merge_conflict_message(&pr.head.name)),
+                )
                 .await?;
             Ok(())
         }
@@ -166,7 +161,9 @@ pub(super) async fn command_try_cancel<Client: RepositoryClient>(
         repo.client
             .post_comment(
                 pr_number,
-                ":exclamation: There is currently no try build in progress.",
+                Comment::new(
+                    ":exclamation: There is currently no try build in progress.".to_string(),
+                ),
             )
             .await?;
         return Ok(());
@@ -180,11 +177,13 @@ pub(super) async fn command_try_cancel<Client: RepositoryClient>(
             );
             db.update_build_status(&build, BuildStatus::Cancelled)
                 .await?;
-
             repo.client
                 .post_comment(
                     pr_number,
-                    "Try build was cancelled. It was not possible to cancel some workflows.",
+                    Comment::new(
+                        "Try build was cancelled. It was not possible to cancel some workflows."
+                            .to_string(),
+                    ),
                 )
                 .await?
         }
@@ -200,11 +199,12 @@ Cancelled workflows:"#
                 let url = repo.client.get_workflow_url(id);
                 try_build_cancelled_comment += format!("\n- {}", url).as_str();
             }
+
             repo.client
-                .post_comment(pr_number, &try_build_cancelled_comment)
+                .post_comment(pr_number, Comment::new(try_build_cancelled_comment))
                 .await?
         }
-    }
+    };
 
     Ok(())
 }
@@ -274,7 +274,7 @@ Please avoid the ["**Resolve conflicts**" button](https://help.github.com/articl
 Sometimes step 4 will complete without asking for resolution. This is usually due to difference between how `Cargo.lock` conflict is
 handled during merge and rebase. This is normal, and you should still perform step 5 to update this PR.
 
-</details>  
+</details>
 "#
     )
 }
@@ -293,10 +293,10 @@ async fn check_try_permissions<Client: RepositoryClient>(
         repo.client
             .post_comment(
                 pr.number,
-                &format!(
+                Comment::new(format!(
                     "@{}: :key: Insufficient privileges: not in try users",
                     author.username
-                ),
+                )),
             )
             .await?;
         false

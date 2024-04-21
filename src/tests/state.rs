@@ -14,7 +14,9 @@ use super::event::default_user;
 use crate::bors::event::{
     BorsEvent, CheckSuiteCompleted, PullRequestComment, WorkflowCompleted, WorkflowStarted,
 };
-use crate::bors::{handle_bors_event, BorsContext, CheckSuite, CommandParser, RepositoryState};
+use crate::bors::{
+    handle_bors_event, BorsContext, CheckSuite, CommandParser, Comment, RepositoryState,
+};
 use crate::bors::{BorsState, RepositoryClient};
 use crate::config::RepositoryConfig;
 use crate::database::{DbClient, WorkflowStatus};
@@ -405,13 +407,13 @@ impl RepositoryClient for Arc<TestRepositoryClient> {
         (self.get_pr_fn.lock().unwrap())(pr)
     }
 
-    async fn post_comment(&self, pr: PullRequestNumber, text: &str) -> anyhow::Result<()> {
+    async fn post_comment(&self, pr: PullRequestNumber, comment: Comment) -> anyhow::Result<()> {
         self.comments
             .lock()
             .unwrap()
             .entry(pr.0)
             .or_default()
-            .push(text.to_string());
+            .push(comment.render().to_string());
         Ok(())
     }
 

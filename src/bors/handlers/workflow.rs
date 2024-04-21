@@ -3,6 +3,7 @@ use std::sync::Arc;
 use crate::bors::event::{CheckSuiteCompleted, WorkflowCompleted, WorkflowStarted};
 use crate::bors::handlers::is_bors_observed_branch;
 use crate::bors::handlers::labels::handle_label_trigger;
+use crate::bors::Comment;
 use crate::bors::{self, RepositoryClient, RepositoryState};
 use crate::database::{BuildStatus, DbClient, WorkflowStatus};
 use crate::github::LabelTrigger;
@@ -179,20 +180,21 @@ async fn try_complete_build<Client: RepositoryClient>(
     let message = if !has_failure {
         tracing::info!("Workflow succeeded");
 
-        let sha = &payload.commit_sha;
-        format!(
+        Comment::new(format!(
             r#":sunny: Try build successful
-{workflow_list}
-Build commit: {sha} (`{sha}`)"#
-        )
+{}
+Build commit: {} (`{}`)"#,
+            workflow_list, payload.commit_sha, payload.commit_sha
+        ))
     } else {
         tracing::info!("Workflow failed");
-        format!(
+        Comment::new(format!(
             r#":broken_heart: Test failed
-{workflow_list}"#
-        )
+{}"#,
+            workflow_list
+        ))
     };
-    repo.client.post_comment(pr.number, &message).await?;
+    repo.client.post_comment(pr.number, message).await?;
 
     let (status, trigger) = if has_failure {
         (BuildStatus::Failure, LabelTrigger::TryBuildFailed)

@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use crate::bors::Comment;
 use crate::bors::RepositoryClient;
 use crate::bors::RepositoryState;
 use crate::github::PullRequest;
@@ -8,7 +9,9 @@ pub(super) async fn command_ping<Client: RepositoryClient>(
     repo: Arc<RepositoryState<Client>>,
     pr: &PullRequest,
 ) -> anyhow::Result<()> {
-    repo.client.post_comment(pr.number, "Pong 🏓!").await?;
+    repo.client
+        .post_comment(pr.number, Comment::new("Pong 🏓!".to_string()))
+        .await?;
     Ok(())
 }
 
