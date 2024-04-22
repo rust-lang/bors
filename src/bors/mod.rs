@@ -1,4 +1,5 @@
 mod command;
+pub mod comment;
 mod context;
 pub mod event;
 mod handlers;
@@ -14,6 +15,7 @@ use crate::config::RepositoryConfig;
 use crate::github::{CommitSha, GithubRepoName, MergeError, PullRequest, PullRequestNumber};
 use crate::permissions::UserPermissions;
 pub use command::CommandParser;
+pub use comment::Comment;
 pub use context::BorsContext;
 pub use handlers::handle_bors_event;
 
@@ -104,18 +106,4 @@ pub struct RepositoryState<Client: RepositoryClient> {
     pub client: Client,
     pub permissions: ArcSwap<UserPermissions>,
     pub config: ArcSwap<RepositoryConfig>,
-}
-
-/// A comment that can be posted to a pull request.
-pub struct Comment {
-    text: String,
-}
-impl Comment {
-    pub fn new(text: String) -> Self {
-        Self { text }
-    }
-
-    pub fn render(&self) -> &str {
-        &self.text
-    }
 }

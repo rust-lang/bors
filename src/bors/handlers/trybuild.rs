@@ -568,6 +568,7 @@ mod tests {
         :sunny: Try build successful
         - [workflow-2](https://workflow-2.com) :white_check_mark:
         Build commit: merge2 (`merge2`)
+        <!-- homu: {"type":"TryBuildCompleted","merge_sha":"merge2"} -->
         "###);
     }
 
