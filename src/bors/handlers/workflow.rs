@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use crate::bors::comment::try_build_succeeded_comment;
 use crate::bors::event::{CheckSuiteCompleted, WorkflowCompleted, WorkflowStarted};
 use crate::bors::handlers::is_bors_observed_branch;
 use crate::bors::handlers::labels::handle_label_trigger;
@@ -180,12 +181,7 @@ async fn try_complete_build<Client: RepositoryClient>(
     let message = if !has_failure {
         tracing::info!("Workflow succeeded");
 
-        Comment::new(format!(
-            r#":sunny: Try build successful
-{}
-Build commit: {} (`{}`)"#,
-            workflow_list, payload.commit_sha, payload.commit_sha
-        ))
+        try_build_succeeded_comment(workflow_list, payload.commit_sha)
     } else {
         tracing::info!("Workflow failed");
         Comment::new(format!(
@@ -337,6 +333,7 @@ mod tests {
         :sunny: Try build successful
         - [workflow-1](https://workflow-1.com) :white_check_mark:
         Build commit: sha-merged (`sha-merged`)
+        <!-- homu: {"type":"TryBuildCompleted","merge_sha":"sha-merged"} -->
         "###
         );
     }
@@ -401,6 +398,7 @@ mod tests {
         - [workflow-1](https://workflow-1.com) :white_check_mark:
         - [workflow-2](https://workflow-2.com) :white_check_mark:
         Build commit: sha-merged (`sha-merged`)
+        <!-- homu: {"type":"TryBuildCompleted","merge_sha":"sha-merged"} -->
         "###);
     }
 
@@ -473,6 +471,7 @@ mod tests {
         :sunny: Try build successful
         - [workflow-name](https://workflow-name-1) :white_check_mark:
         Build commit: sha-merged (`sha-merged`)
+        <!-- homu: {"type":"TryBuildCompleted","merge_sha":"sha-merged"} -->
         "###);
     }
 
