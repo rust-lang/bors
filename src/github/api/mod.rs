@@ -126,7 +126,13 @@ async fn create_repo_state(
     let name = GithubRepoName::new(&owner.login, &repo.name);
     tracing::info!("Found repository {name}");
 
+    let app = repo_client
+        .current()
+        .app()
+        .await
+        .context("Could not load Github App")?;
     let client = GithubRepositoryClient {
+        app,
         client: repo_client,
         repo_name: name.clone(),
         repository: repo,

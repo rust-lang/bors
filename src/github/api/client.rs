@@ -1,7 +1,7 @@
 use anyhow::Context;
 use axum::async_trait;
 use base64::Engine;
-use octocrab::models::{Repository, RunId};
+use octocrab::models::{App, Repository, RunId};
 use octocrab::{Error, Octocrab};
 use tracing::log;
 
@@ -14,6 +14,7 @@ use crate::github::{Branch, CommitSha, GithubRepoName, PullRequest, PullRequestN
 
 /// Provides access to a single app installation (repository) using the GitHub API.
 pub struct GithubRepositoryClient {
+    pub app: App,
     /// The client caches the access token for this given repository and refreshes it once it
     /// expires.
     pub client: Octocrab,
@@ -45,13 +46,7 @@ impl RepositoryClient for GithubRepositoryClient {
 
     /// Was the comment created by the bot?
     async fn is_comment_internal(&self, comment: &PullRequestComment) -> anyhow::Result<bool> {
-        let app = self
-            .client
-            .current()
-            .app()
-            .await
-            .context("Could not load Github App")?;
-        Ok(comment.author.html_url == app.html_url)
+        Ok(comment.author.html_url == self.app.html_url)
     }
 
     /// Loads repository configuration from a file located at `[CONFIG_FILE_PATH]` in the main
