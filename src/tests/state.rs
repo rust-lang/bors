@@ -12,7 +12,8 @@ use url::Url;
 use super::database::MockedDBClient;
 use super::event::default_user;
 use crate::bors::event::{
-    BorsEvent, CheckSuiteCompleted, PullRequestComment, WorkflowCompleted, WorkflowStarted,
+    BorsRepositoryEvent, CheckSuiteCompleted, PullRequestComment, WorkflowCompleted,
+    WorkflowStarted,
 };
 use crate::bors::{
     handle_bors_event, BorsContext, CheckSuite, CommandParser, Comment, RepositoryState,
@@ -30,6 +31,7 @@ use crate::tests::event::{
     CheckSuiteCompletedBuilder, WorkflowCompletedBuilder, WorkflowStartedBuilder,
 };
 use crate::tests::github::{default_base_branch, PRBuilder};
+use crate::{BorsEvent, BorsGlobalEvent};
 
 pub fn test_bot_user() -> GithubUser {
     GithubUser {
@@ -78,25 +80,36 @@ impl TestBorsState {
     }
 
     pub async fn comment<T: Into<PullRequestComment>>(&self, comment: T) {
-        self.event(BorsEvent::Comment(comment.into())).await;
+        self.event(BorsEvent::Repository(BorsRepositoryEvent::Comment(
+            comment.into(),
+        )))
+        .await;
     }
 
     pub async fn workflow_started<T: Into<WorkflowStarted>>(&self, payload: T) {
-        self.event(BorsEvent::WorkflowStarted(payload.into())).await;
+        self.event(BorsEvent::Repository(BorsRepositoryEvent::WorkflowStarted(
+            payload.into(),
+        )))
+        .await;
     }
 
     pub async fn workflow_completed<T: Into<WorkflowCompleted>>(&self, payload: T) {
-        self.event(BorsEvent::WorkflowCompleted(payload.into()))
-            .await;
+        self.event(BorsEvent::Repository(
+            BorsRepositoryEvent::WorkflowCompleted(payload.into()),
+        ))
+        .await;
     }
 
     pub async fn check_suite_completed<T: Into<CheckSuiteCompleted>>(&self, payload: T) {
-        self.event(BorsEvent::CheckSuiteCompleted(payload.into()))
-            .await;
+        self.event(BorsEvent::Repository(
+            BorsRepositoryEvent::CheckSuiteCompleted(payload.into()),
+        ))
+        .await;
     }
 
     pub async fn refresh(&mut self) {
-        self.event(BorsEvent::Refresh).await;
+        self.event(BorsEvent::Global(BorsGlobalEvent::Refresh))
+            .await;
     }
 
     pub async fn perform_workflow_events(

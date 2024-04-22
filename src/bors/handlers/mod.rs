@@ -3,7 +3,7 @@ use std::sync::Arc;
 use tracing::Instrument;
 
 use crate::bors::command::{BorsCommand, CommandParseError};
-use crate::bors::event::{BorsEvent, PullRequestComment};
+use crate::bors::event::{BorsRepositoryEvent, PullRequestComment};
 use crate::bors::handlers::help::command_help;
 use crate::bors::handlers::ping::command_ping;
 use crate::bors::handlers::refresh::refresh_repository;
@@ -15,6 +15,8 @@ use crate::bors::{BorsContext, BorsState, Comment, RepositoryClient, RepositoryS
 use crate::database::DbClient;
 use crate::github::GithubRepoName;
 use crate::utils::logging::LogError;
+
+use super::event::{BorsEvent, BorsGlobalEvent};
 
 mod help;
 mod labels;
@@ -29,9 +31,25 @@ pub async fn handle_bors_event<Client: RepositoryClient>(
     state: Arc<dyn BorsState<Client>>,
     ctx: Arc<BorsContext>,
 ) -> anyhow::Result<()> {
+    match event {
+        BorsEvent::Repository(event) => {
+            handle_bors_repository_event(event, state, ctx).await?;
+        }
+        BorsEvent::Global(event) => {
+            handle_bors_global_event(event, state, ctx).await?;
+        }
+    }
+    Ok(())
+}
+
+pub async fn handle_bors_repository_event<Client: RepositoryClient>(
+    event: BorsRepositoryEvent,
+    state: Arc<dyn BorsState<Client>>,
+    ctx: Arc<BorsContext>,
+) -> anyhow::Result<()> {
     let db = Arc::clone(&ctx.db);
     match event {
-        BorsEvent::Comment(comment) => {
+        BorsRepositoryEvent::Comment(comment) => {
             // We want to ignore comments made by this bot
             if let Some(repo) = get_repo_state(state, &comment.repository) {
                 if repo.client.is_comment_internal(&comment).await? {
@@ -64,13 +82,8 @@ pub async fn handle_bors_event<Client: RepositoryClient>(
                 }
             }
         }
-        BorsEvent::InstallationsChanged => {
-            let span = tracing::info_span!("Repository reload");
-            if let Err(error) = state.reload_repositories().instrument(span.clone()).await {
-                span.log_error(error);
-            }
-        }
-        BorsEvent::WorkflowStarted(payload) => {
+
+        BorsRepositoryEvent::WorkflowStarted(payload) => {
             if let Some(_) = get_repo_state(state, &payload.repository) {
                 let span = tracing::info_span!(
                     "Workflow started",
@@ -85,7 +98,7 @@ pub async fn handle_bors_event<Client: RepositoryClient>(
                 }
             }
         }
-        BorsEvent::WorkflowCompleted(payload) => {
+        BorsRepositoryEvent::WorkflowCompleted(payload) => {
             if let Some(repo) = get_repo_state(state, &payload.repository) {
                 let span = tracing::info_span!(
                     "Workflow completed",
@@ -100,7 +113,7 @@ pub async fn handle_bors_event<Client: RepositoryClient>(
                 }
             }
         }
-        BorsEvent::CheckSuiteCompleted(payload) => {
+        BorsRepositoryEvent::CheckSuiteCompleted(payload) => {
             if let Some(repo) = get_repo_state(state, &payload.repository) {
                 let span = tracing::info_span!(
                     "Check suite completed",
@@ -114,7 +127,24 @@ pub async fn handle_bors_event<Client: RepositoryClient>(
                 }
             }
         }
-        BorsEvent::Refresh => {
+    }
+    Ok(())
+}
+
+pub async fn handle_bors_global_event<Client: RepositoryClient>(
+    event: BorsGlobalEvent,
+    state: Arc<dyn BorsState<Client>>,
+    ctx: Arc<BorsContext>,
+) -> anyhow::Result<()> {
+    let db = Arc::clone(&ctx.db);
+    match event {
+        BorsGlobalEvent::InstallationsChanged => {
+            let span = tracing::info_span!("Repository reload");
+            if let Err(error) = state.reload_repositories().instrument(span.clone()).await {
+                span.log_error(error);
+            }
+        }
+        BorsGlobalEvent::Refresh => {
             let span = tracing::info_span!("Refresh");
             let repos = state.get_all_repos();
             futures::future::join_all(repos.into_iter().map(|repo| {

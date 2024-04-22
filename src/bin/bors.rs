@@ -5,8 +5,8 @@ use std::time::Duration;
 
 use anyhow::Context;
 use bors::{
-    create_app, create_bors_process, BorsContext, BorsEvent, CommandParser, GithubAppState,
-    SeaORMClient, ServerState, WebhookSecret,
+    create_app, create_bors_process, BorsContext, BorsEvent, BorsGlobalEvent, CommandParser,
+    GithubAppState, SeaORMClient, ServerState, WebhookSecret,
 };
 use clap::Parser;
 use sea_orm::Database;
@@ -85,7 +85,9 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
     let refresh_process = async move {
         loop {
             tokio::time::sleep(PERIODIC_REFRESH).await;
-            refresh_tx.send(BorsEvent::Refresh).await?;
+            refresh_tx
+                .send(BorsEvent::Global(BorsGlobalEvent::Refresh))
+                .await?;
         }
     };
 
