@@ -3,7 +3,7 @@ use std::sync::Arc;
 use tracing::Instrument;
 
 use crate::bors::command::{BorsCommand, CommandParseError};
-use crate::bors::event::{BorsEvent, PullRequestComment};
+use crate::bors::event::{BorsRepositoryEvent, PullRequestComment};
 use crate::bors::handlers::help::command_help;
 use crate::bors::handlers::ping::command_ping;
 use crate::bors::handlers::refresh::refresh_repository;
@@ -15,6 +15,8 @@ use crate::bors::{BorsContext, BorsState, Comment, RepositoryClient, RepositoryS
 use crate::database::DbClient;
 use crate::github::GithubRepoName;
 use crate::utils::logging::LogError;
+
+use super::event::{BorsEvent, BorsGlobalEvent};
 
 mod help;
 mod labels;
@@ -29,92 +31,117 @@ pub async fn handle_bors_event<Client: RepositoryClient>(
     state: Arc<dyn BorsState<Client>>,
     ctx: Arc<BorsContext>,
 ) -> anyhow::Result<()> {
-    let db = Arc::clone(&ctx.db);
     match event {
-        BorsEvent::Comment(comment) => {
-            // We want to ignore comments made by this bot
-            if let Some(repo) = get_repo_state(state, &comment.repository) {
-                if repo.client.is_comment_internal(&comment).await? {
-                    tracing::trace!(
-                        "Ignoring comment {comment:?} because it was authored by this bot"
-                    );
-                    return Ok(());
-                }
+        BorsEvent::Repository(event) => {
+            handle_bors_repository_event(event, state, ctx).await?;
+        }
+        BorsEvent::Global(event) => {
+            handle_bors_global_event(event, state, ctx).await?;
+        }
+    }
+    Ok(())
+}
 
-                let span = tracing::info_span!(
-                    "Comment",
-                    pr = format!("{}#{}", comment.repository, comment.pr_number),
-                    author = comment.author.username
-                );
-                let pr_number = comment.pr_number;
-                if let Err(error) = handle_comment(Arc::clone(&repo), db, ctx, comment)
-                    .instrument(span.clone())
+pub async fn handle_bors_repository_event<Client: RepositoryClient>(
+    event: BorsRepositoryEvent,
+    state: Arc<dyn BorsState<Client>>,
+    ctx: Arc<BorsContext>,
+) -> anyhow::Result<()> {
+    let db = Arc::clone(&ctx.db);
+    let Some(repo) = get_repo_state(state, event.repository()) else {
+        return Err(anyhow::anyhow!(
+            "Repository {} not found in the bot state",
+            event.repository()
+        ));
+    };
+
+    match event {
+        BorsRepositoryEvent::Comment(comment) => {
+            // We want to ignore comments made by this bot
+            if repo.client.is_comment_internal(&comment).await? {
+                tracing::trace!("Ignoring comment {comment:?} because it was authored by this bot");
+                return Ok(());
+            }
+
+            let span = tracing::info_span!(
+                "Comment",
+                pr = format!("{}#{}", comment.repository, comment.pr_number),
+                author = comment.author.username
+            );
+            let pr_number = comment.pr_number;
+            if let Err(error) = handle_comment(Arc::clone(&repo), db, ctx, comment)
+                .instrument(span.clone())
+                .await
+            {
+                span.log_error(error);
+                repo.client
+                    .post_comment(
+                        pr_number,
+                        Comment::new(
+                            ":x: Encountered an error while executing command".to_string(),
+                        ),
+                    )
                     .await
-                {
-                    span.log_error(error);
-                    repo.client
-                        .post_comment(
-                            pr_number,
-                            Comment::new(
-                                ":x: Encountered an error while executing command".to_string(),
-                            ),
-                        )
-                        .await
-                        .context("Cannot send comment reacting to an error")?;
-                }
+                    .context("Cannot send comment reacting to an error")?;
             }
         }
-        BorsEvent::InstallationsChanged => {
+
+        BorsRepositoryEvent::WorkflowStarted(payload) => {
+            let span = tracing::info_span!(
+                "Workflow started",
+                repo = payload.repository.to_string(),
+                id = payload.run_id.into_inner()
+            );
+            if let Err(error) = handle_workflow_started(db, payload)
+                .instrument(span.clone())
+                .await
+            {
+                span.log_error(error);
+            }
+        }
+        BorsRepositoryEvent::WorkflowCompleted(payload) => {
+            let span = tracing::info_span!(
+                "Workflow completed",
+                repo = payload.repository.to_string(),
+                id = payload.run_id.into_inner()
+            );
+            if let Err(error) = handle_workflow_completed(repo, db, payload)
+                .instrument(span.clone())
+                .await
+            {
+                span.log_error(error);
+            }
+        }
+        BorsRepositoryEvent::CheckSuiteCompleted(payload) => {
+            let span = tracing::info_span!(
+                "Check suite completed",
+                repo = payload.repository.to_string(),
+            );
+            if let Err(error) = handle_check_suite_completed(repo, db, payload)
+                .instrument(span.clone())
+                .await
+            {
+                span.log_error(error);
+            }
+        }
+    }
+    Ok(())
+}
+
+pub async fn handle_bors_global_event<Client: RepositoryClient>(
+    event: BorsGlobalEvent,
+    state: Arc<dyn BorsState<Client>>,
+    ctx: Arc<BorsContext>,
+) -> anyhow::Result<()> {
+    let db = Arc::clone(&ctx.db);
+    match event {
+        BorsGlobalEvent::InstallationsChanged => {
             let span = tracing::info_span!("Repository reload");
             if let Err(error) = state.reload_repositories().instrument(span.clone()).await {
                 span.log_error(error);
             }
         }
-        BorsEvent::WorkflowStarted(payload) => {
-            if let Some(_) = get_repo_state(state, &payload.repository) {
-                let span = tracing::info_span!(
-                    "Workflow started",
-                    repo = payload.repository.to_string(),
-                    id = payload.run_id.into_inner()
-                );
-                if let Err(error) = handle_workflow_started(db, payload)
-                    .instrument(span.clone())
-                    .await
-                {
-                    span.log_error(error);
-                }
-            }
-        }
-        BorsEvent::WorkflowCompleted(payload) => {
-            if let Some(repo) = get_repo_state(state, &payload.repository) {
-                let span = tracing::info_span!(
-                    "Workflow completed",
-                    repo = payload.repository.to_string(),
-                    id = payload.run_id.into_inner()
-                );
-                if let Err(error) = handle_workflow_completed(repo, db, payload)
-                    .instrument(span.clone())
-                    .await
-                {
-                    span.log_error(error);
-                }
-            }
-        }
-        BorsEvent::CheckSuiteCompleted(payload) => {
-            if let Some(repo) = get_repo_state(state, &payload.repository) {
-                let span = tracing::info_span!(
-                    "Check suite completed",
-                    repo = payload.repository.to_string(),
-                );
-                if let Err(error) = handle_check_suite_completed(repo, db, payload)
-                    .instrument(span.clone())
-                    .await
-                {
-                    span.log_error(error);
-                }
-            }
-        }
-        BorsEvent::Refresh => {
+        BorsGlobalEvent::Refresh => {
             let span = tracing::info_span!("Refresh");
             let repos = state.get_all_repos();
             futures::future::join_all(repos.into_iter().map(|repo| {

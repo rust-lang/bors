@@ -6,7 +6,10 @@ mod github;
 mod permissions;
 mod utils;
 
-pub use bors::{event::BorsEvent, BorsContext, BorsState, CommandParser};
+pub use bors::{
+    event::BorsEvent, event::BorsGlobalEvent, event::BorsRepositoryEvent, BorsContext, BorsState,
+    CommandParser,
+};
 pub use database::SeaORMClient;
 pub use github::{
     server::{create_app, create_bors_process, ServerState},

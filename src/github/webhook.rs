@@ -17,7 +17,8 @@ use secrecy::{ExposeSecret, SecretString};
 use sha2::Sha256;
 
 use crate::bors::event::{
-    BorsEvent, CheckSuiteCompleted, PullRequestComment, WorkflowCompleted, WorkflowStarted,
+    BorsEvent, BorsGlobalEvent, BorsRepositoryEvent, CheckSuiteCompleted, PullRequestComment,
+    WorkflowCompleted, WorkflowStarted,
 };
 use crate::database::{WorkflowStatus, WorkflowType};
 use crate::github::server::ServerStateRef;
@@ -153,7 +154,9 @@ fn parse_webhook_event(request: Parts, body: &[u8]) -> anyhow::Result<Option<Bor
 
             let event: IssueCommentEventPayload = serde_json::from_slice(body)?;
             if event.action == IssueCommentEventAction::Created {
-                let comment = parse_pr_comment(repository_name, event).map(BorsEvent::Comment);
+                let comment = parse_pr_comment(repository_name, event)
+                    .map(BorsRepositoryEvent::Comment)
+                    .map(BorsEvent::Repository);
                 Ok(comment)
             } else {
                 Ok(None)
@@ -163,7 +166,9 @@ fn parse_webhook_event(request: Parts, body: &[u8]) -> anyhow::Result<Option<Bor
             let payload: WebhookPullRequestReviewEvent = serde_json::from_slice(body)?;
             if payload.action == "submitted" {
                 let comment = parse_comment_from_pr_review(payload)?;
-                Ok(Some(BorsEvent::Comment(comment)))
+                Ok(Some(BorsEvent::Repository(BorsRepositoryEvent::Comment(
+                    comment,
+                ))))
             } else {
                 Ok(None)
             }
@@ -175,35 +180,43 @@ fn parse_webhook_event(request: Parts, body: &[u8]) -> anyhow::Result<Option<Bor
             let payload: PullRequestReviewCommentEventPayload = serde_json::from_slice(body)?;
             if payload.action == PullRequestReviewCommentEventAction::Created {
                 let comment = parse_pr_review_comment(repository_name, payload);
-                Ok(Some(BorsEvent::Comment(comment)))
+                Ok(Some(BorsEvent::Repository(BorsRepositoryEvent::Comment(
+                    comment,
+                ))))
             } else {
                 Ok(None)
             }
         }
-        b"installation_repositories" | b"installation" => Ok(Some(BorsEvent::InstallationsChanged)),
+        b"installation_repositories" | b"installation" => Ok(Some(BorsEvent::Global(
+            BorsGlobalEvent::InstallationsChanged,
+        ))),
         b"workflow_run" => {
             let payload: WebhookWorkflowRun = serde_json::from_slice(body)?;
             let repository_name = parse_repository_name(&payload.repository)?;
             let result = match payload.action {
-                "requested" => Some(BorsEvent::WorkflowStarted(WorkflowStarted {
-                    repository: repository_name,
-                    name: payload.workflow_run.name,
-                    branch: payload.workflow_run.head_branch,
-                    commit_sha: CommitSha(payload.workflow_run.head_sha),
-                    run_id: RunId(payload.workflow_run.id.0),
-                    workflow_type: WorkflowType::Github,
-                    url: payload.workflow_run.html_url.into(),
-                })),
-                "completed" => Some(BorsEvent::WorkflowCompleted(WorkflowCompleted {
-                    repository: repository_name,
-                    branch: payload.workflow_run.head_branch,
-                    commit_sha: CommitSha(payload.workflow_run.head_sha),
-                    run_id: RunId(payload.workflow_run.id.0),
-                    status: match payload.workflow_run.conclusion.unwrap_or_default().as_str() {
-                        "success" => WorkflowStatus::Success,
-                        _ => WorkflowStatus::Failure,
+                "requested" => Some(BorsEvent::Repository(BorsRepositoryEvent::WorkflowStarted(
+                    WorkflowStarted {
+                        repository: repository_name,
+                        name: payload.workflow_run.name,
+                        branch: payload.workflow_run.head_branch,
+                        commit_sha: CommitSha(payload.workflow_run.head_sha),
+                        run_id: RunId(payload.workflow_run.id.0),
+                        workflow_type: WorkflowType::Github,
+                        url: payload.workflow_run.html_url.into(),
                     },
-                })),
+                ))),
+                "completed" => Some(BorsEvent::Repository(
+                    BorsRepositoryEvent::WorkflowCompleted(WorkflowCompleted {
+                        repository: repository_name,
+                        branch: payload.workflow_run.head_branch,
+                        commit_sha: CommitSha(payload.workflow_run.head_sha),
+                        run_id: RunId(payload.workflow_run.id.0),
+                        status: match payload.workflow_run.conclusion.unwrap_or_default().as_str() {
+                            "success" => WorkflowStatus::Success,
+                            _ => WorkflowStatus::Failure,
+                        },
+                    }),
+                )),
                 _ => None,
             };
             Ok(result)
@@ -219,15 +232,17 @@ fn parse_webhook_event(request: Parts, body: &[u8]) -> anyhow::Result<Option<Bor
 
             let repository_name = parse_repository_name(&payload.repository)?;
             if payload.action == "created" {
-                Ok(Some(BorsEvent::WorkflowStarted(WorkflowStarted {
-                    repository: repository_name,
-                    name: payload.check_run.name.to_string(),
-                    branch: payload.check_run.check_suite.head_branch,
-                    commit_sha: CommitSha(payload.check_run.check_suite.head_sha),
-                    run_id: RunId(payload.check_run.check_run.id.map(|v| v.0).unwrap_or(0)),
-                    workflow_type: WorkflowType::External,
-                    url: payload.check_run.check_run.html_url.unwrap_or_default(),
-                })))
+                Ok(Some(BorsEvent::Repository(
+                    BorsRepositoryEvent::WorkflowStarted(WorkflowStarted {
+                        repository: repository_name,
+                        name: payload.check_run.name.to_string(),
+                        branch: payload.check_run.check_suite.head_branch,
+                        commit_sha: CommitSha(payload.check_run.check_suite.head_sha),
+                        run_id: RunId(payload.check_run.check_run.id.map(|v| v.0).unwrap_or(0)),
+                        workflow_type: WorkflowType::External,
+                        url: payload.check_run.check_run.html_url.unwrap_or_default(),
+                    }),
+                )))
             } else {
                 Ok(None)
             }
@@ -236,11 +251,13 @@ fn parse_webhook_event(request: Parts, body: &[u8]) -> anyhow::Result<Option<Bor
             let payload: WebhookCheckSuite = serde_json::from_slice(body)?;
             let repository_name = parse_repository_name(&payload.repository)?;
             if payload.action == "completed" {
-                Ok(Some(BorsEvent::CheckSuiteCompleted(CheckSuiteCompleted {
-                    repository: repository_name,
-                    branch: payload.check_suite.head_branch,
-                    commit_sha: CommitSha(payload.check_suite.head_sha),
-                })))
+                Ok(Some(BorsEvent::Repository(
+                    BorsRepositoryEvent::CheckSuiteCompleted(CheckSuiteCompleted {
+                        repository: repository_name,
+                        branch: payload.check_suite.head_branch,
+                        commit_sha: CommitSha(payload.check_suite.head_sha),
+                    }),
+                )))
             } else {
                 Ok(None)
             }
@@ -346,7 +363,7 @@ mod tests {
     use hyper::{Request, StatusCode};
     use tokio::sync::mpsc;
 
-    use crate::bors::event::BorsEvent;
+    use crate::bors::event::{BorsEvent, BorsGlobalEvent};
     use crate::github::server::{ServerState, ServerStateRef};
     use crate::github::webhook::WebhookSecret;
     use crate::github::webhook::{GitHubWebhook, HmacSha256};
@@ -356,7 +373,9 @@ mod tests {
     async fn test_installation_suspend() {
         assert!(matches!(
             check_webhook("webhook/installation-suspend.json", "installation",).await,
-            Ok(GitHubWebhook(BorsEvent::InstallationsChanged))
+            Ok(GitHubWebhook(BorsEvent::Global(
+                BorsGlobalEvent::InstallationsChanged
+            )))
         ));
     }
 
@@ -364,7 +383,9 @@ mod tests {
     async fn test_installation_unsuspend() {
         assert!(matches!(
             check_webhook("webhook/installation-unsuspend.json", "installation",).await,
-            Ok(GitHubWebhook(BorsEvent::InstallationsChanged))
+            Ok(GitHubWebhook(BorsEvent::Global(
+                BorsGlobalEvent::InstallationsChanged
+            )))
         ));
     }
 
@@ -375,38 +396,40 @@ mod tests {
             @r###"
         Ok(
             GitHubWebhook(
-                Comment(
-                    PullRequestComment {
-                        repository: GithubRepoName {
-                            owner: "kobzol",
-                            name: "bors-kindergarten",
-                        },
-                        author: GithubUser {
-                            id: UserId(
-                                4539057,
-                            ),
-                            username: "Kobzol",
-                            html_url: Url {
-                                scheme: "https",
-                                cannot_be_a_base: false,
-                                username: "",
-                                password: None,
-                                host: Some(
-                                    Domain(
-                                        "github.com",
-                                    ),
-                                ),
-                                port: None,
-                                path: "/Kobzol",
-                                query: None,
-                                fragment: None,
+                Repository(
+                    Comment(
+                        PullRequestComment {
+                            repository: GithubRepoName {
+                                owner: "kobzol",
+                                name: "bors-kindergarten",
                             },
+                            author: GithubUser {
+                                id: UserId(
+                                    4539057,
+                                ),
+                                username: "Kobzol",
+                                html_url: Url {
+                                    scheme: "https",
+                                    cannot_be_a_base: false,
+                                    username: "",
+                                    password: None,
+                                    host: Some(
+                                        Domain(
+                                            "github.com",
+                                        ),
+                                    ),
+                                    port: None,
+                                    path: "/Kobzol",
+                                    query: None,
+                                    fragment: None,
+                                },
+                            },
+                            pr_number: PullRequestNumber(
+                                5,
+                            ),
+                            text: "hello bors",
                         },
-                        pr_number: PullRequestNumber(
-                            5,
-                        ),
-                        text: "hello bors",
-                    },
+                    ),
                 ),
             ),
         )
@@ -421,38 +444,40 @@ mod tests {
             @r###"
         Ok(
             GitHubWebhook(
-                Comment(
-                    PullRequestComment {
-                        repository: GithubRepoName {
-                            owner: "kobzol",
-                            name: "bors-kindergarten",
-                        },
-                        author: GithubUser {
-                            id: UserId(
-                                4539057,
-                            ),
-                            username: "Kobzol",
-                            html_url: Url {
-                                scheme: "https",
-                                cannot_be_a_base: false,
-                                username: "",
-                                password: None,
-                                host: Some(
-                                    Domain(
-                                        "github.com",
-                                    ),
-                                ),
-                                port: None,
-                                path: "/Kobzol",
-                                query: None,
-                                fragment: None,
+                Repository(
+                    Comment(
+                        PullRequestComment {
+                            repository: GithubRepoName {
+                                owner: "kobzol",
+                                name: "bors-kindergarten",
                             },
+                            author: GithubUser {
+                                id: UserId(
+                                    4539057,
+                                ),
+                                username: "Kobzol",
+                                html_url: Url {
+                                    scheme: "https",
+                                    cannot_be_a_base: false,
+                                    username: "",
+                                    password: None,
+                                    host: Some(
+                                        Domain(
+                                            "github.com",
+                                        ),
+                                    ),
+                                    port: None,
+                                    path: "/Kobzol",
+                                    query: None,
+                                    fragment: None,
+                                },
+                            },
+                            pr_number: PullRequestNumber(
+                                6,
+                            ),
+                            text: "review comment",
                         },
-                        pr_number: PullRequestNumber(
-                            6,
-                        ),
-                        text: "review comment",
-                    },
+                    ),
                 ),
             ),
         )
@@ -467,38 +492,40 @@ mod tests {
             @r###"
         Ok(
             GitHubWebhook(
-                Comment(
-                    PullRequestComment {
-                        repository: GithubRepoName {
-                            owner: "kobzol",
-                            name: "bors-kindergarten",
-                        },
-                        author: GithubUser {
-                            id: UserId(
-                                4539057,
-                            ),
-                            username: "Kobzol",
-                            html_url: Url {
-                                scheme: "https",
-                                cannot_be_a_base: false,
-                                username: "",
-                                password: None,
-                                host: Some(
-                                    Domain(
-                                        "github.com",
-                                    ),
-                                ),
-                                port: None,
-                                path: "/Kobzol",
-                                query: None,
-                                fragment: None,
+                Repository(
+                    Comment(
+                        PullRequestComment {
+                            repository: GithubRepoName {
+                                owner: "kobzol",
+                                name: "bors-kindergarten",
                             },
+                            author: GithubUser {
+                                id: UserId(
+                                    4539057,
+                                ),
+                                username: "Kobzol",
+                                html_url: Url {
+                                    scheme: "https",
+                                    cannot_be_a_base: false,
+                                    username: "",
+                                    password: None,
+                                    host: Some(
+                                        Domain(
+                                            "github.com",
+                                        ),
+                                    ),
+                                    port: None,
+                                    path: "/Kobzol",
+                                    query: None,
+                                    fragment: None,
+                                },
+                            },
+                            pr_number: PullRequestNumber(
+                                6,
+                            ),
+                            text: "Foo",
                         },
-                        pr_number: PullRequestNumber(
-                            6,
-                        ),
-                        text: "Foo",
-                    },
+                    ),
                 ),
             ),
         )
@@ -513,23 +540,25 @@ mod tests {
             @r###"
         Ok(
             GitHubWebhook(
-                WorkflowStarted(
-                    WorkflowStarted {
-                        repository: GithubRepoName {
-                            owner: "kobzol",
-                            name: "bors-kindergarten",
+                Repository(
+                    WorkflowStarted(
+                        WorkflowStarted {
+                            repository: GithubRepoName {
+                                owner: "kobzol",
+                                name: "bors-kindergarten",
+                            },
+                            name: "Workflow 2",
+                            branch: "automation/bors/try",
+                            commit_sha: CommitSha(
+                                "c9abcadf285659684c0975cead8bf982fa84e123",
+                            ),
+                            run_id: RunId(
+                                4900979074,
+                            ),
+                            workflow_type: Github,
+                            url: "https://github.com/Kobzol/bors-kindergarten/actions/runs/4900979074",
                         },
-                        name: "Workflow 2",
-                        branch: "automation/bors/try",
-                        commit_sha: CommitSha(
-                            "c9abcadf285659684c0975cead8bf982fa84e123",
-                        ),
-                        run_id: RunId(
-                            4900979074,
-                        ),
-                        workflow_type: Github,
-                        url: "https://github.com/Kobzol/bors-kindergarten/actions/runs/4900979074",
-                    },
+                    ),
                 ),
             ),
         )
@@ -544,21 +573,23 @@ mod tests {
             @r###"
         Ok(
             GitHubWebhook(
-                WorkflowCompleted(
-                    WorkflowCompleted {
-                        repository: GithubRepoName {
-                            owner: "kobzol",
-                            name: "bors-kindergarten",
+                Repository(
+                    WorkflowCompleted(
+                        WorkflowCompleted {
+                            repository: GithubRepoName {
+                                owner: "kobzol",
+                                name: "bors-kindergarten",
+                            },
+                            branch: "automation/bors/try",
+                            commit_sha: CommitSha(
+                                "c9abcadf285659684c0975cead8bf982fa84e123",
+                            ),
+                            run_id: RunId(
+                                4900979072,
+                            ),
+                            status: Failure,
                         },
-                        branch: "automation/bors/try",
-                        commit_sha: CommitSha(
-                            "c9abcadf285659684c0975cead8bf982fa84e123",
-                        ),
-                        run_id: RunId(
-                            4900979072,
-                        ),
-                        status: Failure,
-                    },
+                    ),
                 ),
             ),
         )
@@ -573,23 +604,25 @@ mod tests {
             @r###"
         Ok(
             GitHubWebhook(
-                WorkflowStarted(
-                    WorkflowStarted {
-                        repository: GithubRepoName {
-                            owner: "kobzol",
-                            name: "bors-kindergarten",
+                Repository(
+                    WorkflowStarted(
+                        WorkflowStarted {
+                            repository: GithubRepoName {
+                                owner: "kobzol",
+                                name: "bors-kindergarten",
+                            },
+                            name: "check",
+                            branch: "automation/bors/try-merge",
+                            commit_sha: CommitSha(
+                                "3d5258c8dd4fce72a4ea67387499fe69ea410928",
+                            ),
+                            run_id: RunId(
+                                13293850093,
+                            ),
+                            workflow_type: External,
+                            url: "https://github.com/Kobzol/bors-kindergarten/runs/13293850093",
                         },
-                        name: "check",
-                        branch: "automation/bors/try-merge",
-                        commit_sha: CommitSha(
-                            "3d5258c8dd4fce72a4ea67387499fe69ea410928",
-                        ),
-                        run_id: RunId(
-                            13293850093,
-                        ),
-                        workflow_type: External,
-                        url: "https://github.com/Kobzol/bors-kindergarten/runs/13293850093",
-                    },
+                    ),
                 ),
             ),
         )
