@@ -135,10 +135,6 @@ impl TestBorsState {
 
 #[async_trait]
 impl BorsState<Arc<TestRepositoryClient>> for TestBorsState {
-    fn is_comment_internal(&self, comment: &PullRequestComment) -> bool {
-        comment.author == test_bot_user()
-    }
-
     fn get_repo_state(&self, repo: &GithubRepoName) -> Option<Arc<TestRepositoryState>> {
         self.repos.get(repo).map(|repo| Arc::clone(repo))
     }
@@ -391,6 +387,10 @@ impl TestRepositoryClient {
 impl RepositoryClient for Arc<TestRepositoryClient> {
     fn repository(&self) -> &GithubRepoName {
         &self.name
+    }
+
+    async fn is_comment_internal(&self, comment: &PullRequestComment) -> anyhow::Result<bool> {
+        Ok(comment.author == test_bot_user())
     }
 
     async fn get_branch_sha(&self, name: &str) -> anyhow::Result<CommitSha> {
