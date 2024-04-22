@@ -15,6 +15,17 @@ pub enum BorsRepositoryEvent {
     CheckSuiteCompleted(CheckSuiteCompleted),
 }
 
+impl BorsRepositoryEvent {
+    pub fn repository(&self) -> &GithubRepoName {
+        match self {
+            BorsRepositoryEvent::Comment(comment) => &comment.repository,
+            BorsRepositoryEvent::WorkflowStarted(workflow) => &workflow.repository,
+            BorsRepositoryEvent::WorkflowCompleted(workflow) => &workflow.repository,
+            BorsRepositoryEvent::CheckSuiteCompleted(payload) => &payload.repository,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum BorsGlobalEvent {
     /// The configuration of some repository has been changed for the bot's Github App.

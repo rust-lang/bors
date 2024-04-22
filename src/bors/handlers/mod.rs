@@ -48,10 +48,10 @@ pub async fn handle_bors_repository_event<Client: RepositoryClient>(
     ctx: Arc<BorsContext>,
 ) -> anyhow::Result<()> {
     let db = Arc::clone(&ctx.db);
-    match event {
-        BorsRepositoryEvent::Comment(comment) => {
-            // We want to ignore comments made by this bot
-            if let Some(repo) = get_repo_state(state, &comment.repository) {
+    if let Some(repo) = get_repo_state(state, &event.repository()) {
+        match event {
+            BorsRepositoryEvent::Comment(comment) => {
+                // We want to ignore comments made by this bot
                 if repo.client.is_comment_internal(&comment).await? {
                     tracing::trace!(
                         "Ignoring comment {comment:?} because it was authored by this bot"
@@ -81,10 +81,8 @@ pub async fn handle_bors_repository_event<Client: RepositoryClient>(
                         .context("Cannot send comment reacting to an error")?;
                 }
             }
-        }
 
-        BorsRepositoryEvent::WorkflowStarted(payload) => {
-            if let Some(_) = get_repo_state(state, &payload.repository) {
+            BorsRepositoryEvent::WorkflowStarted(payload) => {
                 let span = tracing::info_span!(
                     "Workflow started",
                     repo = payload.repository.to_string(),
@@ -97,9 +95,7 @@ pub async fn handle_bors_repository_event<Client: RepositoryClient>(
                     span.log_error(error);
                 }
             }
-        }
-        BorsRepositoryEvent::WorkflowCompleted(payload) => {
-            if let Some(repo) = get_repo_state(state, &payload.repository) {
+            BorsRepositoryEvent::WorkflowCompleted(payload) => {
                 let span = tracing::info_span!(
                     "Workflow completed",
                     repo = payload.repository.to_string(),
@@ -112,9 +108,7 @@ pub async fn handle_bors_repository_event<Client: RepositoryClient>(
                     span.log_error(error);
                 }
             }
-        }
-        BorsRepositoryEvent::CheckSuiteCompleted(payload) => {
-            if let Some(repo) = get_repo_state(state, &payload.repository) {
+            BorsRepositoryEvent::CheckSuiteCompleted(payload) => {
                 let span = tracing::info_span!(
                     "Check suite completed",
                     repo = payload.repository.to_string(),
