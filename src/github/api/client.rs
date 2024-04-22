@@ -5,6 +5,7 @@ use octocrab::models::{Repository, RunId};
 use octocrab::{Error, Octocrab};
 use tracing::log;
 
+use crate::bors::event::PullRequestComment;
 use crate::bors::{CheckSuite, CheckSuiteStatus, Comment, RepositoryClient};
 use crate::config::{RepositoryConfig, CONFIG_FILE_PATH};
 use crate::github::api::operations::{merge_branches, set_branch_to_commit, MergeError};
@@ -40,6 +41,17 @@ impl GithubRepositoryClient {
 impl RepositoryClient for GithubRepositoryClient {
     fn repository(&self) -> &GithubRepoName {
         self.name()
+    }
+
+    /// Was the comment created by the bot?
+    async fn is_comment_internal(&self, comment: &PullRequestComment) -> anyhow::Result<bool> {
+        let app = self
+            .client
+            .current()
+            .app()
+            .await
+            .context("Could not load Github App")?;
+        Ok(comment.author.html_url == app.html_url)
     }
 
     /// Loads repository configuration from a file located at `[CONFIG_FILE_PATH]` in the main

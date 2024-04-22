@@ -24,6 +24,9 @@ pub use handlers::handle_bors_event;
 pub trait RepositoryClient: Send + Sync {
     fn repository(&self) -> &GithubRepoName;
 
+    /// Was the comment created by the bot?
+    async fn is_comment_internal(&self, comment: &PullRequestComment) -> anyhow::Result<bool>;
+
     /// Load repository config.
     async fn load_config(&self) -> anyhow::Result<RepositoryConfig>;
 
@@ -85,9 +88,6 @@ pub struct CheckSuite {
 /// It is behind a trait to allow easier mocking in tests.
 #[async_trait]
 pub trait BorsState<Client: RepositoryClient>: Send + Sync {
-    /// Was the comment created by the bot?
-    fn is_comment_internal(&self, comment: &PullRequestComment) -> bool;
-
     /// Get repository and database state for the given repository name.
     fn get_repo_state(&self, repo: &GithubRepoName) -> Option<Arc<RepositoryState<Client>>>;
 

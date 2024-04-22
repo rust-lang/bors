@@ -4,13 +4,12 @@ use std::sync::Arc;
 use anyhow::Context;
 use arc_swap::ArcSwap;
 use axum::async_trait;
-use octocrab::models::{App, AppId, InstallationRepositories, Repository};
+use octocrab::models::{AppId, InstallationRepositories, Repository};
 use octocrab::Octocrab;
 use secrecy::{ExposeSecret, SecretVec};
 
 use client::GithubRepositoryClient;
 
-use crate::bors::event::PullRequestComment;
 use crate::bors::{BorsState, RepositoryClient, RepositoryState};
 use crate::github::GithubRepoName;
 use crate::permissions::load_permissions;
@@ -32,7 +31,6 @@ fn base_github_url() -> &'static str {
 
 /// Provides access to managed GitHub repositories.
 pub struct GithubAppState {
-    app: App,
     client: Octocrab,
     repositories: ArcSwap<RepositoryMap>,
 }
@@ -48,15 +46,8 @@ impl GithubAppState {
             .build()
             .context("Could not create octocrab builder")?;
 
-        let app = client
-            .current()
-            .app()
-            .await
-            .context("Could not load Github App")?;
-
         let repositories = load_repositories(&client).await?;
         Ok(GithubAppState {
-            app,
             client,
             repositories: ArcSwap::new(Arc::new(repositories)),
         })
@@ -167,10 +158,6 @@ async fn create_repo_state(
 
 #[async_trait]
 impl BorsState<GithubRepositoryClient> for GithubAppState {
-    fn is_comment_internal(&self, comment: &PullRequestComment) -> bool {
-        comment.author.html_url == self.app.html_url
-    }
-
     fn get_repo_state(
         &self,
         repo: &GithubRepoName,

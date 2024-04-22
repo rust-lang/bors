@@ -33,12 +33,14 @@ pub async fn handle_bors_event<Client: RepositoryClient>(
     match event {
         BorsEvent::Comment(comment) => {
             // We want to ignore comments made by this bot
-            if state.is_comment_internal(&comment) {
-                tracing::trace!("Ignoring comment {comment:?} because it was authored by this bot");
-                return Ok(());
-            }
-
             if let Some(repo) = get_repo_state(state, &comment.repository) {
+                if repo.client.is_comment_internal(&comment).await? {
+                    tracing::trace!(
+                        "Ignoring comment {comment:?} because it was authored by this bot"
+                    );
+                    return Ok(());
+                }
+
                 let span = tracing::info_span!(
                     "Comment",
                     pr = format!("{}#{}", comment.repository, comment.pr_number),
