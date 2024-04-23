@@ -3,14 +3,13 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use arc_swap::ArcSwap;
-use axum::async_trait;
 use octocrab::models::{App, AppId, InstallationRepositories, Repository};
 use octocrab::Octocrab;
 use secrecy::{ExposeSecret, SecretVec};
 
 use client::GithubRepositoryClient;
 
-use crate::bors::{BorsState, RepositoryClient, RepositoryState};
+use crate::bors::{RepositoryClient, RepositoryState};
 use crate::github::GithubRepoName;
 use crate::permissions::load_permissions;
 
@@ -19,39 +18,24 @@ pub(crate) mod operations;
 
 type GithubRepositoryState = RepositoryState<GithubRepositoryClient>;
 
-type RepositoryMap = HashMap<GithubRepoName, Arc<GithubRepositoryState>>;
+type GithubRepositoryMap = HashMap<GithubRepoName, Arc<GithubRepositoryState>>;
 
 fn base_github_html_url() -> &'static str {
     "https://github.com"
 }
 
-/// Provides access to managed GitHub repositories.
-pub struct GithubAppState {
-    client: Octocrab,
-    repositories: ArcSwap<RepositoryMap>,
-}
+pub fn create_github_client(app_id: AppId, private_key: SecretVec<u8>) -> anyhow::Result<Octocrab> {
+    let key = jsonwebtoken::EncodingKey::from_rsa_pem(private_key.expose_secret().as_ref())
+        .context("Could not encode private key")?;
 
-impl GithubAppState {
-    /// Loads repositories managed by the Bors GitHub app with the given ID.
-    pub async fn load(app_id: AppId, private_key: SecretVec<u8>) -> anyhow::Result<GithubAppState> {
-        let key = jsonwebtoken::EncodingKey::from_rsa_pem(private_key.expose_secret().as_ref())
-            .context("Could not encode private key")?;
-
-        let client = Octocrab::builder()
-            .app(app_id, key)
-            .build()
-            .context("Could not create octocrab builder")?;
-
-        let repositories = load_repositories(&client).await?;
-        Ok(GithubAppState {
-            client,
-            repositories: ArcSwap::new(Arc::new(repositories)),
-        })
-    }
+    Octocrab::builder()
+        .app(app_id, key)
+        .build()
+        .context("Could not create octocrab builder")
 }
 
 /// Loads repositories that are connected to the given GitHub App client.
-pub async fn load_repositories(client: &Octocrab) -> anyhow::Result<RepositoryMap> {
+pub async fn load_repositories(client: &Octocrab) -> anyhow::Result<GithubRepositoryMap> {
     let installations = client
         .apps()
         .installations()
@@ -178,28 +162,4 @@ async fn create_repo_state(
         config: ArcSwap::new(Arc::new(config)),
         permissions: ArcSwap::new(Arc::new(permissions)),
     })
-}
-
-#[async_trait]
-impl BorsState<GithubRepositoryClient> for GithubAppState {
-    fn get_repo_state(
-        &self,
-        repo: &GithubRepoName,
-    ) -> Option<Arc<RepositoryState<GithubRepositoryClient>>> {
-        self.repositories
-            .load()
-            .get(repo)
-            .map(|repo| Arc::clone(&repo))
-    }
-
-    fn get_all_repos(&self) -> Vec<Arc<RepositoryState<GithubRepositoryClient>>> {
-        self.repositories.load().values().cloned().collect()
-    }
-
-    /// Re-download information about repositories connected to this GitHub app.
-    async fn reload_repositories(&self) -> anyhow::Result<()> {
-        self.repositories
-            .store(Arc::new(load_repositories(&self.client).await?));
-        Ok(())
-    }
 }

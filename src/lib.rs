@@ -6,14 +6,12 @@ mod github;
 mod permissions;
 mod utils;
 
-pub use bors::{
-    event::BorsEvent, event::BorsGlobalEvent, event::BorsRepositoryEvent, BorsContext, BorsState,
-    CommandParser,
-};
+pub use bors::{event::BorsGlobalEvent, event::BorsRepositoryEvent, BorsContext, CommandParser};
 pub use database::SeaORMClient;
 pub use github::{
+    api::create_github_client,
     server::{create_app, create_bors_process, ServerState},
-    GithubAppState, WebhookSecret,
+    WebhookSecret,
 };
 
 #[cfg(test)]
