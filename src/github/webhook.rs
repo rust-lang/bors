@@ -674,8 +674,13 @@ mod tests {
             HeaderValue::from_str(&signature).unwrap(),
         );
 
-        let (tx, _) = mpsc::channel(1024);
-        let server_ref = ServerStateRef::new(ServerState::new(tx, WebhookSecret::new(secret)));
+        let (repository_tx, _) = mpsc::channel(1024);
+        let (global_tx, _) = mpsc::channel(1024);
+        let server_ref = ServerStateRef::new(ServerState::new(
+            repository_tx,
+            global_tx,
+            WebhookSecret::new(secret),
+        ));
         GitHubWebhook::from_request(request, &server_ref).await
     }
 }

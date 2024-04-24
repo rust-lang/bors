@@ -16,7 +16,8 @@ use crate::bors::event::{
     WorkflowStarted,
 };
 use crate::bors::{
-    handle_bors_event, BorsContext, CheckSuite, CommandParser, Comment, RepositoryState,
+    handle_bors_global_event, handle_bors_repository_event, BorsContext, CheckSuite, CommandParser,
+    Comment, RepositoryState,
 };
 use crate::bors::{BorsState, RepositoryClient};
 use crate::config::RepositoryConfig;
@@ -67,16 +68,21 @@ impl TestBorsState {
 
     /// Execute an event.
     pub async fn event(&self, event: BorsEvent) {
-        handle_bors_event(
-            event,
-            Arc::new(self.clone()),
-            Arc::new(BorsContext::new(
-                CommandParser::new("@bors".to_string()),
-                Arc::clone(&self.db) as Arc<dyn DbClient>,
-            )),
-        )
-        .await
-        .unwrap();
+        let state = Arc::new(self.clone());
+        let ctx = Arc::new(BorsContext::new(
+            CommandParser::new("@bors".to_string()),
+            Arc::clone(&self.db) as Arc<dyn DbClient>,
+        ));
+        match event {
+            BorsEvent::Repository(event) => {
+                handle_bors_repository_event(event, state, ctx)
+                    .await
+                    .unwrap();
+            }
+            BorsEvent::Global(event) => {
+                handle_bors_global_event(event, state, ctx).await.unwrap();
+            }
+        }
     }
 
     pub async fn comment<T: Into<PullRequestComment>>(&self, comment: T) {

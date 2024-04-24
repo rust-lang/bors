@@ -5,8 +5,8 @@ use std::time::Duration;
 
 use anyhow::Context;
 use bors::{
-    create_app, create_bors_process, BorsContext, BorsEvent, BorsGlobalEvent, CommandParser,
-    GithubAppState, SeaORMClient, ServerState, WebhookSecret,
+    create_app, create_bors_process, BorsContext, BorsGlobalEvent, CommandParser, GithubAppState,
+    SeaORMClient, ServerState, WebhookSecret,
 };
 use clap::Parser;
 use sea_orm::Database;
@@ -79,19 +79,21 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
         ))
         .context("Cannot load GitHub repository state")?;
     let ctx = BorsContext::new(CommandParser::new(opts.cmd_prefix), Arc::new(db));
-    let (tx, bors_process) = create_bors_process(state, ctx);
+    let (repository_tx, global_tx, bors_process) = create_bors_process(state, ctx);
 
-    let refresh_tx = tx.clone();
+    let refresh_tx = global_tx.clone();
     let refresh_process = async move {
         loop {
             tokio::time::sleep(PERIODIC_REFRESH).await;
-            refresh_tx
-                .send(BorsEvent::Global(BorsGlobalEvent::Refresh))
-                .await?;
+            refresh_tx.send(BorsGlobalEvent::Refresh).await?;
         }
     };
 
-    let state = ServerState::new(tx, WebhookSecret::new(opts.webhook_secret));
+    let state = ServerState::new(
+        repository_tx,
+        global_tx,
+        WebhookSecret::new(opts.webhook_secret),
+    );
     let server_process = webhook_server(state);
 
     let fut = async move {

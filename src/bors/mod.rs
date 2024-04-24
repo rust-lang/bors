@@ -17,7 +17,7 @@ use crate::permissions::UserPermissions;
 pub use command::CommandParser;
 pub use comment::Comment;
 pub use context::BorsContext;
-pub use handlers::handle_bors_event;
+pub use handlers::{handle_bors_global_event, handle_bors_repository_event};
 
 /// Provides functionality for working with a remote repository.
 #[async_trait]
