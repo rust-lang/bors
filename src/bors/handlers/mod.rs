@@ -3,7 +3,7 @@ use std::sync::Arc;
 use tracing::Instrument;
 
 use crate::bors::command::{BorsCommand, CommandParseError};
-use crate::bors::event::{BorsRepositoryEvent, PullRequestComment};
+use crate::bors::event::{BorsGlobalEvent, BorsRepositoryEvent, PullRequestComment};
 use crate::bors::handlers::help::command_help;
 use crate::bors::handlers::ping::command_ping;
 use crate::bors::handlers::refresh::refresh_repository;
@@ -16,8 +16,6 @@ use crate::database::DbClient;
 use crate::github::GithubRepoName;
 use crate::utils::logging::LogError;
 
-use super::event::{BorsEvent, BorsGlobalEvent};
-
 mod help;
 mod labels;
 mod ping;
@@ -25,23 +23,7 @@ mod refresh;
 mod trybuild;
 mod workflow;
 
-/// This function executes a single BORS event, it is the main execution function of the bot.
-pub async fn handle_bors_event<Client: RepositoryClient>(
-    event: BorsEvent,
-    state: Arc<dyn BorsState<Client>>,
-    ctx: Arc<BorsContext>,
-) -> anyhow::Result<()> {
-    match event {
-        BorsEvent::Repository(event) => {
-            handle_bors_repository_event(event, state, ctx).await?;
-        }
-        BorsEvent::Global(event) => {
-            handle_bors_global_event(event, state, ctx).await?;
-        }
-    }
-    Ok(())
-}
-
+/// This function executes a single BORS repository event
 pub async fn handle_bors_repository_event<Client: RepositoryClient>(
     event: BorsRepositoryEvent,
     state: Arc<dyn BorsState<Client>>,
@@ -128,6 +110,7 @@ pub async fn handle_bors_repository_event<Client: RepositoryClient>(
     Ok(())
 }
 
+/// This function executes a single BORS global event
 pub async fn handle_bors_global_event<Client: RepositoryClient>(
     event: BorsGlobalEvent,
     state: Arc<dyn BorsState<Client>>,

@@ -1,9 +1,10 @@
 use crate::bors::event::BorsEvent;
-use crate::bors::{handle_bors_event, BorsContext, BorsState};
+use crate::bors::{handle_bors_global_event, handle_bors_repository_event, BorsContext};
 use crate::github::api::GithubAppState;
 use crate::github::webhook::GitHubWebhook;
 use crate::github::webhook::WebhookSecret;
 use crate::utils::logging::LogError;
+use crate::{BorsGlobalEvent, BorsRepositoryEvent};
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
@@ -17,14 +18,20 @@ use tracing::Instrument;
 
 /// Shared server state for all axum handlers.
 pub struct ServerState {
-    webhook_sender: WebhookSender,
+    repository_event_queue: mpsc::Sender<BorsRepositoryEvent>,
+    global_event_queue: mpsc::Sender<BorsGlobalEvent>,
     webhook_secret: WebhookSecret,
 }
 
 impl ServerState {
-    pub fn new(webhook_sender: WebhookSender, webhook_secret: WebhookSecret) -> Self {
+    pub fn new(
+        repository_event_queue: mpsc::Sender<BorsRepositoryEvent>,
+        global_event_queue: mpsc::Sender<BorsGlobalEvent>,
+        webhook_secret: WebhookSecret,
+    ) -> Self {
         Self {
-            webhook_sender,
+            repository_event_queue,
+            global_event_queue,
             webhook_secret,
         }
     }
@@ -48,41 +55,88 @@ pub async fn github_webhook_handler(
     State(state): State<ServerStateRef>,
     GitHubWebhook(event): GitHubWebhook,
 ) -> impl IntoResponse {
-    match state.webhook_sender.send(event).await {
-        Ok(_) => (StatusCode::OK, ""),
-        Err(err) => {
-            tracing::error!("Could not send webhook event: {err:?}");
-            (StatusCode::INTERNAL_SERVER_ERROR, "")
-        }
+    match event {
+        BorsEvent::Global(e) => match state.global_event_queue.send(e).await {
+            Ok(_) => (StatusCode::OK, ""),
+            Err(err) => {
+                tracing::error!("Could not send webhook global event: {err:?}");
+                (StatusCode::INTERNAL_SERVER_ERROR, "")
+            }
+        },
+        BorsEvent::Repository(e) => match state.repository_event_queue.send(e).await {
+            Ok(_) => (StatusCode::OK, ""),
+            Err(err) => {
+                tracing::error!("Could not send webhook repository event: {err:?}");
+                (StatusCode::INTERNAL_SERVER_ERROR, "")
+            }
+        },
     }
 }
-
-type WebhookSender = mpsc::Sender<BorsEvent>;
 
 /// Creates a future with a Bors process that continuously receives webhook events and reacts to
 /// them.
 pub fn create_bors_process(
     state: GithubAppState,
     ctx: BorsContext,
-) -> (WebhookSender, impl Future<Output = ()>) {
-    let (tx, mut rx) = mpsc::channel::<BorsEvent>(1024);
+) -> (
+    mpsc::Sender<BorsRepositoryEvent>,
+    mpsc::Sender<BorsGlobalEvent>,
+    impl Future<Output = ()>,
+) {
+    let (repository_tx, repository_rx) = mpsc::channel::<BorsRepositoryEvent>(1024);
+    let (global_tx, global_rx) = mpsc::channel::<BorsGlobalEvent>(1024);
 
     let service = async move {
-        let state: Arc<dyn BorsState<_>> = Arc::new(state);
+        let state = Arc::new(state);
         let ctx = Arc::new(ctx);
-        while let Some(event) = rx.recv().await {
-            let state = state.clone();
-            let ctx = ctx.clone();
-
-            let span = tracing::info_span!("Event");
-            tracing::debug!("Received event: {event:#?}");
-            if let Err(error) = handle_bors_event(event, state, ctx)
-                .instrument(span.clone())
-                .await
-            {
-                span.log_error(error);
+        tokio::select! {
+            _ = consume_repository_events(state.clone(), ctx.clone(), repository_rx) => {
+                tracing::warn!("Repository event handling process has ended");
+            }
+            _ = consume_global_events(state.clone(), ctx.clone(), global_rx) => {
+                tracing::warn!("Global event handling process has ended");
             }
         }
     };
-    (tx, service)
+    (repository_tx, global_tx, service)
+}
+
+async fn consume_repository_events(
+    state: Arc<GithubAppState>,
+    ctx: Arc<BorsContext>,
+    mut repository_rx: mpsc::Receiver<BorsRepositoryEvent>,
+) {
+    while let Some(event) = repository_rx.recv().await {
+        let state = state.clone();
+        let ctx = ctx.clone();
+
+        let span = tracing::info_span!("RepositoryEvent");
+        tracing::debug!("Received repository event: {event:#?}");
+        if let Err(error) = handle_bors_repository_event(event, state, ctx)
+            .instrument(span.clone())
+            .await
+        {
+            span.log_error(error);
+        }
+    }
+}
+
+async fn consume_global_events(
+    state: Arc<GithubAppState>,
+    ctx: Arc<BorsContext>,
+    mut global_rx: mpsc::Receiver<BorsGlobalEvent>,
+) {
+    while let Some(event) = global_rx.recv().await {
+        let state = state.clone();
+        let ctx = ctx.clone();
+
+        let span = tracing::info_span!("GlobalEvent");
+        tracing::debug!("Received global event: {event:#?}");
+        if let Err(error) = handle_bors_global_event(event, state, ctx)
+            .instrument(span.clone())
+            .await
+        {
+            span.log_error(error);
+        }
+    }
 }
