@@ -72,7 +72,8 @@ impl TestBorsState {
                 Arc::clone(&self.db) as Arc<dyn DbClient>,
                 Arc::new(self.default_client.clone()),
             )
-            .await,
+            .await
+            .unwrap(),
         );
         match event {
             BorsEvent::Repository(event) => {

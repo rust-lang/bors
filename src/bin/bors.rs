@@ -75,11 +75,13 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
         create_github_client(opts.app_id.into(), opts.private_key.into_bytes().into())
     })?;
 
-    let ctx = runtime.block_on(BorsContext::new(
-        CommandParser::new(opts.cmd_prefix),
-        Arc::new(db),
-        Arc::new(client),
-    ));
+    let ctx = runtime
+        .block_on(BorsContext::new(
+            CommandParser::new(opts.cmd_prefix),
+            Arc::new(db),
+            Arc::new(client),
+        ))
+        .context("Cannot initialize bors context")?;
     let (repository_tx, global_tx, bors_process) = create_bors_process(ctx);
 
     let refresh_tx = global_tx.clone();
