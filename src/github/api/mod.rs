@@ -73,58 +73,72 @@ pub async fn load_repositories(client: &Octocrab) -> anyhow::Result<RepositoryMa
 
     let mut repositories = HashMap::default();
     for installation in installations {
-        if let Some(ref repositories_url) = installation.repositories_url {
-            let installation_client = client.installation(installation.id);
+        let installation_client = client.installation(installation.id);
 
-            match installation_client
-                .get::<InstallationRepositories, _, ()>(repositories_url, None)
+        let repos = match load_installation_repos(&installation_client).await {
+            Ok(repos) => repos,
+            Err(error) => {
+                tracing::error!(
+                    "Could not load repositories of installation {}: {error:?}",
+                    installation.id
+                );
+                continue;
+            }
+        };
+        for repo in repos {
+            match create_repo_state(app.clone(), installation_client.clone(), repo.clone())
                 .await
-            {
-                Ok(repos) => {
-                    for repo in repos.repositories {
-                        match create_repo_state(
-                            app.clone(),
-                            installation_client.clone(),
-                            repo.clone(),
-                        )
-                        .await
-                        .map_err(|error| {
-                            anyhow::anyhow!(
-                                "Cannot load repository {:?}: {error:?}",
-                                repo.full_name
-                            )
-                        }) {
-                            Ok(repo_state) => {
-                                tracing::info!("Loaded repository {}", repo_state.repository);
+                .map_err(|error| {
+                    anyhow::anyhow!("Cannot load repository {:?}: {error:?}", repo.full_name)
+                }) {
+                Ok(repo_state) => {
+                    tracing::info!("Loaded repository {}", repo_state.repository);
 
-                                if let Some(existing) = repositories
-                                    .insert(repo_state.repository.clone(), Arc::new(repo_state))
-                                {
-                                    return Err(anyhow::anyhow!(
-                                        "Repository {} found in multiple installations!",
-                                        existing.repository
-                                    ));
-                                }
-                            }
-                            Err(error) => {
-                                tracing::error!(
-                                    "Could not load repository {}: {error:?}",
-                                    repo.full_name.unwrap_or_default()
-                                );
-                            }
-                        }
+                    if let Some(existing) =
+                        repositories.insert(repo_state.repository.clone(), Arc::new(repo_state))
+                    {
+                        return Err(anyhow::anyhow!(
+                            "Repository {} found in multiple installations!",
+                            existing.repository
+                        ));
                     }
                 }
                 Err(error) => {
                     tracing::error!(
-                        "Could not load repositories of installation {}: {error:?}",
-                        installation.id
+                        "Could not load repository {}: {error:?}",
+                        repo.full_name.unwrap_or_default()
                     );
                 }
-            };
+            }
         }
     }
     Ok(repositories)
+}
+
+/// Load all repositories of a single GitHub app installation.
+/// The installation endpoint uses a weird pagination API, so we cannot use octocrab::Page directly.
+async fn load_installation_repos(client: &Octocrab) -> anyhow::Result<Vec<Repository>> {
+    let first_page = client
+        .get::<InstallationRepositories, _, _>(
+            "/installation/repositories?per_page=100",
+            None::<&()>,
+        )
+        .await?;
+    let mut repos = first_page.repositories;
+    let mut page = 2;
+    while repos.len() < first_page.total_count as usize {
+        repos.extend(
+            client
+                .get::<InstallationRepositories, _, _>(
+                    format!("/installation/repositories?per_page=100&page={page}"),
+                    None::<&()>,
+                )
+                .await?
+                .repositories,
+        );
+        page += 1;
+    }
+    Ok(repos)
 }
 
 async fn create_repo_state(
