@@ -51,7 +51,6 @@ sha2 = "0.10"
 hmac = "0.12"
 hex = "0.4"
 secrecy = "0.8"
-base64 = "0.22.0"
 
 # Database
 sqlx = { version = "0.7.4", features = ["runtime-tokio-rustls", "sqlite", "postgres"] }
