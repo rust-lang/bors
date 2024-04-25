@@ -71,8 +71,9 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
     let db = runtime
         .block_on(initialize_db(&opts.db))
         .context("Cannot initialize database")?;
-
-    let client = create_github_client(opts.app_id.into(), opts.private_key.into_bytes().into())?;
+    let client = runtime.block_on(async move {
+        create_github_client(opts.app_id.into(), opts.private_key.into_bytes().into())
+    })?;
 
     let ctx = runtime.block_on(BorsContext::new(
         CommandParser::new(opts.cmd_prefix),
