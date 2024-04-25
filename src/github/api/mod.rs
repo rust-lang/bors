@@ -66,6 +66,11 @@ pub async fn load_repositories(client: &Octocrab) -> anyhow::Result<RepositoryMa
     let mut repositories = HashMap::default();
     for installation in installations {
         if let Some(ref repositories_url) = installation.repositories_url {
+            let repositories_url = url::Url::parse(repositories_url)
+                .map_err(|error| anyhow::anyhow!("Invalid repositories URL: {error:?}"))?;
+            // Octocrab only set auth token for relative URLs
+            // https://github.com/XAMPPRocky/octocrab/blob/7e280be901c378a1e162c37f909ea6590c6ff4ba/src/lib.rs#L1545
+            let repositories_url = repositories_url.path();
             let installation_client = client.installation(installation.id);
 
             match installation_client
