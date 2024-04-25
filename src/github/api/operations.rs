@@ -1,4 +1,3 @@
-use crate::github::api::base_github_url;
 use http::StatusCode;
 use octocrab::params::repos::Reference;
 use thiserror::Error;
@@ -42,19 +41,7 @@ pub async fn merge_branches(
     commit_message: &str,
 ) -> Result<CommitSha, MergeError> {
     let client = repo.client();
-    let merge_url = repo
-        .repository
-        .merges_url
-        .as_ref()
-        .map(|url| url.to_string())
-        .unwrap_or_else(|| {
-            format!(
-                "{}/repos/{}/{}/merges",
-                base_github_url(),
-                repo.name().owner,
-                repo.name().name
-            )
-        });
+    let merge_url = format!("/repos/{}/{}/merges", repo.name().owner, repo.name().name);
 
     let request = MergeRequest {
         base: base_ref,
@@ -150,8 +137,7 @@ async fn update_branch(
     sha: &CommitSha,
 ) -> Result<(), BranchUpdateError> {
     let url = format!(
-        "{}/repos/{}/{}/git/refs/{}",
-        base_github_url(),
+        "/repos/{}/{}/git/refs/{}",
         repo.name().owner(),
         repo.name().name(),
         Reference::Branch(branch_name.clone()).ref_url()
