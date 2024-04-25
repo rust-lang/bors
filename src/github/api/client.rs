@@ -1,6 +1,5 @@
 use anyhow::Context;
 use axum::async_trait;
-use base64::Engine;
 use octocrab::models::{App, Repository, RunId};
 use octocrab::{Error, Octocrab};
 use tracing::log;
@@ -66,15 +65,12 @@ impl RepositoryClient for GithubRepositoryClient {
                 )
             })?;
 
-        let engine = base64::engine::general_purpose::STANDARD;
         response
             .take_items()
             .into_iter()
             .next()
-            .and_then(|content| content.content)
+            .and_then(|content| content.decoded_content())
             .ok_or_else(|| anyhow::anyhow!("Configuration file not found"))
-            .and_then(|content| Ok(engine.decode(content.trim())?))
-            .and_then(|content| Ok(String::from_utf8(content)?))
             .and_then(|content| {
                 let config: RepositoryConfig = toml::from_str(&content).map_err(|error| {
                     anyhow::anyhow!("Could not deserialize repository config: {error:?}")
