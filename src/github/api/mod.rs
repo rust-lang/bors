@@ -4,7 +4,7 @@ use std::sync::Arc;
 use anyhow::Context;
 use arc_swap::ArcSwap;
 use axum::async_trait;
-use octocrab::models::{AppId, InstallationRepositories, Repository};
+use octocrab::models::{App, AppId, InstallationRepositories, Repository};
 use octocrab::Octocrab;
 use secrecy::{ExposeSecret, SecretVec};
 
@@ -63,6 +63,14 @@ pub async fn load_repositories(client: &Octocrab) -> anyhow::Result<RepositoryMa
         .await
         .context("Could not load app installations")?;
 
+    // installation client can not be used to load current app
+    // https://docs.github.com/en/rest/apps/apps?apiVersion=2022-11-28#get-the-authenticated-app
+    let app = client
+        .current()
+        .app()
+        .await
+        .context("Could not load Github App")?;
+
     let mut repositories = HashMap::default();
     for installation in installations {
         if let Some(ref repositories_url) = installation.repositories_url {
@@ -74,14 +82,18 @@ pub async fn load_repositories(client: &Octocrab) -> anyhow::Result<RepositoryMa
             {
                 Ok(repos) => {
                     for repo in repos.repositories {
-                        match create_repo_state(installation_client.clone(), repo.clone())
-                            .await
-                            .map_err(|error| {
-                                anyhow::anyhow!(
-                                    "Cannot load repository {:?}: {error:?}",
-                                    repo.full_name
-                                )
-                            }) {
+                        match create_repo_state(
+                            app.clone(),
+                            installation_client.clone(),
+                            repo.clone(),
+                        )
+                        .await
+                        .map_err(|error| {
+                            anyhow::anyhow!(
+                                "Cannot load repository {:?}: {error:?}",
+                                repo.full_name
+                            )
+                        }) {
                             Ok(repo_state) => {
                                 tracing::info!("Loaded repository {}", repo_state.repository);
 
@@ -116,6 +128,7 @@ pub async fn load_repositories(client: &Octocrab) -> anyhow::Result<RepositoryMa
 }
 
 async fn create_repo_state(
+    app: App,
     repo_client: Octocrab,
     repo: Repository,
 ) -> anyhow::Result<GithubRepositoryState> {
@@ -126,11 +139,6 @@ async fn create_repo_state(
     let name = GithubRepoName::new(&owner.login, &repo.name);
     tracing::info!("Found repository {name}");
 
-    let app = repo_client
-        .current()
-        .app()
-        .await
-        .context("Could not load Github App")?;
     let client = GithubRepositoryClient {
         app,
         client: repo_client,
