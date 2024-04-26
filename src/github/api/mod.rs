@@ -25,10 +25,6 @@ fn base_github_html_url() -> &'static str {
     "https://github.com"
 }
 
-fn base_github_url() -> &'static str {
-    "https://api.github.com"
-}
-
 /// Provides access to managed GitHub repositories.
 pub struct GithubAppState {
     client: Octocrab,

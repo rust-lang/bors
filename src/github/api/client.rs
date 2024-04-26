@@ -7,8 +7,8 @@ use tracing::log;
 use crate::bors::event::PullRequestComment;
 use crate::bors::{CheckSuite, CheckSuiteStatus, Comment, RepositoryClient};
 use crate::config::{RepositoryConfig, CONFIG_FILE_PATH};
+use crate::github::api::base_github_html_url;
 use crate::github::api::operations::{merge_branches, set_branch_to_commit, MergeError};
-use crate::github::api::{base_github_html_url, base_github_url};
 use crate::github::{Branch, CommitSha, GithubRepoName, PullRequest, PullRequestNumber};
 
 /// Provides access to a single app installation (repository) using the GitHub API.
@@ -85,8 +85,7 @@ impl RepositoryClient for GithubRepositoryClient {
             .client
             .get(
                 format!(
-                    "{}/repos/{}/{}/branches/{name}",
-                    base_github_url(),
+                    "/repos/{}/{}/branches/{name}",
                     self.repo_name.owner(),
                     self.repo_name.name(),
                 )
@@ -153,8 +152,7 @@ impl RepositoryClient for GithubRepositoryClient {
             .client
             .get(
                 format!(
-                    "{}/repos/{}/{}/commits/{}/check-suites",
-                    base_github_url(),
+                    "/repos/{}/{}/commits/{}/check-suites",
                     self.repo_name.owner(),
                     self.repo_name.name(),
                     sha.0
