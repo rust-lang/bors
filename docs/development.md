@@ -58,7 +58,7 @@ One-time setup:
   - Give it permissions for `Actions` (r/w), `Checks` (r), `Commit statuses` (r), `Contents` (r/w), `Issues` (r/w) and
   `Pull requests` (r/w).
   - Subscribe it to webhook events `Check suite`, `Check run`, `Issue comment`, `Issues`, `Pull request`,
-    `Pull request review` and `Pull request review comment`.
+    `Pull request review`, `Pull request review comment` and `Workflow run`.
 - Install your GitHub app on some test repository where you want to test bors.
   - Don't forget to configure `rust-bors.toml` in the root of the repository, and also some CI checks.
 
