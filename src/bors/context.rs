@@ -1,7 +1,8 @@
-use arc_swap::ArcSwap;
-
 use crate::{bors::command::CommandParser, database::DbClient, github::GithubRepoName};
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::HashMap,
+    sync::{Arc, RwLock},
+};
 
 use super::{RepositoryClient, RepositoryLoader, RepositoryState};
 
@@ -9,7 +10,7 @@ pub struct BorsContext<Client: RepositoryClient> {
     pub parser: CommandParser,
     pub db: Arc<dyn DbClient>,
     pub repository_loader: Arc<dyn RepositoryLoader<Client>>,
-    pub repositories: ArcSwap<HashMap<GithubRepoName, Arc<RepositoryState<Client>>>>,
+    pub repositories: RwLock<HashMap<GithubRepoName, Arc<RepositoryState<Client>>>>,
 }
 
 impl<Client: RepositoryClient> BorsContext<Client> {
@@ -21,7 +22,7 @@ impl<Client: RepositoryClient> BorsContext<Client> {
         // this unwrap is making me nervous, but if lhe repos loading
         // fails we might as well restart the bot
         let repositories = global_client.load_repositories().await?;
-        let repositories = ArcSwap::new(Arc::new(repositories));
+        let repositories = RwLock::new(repositories);
         Ok(Self {
             parser,
             db,

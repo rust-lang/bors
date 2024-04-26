@@ -30,7 +30,8 @@ pub async fn handle_bors_repository_event<Client: RepositoryClient>(
     let db = Arc::clone(&ctx.db);
     let Some(repo) = ctx
         .repositories
-        .load()
+        .read()
+        .unwrap()
         .get(event.repository())
         .map(Arc::clone)
     else {
@@ -125,7 +126,9 @@ pub async fn handle_bors_global_event<Client: RepositoryClient>(
 
             match ctx.repository_loader.load_repositories().await {
                 Ok(repos) => {
-                    ctx.repositories.store(Arc::new(repos));
+                    let mut repositories = ctx.repositories.write().unwrap();
+                    // TODO: keep old repos in case of repo loading failure
+                    *repositories = repos;
                 }
                 Err(error) => {
                     span.log_error(error);
@@ -136,7 +139,7 @@ pub async fn handle_bors_global_event<Client: RepositoryClient>(
         BorsGlobalEvent::Refresh => {
             let span = tracing::info_span!("Refresh");
             let repos: Vec<Arc<RepositoryState<Client>>> =
-                ctx.repositories.load().values().cloned().collect();
+                ctx.repositories.read().unwrap().values().cloned().collect();
             futures::future::join_all(repos.into_iter().map(|repo| {
                 let repo = Arc::clone(&repo);
                 async {
