@@ -123,7 +123,7 @@ pub async fn handle_bors_global_event<Client: RepositoryClient>(
         BorsGlobalEvent::InstallationsChanged => {
             let span = tracing::info_span!("Repository reload").entered();
 
-            match ctx.global_client.load_repositories().await {
+            match ctx.repository_loader.load_repositories().await {
                 Ok(repos) => {
                     ctx.repositories.store(Arc::new(repos));
                 }

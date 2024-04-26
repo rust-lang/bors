@@ -19,7 +19,7 @@ use crate::bors::{
     handle_bors_global_event, handle_bors_repository_event, BorsContext, CheckSuite, CommandParser,
     Comment, RepositoryState,
 };
-use crate::bors::{GlobalClient, RepositoryClient};
+use crate::bors::{RepositoryClient, RepositoryLoader};
 use crate::config::RepositoryConfig;
 use crate::database::{DbClient, WorkflowStatus};
 use crate::github::{
@@ -260,7 +260,7 @@ impl ClientBuilder {
 }
 
 #[async_trait]
-impl GlobalClient<Arc<TestRepositoryClient>> for Arc<TestRepositoryClient> {
+impl RepositoryLoader<Arc<TestRepositoryClient>> for Arc<TestRepositoryClient> {
     async fn load_repositories(
         &self,
     ) -> anyhow::Result<HashMap<GithubRepoName, Arc<TestRepositoryState>>> {

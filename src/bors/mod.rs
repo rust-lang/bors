@@ -74,7 +74,7 @@ pub trait RepositoryClient: Send + Sync {
 /// Temporary trait to sastify the test mocking.
 /// TODO: Remove this trait once we move to mock REST API call.
 #[async_trait]
-pub trait GlobalClient<Client: RepositoryClient>: Send + Sync {
+pub trait RepositoryLoader<Client: RepositoryClient>: Send + Sync {
     /// Load state of repositories.
     async fn load_repositories(
         &self,

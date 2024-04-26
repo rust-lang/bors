@@ -9,7 +9,7 @@ use tracing::log;
 
 use crate::bors::event::PullRequestComment;
 use crate::bors::{
-    CheckSuite, CheckSuiteStatus, Comment, GlobalClient, RepositoryClient, RepositoryState,
+    CheckSuite, CheckSuiteStatus, Comment, RepositoryClient, RepositoryLoader, RepositoryState,
 };
 use crate::config::{RepositoryConfig, CONFIG_FILE_PATH};
 use crate::github::api::base_github_html_url;
@@ -271,7 +271,7 @@ impl RepositoryClient for GithubRepositoryClient {
 }
 
 #[async_trait]
-impl GlobalClient<GithubRepositoryClient> for Octocrab {
+impl RepositoryLoader<GithubRepositoryClient> for Octocrab {
     async fn load_repositories(
         &self,
     ) -> anyhow::Result<HashMap<GithubRepoName, Arc<RepositoryState<GithubRepositoryClient>>>> {
