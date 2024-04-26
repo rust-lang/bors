@@ -9,7 +9,7 @@ pub struct BorsContext<Client: RepositoryClient> {
     pub parser: CommandParser,
     pub db: Arc<dyn DbClient>,
     pub repository_loader: Arc<dyn RepositoryLoader<Client>>,
-    pub repositories: Arc<ArcSwap<HashMap<GithubRepoName, Arc<RepositoryState<Client>>>>>,
+    pub repositories: ArcSwap<HashMap<GithubRepoName, Arc<RepositoryState<Client>>>>,
 }
 
 impl<Client: RepositoryClient> BorsContext<Client> {
@@ -21,7 +21,7 @@ impl<Client: RepositoryClient> BorsContext<Client> {
         // this unwrap is making me nervous, but if lhe repos loading
         // fails we might as well restart the bot
         let repositories = global_client.load_repositories().await?;
-        let repositories = Arc::new(ArcSwap::new(Arc::new(repositories)));
+        let repositories = ArcSwap::new(Arc::new(repositories));
         Ok(Self {
             parser,
             db,
