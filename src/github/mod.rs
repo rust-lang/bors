@@ -11,7 +11,6 @@ pub mod server;
 mod webhook;
 
 pub use api::operations::MergeError;
-pub use api::GithubAppState;
 pub use labels::{LabelModification, LabelTrigger};
 pub use webhook::WebhookSecret;
 

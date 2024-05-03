@@ -1,3 +1,6 @@
+use std::collections::HashMap;
+use std::sync::Arc;
+
 use anyhow::Context;
 use axum::async_trait;
 use octocrab::models::{App, Repository, RunId};
@@ -5,11 +8,15 @@ use octocrab::{Error, Octocrab};
 use tracing::log;
 
 use crate::bors::event::PullRequestComment;
-use crate::bors::{CheckSuite, CheckSuiteStatus, Comment, RepositoryClient};
+use crate::bors::{
+    CheckSuite, CheckSuiteStatus, Comment, RepositoryClient, RepositoryLoader, RepositoryState,
+};
 use crate::config::{RepositoryConfig, CONFIG_FILE_PATH};
 use crate::github::api::base_github_html_url;
 use crate::github::api::operations::{merge_branches, set_branch_to_commit, MergeError};
 use crate::github::{Branch, CommitSha, GithubRepoName, PullRequest, PullRequestNumber};
+
+use super::load_repositories;
 
 /// Provides access to a single app installation (repository) using the GitHub API.
 pub struct GithubRepositoryClient {
@@ -260,6 +267,15 @@ impl RepositoryClient for GithubRepositoryClient {
                 )
             });
         format!("{html_url}/actions/runs/{run_id}")
+    }
+}
+
+#[async_trait]
+impl RepositoryLoader<GithubRepositoryClient> for Octocrab {
+    async fn load_repositories(
+        &self,
+    ) -> anyhow::Result<HashMap<GithubRepoName, Arc<RepositoryState<GithubRepositoryClient>>>> {
+        load_repositories(self).await
     }
 }
 

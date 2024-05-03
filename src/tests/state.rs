@@ -12,14 +12,14 @@ use url::Url;
 use super::database::MockedDBClient;
 use super::event::default_user;
 use crate::bors::event::{
-    BorsRepositoryEvent, CheckSuiteCompleted, PullRequestComment, WorkflowCompleted,
-    WorkflowStarted,
+    BorsEvent, BorsGlobalEvent, BorsRepositoryEvent, CheckSuiteCompleted, PullRequestComment,
+    WorkflowCompleted, WorkflowStarted,
 };
 use crate::bors::{
     handle_bors_global_event, handle_bors_repository_event, BorsContext, CheckSuite, CommandParser,
     Comment, RepositoryState,
 };
-use crate::bors::{BorsState, RepositoryClient};
+use crate::bors::{RepositoryClient, RepositoryLoader};
 use crate::config::RepositoryConfig;
 use crate::database::{DbClient, WorkflowStatus};
 use crate::github::{
@@ -32,7 +32,6 @@ use crate::tests::event::{
     CheckSuiteCompletedBuilder, WorkflowCompletedBuilder, WorkflowStartedBuilder,
 };
 use crate::tests::github::{default_base_branch, PRBuilder};
-use crate::{BorsEvent, BorsGlobalEvent};
 
 pub fn test_bot_user() -> GithubUser {
     GithubUser {
@@ -56,7 +55,6 @@ type TestRepositoryState = RepositoryState<Arc<TestRepositoryClient>>;
 #[derive(Clone)]
 pub struct TestBorsState {
     default_client: Arc<TestRepositoryClient>,
-    repos: Arc<HashMap<GithubRepoName, Arc<TestRepositoryState>>>,
     pub db: Arc<MockedDBClient>,
 }
 
@@ -68,19 +66,21 @@ impl TestBorsState {
 
     /// Execute an event.
     pub async fn event(&self, event: BorsEvent) {
-        let state = Arc::new(self.clone());
-        let ctx = Arc::new(BorsContext::new(
-            CommandParser::new("@bors".to_string()),
-            Arc::clone(&self.db) as Arc<dyn DbClient>,
-        ));
+        let ctx = Arc::new(
+            BorsContext::new(
+                CommandParser::new("@bors".to_string()),
+                Arc::clone(&self.db) as Arc<dyn DbClient>,
+                Arc::new(self.default_client.clone()),
+            )
+            .await
+            .unwrap(),
+        );
         match event {
             BorsEvent::Repository(event) => {
-                handle_bors_repository_event(event, state, ctx)
-                    .await
-                    .unwrap();
+                handle_bors_repository_event(event, ctx).await.unwrap();
             }
             BorsEvent::Global(event) => {
-                handle_bors_global_event(event, state, ctx).await.unwrap();
+                handle_bors_global_event(event, ctx).await.unwrap();
             }
         }
     }
@@ -152,21 +152,6 @@ impl TestBorsState {
     }
 }
 
-#[async_trait]
-impl BorsState<Arc<TestRepositoryClient>> for TestBorsState {
-    fn get_repo_state(&self, repo: &GithubRepoName) -> Option<Arc<TestRepositoryState>> {
-        self.repos.get(repo).map(|repo| Arc::clone(repo))
-    }
-
-    fn get_all_repos(&self) -> Vec<Arc<TestRepositoryState>> {
-        self.repos.values().cloned().collect()
-    }
-
-    async fn reload_repositories(&self) -> anyhow::Result<()> {
-        Ok(())
-    }
-}
-
 #[derive(Builder)]
 #[builder(pattern = "owned")]
 pub struct RepoConfig {
@@ -199,7 +184,7 @@ impl RepoConfigBuilder {
     }
 }
 
-#[derive(Builder)]
+#[derive(Builder, Clone)]
 #[builder(pattern = "owned")]
 pub struct Permissions {
     #[builder(field(ty = "HashSet<UserId>"))]
@@ -263,21 +248,31 @@ impl ClientBuilder {
             added_labels: Default::default(),
             removed_labels: Default::default(),
             branch_history: Mutex::new(branch_history),
+            permissions: Arc::new(permissions.create()),
+            config: Arc::new(config.create()),
         });
 
-        let repo_state = RepositoryState {
-            repository: name.clone(),
-            client: client.clone(),
-            permissions: ArcSwap::new(Arc::new(permissions.create())),
-            config: ArcSwap::new(Arc::new(config.create())),
-        };
-        let mut repos = HashMap::new();
-        repos.insert(name.clone(), Arc::new(repo_state));
         TestBorsState {
-            repos: Arc::new(repos),
             db: Arc::new(db),
             default_client: client,
         }
+    }
+}
+
+#[async_trait]
+impl RepositoryLoader<Arc<TestRepositoryClient>> for Arc<TestRepositoryClient> {
+    async fn load_repositories(
+        &self,
+    ) -> anyhow::Result<HashMap<GithubRepoName, Arc<TestRepositoryState>>> {
+        let repo_state = RepositoryState {
+            repository: self.name.clone(),
+            client: self.clone(),
+            permissions: ArcSwap::new(Arc::clone(&self.permissions)),
+            config: ArcSwap::new(Arc::clone(&self.config)),
+        };
+        let mut repos = HashMap::new();
+        repos.insert(self.name.clone(), Arc::new(repo_state));
+        Ok(repos)
     }
 }
 
@@ -292,6 +287,8 @@ pub struct TestRepositoryClient {
     removed_labels: Mutex<HashMap<u64, Vec<String>>>,
     // Branch name -> history of SHAs
     branch_history: Mutex<HashMap<String, Vec<CommitSha>>>,
+    permissions: Arc<UserPermissions>,
+    config: Arc<RepositoryConfig>,
 }
 
 impl TestRepositoryClient {

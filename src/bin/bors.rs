@@ -5,8 +5,8 @@ use std::time::Duration;
 
 use anyhow::Context;
 use bors::{
-    create_app, create_bors_process, BorsContext, BorsGlobalEvent, CommandParser, GithubAppState,
-    SeaORMClient, ServerState, WebhookSecret,
+    create_app, create_bors_process, create_github_client, BorsContext, BorsGlobalEvent,
+    CommandParser, SeaORMClient, ServerState, WebhookSecret,
 };
 use clap::Parser;
 use sea_orm::Database;
@@ -71,15 +71,18 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
     let db = runtime
         .block_on(initialize_db(&opts.db))
         .context("Cannot initialize database")?;
+    let client = runtime.block_on(async move {
+        create_github_client(opts.app_id.into(), opts.private_key.into_bytes().into())
+    })?;
 
-    let state = runtime
-        .block_on(GithubAppState::load(
-            opts.app_id.into(),
-            opts.private_key.into_bytes().into(),
+    let ctx = runtime
+        .block_on(BorsContext::new(
+            CommandParser::new(opts.cmd_prefix),
+            Arc::new(db),
+            Arc::new(client),
         ))
-        .context("Cannot load GitHub repository state")?;
-    let ctx = BorsContext::new(CommandParser::new(opts.cmd_prefix), Arc::new(db));
-    let (repository_tx, global_tx, bors_process) = create_bors_process(state, ctx);
+        .context("Cannot initialize bors context")?;
+    let (repository_tx, global_tx, bors_process) = create_bors_process(ctx);
 
     let refresh_tx = global_tx.clone();
     let refresh_process = async move {

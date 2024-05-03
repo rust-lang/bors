@@ -11,9 +11,8 @@ use crate::bors::handlers::trybuild::{command_try_build, command_try_cancel, TRY
 use crate::bors::handlers::workflow::{
     handle_check_suite_completed, handle_workflow_completed, handle_workflow_started,
 };
-use crate::bors::{BorsContext, BorsState, Comment, RepositoryClient, RepositoryState};
+use crate::bors::{BorsContext, Comment, RepositoryClient, RepositoryState};
 use crate::database::DbClient;
-use crate::github::GithubRepoName;
 use crate::utils::logging::LogError;
 
 mod help;
@@ -26,11 +25,16 @@ mod workflow;
 /// This function executes a single BORS repository event
 pub async fn handle_bors_repository_event<Client: RepositoryClient>(
     event: BorsRepositoryEvent,
-    state: Arc<dyn BorsState<Client>>,
-    ctx: Arc<BorsContext>,
+    ctx: Arc<BorsContext<Client>>,
 ) -> anyhow::Result<()> {
     let db = Arc::clone(&ctx.db);
-    let Some(repo) = get_repo_state(state, event.repository()) else {
+    let Some(repo) = ctx
+        .repositories
+        .read()
+        .unwrap()
+        .get(event.repository())
+        .map(Arc::clone)
+    else {
         return Err(anyhow::anyhow!(
             "Repository {} not found in the bot state",
             event.repository()
@@ -113,20 +117,29 @@ pub async fn handle_bors_repository_event<Client: RepositoryClient>(
 /// This function executes a single BORS global event
 pub async fn handle_bors_global_event<Client: RepositoryClient>(
     event: BorsGlobalEvent,
-    state: Arc<dyn BorsState<Client>>,
-    ctx: Arc<BorsContext>,
+    ctx: Arc<BorsContext<Client>>,
 ) -> anyhow::Result<()> {
     let db = Arc::clone(&ctx.db);
     match event {
         BorsGlobalEvent::InstallationsChanged => {
-            let span = tracing::info_span!("Repository reload");
-            if let Err(error) = state.reload_repositories().instrument(span.clone()).await {
-                span.log_error(error);
+            let span = tracing::info_span!("Repository reload").entered();
+
+            match ctx.repository_loader.load_repositories().await {
+                Ok(repos) => {
+                    let mut repositories = ctx.repositories.write().unwrap();
+                    // TODO: keep old repos in case of repo loading failure
+                    *repositories = repos;
+                }
+                Err(error) => {
+                    span.log_error(error);
+                }
             }
+            span.exit();
         }
         BorsGlobalEvent::Refresh => {
             let span = tracing::info_span!("Refresh");
-            let repos = state.get_all_repos();
+            let repos: Vec<Arc<RepositoryState<Client>>> =
+                ctx.repositories.read().unwrap().values().cloned().collect();
             futures::future::join_all(repos.into_iter().map(|repo| {
                 let repo = Arc::clone(&repo);
                 async {
@@ -143,23 +156,10 @@ pub async fn handle_bors_global_event<Client: RepositoryClient>(
     Ok(())
 }
 
-fn get_repo_state<Client: RepositoryClient>(
-    state: Arc<dyn BorsState<Client>>,
-    repo: &GithubRepoName,
-) -> Option<Arc<RepositoryState<Client>>> {
-    match state.get_repo_state(repo) {
-        Some(result) => Some(result),
-        None => {
-            tracing::warn!("Repository {} not found", repo);
-            None
-        }
-    }
-}
-
 async fn handle_comment<Client: RepositoryClient>(
     repo: Arc<RepositoryState<Client>>,
     database: Arc<dyn DbClient>,
-    ctx: Arc<BorsContext>,
+    ctx: Arc<BorsContext<Client>>,
     comment: PullRequestComment,
 ) -> anyhow::Result<()> {
     let pr_number = comment.pr_number;

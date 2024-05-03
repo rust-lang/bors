@@ -4,6 +4,7 @@ mod context;
 pub mod event;
 mod handlers;
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use arc_swap::ArcSwap;
@@ -70,6 +71,16 @@ pub trait RepositoryClient: Send + Sync {
     fn get_workflow_url(&self, run_id: RunId) -> String;
 }
 
+/// Temporary trait to sastify the test mocking.
+/// TODO: Remove this trait once we move to mock REST API call.
+#[async_trait]
+pub trait RepositoryLoader<Client: RepositoryClient>: Send + Sync {
+    /// Load state of repositories.
+    async fn load_repositories(
+        &self,
+    ) -> anyhow::Result<HashMap<GithubRepoName, Arc<RepositoryState<Client>>>>;
+}
+
 #[derive(Clone)]
 pub enum CheckSuiteStatus {
     Pending,
@@ -82,20 +93,6 @@ pub enum CheckSuiteStatus {
 #[derive(Clone)]
 pub struct CheckSuite {
     pub(crate) status: CheckSuiteStatus,
-}
-
-/// Main state holder for the bot.
-/// It is behind a trait to allow easier mocking in tests.
-#[async_trait]
-pub trait BorsState<Client: RepositoryClient>: Send + Sync {
-    /// Get repository and database state for the given repository name.
-    fn get_repo_state(&self, repo: &GithubRepoName) -> Option<Arc<RepositoryState<Client>>>;
-
-    /// Get all repositories.
-    fn get_all_repos(&self) -> Vec<Arc<RepositoryState<Client>>>;
-
-    /// Reload state of repositories due to some external change.
-    async fn reload_repositories(&self) -> anyhow::Result<()>;
 }
 
 /// An access point to a single repository.
