@@ -9,7 +9,8 @@ use bors::{
     CommandParser, SeaORMClient, ServerState, WebhookSecret,
 };
 use clap::Parser;
-use sea_orm::Database;
+use sea_orm::{ConnectOptions, Database};
+use tracing::log::LevelFilter;
 use tracing_subscriber::EnvFilter;
 
 use migration::{Migrator, MigratorTrait};
@@ -57,8 +58,12 @@ async fn webhook_server(state: ServerState) -> anyhow::Result<()> {
 }
 
 async fn initialize_db(connection_string: &str) -> anyhow::Result<SeaORMClient> {
-    let db = Database::connect(connection_string).await?;
+    let mut opts = ConnectOptions::new(connection_string);
+    opts.sqlx_logging_level(LevelFilter::Trace);
+
+    let db = Database::connect(opts).await?;
     Migrator::up(&db, None).await?;
+
     Ok(SeaORMClient::new(db))
 }
 
@@ -123,7 +128,6 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
 
 fn main() {
     tracing_subscriber::fmt()
-        .with_target(false)
         .with_env_filter(
             EnvFilter::builder()
                 .with_default_directive(tracing::Level::INFO.into())
