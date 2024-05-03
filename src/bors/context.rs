@@ -19,8 +19,6 @@ impl<Client: RepositoryClient> BorsContext<Client> {
         db: Arc<dyn DbClient>,
         global_client: Arc<dyn RepositoryLoader<Client>>,
     ) -> anyhow::Result<Self> {
-        // this unwrap is making me nervous, but if lhe repos loading
-        // fails we might as well restart the bot
         let repositories = global_client.load_repositories().await?;
         let repositories = RwLock::new(repositories);
         Ok(Self {
