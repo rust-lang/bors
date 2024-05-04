@@ -125,10 +125,23 @@ pub async fn handle_bors_global_event<Client: RepositoryClient>(
             let span = tracing::info_span!("Repository reload").entered();
 
             match ctx.repository_loader.load_repositories().await {
-                Ok(repos) => {
+                Ok(reloaded_repos) => {
                     let mut repositories = ctx.repositories.write().unwrap();
-                    // TODO: keep old repos in case of repo loading failure
-                    *repositories = repos;
+                    for repo in repositories.values() {
+                        if !reloaded_repos.contains_key(&repo.repository) {
+                            tracing::info!("Repository {} was not reloaded", repo.repository);
+                        }
+                    }
+                    for repo in reloaded_repos.values() {
+                        if repositories
+                            .insert(repo.repository.clone(), repo.clone())
+                            .is_some()
+                        {
+                            tracing::info!("Repository {} was reloaded", repo.repository);
+                        } else {
+                            tracing::info!("Repository {} was added", repo.repository);
+                        }
+                    }
                 }
                 Err(error) => {
                     span.log_error(error);
