@@ -36,6 +36,7 @@ pub(super) async fn command_try_build<Client: RepositoryClient>(
     pr: &PullRequest,
     author: &GithubUser,
     parent: Option<Parent>,
+    jobs: Option<Vec<String>>,
 ) -> anyhow::Result<()> {
     let repo = repo.as_ref();
     if !check_try_permissions(repo, pr, author).await? {
@@ -94,7 +95,7 @@ pub(super) async fn command_try_build<Client: RepositoryClient>(
         .merge_branches(
             TRY_MERGE_BRANCH_NAME,
             &pr.head.sha,
-            &auto_merge_commit_message(pr, "<try>"),
+            &auto_merge_commit_message(pr, "<try>", jobs),
         )
         .await
     {
@@ -232,9 +233,13 @@ fn get_pending_build(pr: PullRequestModel) -> Option<BuildModel> {
         .and_then(|b| (b.status == BuildStatus::Pending).then_some(b))
 }
 
-fn auto_merge_commit_message(pr: &PullRequest, reviewer: &str) -> String {
+fn auto_merge_commit_message(
+    pr: &PullRequest,
+    reviewer: &str,
+    jobs: Option<Vec<String>>,
+) -> String {
     let pr_number = pr.number;
-    format!(
+    let mut message = format!(
         r#"Auto merge of #{pr_number} - {pr_label}, r={reviewer}
 {pr_title}
 
@@ -242,7 +247,13 @@ fn auto_merge_commit_message(pr: &PullRequest, reviewer: &str) -> String {
         pr_label = pr.head_label,
         pr_title = pr.title,
         pr_message = pr.message
-    )
+    );
+    if let Some(jobs) = jobs {
+        for job in jobs {
+            message.push_str(&format!("\nci-job: {}", job));
+        }
+    }
+    message
 }
 
 fn merge_conflict_message(branch: &str) -> String {
