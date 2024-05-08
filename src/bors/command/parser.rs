@@ -140,14 +140,15 @@ fn parser_try<'a>(command: &'a str, parts: &[CommandPart<'a>]) -> ParseResult<'a
     }
 
     let mut parent = None;
+    let mut jobs = Vec::new();
 
     for part in parts {
         match part {
             CommandPart::Bare(key) => {
                 return Some(Err(CommandParseError::UnknownArg(key)));
             }
-            CommandPart::KeyValue { key, value } => {
-                if *key == "parent" {
+            CommandPart::KeyValue { key, value } => match *key {
+                "parent" => {
                     parent = if *value == "last" {
                         Some(Parent::Last)
                     } else {
@@ -160,18 +161,35 @@ fn parser_try<'a>(command: &'a str, parts: &[CommandPart<'a>]) -> ParseResult<'a
                             }
                         }
                     }
-                } else {
+                }
+                "jobs" => {
+                    let raw_jobs: Vec<_> = value.split(',').map(|s| s.to_string()).collect();
+                    if raw_jobs.is_empty() {
+                        return Some(Err(CommandParseError::ValidationError(
+                            "Try jobs must not be empty".to_string(),
+                        )));
+                    }
+
+                    // rust ci currently allows specifying 10 jobs max
+                    if raw_jobs.len() > 10 {
+                        return Some(Err(CommandParseError::ValidationError(
+                            "Try jobs must not have more than 10 jobs".to_string(),
+                        )));
+                    }
+                    jobs = raw_jobs;
+                }
+                _ => {
                     return Some(Err(CommandParseError::UnknownArg(key)));
                 }
-            }
+            },
         }
     }
-    Some(Ok(BorsCommand::Try { parent }))
+    Some(Ok(BorsCommand::Try { parent, jobs }))
 }
 
 /// Parses "@bors try cancel".
 fn parser_try_cancel<'a>(command: &'a str, parts: &[CommandPart<'a>]) -> ParseResult<'a> {
-    if command == "try" && parts.get(0) == Some(&CommandPart::Bare("cancel")) {
+    if command == "try" && parts.first() == Some(&CommandPart::Bare("cancel")) {
         Some(Ok(BorsCommand::TryCancel))
     } else {
         None
@@ -262,14 +280,28 @@ line two
 "#,
         );
         assert_eq!(cmds.len(), 1);
-        assert!(matches!(cmds[0], Ok(BorsCommand::Try { parent: None })));
+        insta::assert_debug_snapshot!(cmds[0], @r###"
+        Ok(
+            Try {
+                parent: None,
+                jobs: [],
+            },
+        )
+        "###);
     }
 
     #[test]
     fn parse_try() {
         let cmds = parse_commands("@bors try");
         assert_eq!(cmds.len(), 1);
-        assert!(matches!(cmds[0], Ok(BorsCommand::Try { parent: None })));
+        insta::assert_debug_snapshot!(cmds[0], @r###"
+        Ok(
+            Try {
+                parent: None,
+                jobs: [],
+            },
+        )
+        "###);
     }
 
     #[test]
@@ -281,7 +313,8 @@ line two
             Ok(BorsCommand::Try {
                 parent: Some(Parent::CommitSha(CommitSha(
                     "ea9c1b050cc8b420c2c211d2177811e564a4dc60".to_string()
-                )))
+                ))),
+                jobs: Vec::new()
             })
         );
     }
@@ -293,7 +326,8 @@ line two
         assert_eq!(
             cmds[0],
             Ok(BorsCommand::Try {
-                parent: Some(Parent::Last)
+                parent: Some(Parent::Last),
+                jobs: Vec::new()
             })
         );
     }
@@ -306,6 +340,46 @@ line two
         Err(
             ValidationError(
                 "Try parent has to be a valid commit SHA: SHA must have exactly 40 characters",
+            ),
+        )
+        "###);
+    }
+
+    #[test]
+    fn parse_try_jobs() {
+        let cmds = parse_commands("@bors try jobs=ci,lint");
+        assert_eq!(cmds.len(), 1);
+        assert_eq!(
+            cmds[0],
+            Ok(BorsCommand::Try {
+                parent: None,
+                jobs: vec!["ci".to_string(), "lint".to_string()]
+            })
+        );
+    }
+
+    #[test]
+    fn parse_try_jobs_empty() {
+        let cmds = parse_commands("@bors try jobs=");
+        assert_eq!(cmds.len(), 1);
+        insta::assert_debug_snapshot!(cmds[0], @r###"
+        Err(
+            MissingArgValue {
+                arg: "jobs",
+            },
+        )
+        "###);
+    }
+
+    #[test]
+    fn parse_try_jobs_too_many() {
+        let cmds =
+            parse_commands("@bors try jobs=ci,lint,foo,bar,baz,qux,quux,corge,grault,garply,waldo");
+        assert_eq!(cmds.len(), 1);
+        insta::assert_debug_snapshot!(cmds[0], @r###"
+        Err(
+            ValidationError(
+                "Try jobs must not have more than 10 jobs",
             ),
         )
         "###);
@@ -333,7 +407,14 @@ line two
 "#,
         );
         assert_eq!(cmds.len(), 1);
-        assert!(matches!(cmds[0], Ok(BorsCommand::Try { parent: None })));
+        insta::assert_debug_snapshot!(cmds[0], @r###"
+        Ok(
+            Try {
+                parent: None,
+                jobs: [],
+            },
+        )
+        "###)
     }
 
     #[test]

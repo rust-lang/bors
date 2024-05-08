@@ -22,6 +22,8 @@ pub enum BorsCommand {
     Try {
         /// Parent commit which should be used as the merge base.
         parent: Option<Parent>,
+        /// The CI workflow to run.
+        jobs: Vec<String>,
     },
     /// Cancel a try build.
     TryCancel,
