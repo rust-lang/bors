@@ -23,7 +23,7 @@ pub enum BorsCommand {
         /// Parent commit which should be used as the merge base.
         parent: Option<Parent>,
         /// The CI workflow to run.
-        jobs: Option<Vec<String>>,
+        jobs: Vec<String>,
     },
     /// Cancel a try build.
     TryCancel,

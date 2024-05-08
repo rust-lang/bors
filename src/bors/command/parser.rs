@@ -140,7 +140,7 @@ fn parser_try<'a>(command: &'a str, parts: &[CommandPart<'a>]) -> ParseResult<'a
     }
 
     let mut parent = None;
-    let mut jobs = None;
+    let mut jobs = Vec::new();
 
     for part in parts {
         match part {
@@ -165,18 +165,18 @@ fn parser_try<'a>(command: &'a str, parts: &[CommandPart<'a>]) -> ParseResult<'a
                 "jobs" => {
                     let raw_jobs: Vec<_> = value.split(',').map(|s| s.to_string()).collect();
                     if raw_jobs.is_empty() {
-                        return Some(Err(CommandParseError::ValidationError(format!(
-                            "Try jobs must not be empty"
-                        ))));
+                        return Some(Err(CommandParseError::ValidationError(
+                            "Try jobs must not be empty".to_string(),
+                        )));
                     }
 
                     // rust ci currently allows specifying 10 jobs max
                     if raw_jobs.len() > 10 {
-                        return Some(Err(CommandParseError::ValidationError(format!(
-                            "Try jobs must not have more than 10 jobs"
-                        ))));
+                        return Some(Err(CommandParseError::ValidationError(
+                            "Try jobs must not have more than 10 jobs".to_string(),
+                        )));
                     }
-                    jobs = Some(raw_jobs);
+                    jobs = raw_jobs;
                 }
                 _ => {
                     return Some(Err(CommandParseError::UnknownArg(key)));
@@ -189,7 +189,7 @@ fn parser_try<'a>(command: &'a str, parts: &[CommandPart<'a>]) -> ParseResult<'a
 
 /// Parses "@bors try cancel".
 fn parser_try_cancel<'a>(command: &'a str, parts: &[CommandPart<'a>]) -> ParseResult<'a> {
-    if command == "try" && parts.get(0) == Some(&CommandPart::Bare("cancel")) {
+    if command == "try" && parts.first() == Some(&CommandPart::Bare("cancel")) {
         Some(Ok(BorsCommand::TryCancel))
     } else {
         None
@@ -280,26 +280,28 @@ line two
 "#,
         );
         assert_eq!(cmds.len(), 1);
-        assert!(matches!(
-            cmds[0],
-            Ok(BorsCommand::Try {
+        insta::assert_debug_snapshot!(cmds[0], @r###"
+        Ok(
+            Try {
                 parent: None,
-                jobs: None
-            })
-        ));
+                jobs: [],
+            },
+        )
+        "###);
     }
 
     #[test]
     fn parse_try() {
         let cmds = parse_commands("@bors try");
         assert_eq!(cmds.len(), 1);
-        assert!(matches!(
-            cmds[0],
-            Ok(BorsCommand::Try {
+        insta::assert_debug_snapshot!(cmds[0], @r###"
+        Ok(
+            Try {
                 parent: None,
-                jobs: None
-            })
-        ));
+                jobs: [],
+            },
+        )
+        "###);
     }
 
     #[test]
@@ -312,7 +314,7 @@ line two
                 parent: Some(Parent::CommitSha(CommitSha(
                     "ea9c1b050cc8b420c2c211d2177811e564a4dc60".to_string()
                 ))),
-                jobs: None
+                jobs: Vec::new()
             })
         );
     }
@@ -325,7 +327,7 @@ line two
             cmds[0],
             Ok(BorsCommand::Try {
                 parent: Some(Parent::Last),
-                jobs: None
+                jobs: Vec::new()
             })
         );
     }
@@ -351,7 +353,7 @@ line two
             cmds[0],
             Ok(BorsCommand::Try {
                 parent: None,
-                jobs: Some(vec!["ci".to_string(), "lint".to_string()])
+                jobs: vec!["ci".to_string(), "lint".to_string()]
             })
         );
     }
@@ -405,13 +407,14 @@ line two
 "#,
         );
         assert_eq!(cmds.len(), 1);
-        assert!(matches!(
-            cmds[0],
-            Ok(BorsCommand::Try {
+        insta::assert_debug_snapshot!(cmds[0], @r###"
+        Ok(
+            Try {
                 parent: None,
-                jobs: None
-            })
-        ));
+                jobs: [],
+            },
+        )
+        "###)
     }
 
     #[test]

@@ -36,7 +36,7 @@ pub(super) async fn command_try_build<Client: RepositoryClient>(
     pr: &PullRequest,
     author: &GithubUser,
     parent: Option<Parent>,
-    jobs: Option<Vec<String>>,
+    jobs: Vec<String>,
 ) -> anyhow::Result<()> {
     let repo = repo.as_ref();
     if !check_try_permissions(repo, pr, author).await? {
@@ -233,11 +233,7 @@ fn get_pending_build(pr: PullRequestModel) -> Option<BuildModel> {
         .and_then(|b| (b.status == BuildStatus::Pending).then_some(b))
 }
 
-fn auto_merge_commit_message(
-    pr: &PullRequest,
-    reviewer: &str,
-    jobs: Option<Vec<String>>,
-) -> String {
+fn auto_merge_commit_message(pr: &PullRequest, reviewer: &str, jobs: Vec<String>) -> String {
     let pr_number = pr.number;
     let mut message = format!(
         r#"Auto merge of #{pr_number} - {pr_label}, r={reviewer}
@@ -248,10 +244,10 @@ fn auto_merge_commit_message(
         pr_title = pr.title,
         pr_message = pr.message
     );
-    if let Some(jobs) = jobs {
-        for job in jobs {
-            message.push_str(&format!("\nci-job: {}", job));
-        }
+
+    // if jobs is empty, try-job won't be added to the message
+    for job in jobs {
+        message.push_str(&format!("\ntry-job: {}", job));
     }
     message
 }
