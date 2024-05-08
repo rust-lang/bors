@@ -8,6 +8,8 @@ use axum::async_trait;
 use derive_builder::Builder;
 use octocrab::models::{RunId, UserId};
 use url::Url;
+use wiremock::matchers::any;
+use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use super::database::MockedDBClient;
 use super::event::default_user;
@@ -26,12 +28,13 @@ use crate::github::{
     CommitSha, GithubRepoName, GithubUser, LabelModification, LabelTrigger, PullRequest,
 };
 use crate::github::{MergeError, PullRequestNumber};
-use crate::permissions::UserPermissions;
+use crate::permissions::UserPermissionsResponse;
 use crate::tests::database::create_test_db;
 use crate::tests::event::{
     CheckSuiteCompletedBuilder, WorkflowCompletedBuilder, WorkflowStartedBuilder,
 };
 use crate::tests::github::{default_base_branch, PRBuilder};
+use crate::TeamApiClient;
 
 pub fn test_bot_user() -> GithubUser {
     GithubUser {
@@ -56,6 +59,7 @@ type TestRepositoryState = RepositoryState<Arc<TestRepositoryClient>>;
 pub struct TestBorsState {
     default_client: Arc<TestRepositoryClient>,
     pub db: Arc<MockedDBClient>,
+    ctx: Arc<BorsContext<Arc<TestRepositoryClient>>>,
 }
 
 impl TestBorsState {
@@ -66,21 +70,16 @@ impl TestBorsState {
 
     /// Execute an event.
     pub async fn event(&self, event: BorsEvent) {
-        let ctx = Arc::new(
-            BorsContext::new(
-                CommandParser::new("@bors".to_string()),
-                Arc::clone(&self.db) as Arc<dyn DbClient>,
-                Arc::new(self.default_client.clone()),
-            )
-            .await
-            .unwrap(),
-        );
         match event {
             BorsEvent::Repository(event) => {
-                handle_bors_repository_event(event, ctx).await.unwrap();
+                handle_bors_repository_event(event, self.ctx.clone())
+                    .await
+                    .unwrap();
             }
             BorsEvent::Global(event) => {
-                handle_bors_global_event(event, ctx).await.unwrap();
+                handle_bors_global_event(event, self.ctx.clone())
+                    .await
+                    .unwrap();
             }
         }
     }
@@ -184,38 +183,11 @@ impl RepoConfigBuilder {
     }
 }
 
-#[derive(Builder, Clone)]
-#[builder(pattern = "owned")]
-pub struct Permissions {
-    #[builder(field(ty = "HashSet<UserId>"))]
-    review_users: HashSet<UserId>,
-    #[builder(field(ty = "HashSet<UserId>"))]
-    try_users: HashSet<UserId>,
-}
-
-impl PermissionsBuilder {
-    pub fn create(self) -> UserPermissions {
-        let Permissions {
-            review_users,
-            try_users,
-        } = self.build().unwrap();
-        UserPermissions::new(review_users, try_users)
-    }
-
-    pub fn add_default_users(mut self) -> Self {
-        self.review_users.insert(default_user().id);
-        self.try_users.insert(default_user().id);
-        self
-    }
-}
-
 #[derive(Builder)]
 #[builder(pattern = "owned")]
 pub struct Client {
     #[builder(default = "default_repo_name()")]
     name: GithubRepoName,
-    #[builder(default = "PermissionsBuilder::default().add_default_users()")]
-    permissions: PermissionsBuilder,
     #[builder(default)]
     config: RepoConfigBuilder,
     #[builder(default)]
@@ -224,17 +196,13 @@ pub struct Client {
 
 impl ClientBuilder {
     pub async fn create_state(self) -> TestBorsState {
-        let Client {
-            name,
-            permissions,
-            config,
-            db,
-        } = self.build().unwrap();
+        let Client { name, config, db } = self.build().unwrap();
 
         let mut branch_history = HashMap::default();
         let default_base_branch = default_base_branch();
         branch_history.insert(default_base_branch.name, vec![default_base_branch.sha]);
         let db = db.unwrap_or(create_test_db().await);
+        let db = Arc::new(db);
 
         let client = Arc::new(TestRepositoryClient {
             comments: Default::default(),
@@ -248,13 +216,34 @@ impl ClientBuilder {
             added_labels: Default::default(),
             removed_labels: Default::default(),
             branch_history: Mutex::new(branch_history),
-            permissions: Arc::new(permissions.create()),
             config: Arc::new(config.create()),
         });
 
+        let mut github_ids = HashSet::new();
+        github_ids.insert(default_user().id);
+
+        let permissions = UserPermissionsResponse { github_ids };
+        let mock_server = MockServer::start().await;
+        Mock::given(any())
+            .respond_with(ResponseTemplate::new(200).set_body_json(permissions))
+            .mount(&mock_server)
+            .await;
+
+        let ctx = Arc::new(
+            BorsContext::new(
+                CommandParser::new("@bors".to_string()),
+                Arc::clone(&db) as Arc<dyn DbClient>,
+                Arc::new(client.clone()),
+                TeamApiClient::new(Some(mock_server.uri().as_str())),
+            )
+            .await
+            .unwrap(),
+        );
+
         TestBorsState {
-            db: Arc::new(db),
+            ctx,
             default_client: client,
+            db,
         }
     }
 }
@@ -267,7 +256,6 @@ impl RepositoryLoader<Arc<TestRepositoryClient>> for Arc<TestRepositoryClient> {
         let repo_state = RepositoryState {
             repository: self.name.clone(),
             client: self.clone(),
-            permissions: ArcSwap::new(Arc::clone(&self.permissions)),
             config: ArcSwap::new(Arc::clone(&self.config)),
         };
         let mut repos = HashMap::new();
@@ -287,7 +275,6 @@ pub struct TestRepositoryClient {
     removed_labels: Mutex<HashMap<u64, Vec<String>>>,
     // Branch name -> history of SHAs
     branch_history: Mutex<HashMap<String, Vec<CommitSha>>>,
-    permissions: Arc<UserPermissions>,
     config: Arc<RepositoryConfig>,
 }
 

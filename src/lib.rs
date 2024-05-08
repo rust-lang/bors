@@ -13,6 +13,7 @@ pub use github::{
     server::{create_app, create_bors_process, ServerState},
     WebhookSecret,
 };
+pub use permissions::TeamApiClient;
 
 #[cfg(test)]
 mod tests;

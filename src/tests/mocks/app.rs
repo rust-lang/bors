@@ -5,10 +5,7 @@ use wiremock::{
     Mock, MockServer, ResponseTemplate,
 };
 
-use super::{
-    permission::Permissions,
-    user::{default_user, Author},
-};
+use super::user::{default_user, Author};
 
 #[derive(Serialize)]
 struct App {
@@ -97,3 +94,6 @@ pub(super) async fn setup_app_installation_token_mock(mock_server: &MockServer) 
         .mount(mock_server)
         .await;
 }
+
+#[derive(Serialize)]
+pub(crate) struct Permissions {}

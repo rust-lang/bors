@@ -6,7 +6,7 @@ use std::time::Duration;
 use anyhow::Context;
 use bors::{
     create_app, create_bors_process, create_github_client, BorsContext, BorsGlobalEvent,
-    CommandParser, SeaORMClient, ServerState, WebhookSecret,
+    CommandParser, SeaORMClient, ServerState, TeamApiClient, WebhookSecret,
 };
 use clap::Parser;
 use sea_orm::{ConnectOptions, Database};
@@ -79,12 +79,14 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
     let client = runtime.block_on(async move {
         create_github_client(opts.app_id.into(), opts.private_key.into_bytes().into())
     })?;
+    let team_api_client = TeamApiClient::default();
 
     let ctx = runtime
         .block_on(BorsContext::new(
             CommandParser::new(opts.cmd_prefix),
             Arc::new(db),
             Arc::new(client),
+            team_api_client,
         ))
         .context("Cannot initialize bors context")?;
     let (repository_tx, global_tx, bors_process) = create_bors_process(ctx);

@@ -9,7 +9,7 @@ use wiremock::MockServer;
 
 use crate::{
     create_app, create_bors_process, github::webhook::HmacSha256, BorsContext, CommandParser,
-    ServerState, WebhookSecret,
+    ServerState, TeamApiClient, WebhookSecret,
 };
 
 use super::{
@@ -34,11 +34,13 @@ impl BorsTester {
 
         let db = create_test_db().await;
         let client = create_test_github_client(&mock_server);
+        let team_api_client = TeamApiClient::new(Some(mock_server.uri().as_str()));
 
         let ctx = BorsContext::new(
             CommandParser::new("@bors".to_string()),
             Arc::new(db),
             Arc::new(client),
+            team_api_client,
         )
         .await
         .unwrap();

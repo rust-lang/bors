@@ -8,6 +8,7 @@ use wiremock::MockServer;
 
 use app::*;
 use issue::*;
+use permission::*;
 use repository::*;
 
 pub(super) async fn setup_mock(mock_server: &MockServer) -> InMemoryIssue {
@@ -17,6 +18,7 @@ pub(super) async fn setup_mock(mock_server: &MockServer) -> InMemoryIssue {
     setup_repositories_mock(mock_server).await;
     setup_repository_config_mock(mock_server).await;
     setup_pull_request_mock(mock_server).await;
+    setup_team_api_mock(mock_server).await;
     setup_create_comment_mock(mock_server).await
 }
 

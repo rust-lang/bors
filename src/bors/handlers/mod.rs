@@ -12,7 +12,6 @@ use crate::bors::handlers::workflow::{
     handle_check_suite_completed, handle_workflow_completed, handle_workflow_started,
 };
 use crate::bors::{BorsContext, Comment, RepositoryClient, RepositoryState};
-use crate::database::DbClient;
 use crate::utils::logging::LogError;
 
 mod help;
@@ -55,7 +54,7 @@ pub async fn handle_bors_repository_event<Client: RepositoryClient>(
                 author = comment.author.username
             );
             let pr_number = comment.pr_number;
-            if let Err(error) = handle_comment(Arc::clone(&repo), db, ctx, comment)
+            if let Err(error) = handle_comment(Arc::clone(&repo), ctx, comment)
                 .instrument(span.clone())
                 .await
             {
@@ -148,7 +147,7 @@ pub async fn handle_bors_global_event<Client: RepositoryClient>(
                 let repo = Arc::clone(&repo);
                 async {
                     let subspan = tracing::info_span!("Repo", repo = repo.repository.to_string());
-                    refresh_repository(repo, Arc::clone(&db))
+                    refresh_repository(repo, Arc::clone(&db), &ctx.team_api_client)
                         .instrument(subspan)
                         .await
                 }
@@ -162,7 +161,6 @@ pub async fn handle_bors_global_event<Client: RepositoryClient>(
 
 async fn handle_comment<Client: RepositoryClient>(
     repo: Arc<RepositoryState<Client>>,
-    database: Arc<dyn DbClient>,
     ctx: Arc<BorsContext<Client>>,
     comment: PullRequestComment,
 ) -> anyhow::Result<()> {
@@ -188,7 +186,8 @@ async fn handle_comment<Client: RepositoryClient>(
         match command {
             Ok(command) => {
                 let repo = Arc::clone(&repo);
-                let database = Arc::clone(&database);
+                let db = Arc::clone(&ctx.db);
+                let team_api_client = &ctx.team_api_client;
                 let result = match command {
                     BorsCommand::Help => {
                         let span = tracing::info_span!("Help");
@@ -202,7 +201,8 @@ async fn handle_comment<Client: RepositoryClient>(
                         let span = tracing::info_span!("Try");
                         command_try_build(
                             repo,
-                            database,
+                            db,
+                            team_api_client,
                             &pull_request,
                             &comment.author,
                             parent,
@@ -213,9 +213,15 @@ async fn handle_comment<Client: RepositoryClient>(
                     }
                     BorsCommand::TryCancel => {
                         let span = tracing::info_span!("Cancel try");
-                        command_try_cancel(repo, database, &pull_request, &comment.author)
-                            .instrument(span)
-                            .await
+                        command_try_cancel(
+                            repo,
+                            db,
+                            team_api_client,
+                            &pull_request,
+                            &comment.author,
+                        )
+                        .instrument(span)
+                        .await
                     }
                 };
                 if result.is_err() {

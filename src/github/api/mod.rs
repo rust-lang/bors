@@ -11,7 +11,6 @@ use client::GithubRepositoryClient;
 
 use crate::bors::{RepositoryClient, RepositoryState};
 use crate::github::GithubRepoName;
-use crate::permissions::load_permissions;
 
 pub mod client;
 pub(crate) mod operations;
@@ -152,14 +151,9 @@ async fn create_repo_state(
         }
     };
 
-    let permissions = load_permissions(&name)
-        .await
-        .map_err(|error| anyhow::anyhow!("Could not load permissions for {name}: {error:?}"))?;
-
     Ok(RepositoryState {
         repository: name,
         client,
         config: ArcSwap::new(Arc::new(config)),
-        permissions: ArcSwap::new(Arc::new(permissions)),
     })
 }

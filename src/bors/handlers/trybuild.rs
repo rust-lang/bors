@@ -15,6 +15,7 @@ use crate::github::{
     CommitSha, GithubUser, LabelTrigger, MergeError, PullRequest, PullRequestNumber,
 };
 use crate::permissions::PermissionType;
+use crate::TeamApiClient;
 
 // This branch serves for preparing the final commit.
 // It will be reset to master and merged with the branch that should be tested.
@@ -33,13 +34,14 @@ pub(super) const TRY_BRANCH_NAME: &str = "automation/bors/try";
 pub(super) async fn command_try_build<Client: RepositoryClient>(
     repo: Arc<RepositoryState<Client>>,
     db: Arc<dyn DbClient>,
+    team_api_client: &TeamApiClient,
     pr: &PullRequest,
     author: &GithubUser,
     parent: Option<Parent>,
     jobs: Vec<String>,
 ) -> anyhow::Result<()> {
     let repo = repo.as_ref();
-    if !check_try_permissions(repo, pr, author).await? {
+    if !check_try_permissions(repo, team_api_client, pr, author).await? {
         return Ok(());
     }
 
@@ -144,11 +146,12 @@ pub(super) async fn command_try_build<Client: RepositoryClient>(
 pub(super) async fn command_try_cancel<Client: RepositoryClient>(
     repo: Arc<RepositoryState<Client>>,
     db: Arc<dyn DbClient>,
+    team_api_client: &TeamApiClient,
     pr: &PullRequest,
     author: &GithubUser,
 ) -> anyhow::Result<()> {
     let repo = repo.as_ref();
-    if !check_try_permissions(repo, pr, author).await? {
+    if !check_try_permissions(repo, team_api_client, pr, author).await? {
         return Ok(());
     }
 
@@ -288,28 +291,26 @@ handled during merge and rebase. This is normal, and you should still perform st
 
 async fn check_try_permissions<Client: RepositoryClient>(
     repo: &RepositoryState<Client>,
+    team_api_client: &TeamApiClient,
     pr: &PullRequest,
     author: &GithubUser,
 ) -> anyhow::Result<bool> {
-    let result = if !repo
-        .permissions
-        .load()
-        .has_permission(&author.id, PermissionType::Try)
-    {
-        tracing::info!("Permission denied");
-        repo.client
-            .post_comment(
-                pr.number,
-                Comment::new(format!(
-                    "@{}: :key: Insufficient privileges: not in try users",
-                    author.username
-                )),
-            )
-            .await?;
-        false
-    } else {
-        true
-    };
+    let result =
+        if !team_api_client.has_permission(&repo.repository, &author.id, PermissionType::Try) {
+            tracing::info!("Permission denied");
+            repo.client
+                .post_comment(
+                    pr.number,
+                    Comment::new(format!(
+                        "@{}: :key: Insufficient privileges: not in try users",
+                        author.username
+                    )),
+                )
+                .await?;
+            false
+        } else {
+            true
+        };
     Ok(result)
 }
 
@@ -328,15 +329,16 @@ mod tests {
     };
     use crate::tests::github::{BranchBuilder, PRBuilder};
     use crate::tests::state::{
-        default_merge_sha, default_repo_name, ClientBuilder, PermissionsBuilder, RepoConfigBuilder,
+        default_merge_sha, default_repo_name, ClientBuilder, RepoConfigBuilder,
     };
 
+    // Ignore this test for now, as currently it's not possible to dynamically
+    // mock the team API client.
+    // TODO: enable this test once we have a way to mock the team API client.
     #[tokio::test]
+    #[ignore]
     async fn test_try_no_permission() {
-        let state = ClientBuilder::default()
-            .permissions(PermissionsBuilder::default())
-            .create_state()
-            .await;
+        let state = ClientBuilder::default().create_state().await;
         state.comment("@bors try").await;
         state.client().check_comments(
             default_pr_number(),

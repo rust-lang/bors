@@ -14,7 +14,6 @@ use octocrab::models::RunId;
 use crate::bors::event::PullRequestComment;
 use crate::config::RepositoryConfig;
 use crate::github::{CommitSha, GithubRepoName, MergeError, PullRequest, PullRequestNumber};
-use crate::permissions::UserPermissions;
 pub use command::CommandParser;
 pub use comment::Comment;
 pub use context::BorsContext;
@@ -101,6 +100,5 @@ pub struct CheckSuite {
 pub struct RepositoryState<Client: RepositoryClient> {
     pub repository: GithubRepoName,
     pub client: Client,
-    pub permissions: ArcSwap<UserPermissions>,
     pub config: ArcSwap<RepositoryConfig>,
 }
