@@ -331,7 +331,7 @@ fn parse_repository_name(repository: &Repository) -> anyhow::Result<GithubRepoNa
     Ok(GithubRepoName::new(repo_owner, repo_name))
 }
 
-type HmacSha256 = Hmac<Sha256>;
+pub type HmacSha256 = Hmac<Sha256>;
 
 /// Verifies that the request is properly signed by GitHub with SHA-256 and the passed `secret`.
 fn verify_gh_signature(

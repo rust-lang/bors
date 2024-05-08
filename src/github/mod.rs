@@ -8,7 +8,7 @@ use url::Url;
 pub mod api;
 mod labels;
 pub mod server;
-mod webhook;
+pub mod webhook;
 
 pub use api::operations::MergeError;
 pub use labels::{LabelModification, LabelTrigger};

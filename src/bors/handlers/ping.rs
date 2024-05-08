@@ -17,15 +17,12 @@ pub(super) async fn command_ping<Client: RepositoryClient>(
 
 #[cfg(test)]
 mod tests {
-    use crate::tests::event::default_pr_number;
-    use crate::tests::state::ClientBuilder;
+    use crate::tests::tester::BorsTester;
 
     #[tokio::test]
     async fn test_ping() {
-        let state = ClientBuilder::default().create_state().await;
-        state.comment("@bors ping").await;
-        state
-            .client()
-            .check_comments(default_pr_number(), &["Pong 🏓!"]);
+        let mut tester = BorsTester::new().await;
+        tester.comment("@bors ping").await;
+        tester.check_comments(&["Pong 🏓!"]).await;
     }
 }
