@@ -33,7 +33,7 @@ async fn cancel_timed_out_builds<Client: RepositoryClient>(
     let running_builds = db.get_running_builds(&repo.repository).await?;
     tracing::info!("Found {} running build(s)", running_builds.len());
 
-    let timeout = repo.config.load().timeout.clone();
+    let timeout = repo.config.load().timeout;
     for build in running_builds {
         if elapsed_time(build.created_at) >= timeout {
             tracing::info!("Cancelling build {}", build.commit_sha);
