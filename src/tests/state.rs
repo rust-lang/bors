@@ -383,7 +383,7 @@ impl TestRepositoryClient {
             .unwrap_or_else(|| panic!("Branch {branch} not found"));
         assert_eq!(
             history,
-            &sha.into_iter()
+            &sha.iter()
                 .map(|s| CommitSha(s.to_string()))
                 .collect::<Vec<_>>()
         );
@@ -469,7 +469,7 @@ impl RepositoryClient for Arc<TestRepositoryClient> {
         self.cancelled_workflows
             .lock()
             .unwrap()
-            .extend(run_ids.into_iter().map(|id| id.0));
+            .extend(run_ids.iter().map(|id| id.0));
         Ok(())
     }
 
