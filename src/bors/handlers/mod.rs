@@ -271,18 +271,18 @@ mod tests {
     use crate::tests::event::{comment, default_pr_number};
     use crate::tests::state::{test_bot_user, ClientBuilder};
 
-    #[tokio::test]
-    async fn test_ignore_bot_comment() {
-        let state = ClientBuilder::default().create_state().await;
+    #[sqlx::test]
+    async fn test_ignore_bot_comment(pool: sqlx::PgPool) {
+        let state = ClientBuilder::default().pool(pool).create_state().await;
         state
             .comment(comment("@bors ping").author(test_bot_user()).create())
             .await;
         state.client().check_comments(default_pr_number(), &[]);
     }
 
-    #[tokio::test]
-    async fn test_do_not_comment_when_pr_fetch_fails() {
-        let state = ClientBuilder::default().create_state().await;
+    #[sqlx::test]
+    async fn test_do_not_comment_when_pr_fetch_fails(pool: sqlx::PgPool) {
+        let state = ClientBuilder::default().pool(pool).create_state().await;
         state
             .client()
             .set_get_pr_fn(|_| Err(anyhow::anyhow!("Foo")));

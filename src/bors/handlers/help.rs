@@ -28,9 +28,9 @@ mod tests {
     use crate::tests::event::default_pr_number;
     use crate::tests::state::ClientBuilder;
 
-    #[tokio::test]
-    async fn test_help() {
-        let state = ClientBuilder::default().create_state().await;
+    #[sqlx::test]
+    async fn test_help(pool: sqlx::PgPool) {
+        let state = ClientBuilder::default().pool(pool).create_state().await;
         state.comment("@bors help").await;
         state
             .client()

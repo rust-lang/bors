@@ -113,16 +113,17 @@ mod tests {
     use crate::tests::event::{default_pr_number, WorkflowStartedBuilder};
     use crate::tests::state::{default_repo_name, ClientBuilder, RepoConfigBuilder};
 
-    #[tokio::test(flavor = "current_thread")]
-    async fn refresh_no_builds() {
-        let mut state = ClientBuilder::default().create_state().await;
+    #[sqlx::test]
+    async fn refresh_no_builds(pool: sqlx::PgPool) {
+        let mut state = ClientBuilder::default().pool(pool).create_state().await;
         state.refresh().await;
     }
 
-    #[tokio::test(flavor = "current_thread")]
-    async fn refresh_do_nothing_before_timeout() {
+    #[sqlx::test]
+    async fn refresh_do_nothing_before_timeout(pool: sqlx::PgPool) {
         let mut state = ClientBuilder::default()
             .config(RepoConfigBuilder::default().timeout(Duration::from_secs(3600)))
+            .pool(pool)
             .create_state()
             .await;
         state.comment("@bors try").await;
@@ -133,10 +134,11 @@ mod tests {
         .await;
     }
 
-    #[tokio::test(flavor = "current_thread")]
-    async fn refresh_cancel_build_after_timeout() {
+    #[sqlx::test]
+    async fn refresh_cancel_build_after_timeout(pool: sqlx::PgPool) {
         let mut state = ClientBuilder::default()
             .config(RepoConfigBuilder::default().timeout(Duration::from_secs(3600)))
+            .pool(pool)
             .create_state()
             .await;
         state.comment("@bors try").await;
@@ -149,10 +151,11 @@ mod tests {
         .await;
     }
 
-    #[tokio::test(flavor = "current_thread")]
-    async fn refresh_cancel_workflow_after_timeout() {
+    #[sqlx::test]
+    async fn refresh_cancel_workflow_after_timeout(pool: sqlx::PgPool) {
         let mut state = ClientBuilder::default()
             .config(RepoConfigBuilder::default().timeout(Duration::from_secs(3600)))
+            .pool(pool)
             .create_state()
             .await;
         state.comment("@bors try").await;

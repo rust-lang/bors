@@ -27,7 +27,6 @@ use crate::github::{
 };
 use crate::github::{MergeError, PullRequestNumber};
 use crate::permissions::UserPermissions;
-use crate::tests::database::create_test_db;
 use crate::tests::event::{
     CheckSuiteCompletedBuilder, WorkflowCompletedBuilder, WorkflowStartedBuilder,
 };
@@ -218,8 +217,10 @@ pub struct Client {
     permissions: PermissionsBuilder,
     #[builder(default)]
     config: RepoConfigBuilder,
-    #[builder(default)]
+    #[builder(setter(into, strip_option), default)]
     db: Option<MockedDBClient>,
+    #[builder(setter(into, strip_option), default)]
+    pool: Option<sqlx::PgPool>,
 }
 
 impl ClientBuilder {
@@ -229,12 +230,17 @@ impl ClientBuilder {
             permissions,
             config,
             db,
+            pool,
         } = self.build().unwrap();
 
         let mut branch_history = HashMap::default();
         let default_base_branch = default_base_branch();
         branch_history.insert(default_base_branch.name, vec![default_base_branch.sha]);
-        let db = db.unwrap_or(create_test_db().await);
+
+        let db = db.unwrap_or_else(|| {
+            let pool = pool.expect("Database pool is required if no DB client is provided");
+            MockedDBClient::new(pool)
+        });
 
         let client = Arc::new(TestRepositoryClient {
             comments: Default::default(),

@@ -1,10 +1,5 @@
-use std::env;
-
 use axum::async_trait;
-use sqlx::postgres::PgConnectOptions;
-use sqlx::ConnectOptions;
 use sqlx::PgPool;
-use tracing::log::LevelFilter;
 
 use crate::database::operations::get_all_workflows;
 use crate::{
@@ -16,20 +11,6 @@ use crate::{
     PgDbClient,
 };
 
-pub async fn create_test_db() -> MockedDBClient {
-    let mut opts: PgConnectOptions = env::var("DATABASE").unwrap().parse().unwrap();
-    opts = opts.log_statements(LevelFilter::Trace);
-    let db = PgPool::connect_with(opts)
-        .await
-        .expect("Cannot connect to database");
-
-    sqlx::migrate!()
-        .run(&db)
-        .await
-        .expect("Cannot run database migrations");
-    MockedDBClient::new(PgDbClient::new(db.clone()), db)
-}
-
 pub(crate) struct MockedDBClient {
     pool: PgPool,
     db: PgDbClient,
@@ -38,7 +19,8 @@ pub(crate) struct MockedDBClient {
 }
 
 impl MockedDBClient {
-    fn new(db: PgDbClient, pool: PgPool) -> Self {
+    pub(crate) fn new(pool: PgPool) -> Self {
+        let db = PgDbClient::new(pool.clone());
         Self {
             db,
             pool,

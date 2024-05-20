@@ -213,9 +213,9 @@ mod tests {
     };
     use crate::tests::state::{default_merge_sha, ClientBuilder};
 
-    #[tokio::test]
-    async fn test_workflow_started_unknown_build() {
-        let state = ClientBuilder::default().create_state().await;
+    #[sqlx::test]
+    async fn test_workflow_started_unknown_build(pool: sqlx::PgPool) {
+        let state = ClientBuilder::default().pool(pool).create_state().await;
 
         state
             .workflow_started(
@@ -227,9 +227,9 @@ mod tests {
         assert_eq!(state.db.get_all_workflows().await.unwrap().len(), 0);
     }
 
-    #[tokio::test]
-    async fn test_workflow_completed_unknown_build() {
-        let state = ClientBuilder::default().create_state().await;
+    #[sqlx::test]
+    async fn test_workflow_completed_unknown_build(pool: sqlx::PgPool) {
+        let state = ClientBuilder::default().pool(pool).create_state().await;
 
         state
             .workflow_completed(
@@ -242,9 +242,9 @@ mod tests {
         assert_eq!(state.db.get_all_workflows().await.unwrap().len(), 0);
     }
 
-    #[tokio::test]
-    async fn test_try_workflow_started() {
-        let state = ClientBuilder::default().create_state().await;
+    #[sqlx::test]
+    async fn test_try_workflow_started(pool: sqlx::PgPool) {
+        let state = ClientBuilder::default().pool(pool).create_state().await;
         state.comment("@bors try").await;
 
         state
@@ -258,9 +258,9 @@ mod tests {
         assert_eq!(suite.status, WorkflowStatus::Pending);
     }
 
-    #[tokio::test]
-    async fn test_try_workflow_start_twice() {
-        let state = ClientBuilder::default().create_state().await;
+    #[sqlx::test]
+    async fn test_try_workflow_start_twice(pool: sqlx::PgPool) {
+        let state = ClientBuilder::default().pool(pool).create_state().await;
         state.comment("@bors try").await;
 
         let event = || {
@@ -273,9 +273,9 @@ mod tests {
         assert_eq!(state.db.get_all_workflows().await.unwrap().len(), 1);
     }
 
-    #[tokio::test]
-    async fn test_try_check_suite_finished_missing_build() {
-        let state = ClientBuilder::default().create_state().await;
+    #[sqlx::test]
+    async fn test_try_check_suite_finished_missing_build(pool: sqlx::PgPool) {
+        let state = ClientBuilder::default().pool(pool).create_state().await;
         state
             .check_suite_completed(
                 CheckSuiteCompletedBuilder::default()
@@ -285,9 +285,9 @@ mod tests {
             .await;
     }
 
-    #[tokio::test]
-    async fn test_try_success() {
-        let state = ClientBuilder::default().create_state().await;
+    #[sqlx::test]
+    async fn test_try_success(pool: sqlx::PgPool) {
+        let state = ClientBuilder::default().pool(pool).create_state().await;
         state
             .client()
             .set_checks(&default_merge_sha(), &[suite_success()]);
@@ -313,9 +313,9 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn test_try_failure() {
-        let state = ClientBuilder::default().create_state().await;
+    #[sqlx::test]
+    async fn test_try_failure(pool: sqlx::PgPool) {
+        let state = ClientBuilder::default().pool(pool).create_state().await;
         state
             .client()
             .set_checks(&default_merge_sha(), &[suite_failure()]);
@@ -339,9 +339,9 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn test_try_success_multiple_suites() {
-        let state = ClientBuilder::default().create_state().await;
+    #[sqlx::test]
+    async fn test_try_success_multiple_suites(pool: sqlx::PgPool) {
+        let state = ClientBuilder::default().pool(pool).create_state().await;
         state
             .client()
             .set_checks(&default_merge_sha(), &[suite_success(), suite_pending()]);
@@ -377,9 +377,9 @@ mod tests {
         "###);
     }
 
-    #[tokio::test]
-    async fn test_try_failure_multiple_suites() {
-        let state = ClientBuilder::default().create_state().await;
+    #[sqlx::test]
+    async fn test_try_failure_multiple_suites(pool: sqlx::PgPool) {
+        let state = ClientBuilder::default().pool(pool).create_state().await;
         state
             .client()
             .set_checks(&default_merge_sha(), &[suite_success(), suite_pending()]);
@@ -413,9 +413,9 @@ mod tests {
         "###);
     }
 
-    #[tokio::test]
-    async fn test_try_suite_completed_received_before_workflow_completed() {
-        let state = ClientBuilder::default().create_state().await;
+    #[sqlx::test]
+    async fn test_try_suite_completed_received_before_workflow_completed(pool: sqlx::PgPool) {
+        let state = ClientBuilder::default().pool(pool).create_state().await;
         state
             .client()
             .set_checks(&default_merge_sha(), &[suite_success()]);
@@ -450,9 +450,9 @@ mod tests {
         "###);
     }
 
-    #[tokio::test]
-    async fn test_try_check_suite_finished_twice() {
-        let state = ClientBuilder::default().create_state().await;
+    #[sqlx::test]
+    async fn test_try_check_suite_finished_twice(pool: sqlx::PgPool) {
+        let state = ClientBuilder::default().pool(pool).create_state().await;
         state
             .client()
             .set_checks(&default_merge_sha(), &[suite_success(), suite_success()]);
