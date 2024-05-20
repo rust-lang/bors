@@ -1,5 +1,3 @@
-BEGIN;
-
 CREATE TABLE IF NOT EXISTS workflow (
   id SERIAL PRIMARY KEY,
   build_id INT NOT NULL,
@@ -14,5 +12,3 @@ CREATE TABLE IF NOT EXISTS workflow (
 
 -- create index for build url
 CREATE UNIQUE INDEX IF NOT EXISTS workflow_build_id_url_idx ON workflow (build_id, url);
-
-COMMIT;

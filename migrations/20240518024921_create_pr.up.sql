@@ -1,5 +1,3 @@
-BEGIN;
-
 CREATE TABLE IF NOT EXISTS pull_request (
   id SERIAL PRIMARY KEY,
   repository TEXT NOT NULL,
@@ -11,5 +9,3 @@ CREATE TABLE IF NOT EXISTS pull_request (
 
 -- create index for repository and number
 CREATE UNIQUE INDEX IF NOT EXISTS pull_request_repository_number_idx ON pull_request (repository, number);
-
-COMMIT;

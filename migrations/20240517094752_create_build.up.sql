@@ -1,5 +1,3 @@
-BEGIN;
-
 CREATE TABLE IF NOT EXISTS build (
   id SERIAL PRIMARY KEY,
   repository TEXT NOT NULL,
@@ -11,5 +9,3 @@ CREATE TABLE IF NOT EXISTS build (
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS build_repository_branch_commit_sha_idx ON build (repository, branch, commit_sha);
-
-COMMIT;
