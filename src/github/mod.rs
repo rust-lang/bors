@@ -44,6 +44,34 @@ impl Display for GithubRepoName {
     }
 }
 
+impl From<String> for GithubRepoName {
+    fn from(value: String) -> Self {
+        let mut parts = value.split('/');
+        let owner = parts.next().unwrap_or_default();
+        let name = parts.next().unwrap_or_default();
+        Self::new(owner, name)
+    }
+}
+
+impl sqlx::Type<sqlx::Postgres> for GithubRepoName {
+    fn type_info() -> sqlx::postgres::PgTypeInfo {
+        <String as sqlx::Type<sqlx::Postgres>>::type_info()
+    }
+}
+
+impl sqlx::Encode<'_, sqlx::Postgres> for GithubRepoName {
+    fn encode_by_ref(&self, buf: &mut sqlx::postgres::PgArgumentBuffer) -> sqlx::encode::IsNull {
+        <String as sqlx::Encode<sqlx::Postgres>>::encode(self.to_string(), buf)
+    }
+}
+
+impl sqlx::Decode<'_, sqlx::Postgres> for GithubRepoName {
+    fn decode(value: sqlx::postgres::PgValueRef<'_>) -> Result<Self, sqlx::error::BoxDynError> {
+        let value = <String as sqlx::Decode<sqlx::Postgres>>::decode(value)?;
+        Ok(Self::from(value))
+    }
+}
+
 #[derive(Debug, PartialEq)]
 pub struct GithubUser {
     pub id: UserId,
@@ -93,6 +121,20 @@ pub struct PullRequestNumber(pub u64);
 impl From<u64> for PullRequestNumber {
     fn from(value: u64) -> Self {
         Self(value)
+    }
+}
+
+// to load from/ save to Postgres, as it doesn't have unsigned integer types.
+impl From<i64> for PullRequestNumber {
+    fn from(value: i64) -> Self {
+        Self(value as u64)
+    }
+}
+
+impl sqlx::Type<sqlx::Postgres> for PullRequestNumber {
+    fn type_info() -> sqlx::postgres::PgTypeInfo {
+        // Postgres don't have unsigned integer types.
+        <i64 as sqlx::Type<sqlx::Postgres>>::type_info()
     }
 }
 

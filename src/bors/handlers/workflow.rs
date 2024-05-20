@@ -4,8 +4,8 @@ use crate::bors::comment::try_build_succeeded_comment;
 use crate::bors::event::{CheckSuiteCompleted, WorkflowCompleted, WorkflowStarted};
 use crate::bors::handlers::is_bors_observed_branch;
 use crate::bors::handlers::labels::handle_label_trigger;
-use crate::bors::Comment;
-use crate::bors::{self, RepositoryClient, RepositoryState};
+use crate::bors::{CheckSuiteStatus, Comment};
+use crate::bors::{RepositoryClient, RepositoryState};
 use crate::database::{BuildStatus, DbClient, WorkflowStatus};
 use crate::github::LabelTrigger;
 
@@ -48,7 +48,7 @@ pub(super) async fn handle_workflow_started(
         &build,
         payload.name,
         payload.url,
-        payload.run_id,
+        payload.run_id.into(),
         payload.workflow_type,
         WorkflowStatus::Pending,
     )
@@ -138,14 +138,14 @@ async fn try_complete_build<Client: RepositoryClient>(
     // Some checks are still running, let's wait for the next event
     if checks
         .iter()
-        .any(|check| matches!(check.status, bors::CheckSuiteStatus::Pending))
+        .any(|check| matches!(check.status, CheckSuiteStatus::Pending))
     {
         return Ok(());
     }
 
     let has_failure = checks
         .iter()
-        .any(|check| matches!(check.status, bors::CheckSuiteStatus::Failure));
+        .any(|check| matches!(check.status, CheckSuiteStatus::Failure));
 
     let mut workflows = db.get_workflows_for_build(&build).await?;
     workflows.sort_by(|a, b| a.name.cmp(&b.name));
@@ -205,12 +205,6 @@ async fn try_complete_build<Client: RepositoryClient>(
 
 #[cfg(test)]
 mod tests {
-    use std::assert_eq;
-
-    use sea_orm::EntityTrait;
-
-    use entity::workflow;
-
     use crate::bors::handlers::trybuild::TRY_BRANCH_NAME;
     use crate::database::WorkflowStatus;
     use crate::tests::event::{
@@ -230,11 +224,7 @@ mod tests {
                     .commit_sha("unknown-sha-".to_string()),
             )
             .await;
-        assert!(workflow::Entity::find()
-            .one(state.db.connection())
-            .await
-            .unwrap()
-            .is_none());
+        assert_eq!(state.db.get_all_workflows().await.unwrap().len(), 0);
     }
 
     #[tokio::test]
@@ -249,11 +239,7 @@ mod tests {
                     .commit_sha("unknown-sha-".to_string()),
             )
             .await;
-        assert!(workflow::Entity::find()
-            .one(state.db.connection())
-            .await
-            .unwrap()
-            .is_none());
+        assert_eq!(state.db.get_all_workflows().await.unwrap().len(), 0);
     }
 
     #[tokio::test]
@@ -268,12 +254,8 @@ mod tests {
                     .run_id(42),
             )
             .await;
-        let suite = workflow::Entity::find()
-            .one(state.db.connection())
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(suite.status, "pending");
+        let suite = state.db.get_all_workflows().await.unwrap().pop().unwrap();
+        assert_eq!(suite.status, WorkflowStatus::Pending);
     }
 
     #[tokio::test]
@@ -288,14 +270,7 @@ mod tests {
         };
         state.workflow_started(event()).await;
         state.workflow_started(event()).await;
-        assert_eq!(
-            workflow::Entity::find()
-                .all(state.db.connection())
-                .await
-                .unwrap()
-                .len(),
-            1
-        );
+        assert_eq!(state.db.get_all_workflows().await.unwrap().len(), 1);
     }
 
     #[tokio::test]

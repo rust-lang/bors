@@ -5,20 +5,13 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
-[workspace]
-members = [".", "database/entity", "database/migration"]
-
-[workspace.dependencies]
-sea-orm = { version = "0.12.14" }
-tokio = { version = "1.21", features = ["full"] }
-
 [dependencies]
 # CLI
 clap = { version = "4.0", features = ["env", "derive"] }
 
 # Logging
 tracing = "0.1"
-tracing-subscriber = "0.3"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # Errors
 anyhow = "1.0"
@@ -34,7 +27,7 @@ octocrab = "0.35.0"
 
 # Async
 futures = "0.3"
-tokio = { workspace = true }
+tokio = { version = "1.21", features = ["full"] }
 arc-swap = "1.7.1"
 
 # Web
@@ -53,17 +46,12 @@ hex = "0.4"
 secrecy = "0.8"
 
 # Database
-sqlx = { version = "0.7.4", features = ["runtime-tokio-rustls", "sqlite", "postgres"] }
-sea-orm = { workspace = true }
+sqlx = { version = "0.7.4", features = ["runtime-tokio" ,"tls-rustls", "postgres", "chrono"] }
 
 # Time
 chrono = "0.4"
 
 itertools = "0.12.1"
-
-# Local
-entity = { path = "database/entity" }
-migration = { path = "database/migration" }
 
 [dev-dependencies]
 insta = "1.26"

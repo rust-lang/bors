@@ -1,13 +1,13 @@
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context};
-use octocrab::models::RunId;
 
 use crate::bors::command::Parent;
 use crate::bors::handlers::labels::handle_label_trigger;
 use crate::bors::Comment;
 use crate::bors::RepositoryClient;
 use crate::bors::RepositoryState;
+use crate::database::RunId;
 use crate::database::{
     BuildModel, BuildStatus, DbClient, PullRequestModel, WorkflowStatus, WorkflowType,
 };
@@ -315,10 +315,6 @@ async fn check_try_permissions<Client: RepositoryClient>(
 
 #[cfg(test)]
 mod tests {
-    use sea_orm::EntityTrait;
-
-    use entity::workflow;
-
     use crate::bors::handlers::trybuild::{TRY_BRANCH_NAME, TRY_MERGE_BRANCH_NAME};
     use crate::database::{BuildStatus, DbClient, WorkflowStatus, WorkflowType};
     use crate::github::{CommitSha, LabelTrigger, MergeError, PullRequestNumber};
@@ -710,14 +706,7 @@ mod tests {
                     .run_id(123),
             )
             .await;
-        assert_eq!(
-            workflow::Entity::find()
-                .all(state.db.connection())
-                .await
-                .unwrap()
-                .len(),
-            0
-        );
+        assert_eq!(state.db.get_all_workflows().await.unwrap().len(), 0);
     }
 
     #[tokio::test]

@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use axum::async_trait;
-use octocrab::models::{App, Repository, RunId};
+use octocrab::models::{App, Repository};
 use octocrab::{Error, Octocrab};
 use tracing::log;
 
@@ -12,6 +12,7 @@ use crate::bors::{
     CheckSuite, CheckSuiteStatus, Comment, RepositoryClient, RepositoryLoader, RepositoryState,
 };
 use crate::config::{RepositoryConfig, CONFIG_FILE_PATH};
+use crate::database::RunId;
 use crate::github::api::base_github_html_url;
 use crate::github::api::operations::{merge_branches, set_branch_to_commit, MergeError};
 use crate::github::{Branch, CommitSha, GithubRepoName, PullRequest, PullRequestNumber};
@@ -203,7 +204,11 @@ impl RepositoryClient for GithubRepositoryClient {
 
         // Cancel all workflows in parallel
         futures::future::join_all(run_ids.iter().map(|run_id| {
-            actions.cancel_workflow_run(self.repo_name.owner(), self.repo_name.name(), *run_id)
+            actions.cancel_workflow_run(
+                self.repo_name.owner(),
+                self.repo_name.name(),
+                (*run_id).into(),
+            )
         }))
         .await
         .into_iter()

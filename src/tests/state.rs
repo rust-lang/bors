@@ -6,7 +6,7 @@ use std::time::Duration;
 use arc_swap::ArcSwap;
 use axum::async_trait;
 use derive_builder::Builder;
-use octocrab::models::{RunId, UserId};
+use octocrab::models::UserId;
 use url::Url;
 
 use super::database::MockedDBClient;
@@ -21,7 +21,7 @@ use crate::bors::{
 };
 use crate::bors::{RepositoryClient, RepositoryLoader};
 use crate::config::RepositoryConfig;
-use crate::database::{DbClient, WorkflowStatus};
+use crate::database::{DbClient, RunId, WorkflowStatus};
 use crate::github::{
     CommitSha, GithubRepoName, GithubUser, LabelModification, LabelTrigger, PullRequest,
 };

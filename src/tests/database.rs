@@ -1,39 +1,53 @@
-use axum::async_trait;
-use migration::{Migrator, MigratorTrait};
-use octocrab::models::RunId;
-use sea_orm::Database;
-use sea_orm::DatabaseConnection;
+use std::env;
 
+use axum::async_trait;
+use sqlx::postgres::PgConnectOptions;
+use sqlx::ConnectOptions;
+use sqlx::PgPool;
+use tracing::log::LevelFilter;
+
+use crate::database::operations::get_all_workflows;
 use crate::{
     database::{
-        BuildModel, BuildStatus, DbClient, PullRequestModel, SeaORMClient, WorkflowModel,
-        WorkflowStatus, WorkflowType,
+        BuildModel, BuildStatus, DbClient, PullRequestModel, RunId, WorkflowModel, WorkflowStatus,
+        WorkflowType,
     },
     github::{CommitSha, GithubRepoName, PullRequestNumber},
+    PgDbClient,
 };
 
 pub async fn create_test_db() -> MockedDBClient {
-    let db = Database::connect("sqlite::memory:").await.unwrap();
-    Migrator::up(&db, None).await.unwrap();
-    MockedDBClient::new(SeaORMClient::new(db.clone()))
+    let mut opts: PgConnectOptions = env::var("DATABASE").unwrap().parse().unwrap();
+    opts = opts.log_statements(LevelFilter::Trace);
+    let db = PgPool::connect_with(opts)
+        .await
+        .expect("Cannot connect to database");
+
+    sqlx::migrate!()
+        .run(&db)
+        .await
+        .expect("Cannot run database migrations");
+    MockedDBClient::new(PgDbClient::new(db.clone()), db)
 }
 
-pub struct MockedDBClient {
-    db: SeaORMClient,
+pub(crate) struct MockedDBClient {
+    pool: PgPool,
+    db: PgDbClient,
     pub get_workflows_for_build:
         Option<Box<dyn Fn() -> anyhow::Result<Vec<WorkflowModel>> + Send + Sync>>,
 }
 
 impl MockedDBClient {
-    fn new(db: SeaORMClient) -> Self {
+    fn new(db: PgDbClient, pool: PgPool) -> Self {
         Self {
             db,
+            pool,
             get_workflows_for_build: None,
         }
     }
 
-    pub fn connection(&self) -> &DatabaseConnection {
-        self.db.connection()
+    pub(crate) async fn get_all_workflows(&self) -> anyhow::Result<Vec<WorkflowModel>> {
+        get_all_workflows(&self.pool).await
     }
 }
 
