@@ -8,7 +8,6 @@ use axum::async_trait;
 use chrono::{DateTime, Utc};
 
 pub use client::PgDbClient;
-use sqlx::{postgres::PgTypeInfo, Postgres};
 
 use crate::github::{CommitSha, GithubRepoName, PullRequestNumber};
 
@@ -83,7 +82,9 @@ impl sqlx::Type<sqlx::Postgres> for PullRequestNumber {
 }
 
 /// Status of a GitHub build.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, sqlx::Type)]
+#[sqlx(type_name = "TEXT")]
+#[sqlx(rename_all = "lowercase")]
 pub enum BuildStatus {
     /// The build is still waiting for results.
     Pending,
@@ -95,40 +96,6 @@ pub enum BuildStatus {
     Cancelled,
     /// The build ran for too long and was timeouted by the bot.
     Timeouted,
-}
-
-impl sqlx::Type<Postgres> for BuildStatus {
-    fn type_info() -> PgTypeInfo {
-        <String as sqlx::Type<Postgres>>::type_info()
-    }
-}
-
-impl sqlx::Decode<'_, Postgres> for BuildStatus {
-    fn decode(value: sqlx::postgres::PgValueRef<'_>) -> Result<Self, sqlx::error::BoxDynError> {
-        // decode by string
-        let status = <String as sqlx::Decode<Postgres>>::decode(value)?;
-        match status.as_str() {
-            "pending" => Ok(BuildStatus::Pending),
-            "success" => Ok(BuildStatus::Success),
-            "failure" => Ok(BuildStatus::Failure),
-            "cancelled" => Ok(BuildStatus::Cancelled),
-            "timeouted" => Ok(BuildStatus::Timeouted),
-            _ => Err(format!("Invalid build status: {}", status).into()),
-        }
-    }
-}
-
-impl sqlx::Encode<'_, Postgres> for BuildStatus {
-    fn encode_by_ref(&self, buf: &mut sqlx::postgres::PgArgumentBuffer) -> sqlx::encode::IsNull {
-        let status = match self {
-            BuildStatus::Pending => "pending",
-            BuildStatus::Success => "success",
-            BuildStatus::Failure => "failure",
-            BuildStatus::Cancelled => "cancelled",
-            BuildStatus::Timeouted => "timeouted",
-        };
-        <&str as sqlx::Encode<Postgres>>::encode(status, buf)
-    }
 }
 
 /// Represents a single (merged) commit.
@@ -156,42 +123,18 @@ pub struct PullRequestModel {
 
 /// Describes whether a workflow is a Github Actions workflow or if it's a job from some external
 /// CI.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, sqlx::Type)]
+#[sqlx(type_name = "TEXT")]
+#[sqlx(rename_all = "lowercase")]
 pub enum WorkflowType {
     Github,
     External,
 }
 
-impl sqlx::Type<Postgres> for WorkflowType {
-    fn type_info() -> PgTypeInfo {
-        <String as sqlx::Type<Postgres>>::type_info()
-    }
-}
-
-impl sqlx::Decode<'_, Postgres> for WorkflowType {
-    fn decode(value: sqlx::postgres::PgValueRef<'_>) -> Result<Self, sqlx::error::BoxDynError> {
-        // decode by string
-        let status = <String as sqlx::Decode<Postgres>>::decode(value)?;
-        match status.as_str() {
-            "github" => Ok(WorkflowType::Github),
-            "external" => Ok(WorkflowType::External),
-            _ => Err(format!("Invalid workflow type: {}", status).into()),
-        }
-    }
-}
-
-impl sqlx::Encode<'_, Postgres> for WorkflowType {
-    fn encode_by_ref(&self, buf: &mut sqlx::postgres::PgArgumentBuffer) -> sqlx::encode::IsNull {
-        let status = match self {
-            WorkflowType::Github => "github",
-            WorkflowType::External => "external",
-        };
-        <&str as sqlx::Encode<Postgres>>::encode(status, buf)
-    }
-}
-
 /// Status of a workflow.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, sqlx::Type)]
+#[sqlx(type_name = "TEXT")]
+#[sqlx(rename_all = "lowercase")]
 pub enum WorkflowStatus {
     /// Workflow is running.
     Pending,
@@ -199,36 +142,6 @@ pub enum WorkflowStatus {
     Success,
     /// Workflow has failed.
     Failure,
-}
-
-impl sqlx::Type<Postgres> for WorkflowStatus {
-    fn type_info() -> PgTypeInfo {
-        <String as sqlx::Type<Postgres>>::type_info()
-    }
-}
-
-impl sqlx::Decode<'_, Postgres> for WorkflowStatus {
-    fn decode(value: sqlx::postgres::PgValueRef<'_>) -> Result<Self, sqlx::error::BoxDynError> {
-        // decode by string
-        let status = <String as sqlx::Decode<Postgres>>::decode(value)?;
-        match status.as_str() {
-            "pending" => Ok(WorkflowStatus::Pending),
-            "success" => Ok(WorkflowStatus::Success),
-            "failure" => Ok(WorkflowStatus::Failure),
-            _ => Err(format!("Invalid workflow status: {}", status).into()),
-        }
-    }
-}
-
-impl sqlx::Encode<'_, Postgres> for WorkflowStatus {
-    fn encode_by_ref(&self, buf: &mut sqlx::postgres::PgArgumentBuffer) -> sqlx::encode::IsNull {
-        let status = match self {
-            WorkflowStatus::Pending => "pending",
-            WorkflowStatus::Success => "success",
-            WorkflowStatus::Failure => "failure",
-        };
-        <&str as sqlx::Encode<Postgres>>::encode(status, buf)
-    }
 }
 
 /// Represents a workflow run, coming either from Github Actions or from some external CI.
