@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE workflow SET status = $1 WHERE run_id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "6d15016184e78bd7c8b9e6448bb5dbb8e95162d7d0432cb07ce9da170c1941d7"
+}
