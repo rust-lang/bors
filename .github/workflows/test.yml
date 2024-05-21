@@ -13,7 +13,6 @@ jobs:
     name: Test
     runs-on: ubuntu-latest
     env:
-      SQLX_OFFLINE: true
       DATABASE_URL: postgres://postgres:password@localhost:5432/test
     services:
       postgres:
@@ -41,7 +40,16 @@ jobs:
           override: true
           components: clippy, rustfmt
 
+      - name: Install sqlx-cli
+        run: cargo install sqlx-cli@0.7.4 --no-default-features --features native-tls,postgres
+
       - uses: Swatinem/rust-cache@v1
+
+      - name: Run SQLx migrations
+        run: cargo sqlx database create && sqlx migrate run
+
+      - name: Check .sqlx files
+        run: cargo sqlx prepare --check -- --tests
 
       - name: Check
         uses: actions-rs/cargo@v1
