@@ -1,13 +1,13 @@
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context};
-use octocrab::models::RunId;
 
 use crate::bors::command::Parent;
 use crate::bors::handlers::labels::handle_label_trigger;
 use crate::bors::Comment;
 use crate::bors::RepositoryClient;
 use crate::bors::RepositoryState;
+use crate::database::RunId;
 use crate::database::{
     BuildModel, BuildStatus, DbClient, PullRequestModel, WorkflowStatus, WorkflowType,
 };
@@ -315,14 +315,10 @@ async fn check_try_permissions<Client: RepositoryClient>(
 
 #[cfg(test)]
 mod tests {
-    use sea_orm::EntityTrait;
-
-    use entity::workflow;
-
     use crate::bors::handlers::trybuild::{TRY_BRANCH_NAME, TRY_MERGE_BRANCH_NAME};
     use crate::database::{BuildStatus, DbClient, WorkflowStatus, WorkflowType};
     use crate::github::{CommitSha, LabelTrigger, MergeError, PullRequestNumber};
-    use crate::tests::database::create_test_db;
+    use crate::tests::database::MockedDBClient;
     use crate::tests::event::{
         default_pr_number, suite_failure, suite_pending, suite_success, WorkflowStartedBuilder,
     };
@@ -331,10 +327,11 @@ mod tests {
         default_merge_sha, default_repo_name, ClientBuilder, PermissionsBuilder, RepoConfigBuilder,
     };
 
-    #[tokio::test]
-    async fn test_try_no_permission() {
+    #[sqlx::test]
+    async fn test_try_no_permission(pool: sqlx::PgPool) {
         let state = ClientBuilder::default()
             .permissions(PermissionsBuilder::default())
+            .pool(pool)
             .create_state()
             .await;
         state.comment("@bors try").await;
@@ -344,9 +341,9 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn test_try_merge_comment() {
-        let state = ClientBuilder::default().create_state().await;
+    #[sqlx::test]
+    async fn test_try_merge_comment(pool: sqlx::PgPool) {
+        let state = ClientBuilder::default().pool(pool).create_state().await;
         state.client().set_get_pr_fn(|pr| {
             Ok(PRBuilder::default()
                 .number(pr.0)
@@ -362,9 +359,9 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn test_try_merge_unknown_base_branch() {
-        let state = ClientBuilder::default().create_state().await;
+    #[sqlx::test]
+    async fn test_try_merge_unknown_base_branch(pool: sqlx::PgPool) {
+        let state = ClientBuilder::default().pool(pool).create_state().await;
         state.client().set_get_pr_fn(|pr| {
             Ok(PRBuilder::default()
                 .number(pr.0)
@@ -385,9 +382,9 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn test_try_merge_branch_history() {
-        let state = ClientBuilder::default().create_state().await;
+    #[sqlx::test]
+    async fn test_try_merge_branch_history(pool: sqlx::PgPool) {
+        let state = ClientBuilder::default().pool(pool).create_state().await;
         let main_sha = "main1-sha";
         let main_name = "main1";
 
@@ -415,9 +412,9 @@ mod tests {
             .check_branch_history(TRY_BRANCH_NAME, &[&default_merge_sha()]);
     }
 
-    #[tokio::test]
-    async fn test_try_merge_explicit_parent() {
-        let state = ClientBuilder::default().create_state().await;
+    #[sqlx::test]
+    async fn test_try_merge_explicit_parent(pool: sqlx::PgPool) {
+        let state = ClientBuilder::default().pool(pool).create_state().await;
         state
             .comment("@bors try parent=ea9c1b050cc8b420c2c211d2177811e564a4dc60")
             .await;
@@ -430,9 +427,9 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn test_try_merge_last_parent() {
-        let state = ClientBuilder::default().create_state().await;
+    #[sqlx::test]
+    async fn test_try_merge_last_parent(pool: sqlx::PgPool) {
+        let state = ClientBuilder::default().pool(pool).create_state().await;
 
         state
             .comment("@bors try parent=ea9c1b050cc8b420c2c211d2177811e564a4dc60")
@@ -465,9 +462,9 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn test_try_merge_last_parent_unknown() {
-        let state = ClientBuilder::default().create_state().await;
+    #[sqlx::test]
+    async fn test_try_merge_last_parent_unknown(pool: sqlx::PgPool) {
+        let state = ClientBuilder::default().pool(pool).create_state().await;
 
         state.comment("@bors try parent=last").await;
         state.client().check_comments(
@@ -476,9 +473,9 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn test_try_merge_conflict() {
-        let state = ClientBuilder::default().create_state().await;
+    #[sqlx::test]
+    async fn test_try_merge_conflict(pool: sqlx::PgPool) {
+        let state = ClientBuilder::default().pool(pool).create_state().await;
         state
             .client()
             .set_merge_branches_fn(Box::new(|| Err(MergeError::Conflict)));
@@ -516,9 +513,9 @@ mod tests {
         "###);
     }
 
-    #[tokio::test]
-    async fn test_try_merge_insert_into_db() {
-        let state = ClientBuilder::default().create_state().await;
+    #[sqlx::test]
+    async fn test_try_merge_insert_into_db(pool: sqlx::PgPool) {
+        let state = ClientBuilder::default().pool(pool).create_state().await;
         state.comment("@bors try").await;
 
         assert!(state
@@ -533,9 +530,9 @@ mod tests {
             .is_some());
     }
 
-    #[tokio::test]
-    async fn test_try_merge_active_build() {
-        let state = ClientBuilder::default().create_state().await;
+    #[sqlx::test]
+    async fn test_try_merge_active_build(pool: sqlx::PgPool) {
+        let state = ClientBuilder::default().pool(pool).create_state().await;
 
         state.comment("@bors try").await;
         state.comment("@bors try").await;
@@ -543,9 +540,9 @@ mod tests {
         insta::assert_snapshot!(state.client().get_last_comment(default_pr_number()), @":exclamation: A try build is currently in progress. You can cancel it using @bors try cancel.");
     }
 
-    #[tokio::test]
-    async fn test_try_again_after_checks_finish() {
-        let state = ClientBuilder::default().create_state().await;
+    #[sqlx::test]
+    async fn test_try_again_after_checks_finish(pool: sqlx::PgPool) {
+        let state = ClientBuilder::default().pool(pool).create_state().await;
         state
             .client()
             .set_checks(&default_merge_sha(), &[suite_success()]);
@@ -579,18 +576,18 @@ mod tests {
         "###);
     }
 
-    #[tokio::test]
-    async fn test_try_cancel_no_running_build() {
-        let state = ClientBuilder::default().create_state().await;
+    #[sqlx::test]
+    async fn test_try_cancel_no_running_build(pool: sqlx::PgPool) {
+        let state = ClientBuilder::default().pool(pool).create_state().await;
 
         state.comment("@bors try cancel").await;
 
         insta::assert_snapshot!(state.client().get_last_comment(default_pr_number()), @":exclamation: There is currently no try build in progress.");
     }
 
-    #[tokio::test]
-    async fn test_try_cancel_cancel_workflows() {
-        let state = ClientBuilder::default().create_state().await;
+    #[sqlx::test]
+    async fn test_try_cancel_cancel_workflows(pool: sqlx::PgPool) {
+        let state = ClientBuilder::default().pool(pool).create_state().await;
 
         state.comment("@bors try").await;
         state
@@ -618,11 +615,11 @@ mod tests {
         "###);
     }
 
-    #[tokio::test]
-    async fn test_try_cancel_error() {
-        let mut db = create_test_db().await;
+    #[sqlx::test]
+    async fn test_try_cancel_error(pool: sqlx::PgPool) {
+        let mut db = MockedDBClient::new(pool);
         db.get_workflows_for_build = Some(Box::new(|| Err(anyhow::anyhow!("Errr"))));
-        let state = ClientBuilder::default().db(Some(db)).create_state().await;
+        let state = ClientBuilder::default().db(db).create_state().await;
 
         state.comment("@bors try").await;
         state.comment("@bors try cancel").await;
@@ -638,9 +635,9 @@ mod tests {
         insta::assert_snapshot!(state.client().get_last_comment(default_pr_number()), @"Try build was cancelled. It was not possible to cancel some workflows.");
     }
 
-    #[tokio::test]
-    async fn test_try_cancel_ignore_finished_workflows() {
-        let state = ClientBuilder::default().create_state().await;
+    #[sqlx::test]
+    async fn test_try_cancel_ignore_finished_workflows(pool: sqlx::PgPool) {
+        let state = ClientBuilder::default().pool(pool).create_state().await;
         state.client().set_checks(
             &default_merge_sha(),
             &[suite_success(), suite_failure(), suite_pending()],
@@ -674,9 +671,9 @@ mod tests {
         state.client().check_cancelled_workflows(&[123]);
     }
 
-    #[tokio::test]
-    async fn test_try_cancel_ignore_external_workflows() {
-        let state = ClientBuilder::default().create_state().await;
+    #[sqlx::test]
+    async fn test_try_cancel_ignore_external_workflows(pool: sqlx::PgPool) {
+        let state = ClientBuilder::default().pool(pool).create_state().await;
         state
             .client()
             .set_checks(&default_merge_sha(), &[suite_success()]);
@@ -694,9 +691,9 @@ mod tests {
         state.client().check_cancelled_workflows(&[]);
     }
 
-    #[tokio::test]
-    async fn test_try_workflow_start_after_cancel() {
-        let state = ClientBuilder::default().create_state().await;
+    #[sqlx::test]
+    async fn test_try_workflow_start_after_cancel(pool: sqlx::PgPool) {
+        let state = ClientBuilder::default().pool(pool).create_state().await;
         state
             .client()
             .set_checks(&default_merge_sha(), &[suite_success()]);
@@ -710,18 +707,11 @@ mod tests {
                     .run_id(123),
             )
             .await;
-        assert_eq!(
-            workflow::Entity::find()
-                .all(state.db.connection())
-                .await
-                .unwrap()
-                .len(),
-            0
-        );
+        assert_eq!(state.db.get_all_workflows().await.unwrap().len(), 0);
     }
 
-    #[tokio::test]
-    async fn test_try_build_start_modify_labels() {
+    #[sqlx::test]
+    async fn test_try_build_start_modify_labels(pool: sqlx::PgPool) {
         let state = ClientBuilder::default()
             .config(
                 RepoConfigBuilder::default()
@@ -729,6 +719,7 @@ mod tests {
                     .add_label(LabelTrigger::TryBuildStarted, "bar")
                     .remove_label(LabelTrigger::TryBuildStarted, "baz"),
             )
+            .pool(pool)
             .create_state()
             .await;
 
@@ -739,8 +730,8 @@ mod tests {
             .check_removed_labels(default_pr_number(), &["baz"]);
     }
 
-    #[tokio::test]
-    async fn test_try_build_succeeded_modify_labels() {
+    #[sqlx::test]
+    async fn test_try_build_succeeded_modify_labels(pool: sqlx::PgPool) {
         let state = ClientBuilder::default()
             .config(
                 RepoConfigBuilder::default()
@@ -748,6 +739,7 @@ mod tests {
                     .add_label(LabelTrigger::TryBuildSucceeded, "bar")
                     .remove_label(LabelTrigger::TryBuildSucceeded, "baz"),
             )
+            .pool(pool)
             .create_state()
             .await;
         state
@@ -769,8 +761,8 @@ mod tests {
             .check_removed_labels(default_pr_number(), &["baz"]);
     }
 
-    #[tokio::test]
-    async fn test_try_build_failed_modify_labels() {
+    #[sqlx::test]
+    async fn test_try_build_failed_modify_labels(pool: sqlx::PgPool) {
         let state = ClientBuilder::default()
             .config(
                 RepoConfigBuilder::default()
@@ -778,6 +770,7 @@ mod tests {
                     .add_label(LabelTrigger::TryBuildFailed, "bar")
                     .remove_label(LabelTrigger::TryBuildFailed, "baz"),
             )
+            .pool(pool)
             .create_state()
             .await;
         state

@@ -12,6 +12,22 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgres://postgres:password@localhost:5432/test
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - name: Checkout sources
         uses: actions/checkout@v2
@@ -24,7 +40,16 @@ jobs:
           override: true
           components: clippy, rustfmt
 
+      - name: Install sqlx-cli
+        run: cargo install sqlx-cli@0.7.4 --no-default-features --features native-tls,postgres
+
       - uses: Swatinem/rust-cache@v1
+
+      - name: Run SQLx migrations
+        run: cargo sqlx database create && sqlx migrate run
+
+      - name: Check .sqlx files
+        run: cargo sqlx prepare --check -- --tests
 
       - name: Check
         uses: actions-rs/cargo@v1

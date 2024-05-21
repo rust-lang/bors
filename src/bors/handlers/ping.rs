@@ -20,9 +20,9 @@ mod tests {
     use crate::tests::event::default_pr_number;
     use crate::tests::state::ClientBuilder;
 
-    #[tokio::test]
-    async fn test_ping() {
-        let state = ClientBuilder::default().create_state().await;
+    #[sqlx::test]
+    async fn test_ping(pool: sqlx::PgPool) {
+        let state = ClientBuilder::default().pool(pool).create_state().await;
         state.comment("@bors ping").await;
         state
             .client()

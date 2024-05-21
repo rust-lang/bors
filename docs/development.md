@@ -3,14 +3,12 @@ This document should help you make sense of the codebase and provide
 guidance on working with it and testing it locally.
 
 Directory structure:
-- `database/migration`
-    - `SeaORM` migrations that are the source of truth for database schema
-- `database/entity`
-    - Automatically generated `SeaORM` DB entities, which are generated from a (Postgre) database.
+- `migrations`
+    - `sqlx` migrations that are the source of truth for database schema
 - `src/bors`
     - Bors commands and their handlers.
 - `src/database`
-    - Database ORM layer built on top of SeaORM.
+    - Database access layer built on top of `sqlx`.
 - `src/github`
     - Communication with the GitHub API and definitions of GitHub webhook messages.
 
@@ -71,28 +69,39 @@ Everytime you want to run bors:
 - Try `@bors ping` on some PR on the test repository :)
 
 ## Database
-You must have `sea-orm-cli` installed for the following commands to work.
+You must have `sqlx-cli` installed for the following commands to work.
 ```console
-$ cargo install sea-orm-cli
+$ cargo install sqlx-cli@0.7.4 --no-default-features --features native-tls,postgres
 ```
 
-You must also set up a `DATABASE_URL` environment variable. **You can use SQLite for local testing,
-but when entities are regenerated, it should be done against a Postgre database!**
+The database can be set up with the docker-compose file in the root of the repository:
+
 ```console
-$ export DATABASE_URL=sqlite://bors.db?mode=rwc
+$ docker-compose up -d
+```
+
+Then, set the `DATABASE_URL` environment variable to the connection string of the database.
+The content of the variable is can be found in the `.env.example` file.
+If an `.env` file is present, the environment variable listed in it will be picked up automatically by `sqlx`.
+
+```console
+$ export DATABASE_URL=postgres://bors:bors@localhost:5432/bors
 ```
 
 ### Updating the DB schema
 1) Generate a new migration
     ```console
-    $ sea-orm-cli migrate -d database/migration/ generate <name>
+    $ sqlx migrate add <new-migration>
     ```
-2) Change the migration manually in `database/migration/src/<new-migration>.rs`.
-3) Apply migrations to a **Postgre** DB. (You can use Docker for that).
+2) Change the migration manually in `migrations/<timestamp>-<new-migration>.sql`.
+3) Apply migrations to the **Postgre** DB.
     ```console
-    $ sea-orm-cli migrate -d database/migration/ up
+    $ sqlx migrate run
     ```
-4) Re-generate entities, again against a **Postgre** DB.
-    ```console
-    $ sea-orm-cli generate entity -o database/entity/src --lib
-    ```
+
+### Generate `.sqlx` directory
+```console
+$ sqlx prepare -- --tests
+```
+
+After that, you should commit the changes to the `.sqlx` directory.

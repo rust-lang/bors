@@ -19,8 +19,9 @@ RUN cargo chef cook --release --recipe-path recipe.json
 
 COPY Cargo.toml .
 COPY Cargo.lock .
+COPY migrations migrations
+COPY .sqlx .sqlx
 COPY src src
-COPY database database
 
 RUN cargo build --release
 

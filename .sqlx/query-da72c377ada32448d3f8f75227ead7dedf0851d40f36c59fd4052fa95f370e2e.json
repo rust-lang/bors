@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\nINSERT INTO workflow (build_id, name, url, run_id, type, status)\nVALUES ($1, $2, $3, $4, $5, $6)\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Text",
+        "Text",
+        "Int8",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "da72c377ada32448d3f8f75227ead7dedf0851d40f36c59fd4052fa95f370e2e"
+}

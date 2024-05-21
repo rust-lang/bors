@@ -44,6 +44,15 @@ impl Display for GithubRepoName {
     }
 }
 
+impl From<String> for GithubRepoName {
+    fn from(value: String) -> Self {
+        let mut parts = value.split('/');
+        let owner = parts.next().unwrap_or_default();
+        let name = parts.next().unwrap_or_default();
+        Self::new(owner, name)
+    }
+}
+
 #[derive(Debug, PartialEq)]
 pub struct GithubUser {
     pub id: UserId,

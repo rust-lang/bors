@@ -6,14 +6,13 @@ use std::time::Duration;
 use anyhow::Context;
 use bors::{
     create_app, create_bors_process, create_github_client, BorsContext, BorsGlobalEvent,
-    CommandParser, SeaORMClient, ServerState, WebhookSecret,
+    CommandParser, PgDbClient, ServerState, WebhookSecret,
 };
 use clap::Parser;
-use sea_orm::{ConnectOptions, Database};
+use sqlx::postgres::PgConnectOptions;
+use sqlx::{ConnectOptions, PgPool};
 use tracing::log::LevelFilter;
-use tracing_subscriber::EnvFilter;
-
-use migration::{Migrator, MigratorTrait};
+use tracing_subscriber::filter::EnvFilter;
 
 /// How often should the bot check DB state, e.g. for handling timeouts.
 const PERIODIC_REFRESH: Duration = Duration::from_secs(120);
@@ -33,7 +32,7 @@ struct Opts {
     webhook_secret: String,
 
     /// Database connection string.
-    #[arg(long, env = "DATABASE")]
+    #[arg(long, env = "DATABASE_URL")]
     db: String,
 
     /// Prefix used for bot commands in PR comments.
@@ -57,14 +56,19 @@ async fn webhook_server(state: ServerState) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn initialize_db(connection_string: &str) -> anyhow::Result<SeaORMClient> {
-    let mut opts = ConnectOptions::new(connection_string);
-    opts.sqlx_logging_level(LevelFilter::Trace);
+async fn initialize_db(connection_string: &str) -> anyhow::Result<PgDbClient> {
+    let mut opts: PgConnectOptions = connection_string.parse()?;
+    opts = opts.log_statements(LevelFilter::Trace);
+    let db = PgPool::connect_with(opts)
+        .await
+        .context("Cannot connect to database")?;
 
-    let db = Database::connect(opts).await?;
-    Migrator::up(&db, None).await?;
+    sqlx::migrate!()
+        .run(&db)
+        .await
+        .context("Cannot run database migrations")?;
 
-    Ok(SeaORMClient::new(db))
+    Ok(PgDbClient::new(db))
 }
 
 fn try_main(opts: Opts) -> anyhow::Result<()> {

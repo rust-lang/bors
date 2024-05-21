@@ -1,24 +1,90 @@
 //! Provides access to the database.
-//! It should be as self-contained as possible and it should ideally not expose the used database
-//! (ORM) types, to avoid dependencies on the ORM in the rest of the codebase.
-//!
-//! That is why the database model types are explicitly specified here, instead of just using the
-//! ORM (currently SeaORM) types.
+mod client;
+pub(crate) mod operations;
+
+use std::fmt::{Display, Formatter};
+
 use axum::async_trait;
 use chrono::{DateTime, Utc};
-use octocrab::models::RunId;
 
-pub use sea_orm_client::SeaORMClient;
+pub use client::PgDbClient;
 
-use crate::github::PullRequestNumber;
-use crate::github::{CommitSha, GithubRepoName};
-
-mod sea_orm_client;
+use crate::github::{CommitSha, GithubRepoName, PullRequestNumber};
 
 type PrimaryKey = i32;
 
+/// A unique identifier for a workflow run.
+#[derive(Clone, Copy, Debug)]
+pub struct RunId(pub u64);
+
+/// Postgres doesn't support unsigned integers.
+impl sqlx::Type<sqlx::Postgres> for RunId {
+    fn type_info() -> sqlx::postgres::PgTypeInfo {
+        <i64 as sqlx::Type<sqlx::Postgres>>::type_info()
+    }
+}
+
+impl From<i64> for RunId {
+    fn from(value: i64) -> RunId {
+        RunId(value as u64)
+    }
+}
+
+impl Display for RunId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        Display::fmt(&self.0, f)
+    }
+}
+
+impl From<RunId> for octocrab::models::RunId {
+    fn from(val: RunId) -> Self {
+        octocrab::models::RunId(val.0)
+    }
+}
+
+impl From<octocrab::models::RunId> for RunId {
+    fn from(val: octocrab::models::RunId) -> Self {
+        RunId(val.0)
+    }
+}
+
+impl sqlx::Type<sqlx::Postgres> for GithubRepoName {
+    fn type_info() -> sqlx::postgres::PgTypeInfo {
+        <String as sqlx::Type<sqlx::Postgres>>::type_info()
+    }
+}
+
+impl sqlx::Encode<'_, sqlx::Postgres> for GithubRepoName {
+    fn encode_by_ref(&self, buf: &mut sqlx::postgres::PgArgumentBuffer) -> sqlx::encode::IsNull {
+        <String as sqlx::Encode<sqlx::Postgres>>::encode(self.to_string(), buf)
+    }
+}
+
+impl sqlx::Decode<'_, sqlx::Postgres> for GithubRepoName {
+    fn decode(value: sqlx::postgres::PgValueRef<'_>) -> Result<Self, sqlx::error::BoxDynError> {
+        let value = <String as sqlx::Decode<sqlx::Postgres>>::decode(value)?;
+        Ok(Self::from(value))
+    }
+}
+
+// to load from/ save to Postgres, as it doesn't have unsigned integer types.
+impl From<i64> for PullRequestNumber {
+    fn from(value: i64) -> Self {
+        Self(value as u64)
+    }
+}
+
+impl sqlx::Type<sqlx::Postgres> for PullRequestNumber {
+    fn type_info() -> sqlx::postgres::PgTypeInfo {
+        // Postgres don't have unsigned integer types.
+        <i64 as sqlx::Type<sqlx::Postgres>>::type_info()
+    }
+}
+
 /// Status of a GitHub build.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, sqlx::Type)]
+#[sqlx(type_name = "TEXT")]
+#[sqlx(rename_all = "lowercase")]
 pub enum BuildStatus {
     /// The build is still waiting for results.
     Pending,
@@ -33,21 +99,23 @@ pub enum BuildStatus {
 }
 
 /// Represents a single (merged) commit.
-#[derive(Debug)]
+#[derive(Debug, sqlx::Type)]
+#[sqlx(type_name = "build")]
 pub struct BuildModel {
     pub id: PrimaryKey,
-    pub repository: String,
+    pub repository: GithubRepoName,
     pub branch: String,
     pub commit_sha: String,
-    pub parent: String,
     pub status: BuildStatus,
+    pub parent: String,
     pub created_at: DateTime<Utc>,
 }
 
 /// Represents a pull request.
+#[derive(Debug)]
 pub struct PullRequestModel {
     pub id: PrimaryKey,
-    pub repository: String,
+    pub repository: GithubRepoName,
     pub number: PullRequestNumber,
     pub try_build: Option<BuildModel>,
     pub created_at: DateTime<Utc>,
@@ -55,14 +123,18 @@ pub struct PullRequestModel {
 
 /// Describes whether a workflow is a Github Actions workflow or if it's a job from some external
 /// CI.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, sqlx::Type)]
+#[sqlx(type_name = "TEXT")]
+#[sqlx(rename_all = "lowercase")]
 pub enum WorkflowType {
     Github,
     External,
 }
 
 /// Status of a workflow.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, sqlx::Type)]
+#[sqlx(type_name = "TEXT")]
+#[sqlx(rename_all = "lowercase")]
 pub enum WorkflowStatus {
     /// Workflow is running.
     Pending,

@@ -9,10 +9,10 @@ use std::sync::Arc;
 
 use arc_swap::ArcSwap;
 use axum::async_trait;
-use octocrab::models::RunId;
 
 use crate::bors::event::PullRequestComment;
 use crate::config::RepositoryConfig;
+use crate::database::RunId;
 use crate::github::{CommitSha, GithubRepoName, MergeError, PullRequest, PullRequestNumber};
 use crate::permissions::UserPermissions;
 pub use command::CommandParser;
