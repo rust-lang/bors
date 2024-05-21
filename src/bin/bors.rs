@@ -32,7 +32,7 @@ struct Opts {
     webhook_secret: String,
 
     /// Database connection string.
-    #[arg(long, env = "DATABASE")]
+    #[arg(long, env = "DATABASE_URL")]
     db: String,
 
     /// Prefix used for bot commands in PR comments.

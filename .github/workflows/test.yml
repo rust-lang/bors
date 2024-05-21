@@ -17,7 +17,7 @@ jobs:
       DATABASE_URL: postgres://postgres:password@localhost:5432/test
     services:
       postgres:
-        image: postgres:13
+        image: postgres:16
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: password
