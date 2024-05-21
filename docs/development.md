@@ -71,7 +71,7 @@ Everytime you want to run bors:
 ## Database
 You must have `sqlx-cli` installed for the following commands to work.
 ```console
-$ cargo install sqlx-cli --no-default-features --features native-tls,postgres
+$ cargo install sqlx-cli@0.7.4 --no-default-features --features native-tls,postgres
 ```
 
 The database can be set up with the docker-compose file in the root of the repository:
@@ -80,7 +80,9 @@ The database can be set up with the docker-compose file in the root of the repos
 $ docker-compose up -d
 ```
 
-Then, set the `DATABASE_URL` environment variable to the connection string of the database. The content of the variable is can be found in the `.env.example` file.
+Then, set the `DATABASE_URL` environment variable to the connection string of the database.
+The content of the variable is can be found in the `.env.example` file.
+If an `.env` file is present, the environment variable listed in it will be picked up automatically by `sqlx`.
 
 ```console
 $ export DATABASE_URL=postgres://bors:bors@localhost:5432/bors
@@ -101,3 +103,5 @@ $ export DATABASE_URL=postgres://bors:bors@localhost:5432/bors
 ```console
 $ sqlx prepare -- --tests
 ```
+
+After that, you should commit the changes to the `.sqlx` directory.
