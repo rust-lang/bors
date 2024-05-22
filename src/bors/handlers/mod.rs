@@ -122,23 +122,8 @@ pub async fn handle_bors_global_event<Client: RepositoryClient>(
     let db = Arc::clone(&ctx.db);
     match event {
         BorsGlobalEvent::InstallationsChanged => {
-            let reloaded_repos = ctx.repository_loader.load_repositories().await?;
-            let mut repositories = ctx.repositories.write().unwrap();
-            for repo in repositories.values() {
-                if !reloaded_repos.contains_key(&repo.repository) {
-                    tracing::info!("Repository {} was not reloaded", repo.repository);
-                }
-            }
-            for repo in reloaded_repos.values() {
-                if repositories
-                    .insert(repo.repository.clone(), repo.clone())
-                    .is_some()
-                {
-                    tracing::info!("Repository {} was reloaded", repo.repository);
-                } else {
-                    tracing::info!("Repository {} was added", repo.repository);
-                }
-            }
+            let span = tracing::info_span!("Installations changed");
+            reload_repos(ctx).instrument(span).await?;
         }
         BorsGlobalEvent::Refresh => {
             let span = tracing::info_span!("Refresh");
@@ -247,6 +232,29 @@ async fn handle_comment<Client: RepositoryClient>(
                     .await
                     .context("Could not reply to PR comment")?;
             }
+        }
+    }
+    Ok(())
+}
+
+async fn reload_repos<Client: RepositoryClient>(
+    ctx: Arc<BorsContext<Client>>,
+) -> anyhow::Result<()> {
+    let reloaded_repos = ctx.repository_loader.load_repositories().await?;
+    let mut repositories = ctx.repositories.write().unwrap();
+    for repo in repositories.values() {
+        if !reloaded_repos.contains_key(&repo.repository) {
+            tracing::info!("Repository {} was not reloaded", repo.repository);
+        }
+    }
+    for repo in reloaded_repos.values() {
+        if repositories
+            .insert(repo.repository.clone(), repo.clone())
+            .is_some()
+        {
+            tracing::info!("Repository {} was reloaded", repo.repository);
+        } else {
+            tracing::info!("Repository {} was added", repo.repository);
         }
     }
     Ok(())
