@@ -10,7 +10,7 @@ use crate::{
 
 use super::{
     database::MockedDBClient,
-    mocks::{GithubMockServer, PRIVATE_KEY},
+    mocks::{GithubMockServer, GITHUB_MOCK_PRIVATE_KEY},
 };
 
 const WEBHOOK_SECRET: &str = "ABCDEF";
@@ -49,7 +49,7 @@ impl BorsTester {
 }
 
 fn create_test_github_client(mock_server: &GithubMockServer) -> Octocrab {
-    let key = jsonwebtoken::EncodingKey::from_rsa_pem(PRIVATE_KEY.as_bytes()).unwrap();
+    let key = jsonwebtoken::EncodingKey::from_rsa_pem(GITHUB_MOCK_PRIVATE_KEY.as_bytes()).unwrap();
     OctocrabBuilder::new()
         .base_uri(mock_server.uri())
         .unwrap()
