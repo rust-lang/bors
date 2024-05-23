@@ -91,17 +91,17 @@ $ export DATABASE_URL=postgres://bors:bors@localhost:5432/bors
 ### Updating the DB schema
 1) Generate a new migration
     ```console
-    $ sqlx migrate add <new-migration>
+    $ cargo sqlx migrate add <new-migration>
     ```
 2) Change the migration manually in `migrations/<timestamp>-<new-migration>.sql`.
 3) Apply migrations to the **Postgre** DB.
     ```console
-    $ sqlx migrate run
+    $ cargo sqlx migrate run
     ```
 
 ### Generate `.sqlx` directory
 ```console
-$ sqlx prepare -- --tests
+$ cargo sqlx prepare -- --tests
 ```
 
 After that, you should commit the changes to the `.sqlx` directory.
