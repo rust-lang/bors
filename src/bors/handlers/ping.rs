@@ -19,13 +19,18 @@ pub(super) async fn command_ping<Client: RepositoryClient>(
 mod tests {
     use crate::tests::event::default_pr_number;
     use crate::tests::state::ClientBuilder;
+    use crate::tests::tester::BorsTester;
 
     #[sqlx::test]
     async fn test_ping(pool: sqlx::PgPool) {
-        let state = ClientBuilder::default().pool(pool).create_state().await;
+        let state = ClientBuilder::default()
+            .pool(pool.clone())
+            .create_state()
+            .await;
         state.comment("@bors ping").await;
         state
             .client()
             .check_comments(default_pr_number(), &["Pong 🏓!"]);
+        let _ = BorsTester::new(pool).await;
     }
 }
