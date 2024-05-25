@@ -6,7 +6,7 @@ use std::time::Duration;
 use anyhow::Context;
 use bors::{
     create_app, create_bors_process, create_github_client, BorsContext, BorsGlobalEvent,
-    CommandParser, PgDbClient, ServerState, WebhookSecret,
+    CommandParser, PgDbClient, ServerState, TeamApiClient, WebhookSecret,
 };
 use clap::Parser;
 use sqlx::postgres::PgConnectOptions;
@@ -89,6 +89,7 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
             CommandParser::new(opts.cmd_prefix),
             Arc::new(db),
             Arc::new(client),
+            TeamApiClient::default(),
         ))
         .context("Cannot initialize bors context")?;
     let (repository_tx, global_tx, bors_process) = create_bors_process(ctx);

@@ -5,12 +5,14 @@ use octocrab::{Octocrab, OctocrabBuilder};
 use sqlx::PgPool;
 
 use crate::{
-    create_app, create_bors_process, BorsContext, CommandParser, ServerState, WebhookSecret,
+    create_app, create_bors_process, permissions::TeamApiClient, BorsContext, CommandParser,
+    ServerState, WebhookSecret,
 };
 
 use super::{
     database::MockedDBClient,
     mocks::{GithubMockServer, GITHUB_MOCK_PRIVATE_KEY},
+    permission::TeamApiMockServer,
 };
 
 const WEBHOOK_SECRET: &str = "ABCDEF";
@@ -22,15 +24,17 @@ pub(crate) struct BorsTester {
 
 impl BorsTester {
     pub(crate) async fn new(pool: PgPool) -> Self {
-        let mock_server = GithubMockServer::start().await;
+        let gh_mock_server = GithubMockServer::start().await;
+        let team_api_mock_server = TeamApiMockServer::start().await;
 
-        let client = create_test_github_client(&mock_server);
+        let client = create_test_github_client(&gh_mock_server);
         let db = MockedDBClient::new(pool);
 
         let ctx = BorsContext::new(
             CommandParser::new("@bors".to_string()),
             Arc::new(db),
             Arc::new(client),
+            TeamApiClient::new(team_api_mock_server.uri()),
         )
         .await
         .unwrap();

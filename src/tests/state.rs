@@ -31,6 +31,7 @@ use crate::tests::event::{
     CheckSuiteCompletedBuilder, WorkflowCompletedBuilder, WorkflowStartedBuilder,
 };
 use crate::tests::github::{default_base_branch, PRBuilder};
+use crate::TeamApiClient;
 
 pub fn test_bot_user() -> GithubUser {
     GithubUser {
@@ -70,6 +71,7 @@ impl TestBorsState {
                 CommandParser::new("@bors".to_string()),
                 Arc::clone(&self.db) as Arc<dyn DbClient>,
                 Arc::new(self.default_client.clone()),
+                TeamApiClient::default(),
             )
             .await
             .unwrap(),
@@ -269,6 +271,7 @@ impl ClientBuilder {
 impl RepositoryLoader<Arc<TestRepositoryClient>> for Arc<TestRepositoryClient> {
     async fn load_repositories(
         &self,
+        _team_api_client: &TeamApiClient,
     ) -> anyhow::Result<HashMap<GithubRepoName, Arc<TestRepositoryState>>> {
         let repo_state = RepositoryState {
             repository: self.name.clone(),
