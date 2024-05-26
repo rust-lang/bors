@@ -6,7 +6,7 @@ use std::time::Duration;
 use anyhow::Context;
 use bors::{
     create_app, create_bors_process, create_github_client, BorsContext, BorsGlobalEvent,
-    CommandParser, PgDbClient, ServerState, TeamApiClient, WebhookSecret,
+    CommandParser, PgDbClient, RepositoryLoader, ServerState, TeamApiClient, WebhookSecret,
 };
 use clap::Parser;
 use sqlx::postgres::PgConnectOptions;
@@ -80,19 +80,16 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
     let db = runtime
         .block_on(initialize_db(&opts.db))
         .context("Cannot initialize database")?;
-    let client = runtime.block_on(async move {
-        create_github_client(opts.app_id.into(), opts.private_key.into_bytes().into())
+    let team_api = TeamApiClient::default();
+    let (client, repos) = runtime.block_on(async {
+        let client =
+            create_github_client(opts.app_id.into(), opts.private_key.into_bytes().into())?;
+        let repos = client.load_repositories(&team_api).await?;
+        Ok::<_, anyhow::Error>((client, repos))
     })?;
 
-    let ctx = runtime
-        .block_on(BorsContext::new(
-            CommandParser::new(opts.cmd_prefix),
-            Arc::new(db),
-            Arc::new(client),
-            TeamApiClient::default(),
-        ))
-        .context("Cannot initialize bors context")?;
-    let (repository_tx, global_tx, bors_process) = create_bors_process(ctx);
+    let ctx = BorsContext::new(CommandParser::new(opts.cmd_prefix), Arc::new(db), repos);
+    let (repository_tx, global_tx, bors_process) = create_bors_process(ctx, client, team_api);
 
     let refresh_tx = global_tx.clone();
     let refresh_process = async move {

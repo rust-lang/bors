@@ -11,9 +11,10 @@ use crate::bors::handlers::trybuild::{command_try_build, command_try_cancel, TRY
 use crate::bors::handlers::workflow::{
     handle_check_suite_completed, handle_workflow_completed, handle_workflow_started,
 };
-use crate::bors::{BorsContext, Comment, RepositoryClient, RepositoryState};
+use crate::bors::{BorsContext, Comment, RepositoryClient, RepositoryLoader, RepositoryState};
 use crate::database::DbClient;
 use crate::utils::logging::LogError;
+use crate::TeamApiClient;
 
 mod help;
 mod labels;
@@ -118,12 +119,16 @@ pub async fn handle_bors_repository_event<Client: RepositoryClient>(
 pub async fn handle_bors_global_event<Client: RepositoryClient>(
     event: BorsGlobalEvent,
     ctx: Arc<BorsContext<Client>>,
+    repo_loader: &dyn RepositoryLoader<Client>,
+    team_api_client: &TeamApiClient,
 ) -> anyhow::Result<()> {
     let db = Arc::clone(&ctx.db);
     match event {
         BorsGlobalEvent::InstallationsChanged => {
             let span = tracing::info_span!("Installations changed");
-            reload_repos(ctx).instrument(span).await?;
+            reload_repos(ctx, repo_loader, team_api_client)
+                .instrument(span)
+                .await?;
         }
         BorsGlobalEvent::Refresh => {
             let span = tracing::info_span!("Refresh");
@@ -133,7 +138,7 @@ pub async fn handle_bors_global_event<Client: RepositoryClient>(
                 let repo = Arc::clone(&repo);
                 async {
                     let subspan = tracing::info_span!("Repo", repo = repo.repository.to_string());
-                    refresh_repository(repo, Arc::clone(&db), &ctx.team_api_client)
+                    refresh_repository(repo, Arc::clone(&db), &team_api_client)
                         .instrument(subspan)
                         .await
                 }
@@ -239,11 +244,10 @@ async fn handle_comment<Client: RepositoryClient>(
 
 async fn reload_repos<Client: RepositoryClient>(
     ctx: Arc<BorsContext<Client>>,
+    repo_loader: &dyn RepositoryLoader<Client>,
+    team_api_client: &TeamApiClient,
 ) -> anyhow::Result<()> {
-    let reloaded_repos = ctx
-        .repository_loader
-        .load_repositories(&ctx.team_api_client)
-        .await?;
+    let reloaded_repos = repo_loader.load_repositories(&team_api_client).await?;
     let mut repositories = ctx.repositories.write().unwrap();
     for repo in repositories.values() {
         if !reloaded_repos.contains_key(&repo.repository) {

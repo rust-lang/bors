@@ -66,22 +66,26 @@ impl TestBorsState {
 
     /// Execute an event.
     pub async fn event(&self, event: BorsEvent) {
-        let ctx = Arc::new(
-            BorsContext::new(
-                CommandParser::new("@bors".to_string()),
-                Arc::clone(&self.db) as Arc<dyn DbClient>,
-                Arc::new(self.default_client.clone()),
-                TeamApiClient::default(),
-            )
-            .await
-            .unwrap(),
-        );
+        let repo = RepositoryState {
+            repository: self.default_client.name.clone(),
+            client: self.default_client.clone(),
+            permissions: ArcSwap::new(Arc::clone(&self.default_client.permissions)),
+            config: ArcSwap::new(Arc::clone(&self.default_client.config)),
+        };
+        let repos = HashMap::from([(repo.repository.clone(), Arc::new(repo))]);
+
+        let ctx = Arc::new(BorsContext::new(
+            CommandParser::new("@bors".to_string()),
+            Arc::clone(&self.db) as Arc<dyn DbClient>,
+            repos,
+        ));
         match event {
             BorsEvent::Repository(event) => {
                 handle_bors_repository_event(event, ctx).await.unwrap();
             }
             BorsEvent::Global(event) => {
-                handle_bors_global_event(event, ctx).await.unwrap();
+                todo!()
+                // handle_bors_global_event(event, ctx, &TeamApiClient::default()).await.unwrap();
             }
         }
     }

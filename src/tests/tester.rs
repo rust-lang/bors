@@ -33,13 +33,10 @@ impl BorsTester {
         let ctx = BorsContext::new(
             CommandParser::new("@bors".to_string()),
             Arc::new(db),
-            Arc::new(client),
-            TeamApiClient::new(team_api_mock_server.uri()),
-        )
-        .await
-        .unwrap();
+            Default::default(),
+        );
 
-        let (repository_tx, global_tx, bors_process) = create_bors_process(ctx);
+        let (repository_tx, global_tx, bors_process) = create_bors_process(ctx, todo!(), todo!());
 
         let state = ServerState::new(
             repository_tx,
