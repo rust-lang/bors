@@ -15,6 +15,7 @@ use crate::config::RepositoryConfig;
 use crate::database::RunId;
 use crate::github::{CommitSha, GithubRepoName, MergeError, PullRequest, PullRequestNumber};
 use crate::permissions::UserPermissions;
+use crate::TeamApiClient;
 pub use command::CommandParser;
 pub use comment::Comment;
 pub use context::BorsContext;
@@ -78,6 +79,7 @@ pub trait RepositoryLoader<Client: RepositoryClient>: Send + Sync {
     /// Load state of repositories.
     async fn load_repositories(
         &self,
+        team_api_client: &TeamApiClient,
     ) -> anyhow::Result<HashMap<GithubRepoName, Arc<RepositoryState<Client>>>>;
 }
 

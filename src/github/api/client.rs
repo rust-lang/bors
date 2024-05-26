@@ -16,6 +16,7 @@ use crate::database::RunId;
 use crate::github::api::base_github_html_url;
 use crate::github::api::operations::{merge_branches, set_branch_to_commit, MergeError};
 use crate::github::{Branch, CommitSha, GithubRepoName, PullRequest, PullRequestNumber};
+use crate::permissions::TeamApiClient;
 
 use super::load_repositories;
 
@@ -279,8 +280,9 @@ impl RepositoryClient for GithubRepositoryClient {
 impl RepositoryLoader<GithubRepositoryClient> for Octocrab {
     async fn load_repositories(
         &self,
+        team_api_client: &TeamApiClient,
     ) -> anyhow::Result<HashMap<GithubRepoName, Arc<RepositoryState<GithubRepositoryClient>>>> {
-        load_repositories(self).await
+        load_repositories(self, team_api_client).await
     }
 }
 

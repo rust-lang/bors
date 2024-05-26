@@ -8,7 +8,10 @@ use wiremock::{
 
 use crate::github::GithubRepoName;
 
-use super::user::{default_user, User};
+use super::{
+    default_repo,
+    user::{default_user, User},
+};
 
 /// Handles all repositories related requests
 pub(super) struct RepositoriesHandler {
@@ -39,7 +42,7 @@ impl RepositoriesHandler {
 
 impl Default for RepositoriesHandler {
     fn default() -> Self {
-        Self::new(vec![GithubRepoName::new("owner", "repo")])
+        Self::new(vec![default_repo()])
     }
 }
 

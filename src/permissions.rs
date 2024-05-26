@@ -1,4 +1,5 @@
 use octocrab::models::UserId;
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
 use crate::github::GithubRepoName;
@@ -30,45 +31,81 @@ impl UserPermissions {
     }
 }
 
-pub async fn load_permissions(repo: &GithubRepoName) -> anyhow::Result<UserPermissions> {
-    tracing::info!("Reloading permissions for repository {repo}");
-
-    let review_users = load_users_from_team_api(repo.name(), PermissionType::Review)
-        .await
-        .map_err(|error| anyhow::anyhow!("Cannot load review users: {error:?}"))?;
-
-    let try_users = load_users_from_team_api(repo.name(), PermissionType::Try)
-        .await
-        .map_err(|error| anyhow::anyhow!("Cannot load try users: {error:?}"))?;
-    Ok(UserPermissions {
-        review_users,
-        try_users,
-    })
-}
-
-#[derive(serde::Deserialize)]
-struct UserPermissionsResponse {
+#[derive(Deserialize, Serialize)]
+pub(crate) struct UserPermissionsResponse {
     github_ids: HashSet<UserId>,
 }
 
-/// Loads users that are allowed to perform try/review from the Rust Team API.
-async fn load_users_from_team_api(
-    repository_name: &str,
-    permission: PermissionType,
-) -> anyhow::Result<HashSet<UserId>> {
-    let permission = match permission {
-        PermissionType::Review => "review",
-        PermissionType::Try => "try",
-    };
+#[cfg(test)]
+impl UserPermissionsResponse {
+    pub fn new(github_ids: HashSet<UserId>) -> Self {
+        Self { github_ids }
+    }
+}
 
-    let normalized_name = repository_name.replace('-', "_");
-    let url = format!("https://team-api.infra.rust-lang.org/v1/permissions/bors.{normalized_name}.{permission}.json");
-    let users = reqwest::get(url)
-        .await
-        .and_then(|res| res.error_for_status())
-        .map_err(|error| anyhow::anyhow!("Cannot load users from team API: {error:?}"))?
-        .json::<UserPermissionsResponse>()
-        .await
-        .map_err(|error| anyhow::anyhow!("Cannot deserialize users from team API: {error:?}"))?;
-    Ok(users.github_ids)
+pub struct TeamApiClient {
+    base_url: String,
+}
+
+impl TeamApiClient {
+    pub(crate) fn new(base_url: impl Into<String>) -> Self {
+        Self {
+            base_url: base_url.into(),
+        }
+    }
+
+    pub(crate) async fn load_permissions(
+        &self,
+        repo: &GithubRepoName,
+    ) -> anyhow::Result<UserPermissions> {
+        tracing::info!("Reloading permissions for repository {repo}");
+
+        let review_users = self
+            .load_users(repo.name(), PermissionType::Review)
+            .await
+            .map_err(|error| anyhow::anyhow!("Cannot load review users: {error:?}"))?;
+
+        let try_users = self
+            .load_users(repo.name(), PermissionType::Try)
+            .await
+            .map_err(|error| anyhow::anyhow!("Cannot load try users: {error:?}"))?;
+        Ok(UserPermissions {
+            review_users,
+            try_users,
+        })
+    }
+
+    /// Loads users that are allowed to perform try/review from the Rust Team API.
+    async fn load_users(
+        &self,
+        repository_name: &str,
+        permission: PermissionType,
+    ) -> anyhow::Result<HashSet<UserId>> {
+        let permission = match permission {
+            PermissionType::Review => "review",
+            PermissionType::Try => "try",
+        };
+
+        let normalized_name = repository_name.replace('-', "_");
+        let url = format!(
+            "{}/v1/permissions/bors.{normalized_name}.{permission}.json",
+            self.base_url
+        );
+        let users = reqwest::get(url)
+            .await
+            .and_then(|res| res.error_for_status())
+            .map_err(|error| anyhow::anyhow!("Cannot load users from team API: {error:?}"))?
+            .json::<UserPermissionsResponse>()
+            .await
+            .map_err(|error| {
+                anyhow::anyhow!("Cannot deserialize users from team API: {error:?}")
+            })?;
+        Ok(users.github_ids)
+    }
+}
+
+impl Default for TeamApiClient {
+    fn default() -> Self {
+        Self::new("https://team-api.infra.rust-lang.org")
+    }
 }

@@ -133,7 +133,7 @@ pub async fn handle_bors_global_event<Client: RepositoryClient>(
                 let repo = Arc::clone(&repo);
                 async {
                     let subspan = tracing::info_span!("Repo", repo = repo.repository.to_string());
-                    refresh_repository(repo, Arc::clone(&db))
+                    refresh_repository(repo, Arc::clone(&db), &ctx.team_api_client)
                         .instrument(subspan)
                         .await
                 }
@@ -240,7 +240,10 @@ async fn handle_comment<Client: RepositoryClient>(
 async fn reload_repos<Client: RepositoryClient>(
     ctx: Arc<BorsContext<Client>>,
 ) -> anyhow::Result<()> {
-    let reloaded_repos = ctx.repository_loader.load_repositories().await?;
+    let reloaded_repos = ctx
+        .repository_loader
+        .load_repositories(&ctx.team_api_client)
+        .await?;
     let mut repositories = ctx.repositories.write().unwrap();
     for repo in repositories.values() {
         if !reloaded_repos.contains_key(&repo.repository) {

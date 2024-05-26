@@ -11,7 +11,7 @@ use client::GithubRepositoryClient;
 
 use crate::bors::{RepositoryClient, RepositoryState};
 use crate::github::GithubRepoName;
-use crate::permissions::load_permissions;
+use crate::permissions::TeamApiClient;
 
 pub mod client;
 pub(crate) mod operations;
@@ -35,7 +35,10 @@ pub fn create_github_client(app_id: AppId, private_key: SecretVec<u8>) -> anyhow
 }
 
 /// Loads repositories that are connected to the given GitHub App client.
-pub async fn load_repositories(client: &Octocrab) -> anyhow::Result<GithubRepositoryMap> {
+pub async fn load_repositories(
+    client: &Octocrab,
+    team_api_client: &TeamApiClient,
+) -> anyhow::Result<GithubRepositoryMap> {
     let installations = client
         .apps()
         .installations()
@@ -66,11 +69,16 @@ pub async fn load_repositories(client: &Octocrab) -> anyhow::Result<GithubReposi
             }
         };
         for repo in repos {
-            match create_repo_state(app.clone(), installation_client.clone(), repo.clone())
-                .await
-                .map_err(|error| {
-                    anyhow::anyhow!("Cannot load repository {:?}: {error:?}", repo.full_name)
-                }) {
+            match create_repo_state(
+                app.clone(),
+                installation_client.clone(),
+                team_api_client,
+                repo.clone(),
+            )
+            .await
+            .map_err(|error| {
+                anyhow::anyhow!("Cannot load repository {:?}: {error:?}", repo.full_name)
+            }) {
                 Ok(repo_state) => {
                     tracing::info!("Loaded repository {}", repo_state.repository);
 
@@ -124,6 +132,7 @@ async fn load_installation_repos(client: &Octocrab) -> anyhow::Result<Vec<Reposi
 async fn create_repo_state(
     app: App,
     repo_client: Octocrab,
+    team_api_client: &TeamApiClient,
     repo: Repository,
 ) -> anyhow::Result<GithubRepositoryState> {
     let Some(owner) = repo.owner.clone() else {
@@ -140,6 +149,11 @@ async fn create_repo_state(
         repository: repo,
     };
 
+    let permissions = team_api_client
+        .load_permissions(&name)
+        .await
+        .context("Could not load permissions for repository {name}")?;
+
     let config = match client.load_config().await {
         Ok(config) => {
             tracing::info!("Loaded repository config for {name}: {config:#?}");
@@ -151,10 +165,6 @@ async fn create_repo_state(
             ));
         }
     };
-
-    let permissions = load_permissions(&name)
-        .await
-        .map_err(|error| anyhow::anyhow!("Could not load permissions for {name}: {error:?}"))?;
 
     Ok(RepositoryState {
         repository: name,

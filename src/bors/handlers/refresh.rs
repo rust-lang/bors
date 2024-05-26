@@ -1,22 +1,24 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use anyhow::Context;
 use chrono::{DateTime, Utc};
 
 use crate::bors::handlers::trybuild::cancel_build_workflows;
 use crate::bors::Comment;
 use crate::bors::{RepositoryClient, RepositoryState};
 use crate::database::{BuildStatus, DbClient};
-use crate::permissions::load_permissions;
+use crate::TeamApiClient;
 
 pub async fn refresh_repository<Client: RepositoryClient>(
     repo: Arc<RepositoryState<Client>>,
     db: Arc<dyn DbClient>,
+    team_api_client: &TeamApiClient,
 ) -> anyhow::Result<()> {
     let repo = repo.as_ref();
     if let (Ok(_), _, Ok(_)) = tokio::join!(
         cancel_timed_out_builds(repo, db.as_ref()),
-        reload_permission(repo),
+        reload_permission(repo, team_api_client),
         reload_config(repo)
     ) {
         Ok(())
@@ -65,8 +67,12 @@ async fn cancel_timed_out_builds<Client: RepositoryClient>(
 
 async fn reload_permission<Client: RepositoryClient>(
     repo: &RepositoryState<Client>,
+    team_api_client: &TeamApiClient,
 ) -> anyhow::Result<()> {
-    let permissions = load_permissions(&repo.repository).await?;
+    let permissions = team_api_client
+        .load_permissions(&repo.repository)
+        .await
+        .context("Could not load permissions for repository {repo}")?;
     repo.permissions.store(Arc::new(permissions));
     Ok(())
 }
