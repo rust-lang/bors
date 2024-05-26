@@ -1,4 +1,5 @@
 mod app;
+pub(crate) mod permission;
 mod repository;
 mod user;
 

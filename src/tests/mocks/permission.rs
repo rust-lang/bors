@@ -7,12 +7,12 @@ use crate::permissions::UserPermissionsResponse;
 
 use super::event::default_user;
 
-pub(super) struct TeamApiMockServer {
+pub(in crate::tests) struct TeamApiMockServer {
     mock_server: MockServer,
 }
 
 impl TeamApiMockServer {
-    pub(super) async fn start() -> Self {
+    pub(in crate::tests) async fn start() -> Self {
         let mock_server = MockServer::start().await;
         let permissions =
             UserPermissionsResponse::new(vec![default_user().id].into_iter().collect());
@@ -28,7 +28,7 @@ impl TeamApiMockServer {
         Self { mock_server }
     }
 
-    pub(super) fn uri(&self) -> String {
+    pub(in crate::tests) fn uri(&self) -> String {
         self.mock_server.uri()
     }
 }
