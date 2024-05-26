@@ -31,6 +31,5 @@ mod tests {
         state
             .client()
             .check_comments(default_pr_number(), &["Pong 🏓!"]);
-        let _ = BorsTester::new(pool).await;
     }
 }
