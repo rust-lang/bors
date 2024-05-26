@@ -7,8 +7,6 @@ use wiremock::MockServer;
 use app::*;
 use repository::*;
 
-use crate::github::GithubRepoName;
-
 pub(crate) struct GithubMockServer {
     mock_server: MockServer,
 }
@@ -56,7 +54,3 @@ EjQJOzV2OIk4waurl+BsbOHP7C0Zhp7rpyWx4fUCgYEAp/4UceUfbJZGa8CcWZ8F
 3VafpHjFw+fMUjcIkQk0VfdbRD5fLDQpJy6hUVq6A+duSqTvlhE8DFAdBAC3VZ9k
 34PVnCZP7HB3k2eBSpDp4vk=
 -----END PRIVATE KEY-----"###;
-
-pub(super) fn default_repo() -> GithubRepoName {
-    GithubRepoName::new("owner", "repo")
-}

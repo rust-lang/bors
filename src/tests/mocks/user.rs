@@ -1,7 +1,7 @@
 use serde::Serialize;
 use url::Url;
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 pub(crate) struct User {
     pub(crate) login: String,
     id: u64,

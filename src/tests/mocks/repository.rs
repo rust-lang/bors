@@ -1,3 +1,5 @@
+use std::fmt;
+
 use base64::Engine;
 use serde::Serialize;
 use url::Url;
@@ -8,29 +10,22 @@ use wiremock::{
 
 use crate::github::GithubRepoName;
 
-use super::{
-    default_repo,
-    user::{default_user, User},
-};
+use super::user::{default_user, User};
 
 /// Handles all repositories related requests
-pub(super) struct RepositoriesHandler {
-    repos: Vec<GithubRepoName>,
-}
+#[derive(Default)]
+pub(super) struct RepositoriesHandler {}
 
 impl RepositoriesHandler {
-    pub(super) fn new(name: Vec<GithubRepoName>) -> Self {
-        Self { repos: name }
-    }
-
     pub(super) async fn mount(&self, mock_server: &MockServer) {
+        let repos = Repositories::default();
         Mock::given(method("GET"))
             .and(path("/installation/repositories"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(Repositories::default()))
+            .respond_with(ResponseTemplate::new(200).set_body_json(repos.clone()))
             .mount(mock_server)
             .await;
 
-        for repo in &self.repos {
+        for repo in repos.repositories {
             Mock::given(method("GET"))
                 .and(path(format!("/repos/{}/contents/rust-bors.toml", repo)))
                 .respond_with(ResponseTemplate::new(200).set_body_json(Content::default()))
@@ -40,15 +35,9 @@ impl RepositoriesHandler {
     }
 }
 
-impl Default for RepositoriesHandler {
-    fn default() -> Self {
-        Self::new(vec![default_repo()])
-    }
-}
-
 /// Represents all repositories for an installation
 /// Returns type for the `GET /installation/repositories` endpoint
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 struct Repositories {
     total_count: u64,
     repositories: Vec<Repository>,
@@ -63,7 +52,7 @@ impl Default for Repositories {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 pub(super) struct Repository {
     id: u64,
     pub(crate) name: String,
@@ -79,6 +68,13 @@ impl Default for Repository {
             url: "https://test.com".parse().unwrap(),
             owner: default_user(),
         }
+    }
+}
+
+impl fmt::Display for Repository {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let name = GithubRepoName::new(&self.owner.login, &self.name);
+        write!(f, "{}", name)
     }
 }
 
