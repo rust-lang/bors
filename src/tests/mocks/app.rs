@@ -5,7 +5,7 @@ use wiremock::{
     Mock, MockServer, ResponseTemplate,
 };
 
-use super::user::{default_user, User};
+use super::user::GitHubUser;
 
 /// Handles all app related requests
 #[derive(Default)]
@@ -34,10 +34,10 @@ impl AppHandler {
 /// Represents an app on GitHub
 /// Returns type for the `GET /app` endpoint
 #[derive(Serialize)]
-struct App {
-    pub(crate) id: u64,
+pub struct App {
+    id: u64,
     node_id: String,
-    owner: User,
+    owner: GitHubUser,
     name: String,
     external_url: Url,
     html_url: Url,
@@ -48,10 +48,10 @@ struct App {
 impl Default for App {
     fn default() -> Self {
         App {
-            id: 1,
-            node_id: "".to_string(),
-            owner: default_user(),
-            name: "test".to_string(),
+            id: default_app_id(),
+            node_id: "1234".to_string(),
+            owner: GitHubUser::default(),
+            name: "bors".to_string(),
             // same as bors user html_url
             html_url: "https://test-bors.bot.com".parse().unwrap(),
             external_url: "https://test-bors.bot.com".parse().unwrap(),
@@ -61,13 +61,17 @@ impl Default for App {
     }
 }
 
+pub fn default_app_id() -> u64 {
+    1
+}
+
 /// Represents an installation of an app on GitHub
 /// Returns type for the `GET /app/installations` endpoint
 #[derive(Serialize)]
 pub(crate) struct Installation {
-    pub(crate) id: u64,
+    id: u64,
     node_id: String,
-    account: User,
+    account: GitHubUser,
     permissions: Permissions,
     events: Vec<String>,
 }
@@ -77,7 +81,7 @@ impl Default for Installation {
         Installation {
             id: 1,
             node_id: "".to_string(),
-            account: default_user(),
+            account: GitHubUser::default(),
             permissions: Permissions {},
             events: vec!["*".to_string()],
         }

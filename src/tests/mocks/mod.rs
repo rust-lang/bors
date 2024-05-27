@@ -1,63 +1,118 @@
+use std::collections::HashMap;
+
+use octocrab::Octocrab;
+
+use crate::github::GithubRepoName;
+use crate::permissions::PermissionType;
+use crate::tests::mocks::github::GitHubMockServer;
+use crate::tests::mocks::permissions::TeamApiMockServer;
+use crate::TeamApiClient;
+
 mod app;
-pub(crate) mod permission;
+mod github;
+mod permissions;
 mod repository;
 mod user;
 
-use wiremock::MockServer;
-
-use app::*;
-use repository::*;
-
-use crate::github::GithubRepoName;
-
-pub(crate) struct GithubMockServer {
-    mock_server: MockServer,
+pub struct World {
+    repos: HashMap<GithubRepoName, Repo>,
 }
 
-impl GithubMockServer {
-    pub(crate) async fn start() -> Self {
-        let mock_server = MockServer::start().await;
-        let repos = RepositoriesHandler::default();
-        let app = AppHandler::default();
-        repos.mount(&mock_server).await;
-        app.mount(&mock_server).await;
-        Self { mock_server }
+impl World {
+    pub fn new() -> Self {
+        Self {
+            repos: Default::default(),
+        }
     }
 
-    pub(crate) fn uri(&self) -> String {
-        self.mock_server.uri()
+    pub fn repo(mut self, repo: Repo) -> Self {
+        self.repos.insert(repo.name.clone(), repo);
+        self
+    }
+
+    pub async fn build(self) -> RunningMock {
+        RunningMock::start(self).await
     }
 }
 
-pub(super) const GITHUB_MOCK_PRIVATE_KEY: &str = r###"-----BEGIN PRIVATE KEY-----
-MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDa2WIpKFzkeys9
-R1Mn+kCM+UVAFT47QK98iTcXIG982rXPYdL2+jtzUoUc7irfZnScIiFmO8U2O2Nm
-nchI/bjdceGGxyCt04PdYVgYpUWfqp2rbiqi6V6L39j23zxGUbf8chQsviW7HuCl
-B105H/DQdhuHDmhOOWBg1Hv+uepp0pF86WPiz4/Ez9uNmIsoJps2pvOIi8nf/8k2
-iRClRynYbE8495rD5ZGRHRkPG4wXYoKv/iH8Q7+kO+72sBk0oqmkEoUdUz+itQOB
-CnWZWBC5vXb+vopw30vRZi0FNoArzN5WH2pXUKuFYkIIBWb9Aq6TDmsjPPth/VCb
-DBaSJuM7AgMBAAECggEAOFkERyiXUlTMO0jkBkUO3b1IsUlG7qanCF+kCZZWXkVJ
-zo2XbfPb3sN+doZ0D3UnzROUmegFzQLZgxBZA0IgmRO7R6J5rYfqSdPIhP/4vzWE
-xyDkZXHE4CrQiC/OKyTbRGpy+1oyCM3YdWVCAXVR4bqnN8zj2lA3mnbbPijMTFZr
-B67VdKF16qp9L2A8cEKdEHs+m86l/y6ySSpHHOLFCZblUDjeb2dqTg7DWod1Ughj
-kj8FbyeNQovn0KMH3qkdYOAxC+paJaKYdd680ewKO1i+zbI6bauoUUZsLzKwdh5M
-FrQhVpZ9Gc0Rroyyp85WMCCy1eyyHo732RuN0qyicQKBgQDg9+5p4XVVlcObjnHi
-adfviAYxNbXu1T3S8Yejvva8c75ImHeo9pt0X4yUsnLuqflmM8UbzBbn8+PbXfux
-rXiZPxl7wR7kDkKpmTwsTFOxYB2CgC4qetlcylG1kGSgckbz2dYYMmmK6ZauMBlU
-dHfzaGJ8aUC2R/ZLl0ZxQVNNNQKBgQD5CV3vybh+RUCfm6qm6lGAs1ONFjjliwkQ
-CE/bTGspBq37WlhWaeO+I3BkqivozlQ92jcGwxQq8oDhvEieucqDyYjUvp1Pxt1e
-LT3gLy1kq1pREBI1bB1zCK1HpGn8eigIcuB8nOE+4tMUeKQNH++mhta7MgcSOoH9
-4hIQgzAsrwKBgDnS4D/syGjoJq/8C/+jLvKNZvINGSc7PjnTBQcslWTY5ybnsZIH
-WOuvh4XM3EfF/qmrUtWTPqv9/yoqXQBNUzsogddSSytZEv9euJ22PKjRyKP7aGJY
-0zfLdPcTFxo6ZUxWSHZNtt0Srz00db5EdXRl9zJ9JznzAzZoup1vqgalAoGANRmw
-M+7ZLeNqUh4JFyojUsPp7s1sOFWbCxYaoPH8b3UDJ/Mtns9ZRjOcRXqbfjpwb/fV
-f9WcuUOYA4n4GhAXhF42lNZICLiofuo6pVCp5ys6SMqad1WkOeEBwaLnDnSlkJee
-EjQJOzV2OIk4waurl+BsbOHP7C0Zhp7rpyWx4fUCgYEAp/4UceUfbJZGa8CcWZ8F
-7M0LU9Q+tGPkP2W87zkzP82PF0bQCPT3dBP0ZduDchacrF0bqEcvMLWKwwUSNvkx
-3VafpHjFw+fMUjcIkQk0VfdbRD5fLDQpJy6hUVq6A+duSqTvlhE8DFAdBAC3VZ9k
-34PVnCZP7HB3k2eBSpDp4vk=
------END PRIVATE KEY-----"###;
+impl Default for World {
+    fn default() -> Self {
+        Self {
+            repos: HashMap::from([(default_repo_name(), Repo::default())]),
+        }
+    }
+}
 
-pub(super) fn default_repo() -> GithubRepoName {
-    GithubRepoName::new("owner", "repo")
+fn default_repo_name() -> GithubRepoName {
+    GithubRepoName::new("rust-lang", "bors-test")
+}
+
+pub struct Repo {
+    pub name: GithubRepoName,
+    pub permissions: Permissions,
+    pub config: String,
+}
+
+impl Repo {
+    pub fn new(owner: &str, name: &str) -> Self {
+        Self {
+            name: GithubRepoName::new(owner, name),
+            permissions: Default::default(),
+            config: r#"
+timeout = 3600
+"#
+            .to_string(),
+        }
+    }
+
+    pub fn perms(mut self, user: User, permissions: &[PermissionType]) -> Self {
+        self.permissions.users.insert(user, permissions.to_vec());
+        self
+    }
+}
+
+impl Default for Repo {
+    fn default() -> Self {
+        Self::new(default_repo_name().owner(), default_repo_name().name())
+    }
+}
+
+#[derive(Eq, PartialEq, Hash)]
+pub struct User {
+    pub github_id: u64,
+}
+
+impl User {
+    pub fn new(id: u64) -> Self {
+        Self { github_id: id }
+    }
+}
+
+#[derive(Default)]
+pub struct Permissions {
+    pub users: HashMap<User, Vec<PermissionType>>,
+}
+
+pub struct RunningMock {
+    gh_server: GitHubMockServer,
+    team_api_server: TeamApiMockServer,
+}
+
+impl RunningMock {
+    async fn start(world: World) -> Self {
+        let gh_server = GitHubMockServer::start(&world).await;
+        let team_api_server = TeamApiMockServer::start(&world).await;
+        Self {
+            gh_server,
+            team_api_server,
+        }
+    }
+
+    pub fn github_client(&self) -> Octocrab {
+        self.gh_server.client()
+    }
+
+    pub fn team_api_client(&self) -> TeamApiClient {
+        self.team_api_server.client()
+    }
 }

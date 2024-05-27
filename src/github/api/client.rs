@@ -302,3 +302,38 @@ fn github_pr_to_pr(pr: octocrab::models::pulls::PullRequest) -> PullRequest {
         message: pr.body.unwrap_or_default(),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::github::GithubRepoName;
+    use crate::permissions::PermissionType;
+    use crate::tests::mocks::Repo;
+    use crate::tests::mocks::{User, World};
+    use crate::RepositoryLoader;
+    use octocrab::models::UserId;
+    use tracing_test::traced_test;
+
+    #[traced_test]
+    #[tokio::test]
+    async fn test_load_installed_repos() {
+        let world = World::new()
+            .repo(Repo::new("foo", "bar").perms(User::new(1), &[PermissionType::Try]))
+            .repo(Repo::new("foo", "baz"))
+            .build()
+            .await;
+        let client = world.github_client();
+        let team_api_client = world.team_api_client();
+        let repos = client.load_repositories(&team_api_client).await.unwrap();
+        assert_eq!(repos.len(), 2);
+
+        let repo = repos.get(&GithubRepoName::new("foo", "bar")).unwrap();
+        assert!(repo
+            .permissions
+            .load()
+            .has_permission(UserId(1), PermissionType::Try));
+        assert!(!repo
+            .permissions
+            .load()
+            .has_permission(UserId(1), PermissionType::Review));
+    }
+}

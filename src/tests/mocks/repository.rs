@@ -6,43 +6,50 @@ use wiremock::{
     Mock, MockServer, ResponseTemplate,
 };
 
-use crate::github::GithubRepoName;
+use crate::tests::mocks::World;
 
-use super::{
-    default_repo,
-    user::{default_user, User},
-};
+use super::user::GitHubUser;
 
 /// Handles all repositories related requests
-pub(super) struct RepositoriesHandler {
-    repos: Vec<GithubRepoName>,
-}
+#[derive(Default)]
+pub struct RepositoriesHandler;
 
 impl RepositoriesHandler {
-    pub(super) fn new(name: Vec<GithubRepoName>) -> Self {
-        Self { repos: name }
-    }
+    pub async fn mount(&self, world: &World, mock_server: &MockServer) {
+        let repos = Repositories {
+            total_count: world.repos.len() as u64,
+            repositories: world
+                .repos
+                .iter()
+                .enumerate()
+                .map(|(index, (_, repo))| Repository {
+                    id: index as u64,
+                    owner: GitHubUser::new(repo.name.owner()),
+                    name: repo.name.name().to_string(),
+                    url: format!("https://{}.foo", repo.name.name()).parse().unwrap(),
+                })
+                .collect(),
+        };
 
-    pub(super) async fn mount(&self, mock_server: &MockServer) {
         Mock::given(method("GET"))
             .and(path("/installation/repositories"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(Repositories::default()))
+            .respond_with(ResponseTemplate::new(200).set_body_json(repos))
             .mount(mock_server)
             .await;
 
-        for repo in &self.repos {
+        for repo in world.repos.values() {
             Mock::given(method("GET"))
-                .and(path(format!("/repos/{}/contents/rust-bors.toml", repo)))
-                .respond_with(ResponseTemplate::new(200).set_body_json(Content::default()))
+                .and(path(format!(
+                    "/repos/{}/contents/rust-bors.toml",
+                    repo.name
+                )))
+                .respond_with(
+                    ResponseTemplate::new(200)
+                        .set_body_json(Content::new("rust-bors.toml", &repo.config)),
+                )
                 .mount(mock_server)
                 .await;
         }
-    }
-}
-
-impl Default for RepositoriesHandler {
-    fn default() -> Self {
-        Self::new(vec![default_repo()])
     }
 }
 
@@ -54,32 +61,12 @@ struct Repositories {
     repositories: Vec<Repository>,
 }
 
-impl Default for Repositories {
-    fn default() -> Self {
-        Repositories {
-            total_count: 1,
-            repositories: vec![Repository::default()],
-        }
-    }
-}
-
 #[derive(Serialize)]
 pub(super) struct Repository {
     id: u64,
-    pub(crate) name: String,
+    name: String,
     url: Url,
-    pub(crate) owner: User,
-}
-
-impl Default for Repository {
-    fn default() -> Self {
-        Repository {
-            id: 1,
-            name: "test".to_string(),
-            url: "https://test.com".parse().unwrap(),
-            owner: default_user(),
-        }
-    }
+    owner: GitHubUser,
 }
 
 /// Represents a file in a GitHub repository
@@ -98,39 +85,17 @@ struct Content {
     links: ContentLinks,
 }
 
-#[derive(Serialize)]
-struct ContentLinks {
-    #[serde(rename = "self")]
-    _self: Url,
-}
-
-impl Default for ContentLinks {
-    fn default() -> Self {
-        ContentLinks {
-            _self: "https://test.com".parse().unwrap(),
-        }
-    }
-}
-
-const RUST_BORS_TOML: &str = r###"
-timeout = 3600
-
-[labels]
-try = ["+foo", "-bar"]
-try_succeed = ["+foobar", "+foo", "+baz"]
-try_failed = []
-"###;
-
-impl Default for Content {
-    fn default() -> Self {
-        let content = base64::prelude::BASE64_STANDARD.encode(RUST_BORS_TOML);
+impl Content {
+    fn new(path: &str, content: &str) -> Self {
+        let content = base64::prelude::BASE64_STANDARD.encode(content);
+        let size = content.len() as i64;
         Content {
-            name: "test".to_string(),
-            path: "test".to_string(),
+            name: path.to_string(),
+            path: path.to_string(),
             sha: "test".to_string(),
             encoding: Some("base64".to_string()),
             content: Some(content),
-            size: 1,
+            size,
             url: "https://test.com".to_string(),
             r#type: "file".to_string(),
             links: ContentLinks {
@@ -138,4 +103,10 @@ impl Default for Content {
             },
         }
     }
+}
+
+#[derive(Serialize)]
+struct ContentLinks {
+    #[serde(rename = "self")]
+    _self: Url,
 }

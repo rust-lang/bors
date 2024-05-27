@@ -4,6 +4,7 @@ use std::collections::HashSet;
 
 use crate::github::GithubRepoName;
 
+#[derive(Eq, PartialEq, Debug, Clone)]
 pub enum PermissionType {
     /// Can perform commands like r+.
     Review,
@@ -23,10 +24,10 @@ impl UserPermissions {
             try_users,
         }
     }
-    pub fn has_permission(&self, user_id: &UserId, permission: PermissionType) -> bool {
+    pub fn has_permission(&self, user_id: UserId, permission: PermissionType) -> bool {
         match permission {
-            PermissionType::Review => self.review_users.contains(user_id),
-            PermissionType::Try => self.try_users.contains(user_id),
+            PermissionType::Review => self.review_users.contains(&user_id),
+            PermissionType::Try => self.try_users.contains(&user_id),
         }
     }
 }
@@ -34,13 +35,6 @@ impl UserPermissions {
 #[derive(Deserialize, Serialize)]
 pub(crate) struct UserPermissionsResponse {
     github_ids: HashSet<UserId>,
-}
-
-#[cfg(test)]
-impl UserPermissionsResponse {
-    pub fn new(github_ids: HashSet<UserId>) -> Self {
-        Self { github_ids }
-    }
 }
 
 pub struct TeamApiClient {

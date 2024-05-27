@@ -9,15 +9,12 @@ use derive_builder::Builder;
 use octocrab::models::UserId;
 use url::Url;
 
-use super::database::MockedDBClient;
-use super::event::default_user;
 use crate::bors::event::{
     BorsEvent, BorsGlobalEvent, BorsRepositoryEvent, CheckSuiteCompleted, PullRequestComment,
     WorkflowCompleted, WorkflowStarted,
 };
 use crate::bors::{
-    handle_bors_global_event, handle_bors_repository_event, BorsContext, CheckSuite, CommandParser,
-    Comment, RepositoryState,
+    handle_bors_repository_event, BorsContext, CheckSuite, CommandParser, Comment, RepositoryState,
 };
 use crate::bors::{RepositoryClient, RepositoryLoader};
 use crate::config::RepositoryConfig;
@@ -32,6 +29,9 @@ use crate::tests::event::{
 };
 use crate::tests::github::{default_base_branch, PRBuilder};
 use crate::TeamApiClient;
+
+use super::database::MockedDBClient;
+use super::event::default_user;
 
 pub fn test_bot_user() -> GithubUser {
     GithubUser {
@@ -83,7 +83,7 @@ impl TestBorsState {
             BorsEvent::Repository(event) => {
                 handle_bors_repository_event(event, ctx).await.unwrap();
             }
-            BorsEvent::Global(event) => {
+            BorsEvent::Global(_event) => {
                 todo!()
                 // handle_bors_global_event(event, ctx, &TeamApiClient::default()).await.unwrap();
             }
