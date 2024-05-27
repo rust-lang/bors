@@ -152,7 +152,7 @@ async fn create_repo_state(
     let permissions = team_api_client
         .load_permissions(&name)
         .await
-        .context("Could not load permissions for repository {name}")?;
+        .with_context(|| format!("Could not load permissions for repository {name}"))?;
 
     let config = match client.load_config().await {
         Ok(config) => {

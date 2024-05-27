@@ -72,7 +72,12 @@ async fn reload_permission<Client: RepositoryClient>(
     let permissions = team_api_client
         .load_permissions(&repo.repository)
         .await
-        .context("Could not load permissions for repository {repo}")?;
+        .with_context(|| {
+            format!(
+                "Could not load permissions for repository {}",
+                repo.repository
+            )
+        })?;
     repo.permissions.store(Arc::new(permissions));
     Ok(())
 }
