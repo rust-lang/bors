@@ -30,8 +30,8 @@ impl World {
         self
     }
 
-    pub async fn build(self) -> RunningMock {
-        RunningMock::start(self).await
+    pub async fn build(self) -> ExternalHttpMock {
+        ExternalHttpMock::start(self).await
     }
 }
 
@@ -93,13 +93,13 @@ pub struct Permissions {
     pub users: HashMap<User, Vec<PermissionType>>,
 }
 
-pub struct RunningMock {
+pub struct ExternalHttpMock {
     gh_server: GitHubMockServer,
     team_api_server: TeamApiMockServer,
 }
 
-impl RunningMock {
-    async fn start(world: World) -> Self {
+impl ExternalHttpMock {
+    pub async fn start(world: World) -> Self {
         let gh_server = GitHubMockServer::start(&world).await;
         let team_api_server = TeamApiMockServer::start(&world).await;
         Self {

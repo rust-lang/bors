@@ -307,22 +307,21 @@ fn github_pr_to_pr(pr: octocrab::models::pulls::PullRequest) -> PullRequest {
 mod tests {
     use crate::github::GithubRepoName;
     use crate::permissions::PermissionType;
-    use crate::tests::mocks::Repo;
+    use crate::tests::mocks::{ExternalHttpMock, Repo};
     use crate::tests::mocks::{User, World};
     use crate::RepositoryLoader;
     use octocrab::models::UserId;
-    use tracing_test::traced_test;
 
-    #[traced_test]
     #[tokio::test]
     async fn test_load_installed_repos() {
-        let world = World::new()
-            .repo(Repo::new("foo", "bar").perms(User::new(1), &[PermissionType::Try]))
-            .repo(Repo::new("foo", "baz"))
-            .build()
-            .await;
-        let client = world.github_client();
-        let team_api_client = world.team_api_client();
+        let mock = ExternalHttpMock::start(
+            World::new()
+                .repo(Repo::new("foo", "bar").perms(User::new(1), &[PermissionType::Try]))
+                .repo(Repo::new("foo", "baz")),
+        )
+        .await;
+        let client = mock.github_client();
+        let team_api_client = mock.team_api_client();
         let repos = client.load_repositories(&team_api_client).await.unwrap();
         assert_eq!(repos.len(), 2);
 
