@@ -8,11 +8,17 @@ use crate::tests::mocks::github::GitHubMockServer;
 use crate::tests::mocks::permissions::TeamApiMockServer;
 use crate::TeamApiClient;
 
+pub use bors::BorsBuilder;
+pub use user::User;
+
 mod app;
+mod bors;
+mod comment;
 mod github;
 mod permissions;
 mod repository;
 mod user;
+mod webhook;
 
 pub struct World {
     repos: HashMap<GithubRepoName, Repo>,
@@ -31,7 +37,7 @@ impl World {
     }
 
     pub async fn build(self) -> ExternalHttpMock {
-        ExternalHttpMock::start(self).await
+        ExternalHttpMock::start(&self).await
     }
 }
 
@@ -77,17 +83,6 @@ impl Default for Repo {
     }
 }
 
-#[derive(Eq, PartialEq, Hash)]
-pub struct User {
-    pub github_id: u64,
-}
-
-impl User {
-    pub fn new(id: u64) -> Self {
-        Self { github_id: id }
-    }
-}
-
 #[derive(Default)]
 pub struct Permissions {
     pub users: HashMap<User, Vec<PermissionType>>,
@@ -99,9 +94,9 @@ pub struct ExternalHttpMock {
 }
 
 impl ExternalHttpMock {
-    pub async fn start(world: World) -> Self {
-        let gh_server = GitHubMockServer::start(&world).await;
-        let team_api_server = TeamApiMockServer::start(&world).await;
+    pub async fn start(world: &World) -> Self {
+        let gh_server = GitHubMockServer::start(world).await;
+        let team_api_server = TeamApiMockServer::start(world).await;
         Self {
             gh_server,
             team_api_server,

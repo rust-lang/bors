@@ -82,8 +82,11 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
         .context("Cannot initialize database")?;
     let team_api = TeamApiClient::default();
     let (client, repos) = runtime.block_on(async {
-        let client =
-            create_github_client(opts.app_id.into(), opts.private_key.into_bytes().into())?;
+        let client = create_github_client(
+            opts.app_id.into(),
+            "https://api.github.com".to_string(),
+            opts.private_key.into_bytes().into(),
+        )?;
         let repos = client.load_repositories(&team_api).await?;
         Ok::<_, anyhow::Error>((client, repos))
     })?;

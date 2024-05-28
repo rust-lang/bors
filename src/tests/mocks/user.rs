@@ -1,6 +1,27 @@
 use serde::Serialize;
 use url::Url;
 
+#[derive(Eq, PartialEq, Hash, Clone)]
+pub struct User {
+    pub github_id: u64,
+    pub name: String,
+}
+
+impl User {
+    pub fn new(id: u64, name: &str) -> Self {
+        Self {
+            github_id: id,
+            name: name.to_string(),
+        }
+    }
+}
+
+impl Default for User {
+    fn default() -> Self {
+        Self::new(101, "default-user")
+    }
+}
+
 #[derive(Serialize)]
 pub struct GitHubUser {
     login: String,
@@ -23,10 +44,17 @@ pub struct GitHubUser {
     site_admin: bool,
 }
 
-impl GitHubUser {
-    pub fn new(name: &str) -> GitHubUser {
+impl Default for GitHubUser {
+    fn default() -> Self {
+        User::default().into()
+    }
+}
+
+impl From<User> for GitHubUser {
+    fn from(user: User) -> Self {
+        let name = user.name;
         GitHubUser {
-            id: 101,
+            id: user.github_id,
             login: name.to_string(),
             node_id: "MDQ6VXNlcjQ1MzkwNTc=".to_string(),
             avatar_url: "https://avatars.githubusercontent.com/u/4539057?v=4"
@@ -67,11 +95,5 @@ impl GitHubUser {
             r#type: "User".to_string(),
             site_admin: false,
         }
-    }
-}
-
-impl Default for GitHubUser {
-    fn default() -> Self {
-        Self::new("user")
     }
 }

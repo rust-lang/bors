@@ -1,6 +1,7 @@
-use octocrab::{Octocrab, OctocrabBuilder};
+use octocrab::Octocrab;
 use wiremock::MockServer;
 
+use crate::create_github_client;
 use crate::tests::mocks::app::{default_app_id, AppHandler};
 use crate::tests::mocks::repository::RepositoriesHandler;
 use crate::tests::mocks::World;
@@ -18,14 +19,12 @@ impl GitHubMockServer {
     }
 
     pub fn client(&self) -> Octocrab {
-        let key =
-            jsonwebtoken::EncodingKey::from_rsa_pem(GITHUB_MOCK_PRIVATE_KEY.as_bytes()).unwrap();
-        OctocrabBuilder::new()
-            .base_uri(self.mock_server.uri())
-            .unwrap()
-            .app(default_app_id().into(), key)
-            .build()
-            .unwrap()
+        create_github_client(
+            default_app_id().into(),
+            self.mock_server.uri(),
+            GITHUB_MOCK_PRIVATE_KEY.as_bytes().to_vec().into(),
+        )
+        .unwrap()
     }
 }
 

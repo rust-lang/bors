@@ -315,8 +315,8 @@ mod tests {
     #[tokio::test]
     async fn test_load_installed_repos() {
         let mock = ExternalHttpMock::start(
-            World::new()
-                .repo(Repo::new("foo", "bar").perms(User::new(1), &[PermissionType::Try]))
+            &World::new()
+                .repo(Repo::new("foo", "bar").perms(User::new(1, "user"), &[PermissionType::Try]))
                 .repo(Repo::new("foo", "baz")),
         )
         .await;

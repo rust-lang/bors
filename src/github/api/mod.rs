@@ -24,11 +24,16 @@ fn base_github_html_url() -> &'static str {
     "https://github.com"
 }
 
-pub fn create_github_client(app_id: AppId, private_key: SecretVec<u8>) -> anyhow::Result<Octocrab> {
+pub fn create_github_client(
+    app_id: AppId,
+    github_url: String,
+    private_key: SecretVec<u8>,
+) -> anyhow::Result<Octocrab> {
     let key = jsonwebtoken::EncodingKey::from_rsa_pem(private_key.expose_secret().as_ref())
         .context("Could not encode private key")?;
 
     Octocrab::builder()
+        .base_uri(github_url)?
         .app(app_id, key)
         .build()
         .context("Could not create octocrab builder")
