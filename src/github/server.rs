@@ -92,12 +92,30 @@ pub fn create_bors_process(
 
     let service = async move {
         let ctx = Arc::new(ctx);
-        tokio::select! {
-            _ = consume_repository_events(ctx.clone(), repository_rx) => {
-                tracing::warn!("Repository event handling process has ended");
-            }
-            _ = consume_global_events(ctx.clone(), global_rx, gh_client, team_api) => {
-                tracing::warn!("Global event handling process has ended");
+
+        // In tests, we shutdown these futures by dropping the channel sender,
+        // In that case, we need to wait until both of these futures resolve,
+        // to make sure that they are able to handle all the events in the queue
+        // before finishing.
+        #[cfg(test)]
+        {
+            tokio::join!(
+                consume_repository_events(ctx.clone(), repository_rx),
+                consume_global_events(ctx.clone(), global_rx, gh_client, team_api)
+            );
+        }
+        // In real execution, the bot runs forever. If there is something that finishes
+        // the futures early, it's essentially a bug.
+        // FIXME: maybe we could just use join for both versions of the code.
+        #[cfg(not(test))]
+        {
+            tokio::select! {
+                _ = consume_repository_events(ctx.clone(), repository_rx) => {
+                    tracing::error!("Repository event handling process has ended");
+                }
+                _ = consume_global_events(ctx.clone(), global_rx, gh_client, team_api) => {
+                    tracing::error!("Global event handling process has ended");
+                }
             }
         }
     };
