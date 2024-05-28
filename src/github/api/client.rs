@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use anyhow::Context;
 use axum::async_trait;
@@ -281,7 +280,9 @@ impl RepositoryLoader<GithubRepositoryClient> for Octocrab {
     async fn load_repositories(
         &self,
         team_api_client: &TeamApiClient,
-    ) -> anyhow::Result<HashMap<GithubRepoName, Arc<RepositoryState<GithubRepositoryClient>>>> {
+    ) -> anyhow::Result<
+        HashMap<GithubRepoName, anyhow::Result<RepositoryState<GithubRepositoryClient>>>,
+    > {
         load_repositories(self, team_api_client).await
     }
 }
@@ -322,10 +323,13 @@ mod tests {
         .await;
         let client = mock.github_client();
         let team_api_client = mock.team_api_client();
-        let repos = client.load_repositories(&team_api_client).await.unwrap();
+        let mut repos = client.load_repositories(&team_api_client).await.unwrap();
         assert_eq!(repos.len(), 2);
 
-        let repo = repos.get(&GithubRepoName::new("foo", "bar")).unwrap();
+        let repo = repos
+            .remove(&GithubRepoName::new("foo", "bar"))
+            .unwrap()
+            .unwrap();
         assert!(repo
             .permissions
             .load()

@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::future::Future;
 use std::sync::Arc;
 
@@ -65,9 +66,15 @@ impl BorsTester {
         let mock = ExternalHttpMock::start(&world).await;
         let db = MockedDBClient::new(pool);
 
-        let repos = load_repositories(&mock.github_client(), &mock.team_api_client())
+        let loaded_repos = load_repositories(&mock.github_client(), &mock.team_api_client())
             .await
             .unwrap();
+        let mut repos = HashMap::default();
+        for (name, repo) in loaded_repos {
+            let repo = repo.unwrap();
+            repos.insert(name, Arc::new(repo));
+        }
+
         let ctx = BorsContext::new(CommandParser::new("@bors".to_string()), Arc::new(db), repos);
 
         let (repository_tx, global_tx, bors_process) =

@@ -5,7 +5,6 @@ pub mod event;
 mod handlers;
 
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use arc_swap::ArcSwap;
 use axum::async_trait;
@@ -80,7 +79,7 @@ pub trait RepositoryLoader<Client: RepositoryClient>: Send + Sync {
     async fn load_repositories(
         &self,
         team_api_client: &TeamApiClient,
-    ) -> anyhow::Result<HashMap<GithubRepoName, Arc<RepositoryState<Client>>>>;
+    ) -> anyhow::Result<HashMap<GithubRepoName, anyhow::Result<RepositoryState<Client>>>>;
 }
 
 #[derive(Clone)]

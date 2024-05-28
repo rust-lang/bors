@@ -251,17 +251,22 @@ async fn reload_repos<Client: RepositoryClient>(
     let mut repositories = ctx.repositories.write().unwrap();
     for repo in repositories.values() {
         if !reloaded_repos.contains_key(&repo.repository) {
-            tracing::info!("Repository {} was not reloaded", repo.repository);
+            tracing::warn!("Repository {} was not reloaded", repo.repository);
         }
     }
-    for repo in reloaded_repos.values() {
-        if repositories
-            .insert(repo.repository.clone(), repo.clone())
-            .is_some()
-        {
-            tracing::info!("Repository {} was reloaded", repo.repository);
+    for (name, repo) in reloaded_repos {
+        let repo = match repo {
+            Ok(repo) => repo,
+            Err(error) => {
+                tracing::error!("Failed to reload repository {name}: {error:?}");
+                continue;
+            }
+        };
+
+        if repositories.insert(name.clone(), Arc::new(repo)).is_some() {
+            tracing::info!("Repository {name} was reloaded");
         } else {
-            tracing::info!("Repository {} was added", repo.repository);
+            tracing::info!("Repository {name} was added");
         }
     }
     Ok(())

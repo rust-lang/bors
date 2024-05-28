@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::io::IsTerminal;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -81,7 +82,7 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
         .block_on(initialize_db(&opts.db))
         .context("Cannot initialize database")?;
     let team_api = TeamApiClient::default();
-    let (client, repos) = runtime.block_on(async {
+    let (client, loaded_repos) = runtime.block_on(async {
         let client = create_github_client(
             opts.app_id.into(),
             "https://api.github.com".to_string(),
@@ -90,6 +91,22 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
         let repos = client.load_repositories(&team_api).await?;
         Ok::<_, anyhow::Error>((client, repos))
     })?;
+
+    let mut repos = HashMap::default();
+    for (name, repo) in loaded_repos {
+        let repo = match repo {
+            Ok(repo) => {
+                tracing::info!("Loaded repository {name}");
+                repo
+            }
+            Err(error) => {
+                return Err(anyhow::anyhow!(
+                    "Failed to load repository {name}: {error:?}"
+                ));
+            }
+        };
+        repos.insert(name, Arc::new(repo));
+    }
 
     let ctx = BorsContext::new(CommandParser::new(opts.cmd_prefix), Arc::new(db), repos);
     let (repository_tx, global_tx, bors_process) = create_bors_process(ctx, client, team_api);
