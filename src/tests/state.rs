@@ -276,7 +276,7 @@ impl RepositoryLoader<Arc<TestRepositoryClient>> for Arc<TestRepositoryClient> {
     async fn load_repositories(
         &self,
         _team_api_client: &TeamApiClient,
-    ) -> anyhow::Result<HashMap<GithubRepoName, Arc<TestRepositoryState>>> {
+    ) -> anyhow::Result<HashMap<GithubRepoName, anyhow::Result<TestRepositoryState>>> {
         let repo_state = RepositoryState {
             repository: self.name.clone(),
             client: self.clone(),
@@ -284,7 +284,7 @@ impl RepositoryLoader<Arc<TestRepositoryClient>> for Arc<TestRepositoryClient> {
             config: ArcSwap::new(Arc::clone(&self.config)),
         };
         let mut repos = HashMap::new();
-        repos.insert(self.name.clone(), Arc::new(repo_state));
+        repos.insert(self.name.clone(), Ok(repo_state));
         Ok(repos)
     }
 }

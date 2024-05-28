@@ -31,4 +31,16 @@ mod tests {
             .client()
             .check_comments(default_pr_number(), &["Pong 🏓!"]);
     }
+
+    // Failing tests - needs comment and PR endpoints to be implemented
+    // #[traced_test]
+    // #[sqlx::test]
+    // async fn test_ping2(pool: sqlx::PgPool) {
+    //     BorsBuilder::new(pool)
+    //         .run_test(|mut tester| async {
+    //             tester.comment("@bors ping").await;
+    //             Ok(tester)
+    //         })
+    //         .await;
+    // }
 }

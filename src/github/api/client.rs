@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use anyhow::Context;
 use axum::async_trait;
@@ -281,7 +280,9 @@ impl RepositoryLoader<GithubRepositoryClient> for Octocrab {
     async fn load_repositories(
         &self,
         team_api_client: &TeamApiClient,
-    ) -> anyhow::Result<HashMap<GithubRepoName, Arc<RepositoryState<GithubRepositoryClient>>>> {
+    ) -> anyhow::Result<
+        HashMap<GithubRepoName, anyhow::Result<RepositoryState<GithubRepositoryClient>>>,
+    > {
         load_repositories(self, team_api_client).await
     }
 }
@@ -307,26 +308,36 @@ fn github_pr_to_pr(pr: octocrab::models::pulls::PullRequest) -> PullRequest {
 mod tests {
     use crate::github::GithubRepoName;
     use crate::permissions::PermissionType;
-    use crate::tests::mocks::Repo;
+    use crate::tests::mocks::{ExternalHttpMock, Permissions, Repo};
     use crate::tests::mocks::{User, World};
     use crate::RepositoryLoader;
     use octocrab::models::UserId;
-    use tracing_test::traced_test;
 
-    #[traced_test]
     #[tokio::test]
     async fn test_load_installed_repos() {
-        let world = World::new()
-            .repo(Repo::new("foo", "bar").perms(User::new(1), &[PermissionType::Try]))
-            .repo(Repo::new("foo", "baz"))
-            .build()
-            .await;
-        let client = world.github_client();
-        let team_api_client = world.team_api_client();
-        let repos = client.load_repositories(&team_api_client).await.unwrap();
+        let mock = ExternalHttpMock::start(
+            &World::new()
+                .repo(
+                    Repo::new("foo", "bar", Permissions::default(), "".to_string())
+                        .perms(User::new(1, "user"), &[PermissionType::Try]),
+                )
+                .repo(Repo::new(
+                    "foo",
+                    "baz",
+                    Permissions::default(),
+                    "".to_string(),
+                )),
+        )
+        .await;
+        let client = mock.github_client();
+        let team_api_client = mock.team_api_client();
+        let mut repos = client.load_repositories(&team_api_client).await.unwrap();
         assert_eq!(repos.len(), 2);
 
-        let repo = repos.get(&GithubRepoName::new("foo", "bar")).unwrap();
+        let repo = repos
+            .remove(&GithubRepoName::new("foo", "bar"))
+            .unwrap()
+            .unwrap();
         assert!(repo
             .permissions
             .load()

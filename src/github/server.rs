@@ -2,9 +2,9 @@ use crate::bors::event::BorsEvent;
 use crate::bors::{handle_bors_global_event, handle_bors_repository_event, BorsContext};
 use crate::github::webhook::GitHubWebhook;
 use crate::github::webhook::WebhookSecret;
-use crate::utils::logging::LogError;
 use crate::{BorsGlobalEvent, BorsRepositoryEvent, TeamApiClient};
 
+use anyhow::Error;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
@@ -15,7 +15,7 @@ use std::future::Future;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tower::limit::ConcurrencyLimitLayer;
-use tracing::Instrument;
+use tracing::{Instrument, Span};
 
 use super::api::client::GithubRepositoryClient;
 
@@ -92,12 +92,30 @@ pub fn create_bors_process(
 
     let service = async move {
         let ctx = Arc::new(ctx);
-        tokio::select! {
-            _ = consume_repository_events(ctx.clone(), repository_rx) => {
-                tracing::warn!("Repository event handling process has ended");
-            }
-            _ = consume_global_events(ctx.clone(), global_rx, gh_client, team_api) => {
-                tracing::warn!("Global event handling process has ended");
+
+        // In tests, we shutdown these futures by dropping the channel sender,
+        // In that case, we need to wait until both of these futures resolve,
+        // to make sure that they are able to handle all the events in the queue
+        // before finishing.
+        #[cfg(test)]
+        {
+            tokio::join!(
+                consume_repository_events(ctx.clone(), repository_rx),
+                consume_global_events(ctx.clone(), global_rx, gh_client, team_api)
+            );
+        }
+        // In real execution, the bot runs forever. If there is something that finishes
+        // the futures early, it's essentially a bug.
+        // FIXME: maybe we could just use join for both versions of the code.
+        #[cfg(not(test))]
+        {
+            tokio::select! {
+                _ = consume_repository_events(ctx.clone(), repository_rx) => {
+                    tracing::error!("Repository event handling process has ended");
+                }
+                _ = consume_global_events(ctx.clone(), global_rx, gh_client, team_api) => {
+                    tracing::error!("Global event handling process has ended");
+                }
             }
         }
     };
@@ -117,7 +135,7 @@ async fn consume_repository_events(
             .instrument(span.clone())
             .await
         {
-            span.log_error(error);
+            handle_global_error(span, error);
         }
     }
 }
@@ -137,7 +155,21 @@ async fn consume_global_events(
             .instrument(span.clone())
             .await
         {
-            span.log_error(error);
+            handle_global_error(span, error);
         }
+    }
+}
+
+#[allow(unused_variables)]
+fn handle_global_error(span: Span, error: Error) {
+    // In tests, we want to panic on all errors.
+    #[cfg(test)]
+    {
+        panic!("Global handler failed: {error:?}");
+    }
+    #[cfg(not(test))]
+    {
+        use crate::utils::logging::LogError;
+        span.log_error(error);
     }
 }

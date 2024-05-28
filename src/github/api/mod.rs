@@ -18,17 +18,20 @@ pub(crate) mod operations;
 
 type GithubRepositoryState = RepositoryState<GithubRepositoryClient>;
 
-type GithubRepositoryMap = HashMap<GithubRepoName, Arc<GithubRepositoryState>>;
-
 fn base_github_html_url() -> &'static str {
     "https://github.com"
 }
 
-pub fn create_github_client(app_id: AppId, private_key: SecretVec<u8>) -> anyhow::Result<Octocrab> {
+pub fn create_github_client(
+    app_id: AppId,
+    github_url: String,
+    private_key: SecretVec<u8>,
+) -> anyhow::Result<Octocrab> {
     let key = jsonwebtoken::EncodingKey::from_rsa_pem(private_key.expose_secret().as_ref())
         .context("Could not encode private key")?;
 
     Octocrab::builder()
+        .base_uri(github_url)?
         .app(app_id, key)
         .build()
         .context("Could not create octocrab builder")
@@ -38,7 +41,7 @@ pub fn create_github_client(app_id: AppId, private_key: SecretVec<u8>) -> anyhow
 pub async fn load_repositories(
     client: &Octocrab,
     team_api_client: &TeamApiClient,
-) -> anyhow::Result<GithubRepositoryMap> {
+) -> anyhow::Result<HashMap<GithubRepoName, anyhow::Result<GithubRepositoryState>>> {
     let installations = client
         .apps()
         .installations()
@@ -61,43 +64,39 @@ pub async fn load_repositories(
         let repos = match load_installation_repos(&installation_client).await {
             Ok(repos) => repos,
             Err(error) => {
-                tracing::error!(
+                return Err(anyhow::anyhow!(
                     "Could not load repositories of installation {}: {error:?}",
                     installation.id
-                );
-                continue;
+                ));
             }
         };
         for repo in repos {
-            match create_repo_state(
+            let name = match parse_repo_name(&repo) {
+                Ok(name) => name,
+                Err(error) => {
+                    tracing::error!("Found repository without a name: {error:?}");
+                    continue;
+                }
+            };
+
+            if repositories.contains_key(&name) {
+                return Err(anyhow::anyhow!(
+                    "Repository {name} found in multiple installations!",
+                ));
+            }
+
+            let repo_state = create_repo_state(
                 app.clone(),
                 installation_client.clone(),
                 team_api_client,
                 repo.clone(),
+                name.clone(),
             )
             .await
             .map_err(|error| {
                 anyhow::anyhow!("Cannot load repository {:?}: {error:?}", repo.full_name)
-            }) {
-                Ok(repo_state) => {
-                    tracing::info!("Loaded repository {}", repo_state.repository);
-
-                    if let Some(existing) =
-                        repositories.insert(repo_state.repository.clone(), Arc::new(repo_state))
-                    {
-                        return Err(anyhow::anyhow!(
-                            "Repository {} found in multiple installations!",
-                            existing.repository
-                        ));
-                    }
-                }
-                Err(error) => {
-                    tracing::error!(
-                        "Could not load repository {}: {error:?}",
-                        repo.full_name.unwrap_or_default()
-                    );
-                }
-            }
+            });
+            repositories.insert(name, repo_state);
         }
     }
     Ok(repositories)
@@ -129,17 +128,21 @@ async fn load_installation_repos(client: &Octocrab) -> anyhow::Result<Vec<Reposi
     Ok(repos)
 }
 
+fn parse_repo_name(repo: &Repository) -> anyhow::Result<GithubRepoName> {
+    let Some(owner) = repo.owner.clone() else {
+        return Err(anyhow::anyhow!("Repository {} has no owner", repo.name));
+    };
+
+    Ok(GithubRepoName::new(&owner.login, &repo.name))
+}
+
 async fn create_repo_state(
     app: App,
     repo_client: Octocrab,
     team_api_client: &TeamApiClient,
     repo: Repository,
+    name: GithubRepoName,
 ) -> anyhow::Result<GithubRepositoryState> {
-    let Some(owner) = repo.owner.clone() else {
-        return Err(anyhow::anyhow!("Repository {} has no owner", repo.name));
-    };
-
-    let name = GithubRepoName::new(&owner.login, &repo.name);
     tracing::info!("Found repository {name}");
 
     let client = GithubRepositoryClient {
