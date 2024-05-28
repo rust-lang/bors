@@ -3,13 +3,14 @@ use crate::bors::{handle_bors_global_event, handle_bors_repository_event, BorsCo
 use crate::github::webhook::GitHubWebhook;
 use crate::github::webhook::WebhookSecret;
 use crate::utils::logging::LogError;
-use crate::{BorsGlobalEvent, BorsRepositoryEvent};
+use crate::{BorsGlobalEvent, BorsRepositoryEvent, TeamApiClient};
 
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::post;
 use axum::Router;
+use octocrab::Octocrab;
 use std::future::Future;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -79,6 +80,8 @@ pub async fn github_webhook_handler(
 /// them.
 pub fn create_bors_process(
     ctx: BorsContext<GithubRepositoryClient>,
+    gh_client: Octocrab,
+    team_api: TeamApiClient,
 ) -> (
     mpsc::Sender<BorsRepositoryEvent>,
     mpsc::Sender<BorsGlobalEvent>,
@@ -93,7 +96,7 @@ pub fn create_bors_process(
             _ = consume_repository_events(ctx.clone(), repository_rx) => {
                 tracing::warn!("Repository event handling process has ended");
             }
-            _ = consume_global_events(ctx.clone(), global_rx) => {
+            _ = consume_global_events(ctx.clone(), global_rx, gh_client, team_api) => {
                 tracing::warn!("Global event handling process has ended");
             }
         }
@@ -122,13 +125,15 @@ async fn consume_repository_events(
 async fn consume_global_events(
     ctx: Arc<BorsContext<GithubRepositoryClient>>,
     mut global_rx: mpsc::Receiver<BorsGlobalEvent>,
+    gh_client: Octocrab,
+    team_api: TeamApiClient,
 ) {
     while let Some(event) = global_rx.recv().await {
         let ctx = ctx.clone();
 
         let span = tracing::info_span!("GlobalEvent");
         tracing::debug!("Received global event: {event:#?}");
-        if let Err(error) = handle_bors_global_event(event, ctx)
+        if let Err(error) = handle_bors_global_event(event, ctx, &gh_client, &team_api)
             .instrument(span.clone())
             .await
         {

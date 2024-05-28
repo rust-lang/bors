@@ -294,7 +294,7 @@ async fn check_try_permissions<Client: RepositoryClient>(
     let result = if !repo
         .permissions
         .load()
-        .has_permission(&author.id, PermissionType::Try)
+        .has_permission(author.id, PermissionType::Try)
     {
         tracing::info!("Permission denied");
         repo.client
