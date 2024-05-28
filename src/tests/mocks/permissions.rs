@@ -3,7 +3,8 @@ use serde_json::json;
 use wiremock::matchers::path;
 use wiremock::{matchers::method, Mock, MockServer, ResponseTemplate};
 
-use crate::tests::mocks::{Repo, World};
+use crate::tests::mocks::repository::Repo;
+use crate::tests::mocks::World;
 use crate::TeamApiClient;
 
 pub struct TeamApiMockServer {

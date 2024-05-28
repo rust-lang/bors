@@ -109,9 +109,18 @@ impl BorsTester {
             .call(webhook)
             .await
             .expect("Cannot send webhook request");
-        if !response.status().is_success() {
-            panic!("Wrong status code {}", response.status());
+        let status = response.status();
+        if !status.is_success() {
+            panic!("Wrong status code {status}");
         }
+        let body_text = String::from_utf8(
+            axum::body::to_bytes(response.into_body(), 10 * 1024 * 1024)
+                .await
+                .unwrap()
+                .to_vec(),
+        )
+        .unwrap();
+        tracing::debug!("Received webhook with status {status} and response body `{body_text}`");
     }
 
     pub async fn finish(self) {

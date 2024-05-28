@@ -2,9 +2,9 @@ use crate::bors::event::BorsEvent;
 use crate::bors::{handle_bors_global_event, handle_bors_repository_event, BorsContext};
 use crate::github::webhook::GitHubWebhook;
 use crate::github::webhook::WebhookSecret;
-use crate::utils::logging::LogError;
 use crate::{BorsGlobalEvent, BorsRepositoryEvent, TeamApiClient};
 
+use anyhow::Error;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
@@ -15,7 +15,7 @@ use std::future::Future;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tower::limit::ConcurrencyLimitLayer;
-use tracing::Instrument;
+use tracing::{Instrument, Span};
 
 use super::api::client::GithubRepositoryClient;
 
@@ -117,7 +117,7 @@ async fn consume_repository_events(
             .instrument(span.clone())
             .await
         {
-            span.log_error(error);
+            handle_global_error(span, error);
         }
     }
 }
@@ -137,7 +137,21 @@ async fn consume_global_events(
             .instrument(span.clone())
             .await
         {
-            span.log_error(error);
+            handle_global_error(span, error);
         }
+    }
+}
+
+#[allow(unused_variables)]
+fn handle_global_error(span: Span, error: Error) {
+    // In tests, we want to panic on all errors.
+    #[cfg(test)]
+    {
+        panic!("Global handler failed: {error:?}");
+    }
+    #[cfg(not(test))]
+    {
+        use crate::utils::logging::LogError;
+        span.log_error(error);
     }
 }

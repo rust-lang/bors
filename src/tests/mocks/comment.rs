@@ -1,14 +1,13 @@
 use chrono::Utc;
 use octocrab::models::events::payload::{IssueCommentEventAction, IssueCommentEventChanges};
-use octocrab::models::issues::{IssueStateReason, PullRequestLink};
+use octocrab::models::issues::IssueStateReason;
 use octocrab::models::{Author, CommentId, IssueId, IssueState, Label};
 use serde::Serialize;
 use url::Url;
 
 use crate::github::GithubRepoName;
 use crate::tests::event::default_pr_number;
-use crate::tests::mocks::default_repo_name;
-use crate::tests::mocks::repository::GitHubRepository;
+use crate::tests::mocks::repository::{GitHubRepository, Repo};
 use crate::tests::mocks::user::{GitHubUser, User};
 
 pub struct Comment {
@@ -21,7 +20,7 @@ pub struct Comment {
 impl Comment {
     pub fn new(content: &str) -> Self {
         Self {
-            repo: default_repo_name(),
+            repo: Repo::default().name,
             pr: default_pr_number(),
             author: User::default(),
             content: content.to_string(),
@@ -68,7 +67,12 @@ impl From<Comment> for GitHubIssueCommentEventPayload {
                 author_association: "".to_string(),
                 locked: false,
                 comments: 0,
-                pull_request: None,
+                pull_request: Some(GitHubPullRequestLink {
+                    url: url.clone(),
+                    html_url: url.clone(),
+                    diff_url: url.clone(),
+                    patch_url: url.clone(),
+                }),
                 created_at: time,
                 updated_at: time,
             },
@@ -104,9 +108,7 @@ struct GitHubIssue {
     state_reason: Option<IssueStateReason>,
     title: String,
     body: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     body_text: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     body_html: Option<String>,
     user: GitHubUser,
     labels: Vec<Label>,
@@ -114,8 +116,7 @@ struct GitHubIssue {
     author_association: String,
     locked: bool,
     comments: u32,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pull_request: Option<PullRequestLink>,
+    pull_request: Option<GitHubPullRequestLink>,
     created_at: chrono::DateTime<chrono::Utc>,
     updated_at: chrono::DateTime<chrono::Utc>,
 }
@@ -127,11 +128,8 @@ struct GitHubComment {
     node_id: String,
     url: Url,
     html_url: Url,
-    #[serde(skip_serializing_if = "Option::is_none")]
     body: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     body_text: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     body_html: Option<String>,
     user: GitHubUser,
     created_at: chrono::DateTime<chrono::Utc>,

@@ -1,15 +1,63 @@
 use crate::github::GithubRepoName;
+use crate::permissions::PermissionType;
 use base64::Engine;
 use serde::Serialize;
+use std::collections::HashMap;
 use url::Url;
 use wiremock::{
     matchers::{method, path},
     Mock, MockServer, ResponseTemplate,
 };
 
-use crate::tests::mocks::World;
+use crate::tests::mocks::{Permissions, World};
 
 use super::user::{GitHubUser, User};
+
+pub struct Repo {
+    pub name: GithubRepoName,
+    pub permissions: Permissions,
+    pub config: String,
+}
+
+impl Repo {
+    pub fn new(owner: &str, name: &str, permissions: Permissions, config: String) -> Self {
+        Self {
+            name: GithubRepoName::new(owner, name),
+            permissions,
+            config,
+        }
+    }
+
+    pub fn perms(mut self, user: User, permissions: &[PermissionType]) -> Self {
+        self.permissions.users.insert(user, permissions.to_vec());
+        self
+    }
+}
+
+impl Default for Repo {
+    fn default() -> Self {
+        let config = r#"
+timeout = 3600
+"#
+        .to_string();
+        let mut users = HashMap::default();
+        users.insert(
+            User::default(),
+            vec![PermissionType::Try, PermissionType::Review],
+        );
+
+        Self::new(
+            default_repo_name().owner(),
+            default_repo_name().name(),
+            Permissions { users },
+            config,
+        )
+    }
+}
+
+fn default_repo_name() -> GithubRepoName {
+    GithubRepoName::new("rust-lang", "borstest")
+}
 
 /// Handles all repositories related requests
 #[derive(Default)]
@@ -75,7 +123,7 @@ impl From<GithubRepoName> for GitHubRepository {
         Self {
             id: 1,
             name: value.name().to_string(),
-            owner: User::default().into(),
+            owner: GitHubUser::new(value.owner(), 1001),
             url: format!("https://github.com/{}", value).parse().unwrap(),
         }
     }

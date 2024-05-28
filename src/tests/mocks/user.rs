@@ -44,17 +44,10 @@ pub struct GitHubUser {
     site_admin: bool,
 }
 
-impl Default for GitHubUser {
-    fn default() -> Self {
-        User::default().into()
-    }
-}
-
-impl From<User> for GitHubUser {
-    fn from(user: User) -> Self {
-        let name = user.name;
-        GitHubUser {
-            id: user.github_id,
+impl GitHubUser {
+    pub fn new(name: &str, id: u64) -> Self {
+        Self {
+            id,
             login: name.to_string(),
             node_id: "MDQ6VXNlcjQ1MzkwNTc=".to_string(),
             avatar_url: "https://avatars.githubusercontent.com/u/4539057?v=4"
@@ -95,5 +88,17 @@ impl From<User> for GitHubUser {
             r#type: "User".to_string(),
             site_admin: false,
         }
+    }
+}
+
+impl Default for GitHubUser {
+    fn default() -> Self {
+        User::default().into()
+    }
+}
+
+impl From<User> for GitHubUser {
+    fn from(user: User) -> Self {
+        Self::new(&user.name, user.github_id)
     }
 }
