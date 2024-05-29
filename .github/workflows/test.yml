@@ -51,10 +51,10 @@ jobs:
       - name: Check .sqlx files
         run: cargo sqlx prepare --check -- --tests
 
-      - name: Check
+      - name: Build
         uses: actions-rs/cargo@v1
         with:
-          command: check
+          command: build
           args: --all --all-targets
 
       - name: Test
