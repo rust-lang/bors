@@ -17,6 +17,7 @@ mod bors;
 mod comment;
 mod github;
 mod permissions;
+mod pull_request;
 mod repository;
 mod user;
 mod webhook;
@@ -47,7 +48,7 @@ impl Default for World {
     }
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct Permissions {
     pub users: HashMap<User, Vec<PermissionType>>,
 }

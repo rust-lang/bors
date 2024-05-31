@@ -1,7 +1,7 @@
 use serde::Serialize;
 use url::Url;
 
-#[derive(Eq, PartialEq, Hash, Clone)]
+#[derive(Eq, PartialEq, Hash, Clone, Debug)]
 pub struct User {
     pub github_id: u64,
     pub name: String,

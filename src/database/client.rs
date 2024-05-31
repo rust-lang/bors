@@ -36,7 +36,6 @@ impl DbClient for PgDbClient {
         if let Some(pr) = get_pull_request(&self.pool, repo, pr_number).await? {
             return Ok(pr);
         }
-        println!("Creating PR");
         create_pull_request(&self.pool, repo, pr_number).await?;
         let pr = get_pull_request(&self.pool, repo, pr_number)
             .await?
