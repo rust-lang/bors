@@ -69,6 +69,7 @@ pub async fn run_test<
 /// send channels for the bors process, which should stop its async task.
 pub struct BorsTester {
     app: Router,
+    http_mock: ExternalHttpMock,
     bors: JoinHandle<()>,
 }
 
@@ -98,14 +99,18 @@ impl BorsTester {
         );
         let app = create_app(state);
         let bors = tokio::spawn(bors_process);
-        Self { app, bors }
+        Self {
+            app,
+            http_mock: mock,
+            bors,
+        }
     }
 
     pub async fn post_comment(&mut self, content: &str) {
         self.webhook_comment(Comment::new(content)).await;
     }
 
-    pub async fn webhook_comment(&mut self, comment: Comment) {
+    async fn webhook_comment(&mut self, comment: Comment) {
         self.send_webhook(
             "issue_comment",
             GitHubIssueCommentEventPayload::from(comment),
