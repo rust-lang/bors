@@ -20,7 +20,7 @@ mod tests {
     use tracing_test::traced_test;
 
     use crate::tests::event::default_pr_number;
-    use crate::tests::mocks::BorsBuilder;
+    use crate::tests::mocks::run_test;
     use crate::tests::state::ClientBuilder;
 
     #[sqlx::test]
@@ -38,11 +38,10 @@ mod tests {
     #[traced_test]
     #[sqlx::test]
     async fn test_ping2(pool: sqlx::PgPool) {
-        BorsBuilder::new(pool)
-            .run_test(|mut tester| async {
-                tester.comment("@bors ping").await;
-                Ok(tester)
-            })
-            .await;
+        run_test(pool, |mut tester| async {
+            tester.post_comment("@bors ping").await;
+            Ok(tester)
+        })
+        .await;
     }
 }

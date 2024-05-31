@@ -50,6 +50,17 @@ impl BorsBuilder {
     }
 }
 
+/// Simple end-to-end test entrypoint for tests that don't need to prepare any custom state.
+pub async fn run_test<
+    F: FnOnce(BorsTester) -> Fut,
+    Fut: Future<Output = anyhow::Result<BorsTester>>,
+>(
+    pool: PgPool,
+    f: F,
+) {
+    BorsBuilder::new(pool).run_test(f).await
+}
+
 /// Represents a running bors web application and also the background
 /// bors process. This structure should be used in tests to test interaction
 /// with the bot.
@@ -90,7 +101,7 @@ impl BorsTester {
         Self { app, bors }
     }
 
-    pub async fn comment(&mut self, content: &str) {
+    pub async fn post_comment(&mut self, content: &str) {
         self.webhook_comment(Comment::new(content)).await;
     }
 

@@ -8,6 +8,7 @@ use crate::tests::mocks::github::GitHubMockServer;
 use crate::tests::mocks::permissions::TeamApiMockServer;
 use crate::TeamApiClient;
 
+pub use bors::run_test;
 pub use bors::BorsBuilder;
 pub use repository::Repo;
 pub use user::User;
