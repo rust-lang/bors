@@ -4,18 +4,18 @@ use crate::tests::event::default_pr_number;
 use base64::Engine;
 use serde::Serialize;
 use std::collections::HashMap;
+use tokio::sync::mpsc::Sender;
 use url::Url;
 use wiremock::{
     matchers::{method, path},
     Mock, MockServer, ResponseTemplate,
 };
 
+use crate::tests::mocks::comment::Comment;
+use crate::tests::mocks::pull_request::mock_pull_requests;
 use crate::tests::mocks::{Permissions, World};
 
-use super::{
-    pull_request::PullRequestsHandler,
-    user::{GitHubUser, User},
-};
+use super::user::{GitHubUser, User};
 
 #[derive(Clone)]
 pub struct Repo {
@@ -68,50 +68,46 @@ fn default_repo_name() -> GithubRepoName {
     GithubRepoName::new("rust-lang", "borstest")
 }
 
-/// Handles all repositories related requests
-#[derive(Default)]
-pub struct RepositoriesHandler;
+pub async fn mock_repo_list(world: &World, mock_server: &MockServer) {
+    let repos = GitHubRepositories {
+        total_count: world.repos.len() as u64,
+        repositories: world
+            .repos
+            .iter()
+            .enumerate()
+            .map(|(index, (_, repo))| GitHubRepository {
+                id: index as u64,
+                owner: User::new(index as u64, repo.name.owner()).into(),
+                name: repo.name.name().to_string(),
+                url: format!("https://{}.foo", repo.name.name()).parse().unwrap(),
+            })
+            .collect(),
+    };
 
-impl RepositoriesHandler {
-    pub async fn mount(&self, world: &World, mock_server: &MockServer) {
-        let repos = GitHubRepositories {
-            total_count: world.repos.len() as u64,
-            repositories: world
-                .repos
-                .iter()
-                .enumerate()
-                .map(|(index, (_, repo))| GitHubRepository {
-                    id: index as u64,
-                    owner: User::new(index as u64, repo.name.owner()).into(),
-                    name: repo.name.name().to_string(),
-                    url: format!("https://{}.foo", repo.name.name()).parse().unwrap(),
-                })
-                .collect(),
-        };
+    Mock::given(method("GET"))
+        .and(path("/installation/repositories"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(repos))
+        .mount(mock_server)
+        .await;
+}
 
-        Mock::given(method("GET"))
-            .and(path("/installation/repositories"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(repos))
-            .mount(mock_server)
-            .await;
+pub async fn mock_repo(repo: &Repo, comments_tx: Sender<Comment>, mock_server: &MockServer) {
+    mock_pull_requests(repo, mock_server).await;
+    mock_config(repo, mock_server).await;
+}
 
-        for repo in world.repos.values() {
-            PullRequestsHandler::new(repo.to_owned())
-                .mount(mock_server)
-                .await;
-            Mock::given(method("GET"))
-                .and(path(format!(
-                    "/repos/{}/contents/rust-bors.toml",
-                    repo.name
-                )))
-                .respond_with(
-                    ResponseTemplate::new(200)
-                        .set_body_json(GitHubContent::new("rust-bors.toml", &repo.config)),
-                )
-                .mount(mock_server)
-                .await;
-        }
-    }
+async fn mock_config(repo: &Repo, mock_server: &MockServer) {
+    Mock::given(method("GET"))
+        .and(path(format!(
+            "/repos/{}/contents/rust-bors.toml",
+            repo.name
+        )))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(GitHubContent::new("rust-bors.toml", &repo.config)),
+        )
+        .mount(mock_server)
+        .await;
 }
 
 /// Represents all repositories for an installation

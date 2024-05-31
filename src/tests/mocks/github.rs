@@ -1,21 +1,51 @@
 use octocrab::Octocrab;
+use std::collections::HashMap;
 use wiremock::MockServer;
 
 use crate::create_github_client;
+use crate::github::GithubRepoName;
 use crate::tests::mocks::app::{default_app_id, AppHandler};
-use crate::tests::mocks::repository::RepositoriesHandler;
+use crate::tests::mocks::comment::Comment;
+use crate::tests::mocks::repository::{mock_repo, mock_repo_list};
 use crate::tests::mocks::World;
+
+/// Represents the state of a simulated GH repo.
+pub struct GitHubRepoState {
+    // We store comments from all PRs inside a single queue, because
+    // we don't necessarily know beforehand which PRs will receive comments.
+    comments_queue: tokio::sync::mpsc::Receiver<Comment>,
+    // We need a local queue to avoid skipping comments received out of order.
+    pending_comments: Vec<Comment>,
+}
 
 pub struct GitHubMockServer {
     mock_server: MockServer,
+    repos: HashMap<GithubRepoName, GitHubRepoState>,
 }
 
 impl GitHubMockServer {
     pub async fn start(world: &World) -> Self {
         let mock_server = MockServer::start().await;
-        RepositoriesHandler.mount(world, &mock_server).await;
+        mock_repo_list(world, &mock_server).await;
+
+        // Repositories are mocked separately to make it easier to
+        // pass comm. channels to them.
+        let mut repos = HashMap::default();
+        for (name, repo) in &world.repos {
+            let (comments_tx, comments_rx) = tokio::sync::mpsc::channel(1024);
+            mock_repo(repo, comments_tx, &mock_server).await;
+            repos.insert(
+                name.clone(),
+                GitHubRepoState {
+                    comments_queue: comments_rx,
+                    pending_comments: vec![],
+                },
+            );
+        }
+
         AppHandler::default().mount(&mock_server).await;
-        Self { mock_server }
+
+        Self { mock_server, repos }
     }
 
     pub fn client(&self) -> Octocrab {
