@@ -1,5 +1,6 @@
 use octocrab::Octocrab;
 use std::collections::HashMap;
+use std::time::Duration;
 use wiremock::MockServer;
 
 use crate::create_github_client;
@@ -9,6 +10,8 @@ use crate::tests::mocks::comment::Comment;
 use crate::tests::mocks::repository::{mock_repo, mock_repo_list};
 use crate::tests::mocks::World;
 
+const DEFAULT_TIMEOUT: Duration = Duration::from_secs(3);
+
 /// Represents the state of a simulated GH repo.
 pub struct GitHubRepoState {
     // We store comments from all PRs inside a single queue, because
@@ -16,6 +19,35 @@ pub struct GitHubRepoState {
     comments_queue: tokio::sync::mpsc::Receiver<Comment>,
     // We need a local queue to avoid skipping comments received out of order.
     pending_comments: Vec<Comment>,
+}
+
+impl GitHubRepoState {
+    /// Wait until a comment from the given pull request was received.
+    /// If a comment from a different PR is received, it is inserted into
+    /// `pending_comments`, to be picked up later.
+    async fn get_comment(&mut self, pr: u64) -> Comment {
+        // First, try to resolve the comment from the pending comment list
+        if let Some(index) = self.pending_comments.iter().position(|c| c.pr == pr) {
+            return self.pending_comments.remove(index);
+        }
+        // If it is not there, wait until some comment is received
+        loop {
+            let comment = self
+                .comments_queue
+                .recv()
+                .await
+                .expect("Channel was closed while waiting for a comment");
+
+            if comment.pr == pr {
+                return comment;
+            }
+            tracing::warn!(
+                "Received comment for PR {}, while expected for PR {pr}",
+                comment.pr
+            );
+            self.pending_comments.push(comment);
+        }
+    }
 }
 
 pub struct GitHubMockServer {
@@ -38,7 +70,7 @@ impl GitHubMockServer {
                 name.clone(),
                 GitHubRepoState {
                     comments_queue: comments_rx,
-                    pending_comments: vec![],
+                    pending_comments: Default::default(),
                 },
             );
         }
@@ -55,6 +87,38 @@ impl GitHubMockServer {
             GITHUB_MOCK_PRIVATE_KEY.as_bytes().to_vec().into(),
         )
         .unwrap()
+    }
+
+    pub async fn get_comment(&mut self, repo: GithubRepoName, pr: u64) -> Comment {
+        let repo = self.repos.get_mut(&repo).unwrap();
+        let fut = repo.get_comment(pr);
+        tokio::time::timeout(DEFAULT_TIMEOUT, fut)
+            .await
+            .expect("Timed out while waiting for a comment to be received")
+    }
+
+    /// Make sure that there are no leftover events left in the queues.
+    pub async fn assert_empty_queues(mut self) {
+        // This will remove all mocks and thus also any leftover
+        // channel senders, so that we can be sure below that the `recv`
+        // call will not block indefinitely.
+        self.mock_server.reset().await;
+        drop(self.mock_server);
+
+        for (name, repo) in self.repos.iter_mut() {
+            if !repo.pending_comments.is_empty() {
+                panic!(
+                    "Expected that {name} won't have any received comments, but it has {:?}",
+                    repo.pending_comments
+                );
+            }
+            // Make sure that the queue has been closed and nothing is in it.
+            if let Some(comment) = repo.comments_queue.recv().await {
+                panic!(
+                    "Expected that {name} won't have any received comments, but it has {comment:?}"
+                );
+            }
+        }
     }
 }
 

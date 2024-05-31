@@ -10,9 +10,10 @@ use tower::Service;
 
 use crate::github::api::load_repositories;
 use crate::tests::database::MockedDBClient;
+use crate::tests::event::default_pr_number;
 use crate::tests::mocks::comment::{Comment, GitHubIssueCommentEventPayload};
 use crate::tests::mocks::webhook::{create_webhook_request, TEST_WEBHOOK_SECRET};
-use crate::tests::mocks::{ExternalHttpMock, World};
+use crate::tests::mocks::{ExternalHttpMock, Repo, World};
 use crate::{
     create_app, create_bors_process, BorsContext, CommandParser, ServerState, WebhookSecret,
 };
@@ -106,8 +107,22 @@ impl BorsTester {
         }
     }
 
+    /// Wait until the next bot comment is received on the default repo and the default PR.
+    pub async fn get_comment(&mut self) -> String {
+        self.http_mock
+            .gh_server
+            .get_comment(Repo::default().name, default_pr_number())
+            .await
+            .content
+    }
+
     pub async fn post_comment(&mut self, content: &str) {
-        self.webhook_comment(Comment::new(content)).await;
+        self.webhook_comment(Comment::new(
+            Repo::default().name,
+            default_pr_number(),
+            content,
+        ))
+        .await;
     }
 
     async fn webhook_comment(&mut self, comment: Comment) {
@@ -140,7 +155,11 @@ impl BorsTester {
     }
 
     pub async fn finish(self) {
+        // Make sure that the event channel senders are closed
         drop(self.app);
+        // Wait until all events are handled in the bors service
         self.bors.await.unwrap();
+        // Flush any local queues
+        self.http_mock.gh_server.assert_empty_queues().await;
     }
 }

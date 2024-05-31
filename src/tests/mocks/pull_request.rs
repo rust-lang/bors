@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use tokio::sync::mpsc::Sender;
 use wiremock::{
     matchers::{method, path},
     Mock, MockServer, Request, ResponseTemplate,
@@ -6,29 +7,40 @@ use wiremock::{
 
 use super::{
     comment::{Comment, GitHubComment},
-    Repo,
+    Repo, User,
 };
 
-pub async fn mock_pull_requests(repo: &Repo, mock_server: &MockServer) {
-    for pr_number in &repo.known_prs {
+pub async fn mock_pull_requests(
+    repo: &Repo,
+    comments_tx: Sender<Comment>,
+    mock_server: &MockServer,
+) {
+    let repo_name = repo.name.clone();
+    for &pr_number in &repo.known_prs {
         Mock::given(method("GET"))
-            .and(path(format!("/repos/{}/pulls/{}", repo.name, pr_number)))
+            .and(path(format!("/repos/{repo_name}/pulls/{pr_number}")))
             .respond_with(
-                ResponseTemplate::new(200).set_body_json(GitHubPullRequest::new(*pr_number)),
+                ResponseTemplate::new(200).set_body_json(GitHubPullRequest::new(pr_number)),
             )
             .mount(mock_server)
             .await;
 
+        let repo_name = repo_name.clone();
+        let comments_tx = comments_tx.clone();
         Mock::given(method("POST"))
             .and(path(format!(
-                "/repos/{}/issues/{}/comments",
-                repo.name, pr_number
+                "/repos/{repo_name}/issues/{pr_number}/comments",
             )))
             .respond_with(move |req: &Request| {
                 let comment_payload: CommentCreatePayload = req.body_json().unwrap();
-                let comment: Comment = comment_payload.into();
-                // let mut comments = comments.lock().unwrap();
-                // comments.entry(1).or_default().push(comment.clone());
+                let comment: Comment =
+                    Comment::new(repo_name.clone(), pr_number, &comment_payload.body)
+                        .with_author(User::new(1002, "bors"));
+
+                // We cannot use `tx.blocking_send()`, because this function is actually called
+                // from within an async task, but it is not async, so we also cannot use
+                // `tx.send()`.
+                comments_tx.try_send(comment.clone()).unwrap();
                 ResponseTemplate::new(201).set_body_json(GitHubComment::from(comment))
             })
             .mount(mock_server)
@@ -100,10 +112,4 @@ fn default_pr_number() -> u64 {
 #[derive(Deserialize)]
 struct CommentCreatePayload {
     body: String,
-}
-
-impl From<CommentCreatePayload> for Comment {
-    fn from(payload: CommentCreatePayload) -> Self {
-        Comment::new(payload.body.as_str())
-    }
 }

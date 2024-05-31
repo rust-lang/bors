@@ -92,7 +92,7 @@ pub async fn mock_repo_list(world: &World, mock_server: &MockServer) {
 }
 
 pub async fn mock_repo(repo: &Repo, comments_tx: Sender<Comment>, mock_server: &MockServer) {
-    mock_pull_requests(repo, mock_server).await;
+    mock_pull_requests(repo, comments_tx, mock_server).await;
     mock_config(repo, mock_server).await;
 }
 
