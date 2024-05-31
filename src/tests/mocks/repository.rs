@@ -11,8 +11,12 @@ use wiremock::{
 
 use crate::tests::mocks::{Permissions, World};
 
-use super::user::{GitHubUser, User};
+use super::{
+    pull_request::PullRequestsHandler,
+    user::{GitHubUser, User},
+};
 
+#[derive(Clone)]
 pub struct Repo {
     pub name: GithubRepoName,
     pub permissions: Permissions,
@@ -87,6 +91,9 @@ impl RepositoriesHandler {
             .await;
 
         for repo in world.repos.values() {
+            PullRequestsHandler::new(repo.to_owned())
+                .mount(mock_server)
+                .await;
             Mock::given(method("GET"))
                 .and(path(format!(
                     "/repos/{}/contents/rust-bors.toml",

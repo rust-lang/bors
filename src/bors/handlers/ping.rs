@@ -17,7 +17,10 @@ pub(super) async fn command_ping<Client: RepositoryClient>(
 
 #[cfg(test)]
 mod tests {
+    use tracing_test::traced_test;
+
     use crate::tests::event::default_pr_number;
+    use crate::tests::mocks::BorsBuilder;
     use crate::tests::state::ClientBuilder;
 
     #[sqlx::test]
@@ -32,15 +35,14 @@ mod tests {
             .check_comments(default_pr_number(), &["Pong 🏓!"]);
     }
 
-    // Failing tests - needs comment and PR endpoints to be implemented
-    // #[traced_test]
-    // #[sqlx::test]
-    // async fn test_ping2(pool: sqlx::PgPool) {
-    //     BorsBuilder::new(pool)
-    //         .run_test(|mut tester| async {
-    //             tester.comment("@bors ping").await;
-    //             Ok(tester)
-    //         })
-    //         .await;
-    // }
+    #[traced_test]
+    #[sqlx::test]
+    async fn test_ping2(pool: sqlx::PgPool) {
+        BorsBuilder::new(pool)
+            .run_test(|mut tester| async {
+                tester.comment("@bors ping").await;
+                Ok(tester)
+            })
+            .await;
+    }
 }

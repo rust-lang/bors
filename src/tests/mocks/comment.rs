@@ -10,6 +10,7 @@ use crate::tests::event::default_pr_number;
 use crate::tests::mocks::repository::{GitHubRepository, Repo};
 use crate::tests::mocks::user::{GitHubUser, User};
 
+#[derive(Clone, Debug)]
 pub struct Comment {
     repo: GithubRepoName,
     pr: u64,
@@ -123,7 +124,7 @@ struct GitHubIssue {
 
 // Copied from octocrab, since its version if #[non_exhaustive]
 #[derive(Serialize)]
-struct GitHubComment {
+pub(super) struct GitHubComment {
     id: CommentId,
     node_id: String,
     url: Url,
@@ -133,6 +134,24 @@ struct GitHubComment {
     body_html: Option<String>,
     user: GitHubUser,
     created_at: chrono::DateTime<chrono::Utc>,
+}
+
+impl From<Comment> for GitHubComment {
+    fn from(value: Comment) -> Self {
+        let time = Utc::now();
+        let url = Url::parse("https://foo.bar").unwrap();
+        Self {
+            id: CommentId(1),
+            node_id: "1".to_string(),
+            url: url.clone(),
+            html_url: url,
+            body: Some(value.content.clone()),
+            body_text: Some(value.content.clone()),
+            body_html: Some(value.content.clone()),
+            user: value.author.into(),
+            created_at: time,
+        }
+    }
 }
 
 // Copied from octocrab, since its version if #[non_exhaustive]
