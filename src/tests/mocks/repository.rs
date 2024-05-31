@@ -1,5 +1,6 @@
 use crate::github::GithubRepoName;
 use crate::permissions::PermissionType;
+use crate::tests::event::default_pr_number;
 use base64::Engine;
 use serde::Serialize;
 use std::collections::HashMap;
@@ -21,6 +22,9 @@ pub struct Repo {
     pub name: GithubRepoName,
     pub permissions: Permissions,
     pub config: String,
+    // Pre-set known PRs to avoid responding to requests about PRs that we
+    // don't expect.
+    pub known_prs: Vec<u64>,
 }
 
 impl Repo {
@@ -29,6 +33,7 @@ impl Repo {
             name: GithubRepoName::new(owner, name),
             permissions,
             config,
+            known_prs: vec![default_pr_number()],
         }
     }
 
