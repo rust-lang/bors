@@ -1,9 +1,5 @@
-use std::{
-    collections::HashMap,
-    sync::{Arc, Mutex},
-};
-
 use serde::{Deserialize, Serialize};
+use tokio::sync::mpsc::Sender;
 use wiremock::{
     matchers::{method, path},
     Mock, MockServer, Request, ResponseTemplate,
@@ -11,47 +7,40 @@ use wiremock::{
 
 use super::{
     comment::{Comment, GitHubComment},
-    Repo,
+    Repo, User,
 };
 
-/// Handles all repositories related requests
-/// Only handle one PR for now, since bors don't create PRs itself
-#[derive(Default)]
-pub(super) struct PullRequestsHandler {
-    repo: Repo,
-    number: u64,
-    comments: Arc<Mutex<HashMap<u64, Vec<Comment>>>>,
-}
-
-impl PullRequestsHandler {
-    pub(super) fn new(repo: Repo) -> Self {
-        PullRequestsHandler {
-            repo,
-            number: default_pr_number(),
-            comments: Arc::new(Mutex::new(HashMap::new())),
-        }
-    }
-    pub(super) async fn mount(&self, mock_server: &MockServer) {
+pub async fn mock_pull_requests(
+    repo: &Repo,
+    comments_tx: Sender<Comment>,
+    mock_server: &MockServer,
+) {
+    let repo_name = repo.name.clone();
+    for &pr_number in &repo.known_prs {
         Mock::given(method("GET"))
-            .and(path(format!(
-                "/repos/{}/pulls/{}",
-                self.repo.name, self.number
-            )))
-            .respond_with(ResponseTemplate::new(200).set_body_json(GitHubPullRequest::default()))
+            .and(path(format!("/repos/{repo_name}/pulls/{pr_number}")))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(GitHubPullRequest::new(pr_number)),
+            )
             .mount(mock_server)
             .await;
 
-        let comments = self.comments.clone();
+        let repo_name = repo_name.clone();
+        let comments_tx = comments_tx.clone();
         Mock::given(method("POST"))
             .and(path(format!(
-                "/repos/{}/issues/{}/comments",
-                self.repo.name, self.number
+                "/repos/{repo_name}/issues/{pr_number}/comments",
             )))
             .respond_with(move |req: &Request| {
                 let comment_payload: CommentCreatePayload = req.body_json().unwrap();
-                let comment: Comment = comment_payload.into();
-                let mut comments = comments.lock().unwrap();
-                comments.entry(1).or_default().push(comment.clone());
+                let comment: Comment =
+                    Comment::new(repo_name.clone(), pr_number, &comment_payload.body)
+                        .with_author(User::new(1002, "bors"));
+
+                // We cannot use `tx.blocking_send()`, because this function is actually called
+                // from within an async task, but it is not async, so we also cannot use
+                // `tx.send()`.
+                comments_tx.try_send(comment.clone()).unwrap();
                 ResponseTemplate::new(201).set_body_json(GitHubComment::from(comment))
             })
             .mount(mock_server)
@@ -74,24 +63,30 @@ struct GitHubPullRequest {
     base: Box<Base>,
 }
 
-impl Default for GitHubPullRequest {
-    fn default() -> Self {
+impl GitHubPullRequest {
+    fn new(number: u64) -> Self {
         GitHubPullRequest {
             url: "https://test.com".to_string(),
-            id: 1,
-            title: format!("PR #{}", default_pr_number()),
-            body: "test".to_string(),
-            number: default_pr_number(),
+            id: number + 1000,
+            title: format!("PR #{number}"),
+            body: format!("Description of PR #{number}"),
+            number,
             head: Box::new(Head {
-                label: "test".to_string(),
-                ref_field: "test".to_string(),
-                sha: "test".to_string(),
+                label: format!("pr-{number}"),
+                ref_field: format!("pr-{number}"),
+                sha: format!("pr-{number}-sha"),
             }),
             base: Box::new(Base {
-                ref_field: "test".to_string(),
-                sha: "test".to_string(),
+                ref_field: "main".to_string(),
+                sha: "main-sha".to_string(),
             }),
         }
+    }
+}
+
+impl Default for GitHubPullRequest {
+    fn default() -> Self {
+        Self::new(default_pr_number())
     }
 }
 
@@ -117,10 +112,4 @@ fn default_pr_number() -> u64 {
 #[derive(Deserialize)]
 struct CommentCreatePayload {
     body: String,
-}
-
-impl From<CommentCreatePayload> for Comment {
-    fn from(payload: CommentCreatePayload) -> Self {
-        Comment::new(payload.body.as_str())
-    }
 }

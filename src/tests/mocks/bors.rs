@@ -10,9 +10,10 @@ use tower::Service;
 
 use crate::github::api::load_repositories;
 use crate::tests::database::MockedDBClient;
+use crate::tests::event::default_pr_number;
 use crate::tests::mocks::comment::{Comment, GitHubIssueCommentEventPayload};
 use crate::tests::mocks::webhook::{create_webhook_request, TEST_WEBHOOK_SECRET};
-use crate::tests::mocks::{ExternalHttpMock, World};
+use crate::tests::mocks::{ExternalHttpMock, Repo, World};
 use crate::{
     create_app, create_bors_process, BorsContext, CommandParser, ServerState, WebhookSecret,
 };
@@ -50,6 +51,17 @@ impl BorsBuilder {
     }
 }
 
+/// Simple end-to-end test entrypoint for tests that don't need to prepare any custom state.
+pub async fn run_test<
+    F: FnOnce(BorsTester) -> Fut,
+    Fut: Future<Output = anyhow::Result<BorsTester>>,
+>(
+    pool: PgPool,
+    f: F,
+) {
+    BorsBuilder::new(pool).run_test(f).await
+}
+
 /// Represents a running bors web application and also the background
 /// bors process. This structure should be used in tests to test interaction
 /// with the bot.
@@ -58,6 +70,7 @@ impl BorsBuilder {
 /// send channels for the bors process, which should stop its async task.
 pub struct BorsTester {
     app: Router,
+    http_mock: ExternalHttpMock,
     bors: JoinHandle<()>,
 }
 
@@ -87,14 +100,32 @@ impl BorsTester {
         );
         let app = create_app(state);
         let bors = tokio::spawn(bors_process);
-        Self { app, bors }
+        Self {
+            app,
+            http_mock: mock,
+            bors,
+        }
     }
 
-    pub async fn comment(&mut self, content: &str) {
-        self.webhook_comment(Comment::new(content)).await;
+    /// Wait until the next bot comment is received on the default repo and the default PR.
+    pub async fn get_comment(&mut self) -> String {
+        self.http_mock
+            .gh_server
+            .get_comment(Repo::default().name, default_pr_number())
+            .await
+            .content
     }
 
-    pub async fn webhook_comment(&mut self, comment: Comment) {
+    pub async fn post_comment(&mut self, content: &str) {
+        self.webhook_comment(Comment::new(
+            Repo::default().name,
+            default_pr_number(),
+            content,
+        ))
+        .await;
+    }
+
+    async fn webhook_comment(&mut self, comment: Comment) {
         self.send_webhook(
             "issue_comment",
             GitHubIssueCommentEventPayload::from(comment),
@@ -124,7 +155,11 @@ impl BorsTester {
     }
 
     pub async fn finish(self) {
+        // Make sure that the event channel senders are closed
         drop(self.app);
+        // Wait until all events are handled in the bors service
         self.bors.await.unwrap();
+        // Flush any local queues
+        self.http_mock.gh_server.assert_empty_queues().await;
     }
 }

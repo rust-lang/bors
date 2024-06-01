@@ -17,32 +17,15 @@ pub(super) async fn command_ping<Client: RepositoryClient>(
 
 #[cfg(test)]
 mod tests {
-    use tracing_test::traced_test;
-
-    use crate::tests::event::default_pr_number;
-    use crate::tests::mocks::BorsBuilder;
-    use crate::tests::state::ClientBuilder;
+    use crate::tests::mocks::run_test;
 
     #[sqlx::test]
     async fn test_ping(pool: sqlx::PgPool) {
-        let state = ClientBuilder::default()
-            .pool(pool.clone())
-            .create_state()
-            .await;
-        state.comment("@bors ping").await;
-        state
-            .client()
-            .check_comments(default_pr_number(), &["Pong 🏓!"]);
-    }
-
-    #[traced_test]
-    #[sqlx::test]
-    async fn test_ping2(pool: sqlx::PgPool) {
-        BorsBuilder::new(pool)
-            .run_test(|mut tester| async {
-                tester.comment("@bors ping").await;
-                Ok(tester)
-            })
-            .await;
+        run_test(pool, |mut tester| async {
+            tester.post_comment("@bors ping").await;
+            assert_eq!(tester.get_comment().await, "Pong 🏓!");
+            Ok(tester)
+        })
+        .await;
     }
 }
