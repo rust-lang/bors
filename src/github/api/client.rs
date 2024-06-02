@@ -45,7 +45,6 @@ impl GithubRepositoryClient {
     }
 }
 
-#[async_trait]
 impl RepositoryClient for GithubRepositoryClient {
     fn repository(&self) -> &GithubRepoName {
         self.name()

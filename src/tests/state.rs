@@ -412,7 +412,6 @@ impl TestRepositoryClient {
     }
 }
 
-#[async_trait]
 impl RepositoryClient for Arc<TestRepositoryClient> {
     fn repository(&self) -> &GithubRepoName {
         &self.name
