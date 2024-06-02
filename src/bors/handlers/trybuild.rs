@@ -345,34 +345,19 @@ mod tests {
     }
 
     #[sqlx::test]
-    async fn test_try_merge_comment(pool: sqlx::PgPool) {
+    async fn try_merge_comment(pool: sqlx::PgPool) {
         let world = World::default();
         BorsBuilder::new(pool)
             .world(world)
             .run_test(|mut tester| async {
                 tester.post_comment("@bors try").await;
-                // assert_eq!(
-                //     tester.get_comment().await,
-                //     ":hourglass: Trying commit head1 with merge sha-merged…"
-                // );
+                assert_eq!(
+                    tester.get_comment().await,
+                    ":hourglass: Trying commit pr-1-sha with merge merge-main-sha1-pr-1-sha…"
+                );
                 Ok(tester)
             })
             .await;
-
-        // let state = ClientBuilder::default().pool(pool).create_state().await;
-        // state.client().set_get_pr_fn(|pr| {
-        //     Ok(PRBuilder::default()
-        //         .number(pr.0)
-        //         .head(BranchBuilder::default().sha("head1".to_string()).create())
-        //         .create())
-        // });
-        //
-        // state.comment("@bors try").await;
-        //
-        // state.client().check_comments(
-        //     default_pr_number(),
-        //     &[":hourglass: Trying commit head1 with merge sha-merged…"],
-        // );
     }
 
     #[sqlx::test]

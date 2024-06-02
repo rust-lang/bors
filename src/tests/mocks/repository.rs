@@ -2,6 +2,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use base64::Engine;
+use octocrab::models::repos::Object;
+use octocrab::models::repos::Object::Commit;
 use parking_lot::Mutex;
 use serde::Serialize;
 use tokio::sync::mpsc::Sender;
@@ -82,6 +84,7 @@ pub fn default_repo_name() -> GithubRepoName {
 pub struct Branch {
     pub name: String,
     pub sha: String,
+    pub commit_message: String,
 }
 
 impl Branch {
@@ -89,6 +92,7 @@ impl Branch {
         Self {
             name: name.to_string(),
             sha: sha.to_string(),
+            commit_message: format!("Commit {sha}"),
         }
     }
 }
@@ -144,9 +148,56 @@ pub async fn mock_repo(
 }
 
 async fn mock_branches(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
-    let repo_name = repo.lock().name.clone();
+    mock_get_branch(repo.clone(), mock_server).await;
+    mock_set_branch_to_ref(repo.clone(), mock_server).await;
+    mock_merge_branch(repo, mock_server).await;
+}
 
-    // Get a branch
+async fn mock_merge_branch(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
+    Mock::given(method("POST"))
+        .and(path(format!("/repos/{}/merges", repo.lock().name)))
+        .respond_with(move |request: &Request| {
+            let mut repo = repo.lock();
+
+            #[derive(serde::Deserialize)]
+            struct MergeRequest {
+                base: String,
+                head: String,
+                commit_message: String,
+            }
+
+            let data: MergeRequest = request.body_json().unwrap();
+            let head = repo.get_branch(&data.head);
+            let head_sha = match head {
+                None => {
+                    // head is a SHA
+                    data.head
+                }
+                Some(branch) => {
+                    // head is a branch
+                    branch.sha.clone()
+                }
+            };
+            let Some(base_branch) = repo.get_branch(&data.base) else {
+                return ResponseTemplate::new(404);
+            };
+            let merge_sha = format!("merge-{}-{head_sha}", base_branch.sha);
+            base_branch.sha = merge_sha.clone();
+            base_branch.commit_message = data.commit_message;
+
+            #[derive(serde::Serialize)]
+            struct MergeResponse {
+                sha: String,
+            }
+            let response = MergeResponse { sha: merge_sha };
+            ResponseTemplate::new(201).set_body_json(response)
+        })
+        .mount(mock_server)
+        .await;
+}
+
+async fn mock_get_branch(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
+    let repo_name = repo.lock().name.clone();
     dynamic_mock_req(
         move |_req: &Request, [branch_name]: [&str; 1]| {
             let mut repo = repo.lock();
@@ -170,6 +221,52 @@ async fn mock_branches(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
     )
     .mount(mock_server)
     .await;
+}
+
+async fn mock_set_branch_to_ref(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
+    let repo_name = repo.lock().name.clone();
+    Mock::given(method("POST"))
+        .and(path(format!("/repos/{repo_name}/git/refs")))
+        .respond_with(move |request: &Request| {
+            let mut repo = repo.lock();
+
+            #[derive(serde::Deserialize)]
+            struct SetRefRequest {
+                r#ref: String,
+                sha: String,
+            }
+
+            let data: SetRefRequest = request.body_json().unwrap();
+            let branch_name = data
+                .r#ref
+                .strip_prefix("refs/heads/")
+                .expect("Unexpected ref name");
+
+            let sha = data.sha;
+            match repo.get_branch(branch_name) {
+                Some(branch) => {
+                    // Change sha of branch
+                    branch.sha = sha.clone();
+                }
+                None => {
+                    // Create a new branch
+                    repo.branches.push(Branch::new(&branch_name, &sha));
+                }
+            }
+
+            let url: Url = format!("https://github.com/branches/{branch_name}")
+                .parse()
+                .unwrap();
+            let response = GitHubRef {
+                ref_field: data.r#ref,
+                node_id: repo.branches.len().to_string(),
+                url: url.clone(),
+                object: Commit { sha, url },
+            };
+            ResponseTemplate::new(200).set_body_json(response)
+        })
+        .mount(mock_server)
+        .await;
 }
 
 async fn mock_config(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
@@ -267,4 +364,14 @@ struct GitHubBranch {
 struct GitHubCommitObject {
     sha: String,
     url: Url,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "snake_case")]
+struct GitHubRef {
+    #[serde(rename = "ref")]
+    ref_field: String,
+    node_id: String,
+    url: Url,
+    object: Object,
 }
