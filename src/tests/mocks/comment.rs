@@ -6,8 +6,10 @@ use serde::Serialize;
 use url::Url;
 
 use crate::github::GithubRepoName;
+use crate::tests::event::default_pr_number;
 use crate::tests::mocks::repository::GitHubRepository;
 use crate::tests::mocks::user::{GitHubUser, User};
+use crate::tests::mocks::Repo;
 
 #[derive(Clone, Debug)]
 pub struct Comment {
@@ -29,6 +31,12 @@ impl Comment {
 
     pub fn with_author(self, author: User) -> Self {
         Self { author, ..self }
+    }
+}
+
+impl<'a> From<&'a str> for Comment {
+    fn from(value: &'a str) -> Self {
+        Comment::new(Repo::default().name, default_pr_number(), value)
     }
 }
 

@@ -8,6 +8,14 @@ pub struct User {
 }
 
 impl User {
+    pub fn default_user() -> Self {
+        Self::new(101, "default-user")
+    }
+
+    pub fn bors_bot() -> Self {
+        Self::new(102, "bors-bot")
+    }
+
     pub fn new(id: u64, name: &str) -> Self {
         Self {
             github_id: id,
@@ -18,7 +26,7 @@ impl User {
 
 impl Default for User {
     fn default() -> Self {
-        Self::new(101, "default-user")
+        Self::default_user()
     }
 }
 
@@ -30,7 +38,7 @@ pub struct GitHubUser {
     avatar_url: Url,
     gravatar_id: String,
     url: Url,
-    html_url: Url,
+    pub html_url: Url,
     followers_url: Url,
     following_url: Url,
     gists_url: Url,

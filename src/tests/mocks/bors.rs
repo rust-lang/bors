@@ -116,13 +116,8 @@ impl BorsTester {
             .content
     }
 
-    pub async fn post_comment(&mut self, content: &str) {
-        self.webhook_comment(Comment::new(
-            Repo::default().name,
-            default_pr_number(),
-            content,
-        ))
-        .await;
+    pub async fn post_comment<C: Into<Comment>>(&mut self, comment: C) {
+        self.webhook_comment(comment.into()).await;
     }
 
     async fn webhook_comment(&mut self, comment: Comment) {

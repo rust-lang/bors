@@ -1,3 +1,4 @@
+use crate::tests::mocks::User;
 use serde::Serialize;
 use url::Url;
 use wiremock::{
@@ -53,7 +54,7 @@ impl Default for App {
             owner: GitHubUser::default(),
             name: "bors".to_string(),
             // same as bors user html_url
-            html_url: "https://test-bors.bot.com".parse().unwrap(),
+            html_url: GitHubUser::from(User::bors_bot()).html_url,
             external_url: "https://test-bors.bot.com".parse().unwrap(),
             permissions: Permissions {},
             events: vec!["*".to_string()],

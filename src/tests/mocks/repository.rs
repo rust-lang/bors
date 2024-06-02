@@ -64,7 +64,7 @@ timeout = 3600
     }
 }
 
-fn default_repo_name() -> GithubRepoName {
+pub fn default_repo_name() -> GithubRepoName {
     GithubRepoName::new("rust-lang", "borstest")
 }
 

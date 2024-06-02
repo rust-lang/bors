@@ -9,6 +9,7 @@ use crate::tests::mocks::permissions::TeamApiMockServer;
 use crate::TeamApiClient;
 
 pub use bors::run_test;
+pub use comment::Comment;
 pub use repository::Repo;
 pub use user::User;
 

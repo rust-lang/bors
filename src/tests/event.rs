@@ -65,10 +65,6 @@ impl From<CommentBuilder> for PullRequestComment {
     }
 }
 
-pub fn comment(text: &str) -> CommentBuilder {
-    CommentBuilder::default().text(text.to_string())
-}
-
 pub fn suite_success() -> CheckSuite {
     CheckSuite {
         status: CheckSuiteStatus::Success,
