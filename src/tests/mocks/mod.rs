@@ -20,7 +20,6 @@ mod permissions;
 mod pull_request;
 mod repository;
 mod user;
-mod webhook;
 
 pub struct World {
     repos: HashMap<GithubRepoName, Repo>,

@@ -12,8 +12,8 @@ use crate::github::api::load_repositories;
 use crate::tests::database::MockedDBClient;
 use crate::tests::event::default_pr_number;
 use crate::tests::mocks::comment::{Comment, GitHubIssueCommentEventPayload};
-use crate::tests::mocks::webhook::{create_webhook_request, TEST_WEBHOOK_SECRET};
 use crate::tests::mocks::{ExternalHttpMock, Repo, World};
+use crate::tests::webhook::{create_webhook_request, TEST_WEBHOOK_SECRET};
 use crate::{
     create_app, create_bors_process, BorsContext, CommandParser, ServerState, WebhookSecret,
 };
