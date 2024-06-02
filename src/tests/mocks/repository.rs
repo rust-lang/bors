@@ -1,9 +1,7 @@
-use crate::github::GithubRepoName;
-use crate::permissions::PermissionType;
-use crate::tests::event::default_pr_number;
+use std::collections::HashMap;
+
 use base64::Engine;
 use serde::Serialize;
-use std::collections::HashMap;
 use tokio::sync::mpsc::Sender;
 use url::Url;
 use wiremock::{
@@ -11,9 +9,13 @@ use wiremock::{
     Mock, MockServer, ResponseTemplate,
 };
 
+use crate::github::GithubRepoName;
+use crate::permissions::PermissionType;
+use crate::tests::event::default_pr_number;
 use crate::tests::mocks::comment::Comment;
+use crate::tests::mocks::permissions::Permissions;
 use crate::tests::mocks::pull_request::mock_pull_requests;
-use crate::tests::mocks::{Permissions, World};
+use crate::tests::mocks::World;
 
 use super::user::{GitHubUser, User};
 
@@ -25,6 +27,7 @@ pub struct Repo {
     // Pre-set known PRs to avoid responding to requests about PRs that we
     // don't expect.
     pub known_prs: Vec<u64>,
+    pub branches: Vec<Branch>,
 }
 
 impl Repo {
@@ -34,10 +37,11 @@ impl Repo {
             permissions,
             config,
             known_prs: vec![default_pr_number()],
+            branches: vec![Branch::default()],
         }
     }
 
-    pub fn perms(mut self, user: User, permissions: &[PermissionType]) -> Self {
+    pub fn with_perms(mut self, user: User, permissions: &[PermissionType]) -> Self {
         self.permissions.users.insert(user, permissions.to_vec());
         self
     }
@@ -68,6 +72,35 @@ pub fn default_repo_name() -> GithubRepoName {
     GithubRepoName::new("rust-lang", "borstest")
 }
 
+#[derive(Clone)]
+pub struct Branch {
+    pub name: String,
+    pub sha: String,
+}
+
+impl Branch {
+    pub fn new(name: &str, sha: &str) -> Self {
+        Self {
+            name: name.to_string(),
+            sha: sha.to_string(),
+        }
+    }
+}
+
+impl Default for Branch {
+    fn default() -> Self {
+        Self::new(&default_branch_name(), &default_branch_sha())
+    }
+}
+
+pub fn default_branch_name() -> String {
+    "main".to_string()
+}
+
+pub fn default_branch_sha() -> String {
+    "main-sha1".to_string()
+}
+
 pub async fn mock_repo_list(world: &World, mock_server: &MockServer) {
     let repos = GitHubRepositories {
         total_count: world.repos.len() as u64,
@@ -93,7 +126,30 @@ pub async fn mock_repo_list(world: &World, mock_server: &MockServer) {
 
 pub async fn mock_repo(repo: &Repo, comments_tx: Sender<Comment>, mock_server: &MockServer) {
     mock_pull_requests(repo, comments_tx, mock_server).await;
+    mock_branches(repo, mock_server).await;
     mock_config(repo, mock_server).await;
+}
+
+async fn mock_branches(repo: &Repo, mock_server: &MockServer) {
+    let repo_name = &repo.name;
+    for branch in &repo.branches {
+        // Get branch
+        let branch = GitHubBranch {
+            name: branch.name.clone(),
+            commit: GitHubCommitObject {
+                sha: branch.sha.clone(),
+                url: format!("https://github.com/branch/{}-{}", branch.name, branch.sha)
+                    .parse()
+                    .unwrap(),
+            },
+            protected: false,
+        };
+        Mock::given(method("GET"))
+            .and(path(format!("/repos/{repo_name}/branches/{}", branch.name)))
+            .respond_with(ResponseTemplate::new(200).set_body_json(branch))
+            .mount(mock_server)
+            .await;
+    }
 }
 
 async fn mock_config(repo: &Repo, mock_server: &MockServer) {
@@ -177,4 +233,17 @@ impl GitHubContent {
 struct GitHubContentLinks {
     #[serde(rename = "self")]
     _self: Url,
+}
+
+#[derive(Serialize)]
+struct GitHubBranch {
+    name: String,
+    commit: GitHubCommitObject,
+    protected: bool,
+}
+
+#[derive(Serialize)]
+struct GitHubCommitObject {
+    sha: String,
+    url: Url,
 }

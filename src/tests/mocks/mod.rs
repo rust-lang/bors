@@ -3,13 +3,15 @@ use std::collections::HashMap;
 use octocrab::Octocrab;
 
 use crate::github::GithubRepoName;
-use crate::permissions::PermissionType;
 use crate::tests::mocks::github::GitHubMockServer;
 use crate::tests::mocks::permissions::TeamApiMockServer;
 use crate::TeamApiClient;
 
 pub use bors::run_test;
+pub use bors::BorsBuilder;
 pub use comment::Comment;
+pub use permissions::Permissions;
+pub use repository::default_repo_name;
 pub use repository::Repo;
 pub use user::User;
 
@@ -33,7 +35,11 @@ impl World {
         }
     }
 
-    pub fn repo(mut self, repo: Repo) -> Self {
+    pub fn get_repo(&mut self, name: GithubRepoName) -> &mut Repo {
+        self.repos.get_mut(&name).unwrap()
+    }
+
+    pub fn add_repo(mut self, repo: Repo) -> Self {
         self.repos.insert(repo.name.clone(), repo);
         self
     }
@@ -46,11 +52,6 @@ impl Default for World {
             repos: HashMap::from([(repo.name.clone(), repo)]),
         }
     }
-}
-
-#[derive(Clone, Default)]
-pub struct Permissions {
-    pub users: HashMap<User, Vec<PermissionType>>,
 }
 
 pub struct ExternalHttpMock {

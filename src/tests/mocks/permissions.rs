@@ -1,11 +1,17 @@
 use crate::permissions::PermissionType;
 use serde_json::json;
+use std::collections::HashMap;
 use wiremock::matchers::path;
 use wiremock::{matchers::method, Mock, MockServer, ResponseTemplate};
 
 use crate::tests::mocks::repository::Repo;
-use crate::tests::mocks::World;
+use crate::tests::mocks::{User, World};
 use crate::TeamApiClient;
+
+#[derive(Clone, Default)]
+pub struct Permissions {
+    pub users: HashMap<User, Vec<PermissionType>>,
+}
 
 pub struct TeamApiMockServer {
     mock_server: MockServer,

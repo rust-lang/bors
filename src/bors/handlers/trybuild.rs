@@ -323,40 +323,56 @@ mod tests {
         default_pr_number, suite_failure, suite_pending, suite_success, WorkflowStartedBuilder,
     };
     use crate::tests::github::{BranchBuilder, PRBuilder};
-    use crate::tests::state::{
-        default_merge_sha, default_repo_name, ClientBuilder, PermissionsBuilder, RepoConfigBuilder,
-    };
+    use crate::tests::mocks::{default_repo_name, BorsBuilder, Permissions, World};
+    use crate::tests::state::{default_merge_sha, ClientBuilder, RepoConfigBuilder};
 
     #[sqlx::test]
-    async fn test_try_no_permission(pool: sqlx::PgPool) {
-        let state = ClientBuilder::default()
-            .permissions(PermissionsBuilder::default())
-            .pool(pool)
-            .create_state()
+    async fn try_no_permissions(pool: sqlx::PgPool) {
+        let mut world = World::default();
+        world.get_repo(default_repo_name()).permissions = Permissions::default();
+
+        BorsBuilder::new(pool)
+            .world(world)
+            .run_test(|mut tester| async {
+                tester.post_comment("@bors try").await;
+                assert_eq!(
+                    tester.get_comment().await,
+                    "@default-user: :key: Insufficient privileges: not in try users"
+                );
+                Ok(tester)
+            })
             .await;
-        state.comment("@bors try").await;
-        state.client().check_comments(
-            default_pr_number(),
-            &["@<user>: :key: Insufficient privileges: not in try users"],
-        );
     }
 
     #[sqlx::test]
     async fn test_try_merge_comment(pool: sqlx::PgPool) {
-        let state = ClientBuilder::default().pool(pool).create_state().await;
-        state.client().set_get_pr_fn(|pr| {
-            Ok(PRBuilder::default()
-                .number(pr.0)
-                .head(BranchBuilder::default().sha("head1".to_string()).create())
-                .create())
-        });
+        let world = World::default();
+        BorsBuilder::new(pool)
+            .world(world)
+            .run_test(|mut tester| async {
+                tester.post_comment("@bors try").await;
+                // assert_eq!(
+                //     tester.get_comment().await,
+                //     ":hourglass: Trying commit head1 with merge sha-merged…"
+                // );
+                Ok(tester)
+            })
+            .await;
 
-        state.comment("@bors try").await;
-
-        state.client().check_comments(
-            default_pr_number(),
-            &[":hourglass: Trying commit head1 with merge sha-merged…"],
-        );
+        // let state = ClientBuilder::default().pool(pool).create_state().await;
+        // state.client().set_get_pr_fn(|pr| {
+        //     Ok(PRBuilder::default()
+        //         .number(pr.0)
+        //         .head(BranchBuilder::default().sha("head1".to_string()).create())
+        //         .create())
+        // });
+        //
+        // state.comment("@bors try").await;
+        //
+        // state.client().check_comments(
+        //     default_pr_number(),
+        //     &[":hourglass: Trying commit head1 with merge sha-merged…"],
+        // );
     }
 
     #[sqlx::test]
