@@ -61,7 +61,6 @@ pub async fn handle_bors_repository_event<Client: RepositoryClient>(
                 .instrument(span.clone())
                 .await
             {
-                span.log_error(error);
                 repo.client
                     .post_comment(
                         pr_number,
@@ -71,6 +70,7 @@ pub async fn handle_bors_repository_event<Client: RepositoryClient>(
                     )
                     .await
                     .context("Cannot send comment reacting to an error")?;
+                return Err(error.context("Cannot perform command"));
             }
         }
 

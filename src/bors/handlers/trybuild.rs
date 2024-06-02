@@ -296,7 +296,7 @@ async fn check_try_permissions<Client: RepositoryClient>(
         .load()
         .has_permission(author.id, PermissionType::Try)
     {
-        tracing::info!("Permission denied");
+        tracing::warn!("Try permission denied for {}", author.username);
         repo.client
             .post_comment(
                 pr.number,
