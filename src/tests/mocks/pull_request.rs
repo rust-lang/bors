@@ -1,4 +1,6 @@
+use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 use tokio::sync::mpsc::Sender;
 use wiremock::{
     matchers::{method, path},
@@ -15,10 +17,11 @@ pub fn default_pr_number() -> u64 {
 }
 
 pub async fn mock_pull_requests(
-    repo: &Repo,
+    repo: Arc<Mutex<Repo>>,
     comments_tx: Sender<Comment>,
     mock_server: &MockServer,
 ) {
+    let repo = repo.lock();
     let repo_name = repo.name.clone();
     for &pr_number in &repo.known_prs {
         Mock::given(method("GET"))

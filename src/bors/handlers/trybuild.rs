@@ -329,7 +329,7 @@ mod tests {
     #[sqlx::test]
     async fn try_no_permissions(pool: sqlx::PgPool) {
         let mut world = World::default();
-        world.get_repo(default_repo_name()).permissions = Permissions::default();
+        world.get_repo(default_repo_name()).lock().permissions = Permissions::default();
 
         BorsBuilder::new(pool)
             .world(world)

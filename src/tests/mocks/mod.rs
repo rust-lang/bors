@@ -1,6 +1,11 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use octocrab::Octocrab;
+use parking_lot::Mutex;
+use regex::Regex;
+use wiremock::matchers::{method, path_regex};
+use wiremock::{Mock, Request, ResponseTemplate};
 
 use crate::github::GithubRepoName;
 use crate::tests::mocks::github::GitHubMockServer;
@@ -25,7 +30,7 @@ mod repository;
 mod user;
 
 pub struct World {
-    repos: HashMap<GithubRepoName, Repo>,
+    repos: HashMap<GithubRepoName, Arc<Mutex<Repo>>>,
 }
 
 impl World {
@@ -35,12 +40,13 @@ impl World {
         }
     }
 
-    pub fn get_repo(&mut self, name: GithubRepoName) -> &mut Repo {
-        self.repos.get_mut(&name).unwrap()
+    pub fn get_repo(&mut self, name: GithubRepoName) -> Arc<Mutex<Repo>> {
+        self.repos.get_mut(&name).unwrap().clone()
     }
 
     pub fn add_repo(mut self, repo: Repo) -> Self {
-        self.repos.insert(repo.name.clone(), repo);
+        self.repos
+            .insert(repo.name.clone(), Arc::new(Mutex::new(repo)));
         self
     }
 }
@@ -49,7 +55,7 @@ impl Default for World {
     fn default() -> Self {
         let repo = Repo::default();
         Self {
-            repos: HashMap::from([(repo.name.clone(), repo)]),
+            repos: HashMap::from([(repo.name.clone(), Arc::new(Mutex::new(repo)))]),
         }
     }
 }
@@ -76,4 +82,30 @@ impl ExternalHttpMock {
     pub fn team_api_client(&self) -> TeamApiClient {
         self.team_api_server.client()
     }
+}
+
+/// Create a mock that dynamically responds to its requests using the given function `f`.
+/// It is expected that the path will be a regex, which will be parsed when a request is received,
+/// and matched capture groups will be passed as a second argument to `f`.
+fn dynamic_mock_req<F: Fn(&Request, [&str; N]) -> ResponseTemplate, const N: usize>(
+    f: F,
+    m: &str,
+    regex: String,
+) -> Mock
+where
+    F: Send + Sync + 'static,
+{
+    // We need to parse the regex from the request path again, because wiremock doesn't give
+    // the parsed path regex results to us :(
+    let parsed_regex = Regex::new(&regex).unwrap();
+    Mock::given(method(m))
+        .and(path_regex(regex))
+        .respond_with(move |req: &Request| {
+            let captured = parsed_regex
+                .captures(req.url.path())
+                .unwrap()
+                .extract::<N>()
+                .1;
+            f(req, captured)
+        })
 }

@@ -1,12 +1,14 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use base64::Engine;
+use parking_lot::Mutex;
 use serde::Serialize;
 use tokio::sync::mpsc::Sender;
 use url::Url;
 use wiremock::{
     matchers::{method, path},
-    Mock, MockServer, ResponseTemplate,
+    Mock, MockServer, Request, ResponseTemplate,
 };
 
 use crate::github::GithubRepoName;
@@ -15,7 +17,7 @@ use crate::tests::event::default_pr_number;
 use crate::tests::mocks::comment::Comment;
 use crate::tests::mocks::permissions::Permissions;
 use crate::tests::mocks::pull_request::mock_pull_requests;
-use crate::tests::mocks::World;
+use crate::tests::mocks::{dynamic_mock_req, World};
 
 use super::user::{GitHubUser, User};
 
@@ -44,6 +46,10 @@ impl Repo {
     pub fn with_perms(mut self, user: User, permissions: &[PermissionType]) -> Self {
         self.permissions.users.insert(user, permissions.to_vec());
         self
+    }
+
+    pub fn get_branch(&mut self, name: &str) -> Option<&mut Branch> {
+        self.branches.iter_mut().find(|b| b.name == name)
     }
 }
 
@@ -108,11 +114,14 @@ pub async fn mock_repo_list(world: &World, mock_server: &MockServer) {
             .repos
             .iter()
             .enumerate()
-            .map(|(index, (_, repo))| GitHubRepository {
-                id: index as u64,
-                owner: User::new(index as u64, repo.name.owner()).into(),
-                name: repo.name.name().to_string(),
-                url: format!("https://{}.foo", repo.name.name()).parse().unwrap(),
+            .map(|(index, (_, repo))| {
+                let repo = repo.lock();
+                GitHubRepository {
+                    id: index as u64,
+                    owner: User::new(index as u64, repo.name.owner()).into(),
+                    name: repo.name.name().to_string(),
+                    url: format!("https://{}.foo", repo.name.name()).parse().unwrap(),
+                }
             })
             .collect(),
     };
@@ -124,35 +133,47 @@ pub async fn mock_repo_list(world: &World, mock_server: &MockServer) {
         .await;
 }
 
-pub async fn mock_repo(repo: &Repo, comments_tx: Sender<Comment>, mock_server: &MockServer) {
-    mock_pull_requests(repo, comments_tx, mock_server).await;
-    mock_branches(repo, mock_server).await;
+pub async fn mock_repo(
+    repo: Arc<Mutex<Repo>>,
+    comments_tx: Sender<Comment>,
+    mock_server: &MockServer,
+) {
+    mock_pull_requests(repo.clone(), comments_tx, mock_server).await;
+    mock_branches(repo.clone(), mock_server).await;
     mock_config(repo, mock_server).await;
 }
 
-async fn mock_branches(repo: &Repo, mock_server: &MockServer) {
-    let repo_name = &repo.name;
-    for branch in &repo.branches {
-        // Get branch
-        let branch = GitHubBranch {
-            name: branch.name.clone(),
-            commit: GitHubCommitObject {
-                sha: branch.sha.clone(),
-                url: format!("https://github.com/branch/{}-{}", branch.name, branch.sha)
-                    .parse()
-                    .unwrap(),
-            },
-            protected: false,
-        };
-        Mock::given(method("GET"))
-            .and(path(format!("/repos/{repo_name}/branches/{}", branch.name)))
-            .respond_with(ResponseTemplate::new(200).set_body_json(branch))
-            .mount(mock_server)
-            .await;
-    }
+async fn mock_branches(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
+    let repo_name = repo.lock().name.clone();
+
+    // Get a branch
+    dynamic_mock_req(
+        move |_req: &Request, [branch_name]: [&str; 1]| {
+            let mut repo = repo.lock();
+            let Some(branch) = repo.get_branch(branch_name) else {
+                return ResponseTemplate::new(404);
+            };
+            let branch = GitHubBranch {
+                name: branch.name.clone(),
+                commit: GitHubCommitObject {
+                    sha: branch.sha.clone(),
+                    url: format!("https://github.com/branch/{}-{}", branch.name, branch.sha)
+                        .parse()
+                        .unwrap(),
+                },
+                protected: false,
+            };
+            ResponseTemplate::new(200).set_body_json(branch)
+        },
+        "GET",
+        format!("^/repos/{repo_name}/branches/(.*)$"),
+    )
+    .mount(mock_server)
+    .await;
 }
 
-async fn mock_config(repo: &Repo, mock_server: &MockServer) {
+async fn mock_config(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
+    let repo = repo.lock();
     Mock::given(method("GET"))
         .and(path(format!(
             "/repos/{}/contents/rust-bors.toml",

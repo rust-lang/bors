@@ -59,6 +59,8 @@ derive_builder = "0.20.0"
 wiremock = "0.6.0"
 base64 = "0.22.1"
 tracing-test = "0.2.4"
+regex = "1.10.4"
+parking_lot = "0.12.3"
 
 [profile.release]
 debug = 1

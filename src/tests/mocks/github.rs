@@ -65,7 +65,7 @@ impl GitHubMockServer {
         let mut repos = HashMap::default();
         for (name, repo) in &world.repos {
             let (comments_tx, comments_rx) = tokio::sync::mpsc::channel(1024);
-            mock_repo(repo, comments_tx, &mock_server).await;
+            mock_repo(repo.clone(), comments_tx, &mock_server).await;
             repos.insert(
                 name.clone(),
                 GitHubRepoState {
