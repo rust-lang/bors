@@ -82,9 +82,10 @@ pub fn default_repo_name() -> GithubRepoName {
 
 #[derive(Clone)]
 pub struct Branch {
-    pub name: String,
-    pub sha: String,
-    pub commit_message: String,
+    name: String,
+    sha: String,
+    commit_message: String,
+    sha_history: Vec<String>,
 }
 
 impl Branch {
@@ -93,7 +94,19 @@ impl Branch {
             name: name.to_string(),
             sha: sha.to_string(),
             commit_message: format!("Commit {sha}"),
+            sha_history: vec![],
         }
+    }
+
+    pub fn set_to_sha(&mut self, sha: &str) {
+        self.sha_history.push(self.sha.clone());
+        self.sha = sha.to_string();
+    }
+
+    pub fn get_sha_history(&self) -> Vec<String> {
+        let mut shas = self.sha_history.clone();
+        shas.push(self.sha.clone());
+        shas
     }
 }
 
@@ -103,12 +116,12 @@ impl Default for Branch {
     }
 }
 
-pub fn default_branch_name() -> String {
-    "main".to_string()
+pub fn default_branch_name() -> &'static str {
+    "main"
 }
 
-pub fn default_branch_sha() -> String {
-    "main-sha1".to_string()
+pub fn default_branch_sha() -> &'static str {
+    "main-sha1"
 }
 
 pub async fn mock_repo_list(world: &World, mock_server: &MockServer) {
@@ -151,49 +164,6 @@ async fn mock_branches(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
     mock_get_branch(repo.clone(), mock_server).await;
     mock_set_branch_to_ref(repo.clone(), mock_server).await;
     mock_merge_branch(repo, mock_server).await;
-}
-
-async fn mock_merge_branch(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
-    Mock::given(method("POST"))
-        .and(path(format!("/repos/{}/merges", repo.lock().name)))
-        .respond_with(move |request: &Request| {
-            let mut repo = repo.lock();
-
-            #[derive(serde::Deserialize)]
-            struct MergeRequest {
-                base: String,
-                head: String,
-                commit_message: String,
-            }
-
-            let data: MergeRequest = request.body_json().unwrap();
-            let head = repo.get_branch(&data.head);
-            let head_sha = match head {
-                None => {
-                    // head is a SHA
-                    data.head
-                }
-                Some(branch) => {
-                    // head is a branch
-                    branch.sha.clone()
-                }
-            };
-            let Some(base_branch) = repo.get_branch(&data.base) else {
-                return ResponseTemplate::new(404);
-            };
-            let merge_sha = format!("merge-{}-{head_sha}", base_branch.sha);
-            base_branch.sha = merge_sha.clone();
-            base_branch.commit_message = data.commit_message;
-
-            #[derive(serde::Serialize)]
-            struct MergeResponse {
-                sha: String,
-            }
-            let response = MergeResponse { sha: merge_sha };
-            ResponseTemplate::new(201).set_body_json(response)
-        })
-        .mount(mock_server)
-        .await;
 }
 
 async fn mock_get_branch(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
@@ -246,7 +216,7 @@ async fn mock_set_branch_to_ref(repo: Arc<Mutex<Repo>>, mock_server: &MockServer
             match repo.get_branch(branch_name) {
                 Some(branch) => {
                     // Change sha of branch
-                    branch.sha = sha.clone();
+                    branch.set_to_sha(&sha);
                 }
                 None => {
                     // Create a new branch
@@ -264,6 +234,49 @@ async fn mock_set_branch_to_ref(repo: Arc<Mutex<Repo>>, mock_server: &MockServer
                 object: Commit { sha, url },
             };
             ResponseTemplate::new(200).set_body_json(response)
+        })
+        .mount(mock_server)
+        .await;
+}
+
+async fn mock_merge_branch(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
+    Mock::given(method("POST"))
+        .and(path(format!("/repos/{}/merges", repo.lock().name)))
+        .respond_with(move |request: &Request| {
+            let mut repo = repo.lock();
+
+            #[derive(serde::Deserialize)]
+            struct MergeRequest {
+                base: String,
+                head: String,
+                commit_message: String,
+            }
+
+            let data: MergeRequest = request.body_json().unwrap();
+            let head = repo.get_branch(&data.head);
+            let head_sha = match head {
+                None => {
+                    // head is a SHA
+                    data.head
+                }
+                Some(branch) => {
+                    // head is a branch
+                    branch.sha.clone()
+                }
+            };
+            let Some(base_branch) = repo.get_branch(&data.base) else {
+                return ResponseTemplate::new(404);
+            };
+            let merge_sha = format!("merge-{}-{head_sha}", base_branch.sha);
+            base_branch.set_to_sha(&merge_sha);
+            base_branch.commit_message = data.commit_message;
+
+            #[derive(serde::Serialize)]
+            struct MergeResponse {
+                sha: String,
+            }
+            let response = MergeResponse { sha: merge_sha };
+            ResponseTemplate::new(201).set_body_json(response)
         })
         .mount(mock_server)
         .await;

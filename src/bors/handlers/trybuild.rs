@@ -322,8 +322,7 @@ mod tests {
     use crate::tests::event::{
         default_pr_number, suite_failure, suite_pending, suite_success, WorkflowStartedBuilder,
     };
-    use crate::tests::github::{BranchBuilder, PRBuilder};
-    use crate::tests::mocks::{default_repo_name, BorsBuilder, Permissions, World};
+    use crate::tests::mocks::{default_repo_name, run_test, BorsBuilder, Permissions, World};
     use crate::tests::state::{default_merge_sha, ClientBuilder, RepoConfigBuilder};
 
     #[sqlx::test]
@@ -346,84 +345,53 @@ mod tests {
 
     #[sqlx::test]
     async fn try_merge_comment(pool: sqlx::PgPool) {
-        let world = World::default();
-        BorsBuilder::new(pool)
-            .world(world)
-            .run_test(|mut tester| async {
-                tester.post_comment("@bors try").await;
-                assert_eq!(
-                    tester.get_comment().await,
-                    ":hourglass: Trying commit pr-1-sha with merge merge-main-sha1-pr-1-sha…"
-                );
-                Ok(tester)
-            })
-            .await;
+        run_test(pool, |mut tester| async {
+            tester.post_comment("@bors try").await;
+            assert_eq!(
+                tester.get_comment().await,
+                ":hourglass: Trying commit pr-1-sha with merge merge-main-sha1-pr-1-sha…"
+            );
+            Ok(tester)
+        })
+        .await;
     }
 
     #[sqlx::test]
-    async fn test_try_merge_unknown_base_branch(pool: sqlx::PgPool) {
-        let state = ClientBuilder::default().pool(pool).create_state().await;
-        state.client().set_get_pr_fn(|pr| {
-            Ok(PRBuilder::default()
-                .number(pr.0)
-                .base(
-                    BranchBuilder::default()
-                        .name("nonexistent".to_string())
-                        .create(),
-                )
-                .head(BranchBuilder::default().sha("head1".to_string()).create())
-                .create())
-        });
-
-        state.comment("@bors try").await;
-
-        state.client().check_comments(
-            default_pr_number(),
-            &[":x: Encountered an error while executing command"],
+    async fn try_merge_branch_history(pool: sqlx::PgPool) {
+        let mut world = run_test(pool, |mut tester| async {
+            tester.post_comment("@bors try").await;
+            tester.expect_comments(1).await;
+            Ok(tester)
+        })
+        .await;
+        world.check_sha_history(
+            default_repo_name(),
+            TRY_MERGE_BRANCH_NAME,
+            &["main-sha1", "merge-main-sha1-pr-1-sha"],
+        );
+        world.check_sha_history(
+            default_repo_name(),
+            TRY_BRANCH_NAME,
+            &["merge-main-sha1-pr-1-sha"],
         );
     }
 
     #[sqlx::test]
-    async fn test_try_merge_branch_history(pool: sqlx::PgPool) {
-        let state = ClientBuilder::default().pool(pool).create_state().await;
-        let main_sha = "main1-sha";
-        let main_name = "main1";
-
-        state.client().set_get_pr_fn(|pr| {
-            Ok(PRBuilder::default()
-                .number(pr.0)
-                .base(
-                    BranchBuilder::default()
-                        .sha(main_sha.to_string())
-                        .name(main_name.to_string())
-                        .create(),
-                )
-                .head(BranchBuilder::default().sha("head1".to_string()).create())
-                .create())
-        });
-
-        state.client().add_branch_sha(main_name, main_sha);
-
-        state.comment("@bors try").await;
-        state
-            .client()
-            .check_branch_history(TRY_MERGE_BRANCH_NAME, &[main_sha, &default_merge_sha()]);
-        state
-            .client()
-            .check_branch_history(TRY_BRANCH_NAME, &[&default_merge_sha()]);
-    }
-
-    #[sqlx::test]
-    async fn test_try_merge_explicit_parent(pool: sqlx::PgPool) {
-        let state = ClientBuilder::default().pool(pool).create_state().await;
-        state
-            .comment("@bors try parent=ea9c1b050cc8b420c2c211d2177811e564a4dc60")
-            .await;
-        state.client().check_branch_history(
+    async fn try_merge_explicit_parent(pool: sqlx::PgPool) {
+        let mut world = run_test(pool, |mut tester| async {
+            tester
+                .post_comment("@bors try parent=ea9c1b050cc8b420c2c211d2177811e564a4dc60")
+                .await;
+            tester.expect_comments(1).await;
+            Ok(tester)
+        })
+        .await;
+        world.check_sha_history(
+            default_repo_name(),
             TRY_MERGE_BRANCH_NAME,
             &[
                 "ea9c1b050cc8b420c2c211d2177811e564a4dc60",
-                &default_merge_sha(),
+                "merge-ea9c1b050cc8b420c2c211d2177811e564a4dc60-pr-1-sha",
             ],
         );
     }

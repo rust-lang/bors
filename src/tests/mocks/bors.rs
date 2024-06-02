@@ -44,7 +44,7 @@ impl BorsBuilder {
     >(
         self,
         f: F,
-    ) {
+    ) -> World {
         let tester = BorsTester::new(self.pool, self.world).await;
         let tester = f(tester).await.unwrap();
         tester.finish().await
@@ -58,7 +58,7 @@ pub async fn run_test<
 >(
     pool: PgPool,
     f: F,
-) {
+) -> World {
     BorsBuilder::new(pool).run_test(f).await
 }
 
@@ -71,6 +71,7 @@ pub async fn run_test<
 pub struct BorsTester {
     app: Router,
     http_mock: ExternalHttpMock,
+    world: World,
     bors: JoinHandle<()>,
 }
 
@@ -103,6 +104,7 @@ impl BorsTester {
         Self {
             app,
             http_mock: mock,
+            world,
             bors,
         }
     }
@@ -114,6 +116,13 @@ impl BorsTester {
             .get_comment(Repo::default().name, default_pr_number())
             .await
             .content
+    }
+
+    /// Expect that `count` comments will be received, without checking their contents.
+    pub async fn expect_comments(&mut self, count: u64) {
+        for _ in 0..count {
+            let _ = self.get_comment().await;
+        }
     }
 
     pub async fn post_comment<C: Into<Comment>>(&mut self, comment: C) {
@@ -149,12 +158,13 @@ impl BorsTester {
         tracing::debug!("Received webhook with status {status} and response body `{body_text}`");
     }
 
-    pub async fn finish(self) {
+    pub async fn finish(self) -> World {
         // Make sure that the event channel senders are closed
         drop(self.app);
         // Wait until all events are handled in the bors service
         self.bors.await.unwrap();
         // Flush any local queues
         self.http_mock.gh_server.assert_empty_queues().await;
+        self.world
     }
 }

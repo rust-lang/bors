@@ -49,6 +49,22 @@ impl World {
             .insert(repo.name.clone(), Arc::new(Mutex::new(repo)));
         self
     }
+
+    pub fn check_sha_history(
+        &mut self,
+        repo: GithubRepoName,
+        branch: &str,
+        expected_shas: &[&str],
+    ) {
+        let actual_shas = self
+            .get_repo(repo)
+            .lock()
+            .get_branch(branch)
+            .expect("Branch not found")
+            .get_sha_history();
+        let actual_shas: Vec<&str> = actual_shas.iter().map(|s| s.as_str()).collect();
+        assert_eq!(actual_shas, expected_shas);
+    }
 }
 
 impl Default for World {
