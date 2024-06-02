@@ -134,7 +134,7 @@ impl BorsTester {
     }
 
     async fn send_webhook<S: Serialize>(&mut self, event: &str, content: S) {
-        let webhook = create_webhook_request(event, content);
+        let webhook = create_webhook_request(event, &serde_json::to_string(&content).unwrap());
         let response = self
             .app
             .call(webhook)

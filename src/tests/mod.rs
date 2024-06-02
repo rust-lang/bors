@@ -4,4 +4,4 @@ pub(crate) mod github;
 pub(crate) mod io;
 pub(crate) mod mocks;
 pub(crate) mod state;
-mod webhook;
+pub(crate) mod webhook;
