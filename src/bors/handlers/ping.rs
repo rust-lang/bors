@@ -20,7 +20,7 @@ mod tests {
     use crate::tests::mocks::run_test;
 
     #[sqlx::test]
-    async fn test_ping(pool: sqlx::PgPool) {
+    async fn ping_command(pool: sqlx::PgPool) {
         run_test(pool, |mut tester| async {
             tester.post_comment("@bors ping").await;
             assert_eq!(tester.get_comment().await, "Pong 🏓!");
