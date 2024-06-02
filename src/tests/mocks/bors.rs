@@ -12,8 +12,8 @@ use crate::github::api::load_repositories;
 use crate::tests::database::MockedDBClient;
 use crate::tests::event::default_pr_number;
 use crate::tests::mocks::comment::{Comment, GitHubIssueCommentEventPayload};
-use crate::tests::mocks::webhook::{create_webhook_request, TEST_WEBHOOK_SECRET};
 use crate::tests::mocks::{ExternalHttpMock, Repo, World};
+use crate::tests::webhook::{create_webhook_request, TEST_WEBHOOK_SECRET};
 use crate::{
     create_app, create_bors_process, BorsContext, CommandParser, ServerState, WebhookSecret,
 };
@@ -116,13 +116,8 @@ impl BorsTester {
             .content
     }
 
-    pub async fn post_comment(&mut self, content: &str) {
-        self.webhook_comment(Comment::new(
-            Repo::default().name,
-            default_pr_number(),
-            content,
-        ))
-        .await;
+    pub async fn post_comment<C: Into<Comment>>(&mut self, comment: C) {
+        self.webhook_comment(comment.into()).await;
     }
 
     async fn webhook_comment(&mut self, comment: Comment) {
@@ -134,7 +129,7 @@ impl BorsTester {
     }
 
     async fn send_webhook<S: Serialize>(&mut self, event: &str, content: S) {
-        let webhook = create_webhook_request(event, content);
+        let webhook = create_webhook_request(event, &serde_json::to_string(&content).unwrap());
         let response = self
             .app
             .call(webhook)

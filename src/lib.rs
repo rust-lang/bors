@@ -1,3 +1,5 @@
+#![allow(async_fn_in_trait)]
+
 //! This is the library of the bors bot.
 mod bors;
 mod config;

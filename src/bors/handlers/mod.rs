@@ -1,5 +1,6 @@
-use anyhow::Context;
 use std::sync::Arc;
+
+use anyhow::Context;
 use tracing::Instrument;
 
 use crate::bors::command::{BorsCommand, CommandParseError};
@@ -273,25 +274,17 @@ fn is_bors_observed_branch(branch: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use crate::tests::event::{comment, default_pr_number};
-    use crate::tests::state::{test_bot_user, ClientBuilder};
+    use crate::tests::mocks::{run_test, Comment, User};
 
     #[sqlx::test]
-    async fn test_ignore_bot_comment(pool: sqlx::PgPool) {
-        let state = ClientBuilder::default().pool(pool).create_state().await;
-        state
-            .comment(comment("@bors ping").author(test_bot_user()).create())
-            .await;
-        state.client().check_comments(default_pr_number(), &[]);
+    async fn ignore_bot_comment(pool: sqlx::PgPool) {
+        run_test(pool, |mut tester| async {
+            tester
+                .post_comment(Comment::from("@bors ping").with_author(User::bors_bot()))
+                .await;
+            // Returning here will make sure that no comments were received
+            Ok(tester)
+        })
+        .await;
     }
-
-    // #[sqlx::test]
-    // async fn test_do_not_comment_when_pr_fetch_fails(pool: sqlx::PgPool) {
-    //     let state = ClientBuilder::default().pool(pool).create_state().await;
-    //     state
-    //         .client()
-    //         .set_get_pr_fn(|_| Err(anyhow::anyhow!("Foo")));
-    //     state.comment(comment("foo").create()).await;
-    //     state.client().check_comments(default_pr_number(), &[]);
-    // }
 }

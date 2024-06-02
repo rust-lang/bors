@@ -9,6 +9,7 @@ use crate::tests::mocks::permissions::TeamApiMockServer;
 use crate::TeamApiClient;
 
 pub use bors::run_test;
+pub use comment::Comment;
 pub use repository::Repo;
 pub use user::User;
 
@@ -20,7 +21,6 @@ mod permissions;
 mod pull_request;
 mod repository;
 mod user;
-mod webhook;
 
 pub struct World {
     repos: HashMap<GithubRepoName, Repo>,

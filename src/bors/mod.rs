@@ -21,7 +21,6 @@ pub use context::BorsContext;
 pub use handlers::{handle_bors_global_event, handle_bors_repository_event};
 
 /// Provides functionality for working with a remote repository.
-#[async_trait]
 pub trait RepositoryClient: Send + Sync {
     fn repository(&self) -> &GithubRepoName;
 

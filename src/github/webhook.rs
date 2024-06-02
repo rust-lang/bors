@@ -358,16 +358,15 @@ fn verify_gh_signature(
 #[cfg(test)]
 mod tests {
     use axum::extract::FromRequest;
-    use axum::http::{HeaderValue, Method};
-    use hmac::Mac;
-    use hyper::{Request, StatusCode};
+    use hyper::StatusCode;
     use tokio::sync::mpsc;
 
     use crate::bors::event::{BorsEvent, BorsGlobalEvent};
     use crate::github::server::{ServerState, ServerStateRef};
+    use crate::github::webhook::GitHubWebhook;
     use crate::github::webhook::WebhookSecret;
-    use crate::github::webhook::{GitHubWebhook, HmacSha256};
     use crate::tests::io::load_test_file;
+    use crate::tests::webhook::{create_webhook_request, TEST_WEBHOOK_SECRET};
 
     #[tokio::test]
     async fn test_installation_suspend() {
@@ -650,36 +649,14 @@ mod tests {
 
     async fn check_webhook(file: &str, event: &str) -> Result<GitHubWebhook, StatusCode> {
         let body = load_test_file(file);
-        let body_length = body.len();
-
-        let secret = "ABCDEF".to_string();
-        let mut mac =
-            HmacSha256::new_from_slice(secret.as_bytes()).expect("Cannot create HMAC key");
-        mac.update(body.as_bytes());
-        let hash = mac.finalize().into_bytes();
-        let hash = hex::encode(hash);
-        let signature = format!("sha256={hash}");
-
-        let mut request = Request::new(axum::body::Body::from(body));
-        *request.method_mut() = Method::POST;
-        let headers = request.headers_mut();
-        headers.insert("content-type", HeaderValue::from_static("application-json"));
-        headers.insert(
-            "content-length",
-            HeaderValue::from_str(&body_length.to_string()).unwrap(),
-        );
-        headers.insert("x-github-event", HeaderValue::from_str(event).unwrap());
-        headers.insert(
-            "x-hub-signature-256",
-            HeaderValue::from_str(&signature).unwrap(),
-        );
+        let request = create_webhook_request(event, &body);
 
         let (repository_tx, _) = mpsc::channel(1024);
         let (global_tx, _) = mpsc::channel(1024);
         let server_ref = ServerStateRef::new(ServerState::new(
             repository_tx,
             global_tx,
-            WebhookSecret::new(secret),
+            WebhookSecret::new(TEST_WEBHOOK_SECRET.to_string()),
         ));
         GitHubWebhook::from_request(request, &server_ref).await
     }

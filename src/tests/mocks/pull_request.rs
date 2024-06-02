@@ -10,6 +10,10 @@ use super::{
     Repo, User,
 };
 
+pub fn default_pr_number() -> u64 {
+    1
+}
+
 pub async fn mock_pull_requests(
     repo: &Repo,
     comments_tx: Sender<Comment>,
@@ -35,7 +39,7 @@ pub async fn mock_pull_requests(
                 let comment_payload: CommentCreatePayload = req.body_json().unwrap();
                 let comment: Comment =
                     Comment::new(repo_name.clone(), pr_number, &comment_payload.body)
-                        .with_author(User::new(1002, "bors"));
+                        .with_author(User::bors_bot());
 
                 // We cannot use `tx.blocking_send()`, because this function is actually called
                 // from within an async task, but it is not async, so we also cannot use
@@ -103,10 +107,6 @@ struct Base {
     #[serde(rename = "ref")]
     ref_field: String,
     sha: String,
-}
-
-fn default_pr_number() -> u64 {
-    1
 }
 
 #[derive(Deserialize)]
