@@ -40,22 +40,17 @@ impl World {
         }
     }
 
-    pub fn get_repo(&mut self, name: GithubRepoName) -> Arc<Mutex<Repo>> {
-        self.repos.get_mut(&name).unwrap().clone()
+    pub fn get_repo(&self, name: GithubRepoName) -> Arc<Mutex<Repo>> {
+        self.repos.get(&name).unwrap().clone()
     }
 
-    pub fn add_repo(mut self, repo: Repo) -> Self {
+    pub fn with_repo(mut self, repo: Repo) -> Self {
         self.repos
             .insert(repo.name.clone(), Arc::new(Mutex::new(repo)));
         self
     }
 
-    pub fn check_sha_history(
-        &mut self,
-        repo: GithubRepoName,
-        branch: &str,
-        expected_shas: &[&str],
-    ) {
+    pub fn check_sha_history(&self, repo: GithubRepoName, branch: &str, expected_shas: &[&str]) {
         let actual_shas = self
             .get_repo(repo)
             .lock()

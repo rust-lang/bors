@@ -327,7 +327,7 @@ mod tests {
 
     #[sqlx::test]
     async fn try_no_permissions(pool: sqlx::PgPool) {
-        let mut world = World::default();
+        let world = World::default();
         world.get_repo(default_repo_name()).lock().permissions = Permissions::default();
 
         BorsBuilder::new(pool)
@@ -358,7 +358,7 @@ mod tests {
 
     #[sqlx::test]
     async fn try_merge_branch_history(pool: sqlx::PgPool) {
-        let mut world = run_test(pool, |mut tester| async {
+        let world = run_test(pool, |mut tester| async {
             tester.post_comment("@bors try").await;
             tester.expect_comments(1).await;
             Ok(tester)
@@ -378,7 +378,7 @@ mod tests {
 
     #[sqlx::test]
     async fn try_merge_explicit_parent(pool: sqlx::PgPool) {
-        let mut world = run_test(pool, |mut tester| async {
+        let world = run_test(pool, |mut tester| async {
             tester
                 .post_comment("@bors try parent=ea9c1b050cc8b420c2c211d2177811e564a4dc60")
                 .await;

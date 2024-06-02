@@ -317,11 +317,11 @@ mod tests {
     async fn test_load_installed_repos() {
         let mock = ExternalHttpMock::start(
             &World::new()
-                .add_repo(
+                .with_repo(
                     Repo::new("foo", "bar", Permissions::default(), "".to_string())
                         .with_perms(User::new(1, "user"), &[PermissionType::Try]),
                 )
-                .add_repo(Repo::new(
+                .with_repo(Repo::new(
                     "foo",
                     "baz",
                     Permissions::default(),
