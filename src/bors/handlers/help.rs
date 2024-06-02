@@ -25,15 +25,15 @@ pub(super) async fn command_help<Client: RepositoryClient>(
 #[cfg(test)]
 mod tests {
     use crate::bors::handlers::help::HELP_MESSAGE;
-    use crate::tests::event::default_pr_number;
-    use crate::tests::state::ClientBuilder;
+    use crate::tests::mocks::run_test;
 
     #[sqlx::test]
     async fn test_help(pool: sqlx::PgPool) {
-        let state = ClientBuilder::default().pool(pool).create_state().await;
-        state.comment("@bors help").await;
-        state
-            .client()
-            .check_comments(default_pr_number(), &[HELP_MESSAGE]);
+        run_test(pool, |mut tester| async {
+            tester.post_comment("@bors help").await;
+            assert_eq!(tester.get_comment().await, HELP_MESSAGE);
+            Ok(tester)
+        })
+        .await;
     }
 }
