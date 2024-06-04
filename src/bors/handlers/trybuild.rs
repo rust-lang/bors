@@ -335,7 +335,7 @@ mod tests {
             .run_test(|mut tester| async {
                 tester.post_comment("@bors try").await?;
                 assert_eq!(
-                    tester.get_comment().await,
+                    tester.get_comment().await?,
                     "@default-user: :key: Insufficient privileges: not in try users"
                 );
                 Ok(tester)
@@ -348,7 +348,7 @@ mod tests {
         run_test(pool, |mut tester| async {
             tester.post_comment("@bors try").await?;
             assert_eq!(
-                tester.get_comment().await,
+                tester.get_comment().await?,
                 ":hourglass: Trying commit pr-1-sha with merge merge-main-sha1-pr-1-sha…"
             );
             Ok(tester)

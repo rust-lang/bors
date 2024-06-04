@@ -1,3 +1,4 @@
+use anyhow::Context;
 use octocrab::Octocrab;
 use std::collections::HashMap;
 use std::time::Duration;
@@ -89,12 +90,13 @@ impl GitHubMockServer {
         .unwrap()
     }
 
-    pub async fn get_comment(&mut self, repo: GithubRepoName, pr: u64) -> Comment {
-        let repo = self.repos.get_mut(&repo).unwrap();
+    pub async fn get_comment(&mut self, repo: GithubRepoName, pr: u64) -> anyhow::Result<Comment> {
+        let repo = self.repos.get_mut(&repo).expect("Repository not found");
         let fut = repo.get_comment(pr);
-        tokio::time::timeout(DEFAULT_TIMEOUT, fut)
+        let comment = tokio::time::timeout(DEFAULT_TIMEOUT, fut)
             .await
-            .expect("Timed out while waiting for a comment to be received")
+            .context("Timed out while waiting for a comment to be received")?;
+        Ok(comment)
     }
 
     /// Make sure that there are no leftover events left in the queues.

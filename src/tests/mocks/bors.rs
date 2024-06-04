@@ -13,9 +13,7 @@ use crate::github::api::load_repositories;
 use crate::tests::database::MockedDBClient;
 use crate::tests::event::default_pr_number;
 use crate::tests::mocks::comment::{Comment, GitHubIssueCommentEventPayload};
-use crate::tests::mocks::workflow::{
-    CheckSuite, GitHubCheckSuiteEventPayload, GitHubWorkflowEventPayload, Workflow,
-};
+use crate::tests::mocks::workflow::{GitHubWorkflowEventPayload, Workflow};
 use crate::tests::mocks::{Branch, ExternalHttpMock, Repo, World};
 use crate::tests::webhook::{create_webhook_request, TEST_WEBHOOK_SECRET};
 use crate::{
@@ -130,7 +128,7 @@ impl BorsTester {
     }
 
     /// Wait until the next bot comment is received on the default repo and the default PR.
-    pub async fn get_comment(&mut self) -> String {
+    pub async fn get_comment(&mut self) -> anyhow::Result<String> {
         self.http_mock
             .gh_server
             .get_comment(Repo::default().name, default_pr_number())
