@@ -81,7 +81,7 @@ pub trait RepositoryLoader<Client: RepositoryClient>: Send + Sync {
     ) -> anyhow::Result<HashMap<GithubRepoName, anyhow::Result<RepositoryState<Client>>>>;
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum CheckSuiteStatus {
     Pending,
     Failure,
@@ -90,7 +90,7 @@ pub enum CheckSuiteStatus {
 
 /// A GitHub check suite.
 /// Corresponds to a single GitHub actions workflow run, or to a single external CI check run.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct CheckSuite {
     pub(crate) status: CheckSuiteStatus,
 }

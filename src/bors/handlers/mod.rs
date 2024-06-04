@@ -14,7 +14,6 @@ use crate::bors::handlers::workflow::{
 };
 use crate::bors::{BorsContext, Comment, RepositoryClient, RepositoryLoader, RepositoryState};
 use crate::database::DbClient;
-use crate::utils::logging::LogError;
 use crate::TeamApiClient;
 
 mod help;
@@ -80,12 +79,9 @@ pub async fn handle_bors_repository_event<Client: RepositoryClient>(
                 repo = payload.repository.to_string(),
                 id = payload.run_id.into_inner()
             );
-            if let Err(error) = handle_workflow_started(db, payload)
+            handle_workflow_started(db, payload)
                 .instrument(span.clone())
-                .await
-            {
-                span.log_error(error);
-            }
+                .await?;
         }
         BorsRepositoryEvent::WorkflowCompleted(payload) => {
             let span = tracing::info_span!(
@@ -93,24 +89,18 @@ pub async fn handle_bors_repository_event<Client: RepositoryClient>(
                 repo = payload.repository.to_string(),
                 id = payload.run_id.into_inner()
             );
-            if let Err(error) = handle_workflow_completed(repo, db, payload)
+            handle_workflow_completed(repo, db, payload)
                 .instrument(span.clone())
-                .await
-            {
-                span.log_error(error);
-            }
+                .await?;
         }
         BorsRepositoryEvent::CheckSuiteCompleted(payload) => {
             let span = tracing::info_span!(
                 "Check suite completed",
                 repo = payload.repository.to_string(),
             );
-            if let Err(error) = handle_check_suite_completed(repo, db, payload)
+            handle_check_suite_completed(repo, db, payload)
                 .instrument(span.clone())
-                .await
-            {
-                span.log_error(error);
-            }
+                .await?;
         }
     }
     Ok(())

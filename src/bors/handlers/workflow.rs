@@ -96,6 +96,7 @@ pub(super) async fn handle_check_suite_completed<Client: RepositoryClient>(
     try_complete_build(repo.as_ref(), db.as_ref(), payload).await
 }
 
+/// Try to complete a pending build.
 async fn try_complete_build<Client: RepositoryClient>(
     repo: &RepositoryState<Client>,
     db: &dyn DbClient,
@@ -130,6 +131,8 @@ async fn try_complete_build<Client: RepositoryClient>(
         return Ok(());
     };
 
+    // Ask GitHub what are all the check suites attached to the given commit.
+    // This tells us for how many workflows we should wait.
     let checks = repo
         .client
         .get_check_suites_for_commit(&payload.branch, &payload.commit_sha)
@@ -209,12 +212,7 @@ mod tests {
     use crate::bors::handlers::trybuild::TRY_BRANCH_NAME;
     use crate::database::operations::get_all_workflows;
     use crate::database::WorkflowStatus;
-    use crate::tests::event::{
-        default_pr_number, suite_failure, suite_pending, suite_success, CheckSuiteCompletedBuilder,
-        WorkflowCompletedBuilder, WorkflowStartedBuilder,
-    };
-    use crate::tests::mocks::{run_test, Branch, Workflow};
-    use crate::tests::state::{default_merge_sha, ClientBuilder};
+    use crate::tests::mocks::{run_test, Branch, CheckSuite, TestWorkflowStatus, Workflow};
 
     #[sqlx::test]
     async fn workflow_started_unknown_build(pool: sqlx::PgPool) {
@@ -262,202 +260,167 @@ mod tests {
             tester.expect_comments(1).await;
             let event = Workflow::started(tester.get_branch(TRY_BRANCH_NAME));
             tester.workflow(event.clone()).await?;
-            tester.workflow(event).await?;
+            tester.workflow(event.with_run_id(2)).await?;
             Ok(tester)
         })
         .await;
-        assert_eq!(get_all_workflows(&pool).await.unwrap().len(), 1);
+        assert_eq!(get_all_workflows(&pool).await.unwrap().len(), 2);
     }
 
     #[sqlx::test]
-    async fn test_try_check_suite_finished_missing_build(pool: sqlx::PgPool) {
-        let state = ClientBuilder::default().pool(pool).create_state().await;
-        state
-            .check_suite_completed(
-                CheckSuiteCompletedBuilder::default()
-                    .branch("<branch>".to_string())
-                    .commit_sha("<unknown-sha>".to_string()),
-            )
-            .await;
+    async fn try_check_suite_finished_missing_build(pool: sqlx::PgPool) {
+        run_test(pool.clone(), |mut tester| async {
+            tester
+                .check_suite(CheckSuite::completed(Branch::new(
+                    "<branch>",
+                    "<unknown-sha>",
+                )))
+                .await?;
+            Ok(tester)
+        })
+        .await;
     }
 
     #[sqlx::test]
-    async fn test_try_success(pool: sqlx::PgPool) {
-        let state = ClientBuilder::default().pool(pool).create_state().await;
-        state
-            .client()
-            .set_checks(&default_merge_sha(), &[suite_success()]);
-
-        state.comment("@bors try").await;
-        state
-            .perform_workflow_events(
-                1,
-                TRY_BRANCH_NAME,
-                &default_merge_sha(),
-                WorkflowStatus::Success,
-            )
-            .await;
-
-        insta::assert_snapshot!(
-            state.client().get_last_comment(default_pr_number()),
-            @r###"
-        :sunny: Try build successful
-        - [workflow-1](https://workflow-1.com) :white_check_mark:
-        Build commit: sha-merged (`sha-merged`)
-        <!-- homu: {"type":"TryBuildCompleted","merge_sha":"sha-merged"} -->
-        "###
-        );
+    async fn try_success(pool: sqlx::PgPool) {
+        run_test(pool.clone(), |mut tester| async {
+            tester.create_branch(TRY_BRANCH_NAME).expect_suites(1);
+            tester.post_comment("@bors try").await?;
+            tester.expect_comments(1).await;
+            tester
+                .workflow_events(1, TRY_BRANCH_NAME, TestWorkflowStatus::Success)
+                .await?;
+            insta::assert_snapshot!(
+                tester.get_comment().await?,
+                @r###"
+            :sunny: Try build successful
+            - [Workflow1](https://github.com/workflows/Workflow1/1) :white_check_mark:
+            Build commit: merge-main-sha1-pr-1-sha (`merge-main-sha1-pr-1-sha`)
+            <!-- homu: {"type":"TryBuildCompleted","merge_sha":"merge-main-sha1-pr-1-sha"} -->
+            "###
+            );
+            Ok(tester)
+        })
+        .await;
     }
 
     #[sqlx::test]
-    async fn test_try_failure(pool: sqlx::PgPool) {
-        let state = ClientBuilder::default().pool(pool).create_state().await;
-        state
-            .client()
-            .set_checks(&default_merge_sha(), &[suite_failure()]);
-
-        state.comment("@bors try").await;
-        state
-            .perform_workflow_events(
-                1,
-                TRY_BRANCH_NAME,
-                &default_merge_sha(),
-                WorkflowStatus::Failure,
-            )
-            .await;
-
-        insta::assert_snapshot!(
-            state.client().get_last_comment(default_pr_number()),
-            @r###"
-        :broken_heart: Test failed
-        - [workflow-1](https://workflow-1.com) :x:
-        "###
-        );
+    async fn try_failure(pool: sqlx::PgPool) {
+        run_test(pool.clone(), |mut tester| async {
+            tester.create_branch(TRY_BRANCH_NAME).expect_suites(1);
+            tester.post_comment("@bors try").await?;
+            tester.expect_comments(1).await;
+            tester
+                .workflow_events(1, TRY_BRANCH_NAME, TestWorkflowStatus::Failure)
+                .await?;
+            insta::assert_snapshot!(
+                tester.get_comment().await?,
+                @r###"
+            :broken_heart: Test failed
+            - [Workflow1](https://github.com/workflows/Workflow1/1) :x:
+            "###
+            );
+            Ok(tester)
+        })
+        .await;
     }
 
     #[sqlx::test]
-    async fn test_try_success_multiple_suites(pool: sqlx::PgPool) {
-        let state = ClientBuilder::default().pool(pool).create_state().await;
-        state
-            .client()
-            .set_checks(&default_merge_sha(), &[suite_success(), suite_pending()]);
-
-        state.comment("@bors try").await;
-        state
-            .perform_workflow_events(
-                1,
-                TRY_BRANCH_NAME,
-                &default_merge_sha(),
-                WorkflowStatus::Success,
-            )
-            .await;
-        state.client().check_comment_count(default_pr_number(), 1);
-
-        state
-            .client()
-            .set_checks(&default_merge_sha(), &[suite_success(), suite_success()]);
-        state
-            .perform_workflow_events(
-                2,
-                TRY_BRANCH_NAME,
-                &default_merge_sha(),
-                WorkflowStatus::Success,
-            )
-            .await;
-        insta::assert_snapshot!(state.client().get_last_comment(default_pr_number()), @r###"
-        :sunny: Try build successful
-        - [workflow-1](https://workflow-1.com) :white_check_mark:
-        - [workflow-2](https://workflow-2.com) :white_check_mark:
-        Build commit: sha-merged (`sha-merged`)
-        <!-- homu: {"type":"TryBuildCompleted","merge_sha":"sha-merged"} -->
-        "###);
+    async fn try_success_multiple_suites(pool: sqlx::PgPool) {
+        run_test(pool.clone(), |mut tester| async {
+            tester.create_branch(TRY_BRANCH_NAME).expect_suites(2);
+            tester.post_comment("@bors try").await?;
+            tester.expect_comments(1).await;
+            tester
+                .workflow_events(1, TRY_BRANCH_NAME, TestWorkflowStatus::Success)
+                .await?;
+            tester
+                .workflow_events(2, TRY_BRANCH_NAME, TestWorkflowStatus::Success)
+                .await?;
+            insta::assert_snapshot!(
+                tester.get_comment().await?,
+                @r###"
+            :sunny: Try build successful
+            - [Workflow1](https://github.com/workflows/Workflow1/1) :white_check_mark:
+            - [Workflow1](https://github.com/workflows/Workflow1/2) :white_check_mark:
+            Build commit: merge-main-sha1-pr-1-sha (`merge-main-sha1-pr-1-sha`)
+            <!-- homu: {"type":"TryBuildCompleted","merge_sha":"merge-main-sha1-pr-1-sha"} -->
+            "###
+            );
+            Ok(tester)
+        })
+        .await;
     }
 
     #[sqlx::test]
-    async fn test_try_failure_multiple_suites(pool: sqlx::PgPool) {
-        let state = ClientBuilder::default().pool(pool).create_state().await;
-        state
-            .client()
-            .set_checks(&default_merge_sha(), &[suite_success(), suite_pending()]);
-
-        state.comment("@bors try").await;
-        state
-            .perform_workflow_events(
-                1,
-                TRY_BRANCH_NAME,
-                &default_merge_sha(),
-                WorkflowStatus::Success,
-            )
-            .await;
-        state.client().check_comment_count(default_pr_number(), 1);
-
-        state
-            .client()
-            .set_checks(&default_merge_sha(), &[suite_success(), suite_failure()]);
-        state
-            .perform_workflow_events(
-                2,
-                TRY_BRANCH_NAME,
-                &default_merge_sha(),
-                WorkflowStatus::Failure,
-            )
-            .await;
-        insta::assert_snapshot!(state.client().get_last_comment(default_pr_number()), @r###"
-        :broken_heart: Test failed
-        - [workflow-1](https://workflow-1.com) :white_check_mark:
-        - [workflow-2](https://workflow-2.com) :x:
-        "###);
+    async fn try_failure_multiple_suites(pool: sqlx::PgPool) {
+        run_test(pool.clone(), |mut tester| async {
+            tester.create_branch(TRY_BRANCH_NAME).expect_suites(2);
+            tester.post_comment("@bors try").await?;
+            tester.expect_comments(1).await;
+            tester
+                .workflow_events(1, TRY_BRANCH_NAME, TestWorkflowStatus::Success)
+                .await?;
+            tester
+                .workflow_events(2, TRY_BRANCH_NAME, TestWorkflowStatus::Failure)
+                .await?;
+            insta::assert_snapshot!(
+                tester.get_comment().await?,
+                @r###"
+            :broken_heart: Test failed
+            - [Workflow1](https://github.com/workflows/Workflow1/1) :white_check_mark:
+            - [Workflow1](https://github.com/workflows/Workflow1/2) :x:
+            "###
+            );
+            Ok(tester)
+        })
+        .await;
     }
 
     #[sqlx::test]
-    async fn test_try_suite_completed_received_before_workflow_completed(pool: sqlx::PgPool) {
-        let state = ClientBuilder::default().pool(pool).create_state().await;
-        state
-            .client()
-            .set_checks(&default_merge_sha(), &[suite_success()]);
+    async fn try_suite_completed_received_before_workflow_completed(pool: sqlx::PgPool) {
+        run_test(pool.clone(), |mut tester| async {
+            tester.create_branch(TRY_BRANCH_NAME).expect_suites(1);
+            tester.post_comment("@bors try").await?;
+            tester.expect_comments(1).await;
 
-        state.comment("@bors try").await;
-        state
-            .workflow_started(WorkflowStartedBuilder::default().branch(TRY_BRANCH_NAME.to_string()))
-            .await;
-
-        // Check suite completed received before the workflow has finished.
-        // We should wait until workflow finished is received before posting the comment.
-        state
-            .check_suite_completed(
-                CheckSuiteCompletedBuilder::default().branch(TRY_BRANCH_NAME.to_string()),
-            )
-            .await;
-        state.client().check_comment_count(default_pr_number(), 1);
-
-        state
-            .workflow_completed(
-                WorkflowCompletedBuilder::default()
-                    .branch(TRY_BRANCH_NAME.to_string())
-                    .status(WorkflowStatus::Success),
-            )
-            .await;
-
-        insta::assert_snapshot!(state.client().get_last_comment(default_pr_number()), @r###"
-        :sunny: Try build successful
-        - [workflow-name](https://workflow-name-1) :white_check_mark:
-        Build commit: sha-merged (`sha-merged`)
-        <!-- homu: {"type":"TryBuildCompleted","merge_sha":"sha-merged"} -->
-        "###);
+            // Check suite completed received before the workflow has finished.
+            // We should wait until workflow finished is received before posting the comment.
+            let branch = tester.get_branch(TRY_BRANCH_NAME);
+            tester.workflow(Workflow::started(branch.clone())).await?;
+            tester
+                .check_suite(CheckSuite::completed(branch.clone()))
+                .await?;
+            tester.workflow(Workflow::success(branch)).await?;
+            insta::assert_snapshot!(
+                tester.get_comment().await?,
+                @r###"
+            :sunny: Try build successful
+            - [Workflow1](https://github.com/workflows/Workflow1/1) :white_check_mark:
+            Build commit: merge-main-sha1-pr-1-sha (`merge-main-sha1-pr-1-sha`)
+            <!-- homu: {"type":"TryBuildCompleted","merge_sha":"merge-main-sha1-pr-1-sha"} -->
+            "###
+            );
+            Ok(tester)
+        })
+        .await;
     }
 
     #[sqlx::test]
     async fn test_try_check_suite_finished_twice(pool: sqlx::PgPool) {
-        let state = ClientBuilder::default().pool(pool).create_state().await;
-        state
-            .client()
-            .set_checks(&default_merge_sha(), &[suite_success(), suite_success()]);
-
-        let event = || CheckSuiteCompletedBuilder::default().branch(TRY_BRANCH_NAME.to_string());
-
-        state.comment("@bors try").await;
-        state.check_suite_completed(event()).await;
-        state.check_suite_completed(event()).await;
-        state.client().check_comment_count(default_pr_number(), 2);
+        run_test(pool.clone(), |mut tester| async {
+            tester.create_branch(TRY_BRANCH_NAME).expect_suites(1);
+            tester.post_comment("@bors try").await?;
+            tester.expect_comments(1).await;
+            tester
+                .workflow_events(1, TRY_BRANCH_NAME, TestWorkflowStatus::Success)
+                .await?;
+            tester
+                .check_suite(CheckSuite::completed(tester.get_branch(TRY_BRANCH_NAME)))
+                .await?;
+            tester.expect_comments(1).await;
+            Ok(tester)
+        })
+        .await;
     }
 }

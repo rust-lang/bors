@@ -4,6 +4,8 @@ use std::future::Future;
 use std::sync::Arc;
 
 use axum::Router;
+use parking_lot::lock_api::MappedMutexGuard;
+use parking_lot::{MutexGuard, RawMutex};
 use serde::Serialize;
 use sqlx::PgPool;
 use tokio::task::JoinHandle;
@@ -13,8 +15,11 @@ use crate::github::api::load_repositories;
 use crate::tests::database::MockedDBClient;
 use crate::tests::event::default_pr_number;
 use crate::tests::mocks::comment::{Comment, GitHubIssueCommentEventPayload};
-use crate::tests::mocks::workflow::{GitHubWorkflowEventPayload, Workflow};
-use crate::tests::mocks::{Branch, ExternalHttpMock, Repo, World};
+use crate::tests::mocks::workflow::{
+    CheckSuite, GitHubCheckSuiteEventPayload, GitHubWorkflowEventPayload, TestWorkflowStatus,
+    Workflow,
+};
+use crate::tests::mocks::{default_repo_name, Branch, ExternalHttpMock, Repo, World};
 use crate::tests::webhook::{create_webhook_request, TEST_WEBHOOK_SECRET};
 use crate::{
     create_app, create_bors_process, BorsContext, CommandParser, ServerState, WebhookSecret,
@@ -118,22 +123,33 @@ impl BorsTester {
         )
     }
 
+    pub fn create_branch(&mut self, name: &str) -> MappedMutexGuard<RawMutex, Branch> {
+        // We cannot clone the Arc, otherwise it won't work
+        let repo = self.world.repos.get(&default_repo_name()).unwrap();
+        MutexGuard::map(repo.lock(), move |repo| {
+            repo.branches
+                .push(Branch::new(name, &format!("{name}-empty")));
+            repo.branches.last_mut().unwrap()
+        })
+    }
+
     pub fn get_branch(&self, name: &str) -> Branch {
         self.world
             .default_repo()
             .lock()
-            .get_branch(name)
+            .get_branch_by_name(name)
             .unwrap()
             .clone()
     }
 
     /// Wait until the next bot comment is received on the default repo and the default PR.
     pub async fn get_comment(&mut self) -> anyhow::Result<String> {
-        self.http_mock
+        Ok(self
+            .http_mock
             .gh_server
             .get_comment(Repo::default().name, default_pr_number())
-            .await
-            .content
+            .await?
+            .content)
     }
 
     /// Expect that `count` comments will be received, without checking their contents.
@@ -148,7 +164,33 @@ impl BorsTester {
     }
 
     pub async fn workflow<W: Into<Workflow>>(&mut self, workflow: W) -> anyhow::Result<()> {
-        self.webhook_workflow(workflow.into()).await
+        let workflow = workflow.into();
+        if let Some(status) = workflow.get_workflow_status() {
+            if let Some(branch) = self
+                .world
+                .get_repo(workflow.repository.clone())
+                .lock()
+                .get_branch_by_name(&workflow.head_branch)
+            {
+                branch.suite_finished(status);
+            }
+        }
+        self.webhook_workflow(workflow).await
+    }
+
+    pub async fn workflow_events(
+        &mut self,
+        run_id: u64,
+        branch: &str,
+        status: TestWorkflowStatus,
+    ) -> anyhow::Result<()> {
+        let branch = self.get_branch(branch);
+
+        self.workflow(Workflow::started(branch.clone()).with_run_id(run_id))
+            .await?;
+        self.workflow(Workflow::with_status(branch.clone(), status).with_run_id(run_id))
+            .await?;
+        self.check_suite(CheckSuite::completed(branch)).await
     }
 
     pub async fn check_suite<C: Into<CheckSuite>>(&mut self, check_suite: C) -> anyhow::Result<()> {

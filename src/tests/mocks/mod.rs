@@ -20,6 +20,8 @@ pub use repository::default_repo_name;
 pub use repository::Branch;
 pub use repository::Repo;
 pub use user::User;
+pub use workflow::CheckSuite;
+pub use workflow::TestWorkflowStatus;
 pub use workflow::Workflow;
 
 mod app;
@@ -61,7 +63,7 @@ impl World {
         let actual_shas = self
             .get_repo(repo)
             .lock()
-            .get_branch(branch)
+            .get_branch_by_name(branch)
             .expect("Branch not found")
             .get_sha_history();
         let actual_shas: Vec<&str> = actual_shas.iter().map(|s| s.as_str()).collect();

@@ -398,35 +398,32 @@ mod tests {
 
     #[sqlx::test]
     async fn test_try_merge_last_parent(pool: sqlx::PgPool) {
-        let state = ClientBuilder::default().pool(pool).create_state().await;
-
-        state
-            .comment("@bors try parent=ea9c1b050cc8b420c2c211d2177811e564a4dc60")
-            .await;
-        state.client().check_branch_history(
+        let world = run_test(pool, |mut tester| async {
+            tester
+                .post_comment("@bors try parent=ea9c1b050cc8b420c2c211d2177811e564a4dc60")
+                .await?;
+            // tester.workflow_started(TRY_BRANCH_NAME).await;
+            // state
+            //     .perform_workflow_events(
+            //         1,
+            //         TRY_BRANCH_NAME,
+            //         &default_merge_sha(),
+            //         WorkflowStatus::Success,
+            //     )
+            //     .await;
+            tester.post_comment("@bors try parent=last").await?;
+            tester.expect_comments(3).await;
+            Ok(tester)
+        })
+        .await;
+        world.check_sha_history(
+            default_repo_name(),
             TRY_MERGE_BRANCH_NAME,
             &[
                 "ea9c1b050cc8b420c2c211d2177811e564a4dc60",
-                &default_merge_sha(),
-            ],
-        );
-        state
-            .perform_workflow_events(
-                1,
-                TRY_BRANCH_NAME,
-                &default_merge_sha(),
-                WorkflowStatus::Success,
-            )
-            .await;
-        state.client().check_comment_count(default_pr_number(), 2);
-        state.comment("@bors try parent=last").await;
-        state.client().check_branch_history(
-            TRY_MERGE_BRANCH_NAME,
-            &[
+                "merge-ea9c1b050cc8b420c2c211d2177811e564a4dc60-pr-1-sha",
                 "ea9c1b050cc8b420c2c211d2177811e564a4dc60",
-                &default_merge_sha(),
-                "ea9c1b050cc8b420c2c211d2177811e564a4dc60",
-                &default_merge_sha(),
+                "merge-ea9c1b050cc8b420c2c211d2177811e564a4dc60-pr-1-sha",
             ],
         );
     }

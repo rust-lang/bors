@@ -1,6 +1,7 @@
 use anyhow::Error;
 use tracing::span::Span;
 
+#[allow(unused)]
 pub trait LogError {
     fn log_error(&self, error: Error);
 }

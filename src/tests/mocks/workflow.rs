@@ -7,13 +7,53 @@ use crate::github::GithubRepoName;
 use crate::tests::mocks::default_repo_name;
 use crate::tests::mocks::repository::{Branch, GitHubRepository};
 
+pub struct CheckSuite {
+    repo: GithubRepoName,
+    branch: Branch,
+}
+
+impl CheckSuite {
+    pub fn completed(branch: Branch) -> Self {
+        Self {
+            repo: default_repo_name(),
+            branch,
+        }
+    }
+}
+
+#[derive(serde::Serialize)]
+pub struct GitHubCheckSuiteEventPayload {
+    action: String,
+    check_suite: GitHubCheckSuiteInner,
+    repository: GitHubRepository,
+}
+
+impl From<CheckSuite> for GitHubCheckSuiteEventPayload {
+    fn from(value: CheckSuite) -> Self {
+        Self {
+            action: "completed".to_string(),
+            check_suite: GitHubCheckSuiteInner {
+                head_branch: value.branch.get_name().to_string(),
+                head_sha: value.branch.get_sha().to_string(),
+            },
+            repository: value.repo.into(),
+        }
+    }
+}
+
+#[derive(serde::Serialize)]
+struct GitHubCheckSuiteInner {
+    head_branch: String,
+    head_sha: String,
+}
+
 #[derive(Clone)]
 pub struct Workflow {
     event: WorkflowEvent,
-    repository: GithubRepoName,
+    pub repository: GithubRepoName,
     name: String,
     run_id: u64,
-    head_branch: String,
+    pub head_branch: String,
     head_sha: String,
 }
 
@@ -29,12 +69,40 @@ impl Workflow {
             branch,
         )
     }
+    pub fn failure(branch: Branch) -> Self {
+        Self::new(
+            WorkflowEvent::Completed {
+                status: "failure".to_string(),
+            },
+            branch,
+        )
+    }
+    pub fn with_status(branch: Branch, status: TestWorkflowStatus) -> Self {
+        match status {
+            TestWorkflowStatus::Success => Self::success(branch),
+            TestWorkflowStatus::Failure => Self::failure(branch),
+        }
+    }
+    pub fn get_workflow_status(&self) -> Option<TestWorkflowStatus> {
+        match &self.event {
+            WorkflowEvent::Started => None,
+            WorkflowEvent::Completed { status } => match status.as_str() {
+                "success" => Some(TestWorkflowStatus::Success),
+                "failure" => Some(TestWorkflowStatus::Failure),
+                _ => unreachable!(),
+            },
+        }
+    }
+
+    pub fn with_run_id(self, run_id: u64) -> Self {
+        Self { run_id, ..self }
+    }
 
     fn new(event: WorkflowEvent, branch: Branch) -> Self {
         Self {
             event,
             repository: default_repo_name(),
-            name: "Workflow 1".to_string(),
+            name: "Workflow1".to_string(),
             run_id: 1,
             head_branch: branch.get_name().to_string(),
             head_sha: branch.get_sha().to_string(),
@@ -46,6 +114,12 @@ impl Workflow {
 enum WorkflowEvent {
     Started,
     Completed { status: String },
+}
+
+#[derive(Copy, Clone)]
+pub enum TestWorkflowStatus {
+    Success,
+    Failure,
 }
 
 #[derive(serde::Serialize)]

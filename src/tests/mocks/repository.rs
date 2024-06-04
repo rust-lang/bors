@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use crate::bors::CheckSuiteStatus;
 use base64::Engine;
 use octocrab::models::repos::Object;
 use octocrab::models::repos::Object::Commit;
@@ -19,7 +20,7 @@ use crate::tests::event::default_pr_number;
 use crate::tests::mocks::comment::Comment;
 use crate::tests::mocks::permissions::Permissions;
 use crate::tests::mocks::pull_request::mock_pull_requests;
-use crate::tests::mocks::{dynamic_mock_req, World};
+use crate::tests::mocks::{dynamic_mock_req, TestWorkflowStatus, World};
 
 use super::user::{GitHubUser, User};
 
@@ -50,8 +51,12 @@ impl Repo {
         self
     }
 
-    pub fn get_branch(&mut self, name: &str) -> Option<&mut Branch> {
+    pub fn get_branch_by_name(&mut self, name: &str) -> Option<&mut Branch> {
         self.branches.iter_mut().find(|b| b.name == name)
+    }
+
+    pub fn get_branch_by_sha(&mut self, sha: &str) -> Option<&mut Branch> {
+        self.branches.iter_mut().find(|b| b.sha == sha)
     }
 }
 
@@ -86,6 +91,7 @@ pub struct Branch {
     sha: String,
     commit_message: String,
     sha_history: Vec<String>,
+    suite_statuses: Vec<CheckSuiteStatus>,
 }
 
 impl Branch {
@@ -95,6 +101,7 @@ impl Branch {
             sha: sha.to_string(),
             commit_message: format!("Commit {sha}"),
             sha_history: vec![],
+            suite_statuses: vec![],
         }
     }
 
@@ -103,6 +110,30 @@ impl Branch {
     }
     pub fn get_sha(&self) -> &str {
         &self.sha
+    }
+    pub fn get_suites(&self) -> &[CheckSuiteStatus] {
+        &self.suite_statuses
+    }
+
+    /// Sets the expectation that this branch will receive `count` suites.
+    pub fn expect_suites(&mut self, count: usize) {
+        self.suite_statuses = vec![CheckSuiteStatus::Pending; count];
+    }
+    pub fn suite_finished(&mut self, status: TestWorkflowStatus) {
+        for suite in self.suite_statuses.iter_mut() {
+            if matches!(suite, CheckSuiteStatus::Pending) {
+                *suite = match status {
+                    TestWorkflowStatus::Success => CheckSuiteStatus::Success,
+                    TestWorkflowStatus::Failure => CheckSuiteStatus::Failure,
+                };
+                return;
+            }
+        }
+        panic!(
+            "Received more suites than expected ({}) for branch {}",
+            self.suite_statuses.len(),
+            self.name
+        );
     }
 
     pub fn set_to_sha(&mut self, sha: &str) {
@@ -170,7 +201,8 @@ pub async fn mock_repo(
 async fn mock_branches(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
     mock_get_branch(repo.clone(), mock_server).await;
     mock_set_branch_to_ref(repo.clone(), mock_server).await;
-    mock_merge_branch(repo, mock_server).await;
+    mock_merge_branch(repo.clone(), mock_server).await;
+    mock_check_suites(repo, mock_server).await;
 }
 
 async fn mock_get_branch(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
@@ -178,7 +210,7 @@ async fn mock_get_branch(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
     dynamic_mock_req(
         move |_req: &Request, [branch_name]: [&str; 1]| {
             let mut repo = repo.lock();
-            let Some(branch) = repo.get_branch(branch_name) else {
+            let Some(branch) = repo.get_branch_by_name(branch_name) else {
                 return ResponseTemplate::new(404);
             };
             let branch = GitHubBranch {
@@ -220,7 +252,7 @@ async fn mock_set_branch_to_ref(repo: Arc<Mutex<Repo>>, mock_server: &MockServer
                 .expect("Unexpected ref name");
 
             let sha = data.sha;
-            match repo.get_branch(branch_name) {
+            match repo.get_branch_by_name(branch_name) {
                 Some(branch) => {
                     // Change sha of branch
                     branch.set_to_sha(&sha);
@@ -260,7 +292,7 @@ async fn mock_merge_branch(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
             }
 
             let data: MergeRequest = request.body_json().unwrap();
-            let head = repo.get_branch(&data.head);
+            let head = repo.get_branch_by_name(&data.head);
             let head_sha = match head {
                 None => {
                     // head is a SHA
@@ -271,7 +303,7 @@ async fn mock_merge_branch(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
                     branch.sha.clone()
                 }
             };
-            let Some(base_branch) = repo.get_branch(&data.base) else {
+            let Some(base_branch) = repo.get_branch_by_name(&data.base) else {
                 return ResponseTemplate::new(404);
             };
             let merge_sha = format!("merge-{}-{head_sha}", base_branch.sha);
@@ -287,6 +319,48 @@ async fn mock_merge_branch(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
         })
         .mount(mock_server)
         .await;
+}
+
+async fn mock_check_suites(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
+    #[derive(serde::Serialize)]
+    struct CheckSuitePayload {
+        conclusion: Option<String>,
+        head_branch: String,
+    }
+
+    #[derive(serde::Serialize)]
+    struct CheckSuiteResponse {
+        check_suites: Vec<CheckSuitePayload>,
+    }
+
+    let repo_name = repo.lock().name.clone();
+    dynamic_mock_req(
+        move |_req: &Request, [sha]: [&str; 1]| {
+            let mut repo = repo.lock();
+            let Some(branch) = repo.get_branch_by_sha(sha) else {
+                return ResponseTemplate::new(404);
+            };
+            let response = CheckSuiteResponse {
+                check_suites: branch
+                    .get_suites()
+                    .iter()
+                    .map(|suite| CheckSuitePayload {
+                        conclusion: match suite {
+                            CheckSuiteStatus::Pending => None,
+                            CheckSuiteStatus::Success => Some("success".to_string()),
+                            CheckSuiteStatus::Failure => Some("failure".to_string()),
+                        },
+                        head_branch: branch.name.clone(),
+                    })
+                    .collect(),
+            };
+            ResponseTemplate::new(200).set_body_json(response)
+        },
+        "GET",
+        format!("^/repos/{repo_name}/commits/(.*)/check-suites$"),
+    )
+    .mount(mock_server)
+    .await;
 }
 
 async fn mock_config(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
