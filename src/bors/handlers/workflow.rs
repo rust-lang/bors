@@ -153,9 +153,10 @@ async fn try_complete_build<Client: RepositoryClient>(
     // If this happens, there is a race condition in GH webhooks and we haven't received a workflow
     // finished/failed event for some workflow yet. In this case, wait for that event before
     // posting the PR comment.
-    if workflows
-        .iter()
-        .any(|w| w.status == WorkflowStatus::Pending)
+    if workflows.len() < checks.len()
+        || workflows
+            .iter()
+            .any(|w| w.status == WorkflowStatus::Pending)
     {
         tracing::warn!("All checks are finished, but some workflows are still pending");
         return Ok(());
