@@ -264,7 +264,6 @@ fn parse_webhook_event(request: Parts, body: &[u8]) -> anyhow::Result<Option<Bor
         }
         _ => {
             tracing::debug!("Ignoring unknown event type {:?}", event_type.to_str());
-            std::fs::write(format!("{}.json", event_type.to_str().unwrap()), body).unwrap();
             Ok(None)
         }
     }
