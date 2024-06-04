@@ -200,7 +200,8 @@ pub async fn mock_repo(
 
 async fn mock_branches(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
     mock_get_branch(repo.clone(), mock_server).await;
-    mock_set_branch_to_ref(repo.clone(), mock_server).await;
+    mock_create_branch(repo.clone(), mock_server).await;
+    mock_update_branch(repo.clone(), mock_server).await;
     mock_merge_branch(repo.clone(), mock_server).await;
     mock_check_suites(repo, mock_server).await;
 }
@@ -232,7 +233,7 @@ async fn mock_get_branch(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
     .await;
 }
 
-async fn mock_set_branch_to_ref(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
+async fn mock_create_branch(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
     let repo_name = repo.lock().name.clone();
     Mock::given(method("POST"))
         .and(path(format!("/repos/{repo_name}/git/refs")))
@@ -254,8 +255,10 @@ async fn mock_set_branch_to_ref(repo: Arc<Mutex<Repo>>, mock_server: &MockServer
             let sha = data.sha;
             match repo.get_branch_by_name(branch_name) {
                 Some(branch) => {
-                    // Change sha of branch
-                    branch.set_to_sha(&sha);
+                    panic!(
+                        "Trying to create an already existing branch {}",
+                        branch.name
+                    );
                 }
                 None => {
                     // Create a new branch
@@ -276,6 +279,39 @@ async fn mock_set_branch_to_ref(repo: Arc<Mutex<Repo>>, mock_server: &MockServer
         })
         .mount(mock_server)
         .await;
+}
+
+async fn mock_update_branch(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
+    let repo_name = repo.lock().name.clone();
+    dynamic_mock_req(
+        move |req: &Request, [branch_name]: [&str; 1]| {
+            let mut repo = repo.lock();
+
+            #[derive(serde::Deserialize)]
+            struct SetRefRequest {
+                sha: String,
+            }
+
+            let data: SetRefRequest = req.body_json().unwrap();
+
+            let sha = data.sha;
+            match repo.get_branch_by_name(branch_name) {
+                Some(branch) => {
+                    // Update branch
+                    branch.set_to_sha(&sha);
+                }
+                None => {
+                    return ResponseTemplate::new(404);
+                }
+            }
+
+            ResponseTemplate::new(200)
+        },
+        "PATCH",
+        format!("^/repos/{repo_name}/git/refs/heads/(.*)$"),
+    )
+    .mount(mock_server)
+    .await;
 }
 
 async fn mock_merge_branch(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
