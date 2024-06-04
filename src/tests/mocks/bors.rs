@@ -12,6 +12,7 @@ use crate::github::api::load_repositories;
 use crate::tests::database::MockedDBClient;
 use crate::tests::event::default_pr_number;
 use crate::tests::mocks::comment::{Comment, GitHubIssueCommentEventPayload};
+use crate::tests::mocks::workflow::{GitHubWorkflowEventPayload, Workflow};
 use crate::tests::mocks::{ExternalHttpMock, Repo, World};
 use crate::tests::webhook::{create_webhook_request, TEST_WEBHOOK_SECRET};
 use crate::{
@@ -129,12 +130,21 @@ impl BorsTester {
         self.webhook_comment(comment.into()).await;
     }
 
+    pub async fn workflow<W: Into<Workflow>>(&mut self, workflow: W) {
+        self.webhook_workflow(workflow.into()).await;
+    }
+
     async fn webhook_comment(&mut self, comment: Comment) {
         self.send_webhook(
             "issue_comment",
             GitHubIssueCommentEventPayload::from(comment),
         )
         .await;
+    }
+
+    async fn webhook_workflow(&mut self, workflow: Workflow) {
+        self.send_webhook("workflow_run", GitHubWorkflowEventPayload::from(workflow))
+            .await;
     }
 
     async fn send_webhook<S: Serialize>(&mut self, event: &str, content: S) {

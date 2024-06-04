@@ -98,6 +98,13 @@ impl Branch {
         }
     }
 
+    pub fn get_name(&self) -> &str {
+        &self.name
+    }
+    pub fn get_sha(&self) -> &str {
+        &self.sha
+    }
+
     pub fn set_to_sha(&mut self, sha: &str) {
         self.sha_history.push(self.sha.clone());
         self.sha = sha.to_string();

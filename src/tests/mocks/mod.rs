@@ -17,8 +17,10 @@ pub use bors::BorsBuilder;
 pub use comment::Comment;
 pub use permissions::Permissions;
 pub use repository::default_repo_name;
+pub use repository::Branch;
 pub use repository::Repo;
 pub use user::User;
+pub use workflow::Workflow;
 
 mod app;
 mod bors;
@@ -28,6 +30,7 @@ mod permissions;
 mod pull_request;
 mod repository;
 mod user;
+mod workflow;
 
 pub struct World {
     repos: HashMap<GithubRepoName, Arc<Mutex<Repo>>>,

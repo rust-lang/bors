@@ -206,25 +206,25 @@ async fn try_complete_build<Client: RepositoryClient>(
 #[cfg(test)]
 mod tests {
     use crate::bors::handlers::trybuild::TRY_BRANCH_NAME;
+    use crate::database::operations::get_all_workflows;
     use crate::database::WorkflowStatus;
     use crate::tests::event::{
         default_pr_number, suite_failure, suite_pending, suite_success, CheckSuiteCompletedBuilder,
         WorkflowCompletedBuilder, WorkflowStartedBuilder,
     };
+    use crate::tests::mocks::{run_test, Branch, Workflow};
     use crate::tests::state::{default_merge_sha, ClientBuilder};
 
     #[sqlx::test]
-    async fn test_workflow_started_unknown_build(pool: sqlx::PgPool) {
-        let state = ClientBuilder::default().pool(pool).create_state().await;
-
-        state
-            .workflow_started(
-                WorkflowStartedBuilder::default()
-                    .branch("unknown".to_string())
-                    .commit_sha("unknown-sha-".to_string()),
-            )
-            .await;
-        assert_eq!(state.db.get_all_workflows().await.unwrap().len(), 0);
+    async fn workflow_started_unknown_build(pool: sqlx::PgPool) {
+        run_test(pool.clone(), |mut tester| async {
+            tester
+                .workflow(Workflow::started(Branch::new("unknown", "unknown-sha")))
+                .await;
+            Ok(tester)
+        })
+        .await;
+        assert_eq!(get_all_workflows(&pool).await.unwrap().len(), 0);
     }
 
     #[sqlx::test]
