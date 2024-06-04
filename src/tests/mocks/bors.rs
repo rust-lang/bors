@@ -1,3 +1,4 @@
+use anyhow::Context;
 use std::collections::HashMap;
 use std::future::Future;
 use std::sync::Arc;
@@ -135,46 +136,47 @@ impl BorsTester {
         }
     }
 
-    pub async fn post_comment<C: Into<Comment>>(&mut self, comment: C) {
-        self.webhook_comment(comment.into()).await;
+    pub async fn post_comment<C: Into<Comment>>(&mut self, comment: C) -> anyhow::Result<()> {
+        self.webhook_comment(comment.into()).await
     }
 
-    pub async fn workflow<W: Into<Workflow>>(&mut self, workflow: W) {
-        self.webhook_workflow(workflow.into()).await;
+    pub async fn workflow<W: Into<Workflow>>(&mut self, workflow: W) -> anyhow::Result<()> {
+        self.webhook_workflow(workflow.into()).await
     }
 
-    async fn webhook_comment(&mut self, comment: Comment) {
+    async fn webhook_comment(&mut self, comment: Comment) -> anyhow::Result<()> {
         self.send_webhook(
             "issue_comment",
             GitHubIssueCommentEventPayload::from(comment),
         )
-        .await;
+        .await
     }
 
-    async fn webhook_workflow(&mut self, workflow: Workflow) {
+    async fn webhook_workflow(&mut self, workflow: Workflow) -> anyhow::Result<()> {
         self.send_webhook("workflow_run", GitHubWorkflowEventPayload::from(workflow))
-            .await;
+            .await
     }
 
-    async fn send_webhook<S: Serialize>(&mut self, event: &str, content: S) {
+    async fn send_webhook<S: Serialize>(&mut self, event: &str, content: S) -> anyhow::Result<()> {
         let webhook = create_webhook_request(event, &serde_json::to_string(&content).unwrap());
         let response = self
             .app
             .call(webhook)
             .await
-            .expect("Cannot send webhook request");
+            .context("Cannot send webhook request")?;
         let status = response.status();
         if !status.is_success() {
-            panic!("Wrong status code {status}");
+            return Err(anyhow::anyhow!(
+                "Wrong status code {status} when sending {event}"
+            ));
         }
         let body_text = String::from_utf8(
             axum::body::to_bytes(response.into_body(), 10 * 1024 * 1024)
-                .await
-                .unwrap()
+                .await?
                 .to_vec(),
-        )
-        .unwrap();
+        )?;
         tracing::debug!("Received webhook with status {status} and response body `{body_text}`");
+        Ok(())
     }
 
     pub async fn finish(self) -> World {

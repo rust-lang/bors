@@ -30,7 +30,7 @@ mod tests {
     #[sqlx::test]
     async fn help_command(pool: sqlx::PgPool) {
         run_test(pool, |mut tester| async {
-            tester.post_comment("@bors help").await;
+            tester.post_comment("@bors help").await?;
             assert_eq!(tester.get_comment().await, HELP_MESSAGE);
             Ok(tester)
         })

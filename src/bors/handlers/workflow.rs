@@ -220,7 +220,7 @@ mod tests {
         run_test(pool.clone(), |mut tester| async {
             tester
                 .workflow(Workflow::started(Branch::new("unknown", "unknown-sha")))
-                .await;
+                .await?;
             Ok(tester)
         })
         .await;
@@ -232,7 +232,7 @@ mod tests {
         run_test(pool.clone(), |mut tester| async {
             tester
                 .workflow(Workflow::success(Branch::new("unknown", "unknown-sha")))
-                .await;
+                .await?;
             Ok(tester)
         })
         .await;
@@ -242,11 +242,11 @@ mod tests {
     #[sqlx::test]
     async fn try_workflow_started(pool: sqlx::PgPool) {
         run_test(pool.clone(), |mut tester| async {
-            tester.post_comment("@bors try").await;
+            tester.post_comment("@bors try").await?;
             tester.expect_comments(1).await;
             tester
                 .workflow(Workflow::started(tester.get_branch(TRY_BRANCH_NAME)))
-                .await;
+                .await?;
             Ok(tester)
         })
         .await;
@@ -257,11 +257,11 @@ mod tests {
     #[sqlx::test]
     async fn try_workflow_start_twice(pool: sqlx::PgPool) {
         run_test(pool.clone(), |mut tester| async {
-            tester.post_comment("@bors try").await;
+            tester.post_comment("@bors try").await?;
             tester.expect_comments(1).await;
             let event = Workflow::started(tester.get_branch(TRY_BRANCH_NAME));
-            tester.workflow(event.clone()).await;
-            tester.workflow(event).await;
+            tester.workflow(event.clone()).await?;
+            tester.workflow(event).await?;
             Ok(tester)
         })
         .await;

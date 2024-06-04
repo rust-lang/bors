@@ -281,7 +281,7 @@ mod tests {
         run_test(pool, |mut tester| async {
             tester
                 .post_comment(Comment::from("@bors ping").with_author(User::bors_bot()))
-                .await;
+                .await?;
             // Returning here will make sure that no comments were received
             Ok(tester)
         })

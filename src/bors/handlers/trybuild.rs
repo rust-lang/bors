@@ -333,7 +333,7 @@ mod tests {
         BorsBuilder::new(pool)
             .world(world)
             .run_test(|mut tester| async {
-                tester.post_comment("@bors try").await;
+                tester.post_comment("@bors try").await?;
                 assert_eq!(
                     tester.get_comment().await,
                     "@default-user: :key: Insufficient privileges: not in try users"
@@ -346,7 +346,7 @@ mod tests {
     #[sqlx::test]
     async fn try_merge_comment(pool: sqlx::PgPool) {
         run_test(pool, |mut tester| async {
-            tester.post_comment("@bors try").await;
+            tester.post_comment("@bors try").await?;
             assert_eq!(
                 tester.get_comment().await,
                 ":hourglass: Trying commit pr-1-sha with merge merge-main-sha1-pr-1-sha…"
@@ -359,7 +359,7 @@ mod tests {
     #[sqlx::test]
     async fn try_merge_branch_history(pool: sqlx::PgPool) {
         let world = run_test(pool, |mut tester| async {
-            tester.post_comment("@bors try").await;
+            tester.post_comment("@bors try").await?;
             tester.expect_comments(1).await;
             Ok(tester)
         })
@@ -381,7 +381,7 @@ mod tests {
         let world = run_test(pool, |mut tester| async {
             tester
                 .post_comment("@bors try parent=ea9c1b050cc8b420c2c211d2177811e564a4dc60")
-                .await;
+                .await?;
             tester.expect_comments(1).await;
             Ok(tester)
         })
