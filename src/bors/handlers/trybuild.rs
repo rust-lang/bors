@@ -316,14 +316,12 @@ async fn check_try_permissions<Client: RepositoryClient>(
 #[cfg(test)]
 mod tests {
     use crate::bors::handlers::trybuild::{TRY_BRANCH_NAME, TRY_MERGE_BRANCH_NAME};
-    use crate::database::{BuildStatus, DbClient, WorkflowStatus, WorkflowType};
+    use crate::database::{BuildStatus, DbClient};
     use crate::github::{CommitSha, LabelTrigger, MergeError, PullRequestNumber};
     use crate::tests::database::MockedDBClient;
-    use crate::tests::event::{
-        default_pr_number, suite_failure, suite_pending, suite_success, WorkflowStartedBuilder,
-    };
+    use crate::tests::event::default_pr_number;
     use crate::tests::mocks::{
-        default_repo_name, run_test, BorsBuilder, Permissions, TestWorkflowStatus, World,
+        default_repo_name, run_test, BorsBuilder, Permissions, TestWorkflowStatus, Workflow, World,
     };
     use crate::tests::state::{default_merge_sha, ClientBuilder, RepoConfigBuilder};
 
@@ -351,7 +349,7 @@ mod tests {
             tester.post_comment("@bors try").await?;
             assert_eq!(
                 tester.get_comment().await?,
-                ":hourglass: Trying commit pr-1-sha with merge merge-main-sha1-pr-1-sha…"
+                ":hourglass: Trying commit pr-1-sha with merge merge-main-sha1-pr-1-sha-0…"
             );
             Ok(tester)
         })
@@ -369,12 +367,12 @@ mod tests {
         world.check_sha_history(
             default_repo_name(),
             TRY_MERGE_BRANCH_NAME,
-            &["main-sha1", "merge-main-sha1-pr-1-sha"],
+            &["main-sha1", "merge-main-sha1-pr-1-sha-0"],
         );
         world.check_sha_history(
             default_repo_name(),
             TRY_BRANCH_NAME,
-            &["merge-main-sha1-pr-1-sha"],
+            &["merge-main-sha1-pr-1-sha-0"],
         );
     }
 
@@ -393,7 +391,7 @@ mod tests {
             TRY_MERGE_BRANCH_NAME,
             &[
                 "ea9c1b050cc8b420c2c211d2177811e564a4dc60",
-                "merge-ea9c1b050cc8b420c2c211d2177811e564a4dc60-pr-1-sha",
+                "merge-ea9c1b050cc8b420c2c211d2177811e564a4dc60-pr-1-sha-0",
             ],
         );
     }
@@ -540,137 +538,144 @@ mod tests {
     }
 
     #[sqlx::test]
-    async fn test_try_cancel_no_running_build(pool: sqlx::PgPool) {
-        let state = ClientBuilder::default().pool(pool).create_state().await;
-
-        state.comment("@bors try cancel").await;
-
-        insta::assert_snapshot!(state.client().get_last_comment(default_pr_number()), @":exclamation: There is currently no try build in progress.");
-    }
-
-    #[sqlx::test]
-    async fn test_try_cancel_cancel_workflows(pool: sqlx::PgPool) {
-        let state = ClientBuilder::default().pool(pool).create_state().await;
-
-        state.comment("@bors try").await;
-        state
-            .workflow_started(
-                WorkflowStartedBuilder::default()
-                    .branch(TRY_BRANCH_NAME.to_string())
-                    .run_id(123),
-            )
+    async fn try_cancel_no_running_build(pool: sqlx::PgPool) {
+        run_test(pool, |mut tester| async {
+            tester.post_comment("@bors try cancel").await?;
+            insta::assert_snapshot!(tester.get_comment().await?, @":exclamation: There is currently no try build in progress.");
+            Ok(tester)
+        })
             .await;
-        state
-            .workflow_started(
-                WorkflowStartedBuilder::default()
-                    .branch(TRY_BRANCH_NAME.to_string())
-                    .run_id(124),
-            )
-            .await;
-        state.comment("@bors try cancel").await;
-        state.client().check_cancelled_workflows(&[123, 124]);
-
-        insta::assert_snapshot!(state.client().get_last_comment(default_pr_number()), @r###"
-        Try build cancelled.
-        Cancelled workflows:
-        - https://github.com/owner/name/actions/runs/123
-        - https://github.com/owner/name/actions/runs/124
-        "###);
     }
 
     #[sqlx::test]
-    async fn test_try_cancel_error(pool: sqlx::PgPool) {
-        let mut db = MockedDBClient::new(pool);
-        db.get_workflows_for_build = Some(Box::new(|| Err(anyhow::anyhow!("Errr"))));
-        let state = ClientBuilder::default().db(db).create_state().await;
+    async fn try_cancel_cancel_workflows(pool: sqlx::PgPool) {
+        let world = run_test(pool, |mut tester| async {
+            tester.post_comment("@bors try").await?;
+            tester.expect_comments(1).await;
 
-        state.comment("@bors try").await;
-        state.comment("@bors try cancel").await;
-        let name = default_repo_name();
-        let pr = state
-            .db
-            .get_or_create_pull_request(&name, PullRequestNumber(default_pr_number()))
-            .await
-            .unwrap();
-        let build = pr.try_build.unwrap();
-        assert_eq!(build.status, BuildStatus::Cancelled);
-
-        insta::assert_snapshot!(state.client().get_last_comment(default_pr_number()), @"Try build was cancelled. It was not possible to cancel some workflows.");
+            let branch = tester.get_branch(TRY_BRANCH_NAME);
+            tester
+                .workflow(Workflow::started(branch.clone()).with_run_id(123))
+                .await?;
+            tester
+                .workflow(Workflow::started(branch.clone()).with_run_id(124))
+                .await?;
+            tester.post_comment("@bors try cancel").await?;
+            insta::assert_snapshot!(tester.get_comment().await?, @r###"
+            Try build cancelled.
+            Cancelled workflows:
+            - https://github.com/rust-lang/borstest/actions/runs/123
+            - https://github.com/rust-lang/borstest/actions/runs/124
+            "###);
+            Ok(tester)
+        })
+        .await;
+        world.check_cancelled_workflows(default_repo_name(), &[123, 124]);
     }
 
     #[sqlx::test]
-    async fn test_try_cancel_ignore_finished_workflows(pool: sqlx::PgPool) {
-        let state = ClientBuilder::default().pool(pool).create_state().await;
-        state.client().set_checks(
-            &default_merge_sha(),
-            &[suite_success(), suite_failure(), suite_pending()],
+    async fn try_cancel_error(pool: sqlx::PgPool) {
+        run_test(pool, |mut tester| async {
+            tester.default_repo().lock().workflow_cancel_error = true;
+            tester.post_comment("@bors try").await?;
+            tester.expect_comments(1).await;
+            tester
+                .workflow(Workflow::started(tester.get_branch(TRY_BRANCH_NAME)))
+                .await?;
+            tester.post_comment("@bors try cancel").await?;
+            insta::assert_snapshot!(tester.get_comment().await?, @"Try build was cancelled. It was not possible to cancel some workflows.");
+            Ok(tester)
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn try_cancel_cancel_in_db(pool: sqlx::PgPool) {
+        run_test(pool, |mut tester| async {
+            tester.default_repo().lock().workflow_cancel_error = true;
+            tester.post_comment("@bors try").await?;
+            tester.expect_comments(1).await;
+            tester.post_comment("@bors try cancel").await?;
+            tester.expect_comments(1).await;
+            let pr = tester
+                .db()
+                .get_or_create_pull_request(
+                    &default_repo_name(),
+                    PullRequestNumber(default_pr_number()),
+                )
+                .await?;
+            assert_eq!(pr.try_build.unwrap().status, BuildStatus::Cancelled);
+            Ok(tester)
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn try_cancel_ignore_finished_workflows(pool: sqlx::PgPool) {
+        let world = run_test(pool, |mut tester| async {
+            tester.create_branch(TRY_BRANCH_NAME).expect_suites(3);
+            tester.post_comment("@bors try").await?;
+            tester.expect_comments(1).await;
+            tester
+                .workflow_events(1, TRY_BRANCH_NAME, TestWorkflowStatus::Success)
+                .await?;
+            tester
+                .workflow_events(2, TRY_BRANCH_NAME, TestWorkflowStatus::Failure)
+                .await?;
+            tester
+                .workflow(Workflow::started(tester.get_branch(TRY_BRANCH_NAME)).with_run_id(3))
+                .await?;
+            tester.post_comment("@bors try cancel").await?;
+            tester.expect_comments(1).await;
+            Ok(tester)
+        })
+        .await;
+        world.check_cancelled_workflows(default_repo_name(), &[3]);
+    }
+
+    // TODO: implement mocking for check_run
+    // #[sqlx::test]
+    // async fn test_try_cancel_ignore_external_workflows(pool: sqlx::PgPool) {
+    //     let state = ClientBuilder::default().pool(pool).create_state().await;
+    //     state
+    //         .client()
+    //         .set_checks(&default_merge_sha(), &[suite_success()]);
+    //
+    //     state.comment("@bors try").await;
+    //     state
+    //         .workflow_started(
+    //             WorkflowStartedBuilder::default()
+    //                 .branch(TRY_BRANCH_NAME.to_string())
+    //                 .run_id(123)
+    //                 .workflow_type(WorkflowType::External),
+    //         )
+    //         .await;
+    //     state.comment("@bors try cancel").await;
+    //     state.client().check_cancelled_workflows(&[]);
+    // }
+
+    #[sqlx::test]
+    async fn try_workflow_start_after_cancel(pool: sqlx::PgPool) {
+        run_test(pool.clone(), |mut tester| async {
+            tester.post_comment("@bors try").await?;
+            tester.expect_comments(1).await;
+            tester.post_comment("@bors try cancel").await?;
+            tester.expect_comments(1).await;
+
+            tester
+                .workflow(Workflow::started(tester.get_branch(TRY_BRANCH_NAME)))
+                .await?;
+            Ok(tester)
+        })
+        .await;
+        assert_eq!(
+            MockedDBClient::new(pool)
+                .get_all_workflows()
+                .await
+                .unwrap()
+                .len(),
+            0
         );
-
-        state.comment("@bors try").await;
-        state
-            .perform_workflow_events(
-                1,
-                TRY_BRANCH_NAME,
-                &default_merge_sha(),
-                WorkflowStatus::Success,
-            )
-            .await;
-        state
-            .perform_workflow_events(
-                2,
-                TRY_BRANCH_NAME,
-                &default_merge_sha(),
-                WorkflowStatus::Failure,
-            )
-            .await;
-        state
-            .workflow_started(
-                WorkflowStartedBuilder::default()
-                    .branch(TRY_BRANCH_NAME.to_string())
-                    .run_id(123),
-            )
-            .await;
-        state.comment("@bors try cancel").await;
-        state.client().check_cancelled_workflows(&[123]);
-    }
-
-    #[sqlx::test]
-    async fn test_try_cancel_ignore_external_workflows(pool: sqlx::PgPool) {
-        let state = ClientBuilder::default().pool(pool).create_state().await;
-        state
-            .client()
-            .set_checks(&default_merge_sha(), &[suite_success()]);
-
-        state.comment("@bors try").await;
-        state
-            .workflow_started(
-                WorkflowStartedBuilder::default()
-                    .branch(TRY_BRANCH_NAME.to_string())
-                    .run_id(123)
-                    .workflow_type(WorkflowType::External),
-            )
-            .await;
-        state.comment("@bors try cancel").await;
-        state.client().check_cancelled_workflows(&[]);
-    }
-
-    #[sqlx::test]
-    async fn test_try_workflow_start_after_cancel(pool: sqlx::PgPool) {
-        let state = ClientBuilder::default().pool(pool).create_state().await;
-        state
-            .client()
-            .set_checks(&default_merge_sha(), &[suite_success()]);
-
-        state.comment("@bors try").await;
-        state.comment("@bors try cancel").await;
-        state
-            .workflow_started(
-                WorkflowStartedBuilder::default()
-                    .branch(TRY_BRANCH_NAME.to_string())
-                    .run_id(123),
-            )
-            .await;
-        assert_eq!(state.db.get_all_workflows().await.unwrap().len(), 0);
     }
 
     // #[sqlx::test]

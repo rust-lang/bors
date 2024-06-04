@@ -33,6 +33,8 @@ pub struct Repo {
     // don't expect.
     pub known_prs: Vec<u64>,
     pub branches: Vec<Branch>,
+    pub cancelled_workflows: Vec<u64>,
+    pub workflow_cancel_error: bool,
 }
 
 impl Repo {
@@ -43,6 +45,8 @@ impl Repo {
             config,
             known_prs: vec![default_pr_number()],
             branches: vec![Branch::default()],
+            cancelled_workflows: vec![],
+            workflow_cancel_error: false,
         }
     }
 
@@ -57,6 +61,10 @@ impl Repo {
 
     pub fn get_branch_by_sha(&mut self, sha: &str) -> Option<&mut Branch> {
         self.branches.iter_mut().find(|b| b.sha == sha)
+    }
+
+    pub fn add_cancelled_workflow(&mut self, run_id: u64) {
+        self.cancelled_workflows.push(run_id);
     }
 }
 
@@ -204,6 +212,7 @@ pub async fn mock_repo(
 ) {
     mock_pull_requests(repo.clone(), comments_tx, mock_server).await;
     mock_branches(repo.clone(), mock_server).await;
+    mock_cancel_workflow(repo.clone(), mock_server).await;
     mock_config(repo, mock_server).await;
 }
 
@@ -213,6 +222,26 @@ async fn mock_branches(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
     mock_update_branch(repo.clone(), mock_server).await;
     mock_merge_branch(repo.clone(), mock_server).await;
     mock_check_suites(repo, mock_server).await;
+}
+
+async fn mock_cancel_workflow(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
+    let repo_name = repo.lock().name.clone();
+    dynamic_mock_req(
+        move |_req: &Request, [run_id]: [&str; 1]| {
+            let run_id: u64 = run_id.parse().unwrap();
+            let mut repo = repo.lock();
+            if repo.workflow_cancel_error {
+                ResponseTemplate::new(500)
+            } else {
+                repo.add_cancelled_workflow(run_id);
+                ResponseTemplate::new(200)
+            }
+        },
+        "POST",
+        format!("^/repos/{repo_name}/actions/runs/(.*)/cancel$"),
+    )
+    .mount(mock_server)
+    .await;
 }
 
 async fn mock_get_branch(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {

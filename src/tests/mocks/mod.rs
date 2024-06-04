@@ -69,6 +69,13 @@ impl World {
         let actual_shas: Vec<&str> = actual_shas.iter().map(|s| s.as_str()).collect();
         assert_eq!(actual_shas, expected_shas);
     }
+
+    pub fn check_cancelled_workflows(&self, repo: GithubRepoName, expected_run_ids: &[u64]) {
+        assert_eq!(
+            &self.get_repo(repo).lock().cancelled_workflows,
+            expected_run_ids
+        );
+    }
 }
 
 impl Default for World {

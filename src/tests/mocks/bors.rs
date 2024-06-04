@@ -5,13 +5,12 @@ use std::sync::Arc;
 
 use axum::Router;
 use parking_lot::lock_api::MappedMutexGuard;
-use parking_lot::{MutexGuard, RawMutex};
+use parking_lot::{Mutex, MutexGuard, RawMutex};
 use serde::Serialize;
 use sqlx::PgPool;
 use tokio::task::JoinHandle;
 use tower::Service;
 
-use crate::database::DbClient;
 use crate::github::api::load_repositories;
 use crate::tests::database::MockedDBClient;
 use crate::tests::event::default_pr_number;
@@ -23,8 +22,7 @@ use crate::tests::mocks::workflow::{
 use crate::tests::mocks::{default_repo_name, Branch, ExternalHttpMock, Repo, World};
 use crate::tests::webhook::{create_webhook_request, TEST_WEBHOOK_SECRET};
 use crate::{
-    create_app, create_bors_process, BorsContext, CommandParser, PgDbClient, ServerState,
-    WebhookSecret,
+    create_app, create_bors_process, BorsContext, CommandParser, ServerState, WebhookSecret,
 };
 
 pub struct BorsBuilder {
@@ -129,6 +127,10 @@ impl BorsTester {
 
     pub fn db(&self) -> Arc<MockedDBClient> {
         self.db.clone()
+    }
+
+    pub fn default_repo(&mut self) -> Arc<Mutex<Repo>> {
+        self.world.get_repo(default_repo_name())
     }
 
     pub fn create_branch(&mut self, name: &str) -> MappedMutexGuard<RawMutex, Branch> {

@@ -1,8 +1,8 @@
 use derive_builder::Builder;
 use octocrab::models::{RunId, UserId};
 
+use crate::bors::event;
 use crate::bors::event::PullRequestComment;
-use crate::bors::{event, CheckSuite, CheckSuiteStatus};
 use crate::database::{WorkflowStatus, WorkflowType};
 use crate::github::{CommitSha, GithubRepoName, GithubUser, PullRequestNumber};
 use crate::tests::state::{default_merge_sha, default_repo_name};
@@ -62,24 +62,6 @@ impl From<&str> for PullRequestComment {
 impl From<CommentBuilder> for PullRequestComment {
     fn from(value: CommentBuilder) -> Self {
         value.create()
-    }
-}
-
-pub fn suite_success() -> CheckSuite {
-    CheckSuite {
-        status: CheckSuiteStatus::Success,
-    }
-}
-
-pub fn suite_failure() -> CheckSuite {
-    CheckSuite {
-        status: CheckSuiteStatus::Failure,
-    }
-}
-
-pub fn suite_pending() -> CheckSuite {
-    CheckSuite {
-        status: CheckSuiteStatus::Pending,
     }
 }
 
