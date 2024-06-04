@@ -19,7 +19,6 @@ pub(crate) async fn get_pull_request(
     repo: &GithubRepoName,
     pr_number: PullRequestNumber,
 ) -> anyhow::Result<Option<PullRequestModel>> {
-    println!("Getting PR {repo}/{pr_number}");
     let pull_request = sqlx::query_as!(
         PullRequestModel,
         r#"
@@ -58,7 +57,6 @@ pub(crate) async fn create_pull_request(
     repo: &GithubRepoName,
     pr_number: PullRequestNumber,
 ) -> anyhow::Result<()> {
-    println!("Creating PR {repo}/{pr_number}");
     sqlx::query!(
         "INSERT INTO pull_request (repository, number) VALUES ($1, $2) ON CONFLICT DO NOTHING",
         repo.to_string(),
@@ -66,7 +64,6 @@ pub(crate) async fn create_pull_request(
     )
     .execute(executor)
     .await?;
-    println!("Created PR");
     Ok(())
 }
 
