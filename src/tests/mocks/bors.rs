@@ -13,7 +13,9 @@ use crate::github::api::load_repositories;
 use crate::tests::database::MockedDBClient;
 use crate::tests::event::default_pr_number;
 use crate::tests::mocks::comment::{Comment, GitHubIssueCommentEventPayload};
-use crate::tests::mocks::workflow::{GitHubWorkflowEventPayload, Workflow};
+use crate::tests::mocks::workflow::{
+    CheckSuite, GitHubCheckSuiteEventPayload, GitHubWorkflowEventPayload, Workflow,
+};
 use crate::tests::mocks::{Branch, ExternalHttpMock, Repo, World};
 use crate::tests::webhook::{create_webhook_request, TEST_WEBHOOK_SECRET};
 use crate::{
@@ -47,9 +49,16 @@ impl BorsBuilder {
         self,
         f: F,
     ) -> World {
-        let tester = BorsTester::new(self.pool, self.world).await;
-        let tester = f(tester).await.unwrap();
-        tester.finish().await
+        // We return `tester` and `bors` separately, so that we can finish `bors`
+        // even if `f` returns a result, for better error propagation.
+        let (tester, bors) = BorsTester::new(self.pool, self.world).await;
+        match f(tester).await {
+            Ok(tester) => tester.finish(bors).await,
+            Err(error) => {
+                let result = bors.await;
+                panic!("Error in run_test\n{result:?}\n{error:?}");
+            }
+        }
     }
 }
 
@@ -64,9 +73,8 @@ pub async fn run_test<
     BorsBuilder::new(pool).run_test(f).await
 }
 
-/// Represents a running bors web application and also the background
-/// bors process. This structure should be used in tests to test interaction
-/// with the bot.
+/// Represents a running bors web application. This structure should be used
+/// in tests to test interaction with the bot.
 ///
 /// Dropping this struct will drop `app`, which will close the
 /// send channels for the bors process, which should stop its async task.
@@ -74,11 +82,10 @@ pub struct BorsTester {
     app: Router,
     http_mock: ExternalHttpMock,
     world: World,
-    bors: JoinHandle<()>,
 }
 
 impl BorsTester {
-    async fn new(pool: PgPool, world: World) -> Self {
+    async fn new(pool: PgPool, world: World) -> (Self, JoinHandle<()>) {
         let mock = ExternalHttpMock::start(&world).await;
         let db = MockedDBClient::new(pool);
 
@@ -103,12 +110,14 @@ impl BorsTester {
         );
         let app = create_app(state);
         let bors = tokio::spawn(bors_process);
-        Self {
-            app,
-            http_mock: mock,
-            world,
+        (
+            Self {
+                app,
+                http_mock: mock,
+                world,
+            },
             bors,
-        }
+        )
     }
 
     pub fn get_branch(&self, name: &str) -> Branch {
@@ -144,6 +153,10 @@ impl BorsTester {
         self.webhook_workflow(workflow.into()).await
     }
 
+    pub async fn check_suite<C: Into<CheckSuite>>(&mut self, check_suite: C) -> anyhow::Result<()> {
+        self.webhook_check_suite(check_suite.into()).await
+    }
+
     async fn webhook_comment(&mut self, comment: Comment) -> anyhow::Result<()> {
         self.send_webhook(
             "issue_comment",
@@ -155,6 +168,14 @@ impl BorsTester {
     async fn webhook_workflow(&mut self, workflow: Workflow) -> anyhow::Result<()> {
         self.send_webhook("workflow_run", GitHubWorkflowEventPayload::from(workflow))
             .await
+    }
+
+    async fn webhook_check_suite(&mut self, check_suite: CheckSuite) -> anyhow::Result<()> {
+        self.send_webhook(
+            "check_suite",
+            GitHubCheckSuiteEventPayload::from(check_suite),
+        )
+        .await
     }
 
     async fn send_webhook<S: Serialize>(&mut self, event: &str, content: S) -> anyhow::Result<()> {
@@ -179,11 +200,11 @@ impl BorsTester {
         Ok(())
     }
 
-    pub async fn finish(self) -> World {
+    pub async fn finish(self, bors: JoinHandle<()>) -> World {
         // Make sure that the event channel senders are closed
         drop(self.app);
         // Wait until all events are handled in the bors service
-        self.bors.await.unwrap();
+        bors.await.unwrap();
         // Flush any local queues
         self.http_mock.gh_server.assert_empty_queues().await;
         self.world
