@@ -228,49 +228,44 @@ mod tests {
     }
 
     #[sqlx::test]
-    async fn test_workflow_completed_unknown_build(pool: sqlx::PgPool) {
-        let state = ClientBuilder::default().pool(pool).create_state().await;
-
-        state
-            .workflow_completed(
-                WorkflowCompletedBuilder::default()
-                    .status(WorkflowStatus::Success)
-                    .branch("unknown".to_string())
-                    .commit_sha("unknown-sha-".to_string()),
-            )
-            .await;
-        assert_eq!(state.db.get_all_workflows().await.unwrap().len(), 0);
+    async fn workflow_completed_unknown_build(pool: sqlx::PgPool) {
+        run_test(pool.clone(), |mut tester| async {
+            tester
+                .workflow(Workflow::success(Branch::new("unknown", "unknown-sha")))
+                .await;
+            Ok(tester)
+        })
+        .await;
+        assert_eq!(get_all_workflows(&pool).await.unwrap().len(), 0);
     }
 
     #[sqlx::test]
-    async fn test_try_workflow_started(pool: sqlx::PgPool) {
-        let state = ClientBuilder::default().pool(pool).create_state().await;
-        state.comment("@bors try").await;
-
-        state
-            .workflow_started(
-                WorkflowStartedBuilder::default()
-                    .branch(TRY_BRANCH_NAME.to_string())
-                    .run_id(42),
-            )
-            .await;
-        let suite = state.db.get_all_workflows().await.unwrap().pop().unwrap();
+    async fn try_workflow_started(pool: sqlx::PgPool) {
+        run_test(pool.clone(), |mut tester| async {
+            tester.post_comment("@bors try").await;
+            tester.expect_comments(1).await;
+            tester
+                .workflow(Workflow::started(tester.get_branch(TRY_BRANCH_NAME)))
+                .await;
+            Ok(tester)
+        })
+        .await;
+        let suite = get_all_workflows(&pool).await.unwrap().pop().unwrap();
         assert_eq!(suite.status, WorkflowStatus::Pending);
     }
 
     #[sqlx::test]
-    async fn test_try_workflow_start_twice(pool: sqlx::PgPool) {
-        let state = ClientBuilder::default().pool(pool).create_state().await;
-        state.comment("@bors try").await;
-
-        let event = || {
-            WorkflowStartedBuilder::default()
-                .branch(TRY_BRANCH_NAME.to_string())
-                .run_id(42)
-        };
-        state.workflow_started(event()).await;
-        state.workflow_started(event()).await;
-        assert_eq!(state.db.get_all_workflows().await.unwrap().len(), 1);
+    async fn try_workflow_start_twice(pool: sqlx::PgPool) {
+        run_test(pool.clone(), |mut tester| async {
+            tester.post_comment("@bors try").await;
+            tester.expect_comments(1).await;
+            let event = Workflow::started(tester.get_branch(TRY_BRANCH_NAME));
+            tester.workflow(event.clone()).await;
+            tester.workflow(event).await;
+            Ok(tester)
+        })
+        .await;
+        assert_eq!(get_all_workflows(&pool).await.unwrap().len(), 1);
     }
 
     #[sqlx::test]

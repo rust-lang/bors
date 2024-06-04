@@ -7,6 +7,7 @@ use crate::github::GithubRepoName;
 use crate::tests::mocks::default_repo_name;
 use crate::tests::mocks::repository::{Branch, GitHubRepository};
 
+#[derive(Clone)]
 pub struct Workflow {
     event: WorkflowEvent,
     repository: GithubRepoName,
@@ -18,8 +19,20 @@ pub struct Workflow {
 
 impl Workflow {
     pub fn started(branch: Branch) -> Self {
+        Self::new(WorkflowEvent::Started, branch)
+    }
+    pub fn success(branch: Branch) -> Self {
+        Self::new(
+            WorkflowEvent::Completed {
+                status: "success".to_string(),
+            },
+            branch,
+        )
+    }
+
+    fn new(event: WorkflowEvent, branch: Branch) -> Self {
         Self {
-            event: WorkflowEvent::Started,
+            event,
             repository: default_repo_name(),
             name: "Workflow 1".to_string(),
             run_id: 1,
@@ -29,9 +42,10 @@ impl Workflow {
     }
 }
 
+#[derive(Clone)]
 enum WorkflowEvent {
     Started,
-    Completed,
+    Completed { status: String },
 }
 
 #[derive(serde::Serialize)]
@@ -50,9 +64,9 @@ impl From<Workflow> for GitHubWorkflowEventPayload {
         .parse()
         .unwrap();
         Self {
-            action: match value.event {
+            action: match &value.event {
                 WorkflowEvent::Started => "requested",
-                WorkflowEvent::Completed => "completed",
+                WorkflowEvent::Completed { .. } => "completed",
             }
             .to_string(),
             workflow_run: GitHubWorkflowRun {
@@ -65,7 +79,10 @@ impl From<Workflow> for GitHubWorkflowEventPayload {
                 run_number: 0,
                 event: "".to_string(),
                 status: "".to_string(),
-                conclusion: None,
+                conclusion: match value.event {
+                    WorkflowEvent::Started => None,
+                    WorkflowEvent::Completed { status } => Some(status),
+                },
                 created_at: Default::default(),
                 updated_at: Default::default(),
                 url: url.clone(),

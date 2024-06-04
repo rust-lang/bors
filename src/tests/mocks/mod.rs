@@ -43,6 +43,10 @@ impl World {
         }
     }
 
+    pub fn default_repo(&self) -> Arc<Mutex<Repo>> {
+        self.get_repo(default_repo_name())
+    }
+
     pub fn get_repo(&self, name: GithubRepoName) -> Arc<Mutex<Repo>> {
         self.repos.get(&name).unwrap().clone()
     }

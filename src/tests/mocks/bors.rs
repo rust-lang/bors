@@ -13,7 +13,7 @@ use crate::tests::database::MockedDBClient;
 use crate::tests::event::default_pr_number;
 use crate::tests::mocks::comment::{Comment, GitHubIssueCommentEventPayload};
 use crate::tests::mocks::workflow::{GitHubWorkflowEventPayload, Workflow};
-use crate::tests::mocks::{ExternalHttpMock, Repo, World};
+use crate::tests::mocks::{Branch, ExternalHttpMock, Repo, World};
 use crate::tests::webhook::{create_webhook_request, TEST_WEBHOOK_SECRET};
 use crate::{
     create_app, create_bors_process, BorsContext, CommandParser, ServerState, WebhookSecret,
@@ -108,6 +108,15 @@ impl BorsTester {
             world,
             bors,
         }
+    }
+
+    pub fn get_branch(&self, name: &str) -> Branch {
+        self.world
+            .default_repo()
+            .lock()
+            .get_branch(name)
+            .unwrap()
+            .clone()
     }
 
     /// Wait until the next bot comment is received on the default repo and the default PR.
