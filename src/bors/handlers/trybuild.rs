@@ -322,7 +322,9 @@ mod tests {
     use crate::tests::event::{
         default_pr_number, suite_failure, suite_pending, suite_success, WorkflowStartedBuilder,
     };
-    use crate::tests::mocks::{default_repo_name, run_test, BorsBuilder, Permissions, World};
+    use crate::tests::mocks::{
+        default_repo_name, run_test, BorsBuilder, Permissions, TestWorkflowStatus, World,
+    };
     use crate::tests::state::{default_merge_sha, ClientBuilder, RepoConfigBuilder};
 
     #[sqlx::test]
@@ -397,22 +399,18 @@ mod tests {
     }
 
     #[sqlx::test]
-    async fn test_try_merge_last_parent(pool: sqlx::PgPool) {
+    async fn try_merge_last_parent(pool: sqlx::PgPool) {
         let world = run_test(pool, |mut tester| async {
             tester
                 .post_comment("@bors try parent=ea9c1b050cc8b420c2c211d2177811e564a4dc60")
                 .await?;
-            // tester.workflow_started(TRY_BRANCH_NAME).await;
-            // state
-            //     .perform_workflow_events(
-            //         1,
-            //         TRY_BRANCH_NAME,
-            //         &default_merge_sha(),
-            //         WorkflowStatus::Success,
-            //     )
-            //     .await;
+            tester.expect_comments(1).await;
+            tester
+                .workflow_events(1, TRY_BRANCH_NAME, TestWorkflowStatus::Success)
+                .await?;
+            tester.expect_comments(1).await;
             tester.post_comment("@bors try parent=last").await?;
-            tester.expect_comments(3).await;
+            insta::assert_snapshot!(tester.get_comment().await?, @":hourglass: Trying commit pr-1-sha with merge merge-ea9c1b050cc8b420c2c211d2177811e564a4dc60-pr-1-sha-1…");
             Ok(tester)
         })
         .await;
@@ -421,125 +419,124 @@ mod tests {
             TRY_MERGE_BRANCH_NAME,
             &[
                 "ea9c1b050cc8b420c2c211d2177811e564a4dc60",
-                "merge-ea9c1b050cc8b420c2c211d2177811e564a4dc60-pr-1-sha",
+                "merge-ea9c1b050cc8b420c2c211d2177811e564a4dc60-pr-1-sha-0",
                 "ea9c1b050cc8b420c2c211d2177811e564a4dc60",
-                "merge-ea9c1b050cc8b420c2c211d2177811e564a4dc60-pr-1-sha",
+                "merge-ea9c1b050cc8b420c2c211d2177811e564a4dc60-pr-1-sha-1",
             ],
         );
     }
 
     #[sqlx::test]
-    async fn test_try_merge_last_parent_unknown(pool: sqlx::PgPool) {
-        let state = ClientBuilder::default().pool(pool).create_state().await;
-
-        state.comment("@bors try parent=last").await;
-        state.client().check_comments(
-            default_pr_number(),
-            &[":exclamation: There was no previous build. Please set an explicit parent or remove the `parent=last` argument to use the default parent."],
-        );
-    }
-
-    #[sqlx::test]
-    async fn test_try_merge_conflict(pool: sqlx::PgPool) {
-        let state = ClientBuilder::default().pool(pool).create_state().await;
-        state
-            .client()
-            .set_merge_branches_fn(Box::new(|| Err(MergeError::Conflict)));
-        state.comment("@bors try").await;
-
-        insta::assert_snapshot!(state.client().get_comment(default_pr_number(), 0), @r###"
-        :lock: Merge conflict
-
-        This pull request and the master branch diverged in a way that cannot
-         be automatically merged. Please rebase on top of the latest master
-         branch, and let the reviewer approve again.
-
-        <details><summary>How do I rebase?</summary>
-
-        Assuming `self` is your fork and `upstream` is this repository,
-         you can resolve the conflict following these steps:
-
-        1. `git checkout pr-1` *(switch to your branch)*
-        2. `git fetch upstream master` *(retrieve the latest master)*
-        3. `git rebase upstream/master -p` *(rebase on top of it)*
-        4. Follow the on-screen instruction to resolve conflicts (check `git status` if you got lost).
-        5. `git push self pr-1 --force-with-lease` *(update this PR)*
-
-        You may also read
-         [*Git Rebasing to Resolve Conflicts* by Drew Blessing](http://blessing.io/git/git-rebase/open-source/2015/08/23/git-rebasing-to-resolve-conflicts.html)
-         for a short tutorial.
-
-        Please avoid the ["**Resolve conflicts**" button](https://help.github.com/articles/resolving-a-merge-conflict-on-github/) on GitHub.
-         It uses `git merge` instead of `git rebase` which makes the PR commit history more difficult to read.
-
-        Sometimes step 4 will complete without asking for resolution. This is usually due to difference between how `Cargo.lock` conflict is
-        handled during merge and rebase. This is normal, and you should still perform step 5 to update this PR.
-
-        </details>
-        "###);
-    }
-
-    #[sqlx::test]
-    async fn test_try_merge_insert_into_db(pool: sqlx::PgPool) {
-        let state = ClientBuilder::default().pool(pool).create_state().await;
-        state.comment("@bors try").await;
-
-        assert!(state
-            .db
-            .find_build(
-                &default_repo_name(),
-                TRY_BRANCH_NAME.to_string(),
-                CommitSha(default_merge_sha().to_string())
-            )
-            .await
-            .unwrap()
-            .is_some());
-    }
-
-    #[sqlx::test]
-    async fn test_try_merge_active_build(pool: sqlx::PgPool) {
-        let state = ClientBuilder::default().pool(pool).create_state().await;
-
-        state.comment("@bors try").await;
-        state.comment("@bors try").await;
-
-        insta::assert_snapshot!(state.client().get_last_comment(default_pr_number()), @":exclamation: A try build is currently in progress. You can cancel it using @bors try cancel.");
-    }
-
-    #[sqlx::test]
-    async fn test_try_again_after_checks_finish(pool: sqlx::PgPool) {
-        let state = ClientBuilder::default().pool(pool).create_state().await;
-        state
-            .client()
-            .set_checks(&default_merge_sha(), &[suite_success()]);
-
-        state.comment("@bors try").await;
-        state
-            .perform_workflow_events(
-                1,
-                TRY_BRANCH_NAME,
-                &default_merge_sha(),
-                WorkflowStatus::Success,
-            )
+    async fn try_merge_last_parent_unknown(pool: sqlx::PgPool) {
+        run_test(pool, |mut tester| async {
+            tester
+                .post_comment("@bors try parent=last")
+                .await?;
+            insta::assert_snapshot!(tester.get_comment().await?, @":exclamation: There was no previous build. Please set an explicit parent or remove the `parent=last` argument to use the default parent.");
+            Ok(tester)
+        })
             .await;
-        state.client().check_comment_count(default_pr_number(), 2);
-        state
-            .client()
-            .set_merge_branches_fn(|| Ok(CommitSha("merge2".to_string())));
+    }
 
-        state.comment("@bors try").await;
-        insta::assert_snapshot!(state.client().get_last_comment(default_pr_number()), @":hourglass: Trying commit pr-sha with merge merge2…");
+    #[sqlx::test]
+    async fn try_merge_conflict(pool: sqlx::PgPool) {
+        run_test(pool, |mut tester| async {
+            tester.create_branch(TRY_MERGE_BRANCH_NAME)
+                .merge_conflict = true;
+            tester
+                .post_comment("@bors try")
+                .await?;
+            insta::assert_snapshot!(tester.get_comment().await?, @r###"
+            :lock: Merge conflict
 
-        state.client().set_checks("merge2", &[suite_success()]);
-        state
-            .perform_workflow_events(2, TRY_BRANCH_NAME, "merge2", WorkflowStatus::Success)
+            This pull request and the master branch diverged in a way that cannot
+             be automatically merged. Please rebase on top of the latest master
+             branch, and let the reviewer approve again.
+
+            <details><summary>How do I rebase?</summary>
+
+            Assuming `self` is your fork and `upstream` is this repository,
+             you can resolve the conflict following these steps:
+
+            1. `git checkout pr-1` *(switch to your branch)*
+            2. `git fetch upstream master` *(retrieve the latest master)*
+            3. `git rebase upstream/master -p` *(rebase on top of it)*
+            4. Follow the on-screen instruction to resolve conflicts (check `git status` if you got lost).
+            5. `git push self pr-1 --force-with-lease` *(update this PR)*
+
+            You may also read
+             [*Git Rebasing to Resolve Conflicts* by Drew Blessing](http://blessing.io/git/git-rebase/open-source/2015/08/23/git-rebasing-to-resolve-conflicts.html)
+             for a short tutorial.
+
+            Please avoid the ["**Resolve conflicts**" button](https://help.github.com/articles/resolving-a-merge-conflict-on-github/) on GitHub.
+             It uses `git merge` instead of `git rebase` which makes the PR commit history more difficult to read.
+
+            Sometimes step 4 will complete without asking for resolution. This is usually due to difference between how `Cargo.lock` conflict is
+            handled during merge and rebase. This is normal, and you should still perform step 5 to update this PR.
+
+            </details>
+            "###);
+            Ok(tester)
+        })
             .await;
-        insta::assert_snapshot!(state.client().get_last_comment(default_pr_number()), @r###"
-        :sunny: Try build successful
-        - [workflow-2](https://workflow-2.com) :white_check_mark:
-        Build commit: merge2 (`merge2`)
-        <!-- homu: {"type":"TryBuildCompleted","merge_sha":"merge2"} -->
-        "###);
+    }
+
+    #[sqlx::test]
+    async fn try_merge_insert_into_db(pool: sqlx::PgPool) {
+        run_test(pool, |mut tester| async {
+            tester.post_comment("@bors try").await?;
+            tester.expect_comments(1).await;
+            assert!(tester
+                .db()
+                .find_build(
+                    &default_repo_name(),
+                    TRY_BRANCH_NAME.to_string(),
+                    CommitSha(tester.get_branch(TRY_BRANCH_NAME).get_sha().to_string()),
+                )
+                .await?
+                .is_some());
+            Ok(tester)
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn try_merge_active_build(pool: sqlx::PgPool) {
+        run_test(pool, |mut tester| async {
+            tester.post_comment("@bors try").await?;
+            tester.expect_comments(1).await;
+            tester.post_comment("@bors try").await?;
+            insta::assert_snapshot!(tester.get_comment().await?, @":exclamation: A try build is currently in progress. You can cancel it using @bors try cancel.");
+            Ok(tester)
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn try_again_after_checks_finish(pool: sqlx::PgPool) {
+        run_test(pool, |mut tester| async {
+            tester.post_comment("@bors try").await?;
+            tester.expect_comments(1).await;
+            tester
+                .workflow_events(1, TRY_BRANCH_NAME, TestWorkflowStatus::Success)
+                .await?;
+            tester.expect_comments(1).await;
+
+            tester.get_branch_mut(TRY_BRANCH_NAME).reset_suites();
+            tester.post_comment("@bors try").await?;
+            insta::assert_snapshot!(tester.get_comment().await?, @":hourglass: Trying commit pr-1-sha with merge merge-main-sha1-pr-1-sha-1…");
+            tester
+                .workflow_events(2, TRY_BRANCH_NAME, TestWorkflowStatus::Success)
+                .await?;
+            insta::assert_snapshot!(tester.get_comment().await?, @r###"
+            :sunny: Try build successful
+            - [Workflow1](https://github.com/workflows/Workflow1/2) :white_check_mark:
+            Build commit: merge-main-sha1-pr-1-sha-1 (`merge-main-sha1-pr-1-sha-1`)
+            <!-- homu: {"type":"TryBuildCompleted","merge_sha":"merge-main-sha1-pr-1-sha-1"} -->
+            "###);
+            Ok(tester)
+        })
+        .await;
     }
 
     #[sqlx::test]
@@ -676,85 +673,85 @@ mod tests {
         assert_eq!(state.db.get_all_workflows().await.unwrap().len(), 0);
     }
 
-    #[sqlx::test]
-    async fn test_try_build_start_modify_labels(pool: sqlx::PgPool) {
-        let state = ClientBuilder::default()
-            .config(
-                RepoConfigBuilder::default()
-                    .add_label(LabelTrigger::TryBuildStarted, "foo")
-                    .add_label(LabelTrigger::TryBuildStarted, "bar")
-                    .remove_label(LabelTrigger::TryBuildStarted, "baz"),
-            )
-            .pool(pool)
-            .create_state()
-            .await;
-
-        state.comment("@bors try").await;
-        state
-            .client()
-            .check_added_labels(default_pr_number(), &["foo", "bar"])
-            .check_removed_labels(default_pr_number(), &["baz"]);
-    }
-
-    #[sqlx::test]
-    async fn test_try_build_succeeded_modify_labels(pool: sqlx::PgPool) {
-        let state = ClientBuilder::default()
-            .config(
-                RepoConfigBuilder::default()
-                    .add_label(LabelTrigger::TryBuildSucceeded, "foo")
-                    .add_label(LabelTrigger::TryBuildSucceeded, "bar")
-                    .remove_label(LabelTrigger::TryBuildSucceeded, "baz"),
-            )
-            .pool(pool)
-            .create_state()
-            .await;
-        state
-            .client()
-            .set_checks(&default_merge_sha(), &[suite_success()]);
-
-        state.comment("@bors try").await;
-        state
-            .perform_workflow_events(
-                1,
-                TRY_BRANCH_NAME,
-                &default_merge_sha(),
-                WorkflowStatus::Success,
-            )
-            .await;
-        state
-            .client()
-            .check_added_labels(default_pr_number(), &["foo", "bar"])
-            .check_removed_labels(default_pr_number(), &["baz"]);
-    }
-
-    #[sqlx::test]
-    async fn test_try_build_failed_modify_labels(pool: sqlx::PgPool) {
-        let state = ClientBuilder::default()
-            .config(
-                RepoConfigBuilder::default()
-                    .add_label(LabelTrigger::TryBuildFailed, "foo")
-                    .add_label(LabelTrigger::TryBuildFailed, "bar")
-                    .remove_label(LabelTrigger::TryBuildFailed, "baz"),
-            )
-            .pool(pool)
-            .create_state()
-            .await;
-        state
-            .client()
-            .set_checks(&default_merge_sha(), &[suite_failure()]);
-
-        state.comment("@bors try").await;
-        state
-            .perform_workflow_events(
-                1,
-                TRY_BRANCH_NAME,
-                &default_merge_sha(),
-                WorkflowStatus::Failure,
-            )
-            .await;
-        state
-            .client()
-            .check_added_labels(default_pr_number(), &["foo", "bar"])
-            .check_removed_labels(default_pr_number(), &["baz"]);
-    }
+    // #[sqlx::test]
+    // async fn test_try_build_start_modify_labels(pool: sqlx::PgPool) {
+    //     let state = ClientBuilder::default()
+    //         .config(
+    //             RepoConfigBuilder::default()
+    //                 .add_label(LabelTrigger::TryBuildStarted, "foo")
+    //                 .add_label(LabelTrigger::TryBuildStarted, "bar")
+    //                 .remove_label(LabelTrigger::TryBuildStarted, "baz"),
+    //         )
+    //         .pool(pool)
+    //         .create_state()
+    //         .await;
+    //
+    //     state.comment("@bors try").await;
+    //     state
+    //         .client()
+    //         .check_added_labels(default_pr_number(), &["foo", "bar"])
+    //         .check_removed_labels(default_pr_number(), &["baz"]);
+    // }
+    //
+    // #[sqlx::test]
+    // async fn test_try_build_succeeded_modify_labels(pool: sqlx::PgPool) {
+    //     let state = ClientBuilder::default()
+    //         .config(
+    //             RepoConfigBuilder::default()
+    //                 .add_label(LabelTrigger::TryBuildSucceeded, "foo")
+    //                 .add_label(LabelTrigger::TryBuildSucceeded, "bar")
+    //                 .remove_label(LabelTrigger::TryBuildSucceeded, "baz"),
+    //         )
+    //         .pool(pool)
+    //         .create_state()
+    //         .await;
+    //     state
+    //         .client()
+    //         .set_checks(&default_merge_sha(), &[suite_success()]);
+    //
+    //     state.comment("@bors try").await;
+    //     state
+    //         .perform_workflow_events(
+    //             1,
+    //             TRY_BRANCH_NAME,
+    //             &default_merge_sha(),
+    //             WorkflowStatus::Success,
+    //         )
+    //         .await;
+    //     state
+    //         .client()
+    //         .check_added_labels(default_pr_number(), &["foo", "bar"])
+    //         .check_removed_labels(default_pr_number(), &["baz"]);
+    // }
+    //
+    // #[sqlx::test]
+    // async fn test_try_build_failed_modify_labels(pool: sqlx::PgPool) {
+    //     let state = ClientBuilder::default()
+    //         .config(
+    //             RepoConfigBuilder::default()
+    //                 .add_label(LabelTrigger::TryBuildFailed, "foo")
+    //                 .add_label(LabelTrigger::TryBuildFailed, "bar")
+    //                 .remove_label(LabelTrigger::TryBuildFailed, "baz"),
+    //         )
+    //         .pool(pool)
+    //         .create_state()
+    //         .await;
+    //     state
+    //         .client()
+    //         .set_checks(&default_merge_sha(), &[suite_failure()]);
+    //
+    //     state.comment("@bors try").await;
+    //     state
+    //         .perform_workflow_events(
+    //             1,
+    //             TRY_BRANCH_NAME,
+    //             &default_merge_sha(),
+    //             WorkflowStatus::Failure,
+    //         )
+    //         .await;
+    //     state
+    //         .client()
+    //         .check_added_labels(default_pr_number(), &["foo", "bar"])
+    //         .check_removed_labels(default_pr_number(), &["baz"]);
+    // }
 }

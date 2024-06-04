@@ -11,6 +11,7 @@ use sqlx::PgPool;
 use tokio::task::JoinHandle;
 use tower::Service;
 
+use crate::database::DbClient;
 use crate::github::api::load_repositories;
 use crate::tests::database::MockedDBClient;
 use crate::tests::event::default_pr_number;
@@ -22,7 +23,8 @@ use crate::tests::mocks::workflow::{
 use crate::tests::mocks::{default_repo_name, Branch, ExternalHttpMock, Repo, World};
 use crate::tests::webhook::{create_webhook_request, TEST_WEBHOOK_SECRET};
 use crate::{
-    create_app, create_bors_process, BorsContext, CommandParser, ServerState, WebhookSecret,
+    create_app, create_bors_process, BorsContext, CommandParser, PgDbClient, ServerState,
+    WebhookSecret,
 };
 
 pub struct BorsBuilder {
@@ -85,12 +87,13 @@ pub struct BorsTester {
     app: Router,
     http_mock: ExternalHttpMock,
     world: World,
+    db: Arc<MockedDBClient>,
 }
 
 impl BorsTester {
     async fn new(pool: PgPool, world: World) -> (Self, JoinHandle<()>) {
         let mock = ExternalHttpMock::start(&world).await;
-        let db = MockedDBClient::new(pool);
+        let db = Arc::new(MockedDBClient::new(pool));
 
         let loaded_repos = load_repositories(&mock.github_client(), &mock.team_api_client())
             .await
@@ -101,7 +104,7 @@ impl BorsTester {
             repos.insert(name, Arc::new(repo));
         }
 
-        let ctx = BorsContext::new(CommandParser::new("@bors".to_string()), Arc::new(db), repos);
+        let ctx = BorsContext::new(CommandParser::new("@bors".to_string()), db.clone(), repos);
 
         let (repository_tx, global_tx, bors_process) =
             create_bors_process(ctx, mock.github_client(), mock.team_api_client());
@@ -118,9 +121,14 @@ impl BorsTester {
                 app,
                 http_mock: mock,
                 world,
+                db,
             },
             bors,
         )
+    }
+
+    pub fn db(&self) -> Arc<MockedDBClient> {
+        self.db.clone()
     }
 
     pub fn create_branch(&mut self, name: &str) -> MappedMutexGuard<RawMutex, Branch> {
@@ -130,6 +138,13 @@ impl BorsTester {
             repo.branches
                 .push(Branch::new(name, &format!("{name}-empty")));
             repo.branches.last_mut().unwrap()
+        })
+    }
+
+    pub fn get_branch_mut(&mut self, name: &str) -> MappedMutexGuard<RawMutex, Branch> {
+        let repo = self.world.repos.get(&default_repo_name()).unwrap();
+        MutexGuard::map(repo.lock(), move |repo| {
+            repo.get_branch_by_name(name).unwrap()
         })
     }
 

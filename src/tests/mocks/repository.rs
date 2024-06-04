@@ -92,6 +92,8 @@ pub struct Branch {
     commit_message: String,
     sha_history: Vec<String>,
     suite_statuses: Vec<CheckSuiteStatus>,
+    merge_counter: u64,
+    pub merge_conflict: bool,
 }
 
 impl Branch {
@@ -101,7 +103,9 @@ impl Branch {
             sha: sha.to_string(),
             commit_message: format!("Commit {sha}"),
             sha_history: vec![],
-            suite_statuses: vec![],
+            suite_statuses: vec![CheckSuiteStatus::Pending],
+            merge_counter: 0,
+            merge_conflict: false,
         }
     }
 
@@ -134,6 +138,11 @@ impl Branch {
             self.suite_statuses.len(),
             self.name
         );
+    }
+    pub fn reset_suites(&mut self) {
+        for suite in self.suite_statuses.iter_mut() {
+            *suite = CheckSuiteStatus::Pending;
+        }
     }
 
     pub fn set_to_sha(&mut self, sha: &str) {
@@ -342,7 +351,16 @@ async fn mock_merge_branch(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
             let Some(base_branch) = repo.get_branch_by_name(&data.base) else {
                 return ResponseTemplate::new(404);
             };
-            let merge_sha = format!("merge-{}-{head_sha}", base_branch.sha);
+            if base_branch.merge_conflict {
+                // Conflict
+                return ResponseTemplate::new(409);
+            }
+
+            let merge_sha = format!(
+                "merge-{}-{head_sha}-{}",
+                base_branch.sha, base_branch.merge_counter
+            );
+            base_branch.merge_counter += 1;
             base_branch.set_to_sha(&merge_sha);
             base_branch.commit_message = data.commit_message;
 

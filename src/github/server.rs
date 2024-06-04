@@ -135,7 +135,7 @@ async fn consume_repository_events(
             .instrument(span.clone())
             .await
         {
-            handle_global_error(span, error);
+            handle_root_error(span, error);
         }
     }
 }
@@ -155,17 +155,17 @@ async fn consume_global_events(
             .instrument(span.clone())
             .await
         {
-            handle_global_error(span, error);
+            handle_root_error(span, error);
         }
     }
 }
 
 #[allow(unused_variables)]
-fn handle_global_error(span: Span, error: Error) {
+fn handle_root_error(span: Span, error: Error) {
     // In tests, we want to panic on all errors.
     #[cfg(test)]
     {
-        panic!("Global handler failed: {error:?}");
+        panic!("Handler failed: {error:?}");
     }
     #[cfg(not(test))]
     {
