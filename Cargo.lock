@@ -288,6 +288,7 @@ dependencies = [
  "itertools",
  "jsonwebtoken",
  "octocrab",
+ "once_cell",
  "parking_lot",
  "regex",
  "reqwest",

@@ -16,12 +16,18 @@ use crate::bors::{BorsContext, Comment, RepositoryClient, RepositoryLoader, Repo
 use crate::database::DbClient;
 use crate::TeamApiClient;
 
+#[cfg(test)]
+use crate::tests::util::TestSyncMarker;
+
 mod help;
 mod labels;
 mod ping;
 mod refresh;
 mod trybuild;
 mod workflow;
+
+#[cfg(test)]
+pub static WAIT_FOR_WORKFLOW_STARTED: TestSyncMarker = TestSyncMarker::new();
 
 /// This function executes a single BORS repository event
 pub async fn handle_bors_repository_event<Client: RepositoryClient>(
@@ -82,6 +88,9 @@ pub async fn handle_bors_repository_event<Client: RepositoryClient>(
             handle_workflow_started(db, payload)
                 .instrument(span.clone())
                 .await?;
+
+            #[cfg(test)]
+            WAIT_FOR_WORKFLOW_STARTED.mark();
         }
         BorsRepositoryEvent::WorkflowCompleted(payload) => {
             let span = tracing::info_span!(
@@ -105,6 +114,9 @@ pub async fn handle_bors_repository_event<Client: RepositoryClient>(
     }
     Ok(())
 }
+
+#[cfg(test)]
+pub static WAIT_FOR_REFRESH: TestSyncMarker = TestSyncMarker::new();
 
 /// This function executes a single BORS global event
 pub async fn handle_bors_global_event<Client: RepositoryClient>(
@@ -136,6 +148,9 @@ pub async fn handle_bors_global_event<Client: RepositoryClient>(
             }))
             .instrument(span)
             .await;
+
+            #[cfg(test)]
+            WAIT_FOR_REFRESH.mark();
         }
     }
     Ok(())

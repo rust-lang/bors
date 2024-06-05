@@ -8,9 +8,11 @@ use parking_lot::lock_api::MappedMutexGuard;
 use parking_lot::{Mutex, MutexGuard, RawMutex};
 use serde::Serialize;
 use sqlx::PgPool;
+use tokio::sync::mpsc::Sender;
 use tokio::task::JoinHandle;
 use tower::Service;
 
+use crate::bors::WAIT_FOR_REFRESH;
 use crate::github::api::load_repositories;
 use crate::tests::mocks::comment::{Comment, GitHubIssueCommentEventPayload};
 use crate::tests::mocks::workflow::{
@@ -22,8 +24,8 @@ use crate::tests::mocks::{
 };
 use crate::tests::webhook::{create_webhook_request, TEST_WEBHOOK_SECRET};
 use crate::{
-    create_app, create_bors_process, BorsContext, CommandParser, PgDbClient, ServerState,
-    WebhookSecret,
+    create_app, create_bors_process, BorsContext, BorsGlobalEvent, CommandParser, PgDbClient,
+    ServerState, WebhookSecret,
 };
 
 pub struct BorsBuilder {
@@ -87,6 +89,8 @@ pub struct BorsTester {
     http_mock: ExternalHttpMock,
     world: World,
     db: Arc<PgDbClient>,
+    // Sender for bors global events
+    global_tx: Sender<BorsGlobalEvent>,
 }
 
 impl BorsTester {
@@ -110,7 +114,7 @@ impl BorsTester {
 
         let state = ServerState::new(
             repository_tx,
-            global_tx,
+            global_tx.clone(),
             WebhookSecret::new(TEST_WEBHOOK_SECRET.to_string()),
         );
         let app = create_app(state);
@@ -121,6 +125,7 @@ impl BorsTester {
                 http_mock: mock,
                 world,
                 db,
+                global_tx,
             },
             bors,
         )
@@ -132,6 +137,12 @@ impl BorsTester {
 
     pub fn default_repo(&mut self) -> Arc<Mutex<Repo>> {
         self.world.get_repo(default_repo_name())
+    }
+
+    pub async fn refresh(&self) {
+        self.global_tx.send(BorsGlobalEvent::Refresh).await.unwrap();
+        // Wait until the refresh is fully handled
+        WAIT_FOR_REFRESH.sync().await;
     }
 
     pub fn create_branch(&mut self, name: &str) -> MappedMutexGuard<RawMutex, Branch> {
@@ -308,6 +319,7 @@ impl BorsTester {
     pub async fn finish(self, bors: JoinHandle<()>) -> World {
         // Make sure that the event channel senders are closed
         drop(self.app);
+        drop(self.global_tx);
         // Wait until all events are handled in the bors service
         bors.await.unwrap();
         // Flush any local queues
