@@ -166,6 +166,10 @@ impl BorsTester {
             .clone()
     }
 
+    pub fn try_branch(&self) -> Branch {
+        self.get_branch("automation/bors/try")
+    }
+
     /// Wait until the next bot comment is received on the default repo and the default PR.
     pub async fn get_comment(&mut self) -> anyhow::Result<String> {
         Ok(self

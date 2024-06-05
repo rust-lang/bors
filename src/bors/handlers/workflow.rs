@@ -253,7 +253,7 @@ mod tests {
             tester.post_comment("@bors try").await?;
             tester.expect_comments(1).await;
             tester
-                .workflow_event(WorkflowEvent::started(tester.get_branch(TRY_BRANCH_NAME)))
+                .workflow_event(WorkflowEvent::started(tester.try_branch()))
                 .await?;
             Ok(tester)
         })
@@ -268,7 +268,7 @@ mod tests {
             tester.post_comment("@bors try").await?;
             tester.expect_comments(1).await;
 
-            let workflow = Workflow::from(tester.get_branch(TRY_BRANCH_NAME));
+            let workflow = Workflow::from(tester.try_branch());
             tester
                 .workflow_event(WorkflowEvent::started(workflow.clone()))
                 .await?;
@@ -301,9 +301,7 @@ mod tests {
             tester.create_branch(TRY_BRANCH_NAME).expect_suites(1);
             tester.post_comment("@bors try").await?;
             tester.expect_comments(1).await;
-            tester
-                .workflow_success(tester.get_branch(TRY_BRANCH_NAME))
-                .await?;
+            tester.workflow_success(tester.try_branch()).await?;
             insta::assert_snapshot!(
                 tester.get_comment().await?,
                 @r###"
@@ -324,9 +322,7 @@ mod tests {
             tester.create_branch(TRY_BRANCH_NAME).expect_suites(1);
             tester.post_comment("@bors try").await?;
             tester.expect_comments(1).await;
-            tester
-                .workflow_failure(tester.get_branch(TRY_BRANCH_NAME))
-                .await?;
+            tester.workflow_failure(tester.try_branch()).await?;
             insta::assert_snapshot!(
                 tester.get_comment().await?,
                 @r###"
@@ -346,10 +342,10 @@ mod tests {
             tester.post_comment("@bors try").await?;
             tester.expect_comments(1).await;
             tester
-                .workflow_success(Workflow::from(tester.get_branch(TRY_BRANCH_NAME)).with_run_id(1))
+                .workflow_success(Workflow::from(tester.try_branch()).with_run_id(1))
                 .await?;
             tester
-                .workflow_success(Workflow::from(tester.get_branch(TRY_BRANCH_NAME)).with_run_id(2))
+                .workflow_success(Workflow::from(tester.try_branch()).with_run_id(2))
                 .await?;
             insta::assert_snapshot!(
                 tester.get_comment().await?,
@@ -373,10 +369,10 @@ mod tests {
             tester.post_comment("@bors try").await?;
             tester.expect_comments(1).await;
             tester
-                .workflow_success(Workflow::from(tester.get_branch(TRY_BRANCH_NAME)).with_run_id(1))
+                .workflow_success(Workflow::from(tester.try_branch()).with_run_id(1))
                 .await?;
             tester
-                .workflow_failure(Workflow::from(tester.get_branch(TRY_BRANCH_NAME)).with_run_id(2))
+                .workflow_failure(Workflow::from(tester.try_branch()).with_run_id(2))
                 .await?;
             insta::assert_snapshot!(
                 tester.get_comment().await?,
@@ -400,7 +396,7 @@ mod tests {
 
             // Check suite completed received before the workflow has finished.
             // We should wait until workflow finished is received before posting the comment.
-            let branch = tester.get_branch(TRY_BRANCH_NAME);
+            let branch = tester.try_branch();
             tester
                 .workflow_event(WorkflowEvent::started(branch.clone()))
                 .await?;
@@ -430,11 +426,9 @@ mod tests {
             tester.create_branch(TRY_BRANCH_NAME).expect_suites(1);
             tester.post_comment("@bors try").await?;
             tester.expect_comments(1).await;
+            tester.workflow_success(tester.try_branch()).await?;
             tester
-                .workflow_success(tester.get_branch(TRY_BRANCH_NAME))
-                .await?;
-            tester
-                .check_suite(CheckSuite::completed(tester.get_branch(TRY_BRANCH_NAME)))
+                .check_suite(CheckSuite::completed(tester.try_branch()))
                 .await?;
             tester.expect_comments(1).await;
             Ok(tester)

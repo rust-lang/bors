@@ -404,7 +404,7 @@ mod tests {
                 .post_comment("@bors try parent=ea9c1b050cc8b420c2c211d2177811e564a4dc60")
                 .await?;
             tester.expect_comments(1).await;
-            tester.workflow_success(tester.get_branch(TRY_BRANCH_NAME)).await?;
+            tester.workflow_success(tester.try_branch()).await?;
             tester.expect_comments(1).await;
             tester.post_comment("@bors try parent=last").await?;
             insta::assert_snapshot!(tester.get_comment().await?, @":hourglass: Trying commit pr-1-sha with merge merge-ea9c1b050cc8b420c2c211d2177811e564a4dc60-pr-1-sha-1…");
@@ -488,7 +488,7 @@ mod tests {
                 .find_build(
                     &default_repo_name(),
                     TRY_BRANCH_NAME.to_string(),
-                    CommitSha(tester.get_branch(TRY_BRANCH_NAME).get_sha().to_string()),
+                    CommitSha(tester.try_branch().get_sha().to_string()),
                 )
                 .await?
                 .is_some());
@@ -515,7 +515,7 @@ mod tests {
             tester.post_comment("@bors try").await?;
             tester.expect_comments(1).await;
             tester
-                .workflow_success(Workflow::from(tester.get_branch(TRY_BRANCH_NAME)).with_run_id(1))
+                .workflow_success(Workflow::from(tester.try_branch()).with_run_id(1))
                 .await?;
             tester.expect_comments(1).await;
 
@@ -523,7 +523,7 @@ mod tests {
             tester.post_comment("@bors try").await?;
             insta::assert_snapshot!(tester.get_comment().await?, @":hourglass: Trying commit pr-1-sha with merge merge-main-sha1-pr-1-sha-1…");
             tester
-                .workflow_success(Workflow::from(tester.get_branch(TRY_BRANCH_NAME)).with_run_id(2))
+                .workflow_success(Workflow::from(tester.try_branch()).with_run_id(2))
                 .await?;
             insta::assert_snapshot!(tester.get_comment().await?, @r###"
             :sunny: Try build successful
@@ -552,7 +552,7 @@ mod tests {
             tester.post_comment("@bors try").await?;
             tester.expect_comments(1).await;
 
-            let branch = tester.get_branch(TRY_BRANCH_NAME);
+            let branch = tester.try_branch();
             tester
                 .workflow_event(WorkflowEvent::started(
                     Workflow::from(branch.clone()).with_run_id(123),
@@ -583,7 +583,7 @@ mod tests {
             tester.post_comment("@bors try").await?;
             tester.expect_comments(1).await;
             tester
-                .workflow_event(WorkflowEvent::started(tester.get_branch(TRY_BRANCH_NAME)))
+                .workflow_event(WorkflowEvent::started(tester.try_branch()))
                 .await?;
             tester.post_comment("@bors try cancel").await?;
             insta::assert_snapshot!(tester.get_comment().await?, @"Try build was cancelled. It was not possible to cancel some workflows.");
@@ -620,7 +620,7 @@ mod tests {
             tester.post_comment("@bors try").await?;
             tester.expect_comments(1).await;
 
-            let branch = tester.get_branch(TRY_BRANCH_NAME);
+            let branch = tester.try_branch();
             tester
                 .workflow_success(Workflow::from(branch.clone()).with_run_id(1))
                 .await?;
@@ -666,7 +666,7 @@ mod tests {
             tester.expect_comments(1).await;
 
             tester
-                .workflow_event(WorkflowEvent::started(tester.get_branch(TRY_BRANCH_NAME)))
+                .workflow_event(WorkflowEvent::started(tester.try_branch()))
                 .await?;
             Ok(tester)
         })
@@ -722,7 +722,7 @@ try_succeed = ["+foo", "+bar", "-baz"]
                 repo.lock()
                     .get_pr(default_pr_number())
                     .check_added_labels(&[]);
-                tester.workflow_success(tester.get_branch(TRY_BRANCH_NAME)).await?;
+                tester.workflow_success(tester.try_branch()).await?;
                 tester.expect_comments(1).await;
                 let pr = repo.lock().get_pr(default_pr_number()).clone();
                 pr.check_added_labels(&["foo", "bar"]);
@@ -751,7 +751,7 @@ try_failed = ["+foo", "+bar", "-baz"]
                 repo.lock()
                     .get_pr(default_pr_number())
                     .check_added_labels(&[]);
-                tester.workflow_failure(tester.get_branch(TRY_BRANCH_NAME)).await?;
+                tester.workflow_failure(tester.try_branch()).await?;
                 tester.expect_comments(1).await;
                 let pr = repo.lock().get_pr(default_pr_number()).clone();
                 pr.check_added_labels(&["foo", "bar"]);
