@@ -121,7 +121,7 @@ pub static WAIT_FOR_REFRESH: TestSyncMarker = TestSyncMarker::new();
 pub async fn handle_bors_global_event(
     event: BorsGlobalEvent,
     ctx: Arc<BorsContext>,
-    repo_loader: &dyn RepositoryLoader,
+    repo_loader: &RepositoryLoader,
     team_api_client: &TeamApiClient,
 ) -> anyhow::Result<()> {
     let db = Arc::clone(&ctx.db);
@@ -243,7 +243,7 @@ async fn handle_comment(
 
 async fn reload_repos(
     ctx: Arc<BorsContext>,
-    repo_loader: &dyn RepositoryLoader,
+    repo_loader: &RepositoryLoader,
     team_api_client: &TeamApiClient,
 ) -> anyhow::Result<()> {
     let reloaded_repos = repo_loader.load_repositories(team_api_client).await?;

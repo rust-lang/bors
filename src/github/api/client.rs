@@ -1,21 +1,15 @@
-use std::collections::HashMap;
-
 use anyhow::Context;
-use axum::async_trait;
 use octocrab::models::{App, Repository};
 use octocrab::{Error, Octocrab};
 use tracing::log;
 
 use crate::bors::event::PullRequestComment;
-use crate::bors::{CheckSuite, CheckSuiteStatus, Comment, RepositoryLoader, RepositoryState};
+use crate::bors::{CheckSuite, CheckSuiteStatus, Comment};
 use crate::config::{RepositoryConfig, CONFIG_FILE_PATH};
 use crate::database::RunId;
 use crate::github::api::base_github_html_url;
 use crate::github::api::operations::{merge_branches, set_branch_to_commit, MergeError};
 use crate::github::{Branch, CommitSha, GithubRepoName, PullRequest, PullRequestNumber};
-use crate::permissions::TeamApiClient;
-
-use super::load_repositories;
 
 /// Provides access to a single app installation (repository) using the GitHub API.
 pub struct GithubRepositoryClient {
@@ -288,16 +282,6 @@ impl GithubRepositoryClient {
     }
 }
 
-#[async_trait]
-impl RepositoryLoader for Octocrab {
-    async fn load_repositories(
-        &self,
-        team_api_client: &TeamApiClient,
-    ) -> anyhow::Result<HashMap<GithubRepoName, anyhow::Result<RepositoryState>>> {
-        load_repositories(self, team_api_client).await
-    }
-}
-
 fn github_pr_to_pr(pr: octocrab::models::pulls::PullRequest) -> PullRequest {
     PullRequest {
         number: pr.number.into(),
@@ -343,7 +327,10 @@ mod tests {
         .await;
         let client = mock.github_client();
         let team_api_client = mock.team_api_client();
-        let mut repos = client.load_repositories(&team_api_client).await.unwrap();
+        let mut repos = RepositoryLoader::new(client)
+            .load_repositories(&team_api_client)
+            .await
+            .unwrap();
         assert_eq!(repos.len(), 2);
 
         let repo = repos
