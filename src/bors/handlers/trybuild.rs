@@ -678,85 +678,83 @@ mod tests {
         );
     }
 
-    // #[sqlx::test]
-    // async fn test_try_build_start_modify_labels(pool: sqlx::PgPool) {
-    //     let state = ClientBuilder::default()
-    //         .config(
-    //             RepoConfigBuilder::default()
-    //                 .add_label(LabelTrigger::TryBuildStarted, "foo")
-    //                 .add_label(LabelTrigger::TryBuildStarted, "bar")
-    //                 .remove_label(LabelTrigger::TryBuildStarted, "baz"),
-    //         )
-    //         .pool(pool)
-    //         .create_state()
-    //         .await;
-    //
-    //     state.comment("@bors try").await;
-    //     state
-    //         .client()
-    //         .check_added_labels(default_pr_number(), &["foo", "bar"])
-    //         .check_removed_labels(default_pr_number(), &["baz"]);
-    // }
-    //
-    // #[sqlx::test]
-    // async fn test_try_build_succeeded_modify_labels(pool: sqlx::PgPool) {
-    //     let state = ClientBuilder::default()
-    //         .config(
-    //             RepoConfigBuilder::default()
-    //                 .add_label(LabelTrigger::TryBuildSucceeded, "foo")
-    //                 .add_label(LabelTrigger::TryBuildSucceeded, "bar")
-    //                 .remove_label(LabelTrigger::TryBuildSucceeded, "baz"),
-    //         )
-    //         .pool(pool)
-    //         .create_state()
-    //         .await;
-    //     state
-    //         .client()
-    //         .set_checks(&default_merge_sha(), &[suite_success()]);
-    //
-    //     state.comment("@bors try").await;
-    //     state
-    //         .perform_workflow_events(
-    //             1,
-    //             TRY_BRANCH_NAME,
-    //             &default_merge_sha(),
-    //             WorkflowStatus::Success,
-    //         )
-    //         .await;
-    //     state
-    //         .client()
-    //         .check_added_labels(default_pr_number(), &["foo", "bar"])
-    //         .check_removed_labels(default_pr_number(), &["baz"]);
-    // }
-    //
-    // #[sqlx::test]
-    // async fn test_try_build_failed_modify_labels(pool: sqlx::PgPool) {
-    //     let state = ClientBuilder::default()
-    //         .config(
-    //             RepoConfigBuilder::default()
-    //                 .add_label(LabelTrigger::TryBuildFailed, "foo")
-    //                 .add_label(LabelTrigger::TryBuildFailed, "bar")
-    //                 .remove_label(LabelTrigger::TryBuildFailed, "baz"),
-    //         )
-    //         .pool(pool)
-    //         .create_state()
-    //         .await;
-    //     state
-    //         .client()
-    //         .set_checks(&default_merge_sha(), &[suite_failure()]);
-    //
-    //     state.comment("@bors try").await;
-    //     state
-    //         .perform_workflow_events(
-    //             1,
-    //             TRY_BRANCH_NAME,
-    //             &default_merge_sha(),
-    //             WorkflowStatus::Failure,
-    //         )
-    //         .await;
-    //     state
-    //         .client()
-    //         .check_added_labels(default_pr_number(), &["foo", "bar"])
-    //         .check_removed_labels(default_pr_number(), &["baz"]);
-    // }
+    #[sqlx::test]
+    async fn try_build_start_modify_labels(pool: sqlx::PgPool) {
+        let world = World::default();
+        world.default_repo().lock().set_config(
+            r#"
+[labels]
+try = ["+foo", "+bar", "-baz"]
+"#,
+        );
+        BorsBuilder::new(pool)
+            .world(world)
+            .run_test(|mut tester| async {
+                tester.post_comment("@bors try").await?;
+                insta::assert_snapshot!(tester.get_comment().await?, @":hourglass: Trying commit pr-1-sha with merge merge-main-sha1-pr-1-sha-0…");
+                let repo = tester.default_repo();
+                let pr = repo.lock().get_pr(default_pr_number()).clone();
+                pr.check_added_labels(&["foo", "bar"]);
+                pr.check_removed_labels(&["baz"]);
+                Ok(tester)
+            })
+            .await;
+    }
+
+    #[sqlx::test]
+    async fn try_build_succeeded_modify_labels(pool: sqlx::PgPool) {
+        let world = World::default();
+        world.default_repo().lock().set_config(
+            r#"
+[labels]
+try_succeed = ["+foo", "+bar", "-baz"]
+"#,
+        );
+        BorsBuilder::new(pool)
+            .world(world)
+            .run_test(|mut tester| async {
+                tester.post_comment("@bors try").await?;
+                insta::assert_snapshot!(tester.get_comment().await?, @":hourglass: Trying commit pr-1-sha with merge merge-main-sha1-pr-1-sha-0…");
+                let repo = tester.default_repo();
+                repo.lock()
+                    .get_pr(default_pr_number())
+                    .check_added_labels(&[]);
+                tester.workflow_events(1, TRY_BRANCH_NAME, TestWorkflowStatus::Success).await?;
+                tester.expect_comments(1).await;
+                let pr = repo.lock().get_pr(default_pr_number()).clone();
+                pr.check_added_labels(&["foo", "bar"]);
+                pr.check_removed_labels(&["baz"]);
+                Ok(tester)
+            })
+            .await;
+    }
+
+    #[sqlx::test]
+    async fn try_build_failed_modify_labels(pool: sqlx::PgPool) {
+        let world = World::default();
+        world.default_repo().lock().set_config(
+            r#"
+[labels]
+try_failed = ["+foo", "+bar", "-baz"]
+"#,
+        );
+        BorsBuilder::new(pool)
+            .world(world)
+            .run_test(|mut tester| async {
+                tester.create_branch(TRY_BRANCH_NAME).expect_suites(1);
+                tester.post_comment("@bors try").await?;
+                insta::assert_snapshot!(tester.get_comment().await?, @":hourglass: Trying commit pr-1-sha with merge merge-main-sha1-pr-1-sha-0…");
+                let repo = tester.default_repo();
+                repo.lock()
+                    .get_pr(default_pr_number())
+                    .check_added_labels(&[]);
+                tester.workflow_events(1, TRY_BRANCH_NAME, TestWorkflowStatus::Failure).await?;
+                tester.expect_comments(1).await;
+                let pr = repo.lock().get_pr(default_pr_number()).clone();
+                pr.check_added_labels(&["foo", "bar"]);
+                pr.check_removed_labels(&["baz"]);
+                Ok(tester)
+            })
+            .await;
+    }
 }

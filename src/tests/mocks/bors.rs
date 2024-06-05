@@ -136,11 +136,18 @@ impl BorsTester {
     pub fn create_branch(&mut self, name: &str) -> MappedMutexGuard<RawMutex, Branch> {
         // We cannot clone the Arc, otherwise it won't work
         let repo = self.world.repos.get(&default_repo_name()).unwrap();
-        MutexGuard::map(repo.lock(), move |repo| {
-            repo.branches
-                .push(Branch::new(name, &format!("{name}-empty")));
-            repo.branches.last_mut().unwrap()
-        })
+        let mut repo = repo.lock();
+
+        // Polonius where art thou :/
+        if repo.get_branch_by_name(name).is_some() {
+            MutexGuard::map(repo, |repo| repo.get_branch_by_name(name).unwrap())
+        } else {
+            MutexGuard::map(repo, move |repo| {
+                repo.branches
+                    .push(Branch::new(name, &format!("{name}-empty")));
+                repo.branches.last_mut().unwrap()
+            })
+        }
     }
 
     pub fn get_branch_mut(&mut self, name: &str) -> MappedMutexGuard<RawMutex, Branch> {

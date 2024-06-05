@@ -182,6 +182,15 @@ async fn try_complete_build<Client: RepositoryClient>(
         .collect::<Vec<_>>()
         .join("\n");
 
+    let (status, trigger) = if has_failure {
+        (BuildStatus::Failure, LabelTrigger::TryBuildFailed)
+    } else {
+        (BuildStatus::Success, LabelTrigger::TryBuildSucceeded)
+    };
+    db.update_build_status(&build, status).await?;
+
+    handle_label_trigger(repo, pr.number, trigger).await?;
+
     let message = if !has_failure {
         tracing::info!("Workflow succeeded");
 
@@ -196,14 +205,6 @@ async fn try_complete_build<Client: RepositoryClient>(
     };
     repo.client.post_comment(pr.number, message).await?;
 
-    let (status, trigger) = if has_failure {
-        (BuildStatus::Failure, LabelTrigger::TryBuildFailed)
-    } else {
-        (BuildStatus::Success, LabelTrigger::TryBuildSucceeded)
-    };
-    db.update_build_status(&build, status).await?;
-
-    handle_label_trigger(repo, pr.number, trigger).await?;
     Ok(())
 }
 

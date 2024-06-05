@@ -24,35 +24,70 @@ use crate::tests::mocks::{dynamic_mock_req, TestWorkflowStatus, World};
 
 use super::user::{GitHubUser, User};
 
+#[derive(Clone, Default)]
+pub struct PullRequest {
+    pub added_labels: Vec<String>,
+    pub removed_labels: Vec<String>,
+}
+
+impl PullRequest {
+    pub fn check_added_labels(&self, labels: &[&str]) {
+        let added_labels = self
+            .added_labels
+            .iter()
+            .map(|s| s.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(&added_labels, labels);
+    }
+
+    pub fn check_removed_labels(&self, labels: &[&str]) {
+        let removed_labels = self
+            .removed_labels
+            .iter()
+            .map(|s| s.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(&removed_labels, labels);
+    }
+}
+
 #[derive(Clone)]
 pub struct Repo {
     pub name: GithubRepoName,
     pub permissions: Permissions,
     pub config: String,
-    // Pre-set known PRs to avoid responding to requests about PRs that we
-    // don't expect.
-    pub known_prs: Vec<u64>,
     pub branches: Vec<Branch>,
     pub cancelled_workflows: Vec<u64>,
     pub workflow_cancel_error: bool,
+    pub pull_requests: HashMap<u64, PullRequest>,
 }
 
 impl Repo {
     pub fn new(owner: &str, name: &str, permissions: Permissions, config: String) -> Self {
+        let pull_requests = [(default_pr_number(), PullRequest::default())]
+            .into_iter()
+            .collect();
         Self {
             name: GithubRepoName::new(owner, name),
             permissions,
             config,
-            known_prs: vec![default_pr_number()],
             branches: vec![Branch::default()],
             cancelled_workflows: vec![],
             workflow_cancel_error: false,
+            pull_requests,
         }
     }
 
     pub fn with_perms(mut self, user: User, permissions: &[PermissionType]) -> Self {
         self.permissions.users.insert(user, permissions.to_vec());
         self
+    }
+
+    pub fn get_pr(&self, pr: u64) -> &PullRequest {
+        self.pull_requests.get(&pr).unwrap()
+    }
+
+    pub fn set_config(&mut self, config: &str) {
+        self.config = config.to_string();
     }
 
     pub fn get_branch_by_name(&mut self, name: &str) -> Option<&mut Branch> {
