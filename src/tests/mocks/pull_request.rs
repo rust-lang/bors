@@ -119,7 +119,7 @@ async fn mock_pr_labels(
 
     // Remove label
     dynamic_mock_req(
-        move |req: &Request, [label_name]: [&str; 1]| {
+        move |_req: &Request, [label_name]: [&str; 1]| {
             let mut repo = repo2.lock();
             let Some(pr) = repo.pull_requests.get_mut(&pr_number) else {
                 return ResponseTemplate::new(404);

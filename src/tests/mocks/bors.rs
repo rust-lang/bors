@@ -17,7 +17,7 @@ use crate::tests::event::default_pr_number;
 use crate::tests::mocks::comment::{Comment, GitHubIssueCommentEventPayload};
 use crate::tests::mocks::workflow::{
     CheckSuite, GitHubCheckSuiteEventPayload, GitHubWorkflowEventPayload, TestWorkflowStatus,
-    Workflow,
+    Workflow, WorkflowEvent, WorkflowEventKind,
 };
 use crate::tests::mocks::{default_repo_name, Branch, ExternalHttpMock, Repo, World};
 use crate::tests::webhook::{create_webhook_request, TEST_WEBHOOK_SECRET};
@@ -187,34 +187,59 @@ impl BorsTester {
         self.webhook_comment(comment.into()).await
     }
 
-    pub async fn workflow<W: Into<Workflow>>(&mut self, workflow: W) -> anyhow::Result<()> {
-        let workflow = workflow.into();
-        if let Some(status) = workflow.get_workflow_status() {
-            if let Some(branch) = self
-                .world
-                .get_repo(workflow.repository.clone())
-                .lock()
-                .get_branch_by_name(&workflow.head_branch)
-            {
-                branch.suite_finished(status);
+    /// Performs a single started/success/failure workflow event.
+    pub async fn workflow_event(&mut self, event: WorkflowEvent) -> anyhow::Result<()> {
+        if let Some(branch) = self
+            .world
+            .get_repo(event.workflow.repository.clone())
+            .lock()
+            .get_branch_by_name(&event.workflow.head_branch)
+        {
+            match &event.event {
+                WorkflowEventKind::Started => {}
+                WorkflowEventKind::Completed { status } => {
+                    let status = match status.as_str() {
+                        "success" => TestWorkflowStatus::Success,
+                        "failure" => TestWorkflowStatus::Failure,
+                        _ => unreachable!(),
+                    };
+                    branch.suite_finished(status);
+                }
             }
         }
-        self.webhook_workflow(workflow).await
+        self.webhook_workflow(event).await
     }
 
-    pub async fn workflow_events(
+    /// Performs all necessary events to complete a single workflow (start, success/fail,
+    /// check suite completed).
+    #[inline]
+    pub async fn workflow_full<W: Into<Workflow>>(
         &mut self,
-        run_id: u64,
-        branch: &str,
+        workflow: W,
         status: TestWorkflowStatus,
     ) -> anyhow::Result<()> {
-        let branch = self.get_branch(branch);
+        let workflow = workflow.into();
+        let branch = self.get_branch(&workflow.head_branch);
 
-        self.workflow(Workflow::started(branch.clone()).with_run_id(run_id))
+        self.workflow_event(WorkflowEvent::started(workflow.clone()))
             .await?;
-        self.workflow(Workflow::with_status(branch.clone(), status).with_run_id(run_id))
-            .await?;
+        let event = match status {
+            TestWorkflowStatus::Success => WorkflowEvent::success(workflow.clone()),
+            TestWorkflowStatus::Failure => WorkflowEvent::failure(workflow.clone()),
+        };
+        self.workflow_event(event).await?;
+
         self.check_suite(CheckSuite::completed(branch)).await
+    }
+
+    pub async fn workflow_success<W: Into<Workflow>>(&mut self, workflow: W) -> anyhow::Result<()> {
+        self.workflow_full(workflow, TestWorkflowStatus::Success)
+            .await
+    }
+
+    pub async fn workflow_failure<W: Into<Workflow>>(&mut self, workflow: W) -> anyhow::Result<()> {
+        self.workflow_full(workflow, TestWorkflowStatus::Failure)
+            .await
     }
 
     pub async fn check_suite<C: Into<CheckSuite>>(&mut self, check_suite: C) -> anyhow::Result<()> {
@@ -224,13 +249,14 @@ impl BorsTester {
     async fn webhook_comment(&mut self, comment: Comment) -> anyhow::Result<()> {
         self.send_webhook(
             "issue_comment",
-            GitHubIssueCommentEventPayload::from(comment),
+            // The Box is here to prevent a stack overflow in debug mode
+            Box::from(GitHubIssueCommentEventPayload::from(comment)),
         )
         .await
     }
 
-    async fn webhook_workflow(&mut self, workflow: Workflow) -> anyhow::Result<()> {
-        self.send_webhook("workflow_run", GitHubWorkflowEventPayload::from(workflow))
+    async fn webhook_workflow(&mut self, event: WorkflowEvent) -> anyhow::Result<()> {
+        self.send_webhook("workflow_run", GitHubWorkflowEventPayload::from(event))
             .await
     }
 
@@ -243,7 +269,8 @@ impl BorsTester {
     }
 
     async fn send_webhook<S: Serialize>(&mut self, event: &str, content: S) -> anyhow::Result<()> {
-        let webhook = create_webhook_request(event, &serde_json::to_string(&content).unwrap());
+        let serialized = serde_json::to_string(&content).unwrap();
+        let webhook = create_webhook_request(event, &serialized);
         let response = self
             .app
             .call(webhook)

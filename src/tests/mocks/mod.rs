@@ -23,6 +23,7 @@ pub use user::User;
 pub use workflow::CheckSuite;
 pub use workflow::TestWorkflowStatus;
 pub use workflow::Workflow;
+pub use workflow::WorkflowEvent;
 
 mod app;
 mod bors;

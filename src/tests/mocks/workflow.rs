@@ -48,72 +48,77 @@ struct GitHubCheckSuiteInner {
 }
 
 #[derive(Clone)]
-pub struct Workflow {
-    event: WorkflowEvent,
-    pub repository: GithubRepoName,
-    name: String,
-    run_id: u64,
-    pub head_branch: String,
-    head_sha: String,
+pub struct WorkflowEvent {
+    pub event: WorkflowEventKind,
+    pub workflow: Workflow,
 }
 
-impl Workflow {
-    pub fn started(branch: Branch) -> Self {
-        Self::new(WorkflowEvent::Started, branch)
+impl WorkflowEvent {
+    pub fn started<W: Into<Workflow>>(workflow: W) -> WorkflowEvent {
+        Self {
+            event: WorkflowEventKind::Started,
+            workflow: workflow.into(),
+        }
     }
-    pub fn success(branch: Branch) -> Self {
-        Self::new(
-            WorkflowEvent::Completed {
+    pub fn success<W: Into<Workflow>>(workflow: W) -> Self {
+        Self {
+            event: WorkflowEventKind::Completed {
                 status: "success".to_string(),
             },
-            branch,
-        )
+            workflow: workflow.into(),
+        }
     }
-    pub fn failure(branch: Branch) -> Self {
-        Self::new(
-            WorkflowEvent::Completed {
+    pub fn failure<W: Into<Workflow>>(workflow: W) -> Self {
+        Self {
+            event: WorkflowEventKind::Completed {
                 status: "failure".to_string(),
             },
-            branch,
-        )
-    }
-    pub fn with_status(branch: Branch, status: TestWorkflowStatus) -> Self {
-        match status {
-            TestWorkflowStatus::Success => Self::success(branch),
-            TestWorkflowStatus::Failure => Self::failure(branch),
-        }
-    }
-    pub fn get_workflow_status(&self) -> Option<TestWorkflowStatus> {
-        match &self.event {
-            WorkflowEvent::Started => None,
-            WorkflowEvent::Completed { status } => match status.as_str() {
-                "success" => Some(TestWorkflowStatus::Success),
-                "failure" => Some(TestWorkflowStatus::Failure),
-                _ => unreachable!(),
-            },
-        }
-    }
-
-    pub fn with_run_id(self, run_id: u64) -> Self {
-        Self { run_id, ..self }
-    }
-
-    fn new(event: WorkflowEvent, branch: Branch) -> Self {
-        Self {
-            event,
-            repository: default_repo_name(),
-            name: "Workflow1".to_string(),
-            run_id: 1,
-            head_branch: branch.get_name().to_string(),
-            head_sha: branch.get_sha().to_string(),
+            workflow: workflow.into(),
         }
     }
 }
 
 #[derive(Clone)]
-enum WorkflowEvent {
+pub enum WorkflowEventKind {
     Started,
     Completed { status: String },
+}
+
+#[derive(Clone)]
+pub struct Workflow {
+    pub repository: GithubRepoName,
+    name: String,
+    run_id: u64,
+    pub head_branch: String,
+    head_sha: String,
+    external: bool,
+}
+
+impl Workflow {
+    pub fn with_run_id(self, run_id: u64) -> Self {
+        Self { run_id, ..self }
+    }
+    pub fn make_external(mut self) -> Self {
+        self.external = true;
+        self
+    }
+
+    fn new(branch: Branch) -> Self {
+        Self {
+            repository: default_repo_name(),
+            name: "Workflow1".to_string(),
+            run_id: 1,
+            head_branch: branch.get_name().to_string(),
+            head_sha: branch.get_sha().to_string(),
+            external: false,
+        }
+    }
+}
+
+impl From<Branch> for Workflow {
+    fn from(value: Branch) -> Self {
+        Self::new(value)
+    }
 }
 
 #[derive(Copy, Clone)]
@@ -129,33 +134,36 @@ pub struct GitHubWorkflowEventPayload {
     repository: GitHubRepository,
 }
 
-impl From<Workflow> for GitHubWorkflowEventPayload {
-    fn from(value: Workflow) -> Self {
+impl From<WorkflowEvent> for GitHubWorkflowEventPayload {
+    fn from(value: WorkflowEvent) -> Self {
+        let WorkflowEvent { event, workflow } = value;
+        assert!(!workflow.external);
+
         let url: Url = format!(
             "https://github.com/workflows/{}/{}",
-            value.name, value.run_id
+            workflow.name, workflow.run_id
         )
         .parse()
         .unwrap();
         Self {
-            action: match &value.event {
-                WorkflowEvent::Started => "requested",
-                WorkflowEvent::Completed { .. } => "completed",
+            action: match &event {
+                WorkflowEventKind::Started => "requested",
+                WorkflowEventKind::Completed { .. } => "completed",
             }
             .to_string(),
             workflow_run: GitHubWorkflowRun {
-                id: value.run_id.into(),
+                id: workflow.run_id.into(),
                 workflow_id: 1.into(),
                 node_id: "".to_string(),
-                name: value.name,
-                head_branch: value.head_branch,
-                head_sha: value.head_sha,
+                name: workflow.name,
+                head_branch: workflow.head_branch,
+                head_sha: workflow.head_sha,
                 run_number: 0,
                 event: "".to_string(),
                 status: "".to_string(),
-                conclusion: match value.event {
-                    WorkflowEvent::Started => None,
-                    WorkflowEvent::Completed { status } => Some(status),
+                conclusion: match event {
+                    WorkflowEventKind::Started => None,
+                    WorkflowEventKind::Completed { status } => Some(status),
                 },
                 created_at: Default::default(),
                 updated_at: Default::default(),
@@ -182,9 +190,9 @@ impl From<Workflow> for GitHubWorkflowEventPayload {
                         email: "".to_string(),
                     },
                 },
-                repository: value.repository.clone().into(),
+                repository: workflow.repository.clone().into(),
             },
-            repository: value.repository.into(),
+            repository: workflow.repository.into(),
         }
     }
 }

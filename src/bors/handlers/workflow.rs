@@ -213,13 +213,18 @@ mod tests {
     use crate::bors::handlers::trybuild::TRY_BRANCH_NAME;
     use crate::database::operations::get_all_workflows;
     use crate::database::WorkflowStatus;
-    use crate::tests::mocks::{run_test, Branch, CheckSuite, TestWorkflowStatus, Workflow};
+    use crate::tests::mocks::{
+        run_test, Branch, CheckSuite, TestWorkflowStatus, Workflow, WorkflowEvent,
+    };
 
     #[sqlx::test]
     async fn workflow_started_unknown_build(pool: sqlx::PgPool) {
         run_test(pool.clone(), |mut tester| async {
             tester
-                .workflow(Workflow::started(Branch::new("unknown", "unknown-sha")))
+                .workflow_event(WorkflowEvent::started(Branch::new(
+                    "unknown",
+                    "unknown-sha",
+                )))
                 .await?;
             Ok(tester)
         })
@@ -231,7 +236,10 @@ mod tests {
     async fn workflow_completed_unknown_build(pool: sqlx::PgPool) {
         run_test(pool.clone(), |mut tester| async {
             tester
-                .workflow(Workflow::success(Branch::new("unknown", "unknown-sha")))
+                .workflow_event(WorkflowEvent::success(Branch::new(
+                    "unknown",
+                    "unknown-sha",
+                )))
                 .await?;
             Ok(tester)
         })
@@ -245,7 +253,7 @@ mod tests {
             tester.post_comment("@bors try").await?;
             tester.expect_comments(1).await;
             tester
-                .workflow(Workflow::started(tester.get_branch(TRY_BRANCH_NAME)))
+                .workflow_event(WorkflowEvent::started(tester.get_branch(TRY_BRANCH_NAME)))
                 .await?;
             Ok(tester)
         })
@@ -259,9 +267,14 @@ mod tests {
         run_test(pool.clone(), |mut tester| async {
             tester.post_comment("@bors try").await?;
             tester.expect_comments(1).await;
-            let event = Workflow::started(tester.get_branch(TRY_BRANCH_NAME));
-            tester.workflow(event.clone()).await?;
-            tester.workflow(event.with_run_id(2)).await?;
+
+            let workflow = Workflow::from(tester.get_branch(TRY_BRANCH_NAME));
+            tester
+                .workflow_event(WorkflowEvent::started(workflow.clone()))
+                .await?;
+            tester
+                .workflow_event(WorkflowEvent::started(workflow.with_run_id(2)))
+                .await?;
             Ok(tester)
         })
         .await;
@@ -289,7 +302,7 @@ mod tests {
             tester.post_comment("@bors try").await?;
             tester.expect_comments(1).await;
             tester
-                .workflow_events(1, TRY_BRANCH_NAME, TestWorkflowStatus::Success)
+                .workflow_success(tester.get_branch(TRY_BRANCH_NAME))
                 .await?;
             insta::assert_snapshot!(
                 tester.get_comment().await?,
@@ -312,7 +325,7 @@ mod tests {
             tester.post_comment("@bors try").await?;
             tester.expect_comments(1).await;
             tester
-                .workflow_events(1, TRY_BRANCH_NAME, TestWorkflowStatus::Failure)
+                .workflow_failure(tester.get_branch(TRY_BRANCH_NAME))
                 .await?;
             insta::assert_snapshot!(
                 tester.get_comment().await?,
@@ -333,10 +346,10 @@ mod tests {
             tester.post_comment("@bors try").await?;
             tester.expect_comments(1).await;
             tester
-                .workflow_events(1, TRY_BRANCH_NAME, TestWorkflowStatus::Success)
+                .workflow_success(Workflow::from(tester.get_branch(TRY_BRANCH_NAME)).with_run_id(1))
                 .await?;
             tester
-                .workflow_events(2, TRY_BRANCH_NAME, TestWorkflowStatus::Success)
+                .workflow_success(Workflow::from(tester.get_branch(TRY_BRANCH_NAME)).with_run_id(2))
                 .await?;
             insta::assert_snapshot!(
                 tester.get_comment().await?,
@@ -360,10 +373,10 @@ mod tests {
             tester.post_comment("@bors try").await?;
             tester.expect_comments(1).await;
             tester
-                .workflow_events(1, TRY_BRANCH_NAME, TestWorkflowStatus::Success)
+                .workflow_success(Workflow::from(tester.get_branch(TRY_BRANCH_NAME)).with_run_id(1))
                 .await?;
             tester
-                .workflow_events(2, TRY_BRANCH_NAME, TestWorkflowStatus::Failure)
+                .workflow_failure(Workflow::from(tester.get_branch(TRY_BRANCH_NAME)).with_run_id(2))
                 .await?;
             insta::assert_snapshot!(
                 tester.get_comment().await?,
@@ -388,11 +401,15 @@ mod tests {
             // Check suite completed received before the workflow has finished.
             // We should wait until workflow finished is received before posting the comment.
             let branch = tester.get_branch(TRY_BRANCH_NAME);
-            tester.workflow(Workflow::started(branch.clone())).await?;
+            tester
+                .workflow_event(WorkflowEvent::started(branch.clone()))
+                .await?;
             tester
                 .check_suite(CheckSuite::completed(branch.clone()))
                 .await?;
-            tester.workflow(Workflow::success(branch)).await?;
+            tester
+                .workflow_event(WorkflowEvent::success(branch))
+                .await?;
             insta::assert_snapshot!(
                 tester.get_comment().await?,
                 @r###"
@@ -414,7 +431,7 @@ mod tests {
             tester.post_comment("@bors try").await?;
             tester.expect_comments(1).await;
             tester
-                .workflow_events(1, TRY_BRANCH_NAME, TestWorkflowStatus::Success)
+                .workflow_success(tester.get_branch(TRY_BRANCH_NAME))
                 .await?;
             tester
                 .check_suite(CheckSuite::completed(tester.get_branch(TRY_BRANCH_NAME)))
