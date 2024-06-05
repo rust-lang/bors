@@ -12,17 +12,18 @@ use tokio::task::JoinHandle;
 use tower::Service;
 
 use crate::github::api::load_repositories;
-use crate::tests::database::MockedDBClient;
-use crate::tests::event::default_pr_number;
 use crate::tests::mocks::comment::{Comment, GitHubIssueCommentEventPayload};
 use crate::tests::mocks::workflow::{
     CheckSuite, GitHubCheckRunEventPayload, GitHubCheckSuiteEventPayload,
     GitHubWorkflowEventPayload, TestWorkflowStatus, Workflow, WorkflowEvent, WorkflowEventKind,
 };
-use crate::tests::mocks::{default_repo_name, Branch, ExternalHttpMock, Repo, World};
+use crate::tests::mocks::{
+    default_pr_number, default_repo_name, Branch, ExternalHttpMock, Repo, World,
+};
 use crate::tests::webhook::{create_webhook_request, TEST_WEBHOOK_SECRET};
 use crate::{
-    create_app, create_bors_process, BorsContext, CommandParser, ServerState, WebhookSecret,
+    create_app, create_bors_process, BorsContext, CommandParser, PgDbClient, ServerState,
+    WebhookSecret,
 };
 
 pub struct BorsBuilder {
@@ -85,13 +86,13 @@ pub struct BorsTester {
     app: Router,
     http_mock: ExternalHttpMock,
     world: World,
-    db: Arc<MockedDBClient>,
+    db: Arc<PgDbClient>,
 }
 
 impl BorsTester {
     async fn new(pool: PgPool, world: World) -> (Self, JoinHandle<()>) {
         let mock = ExternalHttpMock::start(&world).await;
-        let db = Arc::new(MockedDBClient::new(pool));
+        let db = Arc::new(PgDbClient::new(pool));
 
         let loaded_repos = load_repositories(&mock.github_client(), &mock.team_api_client())
             .await
@@ -125,7 +126,7 @@ impl BorsTester {
         )
     }
 
-    pub fn db(&self) -> Arc<MockedDBClient> {
+    pub fn db(&self) -> Arc<PgDbClient> {
         self.db.clone()
     }
 

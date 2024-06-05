@@ -16,11 +16,10 @@ use wiremock::{
 
 use crate::github::GithubRepoName;
 use crate::permissions::PermissionType;
-use crate::tests::event::default_pr_number;
 use crate::tests::mocks::comment::Comment;
 use crate::tests::mocks::permissions::Permissions;
 use crate::tests::mocks::pull_request::mock_pull_requests;
-use crate::tests::mocks::{dynamic_mock_req, TestWorkflowStatus, World};
+use crate::tests::mocks::{default_pr_number, dynamic_mock_req, TestWorkflowStatus, World};
 
 use super::user::{GitHubUser, User};
 

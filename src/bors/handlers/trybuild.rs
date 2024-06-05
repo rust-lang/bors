@@ -316,15 +316,13 @@ async fn check_try_permissions<Client: RepositoryClient>(
 #[cfg(test)]
 mod tests {
     use crate::bors::handlers::trybuild::{TRY_BRANCH_NAME, TRY_MERGE_BRANCH_NAME};
+    use crate::database::operations::get_all_workflows;
     use crate::database::{BuildStatus, DbClient};
-    use crate::github::{CommitSha, LabelTrigger, MergeError, PullRequestNumber};
-    use crate::tests::database::MockedDBClient;
-    use crate::tests::event::default_pr_number;
+    use crate::github::{CommitSha, PullRequestNumber};
     use crate::tests::mocks::{
-        default_repo_name, run_test, BorsBuilder, Permissions, TestWorkflowStatus, Workflow,
+        default_pr_number, default_repo_name, run_test, BorsBuilder, Permissions, Workflow,
         WorkflowEvent, World,
     };
-    use crate::tests::state::{default_merge_sha, ClientBuilder, RepoConfigBuilder};
 
     #[sqlx::test]
     async fn try_success(pool: sqlx::PgPool) {
@@ -711,14 +709,7 @@ mod tests {
             Ok(tester)
         })
         .await;
-        assert_eq!(
-            MockedDBClient::new(pool)
-                .get_all_workflows()
-                .await
-                .unwrap()
-                .len(),
-            0
-        );
+        assert_eq!(get_all_workflows(&pool).await.unwrap().len(), 0);
     }
 
     #[sqlx::test]

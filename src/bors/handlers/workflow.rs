@@ -213,9 +213,7 @@ mod tests {
     use crate::bors::handlers::trybuild::TRY_BRANCH_NAME;
     use crate::database::operations::get_all_workflows;
     use crate::database::WorkflowStatus;
-    use crate::tests::mocks::{
-        run_test, Branch, CheckSuite, TestWorkflowStatus, Workflow, WorkflowEvent,
-    };
+    use crate::tests::mocks::{run_test, Branch, CheckSuite, Workflow, WorkflowEvent};
 
     #[sqlx::test]
     async fn workflow_started_unknown_build(pool: sqlx::PgPool) {

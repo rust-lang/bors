@@ -6,10 +6,9 @@ use serde::Serialize;
 use url::Url;
 
 use crate::github::GithubRepoName;
-use crate::tests::event::default_pr_number;
 use crate::tests::mocks::repository::GitHubRepository;
 use crate::tests::mocks::user::{GitHubUser, User};
-use crate::tests::mocks::Repo;
+use crate::tests::mocks::{default_pr_number, Repo};
 
 #[derive(Clone, Debug)]
 pub struct Comment {
