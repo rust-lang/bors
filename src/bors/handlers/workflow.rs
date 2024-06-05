@@ -6,11 +6,12 @@ use crate::bors::handlers::is_bors_observed_branch;
 use crate::bors::handlers::labels::handle_label_trigger;
 use crate::bors::{CheckSuiteStatus, Comment};
 use crate::bors::{RepositoryClient, RepositoryState};
-use crate::database::{BuildStatus, DbClient, WorkflowStatus};
+use crate::database::{BuildStatus, WorkflowStatus};
 use crate::github::LabelTrigger;
+use crate::PgDbClient;
 
 pub(super) async fn handle_workflow_started(
-    db: Arc<dyn DbClient>,
+    db: Arc<PgDbClient>,
     payload: WorkflowStarted,
 ) -> anyhow::Result<()> {
     if !is_bors_observed_branch(&payload.branch) {
@@ -59,7 +60,7 @@ pub(super) async fn handle_workflow_started(
 
 pub(super) async fn handle_workflow_completed<Client: RepositoryClient>(
     repo: Arc<RepositoryState<Client>>,
-    db: Arc<dyn DbClient>,
+    db: Arc<PgDbClient>,
     payload: WorkflowCompleted,
 ) -> anyhow::Result<()> {
     if !is_bors_observed_branch(&payload.branch) {
@@ -81,7 +82,7 @@ pub(super) async fn handle_workflow_completed<Client: RepositoryClient>(
 
 pub(super) async fn handle_check_suite_completed<Client: RepositoryClient>(
     repo: Arc<RepositoryState<Client>>,
-    db: Arc<dyn DbClient>,
+    db: Arc<PgDbClient>,
     payload: CheckSuiteCompleted,
 ) -> anyhow::Result<()> {
     if !is_bors_observed_branch(&payload.branch) {
@@ -99,7 +100,7 @@ pub(super) async fn handle_check_suite_completed<Client: RepositoryClient>(
 /// Try to complete a pending build.
 async fn try_complete_build<Client: RepositoryClient>(
     repo: &RepositoryState<Client>,
-    db: &dyn DbClient,
+    db: &PgDbClient,
     payload: CheckSuiteCompleted,
 ) -> anyhow::Result<()> {
     if !is_bors_observed_branch(&payload.branch) {

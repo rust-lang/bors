@@ -8,13 +8,12 @@ use crate::bors::Comment;
 use crate::bors::RepositoryClient;
 use crate::bors::RepositoryState;
 use crate::database::RunId;
-use crate::database::{
-    BuildModel, BuildStatus, DbClient, PullRequestModel, WorkflowStatus, WorkflowType,
-};
+use crate::database::{BuildModel, BuildStatus, PullRequestModel, WorkflowStatus, WorkflowType};
 use crate::github::{
     CommitSha, GithubUser, LabelTrigger, MergeError, PullRequest, PullRequestNumber,
 };
 use crate::permissions::PermissionType;
+use crate::PgDbClient;
 
 // This branch serves for preparing the final commit.
 // It will be reset to master and merged with the branch that should be tested.
@@ -32,7 +31,7 @@ pub(super) const TRY_BRANCH_NAME: &str = "automation/bors/try";
 /// Otherwise, it will use the latest commit on the main repository branch.
 pub(super) async fn command_try_build<Client: RepositoryClient>(
     repo: Arc<RepositoryState<Client>>,
-    db: Arc<dyn DbClient>,
+    db: Arc<PgDbClient>,
     pr: &PullRequest,
     author: &GithubUser,
     parent: Option<Parent>,
@@ -143,7 +142,7 @@ pub(super) async fn command_try_build<Client: RepositoryClient>(
 
 pub(super) async fn command_try_cancel<Client: RepositoryClient>(
     repo: Arc<RepositoryState<Client>>,
-    db: Arc<dyn DbClient>,
+    db: Arc<PgDbClient>,
     pr: &PullRequest,
     author: &GithubUser,
 ) -> anyhow::Result<()> {
@@ -212,7 +211,7 @@ Cancelled workflows:"#
 
 pub async fn cancel_build_workflows<Client: RepositoryClient>(
     repo: &RepositoryState<Client>,
-    db: &dyn DbClient,
+    db: &PgDbClient,
     build: &BuildModel,
 ) -> anyhow::Result<Vec<RunId>> {
     let pending_workflows = db
@@ -317,7 +316,7 @@ async fn check_try_permissions<Client: RepositoryClient>(
 mod tests {
     use crate::bors::handlers::trybuild::{TRY_BRANCH_NAME, TRY_MERGE_BRANCH_NAME};
     use crate::database::operations::get_all_workflows;
-    use crate::database::{BuildStatus, DbClient};
+    use crate::database::BuildStatus;
     use crate::github::{CommitSha, PullRequestNumber};
     use crate::tests::mocks::{
         default_pr_number, default_repo_name, run_test, BorsBuilder, Permissions, Workflow,

@@ -13,8 +13,7 @@ use crate::bors::handlers::workflow::{
     handle_check_suite_completed, handle_workflow_completed, handle_workflow_started,
 };
 use crate::bors::{BorsContext, Comment, RepositoryClient, RepositoryLoader, RepositoryState};
-use crate::database::DbClient;
-use crate::TeamApiClient;
+use crate::{PgDbClient, TeamApiClient};
 
 #[cfg(test)]
 use crate::tests::util::TestSyncMarker;
@@ -158,7 +157,7 @@ pub async fn handle_bors_global_event<Client: RepositoryClient>(
 
 async fn handle_comment<Client: RepositoryClient>(
     repo: Arc<RepositoryState<Client>>,
-    database: Arc<dyn DbClient>,
+    database: Arc<PgDbClient>,
     ctx: Arc<BorsContext<Client>>,
     comment: PullRequestComment,
 ) -> anyhow::Result<()> {

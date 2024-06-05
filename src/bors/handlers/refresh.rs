@@ -7,12 +7,12 @@ use chrono::{DateTime, Utc};
 use crate::bors::handlers::trybuild::cancel_build_workflows;
 use crate::bors::Comment;
 use crate::bors::{RepositoryClient, RepositoryState};
-use crate::database::{BuildStatus, DbClient};
-use crate::TeamApiClient;
+use crate::database::BuildStatus;
+use crate::{PgDbClient, TeamApiClient};
 
 pub async fn refresh_repository<Client: RepositoryClient>(
     repo: Arc<RepositoryState<Client>>,
-    db: Arc<dyn DbClient>,
+    db: Arc<PgDbClient>,
     team_api_client: &TeamApiClient,
 ) -> anyhow::Result<()> {
     let repo = repo.as_ref();
@@ -30,7 +30,7 @@ pub async fn refresh_repository<Client: RepositoryClient>(
 
 async fn cancel_timed_out_builds<Client: RepositoryClient>(
     repo: &RepositoryState<Client>,
-    db: &dyn DbClient,
+    db: &PgDbClient,
 ) -> anyhow::Result<()> {
     let running_builds = db.get_running_builds(&repo.repository).await?;
     tracing::info!("Found {} running build(s)", running_builds.len());
