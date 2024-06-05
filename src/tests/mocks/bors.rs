@@ -16,8 +16,8 @@ use crate::tests::database::MockedDBClient;
 use crate::tests::event::default_pr_number;
 use crate::tests::mocks::comment::{Comment, GitHubIssueCommentEventPayload};
 use crate::tests::mocks::workflow::{
-    CheckSuite, GitHubCheckSuiteEventPayload, GitHubWorkflowEventPayload, TestWorkflowStatus,
-    Workflow, WorkflowEvent, WorkflowEventKind,
+    CheckSuite, GitHubCheckRunEventPayload, GitHubCheckSuiteEventPayload,
+    GitHubWorkflowEventPayload, TestWorkflowStatus, Workflow, WorkflowEvent, WorkflowEventKind,
 };
 use crate::tests::mocks::{default_repo_name, Branch, ExternalHttpMock, Repo, World};
 use crate::tests::webhook::{create_webhook_request, TEST_WEBHOOK_SECRET};
@@ -225,13 +225,17 @@ impl BorsTester {
         let workflow = workflow.into();
         let branch = self.get_branch(&workflow.head_branch);
 
-        self.workflow_event(WorkflowEvent::started(workflow.clone()))
-            .await?;
-        let event = match status {
-            TestWorkflowStatus::Success => WorkflowEvent::success(workflow.clone()),
-            TestWorkflowStatus::Failure => WorkflowEvent::failure(workflow.clone()),
-        };
-        self.workflow_event(event).await?;
+        if !workflow.external {
+            self.workflow_event(WorkflowEvent::started(workflow.clone()))
+                .await?;
+            let event = match status {
+                TestWorkflowStatus::Success => WorkflowEvent::success(workflow.clone()),
+                TestWorkflowStatus::Failure => WorkflowEvent::failure(workflow.clone()),
+            };
+            self.workflow_event(event).await?;
+        } else {
+            self.webhook_external_workflow(workflow).await?;
+        }
 
         self.check_suite(CheckSuite::completed(branch)).await
     }
@@ -261,6 +265,11 @@ impl BorsTester {
 
     async fn webhook_workflow(&mut self, event: WorkflowEvent) -> anyhow::Result<()> {
         self.send_webhook("workflow_run", GitHubWorkflowEventPayload::from(event))
+            .await
+    }
+
+    async fn webhook_external_workflow(&mut self, workflow: Workflow) -> anyhow::Result<()> {
+        self.send_webhook("check_run", GitHubCheckRunEventPayload::from(workflow))
             .await
     }
 

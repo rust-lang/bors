@@ -640,22 +640,22 @@ mod tests {
         world.check_cancelled_workflows(default_repo_name(), &[3]);
     }
 
-    // #[sqlx::test]
-    // async fn test_try_cancel_ignore_external_workflows(pool: sqlx::PgPool) {
-    //     let world = run_test(pool, |mut tester| async {
-    //         tester.create_branch(TRY_BRANCH_NAME).expect_suites(1);
-    //         tester.post_comment("@bors try").await?;
-    //         tester.expect_comments(1).await;
-    //         tester
-    //             .workflow_full(1, TRY_BRANCH_NAME, TestWorkflowStatus::Success)
-    //             .await?;
-    //         tester.post_comment("@bors try cancel").await?;
-    //         tester.expect_comments(1).await;
-    //         Ok(tester)
-    //     })
-    //     .await;
-    //     world.check_cancelled_workflows(default_repo_name(), &[]);
-    // }
+    #[sqlx::test]
+    async fn try_cancel_ignore_external_workflows(pool: sqlx::PgPool) {
+        let world = run_test(pool, |mut tester| async {
+            tester.create_branch(TRY_BRANCH_NAME).expect_suites(1);
+            tester.post_comment("@bors try").await?;
+            tester.expect_comments(1).await;
+            tester
+                .workflow_success(Workflow::from(tester.try_branch()).make_external())
+                .await?;
+            tester.post_comment("@bors try cancel").await?;
+            tester.expect_comments(1).await;
+            Ok(tester)
+        })
+        .await;
+        world.check_cancelled_workflows(default_repo_name(), &[]);
+    }
 
     #[sqlx::test]
     async fn try_workflow_start_after_cancel(pool: sqlx::PgPool) {

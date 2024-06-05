@@ -1,11 +1,12 @@
 use chrono::{DateTime, Utc};
-use octocrab::models::{RunId, WorkflowId};
+use octocrab::models::{CheckRunId, RunId, WorkflowId};
 use serde::Serialize;
 use url::Url;
 
 use crate::github::GithubRepoName;
-use crate::tests::mocks::default_repo_name;
+use crate::tests::mocks::app::GitHubApp;
 use crate::tests::mocks::repository::{Branch, GitHubRepository};
+use crate::tests::mocks::{default_repo_name, User};
 
 pub struct CheckSuite {
     repo: GithubRepoName,
@@ -21,7 +22,7 @@ impl CheckSuite {
     }
 }
 
-#[derive(serde::Serialize)]
+#[derive(Serialize)]
 pub struct GitHubCheckSuiteEventPayload {
     action: String,
     check_suite: GitHubCheckSuiteInner,
@@ -41,7 +42,7 @@ impl From<CheckSuite> for GitHubCheckSuiteEventPayload {
     }
 }
 
-#[derive(serde::Serialize)]
+#[derive(Serialize)]
 struct GitHubCheckSuiteInner {
     head_branch: String,
     head_sha: String,
@@ -91,7 +92,7 @@ pub struct Workflow {
     run_id: u64,
     pub head_branch: String,
     head_sha: String,
-    external: bool,
+    pub external: bool,
 }
 
 impl Workflow {
@@ -127,7 +128,7 @@ pub enum TestWorkflowStatus {
     Failure,
 }
 
-#[derive(serde::Serialize)]
+#[derive(Serialize)]
 pub struct GitHubWorkflowEventPayload {
     action: String,
     workflow_run: GitHubWorkflowRun,
@@ -195,6 +196,54 @@ impl From<WorkflowEvent> for GitHubWorkflowEventPayload {
             repository: workflow.repository.into(),
         }
     }
+}
+
+#[derive(Serialize)]
+pub struct GitHubCheckRunEventPayload {
+    action: String,
+    check_run: GitHubCheckRunInner,
+    repository: GitHubRepository,
+}
+
+impl From<Workflow> for GitHubCheckRunEventPayload {
+    fn from(workflow: Workflow) -> Self {
+        assert!(workflow.external);
+
+        let mut app = GitHubApp::default();
+        // We need the owner not to be GitHub
+        app.owner = User::new(1234, "external-ci").into();
+        Self {
+            action: "created".to_string(),
+            check_run: GitHubCheckRunInner {
+                check_run: GitHubCheckRun {
+                    id: workflow.run_id.into(),
+                    html_url: format!("https://external-ci.com/workflows/{}", workflow.run_id),
+                },
+                name: workflow.name,
+                check_suite: GitHubCheckSuiteInner {
+                    head_branch: workflow.head_branch,
+                    head_sha: workflow.head_sha,
+                },
+                app,
+            },
+            repository: workflow.repository.into(),
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct GitHubCheckRunInner {
+    #[serde(flatten)]
+    check_run: GitHubCheckRun,
+    name: String,
+    check_suite: GitHubCheckSuiteInner,
+    app: GitHubApp,
+}
+
+#[derive(Serialize)]
+struct GitHubCheckRun {
+    id: CheckRunId,
+    html_url: String,
 }
 
 #[derive(Serialize)]
