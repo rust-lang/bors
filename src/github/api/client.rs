@@ -314,7 +314,7 @@ mod tests {
     use octocrab::models::UserId;
 
     #[tokio::test]
-    async fn test_load_installed_repos() {
+    async fn load_installed_repos() {
         let mock = ExternalHttpMock::start(
             &World::new()
                 .with_repo(

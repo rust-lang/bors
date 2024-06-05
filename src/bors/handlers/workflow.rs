@@ -421,7 +421,7 @@ mod tests {
     }
 
     #[sqlx::test]
-    async fn test_try_check_suite_finished_twice(pool: sqlx::PgPool) {
+    async fn try_check_suite_finished_twice(pool: sqlx::PgPool) {
         run_test(pool.clone(), |mut tester| async {
             tester.create_branch(TRY_BRANCH_NAME).expect_suites(1);
             tester.post_comment("@bors try").await?;
