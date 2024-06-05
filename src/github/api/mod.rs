@@ -9,14 +9,12 @@ use secrecy::{ExposeSecret, SecretVec};
 
 use client::GithubRepositoryClient;
 
-use crate::bors::{RepositoryClient, RepositoryState};
+use crate::bors::RepositoryState;
 use crate::github::GithubRepoName;
 use crate::permissions::TeamApiClient;
 
 pub mod client;
 pub(crate) mod operations;
-
-type GithubRepositoryState = RepositoryState<GithubRepositoryClient>;
 
 fn base_github_html_url() -> &'static str {
     "https://github.com"
@@ -41,7 +39,7 @@ pub fn create_github_client(
 pub async fn load_repositories(
     client: &Octocrab,
     team_api_client: &TeamApiClient,
-) -> anyhow::Result<HashMap<GithubRepoName, anyhow::Result<GithubRepositoryState>>> {
+) -> anyhow::Result<HashMap<GithubRepoName, anyhow::Result<RepositoryState>>> {
     let installations = client
         .apps()
         .installations()
@@ -142,7 +140,7 @@ async fn create_repo_state(
     team_api_client: &TeamApiClient,
     repo: Repository,
     name: GithubRepoName,
-) -> anyhow::Result<GithubRepositoryState> {
+) -> anyhow::Result<RepositoryState> {
     tracing::info!("Found repository {name}");
 
     let client = GithubRepositoryClient {

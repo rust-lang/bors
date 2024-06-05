@@ -1,12 +1,11 @@
 use std::sync::Arc;
 
 use crate::bors::Comment;
-use crate::bors::RepositoryClient;
 use crate::bors::RepositoryState;
 use crate::github::PullRequest;
 
-pub(super) async fn command_ping<Client: RepositoryClient>(
-    repo: Arc<RepositoryState<Client>>,
+pub(super) async fn command_ping(
+    repo: Arc<RepositoryState>,
     pr: &PullRequest,
 ) -> anyhow::Result<()> {
     repo.client

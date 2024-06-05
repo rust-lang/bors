@@ -7,9 +7,7 @@ use octocrab::{Error, Octocrab};
 use tracing::log;
 
 use crate::bors::event::PullRequestComment;
-use crate::bors::{
-    CheckSuite, CheckSuiteStatus, Comment, RepositoryClient, RepositoryLoader, RepositoryState,
-};
+use crate::bors::{CheckSuite, CheckSuiteStatus, Comment, RepositoryLoader, RepositoryState};
 use crate::config::{RepositoryConfig, CONFIG_FILE_PATH};
 use crate::database::RunId;
 use crate::github::api::base_github_html_url;
@@ -40,24 +38,18 @@ impl GithubRepositoryClient {
         &self.repo_name
     }
 
-    fn format_pr(&self, pr: PullRequestNumber) -> String {
-        format!("{}/{}/{}", self.name().owner(), self.name().name(), pr)
-    }
-}
-
-impl RepositoryClient for GithubRepositoryClient {
-    fn repository(&self) -> &GithubRepoName {
+    pub fn repository(&self) -> &GithubRepoName {
         self.name()
     }
 
     /// Was the comment created by the bot?
-    async fn is_comment_internal(&self, comment: &PullRequestComment) -> anyhow::Result<bool> {
+    pub async fn is_comment_internal(&self, comment: &PullRequestComment) -> anyhow::Result<bool> {
         Ok(comment.author.html_url == self.app.html_url)
     }
 
     /// Loads repository configuration from a file located at `[CONFIG_FILE_PATH]` in the main
     /// branch.
-    async fn load_config(&self) -> anyhow::Result<RepositoryConfig> {
+    pub async fn load_config(&self) -> anyhow::Result<RepositoryConfig> {
         let mut response = self
             .client
             .repos(&self.repo_name.owner, &self.repo_name.name)
@@ -86,7 +78,8 @@ impl RepositoryClient for GithubRepositoryClient {
             })
     }
 
-    async fn get_branch_sha(&self, name: &str) -> anyhow::Result<CommitSha> {
+    /// Return the current SHA of the given branch.
+    pub async fn get_branch_sha(&self, name: &str) -> anyhow::Result<CommitSha> {
         // https://docs.github.com/en/rest/branches/branches?apiVersion=2022-11-28#get-a-branch
         let branch: octocrab::models::repos::Branch = self
             .client
@@ -104,7 +97,8 @@ impl RepositoryClient for GithubRepositoryClient {
         Ok(CommitSha(branch.commit.sha))
     }
 
-    async fn get_pull_request(&self, pr: PullRequestNumber) -> anyhow::Result<PullRequest> {
+    /// Resolve a pull request from this repository by it's number.
+    pub async fn get_pull_request(&self, pr: PullRequestNumber) -> anyhow::Result<PullRequest> {
         let pr = self
             .client
             .pulls(self.repository().owner(), self.repository().name())
@@ -116,8 +110,13 @@ impl RepositoryClient for GithubRepositoryClient {
         Ok(github_pr_to_pr(pr))
     }
 
+    /// Post a comment to the pull request with the given number.
     /// The comment will be posted as the Github App user of the bot.
-    async fn post_comment(&self, pr: PullRequestNumber, comment: Comment) -> anyhow::Result<()> {
+    pub async fn post_comment(
+        &self,
+        pr: PullRequestNumber,
+        comment: Comment,
+    ) -> anyhow::Result<()> {
         self.client
             .issues(&self.name().owner, &self.name().name)
             .create_comment(pr.0, comment.render())
@@ -126,11 +125,13 @@ impl RepositoryClient for GithubRepositoryClient {
         Ok(())
     }
 
-    async fn set_branch_to_sha(&self, branch: &str, sha: &CommitSha) -> anyhow::Result<()> {
+    /// Set the given branch to a commit with the given `sha`.
+    pub async fn set_branch_to_sha(&self, branch: &str, sha: &CommitSha) -> anyhow::Result<()> {
         Ok(set_branch_to_commit(self, branch.to_string(), sha).await?)
     }
 
-    async fn merge_branches(
+    /// Merge `head` into `base`. Returns the SHA of the merge commit.
+    pub async fn merge_branches(
         &self,
         base: &str,
         head: &CommitSha,
@@ -139,7 +140,8 @@ impl RepositoryClient for GithubRepositoryClient {
         Ok(merge_branches(self, base, head, commit_message).await?)
     }
 
-    async fn get_check_suites_for_commit(
+    /// Find all check suites attached to the given commit and branch.
+    pub async fn get_check_suites_for_commit(
         &self,
         branch: &str,
         sha: &CommitSha,
@@ -198,7 +200,8 @@ impl RepositoryClient for GithubRepositoryClient {
         Ok(suites)
     }
 
-    async fn cancel_workflows(&self, run_ids: &[RunId]) -> anyhow::Result<()> {
+    /// Cancels Github Actions workflows.
+    pub async fn cancel_workflows(&self, run_ids: &[RunId]) -> anyhow::Result<()> {
         let actions = self.client.actions();
 
         // Cancel all workflows in parallel
@@ -216,7 +219,8 @@ impl RepositoryClient for GithubRepositoryClient {
         Ok(())
     }
 
-    async fn add_labels(&self, pr: PullRequestNumber, labels: &[String]) -> anyhow::Result<()> {
+    /// Add a set of labels to a PR.
+    pub async fn add_labels(&self, pr: PullRequestNumber, labels: &[String]) -> anyhow::Result<()> {
         let client = self.client.issues(self.name().owner(), self.name().name());
         if !labels.is_empty() {
             client
@@ -228,7 +232,12 @@ impl RepositoryClient for GithubRepositoryClient {
         Ok(())
     }
 
-    async fn remove_labels(&self, pr: PullRequestNumber, labels: &[String]) -> anyhow::Result<()> {
+    /// Remove a set of labels from a PR.
+    pub async fn remove_labels(
+        &self,
+        pr: PullRequestNumber,
+        labels: &[String],
+    ) -> anyhow::Result<()> {
         let client = self.client.issues(self.name().owner(), self.name().name());
         // The GitHub API only allows removing labels one by one, so we remove all of them in
         // parallel to speed it up a little.
@@ -256,7 +265,8 @@ impl RepositoryClient for GithubRepositoryClient {
         Ok(())
     }
 
-    fn get_workflow_url(&self, run_id: RunId) -> String {
+    /// Get a workflow url.
+    pub fn get_workflow_url(&self, run_id: RunId) -> String {
         let html_url = self
             .repository
             .html_url
@@ -272,16 +282,18 @@ impl RepositoryClient for GithubRepositoryClient {
             });
         format!("{html_url}/actions/runs/{run_id}")
     }
+
+    fn format_pr(&self, pr: PullRequestNumber) -> String {
+        format!("{}/{}/{}", self.name().owner(), self.name().name(), pr)
+    }
 }
 
 #[async_trait]
-impl RepositoryLoader<GithubRepositoryClient> for Octocrab {
+impl RepositoryLoader for Octocrab {
     async fn load_repositories(
         &self,
         team_api_client: &TeamApiClient,
-    ) -> anyhow::Result<
-        HashMap<GithubRepoName, anyhow::Result<RepositoryState<GithubRepositoryClient>>>,
-    > {
+    ) -> anyhow::Result<HashMap<GithubRepoName, anyhow::Result<RepositoryState>>> {
         load_repositories(self, team_api_client).await
     }
 }

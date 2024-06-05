@@ -17,8 +17,6 @@ use tokio::sync::mpsc;
 use tower::limit::ConcurrencyLimitLayer;
 use tracing::{Instrument, Span};
 
-use super::api::client::GithubRepositoryClient;
-
 /// Shared server state for all axum handlers.
 pub struct ServerState {
     repository_event_queue: mpsc::Sender<BorsRepositoryEvent>,
@@ -79,7 +77,7 @@ pub async fn github_webhook_handler(
 /// Creates a future with a Bors process that continuously receives webhook events and reacts to
 /// them.
 pub fn create_bors_process(
-    ctx: BorsContext<GithubRepositoryClient>,
+    ctx: BorsContext,
     gh_client: Octocrab,
     team_api: TeamApiClient,
 ) -> (
@@ -123,7 +121,7 @@ pub fn create_bors_process(
 }
 
 async fn consume_repository_events(
-    ctx: Arc<BorsContext<GithubRepositoryClient>>,
+    ctx: Arc<BorsContext>,
     mut repository_rx: mpsc::Receiver<BorsRepositoryEvent>,
 ) {
     while let Some(event) = repository_rx.recv().await {
@@ -141,7 +139,7 @@ async fn consume_repository_events(
 }
 
 async fn consume_global_events(
-    ctx: Arc<BorsContext<GithubRepositoryClient>>,
+    ctx: Arc<BorsContext>,
     mut global_rx: mpsc::Receiver<BorsGlobalEvent>,
     gh_client: Octocrab,
     team_api: TeamApiClient,

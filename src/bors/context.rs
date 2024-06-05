@@ -5,19 +5,19 @@ use std::{
 
 use crate::{bors::command::CommandParser, github::GithubRepoName, PgDbClient};
 
-use super::{RepositoryClient, RepositoryState};
+use super::RepositoryState;
 
-pub struct BorsContext<Client: RepositoryClient> {
+pub struct BorsContext {
     pub parser: CommandParser,
     pub db: Arc<PgDbClient>,
-    pub repositories: RwLock<HashMap<GithubRepoName, Arc<RepositoryState<Client>>>>,
+    pub repositories: RwLock<HashMap<GithubRepoName, Arc<RepositoryState>>>,
 }
 
-impl<Client: RepositoryClient> BorsContext<Client> {
+impl BorsContext {
     pub fn new(
         parser: CommandParser,
         db: Arc<PgDbClient>,
-        repositories: HashMap<GithubRepoName, Arc<RepositoryState<Client>>>,
+        repositories: HashMap<GithubRepoName, Arc<RepositoryState>>,
     ) -> Self {
         let repositories = RwLock::new(repositories);
         Self {

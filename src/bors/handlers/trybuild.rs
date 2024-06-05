@@ -5,7 +5,6 @@ use anyhow::{anyhow, Context};
 use crate::bors::command::Parent;
 use crate::bors::handlers::labels::handle_label_trigger;
 use crate::bors::Comment;
-use crate::bors::RepositoryClient;
 use crate::bors::RepositoryState;
 use crate::database::RunId;
 use crate::database::{BuildModel, BuildStatus, PullRequestModel, WorkflowStatus, WorkflowType};
@@ -29,8 +28,8 @@ pub(super) const TRY_BRANCH_NAME: &str = "automation/bors/try";
 ///
 /// If `parent` is set, it will use it as a base commit for the merge.
 /// Otherwise, it will use the latest commit on the main repository branch.
-pub(super) async fn command_try_build<Client: RepositoryClient>(
-    repo: Arc<RepositoryState<Client>>,
+pub(super) async fn command_try_build(
+    repo: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
     pr: &PullRequest,
     author: &GithubUser,
@@ -140,8 +139,8 @@ pub(super) async fn command_try_build<Client: RepositoryClient>(
     }
 }
 
-pub(super) async fn command_try_cancel<Client: RepositoryClient>(
-    repo: Arc<RepositoryState<Client>>,
+pub(super) async fn command_try_cancel(
+    repo: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
     pr: &PullRequest,
     author: &GithubUser,
@@ -209,8 +208,8 @@ Cancelled workflows:"#
     Ok(())
 }
 
-pub async fn cancel_build_workflows<Client: RepositoryClient>(
-    repo: &RepositoryState<Client>,
+pub async fn cancel_build_workflows(
+    repo: &RepositoryState,
     db: &PgDbClient,
     build: &BuildModel,
 ) -> anyhow::Result<Vec<RunId>> {
@@ -285,8 +284,8 @@ handled during merge and rebase. This is normal, and you should still perform st
     )
 }
 
-async fn check_try_permissions<Client: RepositoryClient>(
-    repo: &RepositoryState<Client>,
+async fn check_try_permissions(
+    repo: &RepositoryState,
     pr: &PullRequest,
     author: &GithubUser,
 ) -> anyhow::Result<bool> {

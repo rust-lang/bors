@@ -6,12 +6,12 @@ use chrono::{DateTime, Utc};
 
 use crate::bors::handlers::trybuild::cancel_build_workflows;
 use crate::bors::Comment;
-use crate::bors::{RepositoryClient, RepositoryState};
+use crate::bors::RepositoryState;
 use crate::database::BuildStatus;
 use crate::{PgDbClient, TeamApiClient};
 
-pub async fn refresh_repository<Client: RepositoryClient>(
-    repo: Arc<RepositoryState<Client>>,
+pub async fn refresh_repository(
+    repo: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
     team_api_client: &TeamApiClient,
 ) -> anyhow::Result<()> {
@@ -28,10 +28,7 @@ pub async fn refresh_repository<Client: RepositoryClient>(
     }
 }
 
-async fn cancel_timed_out_builds<Client: RepositoryClient>(
-    repo: &RepositoryState<Client>,
-    db: &PgDbClient,
-) -> anyhow::Result<()> {
+async fn cancel_timed_out_builds(repo: &RepositoryState, db: &PgDbClient) -> anyhow::Result<()> {
     let running_builds = db.get_running_builds(&repo.repository).await?;
     tracing::info!("Found {} running build(s)", running_builds.len());
 
@@ -65,8 +62,8 @@ async fn cancel_timed_out_builds<Client: RepositoryClient>(
     Ok(())
 }
 
-async fn reload_permission<Client: RepositoryClient>(
-    repo: &RepositoryState<Client>,
+async fn reload_permission(
+    repo: &RepositoryState,
     team_api_client: &TeamApiClient,
 ) -> anyhow::Result<()> {
     let permissions = team_api_client
@@ -82,9 +79,7 @@ async fn reload_permission<Client: RepositoryClient>(
     Ok(())
 }
 
-async fn reload_config<Client: RepositoryClient>(
-    repo: &RepositoryState<Client>,
-) -> anyhow::Result<()> {
+async fn reload_config(repo: &RepositoryState) -> anyhow::Result<()> {
     let config = repo.client.load_config().await?;
     repo.config.store(Arc::new(config));
     Ok(())

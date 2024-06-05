@@ -12,7 +12,7 @@ use crate::bors::handlers::trybuild::{command_try_build, command_try_cancel, TRY
 use crate::bors::handlers::workflow::{
     handle_check_suite_completed, handle_workflow_completed, handle_workflow_started,
 };
-use crate::bors::{BorsContext, Comment, RepositoryClient, RepositoryLoader, RepositoryState};
+use crate::bors::{BorsContext, Comment, RepositoryLoader, RepositoryState};
 use crate::{PgDbClient, TeamApiClient};
 
 #[cfg(test)]
@@ -29,9 +29,9 @@ mod workflow;
 pub static WAIT_FOR_WORKFLOW_STARTED: TestSyncMarker = TestSyncMarker::new();
 
 /// This function executes a single BORS repository event
-pub async fn handle_bors_repository_event<Client: RepositoryClient>(
+pub async fn handle_bors_repository_event(
     event: BorsRepositoryEvent,
-    ctx: Arc<BorsContext<Client>>,
+    ctx: Arc<BorsContext>,
 ) -> anyhow::Result<()> {
     let db = Arc::clone(&ctx.db);
     let Some(repo) = ctx
@@ -118,10 +118,10 @@ pub async fn handle_bors_repository_event<Client: RepositoryClient>(
 pub static WAIT_FOR_REFRESH: TestSyncMarker = TestSyncMarker::new();
 
 /// This function executes a single BORS global event
-pub async fn handle_bors_global_event<Client: RepositoryClient>(
+pub async fn handle_bors_global_event(
     event: BorsGlobalEvent,
-    ctx: Arc<BorsContext<Client>>,
-    repo_loader: &dyn RepositoryLoader<Client>,
+    ctx: Arc<BorsContext>,
+    repo_loader: &dyn RepositoryLoader,
     team_api_client: &TeamApiClient,
 ) -> anyhow::Result<()> {
     let db = Arc::clone(&ctx.db);
@@ -134,7 +134,7 @@ pub async fn handle_bors_global_event<Client: RepositoryClient>(
         }
         BorsGlobalEvent::Refresh => {
             let span = tracing::info_span!("Refresh");
-            let repos: Vec<Arc<RepositoryState<Client>>> =
+            let repos: Vec<Arc<RepositoryState>> =
                 ctx.repositories.read().unwrap().values().cloned().collect();
             futures::future::join_all(repos.into_iter().map(|repo| {
                 let repo = Arc::clone(&repo);
@@ -155,10 +155,10 @@ pub async fn handle_bors_global_event<Client: RepositoryClient>(
     Ok(())
 }
 
-async fn handle_comment<Client: RepositoryClient>(
-    repo: Arc<RepositoryState<Client>>,
+async fn handle_comment(
+    repo: Arc<RepositoryState>,
     database: Arc<PgDbClient>,
-    ctx: Arc<BorsContext<Client>>,
+    ctx: Arc<BorsContext>,
     comment: PullRequestComment,
 ) -> anyhow::Result<()> {
     let pr_number = comment.pr_number;
@@ -241,9 +241,9 @@ async fn handle_comment<Client: RepositoryClient>(
     Ok(())
 }
 
-async fn reload_repos<Client: RepositoryClient>(
-    ctx: Arc<BorsContext<Client>>,
-    repo_loader: &dyn RepositoryLoader<Client>,
+async fn reload_repos(
+    ctx: Arc<BorsContext>,
+    repo_loader: &dyn RepositoryLoader,
     team_api_client: &TeamApiClient,
 ) -> anyhow::Result<()> {
     let reloaded_repos = repo_loader.load_repositories(team_api_client).await?;
