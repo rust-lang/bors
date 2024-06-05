@@ -327,6 +327,46 @@ mod tests {
     use crate::tests::state::{default_merge_sha, ClientBuilder, RepoConfigBuilder};
 
     #[sqlx::test]
+    async fn try_success(pool: sqlx::PgPool) {
+        run_test(pool.clone(), |mut tester| async {
+            tester.create_branch(TRY_BRANCH_NAME).expect_suites(1);
+            tester.post_comment("@bors try").await?;
+            tester.expect_comments(1).await;
+            tester.workflow_success(tester.try_branch()).await?;
+            insta::assert_snapshot!(
+                tester.get_comment().await?,
+                @r###"
+            :sunny: Try build successful
+            - [Workflow1](https://github.com/workflows/Workflow1/1) :white_check_mark:
+            Build commit: merge-main-sha1-pr-1-sha-0 (`merge-main-sha1-pr-1-sha-0`)
+            <!-- homu: {"type":"TryBuildCompleted","merge_sha":"merge-main-sha1-pr-1-sha-0"} -->
+            "###
+            );
+            Ok(tester)
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn try_failure(pool: sqlx::PgPool) {
+        run_test(pool.clone(), |mut tester| async {
+            tester.create_branch(TRY_BRANCH_NAME).expect_suites(1);
+            tester.post_comment("@bors try").await?;
+            tester.expect_comments(1).await;
+            tester.workflow_failure(tester.try_branch()).await?;
+            insta::assert_snapshot!(
+                tester.get_comment().await?,
+                @r###"
+            :broken_heart: Test failed
+            - [Workflow1](https://github.com/workflows/Workflow1/1) :x:
+            "###
+            );
+            Ok(tester)
+        })
+        .await;
+    }
+
+    #[sqlx::test]
     async fn try_no_permissions(pool: sqlx::PgPool) {
         let world = World::default();
         world.get_repo(default_repo_name()).lock().permissions = Permissions::default();
