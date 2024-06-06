@@ -1,4 +1,3 @@
-use axum::async_trait;
 use sqlx::PgPool;
 
 use crate::database::{
@@ -12,7 +11,7 @@ use super::operations::{
     get_pull_request, get_running_builds, get_workflows_for_build, update_build_status,
     update_pr_build_id, update_workflow_status,
 };
-use super::{DbClient, RunId};
+use super::RunId;
 
 /// Provides access to a database using sqlx operations.
 #[derive(Clone)]
@@ -24,11 +23,8 @@ impl PgDbClient {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
     }
-}
 
-#[async_trait]
-impl DbClient for PgDbClient {
-    async fn get_or_create_pull_request(
+    pub async fn get_or_create_pull_request(
         &self,
         repo: &GithubRepoName,
         pr_number: PullRequestNumber,
@@ -44,14 +40,14 @@ impl DbClient for PgDbClient {
         Ok(pr)
     }
 
-    async fn find_pr_by_build(
+    pub async fn find_pr_by_build(
         &self,
         build: &BuildModel,
     ) -> anyhow::Result<Option<PullRequestModel>> {
         find_pr_by_build(&self.pool, build.id).await
     }
 
-    async fn attach_try_build(
+    pub async fn attach_try_build(
         &self,
         pr: PullRequestModel,
         branch: String,
@@ -66,7 +62,7 @@ impl DbClient for PgDbClient {
         Ok(())
     }
 
-    async fn find_build(
+    pub async fn find_build(
         &self,
         repo: &GithubRepoName,
         branch: String,
@@ -75,11 +71,14 @@ impl DbClient for PgDbClient {
         find_build(&self.pool, repo, &branch, &commit_sha).await
     }
 
-    async fn get_running_builds(&self, repo: &GithubRepoName) -> anyhow::Result<Vec<BuildModel>> {
+    pub async fn get_running_builds(
+        &self,
+        repo: &GithubRepoName,
+    ) -> anyhow::Result<Vec<BuildModel>> {
         get_running_builds(&self.pool, repo).await
     }
 
-    async fn update_build_status(
+    pub async fn update_build_status(
         &self,
         build: &BuildModel,
         status: BuildStatus,
@@ -87,7 +86,7 @@ impl DbClient for PgDbClient {
         update_build_status(&self.pool, build.id, status).await
     }
 
-    async fn create_workflow(
+    pub async fn create_workflow(
         &self,
         build: &BuildModel,
         name: String,
@@ -108,7 +107,7 @@ impl DbClient for PgDbClient {
         .await
     }
 
-    async fn update_workflow_status(
+    pub async fn update_workflow_status(
         &self,
         run_id: u64,
         status: WorkflowStatus,
@@ -116,7 +115,7 @@ impl DbClient for PgDbClient {
         update_workflow_status(&self.pool, run_id, status).await
     }
 
-    async fn get_workflows_for_build(
+    pub async fn get_workflows_for_build(
         &self,
         build: &BuildModel,
     ) -> anyhow::Result<Vec<WorkflowModel>> {

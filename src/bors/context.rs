@@ -3,21 +3,21 @@ use std::{
     sync::{Arc, RwLock},
 };
 
-use crate::{bors::command::CommandParser, database::DbClient, github::GithubRepoName};
+use crate::{bors::command::CommandParser, github::GithubRepoName, PgDbClient};
 
-use super::{RepositoryClient, RepositoryState};
+use super::RepositoryState;
 
-pub struct BorsContext<Client: RepositoryClient> {
+pub struct BorsContext {
     pub parser: CommandParser,
-    pub db: Arc<dyn DbClient>,
-    pub repositories: RwLock<HashMap<GithubRepoName, Arc<RepositoryState<Client>>>>,
+    pub db: Arc<PgDbClient>,
+    pub repositories: RwLock<HashMap<GithubRepoName, Arc<RepositoryState>>>,
 }
 
-impl<Client: RepositoryClient> BorsContext<Client> {
+impl BorsContext {
     pub fn new(
         parser: CommandParser,
-        db: Arc<dyn DbClient>,
-        repositories: HashMap<GithubRepoName, Arc<RepositoryState<Client>>>,
+        db: Arc<PgDbClient>,
+        repositories: HashMap<GithubRepoName, Arc<RepositoryState>>,
     ) -> Self {
         let repositories = RwLock::new(repositories);
         Self {

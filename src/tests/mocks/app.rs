@@ -16,7 +16,7 @@ impl AppHandler {
     pub(super) async fn mount(&self, mock_server: &MockServer) {
         Mock::given(method("GET"))
             .and(path("/app"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(App::default()))
+            .respond_with(ResponseTemplate::new(200).set_body_json(GitHubApp::default()))
             .mount(mock_server)
             .await;
         Mock::given(method("GET"))
@@ -35,10 +35,10 @@ impl AppHandler {
 /// Represents an app on GitHub
 /// Returns type for the `GET /app` endpoint
 #[derive(Serialize)]
-pub struct App {
+pub struct GitHubApp {
     id: u64,
     node_id: String,
-    owner: GitHubUser,
+    pub owner: GitHubUser,
     name: String,
     external_url: Url,
     html_url: Url,
@@ -46,9 +46,9 @@ pub struct App {
     events: Vec<String>,
 }
 
-impl Default for App {
+impl Default for GitHubApp {
     fn default() -> Self {
-        App {
+        GitHubApp {
             id: default_app_id(),
             node_id: "1234".to_string(),
             owner: GitHubUser::default(),

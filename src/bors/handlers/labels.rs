@@ -1,13 +1,13 @@
 use itertools::Itertools;
 use tracing::log;
 
-use crate::bors::{RepositoryClient, RepositoryState};
+use crate::bors::RepositoryState;
 use crate::github::{LabelModification, LabelTrigger, PullRequestNumber};
 
 /// If there are any label modifications that should be performed on the given PR when `trigger`
 /// happens, this function will perform them.
-pub async fn handle_label_trigger<Client: RepositoryClient>(
-    repo: &RepositoryState<Client>,
+pub async fn handle_label_trigger(
+    repo: &RepositoryState,
     pr: PullRequestNumber,
     trigger: LabelTrigger,
 ) -> anyhow::Result<()> {

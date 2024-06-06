@@ -6,13 +6,13 @@ use chrono::{DateTime, Utc};
 
 use crate::bors::handlers::trybuild::cancel_build_workflows;
 use crate::bors::Comment;
-use crate::bors::{RepositoryClient, RepositoryState};
-use crate::database::{BuildStatus, DbClient};
-use crate::TeamApiClient;
+use crate::bors::RepositoryState;
+use crate::database::BuildStatus;
+use crate::{PgDbClient, TeamApiClient};
 
-pub async fn refresh_repository<Client: RepositoryClient>(
-    repo: Arc<RepositoryState<Client>>,
-    db: Arc<dyn DbClient>,
+pub async fn refresh_repository(
+    repo: Arc<RepositoryState>,
+    db: Arc<PgDbClient>,
     team_api_client: &TeamApiClient,
 ) -> anyhow::Result<()> {
     let repo = repo.as_ref();
@@ -28,10 +28,7 @@ pub async fn refresh_repository<Client: RepositoryClient>(
     }
 }
 
-async fn cancel_timed_out_builds<Client: RepositoryClient>(
-    repo: &RepositoryState<Client>,
-    db: &dyn DbClient,
-) -> anyhow::Result<()> {
+async fn cancel_timed_out_builds(repo: &RepositoryState, db: &PgDbClient) -> anyhow::Result<()> {
     let running_builds = db.get_running_builds(&repo.repository).await?;
     tracing::info!("Found {} running build(s)", running_builds.len());
 
@@ -65,8 +62,8 @@ async fn cancel_timed_out_builds<Client: RepositoryClient>(
     Ok(())
 }
 
-async fn reload_permission<Client: RepositoryClient>(
-    repo: &RepositoryState<Client>,
+async fn reload_permission(
+    repo: &RepositoryState,
     team_api_client: &TeamApiClient,
 ) -> anyhow::Result<()> {
     let permissions = team_api_client
@@ -82,9 +79,7 @@ async fn reload_permission<Client: RepositoryClient>(
     Ok(())
 }
 
-async fn reload_config<Client: RepositoryClient>(
-    repo: &RepositoryState<Client>,
-) -> anyhow::Result<()> {
+async fn reload_config(repo: &RepositoryState) -> anyhow::Result<()> {
     let config = repo.client.load_config().await?;
     repo.config.store(Arc::new(config));
     Ok(())
@@ -110,81 +105,117 @@ fn elapsed_time(date: DateTime<Utc>) -> Duration {
     (time - date).to_std().unwrap_or(Duration::ZERO)
 }
 
-// FIXME: uncomment once we have end-to-end tests so taht we can mock external resources
-// (GitHub repositories and Team API permissions).
+// TODO: we need a way to get MOCK_TIME working with a multi-threaded tokio runtime
 // #[cfg(test)]
 // mod tests {
+//     use crate::bors::handlers::refresh::MOCK_TIME;
+//     use crate::bors::handlers::WAIT_FOR_WORKFLOW_STARTED;
+//     use crate::database::DbClient;
+//     use crate::tests::mocks::{default_repo_name, run_test, BorsBuilder, WorkflowEvent, World};
+//     use chrono::Utc;
 //     use std::future::Future;
 //     use std::time::Duration;
-//
-//     use chrono::Utc;
 //     use tokio::runtime::RuntimeFlavor;
-//
-//     use crate::bors::handlers::refresh::MOCK_TIME;
-//     use crate::bors::handlers::trybuild::TRY_BRANCH_NAME;
-//     use crate::database::DbClient;
-//     use crate::tests::event::{default_pr_number, WorkflowStartedBuilder};
-//     use crate::tests::state::{default_repo_name, ClientBuilder, RepoConfigBuilder};
 //
 //     #[sqlx::test]
 //     async fn refresh_no_builds(pool: sqlx::PgPool) {
-//         let mut state = ClientBuilder::default().pool(pool).create_state().await;
-//         state.refresh().await;
+//         run_test(pool, |tester| async move {
+//             tester.refresh().await;
+//             Ok(tester)
+//         })
+//         .await;
 //     }
 //
 //     #[sqlx::test]
 //     async fn refresh_do_nothing_before_timeout(pool: sqlx::PgPool) {
-//         let mut state = ClientBuilder::default()
-//             .config(RepoConfigBuilder::default().timeout(Duration::from_secs(3600)))
-//             .pool(pool)
-//             .create_state()
+//         let world = World::default();
+//         world.default_repo().lock().set_config(
+//             r#"
+// timeout = 3600
+// "#,
+//         );
+//         BorsBuilder::new(pool)
+//             .world(world)
+//             .run_test(|mut tester| async move {
+//                 tester.post_comment("@bors try").await?;
+//                 tester.expect_comments(1).await;
+//                 with_mocked_time(Duration::from_secs(10), async {
+//                     tester.refresh().await;
+//                 })
+//                 .await;
+//                 Ok(tester)
+//             })
 //             .await;
-//         state.comment("@bors try").await;
-//         with_mocked_time(Duration::from_secs(10), async move {
-//             state.refresh().await;
-//             state.client().check_comment_count(default_pr_number(), 1);
-//         })
-//         .await;
 //     }
 //
 //     #[sqlx::test]
 //     async fn refresh_cancel_build_after_timeout(pool: sqlx::PgPool) {
-//         let mut state = ClientBuilder::default()
-//             .config(RepoConfigBuilder::default().timeout(Duration::from_secs(3600)))
-//             .pool(pool)
-//             .create_state()
+//         let world = World::default();
+//         world.default_repo().lock().set_config(
+//             r#"
+// timeout = 3600
+// "#,
+//         );
+//         BorsBuilder::new(pool)
+//             .world(world)
+//             .run_test(|mut tester| async move {
+//                 tester.post_comment("@bors try").await?;
+//                 tester.expect_comments(1).await;
+//                 with_mocked_time(Duration::from_secs(4000), async {
+//                     assert_eq!(
+//                         tester
+//                             .db()
+//                             .get_running_builds(&default_repo_name())
+//                             .await
+//                             .unwrap()
+//                             .len(),
+//                         1
+//                     );
+//                     tester.refresh().await;
+//                 })
+//                 .await;
+//                 insta::assert_snapshot!(tester.get_comment().await?, @":boom: Test timed out");
+//                 assert_eq!(
+//                     tester
+//                         .db()
+//                         .get_running_builds(&default_repo_name())
+//                         .await
+//                         .unwrap()
+//                         .len(),
+//                     0
+//                 );
+//                 Ok(tester)
+//             })
 //             .await;
-//         state.comment("@bors try").await;
-//         with_mocked_time(Duration::from_secs(4000), async move {
-//             assert_eq!(state.db.get_running_builds(&default_repo_name()).await.unwrap().len(), 1);
-//             state.refresh().await;
-//             insta::assert_snapshot!(state.client().get_last_comment(default_pr_number()), @":boom: Test timed out");
-//             assert_eq!(state.db.get_running_builds(&default_repo_name()).await.unwrap().len(), 0);
-//         })
-//         .await;
 //     }
 //
 //     #[sqlx::test]
 //     async fn refresh_cancel_workflow_after_timeout(pool: sqlx::PgPool) {
-//         let mut state = ClientBuilder::default()
-//             .config(RepoConfigBuilder::default().timeout(Duration::from_secs(3600)))
-//             .pool(pool)
-//             .create_state()
-//             .await;
-//         state.comment("@bors try").await;
-//         state
-//             .workflow_started(
-//                 WorkflowStartedBuilder::default()
-//                     .branch(TRY_BRANCH_NAME.to_string())
-//                     .run_id(123),
-//             )
-//             .await;
+//         let world = World::default();
+//         world.default_repo().lock().set_config(
+//             r#"
+// timeout = 3600
+// "#,
+//         );
+//         let world = BorsBuilder::new(pool)
+//             .world(world)
+//             .run_test(|mut tester| async move {
+//                 tester.post_comment("@bors try").await?;
+//                 tester.expect_comments(1).await;
+//                 tester
+//                     .workflow_event(WorkflowEvent::started(tester.try_branch()))
+//                     .await?;
+//                 WAIT_FOR_WORKFLOW_STARTED.sync().await;
 //
-//         with_mocked_time(Duration::from_secs(4000), async move {
-//             state.refresh().await;
-//             state.client().check_cancelled_workflows(&[123]);
-//         })
-//         .await;
+//                 with_mocked_time(Duration::from_secs(4000), async {
+//                     tester.refresh().await;
+//                 })
+//                 .await;
+//                 tester.expect_comments(1).await;
+//                 Ok(tester)
+//             })
+//             .await;
+//         world.check_cancelled_workflows(default_repo_name(), &[1]);
 //     }
 //
 //     async fn with_mocked_time<Fut: Future<Output = ()>>(in_future: Duration, future: Fut) {

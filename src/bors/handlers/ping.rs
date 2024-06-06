@@ -1,12 +1,11 @@
 use std::sync::Arc;
 
 use crate::bors::Comment;
-use crate::bors::RepositoryClient;
 use crate::bors::RepositoryState;
 use crate::github::PullRequest;
 
-pub(super) async fn command_ping<Client: RepositoryClient>(
-    repo: Arc<RepositoryState<Client>>,
+pub(super) async fn command_ping(
+    repo: Arc<RepositoryState>,
     pr: &PullRequest,
 ) -> anyhow::Result<()> {
     repo.client
@@ -22,8 +21,8 @@ mod tests {
     #[sqlx::test]
     async fn ping_command(pool: sqlx::PgPool) {
         run_test(pool, |mut tester| async {
-            tester.post_comment("@bors ping").await;
-            assert_eq!(tester.get_comment().await, "Pong 🏓!");
+            tester.post_comment("@bors ping").await?;
+            assert_eq!(tester.get_comment().await?, "Pong 🏓!");
             Ok(tester)
         })
         .await;

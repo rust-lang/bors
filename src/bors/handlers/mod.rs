@@ -12,10 +12,11 @@ use crate::bors::handlers::trybuild::{command_try_build, command_try_cancel, TRY
 use crate::bors::handlers::workflow::{
     handle_check_suite_completed, handle_workflow_completed, handle_workflow_started,
 };
-use crate::bors::{BorsContext, Comment, RepositoryClient, RepositoryLoader, RepositoryState};
-use crate::database::DbClient;
-use crate::utils::logging::LogError;
-use crate::TeamApiClient;
+use crate::bors::{BorsContext, Comment, RepositoryLoader, RepositoryState};
+use crate::{PgDbClient, TeamApiClient};
+
+#[cfg(test)]
+use crate::tests::util::TestSyncMarker;
 
 mod help;
 mod labels;
@@ -24,10 +25,13 @@ mod refresh;
 mod trybuild;
 mod workflow;
 
+#[cfg(test)]
+pub static WAIT_FOR_WORKFLOW_STARTED: TestSyncMarker = TestSyncMarker::new();
+
 /// This function executes a single BORS repository event
-pub async fn handle_bors_repository_event<Client: RepositoryClient>(
+pub async fn handle_bors_repository_event(
     event: BorsRepositoryEvent,
-    ctx: Arc<BorsContext<Client>>,
+    ctx: Arc<BorsContext>,
 ) -> anyhow::Result<()> {
     let db = Arc::clone(&ctx.db);
     let Some(repo) = ctx
@@ -35,7 +39,7 @@ pub async fn handle_bors_repository_event<Client: RepositoryClient>(
         .read()
         .unwrap()
         .get(event.repository())
-        .map(Arc::clone)
+        .cloned()
     else {
         return Err(anyhow::anyhow!(
             "Repository {} not found in the bot state",
@@ -61,7 +65,6 @@ pub async fn handle_bors_repository_event<Client: RepositoryClient>(
                 .instrument(span.clone())
                 .await
             {
-                span.log_error(error);
                 repo.client
                     .post_comment(
                         pr_number,
@@ -71,6 +74,7 @@ pub async fn handle_bors_repository_event<Client: RepositoryClient>(
                     )
                     .await
                     .context("Cannot send comment reacting to an error")?;
+                return Err(error.context("Cannot perform command"));
             }
         }
 
@@ -80,12 +84,12 @@ pub async fn handle_bors_repository_event<Client: RepositoryClient>(
                 repo = payload.repository.to_string(),
                 id = payload.run_id.into_inner()
             );
-            if let Err(error) = handle_workflow_started(db, payload)
+            handle_workflow_started(db, payload)
                 .instrument(span.clone())
-                .await
-            {
-                span.log_error(error);
-            }
+                .await?;
+
+            #[cfg(test)]
+            WAIT_FOR_WORKFLOW_STARTED.mark();
         }
         BorsRepositoryEvent::WorkflowCompleted(payload) => {
             let span = tracing::info_span!(
@@ -93,34 +97,31 @@ pub async fn handle_bors_repository_event<Client: RepositoryClient>(
                 repo = payload.repository.to_string(),
                 id = payload.run_id.into_inner()
             );
-            if let Err(error) = handle_workflow_completed(repo, db, payload)
+            handle_workflow_completed(repo, db, payload)
                 .instrument(span.clone())
-                .await
-            {
-                span.log_error(error);
-            }
+                .await?;
         }
         BorsRepositoryEvent::CheckSuiteCompleted(payload) => {
             let span = tracing::info_span!(
                 "Check suite completed",
                 repo = payload.repository.to_string(),
             );
-            if let Err(error) = handle_check_suite_completed(repo, db, payload)
+            handle_check_suite_completed(repo, db, payload)
                 .instrument(span.clone())
-                .await
-            {
-                span.log_error(error);
-            }
+                .await?;
         }
     }
     Ok(())
 }
 
+#[cfg(test)]
+pub static WAIT_FOR_REFRESH: TestSyncMarker = TestSyncMarker::new();
+
 /// This function executes a single BORS global event
-pub async fn handle_bors_global_event<Client: RepositoryClient>(
+pub async fn handle_bors_global_event(
     event: BorsGlobalEvent,
-    ctx: Arc<BorsContext<Client>>,
-    repo_loader: &dyn RepositoryLoader<Client>,
+    ctx: Arc<BorsContext>,
+    repo_loader: &RepositoryLoader,
     team_api_client: &TeamApiClient,
 ) -> anyhow::Result<()> {
     let db = Arc::clone(&ctx.db);
@@ -133,7 +134,7 @@ pub async fn handle_bors_global_event<Client: RepositoryClient>(
         }
         BorsGlobalEvent::Refresh => {
             let span = tracing::info_span!("Refresh");
-            let repos: Vec<Arc<RepositoryState<Client>>> =
+            let repos: Vec<Arc<RepositoryState>> =
                 ctx.repositories.read().unwrap().values().cloned().collect();
             futures::future::join_all(repos.into_iter().map(|repo| {
                 let repo = Arc::clone(&repo);
@@ -146,15 +147,18 @@ pub async fn handle_bors_global_event<Client: RepositoryClient>(
             }))
             .instrument(span)
             .await;
+
+            #[cfg(test)]
+            WAIT_FOR_REFRESH.mark();
         }
     }
     Ok(())
 }
 
-async fn handle_comment<Client: RepositoryClient>(
-    repo: Arc<RepositoryState<Client>>,
-    database: Arc<dyn DbClient>,
-    ctx: Arc<BorsContext<Client>>,
+async fn handle_comment(
+    repo: Arc<RepositoryState>,
+    database: Arc<PgDbClient>,
+    ctx: Arc<BorsContext>,
     comment: PullRequestComment,
 ) -> anyhow::Result<()> {
     let pr_number = comment.pr_number;
@@ -237,9 +241,9 @@ async fn handle_comment<Client: RepositoryClient>(
     Ok(())
 }
 
-async fn reload_repos<Client: RepositoryClient>(
-    ctx: Arc<BorsContext<Client>>,
-    repo_loader: &dyn RepositoryLoader<Client>,
+async fn reload_repos(
+    ctx: Arc<BorsContext>,
+    repo_loader: &RepositoryLoader,
     team_api_client: &TeamApiClient,
 ) -> anyhow::Result<()> {
     let reloaded_repos = repo_loader.load_repositories(team_api_client).await?;
@@ -281,7 +285,7 @@ mod tests {
         run_test(pool, |mut tester| async {
             tester
                 .post_comment(Comment::from("@bors ping").with_author(User::bors_bot()))
-                .await;
+                .await?;
             // Returning here will make sure that no comments were received
             Ok(tester)
         })

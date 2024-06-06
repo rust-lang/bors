@@ -2,7 +2,7 @@ use crate::bors::event::BorsEvent;
 use crate::bors::{handle_bors_global_event, handle_bors_repository_event, BorsContext};
 use crate::github::webhook::GitHubWebhook;
 use crate::github::webhook::WebhookSecret;
-use crate::{BorsGlobalEvent, BorsRepositoryEvent, TeamApiClient};
+use crate::{BorsGlobalEvent, BorsRepositoryEvent, RepositoryLoader, TeamApiClient};
 
 use anyhow::Error;
 use axum::extract::State;
@@ -16,8 +16,6 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use tower::limit::ConcurrencyLimitLayer;
 use tracing::{Instrument, Span};
-
-use super::api::client::GithubRepositoryClient;
 
 /// Shared server state for all axum handlers.
 pub struct ServerState {
@@ -79,7 +77,7 @@ pub async fn github_webhook_handler(
 /// Creates a future with a Bors process that continuously receives webhook events and reacts to
 /// them.
 pub fn create_bors_process(
-    ctx: BorsContext<GithubRepositoryClient>,
+    ctx: BorsContext,
     gh_client: Octocrab,
     team_api: TeamApiClient,
 ) -> (
@@ -89,6 +87,7 @@ pub fn create_bors_process(
 ) {
     let (repository_tx, repository_rx) = mpsc::channel::<BorsRepositoryEvent>(1024);
     let (global_tx, global_rx) = mpsc::channel::<BorsGlobalEvent>(1024);
+    let repo_loader = RepositoryLoader::new(gh_client);
 
     let service = async move {
         let ctx = Arc::new(ctx);
@@ -101,7 +100,7 @@ pub fn create_bors_process(
         {
             tokio::join!(
                 consume_repository_events(ctx.clone(), repository_rx),
-                consume_global_events(ctx.clone(), global_rx, gh_client, team_api)
+                consume_global_events(ctx.clone(), global_rx, repo_loader, team_api)
             );
         }
         // In real execution, the bot runs forever. If there is something that finishes
@@ -113,7 +112,7 @@ pub fn create_bors_process(
                 _ = consume_repository_events(ctx.clone(), repository_rx) => {
                     tracing::error!("Repository event handling process has ended");
                 }
-                _ = consume_global_events(ctx.clone(), global_rx, gh_client, team_api) => {
+                _ = consume_global_events(ctx.clone(), global_rx, repo_loader, team_api) => {
                     tracing::error!("Global event handling process has ended");
                 }
             }
@@ -123,7 +122,7 @@ pub fn create_bors_process(
 }
 
 async fn consume_repository_events(
-    ctx: Arc<BorsContext<GithubRepositoryClient>>,
+    ctx: Arc<BorsContext>,
     mut repository_rx: mpsc::Receiver<BorsRepositoryEvent>,
 ) {
     while let Some(event) = repository_rx.recv().await {
@@ -135,15 +134,15 @@ async fn consume_repository_events(
             .instrument(span.clone())
             .await
         {
-            handle_global_error(span, error);
+            handle_root_error(span, error);
         }
     }
 }
 
 async fn consume_global_events(
-    ctx: Arc<BorsContext<GithubRepositoryClient>>,
+    ctx: Arc<BorsContext>,
     mut global_rx: mpsc::Receiver<BorsGlobalEvent>,
-    gh_client: Octocrab,
+    loader: RepositoryLoader,
     team_api: TeamApiClient,
 ) {
     while let Some(event) = global_rx.recv().await {
@@ -151,21 +150,21 @@ async fn consume_global_events(
 
         let span = tracing::info_span!("GlobalEvent");
         tracing::debug!("Received global event: {event:#?}");
-        if let Err(error) = handle_bors_global_event(event, ctx, &gh_client, &team_api)
+        if let Err(error) = handle_bors_global_event(event, ctx, &loader, &team_api)
             .instrument(span.clone())
             .await
         {
-            handle_global_error(span, error);
+            handle_root_error(span, error);
         }
     }
 }
 
 #[allow(unused_variables)]
-fn handle_global_error(span: Span, error: Error) {
+fn handle_root_error(span: Span, error: Error) {
     // In tests, we want to panic on all errors.
     #[cfg(test)]
     {
-        panic!("Global handler failed: {error:?}");
+        panic!("Handler failed: {error:?}");
     }
     #[cfg(not(test))]
     {

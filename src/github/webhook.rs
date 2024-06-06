@@ -264,7 +264,6 @@ fn parse_webhook_event(request: Parts, body: &[u8]) -> anyhow::Result<Option<Bor
         }
         _ => {
             tracing::debug!("Ignoring unknown event type {:?}", event_type.to_str());
-            std::fs::write(format!("{}.json", event_type.to_str().unwrap()), body).unwrap();
             Ok(None)
         }
     }
@@ -369,7 +368,7 @@ mod tests {
     use crate::tests::webhook::{create_webhook_request, TEST_WEBHOOK_SECRET};
 
     #[tokio::test]
-    async fn test_installation_suspend() {
+    async fn installation_suspend() {
         assert!(matches!(
             check_webhook("webhook/installation-suspend.json", "installation",).await,
             Ok(GitHubWebhook(BorsEvent::Global(
@@ -379,7 +378,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_installation_unsuspend() {
+    async fn installation_unsuspend() {
         assert!(matches!(
             check_webhook("webhook/installation-unsuspend.json", "installation",).await,
             Ok(GitHubWebhook(BorsEvent::Global(
@@ -389,7 +388,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_issue_comment() {
+    async fn issue_comment() {
         insta::assert_debug_snapshot!(
             check_webhook("webhook/issue-comment.json", "issue_comment").await,
             @r###"
@@ -437,7 +436,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_pull_request_review() {
+    async fn pull_request_review() {
         insta::assert_debug_snapshot!(
             check_webhook("webhook/pull-request-review.json", "pull_request_review").await,
             @r###"
@@ -485,7 +484,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_pull_request_review_comment() {
+    async fn pull_request_review_comment() {
         insta::assert_debug_snapshot!(
             check_webhook("webhook/pull-request-review-comment.json", "pull_request_review_comment").await,
             @r###"
@@ -533,7 +532,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_workflow_run_requested() {
+    async fn workflow_run_requested() {
         insta::assert_debug_snapshot!(
             check_webhook("webhook/workflow-run-requested.json", "workflow_run").await,
             @r###"
@@ -566,7 +565,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_workflow_run_completed() {
+    async fn workflow_run_completed() {
         insta::assert_debug_snapshot!(
             check_webhook("webhook/workflow-run-completed.json", "workflow_run").await,
             @r###"
@@ -597,7 +596,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_check_run_created_external() {
+    async fn check_run_created_external() {
         insta::assert_debug_snapshot!(
             check_webhook("webhook/check-run-created-external.json", "check_run").await,
             @r###"
@@ -630,7 +629,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_check_run_created_gha() {
+    async fn check_run_created_gha() {
         assert!(matches!(
             check_webhook("webhook/check-run-created-gha.json", "check_run").await,
             Err(StatusCode::OK)
@@ -638,7 +637,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_unknown_event() {
+    async fn unknown_event() {
         assert_eq!(
             check_webhook("webhook/push.json", "push")
                 .await

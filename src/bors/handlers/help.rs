@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use crate::bors::Comment;
-use crate::bors::RepositoryClient;
 use crate::bors::RepositoryState;
 use crate::github::PullRequest;
 
@@ -12,8 +11,8 @@ const HELP_MESSAGE: &str = r#"
 - help: Print this help message
 "#;
 
-pub(super) async fn command_help<Client: RepositoryClient>(
-    repo: Arc<RepositoryState<Client>>,
+pub(super) async fn command_help(
+    repo: Arc<RepositoryState>,
     pr: &PullRequest,
 ) -> anyhow::Result<()> {
     repo.client
@@ -30,8 +29,8 @@ mod tests {
     #[sqlx::test]
     async fn help_command(pool: sqlx::PgPool) {
         run_test(pool, |mut tester| async {
-            tester.post_comment("@bors help").await;
-            assert_eq!(tester.get_comment().await, HELP_MESSAGE);
+            tester.post_comment("@bors help").await?;
+            assert_eq!(tester.get_comment().await?, HELP_MESSAGE);
             Ok(tester)
         })
         .await;

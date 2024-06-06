@@ -88,7 +88,9 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
             "https://api.github.com".to_string(),
             opts.private_key.into_bytes().into(),
         )?;
-        let repos = client.load_repositories(&team_api).await?;
+        let repos = RepositoryLoader::new(client.clone())
+            .load_repositories(&team_api)
+            .await?;
         Ok::<_, anyhow::Error>((client, repos))
     })?;
 
