@@ -24,10 +24,9 @@ pub async fn mock_pull_requests(
     comments_tx: Sender<Comment>,
     mock_server: &MockServer,
 ) {
-    let repo_arc = repo;
-    let repo = repo_arc.lock();
-    let repo_name = repo.name.clone();
-    for &pr_number in repo.pull_requests.keys() {
+    let repo_name = repo.lock().name.clone();
+    let prs = repo.lock().pull_requests.clone();
+    for &pr_number in prs.keys() {
         Mock::given(method("GET"))
             .and(path(format!("/repos/{repo_name}/pulls/{pr_number}")))
             .respond_with(
@@ -36,18 +35,23 @@ pub async fn mock_pull_requests(
             .mount(mock_server)
             .await;
 
-        mock_pr_comments(&repo, pr_number, comments_tx.clone(), mock_server).await;
-        mock_pr_labels(repo_arc.clone(), repo_name.clone(), pr_number, mock_server).await;
+        mock_pr_comments(
+            repo_name.clone(),
+            pr_number,
+            comments_tx.clone(),
+            mock_server,
+        )
+        .await;
+        mock_pr_labels(repo.clone(), repo_name.clone(), pr_number, mock_server).await;
     }
 }
 
 async fn mock_pr_comments(
-    repo: &Repo,
+    repo_name: GithubRepoName,
     pr_number: u64,
     comments_tx: Sender<Comment>,
     mock_server: &MockServer,
 ) {
-    let repo_name = repo.name.clone();
     Mock::given(method("POST"))
         .and(path(format!(
             "/repos/{repo_name}/issues/{pr_number}/comments",

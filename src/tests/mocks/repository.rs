@@ -201,7 +201,7 @@ impl Branch {
 
 impl Default for Branch {
     fn default() -> Self {
-        Self::new(&default_branch_name(), &default_branch_sha())
+        Self::new(default_branch_name(), default_branch_sha())
     }
 }
 
@@ -334,7 +334,7 @@ async fn mock_create_branch(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
                 }
                 None => {
                     // Create a new branch
-                    repo.branches.push(Branch::new(&branch_name, &sha));
+                    repo.branches.push(Branch::new(branch_name, &sha));
                 }
             }
 
@@ -481,18 +481,21 @@ async fn mock_check_suites(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
 }
 
 async fn mock_config(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
-    let repo = repo.lock();
-    Mock::given(method("GET"))
-        .and(path(format!(
-            "/repos/{}/contents/rust-bors.toml",
-            repo.name
-        )))
-        .respond_with(
-            ResponseTemplate::new(200)
-                .set_body_json(GitHubContent::new("rust-bors.toml", &repo.config)),
-        )
-        .mount(mock_server)
-        .await;
+    // Extracted into a block to avoid holding the lock over an await point
+    let mock = {
+        let repo = repo.lock();
+        Mock::given(method("GET"))
+            .and(path(format!(
+                "/repos/{}/contents/rust-bors.toml",
+                repo.name
+            )))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(GitHubContent::new("rust-bors.toml", &repo.config)),
+            )
+            .mount(mock_server)
+    };
+    mock.await;
 }
 
 /// Represents all repositories for an installation

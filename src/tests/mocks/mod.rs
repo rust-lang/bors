@@ -116,14 +116,14 @@ impl ExternalHttpMock {
 /// Create a mock that dynamically responds to its requests using the given function `f`.
 /// It is expected that the path will be a regex, which will be parsed when a request is received,
 /// and matched capture groups will be passed as a second argument to `f`.
-fn dynamic_mock_req<F: Fn(&Request, [&str; N]) -> ResponseTemplate, const N: usize>(
+fn dynamic_mock_req<
+    F: Fn(&Request, [&str; N]) -> ResponseTemplate + Send + Sync + 'static,
+    const N: usize,
+>(
     f: F,
     m: &str,
     regex: String,
-) -> Mock
-where
-    F: Send + Sync + 'static,
-{
+) -> Mock {
     // We need to parse the regex from the request path again, because wiremock doesn't give
     // the parsed path regex results to us :(
     let parsed_regex = Regex::new(&regex).unwrap();

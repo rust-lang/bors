@@ -8,7 +8,7 @@ pub struct TestSyncMarker {
 impl TestSyncMarker {
     pub const fn new() -> Self {
         Self {
-            state: Lazy::new(|| TestSyncMarkerInner::new()),
+            state: Lazy::new(TestSyncMarkerInner::new),
         }
     }
 

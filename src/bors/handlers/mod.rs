@@ -39,7 +39,7 @@ pub async fn handle_bors_repository_event(
         .read()
         .unwrap()
         .get(event.repository())
-        .map(Arc::clone)
+        .cloned()
     else {
         return Err(anyhow::anyhow!(
             "Repository {} not found in the bot state",

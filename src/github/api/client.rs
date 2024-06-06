@@ -131,7 +131,7 @@ impl GithubRepositoryClient {
         head: &CommitSha,
         commit_message: &str,
     ) -> Result<CommitSha, MergeError> {
-        Ok(merge_branches(self, base, head, commit_message).await?)
+        merge_branches(self, base, head, commit_message).await
     }
 
     /// Find all check suites attached to the given commit and branch.
