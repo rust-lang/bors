@@ -109,7 +109,6 @@ fn elapsed_time(date: DateTime<Utc>) -> Duration {
 mod tests {
     use crate::bors::handlers::refresh::MOCK_TIME;
     use crate::bors::handlers::WAIT_FOR_WORKFLOW_STARTED;
-    use crate::bors::WAIT_FOR_REFRESH;
     use crate::tests::mocks::{default_repo_name, run_test, BorsBuilder, WorkflowEvent, World};
     use chrono::Utc;
     use std::future::Future;
