@@ -105,132 +105,130 @@ fn elapsed_time(date: DateTime<Utc>) -> Duration {
     (time - date).to_std().unwrap_or(Duration::ZERO)
 }
 
-// TODO: we need a way to get MOCK_TIME working with a multi-threaded tokio runtime
-// #[cfg(test)]
-// mod tests {
-//     use crate::bors::handlers::refresh::MOCK_TIME;
-//     use crate::bors::handlers::WAIT_FOR_WORKFLOW_STARTED;
-//     use crate::database::DbClient;
-//     use crate::tests::mocks::{default_repo_name, run_test, BorsBuilder, WorkflowEvent, World};
-//     use chrono::Utc;
-//     use std::future::Future;
-//     use std::time::Duration;
-//     use tokio::runtime::RuntimeFlavor;
-//
-//     #[sqlx::test]
-//     async fn refresh_no_builds(pool: sqlx::PgPool) {
-//         run_test(pool, |tester| async move {
-//             tester.refresh().await;
-//             Ok(tester)
-//         })
-//         .await;
-//     }
-//
-//     #[sqlx::test]
-//     async fn refresh_do_nothing_before_timeout(pool: sqlx::PgPool) {
-//         let world = World::default();
-//         world.default_repo().lock().set_config(
-//             r#"
-// timeout = 3600
-// "#,
-//         );
-//         BorsBuilder::new(pool)
-//             .world(world)
-//             .run_test(|mut tester| async move {
-//                 tester.post_comment("@bors try").await?;
-//                 tester.expect_comments(1).await;
-//                 with_mocked_time(Duration::from_secs(10), async {
-//                     tester.refresh().await;
-//                 })
-//                 .await;
-//                 Ok(tester)
-//             })
-//             .await;
-//     }
-//
-//     #[sqlx::test]
-//     async fn refresh_cancel_build_after_timeout(pool: sqlx::PgPool) {
-//         let world = World::default();
-//         world.default_repo().lock().set_config(
-//             r#"
-// timeout = 3600
-// "#,
-//         );
-//         BorsBuilder::new(pool)
-//             .world(world)
-//             .run_test(|mut tester| async move {
-//                 tester.post_comment("@bors try").await?;
-//                 tester.expect_comments(1).await;
-//                 with_mocked_time(Duration::from_secs(4000), async {
-//                     assert_eq!(
-//                         tester
-//                             .db()
-//                             .get_running_builds(&default_repo_name())
-//                             .await
-//                             .unwrap()
-//                             .len(),
-//                         1
-//                     );
-//                     tester.refresh().await;
-//                 })
-//                 .await;
-//                 insta::assert_snapshot!(tester.get_comment().await?, @":boom: Test timed out");
-//                 assert_eq!(
-//                     tester
-//                         .db()
-//                         .get_running_builds(&default_repo_name())
-//                         .await
-//                         .unwrap()
-//                         .len(),
-//                     0
-//                 );
-//                 Ok(tester)
-//             })
-//             .await;
-//     }
-//
-//     #[sqlx::test]
-//     async fn refresh_cancel_workflow_after_timeout(pool: sqlx::PgPool) {
-//         let world = World::default();
-//         world.default_repo().lock().set_config(
-//             r#"
-// timeout = 3600
-// "#,
-//         );
-//         let world = BorsBuilder::new(pool)
-//             .world(world)
-//             .run_test(|mut tester| async move {
-//                 tester.post_comment("@bors try").await?;
-//                 tester.expect_comments(1).await;
-//                 tester
-//                     .workflow_event(WorkflowEvent::started(tester.try_branch()))
-//                     .await?;
-//                 WAIT_FOR_WORKFLOW_STARTED.sync().await;
-//
-//                 with_mocked_time(Duration::from_secs(4000), async {
-//                     tester.refresh().await;
-//                 })
-//                 .await;
-//                 tester.expect_comments(1).await;
-//                 Ok(tester)
-//             })
-//             .await;
-//         world.check_cancelled_workflows(default_repo_name(), &[1]);
-//     }
-//
-//     async fn with_mocked_time<Fut: Future<Output = ()>>(in_future: Duration, future: Fut) {
-//         // It is important to use this function only with a single threaded runtime,
-//         // otherwise the `MOCK_TIME` variable might get mixed up between different threads.
-//         assert_eq!(
-//             tokio::runtime::Handle::current().runtime_flavor(),
-//             RuntimeFlavor::CurrentThread
-//         );
-//         MOCK_TIME.with(|time| {
-//             *time.borrow_mut() = Some(Utc::now() + chrono::Duration::from_std(in_future).unwrap());
-//         });
-//         future.await;
-//         MOCK_TIME.with(|time| {
-//             *time.borrow_mut() = None;
-//         });
-//     }
-// }
+#[cfg(test)]
+mod tests {
+    use crate::bors::handlers::refresh::MOCK_TIME;
+    use crate::bors::handlers::WAIT_FOR_WORKFLOW_STARTED;
+    use crate::tests::mocks::{default_repo_name, run_test, BorsBuilder, WorkflowEvent, World};
+    use chrono::Utc;
+    use std::future::Future;
+    use std::time::Duration;
+    use tokio::runtime::RuntimeFlavor;
+
+    #[sqlx::test]
+    async fn refresh_no_builds(pool: sqlx::PgPool) {
+        run_test(pool, |tester| async move {
+            tester.refresh().await;
+            Ok(tester)
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn refresh_do_nothing_before_timeout(pool: sqlx::PgPool) {
+        let world = World::default();
+        world.default_repo().lock().set_config(
+            r#"
+timeout = 3600
+"#,
+        );
+        BorsBuilder::new(pool)
+            .world(world)
+            .run_test(|mut tester| async move {
+                tester.post_comment("@bors try").await?;
+                tester.expect_comments(1).await;
+                with_mocked_time(Duration::from_secs(10), async {
+                    tester.refresh().await;
+                })
+                .await;
+                Ok(tester)
+            })
+            .await;
+    }
+
+    #[sqlx::test]
+    async fn refresh_cancel_build_after_timeout(pool: sqlx::PgPool) {
+        let world = World::default();
+        world.default_repo().lock().set_config(
+            r#"
+timeout = 3600
+"#,
+        );
+        BorsBuilder::new(pool)
+            .world(world)
+            .run_test(|mut tester| async move {
+                tester.post_comment("@bors try").await?;
+                tester.expect_comments(1).await;
+                with_mocked_time(Duration::from_secs(4000), async {
+                    assert_eq!(
+                        tester
+                            .db()
+                            .get_running_builds(&default_repo_name())
+                            .await
+                            .unwrap()
+                            .len(),
+                        1
+                    );
+                    tester.refresh().await;
+                })
+                .await;
+                insta::assert_snapshot!(tester.get_comment().await?, @":boom: Test timed out");
+                assert_eq!(
+                    tester
+                        .db()
+                        .get_running_builds(&default_repo_name())
+                        .await
+                        .unwrap()
+                        .len(),
+                    0
+                );
+                Ok(tester)
+            })
+            .await;
+    }
+
+    #[sqlx::test]
+    async fn refresh_cancel_workflow_after_timeout(pool: sqlx::PgPool) {
+        let world = World::default();
+        world.default_repo().lock().set_config(
+            r#"
+timeout = 3600
+"#,
+        );
+        let world = BorsBuilder::new(pool)
+            .world(world)
+            .run_test(|mut tester| async move {
+                tester.post_comment("@bors try").await?;
+                tester.expect_comments(1).await;
+                tester
+                    .workflow_event(WorkflowEvent::started(tester.try_branch()))
+                    .await?;
+                WAIT_FOR_WORKFLOW_STARTED.sync().await;
+
+                with_mocked_time(Duration::from_secs(4000), async {
+                    tester.refresh().await;
+                })
+                .await;
+                tester.expect_comments(1).await;
+                Ok(tester)
+            })
+            .await;
+        world.check_cancelled_workflows(default_repo_name(), &[1]);
+    }
+
+    async fn with_mocked_time<Fut: Future<Output = ()>>(in_future: Duration, future: Fut) {
+        // It is important to use this function only with a single threaded runtime,
+        // otherwise the `MOCK_TIME` variable might get mixed up between different threads.
+        assert_eq!(
+            tokio::runtime::Handle::current().runtime_flavor(),
+            RuntimeFlavor::CurrentThread
+        );
+        MOCK_TIME.with(|time| {
+            *time.borrow_mut() = Some(Utc::now() + chrono::Duration::from_std(in_future).unwrap());
+        });
+        future.await;
+        MOCK_TIME.with(|time| {
+            *time.borrow_mut() = None;
+        });
+    }
+}
