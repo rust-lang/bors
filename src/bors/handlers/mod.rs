@@ -139,7 +139,7 @@ pub async fn handle_bors_global_event(
             futures::future::join_all(repos.into_iter().map(|repo| {
                 let repo = Arc::clone(&repo);
                 async {
-                    let subspan = tracing::info_span!("Repo", repo = repo.repository.to_string());
+                    let subspan = tracing::info_span!("Repo", repo = repo.repository().to_string());
                     refresh_repository(repo, Arc::clone(&db), team_api_client)
                         .instrument(subspan)
                         .await
@@ -249,8 +249,8 @@ async fn reload_repos(
     let reloaded_repos = repo_loader.load_repositories(team_api_client).await?;
     let mut repositories = ctx.repositories.write().unwrap();
     for repo in repositories.values() {
-        if !reloaded_repos.contains_key(&repo.repository) {
-            tracing::warn!("Repository {} was not reloaded", repo.repository);
+        if !reloaded_repos.contains_key(repo.repository()) {
+            tracing::warn!("Repository {} was not reloaded", repo.repository());
         }
     }
     for (name, repo) in reloaded_repos {

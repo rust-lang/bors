@@ -29,7 +29,7 @@ pub async fn refresh_repository(
 }
 
 async fn cancel_timed_out_builds(repo: &RepositoryState, db: &PgDbClient) -> anyhow::Result<()> {
-    let running_builds = db.get_running_builds(&repo.repository).await?;
+    let running_builds = db.get_running_builds(repo.repository()).await?;
     tracing::info!("Found {} running build(s)", running_builds.len());
 
     let timeout = repo.config.load().timeout;
@@ -67,12 +67,12 @@ async fn reload_permission(
     team_api_client: &TeamApiClient,
 ) -> anyhow::Result<()> {
     let permissions = team_api_client
-        .load_permissions(&repo.repository)
+        .load_permissions(repo.repository())
         .await
         .with_context(|| {
             format!(
                 "Could not load permissions for repository {}",
-                repo.repository
+                repo.repository()
             )
         })?;
     repo.permissions.store(Arc::new(permissions));

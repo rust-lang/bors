@@ -60,8 +60,13 @@ pub struct CheckSuite {
 /// Can be used to query permissions for the repository, and also to perform various
 /// actions using the stored client.
 pub struct RepositoryState {
-    pub repository: GithubRepoName,
     pub client: GithubRepositoryClient,
     pub permissions: ArcSwap<UserPermissions>,
     pub config: ArcSwap<RepositoryConfig>,
+}
+
+impl RepositoryState {
+    pub fn repository(&self) -> &GithubRepoName {
+        self.client.repository()
+    }
 }

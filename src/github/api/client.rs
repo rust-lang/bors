@@ -13,27 +13,37 @@ use crate::github::{Branch, CommitSha, GithubRepoName, PullRequest, PullRequestN
 
 /// Provides access to a single app installation (repository) using the GitHub API.
 pub struct GithubRepositoryClient {
-    pub app: App,
+    app: App,
     /// The client caches the access token for this given repository and refreshes it once it
     /// expires.
-    pub client: Octocrab,
+    client: Octocrab,
     // We store the name separately, because repository has an optional owner, but at this point
     // we must always have some owner of the repo.
-    pub repo_name: GithubRepoName,
-    pub repository: Repository,
+    repo_name: GithubRepoName,
+    repository: Repository,
 }
 
 impl GithubRepositoryClient {
+    pub fn new(
+        app: App,
+        client: Octocrab,
+        repo_name: GithubRepoName,
+        repository: Repository,
+    ) -> Self {
+        Self {
+            app,
+            client,
+            repo_name,
+            repository,
+        }
+    }
+
     pub fn client(&self) -> &Octocrab {
         &self.client
     }
 
-    pub fn name(&self) -> &GithubRepoName {
-        &self.repo_name
-    }
-
     pub fn repository(&self) -> &GithubRepoName {
-        self.name()
+        &self.repo_name
     }
 
     /// Was the comment created by the bot?
@@ -78,12 +88,7 @@ impl GithubRepositoryClient {
         let branch: octocrab::models::repos::Branch = self
             .client
             .get(
-                format!(
-                    "/repos/{}/{}/branches/{name}",
-                    self.repo_name.owner(),
-                    self.repo_name.name(),
-                )
-                .as_str(),
+                format!("/repos/{}/branches/{name}", self.repository()).as_str(),
                 None::<&()>,
             )
             .await
@@ -112,7 +117,7 @@ impl GithubRepositoryClient {
         comment: Comment,
     ) -> anyhow::Result<()> {
         self.client
-            .issues(&self.name().owner, &self.name().name)
+            .issues(&self.repository().owner, &self.repository().name)
             .create_comment(pr.0, comment.render())
             .await
             .with_context(|| format!("Cannot post comment to {}", self.format_pr(pr)))?;
@@ -215,7 +220,9 @@ impl GithubRepositoryClient {
 
     /// Add a set of labels to a PR.
     pub async fn add_labels(&self, pr: PullRequestNumber, labels: &[String]) -> anyhow::Result<()> {
-        let client = self.client.issues(self.name().owner(), self.name().name());
+        let client = self
+            .client
+            .issues(self.repository().owner(), self.repository().name());
         if !labels.is_empty() {
             client
                 .add_labels(pr.0, labels)
@@ -232,7 +239,9 @@ impl GithubRepositoryClient {
         pr: PullRequestNumber,
         labels: &[String],
     ) -> anyhow::Result<()> {
-        let client = self.client.issues(self.name().owner(), self.name().name());
+        let client = self
+            .client
+            .issues(self.repository().owner(), self.repository().name());
         // The GitHub API only allows removing labels one by one, so we remove all of them in
         // parallel to speed it up a little.
         let labels_to_remove_futures = labels.iter().map(|label| client.remove_label(pr.0, label));
@@ -266,19 +275,12 @@ impl GithubRepositoryClient {
             .html_url
             .as_ref()
             .map(|url| url.to_string())
-            .unwrap_or_else(|| {
-                format!(
-                    "{}/{}/{}",
-                    base_github_html_url(),
-                    self.name().owner,
-                    self.name().name
-                )
-            });
+            .unwrap_or_else(|| format!("{}/{}", base_github_html_url(), self.repository(),));
         format!("{html_url}/actions/runs/{run_id}")
     }
 
     fn format_pr(&self, pr: PullRequestNumber) -> String {
-        format!("{}/{}/{}", self.name().owner(), self.name().name(), pr)
+        format!("{}/{}", self.repository(), pr)
     }
 }
 
