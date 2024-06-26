@@ -7,9 +7,9 @@ use crate::github::PullRequestNumber;
 use crate::github::{CommitSha, GithubRepoName};
 
 use super::operations::{
-    create_build, create_pull_request, create_workflow, find_build, find_pr_by_build,
-    get_pull_request, get_running_builds, get_workflows_for_build, update_build_status,
-    update_pr_build_id, update_workflow_status,
+    approve_pull_request, create_build, create_pull_request, create_workflow, find_build,
+    find_pr_by_build, get_pull_request, get_running_builds, get_workflows_for_build,
+    unapprove_pull_request, update_build_status, update_pr_build_id, update_workflow_status,
 };
 use super::RunId;
 
@@ -22,6 +22,25 @@ pub struct PgDbClient {
 impl PgDbClient {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
+    }
+
+    pub async fn approve(
+        &self,
+        repo: &GithubRepoName,
+        pr_number: PullRequestNumber,
+        approver: &str,
+    ) -> anyhow::Result<()> {
+        let pr = self.get_or_create_pull_request(repo, pr_number).await?;
+        approve_pull_request(&self.pool, pr.id, approver).await
+    }
+
+    pub async fn unapprove(
+        &self,
+        repo: &GithubRepoName,
+        pr_number: PullRequestNumber,
+    ) -> anyhow::Result<()> {
+        let pr = self.get_or_create_pull_request(repo, pr_number).await?;
+        unapprove_pull_request(&self.pool, pr.id).await
     }
 
     pub async fn get_or_create_pull_request(

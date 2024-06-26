@@ -12,7 +12,9 @@ use wiremock::{
 
 use super::{
     comment::{Comment, GitHubComment},
-    dynamic_mock_req, Repo, User,
+    dynamic_mock_req,
+    user::GitHubUser,
+    Repo, User,
 };
 
 pub fn default_pr_number() -> u64 {
@@ -152,11 +154,14 @@ struct GitHubPullRequest {
 
     head: Box<GitHubHead>,
     base: Box<GitHubBase>,
+
+    user: GitHubUser,
 }
 
 impl GitHubPullRequest {
     fn new(number: u64) -> Self {
         GitHubPullRequest {
+            user: User::default().into(),
             url: "https://test.com".to_string(),
             id: number + 1000,
             title: format!("PR #{number}"),

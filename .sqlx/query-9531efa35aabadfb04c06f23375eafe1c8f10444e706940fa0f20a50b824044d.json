@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\nSELECT\n    pr.id,\n    pr.repository,\n    pr.number,\n    pr.approved_by,\n    CASE WHEN pr.build_id IS NULL\n        THEN NULL\n        ELSE (\n            build.id,\n            build.repository,\n            build.branch,\n            build.commit_sha,\n            build.status,\n            build.parent,\n            build.created_at\n        )\n    END AS \"try_build: BuildModel\",\n    pr.created_at as \"created_at: DateTime<Utc>\"\nFROM pull_request as pr\n    LEFT JOIN build ON pr.build_id = build.id\nWHERE build.id = $1\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "repository",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "number",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "approved_by",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "try_build: BuildModel",
+        "type_info": "Record"
+      },
+      {
+        "ordinal": 5,
+        "name": "created_at: DateTime<Utc>",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      null,
+      false
+    ]
+  },
+  "hash": "9531efa35aabadfb04c06f23375eafe1c8f10444e706940fa0f20a50b824044d"
+}

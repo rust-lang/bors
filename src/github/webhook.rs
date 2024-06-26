@@ -22,7 +22,7 @@ use crate::bors::event::{
 };
 use crate::database::{WorkflowStatus, WorkflowType};
 use crate::github::server::ServerStateRef;
-use crate::github::{CommitSha, GithubRepoName, GithubUser, PullRequestNumber};
+use crate::github::{CommitSha, GithubRepoName, PullRequestNumber};
 
 /// Wrapper for a secret which is zeroed on drop and can be exposed only through the
 /// [`WebhookSecret::expose`] method.
@@ -273,7 +273,7 @@ fn parse_pr_review_comment(
     repo: GithubRepoName,
     payload: PullRequestReviewCommentEventPayload,
 ) -> PullRequestComment {
-    let user = parse_user(payload.comment.user);
+    let user = payload.comment.user.into();
     PullRequestComment {
         repository: repo,
         author: user,
@@ -286,7 +286,7 @@ fn parse_comment_from_pr_review(
     payload: WebhookPullRequestReviewEvent<'_>,
 ) -> anyhow::Result<PullRequestComment> {
     let repository_name = parse_repository_name(&payload.repository)?;
-    let user = parse_user(payload.sender);
+    let user = payload.sender.into();
 
     Ok(PullRequestComment {
         repository: repository_name,
@@ -294,14 +294,6 @@ fn parse_comment_from_pr_review(
         pr_number: PullRequestNumber(payload.pull_request.number),
         text: payload.review.body.unwrap_or_default(),
     })
-}
-
-fn parse_user(user: Author) -> GithubUser {
-    GithubUser {
-        id: user.id,
-        username: user.login,
-        html_url: user.html_url,
-    }
 }
 
 fn parse_pr_comment(
@@ -316,7 +308,7 @@ fn parse_pr_comment(
 
     Some(PullRequestComment {
         repository: repo,
-        author: parse_user(payload.comment.user),
+        author: payload.comment.user.into(),
         text: payload.comment.body.unwrap_or_default(),
         pr_number: PullRequestNumber(payload.issue.number),
     })

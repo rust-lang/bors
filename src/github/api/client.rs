@@ -9,7 +9,7 @@ use crate::config::{RepositoryConfig, CONFIG_FILE_PATH};
 use crate::database::RunId;
 use crate::github::api::base_github_html_url;
 use crate::github::api::operations::{merge_branches, set_branch_to_commit, MergeError};
-use crate::github::{Branch, CommitSha, GithubRepoName, PullRequest, PullRequestNumber};
+use crate::github::{CommitSha, GithubRepoName, PullRequest, PullRequestNumber};
 
 /// Provides access to a single app installation (repository) using the GitHub API.
 pub struct GithubRepositoryClient {
@@ -106,7 +106,7 @@ impl GithubRepositoryClient {
             .map_err(|error| {
                 anyhow::anyhow!("Could not get PR {}/{}: {error:?}", self.repository(), pr.0)
             })?;
-        Ok(github_pr_to_pr(pr))
+        Ok(pr.into())
     }
 
     /// Post a comment to the pull request with the given number.
@@ -281,23 +281,6 @@ impl GithubRepositoryClient {
 
     fn format_pr(&self, pr: PullRequestNumber) -> String {
         format!("{}/{}", self.repository(), pr)
-    }
-}
-
-fn github_pr_to_pr(pr: octocrab::models::pulls::PullRequest) -> PullRequest {
-    PullRequest {
-        number: pr.number.into(),
-        head_label: pr.head.label.unwrap_or_else(|| "<unknown>".to_string()),
-        head: Branch {
-            name: pr.head.ref_field,
-            sha: pr.head.sha.into(),
-        },
-        base: Branch {
-            name: pr.base.ref_field,
-            sha: pr.base.sha.into(),
-        },
-        title: pr.title.unwrap_or_default(),
-        message: pr.body.unwrap_or_default(),
     }
 }
 

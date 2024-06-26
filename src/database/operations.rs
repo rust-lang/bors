@@ -26,6 +26,7 @@ SELECT
     pr.id,
     pr.repository,
     pr.number,
+    pr.approved_by,
     CASE WHEN pr.build_id IS NULL
         THEN NULL
         ELSE (
@@ -67,6 +68,34 @@ pub(crate) async fn create_pull_request(
     Ok(())
 }
 
+pub(crate) async fn approve_pull_request(
+    executor: impl PgExecutor<'_>,
+    pr_id: i32,
+    approver: &str,
+) -> anyhow::Result<()> {
+    sqlx::query!(
+        "UPDATE pull_request SET approved_by = $1 WHERE id = $2",
+        approver,
+        pr_id
+    )
+    .execute(executor)
+    .await?;
+    Ok(())
+}
+
+pub(crate) async fn unapprove_pull_request(
+    executor: impl PgExecutor<'_>,
+    pr_id: i32,
+) -> anyhow::Result<()> {
+    sqlx::query!(
+        "UPDATE pull_request SET approved_by = NULL WHERE id = $1",
+        pr_id
+    )
+    .execute(executor)
+    .await?;
+    Ok(())
+}
+
 pub(crate) async fn find_pr_by_build(
     executor: impl PgExecutor<'_>,
     build_id: i32,
@@ -78,6 +107,7 @@ SELECT
     pr.id,
     pr.repository,
     pr.number,
+    pr.approved_by,
     CASE WHEN pr.build_id IS NULL
         THEN NULL
         ELSE (

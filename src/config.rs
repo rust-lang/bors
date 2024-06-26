@@ -42,6 +42,8 @@ where
     #[derive(serde::Deserialize, Eq, PartialEq, Hash)]
     #[serde(rename_all = "snake_case")]
     enum Trigger {
+        Approve,
+        Unapprove,
         Try,
         TrySucceed,
         TryFailed,
@@ -50,6 +52,8 @@ where
     impl From<Trigger> for LabelTrigger {
         fn from(value: Trigger) -> Self {
             match value {
+                Trigger::Approve => LabelTrigger::Approved,
+                Trigger::Unapprove => LabelTrigger::Unapproved,
                 Trigger::Try => LabelTrigger::TryBuildStarted,
                 Trigger::TrySucceed => LabelTrigger::TryBuildSucceeded,
                 Trigger::TryFailed => LabelTrigger::TryBuildFailed,
@@ -97,7 +101,20 @@ where
         }
     }
 
-    let triggers = HashMap::<Trigger, Vec<Modification>>::deserialize(deserializer)?;
+    let mut triggers = HashMap::<Trigger, Vec<Modification>>::deserialize(deserializer)?;
+    // If there are any `approve` triggers, add `unapprove` triggers as well.
+    if let Some(modifications) = triggers.get(&Trigger::Approve) {
+        let unapprove_modifications = modifications
+            .iter()
+            .map(|m| match m {
+                Modification::Add(label) => Modification::Remove(label.clone()),
+                Modification::Remove(label) => Modification::Add(label.clone()),
+            })
+            .collect::<Vec<_>>();
+        triggers
+            .entry(Trigger::Unapprove)
+            .or_insert_with(|| unapprove_modifications);
+    }
     let triggers = triggers
         .into_iter()
         .map(|(k, v)| (k.into(), v.into_iter().map(|v| v.into()).collect()))
@@ -128,6 +145,7 @@ mod tests {
     #[test]
     fn deserialize_labels() {
         let content = r#"[labels]
+approve = ["+approved"]
 try = ["+foo", "-bar"]
 try_succeed = ["+foobar", "+foo", "+baz"]
 try_failed = []
@@ -135,6 +153,16 @@ try_failed = []
         let config = load_config(content);
         insta::assert_debug_snapshot!(config.labels.into_iter().collect::<BTreeMap<_, _>>(), @r###"
         {
+            Approved: [
+                Add(
+                    "approved",
+                ),
+            ],
+            Unapproved: [
+                Remove(
+                    "approved",
+                ),
+            ],
             TryBuildStarted: [
                 Add(
                     "foo",

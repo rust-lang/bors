@@ -53,11 +53,21 @@ impl From<String> for GithubRepoName {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct GithubUser {
     pub id: UserId,
     pub username: String,
     pub html_url: Url,
+}
+
+impl From<octocrab::models::Author> for GithubUser {
+    fn from(value: octocrab::models::Author) -> Self {
+        Self {
+            id: value.id,
+            username: value.login,
+            html_url: value.html_url,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -94,6 +104,29 @@ pub struct PullRequest {
     pub base: Branch,
     pub title: String,
     pub message: String,
+    pub author: GithubUser,
+}
+
+impl From<octocrab::models::pulls::PullRequest> for PullRequest {
+    fn from(pr: octocrab::models::pulls::PullRequest) -> Self {
+        Self {
+            number: pr.number.into(),
+            head_label: pr.head.label.unwrap_or_else(|| "<unknown>".to_string()),
+            head: Branch {
+                name: pr.head.ref_field,
+                sha: pr.head.sha.into(),
+            },
+            base: Branch {
+                name: pr.base.ref_field,
+                sha: pr.base.sha.into(),
+            },
+            // For some reason, author field is optional in Octocrab, but
+            // they actually are not optional in Github API schema.
+            author: (*pr.user.unwrap()).into(),
+            title: pr.title.unwrap_or_default(),
+            message: pr.body.unwrap_or_default(),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug)]

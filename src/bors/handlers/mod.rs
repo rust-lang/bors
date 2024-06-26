@@ -8,6 +8,7 @@ use crate::bors::event::{BorsGlobalEvent, BorsRepositoryEvent, PullRequestCommen
 use crate::bors::handlers::help::command_help;
 use crate::bors::handlers::ping::command_ping;
 use crate::bors::handlers::refresh::refresh_repository;
+use crate::bors::handlers::review::{command_approve, command_unapprove};
 use crate::bors::handlers::trybuild::{command_try_build, command_try_cancel, TRY_BRANCH_NAME};
 use crate::bors::handlers::workflow::{
     handle_check_suite_completed, handle_workflow_completed, handle_workflow_started,
@@ -22,6 +23,7 @@ mod help;
 mod labels;
 mod ping;
 mod refresh;
+mod review;
 mod trybuild;
 mod workflow;
 
@@ -179,6 +181,18 @@ async fn handle_comment(
                 let repo = Arc::clone(&repo);
                 let database = Arc::clone(&database);
                 let result = match command {
+                    BorsCommand::Approve(approver) => {
+                        let span = tracing::info_span!("Approve");
+                        command_approve(repo, database, &pull_request, &comment.author, &approver)
+                            .instrument(span)
+                            .await
+                    }
+                    BorsCommand::Unapprove => {
+                        let span = tracing::info_span!("Unapprove");
+                        command_unapprove(repo, database, &pull_request, &comment.author)
+                            .instrument(span)
+                            .await
+                    }
                     BorsCommand::Help => {
                         let span = tracing::info_span!("Help");
                         command_help(repo, &pull_request).instrument(span).await

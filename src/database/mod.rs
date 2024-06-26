@@ -116,6 +116,7 @@ pub struct PullRequestModel {
     pub id: PrimaryKey,
     pub repository: GithubRepoName,
     pub number: PullRequestNumber,
+    pub approved_by: Option<String>,
     pub try_build: Option<BuildModel>,
     pub created_at: DateTime<Utc>,
 }

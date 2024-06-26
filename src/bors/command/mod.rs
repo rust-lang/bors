@@ -11,9 +11,21 @@ pub enum Parent {
     Last,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub enum Approver {
+    /// The approver is the same as the comment author.
+    Myself,
+    /// The approver is specified by the user.
+    Specified(String),
+}
+
 /// Bors command specified by a user.
 #[derive(Debug, PartialEq)]
 pub enum BorsCommand {
+    /// Approve a commit.
+    Approve(Approver),
+    /// Unapprove a commit.
+    Unapprove,
     /// Print help
     Help,
     /// Ping the bot.

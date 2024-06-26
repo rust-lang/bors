@@ -10,6 +10,7 @@ timeout = 3600
 # - try_failed: Try build has failed
 # (Optional)
 [labels]
+approve = ["+approved"]
 try = ["+foo", "-bar"]
 try_succeed = ["+foobar", "+foo", "+baz"]
 try_failed = []
