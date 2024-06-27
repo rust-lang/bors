@@ -143,12 +143,7 @@ async fn create_repo_state(
 ) -> anyhow::Result<RepositoryState> {
     tracing::info!("Found repository {name}");
 
-    let client = GithubRepositoryClient {
-        app,
-        client: repo_client,
-        repo_name: name.clone(),
-        repository: repo,
-    };
+    let client = GithubRepositoryClient::new(app, repo_client, name.clone(), repo);
 
     let permissions = team_api_client
         .load_permissions(&name)
@@ -168,7 +163,6 @@ async fn create_repo_state(
     };
 
     Ok(RepositoryState {
-        repository: name,
         client,
         config: ArcSwap::new(Arc::new(config)),
         permissions: ArcSwap::new(Arc::new(permissions)),

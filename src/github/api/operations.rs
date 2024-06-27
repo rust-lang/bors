@@ -41,7 +41,7 @@ pub async fn merge_branches(
     commit_message: &str,
 ) -> Result<CommitSha, MergeError> {
     let client = repo.client();
-    let merge_url = format!("/repos/{}/{}/merges", repo.name().owner, repo.name().name);
+    let merge_url = format!("/repos/{}/merges", repo.repository());
 
     let request = MergeRequest {
         base: base_ref,
@@ -57,7 +57,7 @@ pub async fn merge_branches(
 
             tracing::trace!(
                 "Response from merging `{head_sha}` into `{base_ref}` in `{}`: {status} ({text})",
-                repo.name(),
+                repo.repository(),
             );
 
             match status {
@@ -79,7 +79,7 @@ pub async fn merge_branches(
         Err(error) => {
             tracing::debug!(
                 "Merging `{head_sha}` into `{base_ref}` in `{}` failed: {error:?}",
-                repo.name()
+                repo.repository()
             );
             Err(MergeError::NetworkError(error))
         }
@@ -112,8 +112,8 @@ async fn create_branch(
     name: String,
     sha: &CommitSha,
 ) -> Result<(), String> {
-    repo.client
-        .repos(repo.repo_name.owner(), repo.repo_name.name())
+    repo.client()
+        .repos(repo.repository().owner(), repo.repository().name())
         .create_ref(&Reference::Branch(name), sha.as_ref())
         .await
         .map_err(|error| format!("Cannot create branch: {error}"))?;
@@ -137,16 +137,15 @@ async fn update_branch(
     sha: &CommitSha,
 ) -> Result<(), BranchUpdateError> {
     let url = format!(
-        "/repos/{}/{}/git/refs/{}",
-        repo.name().owner(),
-        repo.name().name(),
+        "/repos/{}/git/refs/{}",
+        repo.repository(),
         Reference::Branch(branch_name.clone()).ref_url()
     );
 
     tracing::debug!("Updating branch {} to SHA {}", url, sha.as_ref());
 
     let res = repo
-        .client
+        .client()
         ._patch(
             url.as_str(),
             Some(&serde_json::json!({
@@ -160,7 +159,7 @@ async fn update_branch(
     tracing::trace!(
         "Updating branch response: status={}, text={:?}",
         status,
-        repo.client.body_to_string(res).await
+        repo.client().body_to_string(res).await
     );
 
     match status {
