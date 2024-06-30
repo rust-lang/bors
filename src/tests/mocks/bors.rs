@@ -135,7 +135,7 @@ impl BorsTester {
         self.db.clone()
     }
 
-    pub fn default_repo(&mut self) -> Arc<Mutex<Repo>> {
+    pub fn default_repo(&self) -> Arc<Mutex<Repo>> {
         self.world.get_repo(default_repo_name())
     }
 
