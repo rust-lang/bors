@@ -313,6 +313,21 @@ mod tests {
     }
 
     #[test]
+    fn parse_approve_on_behalf_of_only_one_approver() {
+        let cmds = parse_commands("@bors r=user1,user2");
+        assert_eq!(cmds.len(), 1);
+        insta::assert_debug_snapshot!(cmds[0], @r###"
+        Ok(
+            Approve(
+                Specified(
+                    "user1,user2",
+                ),
+            ),
+        )
+        "###);
+    }
+
+    #[test]
     fn parse_unapprove() {
         let cmds = parse_commands("@bors r-");
         assert_eq!(cmds.len(), 1);
