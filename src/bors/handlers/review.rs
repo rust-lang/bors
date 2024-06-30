@@ -20,7 +20,7 @@ pub(super) async fn command_approve(
     approver: &Approver,
 ) -> anyhow::Result<()> {
     tracing::info!("Approving PR {}", pr.number);
-    if insufficient_approve_permission(repo_state.clone(), author) {
+    if !sufficient_approve_permission(repo_state.clone(), author) {
         deny_approve_request(&repo_state, pr, author).await?;
         return Ok(());
     };
@@ -28,12 +28,9 @@ pub(super) async fn command_approve(
         Approver::Myself => author.username.clone(),
         Approver::Specified(approver) => approver.clone(),
     };
-    tracing::info!("Approving PR {} by {}", pr.number, approver);
     db.approve(repo_state.repository(), pr.number, approver.as_str())
         .await?;
-    tracing::info!("Approved PR {}", pr.number);
     handle_label_trigger(&repo_state, pr.number, LabelTrigger::Approved).await?;
-    tracing::info!("Label trigger handled for PR {}", pr.number);
     notify_of_approval(&repo_state, pr, approver.as_str()).await
 }
 
@@ -46,7 +43,7 @@ pub(super) async fn command_unapprove(
     author: &GithubUser,
 ) -> anyhow::Result<()> {
     tracing::info!("Unapproving PR {}", pr.number);
-    if insufficient_unapprove_permission(repo_state.clone(), pr, author) {
+    if !sufficient_unapprove_permission(repo_state.clone(), pr, author) {
         deny_unapprove_request(&repo_state, pr, author).await?;
         return Ok(());
     };
@@ -55,9 +52,8 @@ pub(super) async fn command_unapprove(
     notify_of_unapproval(&repo_state, pr).await
 }
 
-fn insufficient_approve_permission(repo: Arc<RepositoryState>, author: &GithubUser) -> bool {
-    !repo
-        .permissions
+fn sufficient_approve_permission(repo: Arc<RepositoryState>, author: &GithubUser) -> bool {
+    repo.permissions
         .load()
         .has_permission(author.id, PermissionType::Review)
 }
@@ -98,13 +94,13 @@ async fn notify_of_approval(
         .await
 }
 
-fn insufficient_unapprove_permission(
+fn sufficient_unapprove_permission(
     repo: Arc<RepositoryState>,
     pr: &PullRequest,
     author: &GithubUser,
 ) -> bool {
-    author.id != pr.author.id
-        && !repo
+    author.id == pr.author.id
+        || repo
             .permissions
             .load()
             .has_permission(author.id, PermissionType::Review)
