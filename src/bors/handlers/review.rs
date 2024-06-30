@@ -137,7 +137,12 @@ async fn notify_of_unapproval(repo: &RepositoryState, pr: &PullRequest) -> anyho
 
 #[cfg(test)]
 mod tests {
-    use crate::tests::mocks::{default_pr_number, BorsBuilder, Permissions, User, World};
+    use crate::{
+        github::PullRequestNumber,
+        tests::mocks::{
+            default_pr_number, default_repo_name, BorsBuilder, BorsTester, Permissions, User, World,
+        },
+    };
 
     #[sqlx::test]
     async fn default_approve(pool: sqlx::PgPool) {
@@ -160,9 +165,13 @@ approve = ["+approved"]
                         User::default_user().name
                     ),
                 );
-                let repo = tester.default_repo();
-                let pr = repo.lock().get_pr(default_pr_number()).clone();
-                pr.check_added_labels(&["approved"]);
+
+                check_pr_approved_by(
+                    &tester,
+                    default_pr_number().into(),
+                    &User::default_user().name,
+                )
+                .await;
                 Ok(tester)
             })
             .await;
@@ -191,9 +200,8 @@ approve = ["+approved"]
                         default_pr_number(),
                     ),
                 );
-                let repo = tester.default_repo();
-                let pr = repo.lock().get_pr(default_pr_number()).clone();
-                pr.check_added_labels(&["approved"]);
+
+                check_pr_approved_by(&tester, default_pr_number().into(), approve_user).await;
                 Ok(tester)
             })
             .await;
@@ -239,19 +247,48 @@ approve = ["+approved"]
                         User::default_user().name
                     ),
                 );
-                let repo = tester.default_repo();
-                let pr = repo.lock().get_pr(default_pr_number()).clone();
-                pr.check_added_labels(&["approved"]);
+                check_pr_approved_by(
+                    &tester,
+                    default_pr_number().into(),
+                    &User::default_user().name,
+                )
+                .await;
                 tester.post_comment("@bors r-").await?;
                 assert_eq!(
                     tester.get_comment().await?,
                     format!("Commit pr-{}-sha has been unapproved", default_pr_number()),
                 );
-                let repo = tester.default_repo();
-                let pr = repo.lock().get_pr(default_pr_number()).clone();
-                pr.check_removed_labels(&["approved"]);
+                check_pr_unapproved(&tester, default_pr_number().into()).await;
                 Ok(tester)
             })
             .await;
+    }
+
+    async fn check_pr_approved_by(
+        tester: &BorsTester,
+        pr_number: PullRequestNumber,
+        approved_by: &str,
+    ) {
+        let pr_in_db = tester
+            .db()
+            .get_or_create_pull_request(&default_repo_name(), pr_number)
+            .await
+            .unwrap();
+        assert_eq!(pr_in_db.approved_by, Some(approved_by.to_string()));
+        let repo = tester.default_repo();
+        let pr = repo.lock().get_pr(default_pr_number()).clone();
+        pr.check_added_labels(&["approved"]);
+    }
+
+    async fn check_pr_unapproved(tester: &BorsTester, pr_number: PullRequestNumber) {
+        let pr_in_db = tester
+            .db()
+            .get_or_create_pull_request(&default_repo_name(), pr_number)
+            .await
+            .unwrap();
+        assert_eq!(pr_in_db.approved_by, None);
+        let repo = tester.default_repo();
+        let pr = repo.lock().get_pr(default_pr_number()).clone();
+        pr.check_removed_labels(&["approved"]);
     }
 }

@@ -14,6 +14,7 @@ use crate::TeamApiClient;
 
 pub use bors::run_test;
 pub use bors::BorsBuilder;
+pub use bors::BorsTester;
 pub use comment::Comment;
 pub use permissions::Permissions;
 pub use pull_request::default_pr_number;
