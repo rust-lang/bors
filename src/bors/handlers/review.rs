@@ -1,12 +1,15 @@
 use std::sync::Arc;
 
 use crate::bors::command::Approver;
+use crate::bors::event::PullRequestEdited;
 use crate::bors::handlers::labels::handle_label_trigger;
 use crate::bors::Comment;
 use crate::bors::RepositoryState;
+use crate::github::CommitSha;
 use crate::github::GithubUser;
 use crate::github::LabelTrigger;
 use crate::github::PullRequest;
+use crate::github::PullRequestNumber;
 use crate::permissions::PermissionType;
 use crate::PgDbClient;
 
@@ -50,6 +53,21 @@ pub(super) async fn command_unapprove(
     db.unapprove(repo_state.repository(), pr.number).await?;
     handle_label_trigger(&repo_state, pr.number, LabelTrigger::Unapproved).await?;
     notify_of_unapproval(&repo_state, pr).await
+}
+
+pub(super) async fn handle_pull_request_edited(
+    repo_state: Arc<RepositoryState>,
+    db: Arc<PgDbClient>,
+    payload: PullRequestEdited,
+) -> anyhow::Result<()> {
+    // If the base branch has changed, unapprove the PR
+    let Some(_) = payload.from_base_sha else {
+        return Ok(());
+    };
+    let pr_number = payload.pull_request.number;
+    db.unapprove(repo_state.repository(), pr_number).await?;
+    handle_label_trigger(&repo_state, pr_number, LabelTrigger::Unapproved).await?;
+    notify_of_edited_pr(&repo_state, pr_number, payload.pull_request.head.sha).await
 }
 
 fn sufficient_approve_permission(repo: Arc<RepositoryState>, author: &GithubUser) -> bool {
@@ -131,6 +149,23 @@ async fn notify_of_unapproval(repo: &RepositoryState, pr: &PullRequest) -> anyho
         .post_comment(
             pr.number,
             Comment::new(format!("Commit {} has been unapproved", pr.head.sha)),
+        )
+        .await
+}
+
+async fn notify_of_edited_pr(
+    repo: &RepositoryState,
+    pr_number: PullRequestNumber,
+    head_sha: CommitSha,
+) -> anyhow::Result<()> {
+    repo.client
+        .post_comment(
+            pr_number,
+            Comment::new(format!(
+                r#":warning: The base branch changed to `{}`, and the 
+PR will need to be re-approved."#,
+                head_sha
+            )),
         )
         .await
 }
@@ -226,7 +261,6 @@ approve = ["+approved"]
     }
 
     #[sqlx::test]
-    #[tracing_test::traced_test]
     async fn unapprove(pool: sqlx::PgPool) {
         let world = World::default();
         world.default_repo().lock().set_config(
