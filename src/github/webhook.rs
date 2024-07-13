@@ -148,124 +148,134 @@ fn parse_webhook_event(request: Parts, body: &[u8]) -> anyhow::Result<Option<Bor
     );
 
     match event_type.as_bytes() {
-        b"issue_comment" => {
-            let repository: WebhookRepository = serde_json::from_slice(body)?;
-            let repository_name = parse_repository_name(&repository.repository)?;
-
-            let event: IssueCommentEventPayload = serde_json::from_slice(body)?;
-            if event.action == IssueCommentEventAction::Created {
-                let comment = parse_pr_comment(repository_name, event)
-                    .map(BorsRepositoryEvent::Comment)
-                    .map(BorsEvent::Repository);
-                Ok(comment)
-            } else {
-                Ok(None)
-            }
-        }
-        b"pull_request_review" => {
-            let payload: WebhookPullRequestReviewEvent = serde_json::from_slice(body)?;
-            if payload.action == "submitted" {
-                let comment = parse_comment_from_pr_review(payload)?;
-                Ok(Some(BorsEvent::Repository(BorsRepositoryEvent::Comment(
-                    comment,
-                ))))
-            } else {
-                Ok(None)
-            }
-        }
-        b"pull_request_review_comment" => {
-            let repository: WebhookRepository = serde_json::from_slice(body)?;
-            let repository_name = parse_repository_name(&repository.repository)?;
-
-            let payload: PullRequestReviewCommentEventPayload = serde_json::from_slice(body)?;
-            if payload.action == PullRequestReviewCommentEventAction::Created {
-                let comment = parse_pr_review_comment(repository_name, payload);
-                Ok(Some(BorsEvent::Repository(BorsRepositoryEvent::Comment(
-                    comment,
-                ))))
-            } else {
-                Ok(None)
-            }
-        }
+        b"issue_comment" => parse_issue_comment_event(body),
+        b"pull_request_review" => parse_pull_request_review_events(body),
+        b"pull_request_review_comment" => parse_pull_request_review_comment_events(body),
         b"installation_repositories" | b"installation" => Ok(Some(BorsEvent::Global(
             BorsGlobalEvent::InstallationsChanged,
         ))),
-        b"workflow_run" => {
-            let payload: WebhookWorkflowRun = serde_json::from_slice(body)?;
-            let repository_name = parse_repository_name(&payload.repository)?;
-            let result = match payload.action {
-                "requested" => Some(BorsEvent::Repository(BorsRepositoryEvent::WorkflowStarted(
-                    WorkflowStarted {
-                        repository: repository_name,
-                        name: payload.workflow_run.name,
-                        branch: payload.workflow_run.head_branch,
-                        commit_sha: CommitSha(payload.workflow_run.head_sha),
-                        run_id: RunId(payload.workflow_run.id.0),
-                        workflow_type: WorkflowType::Github,
-                        url: payload.workflow_run.html_url.into(),
-                    },
-                ))),
-                "completed" => Some(BorsEvent::Repository(
-                    BorsRepositoryEvent::WorkflowCompleted(WorkflowCompleted {
-                        repository: repository_name,
-                        branch: payload.workflow_run.head_branch,
-                        commit_sha: CommitSha(payload.workflow_run.head_sha),
-                        run_id: RunId(payload.workflow_run.id.0),
-                        status: match payload.workflow_run.conclusion.unwrap_or_default().as_str() {
-                            "success" => WorkflowStatus::Success,
-                            _ => WorkflowStatus::Failure,
-                        },
-                    }),
-                )),
-                _ => None,
-            };
-            Ok(result)
-        }
-        b"check_run" => {
-            let payload: WebhookCheckRun = serde_json::from_slice(body).unwrap();
-
-            // We are only interested in check runs from external CI services.
-            // These basically correspond to workflow runs from GHA.
-            if payload.check_run.app.owner.login == "github" {
-                return Ok(None);
-            }
-
-            let repository_name = parse_repository_name(&payload.repository)?;
-            if payload.action == "created" {
-                Ok(Some(BorsEvent::Repository(
-                    BorsRepositoryEvent::WorkflowStarted(WorkflowStarted {
-                        repository: repository_name,
-                        name: payload.check_run.name.to_string(),
-                        branch: payload.check_run.check_suite.head_branch,
-                        commit_sha: CommitSha(payload.check_run.check_suite.head_sha),
-                        run_id: RunId(payload.check_run.check_run.id.map(|v| v.0).unwrap_or(0)),
-                        workflow_type: WorkflowType::External,
-                        url: payload.check_run.check_run.html_url.unwrap_or_default(),
-                    }),
-                )))
-            } else {
-                Ok(None)
-            }
-        }
-        b"check_suite" => {
-            let payload: WebhookCheckSuite = serde_json::from_slice(body)?;
-            let repository_name = parse_repository_name(&payload.repository)?;
-            if payload.action == "completed" {
-                Ok(Some(BorsEvent::Repository(
-                    BorsRepositoryEvent::CheckSuiteCompleted(CheckSuiteCompleted {
-                        repository: repository_name,
-                        branch: payload.check_suite.head_branch,
-                        commit_sha: CommitSha(payload.check_suite.head_sha),
-                    }),
-                )))
-            } else {
-                Ok(None)
-            }
-        }
+        b"workflow_run" => parse_workflow_run_events(body),
+        b"check_run" => parse_check_run_events(body),
+        b"check_suite" => parse_check_suite_events(body),
         _ => {
             tracing::debug!("Ignoring unknown event type {:?}", event_type.to_str());
             Ok(None)
         }
+    }
+}
+
+fn parse_issue_comment_event(body: &[u8]) -> anyhow::Result<Option<BorsEvent>> {
+    let repository: WebhookRepository = serde_json::from_slice(body)?;
+    let repository_name = parse_repository_name(&repository.repository)?;
+
+    let event: IssueCommentEventPayload = serde_json::from_slice(body)?;
+    if event.action == IssueCommentEventAction::Created {
+        let comment = parse_pr_comment(repository_name, event)
+            .map(BorsRepositoryEvent::Comment)
+            .map(BorsEvent::Repository);
+        Ok(comment)
+    } else {
+        Ok(None)
+    }
+}
+
+fn parse_pull_request_review_events(body: &[u8]) -> anyhow::Result<Option<BorsEvent>> {
+    let payload: WebhookPullRequestReviewEvent = serde_json::from_slice(body)?;
+    if payload.action == "submitted" {
+        let comment = parse_comment_from_pr_review(payload)?;
+        Ok(Some(BorsEvent::Repository(BorsRepositoryEvent::Comment(
+            comment,
+        ))))
+    } else {
+        Ok(None)
+    }
+}
+fn parse_pull_request_review_comment_events(body: &[u8]) -> anyhow::Result<Option<BorsEvent>> {
+    let repository: WebhookRepository = serde_json::from_slice(body)?;
+    let repository_name = parse_repository_name(&repository.repository)?;
+
+    let payload: PullRequestReviewCommentEventPayload = serde_json::from_slice(body)?;
+    if payload.action == PullRequestReviewCommentEventAction::Created {
+        let comment = parse_pr_review_comment(repository_name, payload);
+        Ok(Some(BorsEvent::Repository(BorsRepositoryEvent::Comment(
+            comment,
+        ))))
+    } else {
+        Ok(None)
+    }
+}
+
+fn parse_workflow_run_events(body: &[u8]) -> anyhow::Result<Option<BorsEvent>> {
+    let payload: WebhookWorkflowRun = serde_json::from_slice(body)?;
+    let repository_name = parse_repository_name(&payload.repository)?;
+    let result = match payload.action {
+        "requested" => Some(BorsEvent::Repository(BorsRepositoryEvent::WorkflowStarted(
+            WorkflowStarted {
+                repository: repository_name,
+                name: payload.workflow_run.name,
+                branch: payload.workflow_run.head_branch,
+                commit_sha: CommitSha(payload.workflow_run.head_sha),
+                run_id: RunId(payload.workflow_run.id.0),
+                workflow_type: WorkflowType::Github,
+                url: payload.workflow_run.html_url.into(),
+            },
+        ))),
+        "completed" => Some(BorsEvent::Repository(
+            BorsRepositoryEvent::WorkflowCompleted(WorkflowCompleted {
+                repository: repository_name,
+                branch: payload.workflow_run.head_branch,
+                commit_sha: CommitSha(payload.workflow_run.head_sha),
+                run_id: RunId(payload.workflow_run.id.0),
+                status: match payload.workflow_run.conclusion.unwrap_or_default().as_str() {
+                    "success" => WorkflowStatus::Success,
+                    _ => WorkflowStatus::Failure,
+                },
+            }),
+        )),
+        _ => None,
+    };
+    Ok(result)
+}
+
+fn parse_check_run_events(body: &[u8]) -> anyhow::Result<Option<BorsEvent>> {
+    let payload: WebhookCheckRun = serde_json::from_slice(body).unwrap();
+
+    // We are only interested in check runs from external CI services.
+    // These basically correspond to workflow runs from GHA.
+    if payload.check_run.app.owner.login == "github" {
+        return Ok(None);
+    }
+
+    let repository_name = parse_repository_name(&payload.repository)?;
+    if payload.action == "created" {
+        Ok(Some(BorsEvent::Repository(
+            BorsRepositoryEvent::WorkflowStarted(WorkflowStarted {
+                repository: repository_name,
+                name: payload.check_run.name.to_string(),
+                branch: payload.check_run.check_suite.head_branch,
+                commit_sha: CommitSha(payload.check_run.check_suite.head_sha),
+                run_id: RunId(payload.check_run.check_run.id.map(|v| v.0).unwrap_or(0)),
+                workflow_type: WorkflowType::External,
+                url: payload.check_run.check_run.html_url.unwrap_or_default(),
+            }),
+        )))
+    } else {
+        Ok(None)
+    }
+}
+fn parse_check_suite_events(body: &[u8]) -> anyhow::Result<Option<BorsEvent>> {
+    let payload: WebhookCheckSuite = serde_json::from_slice(body)?;
+    let repository_name = parse_repository_name(&payload.repository)?;
+    if payload.action == "completed" {
+        Ok(Some(BorsEvent::Repository(
+            BorsRepositoryEvent::CheckSuiteCompleted(CheckSuiteCompleted {
+                repository: repository_name,
+                branch: payload.check_suite.head_branch,
+                commit_sha: CommitSha(payload.check_suite.head_sha),
+            }),
+        )))
+    } else {
+        Ok(None)
     }
 }
 
