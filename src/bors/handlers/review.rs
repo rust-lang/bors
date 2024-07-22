@@ -183,7 +183,8 @@ mod tests {
     use crate::{
         github::PullRequestNumber,
         tests::mocks::{
-            default_pr_number, default_repo_name, BorsBuilder, BorsTester, Permissions, User, World,
+            default_pr_number, default_repo_name, BorsBuilder, BorsTester, Permissions,
+            PullRequestChangeEvent, User, World,
         },
     };
 
@@ -301,6 +302,118 @@ approve = ["+approved"]
                     format!("Commit pr-{}-sha has been unapproved", default_pr_number()),
                 );
                 check_pr_unapproved(&tester, default_pr_number().into()).await;
+                Ok(tester)
+            })
+            .await;
+    }
+
+    #[sqlx::test]
+    async fn unapprove_on_base_edited(pool: sqlx::PgPool) {
+        let world = World::default();
+        world.default_repo().lock().set_config(
+            r#"
+[labels]
+approve = ["+approved"]
+"#,
+        );
+        BorsBuilder::new(pool)
+            .world(world)
+            .run_test(|mut tester| async {
+                tester.post_comment("@bors r+").await?;
+                assert_eq!(
+                    tester.get_comment().await?,
+                    format!(
+                        "Commit pr-{}-sha has been approved by `{}`",
+                        default_pr_number(),
+                        User::default_user().name
+                    ),
+                );
+                tester
+                    .edit_pull_request(
+                        default_pr_number(),
+                        PullRequestChangeEvent {
+                            from_base_sha: Some("main-sha".to_string()),
+                        },
+                    )
+                    .await?;
+
+                assert_eq!(
+                    tester.get_comment().await?,
+                    format!(
+                        r#":warning: The base branch changed to `pr-{}-sha`, and the 
+PR will need to be re-approved."#,
+                        default_pr_number()
+                    )
+                );
+                check_pr_unapproved(&tester, default_pr_number().into()).await;
+                Ok(tester)
+            })
+            .await;
+    }
+
+    #[sqlx::test]
+    async fn edit_pr_do_nothing_when_base_not_edited(pool: sqlx::PgPool) {
+        let world = World::default();
+        world.default_repo().lock().set_config(
+            r#"
+[labels]
+approve = ["+approved"]
+"#,
+        );
+        BorsBuilder::new(pool)
+            .world(world)
+            .run_test(|mut tester| async {
+                tester.post_comment("@bors r+").await?;
+                assert_eq!(
+                    tester.get_comment().await?,
+                    format!(
+                        "Commit pr-{}-sha has been approved by `{}`",
+                        default_pr_number(),
+                        User::default_user().name
+                    ),
+                );
+                tester
+                    .edit_pull_request(
+                        default_pr_number(),
+                        PullRequestChangeEvent {
+                            from_base_sha: None,
+                        },
+                    )
+                    .await?;
+
+                check_pr_approved_by(
+                    &tester,
+                    default_pr_number().into(),
+                    &User::default_user().name,
+                )
+                .await;
+                Ok(tester)
+            })
+            .await;
+    }
+
+    #[sqlx::test]
+    async fn edit_pr_do_nothing_when_not_approved(pool: sqlx::PgPool) {
+        let world = World::default();
+        world.default_repo().lock().set_config(
+            r#"
+[labels]
+approve = ["+approved"]
+"#,
+        );
+        BorsBuilder::new(pool)
+            .world(world)
+            .run_test(|mut tester| async {
+                tester
+                    .edit_pull_request(
+                        default_pr_number(),
+                        PullRequestChangeEvent {
+                            from_base_sha: Some("main-sha".to_string()),
+                        },
+                    )
+                    .await?;
+
+                // No comment should be posted
                 Ok(tester)
             })
             .await;
