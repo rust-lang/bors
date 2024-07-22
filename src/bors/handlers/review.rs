@@ -64,6 +64,14 @@ pub(super) async fn handle_pull_request_edited(
     let Some(_) = payload.from_base_sha else {
         return Ok(());
     };
+
+    let pr_model = db
+        .get_or_create_pull_request(repo_state.repository(), payload.pull_request.number)
+        .await?;
+    if pr_model.approved_by.is_none() {
+        return Ok(());
+    }
+
     let pr_number = payload.pull_request.number;
     db.unapprove(repo_state.repository(), pr_number).await?;
     handle_label_trigger(&repo_state, pr_number, LabelTrigger::Unapproved).await?;
