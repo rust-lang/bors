@@ -1,11 +1,13 @@
 use crate::database::{WorkflowStatus, WorkflowType};
-use crate::github::{CommitSha, GithubRepoName, GithubUser, PullRequestNumber};
+use crate::github::{CommitSha, GithubRepoName, GithubUser, PullRequest, PullRequestNumber};
 use octocrab::models::RunId;
 
 #[derive(Debug)]
 pub enum BorsRepositoryEvent {
     /// A comment was posted on a pull request.
     Comment(PullRequestComment),
+    /// When the pull request is edited by its author
+    PullRequestEdited(PullRequestEdited),
     /// A workflow run on Github Actions or a check run from external CI system has been started.
     WorkflowStarted(WorkflowStarted),
     /// A workflow run on Github Actions or a check run from external CI system has been completed.
@@ -22,6 +24,7 @@ impl BorsRepositoryEvent {
             BorsRepositoryEvent::WorkflowStarted(workflow) => &workflow.repository,
             BorsRepositoryEvent::WorkflowCompleted(workflow) => &workflow.repository,
             BorsRepositoryEvent::CheckSuiteCompleted(payload) => &payload.repository,
+            BorsRepositoryEvent::PullRequestEdited(payload) => &payload.repository,
         }
     }
 }
@@ -48,6 +51,13 @@ pub struct PullRequestComment {
     pub author: GithubUser,
     pub pr_number: PullRequestNumber,
     pub text: String,
+}
+
+#[derive(Debug)]
+pub struct PullRequestEdited {
+    pub repository: GithubRepoName,
+    pub pull_request: PullRequest,
+    pub from_base_sha: Option<CommitSha>,
 }
 
 #[derive(Debug)]

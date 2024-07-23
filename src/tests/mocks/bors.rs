@@ -28,6 +28,8 @@ use crate::{
     ServerState, WebhookSecret,
 };
 
+use super::pull_request::{GitHubPullRequestEventPayload, PullRequestChangeEvent};
+
 pub struct BorsBuilder {
     world: World,
     pool: PgPool,
@@ -264,6 +266,18 @@ impl BorsTester {
 
     pub async fn check_suite<C: Into<CheckSuite>>(&mut self, check_suite: C) -> anyhow::Result<()> {
         self.webhook_check_suite(check_suite.into()).await
+    }
+
+    pub async fn edit_pull_request(
+        &mut self,
+        pr_number: u64,
+        changes: PullRequestChangeEvent,
+    ) -> anyhow::Result<()> {
+        self.send_webhook(
+            "pull_request",
+            GitHubPullRequestEventPayload::new(pr_number, "edited".to_string(), Some(changes)),
+        )
+        .await
     }
 
     async fn webhook_comment(&mut self, comment: Comment) -> anyhow::Result<()> {

@@ -18,6 +18,7 @@ pub use bors::BorsTester;
 pub use comment::Comment;
 pub use permissions::Permissions;
 pub use pull_request::default_pr_number;
+pub use pull_request::PullRequestChangeEvent;
 pub use repository::default_repo_name;
 pub use repository::Branch;
 pub use repository::Repo;

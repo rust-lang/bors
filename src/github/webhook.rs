@@ -8,7 +8,8 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::{async_trait, RequestExt};
 use hmac::{Hmac, Mac};
 use octocrab::models::events::payload::{
-    IssueCommentEventAction, IssueCommentEventPayload, PullRequestReviewCommentEventAction,
+    IssueCommentEventAction, IssueCommentEventPayload, PullRequestEventAction,
+    PullRequestEventChangesFrom, PullRequestReviewCommentEventAction,
     PullRequestReviewCommentEventPayload,
 };
 use octocrab::models::pulls::{PullRequest, Review};
@@ -18,7 +19,7 @@ use sha2::Sha256;
 
 use crate::bors::event::{
     BorsEvent, BorsGlobalEvent, BorsRepositoryEvent, CheckSuiteCompleted, PullRequestComment,
-    WorkflowCompleted, WorkflowStarted,
+    PullRequestEdited, WorkflowCompleted, WorkflowStarted,
 };
 use crate::database::{WorkflowStatus, WorkflowType};
 use crate::github::server::ServerStateRef;
@@ -90,6 +91,26 @@ pub struct WebhookPullRequestReviewEvent<'a> {
     sender: Author,
 }
 
+/// Similar to PullRequestEvent from octocrab, but changes field also includes base sha.
+/// https://docs.github.com/en/webhooks/webhook-events-and-payloads#pull_request
+#[derive(Debug, serde::Deserialize)]
+struct WebhookPullRequestEvent {
+    action: PullRequestEventAction,
+    pull_request: PullRequest,
+    changes: Option<WebhookPullRequestChanges>,
+    repository: Repository,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct WebhookPullRequestChanges {
+    base: Option<WebhookPullRequestBaseChanges>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct WebhookPullRequestBaseChanges {
+    sha: Option<PullRequestEventChangesFrom>,
+}
+
 /// axum extractor for GitHub webhook events.
 #[derive(Debug)]
 pub struct GitHubWebhook(pub BorsEvent);
@@ -149,6 +170,7 @@ fn parse_webhook_event(request: Parts, body: &[u8]) -> anyhow::Result<Option<Bor
 
     match event_type.as_bytes() {
         b"issue_comment" => parse_issue_comment_event(body),
+        b"pull_request" => parse_pull_request_events(body),
         b"pull_request_review" => parse_pull_request_review_events(body),
         b"pull_request_review_comment" => parse_pull_request_review_comment_events(body),
         b"installation_repositories" | b"installation" => Ok(Some(BorsEvent::Global(
@@ -174,6 +196,30 @@ fn parse_issue_comment_event(body: &[u8]) -> anyhow::Result<Option<BorsEvent>> {
             .map(BorsRepositoryEvent::Comment)
             .map(BorsEvent::Repository);
         Ok(comment)
+    } else {
+        Ok(None)
+    }
+}
+
+fn parse_pull_request_events(body: &[u8]) -> anyhow::Result<Option<BorsEvent>> {
+    let payload: WebhookPullRequestEvent = serde_json::from_slice(body)?;
+    let repository_name = parse_repository_name(&payload.repository)?;
+    if payload.action == PullRequestEventAction::Edited {
+        let Some(changes) = payload.changes else {
+            return Err(anyhow::anyhow!(
+                "Edited pull request event should have `changes` field"
+            ));
+        };
+        Ok(Some(BorsEvent::Repository(
+            BorsRepositoryEvent::PullRequestEdited(PullRequestEdited {
+                repository: repository_name,
+                pull_request: payload.pull_request.into(),
+                from_base_sha: changes
+                    .base
+                    .and_then(|base| base.sha)
+                    .map(|sha| CommitSha(sha.from)),
+            }),
+        )))
     } else {
         Ok(None)
     }

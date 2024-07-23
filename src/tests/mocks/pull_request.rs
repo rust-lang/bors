@@ -12,7 +12,8 @@ use wiremock::{
 
 use super::{
     comment::{Comment, GitHubComment},
-    dynamic_mock_req,
+    default_repo_name, dynamic_mock_req,
+    repository::GitHubRepository,
     user::GitHubUser,
     Repo, User,
 };
@@ -209,4 +210,52 @@ struct GitHubLabel {
     name: String,
     color: String,
     default: bool,
+}
+
+#[derive(Serialize)]
+pub(super) struct GitHubPullRequestEventPayload {
+    action: String,
+    pull_request: GitHubPullRequest,
+    changes: Option<GitHubPullRequestChanges>,
+    repository: GitHubRepository,
+}
+
+impl GitHubPullRequestEventPayload {
+    pub fn new(pr_number: u64, action: String, changes: Option<PullRequestChangeEvent>) -> Self {
+        GitHubPullRequestEventPayload {
+            action,
+            pull_request: GitHubPullRequest::new(pr_number),
+            changes: changes.map(Into::into),
+            repository: default_repo_name().into(),
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct GitHubPullRequestChanges {
+    base: Option<GitHubPullRequestBaseChanges>,
+}
+
+#[derive(Serialize)]
+struct GitHubPullRequestBaseChanges {
+    sha: Option<PullRequestEventChangesFrom>,
+}
+
+#[derive(Serialize)]
+struct PullRequestEventChangesFrom {
+    pub from: String,
+}
+
+impl From<PullRequestChangeEvent> for GitHubPullRequestChanges {
+    fn from(value: PullRequestChangeEvent) -> Self {
+        GitHubPullRequestChanges {
+            base: value.from_base_sha.map(|sha| GitHubPullRequestBaseChanges {
+                sha: Some(PullRequestEventChangesFrom { from: sha }),
+            }),
+        }
+    }
+}
+
+pub struct PullRequestChangeEvent {
+    pub from_base_sha: Option<String>,
 }

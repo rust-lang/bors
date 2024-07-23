@@ -8,7 +8,9 @@ use crate::bors::event::{BorsGlobalEvent, BorsRepositoryEvent, PullRequestCommen
 use crate::bors::handlers::help::command_help;
 use crate::bors::handlers::ping::command_ping;
 use crate::bors::handlers::refresh::refresh_repository;
-use crate::bors::handlers::review::{command_approve, command_unapprove};
+use crate::bors::handlers::review::{
+    command_approve, command_unapprove, handle_pull_request_edited,
+};
 use crate::bors::handlers::trybuild::{command_try_build, command_try_cancel, TRY_BRANCH_NAME};
 use crate::bors::handlers::workflow::{
     handle_check_suite_completed, handle_workflow_completed, handle_workflow_started,
@@ -109,6 +111,14 @@ pub async fn handle_bors_repository_event(
                 repo = payload.repository.to_string(),
             );
             handle_check_suite_completed(repo, db, payload)
+                .instrument(span.clone())
+                .await?;
+        }
+        BorsRepositoryEvent::PullRequestEdited(payload) => {
+            let span =
+                tracing::info_span!("Pull request edited", repo = payload.repository.to_string());
+
+            handle_pull_request_edited(repo, db, payload)
                 .instrument(span.clone())
                 .await?;
         }
