@@ -38,6 +38,7 @@ pub enum BorsGlobalEvent {
 }
 
 #[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
 pub enum BorsEvent {
     /// An event that happen per repository basis.
     Repository(BorsRepositoryEvent),
