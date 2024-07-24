@@ -42,7 +42,7 @@ pub(super) async fn command_try_build(
     }
 
     let pr_model = db
-        .get_or_create_pull_request(repo.client.repository(), pr.number)
+        .get_or_create_pull_request(repo.client.repository(), pr)
         .await
         .context("Cannot find or create PR")?;
 
@@ -152,7 +152,7 @@ pub(super) async fn command_try_cancel(
 
     let pr_number: PullRequestNumber = pr.number;
     let pr = db
-        .get_or_create_pull_request(repo.client.repository(), pr_number)
+        .get_or_create_pull_request(repo.client.repository(), pr)
         .await?;
 
     let Some(build) = get_pending_build(pr) else {
@@ -638,11 +638,9 @@ mod tests {
             tester.expect_comments(1).await;
             let pr = tester
                 .db()
-                .get_or_create_pull_request(
-                    &default_repo_name(),
-                    PullRequestNumber(default_pr_number()),
-                )
-                .await?;
+                .get_pull_request(&default_repo_name(), PullRequestNumber(default_pr_number()))
+                .await?
+                .unwrap();
             assert_eq!(pr.try_build.unwrap().status, BuildStatus::Cancelled);
             Ok(tester)
         })
