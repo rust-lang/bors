@@ -19,7 +19,7 @@ use sha2::Sha256;
 
 use crate::bors::event::{
     BorsEvent, BorsGlobalEvent, BorsRepositoryEvent, CheckSuiteCompleted, PullRequestComment,
-    PullRequestEdited, WorkflowCompleted, WorkflowStarted,
+    PullRequestEdited, PullRequestPushed, WorkflowCompleted, WorkflowStarted,
 };
 use crate::database::{WorkflowStatus, WorkflowType};
 use crate::github::server::ServerStateRef;
@@ -204,24 +204,31 @@ fn parse_issue_comment_event(body: &[u8]) -> anyhow::Result<Option<BorsEvent>> {
 fn parse_pull_request_events(body: &[u8]) -> anyhow::Result<Option<BorsEvent>> {
     let payload: WebhookPullRequestEvent = serde_json::from_slice(body)?;
     let repository_name = parse_repository_name(&payload.repository)?;
-    if payload.action == PullRequestEventAction::Edited {
-        let Some(changes) = payload.changes else {
-            return Err(anyhow::anyhow!(
-                "Edited pull request event should have `changes` field"
-            ));
-        };
-        Ok(Some(BorsEvent::Repository(
-            BorsRepositoryEvent::PullRequestEdited(PullRequestEdited {
-                repository: repository_name,
+    match payload.action {
+        PullRequestEventAction::Edited => {
+            let Some(changes) = payload.changes else {
+                return Err(anyhow::anyhow!(
+                    "Edited pull request event should have `changes` field"
+                ));
+            };
+            Ok(Some(BorsEvent::Repository(
+                BorsRepositoryEvent::PullRequestEdited(PullRequestEdited {
+                    repository: repository_name,
+                    pull_request: payload.pull_request.into(),
+                    from_base_sha: changes
+                        .base
+                        .and_then(|base| base.sha)
+                        .map(|sha| CommitSha(sha.from)),
+                }),
+            )))
+        }
+        PullRequestEventAction::Synchronize => Ok(Some(BorsEvent::Repository(
+            BorsRepositoryEvent::PullRequestPushed(PullRequestPushed {
                 pull_request: payload.pull_request.into(),
-                from_base_sha: changes
-                    .base
-                    .and_then(|base| base.sha)
-                    .map(|sha| CommitSha(sha.from)),
+                repository: repository_name,
             }),
-        )))
-    } else {
-        Ok(None)
+        ))),
+        _ => Ok(None),
     }
 }
 

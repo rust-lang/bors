@@ -280,6 +280,14 @@ impl BorsTester {
         .await
     }
 
+    pub async fn push_to_pull_request(&mut self, pr_number: u64) -> anyhow::Result<()> {
+        self.send_webhook(
+            "pull_request",
+            GitHubPullRequestEventPayload::new(pr_number, "synchronize".to_string(), None),
+        )
+        .await
+    }
+
     async fn webhook_comment(&mut self, comment: Comment) -> anyhow::Result<()> {
         self.send_webhook(
             "issue_comment",

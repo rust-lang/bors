@@ -9,7 +9,7 @@ use crate::bors::handlers::help::command_help;
 use crate::bors::handlers::ping::command_ping;
 use crate::bors::handlers::refresh::refresh_repository;
 use crate::bors::handlers::review::{
-    command_approve, command_unapprove, handle_pull_request_edited,
+    command_approve, command_unapprove, handle_pull_request_edited, handle_push_to_pull_request,
 };
 use crate::bors::handlers::trybuild::{command_try_build, command_try_cancel, TRY_BRANCH_NAME};
 use crate::bors::handlers::workflow::{
@@ -119,6 +119,14 @@ pub async fn handle_bors_repository_event(
                 tracing::info_span!("Pull request edited", repo = payload.repository.to_string());
 
             handle_pull_request_edited(repo, db, payload)
+                .instrument(span.clone())
+                .await?;
+        }
+        BorsRepositoryEvent::PullRequestPushed(payload) => {
+            let span =
+                tracing::info_span!("Pull request pushed", repo = payload.repository.to_string());
+
+            handle_push_to_pull_request(repo, db, payload)
                 .instrument(span.clone())
                 .await?;
         }
