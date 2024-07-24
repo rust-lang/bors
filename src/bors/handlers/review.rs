@@ -30,7 +30,7 @@ pub(super) async fn command_approve(
         Approver::Myself => author.username.clone(),
         Approver::Specified(approver) => approver.clone(),
     };
-    db.approve(repo_state.repository(), pr.number, approver.as_str())
+    db.approve(repo_state.repository(), pr, approver.as_str())
         .await?;
     handle_label_trigger(&repo_state, pr.number, LabelTrigger::Approved).await?;
     notify_of_approval(&repo_state, pr, approver.as_str()).await
@@ -49,7 +49,7 @@ pub(super) async fn command_unapprove(
         deny_unapprove_request(&repo_state, pr, author).await?;
         return Ok(());
     };
-    db.unapprove(repo_state.repository(), pr.number).await?;
+    db.unapprove(repo_state.repository(), pr).await?;
     handle_label_trigger(&repo_state, pr.number, LabelTrigger::Unapproved).await?;
     notify_of_unapproval(&repo_state, pr).await
 }
@@ -65,16 +65,16 @@ pub(super) async fn handle_pull_request_edited(
     };
 
     let pr_model = db
-        .get_or_create_pull_request(repo_state.repository(), payload.pull_request.number)
+        .get_or_create_pull_request(repo_state.repository(), &payload.pull_request)
         .await?;
     if pr_model.approved_by.is_none() {
         return Ok(());
     }
 
-    let pr_number = payload.pull_request.number;
-    db.unapprove(repo_state.repository(), pr_number).await?;
-    handle_label_trigger(&repo_state, pr_number, LabelTrigger::Unapproved).await?;
-    notify_of_edited_pr(&repo_state, pr_number, &payload.pull_request.base.name).await
+    let pr = &payload.pull_request;
+    db.unapprove(repo_state.repository(), pr).await?;
+    handle_label_trigger(&repo_state, pr.number, LabelTrigger::Unapproved).await?;
+    notify_of_edited_pr(&repo_state, pr.number, &payload.pull_request.base.name).await
 }
 
 fn sufficient_approve_permission(repo: Arc<RepositoryState>, author: &GithubUser) -> bool {
@@ -421,8 +421,9 @@ approve = ["+approved"]
     ) {
         let pr_in_db = tester
             .db()
-            .get_or_create_pull_request(&default_repo_name(), pr_number)
+            .get_pull_request(&default_repo_name(), pr_number)
             .await
+            .unwrap()
             .unwrap();
         assert_eq!(pr_in_db.approved_by, Some(approved_by.to_string()));
         let repo = tester.default_repo();
@@ -433,8 +434,9 @@ approve = ["+approved"]
     async fn check_pr_unapproved(tester: &BorsTester, pr_number: PullRequestNumber) {
         let pr_in_db = tester
             .db()
-            .get_or_create_pull_request(&default_repo_name(), pr_number)
+            .get_pull_request(&default_repo_name(), pr_number)
             .await
+            .unwrap()
             .unwrap();
         assert_eq!(pr_in_db.approved_by, None);
         let repo = tester.default_repo();

@@ -3,8 +3,10 @@ use sqlx::PgPool;
 use crate::database::{
     BuildModel, BuildStatus, PullRequestModel, WorkflowModel, WorkflowStatus, WorkflowType,
 };
+use crate::github::{CommitSha, GithubRepoName, PullRequest};
+
+#[cfg(test)]
 use crate::github::PullRequestNumber;
-use crate::github::{CommitSha, GithubRepoName};
 
 use super::operations::{
     approve_pull_request, create_build, create_pull_request, create_workflow, find_build,
@@ -27,32 +29,28 @@ impl PgDbClient {
     pub async fn approve(
         &self,
         repo: &GithubRepoName,
-        pr_number: PullRequestNumber,
+        pr: &PullRequest,
         approver: &str,
     ) -> anyhow::Result<()> {
-        let pr = self.get_or_create_pull_request(repo, pr_number).await?;
+        let pr = self.get_or_create_pull_request(repo, pr).await?;
         approve_pull_request(&self.pool, pr.id, approver).await
     }
 
-    pub async fn unapprove(
-        &self,
-        repo: &GithubRepoName,
-        pr_number: PullRequestNumber,
-    ) -> anyhow::Result<()> {
-        let pr = self.get_or_create_pull_request(repo, pr_number).await?;
+    pub async fn unapprove(&self, repo: &GithubRepoName, pr: &PullRequest) -> anyhow::Result<()> {
+        let pr = self.get_or_create_pull_request(repo, pr).await?;
         unapprove_pull_request(&self.pool, pr.id).await
     }
 
     pub async fn get_or_create_pull_request(
         &self,
         repo: &GithubRepoName,
-        pr_number: PullRequestNumber,
+        pr: &PullRequest,
     ) -> anyhow::Result<PullRequestModel> {
-        if let Some(pr) = get_pull_request(&self.pool, repo, pr_number).await? {
+        if let Some(pr) = get_pull_request(&self.pool, repo, pr.number).await? {
             return Ok(pr);
         }
-        create_pull_request(&self.pool, repo, pr_number).await?;
-        let pr = get_pull_request(&self.pool, repo, pr_number)
+        create_pull_request(&self.pool, repo, pr).await?;
+        let pr = get_pull_request(&self.pool, repo, pr.number)
             .await?
             .expect("PR not found after creation");
 
@@ -139,5 +137,14 @@ impl PgDbClient {
         build: &BuildModel,
     ) -> anyhow::Result<Vec<WorkflowModel>> {
         get_workflows_for_build(&self.pool, build.id).await
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn get_pull_request(
+        &self,
+        repo: &GithubRepoName,
+        pr_number: PullRequestNumber,
+    ) -> anyhow::Result<Option<PullRequestModel>> {
+        get_pull_request(&self.pool, repo, pr_number).await
     }
 }
