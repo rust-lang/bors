@@ -169,9 +169,8 @@ async fn notify_of_edited_pr(
         .post_comment(
             pr_number,
             Comment::new(format!(
-                r#":warning: The base branch changed to `{}`, and the 
+                r#":warning: The base branch changed to `{base_name}`, and the 
 PR will need to be re-approved."#,
-                base_name
             )),
         )
         .await
