@@ -5,7 +5,6 @@ use crate::bors::event::PullRequestEdited;
 use crate::bors::handlers::labels::handle_label_trigger;
 use crate::bors::Comment;
 use crate::bors::RepositoryState;
-use crate::github::CommitSha;
 use crate::github::GithubUser;
 use crate::github::LabelTrigger;
 use crate::github::PullRequest;
@@ -75,7 +74,7 @@ pub(super) async fn handle_pull_request_edited(
     let pr_number = payload.pull_request.number;
     db.unapprove(repo_state.repository(), pr_number).await?;
     handle_label_trigger(&repo_state, pr_number, LabelTrigger::Unapproved).await?;
-    notify_of_edited_pr(&repo_state, pr_number, payload.pull_request.head.sha).await
+    notify_of_edited_pr(&repo_state, pr_number, &payload.pull_request.base.name).await
 }
 
 fn sufficient_approve_permission(repo: Arc<RepositoryState>, author: &GithubUser) -> bool {
@@ -164,15 +163,14 @@ async fn notify_of_unapproval(repo: &RepositoryState, pr: &PullRequest) -> anyho
 async fn notify_of_edited_pr(
     repo: &RepositoryState,
     pr_number: PullRequestNumber,
-    head_sha: CommitSha,
+    base_name: &str,
 ) -> anyhow::Result<()> {
     repo.client
         .post_comment(
             pr_number,
             Comment::new(format!(
-                r#":warning: The base branch changed to `{}`, and the 
+                r#":warning: The base branch changed to `{base_name}`, and the 
 PR will need to be re-approved."#,
-                head_sha
             )),
         )
         .await
@@ -339,11 +337,8 @@ approve = ["+approved"]
 
                 assert_eq!(
                     tester.get_comment().await?,
-                    format!(
-                        r#":warning: The base branch changed to `pr-{}-sha`, and the 
+                    r#":warning: The base branch changed to `main`, and the 
 PR will need to be re-approved."#,
-                        default_pr_number()
-                    )
                 );
                 check_pr_unapproved(&tester, default_pr_number().into()).await;
                 Ok(tester)
