@@ -207,7 +207,7 @@ async fn notify_of_pushed_pr(
         .post_comment(
             pr_number,
             Comment::new(format!(
-                r#":warning: Branch's head was changed to `{}`, the 
+                r#":warning: A new commit `{}` was pushed to the branch, the 
 PR will need to be re-approved."#,
                 head_sha
             )),
@@ -428,7 +428,7 @@ PR will need to be re-approved."#,
                 assert_eq!(
                     tester.get_comment().await?,
                     format!(
-                        r#":warning: Branch's head was changed to `pr-{}-sha`, the 
+                        r#":warning: A new commit `pr-{}-sha` was pushed to the branch, the 
 PR will need to be re-approved."#,
                         default_pr_number()
                     )
