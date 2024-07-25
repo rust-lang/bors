@@ -6,6 +6,8 @@ use octocrab::models::RunId;
 pub enum BorsRepositoryEvent {
     /// A comment was posted on a pull request.
     Comment(PullRequestComment),
+    /// When a new commit is pushed to the pull request branch.
+    PullRequestCommitPushed(PullRequestPushed),
     /// When the pull request is edited by its author
     PullRequestEdited(PullRequestEdited),
     /// A workflow run on Github Actions or a check run from external CI system has been started.
@@ -21,10 +23,11 @@ impl BorsRepositoryEvent {
     pub fn repository(&self) -> &GithubRepoName {
         match self {
             BorsRepositoryEvent::Comment(comment) => &comment.repository,
+            BorsRepositoryEvent::PullRequestCommitPushed(payload) => &payload.repository,
+            BorsRepositoryEvent::PullRequestEdited(payload) => &payload.repository,
             BorsRepositoryEvent::WorkflowStarted(workflow) => &workflow.repository,
             BorsRepositoryEvent::WorkflowCompleted(workflow) => &workflow.repository,
             BorsRepositoryEvent::CheckSuiteCompleted(payload) => &payload.repository,
-            BorsRepositoryEvent::PullRequestEdited(payload) => &payload.repository,
         }
     }
 }
@@ -52,6 +55,12 @@ pub struct PullRequestComment {
     pub author: GithubUser,
     pub pr_number: PullRequestNumber,
     pub text: String,
+}
+
+#[derive(Debug)]
+pub struct PullRequestPushed {
+    pub repository: GithubRepoName,
+    pub pull_request: PullRequest,
 }
 
 #[derive(Debug)]

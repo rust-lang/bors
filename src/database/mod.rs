@@ -121,6 +121,12 @@ pub struct PullRequestModel {
     pub created_at: DateTime<Utc>,
 }
 
+impl PullRequestModel {
+    pub fn is_approved(&self) -> bool {
+        self.approved_by.is_some()
+    }
+}
+
 /// Describes whether a workflow is a Github Actions workflow or if it's a job from some external
 /// CI.
 #[derive(Debug, PartialEq, sqlx::Type)]
