@@ -65,18 +65,11 @@ pub(super) async fn handle_pull_request_edited(
     let Some(_) = payload.from_base_sha else {
         return Ok(());
     };
-
-    let pr_model = db
-        .get_or_create_pull_request(repo_state.repository(), payload.pull_request.number)
-        .await?;
-    if !pr_model.is_approved() {
-        return Ok(());
-    }
-
-    let pr_number = payload.pull_request.number;
-    db.unapprove(repo_state.repository(), pr_number).await?;
-    handle_label_trigger(&repo_state, pr_number, LabelTrigger::Unapproved).await?;
-    notify_of_edited_pr(&repo_state, pr_number, &payload.pull_request.base.name).await
+    let pr = &payload.pull_request;
+    unapprove_if_approved(&repo_state, &db, pr, || async {
+        notify_of_edited_pr(&repo_state, pr.number, &pr.base.name).await
+    })
+    .await
 }
 
 pub(super) async fn handle_push_to_pull_request(
@@ -85,18 +78,10 @@ pub(super) async fn handle_push_to_pull_request(
     payload: PullRequestPushed,
 ) -> anyhow::Result<()> {
     let pr = &payload.pull_request;
-    let pr_model = db
-        .get_or_create_pull_request(repo_state.repository(), pr.number)
-        .await?;
-
-    if !pr_model.is_approved() {
-        return Ok(());
-    }
-
-    let pr_number = pr_model.number;
-    db.unapprove(repo_state.repository(), pr_number).await?;
-    handle_label_trigger(&repo_state, pr_number, LabelTrigger::Unapproved).await?;
-    notify_of_pushed_pr(&repo_state, pr_number, pr.head.sha.clone()).await
+    unapprove_if_approved(&repo_state, &db, pr, || async {
+        notify_of_pushed_pr(&repo_state, pr.number, pr.head.sha.clone()).await
+    })
+    .await
 }
 
 fn sufficient_approve_permission(repo: Arc<RepositoryState>, author: &GithubUser) -> bool {
@@ -180,6 +165,28 @@ async fn notify_of_unapproval(repo: &RepositoryState, pr: &PullRequest) -> anyho
             Comment::new(format!("Commit {} has been unapproved", pr.head.sha)),
         )
         .await
+}
+
+async fn unapprove_if_approved<F, Fut>(
+    repo_state: &RepositoryState,
+    db: &PgDbClient,
+    pr: &PullRequest,
+    notify_fn: F,
+) -> anyhow::Result<()>
+where
+    F: FnOnce() -> Fut,
+    Fut: futures::Future<Output = anyhow::Result<()>>,
+{
+    let pr_model = db
+        .get_or_create_pull_request(repo_state.repository(), pr.number)
+        .await?;
+    if !pr_model.is_approved() {
+        return Ok(());
+    }
+
+    db.unapprove(repo_state.repository(), pr.number).await?;
+    handle_label_trigger(repo_state, pr.number, LabelTrigger::Unapproved).await?;
+    notify_fn().await
 }
 
 async fn notify_of_edited_pr(
