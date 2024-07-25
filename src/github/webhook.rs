@@ -223,7 +223,7 @@ fn parse_pull_request_events(body: &[u8]) -> anyhow::Result<Option<BorsEvent>> {
             )))
         }
         PullRequestEventAction::Synchronize => Ok(Some(BorsEvent::Repository(
-            BorsRepositoryEvent::PullRequestPushed(PullRequestPushed {
+            BorsRepositoryEvent::PullRequestCommitPushed(PullRequestPushed {
                 pull_request: payload.pull_request.into(),
                 repository: repository_name,
             }),

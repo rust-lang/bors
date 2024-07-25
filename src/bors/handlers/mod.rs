@@ -122,7 +122,7 @@ pub async fn handle_bors_repository_event(
                 .instrument(span.clone())
                 .await?;
         }
-        BorsRepositoryEvent::PullRequestPushed(payload) => {
+        BorsRepositoryEvent::PullRequestCommitPushed(payload) => {
             let span =
                 tracing::info_span!("Pull request pushed", repo = payload.repository.to_string());
 

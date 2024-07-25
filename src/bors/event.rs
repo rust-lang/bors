@@ -7,7 +7,7 @@ pub enum BorsRepositoryEvent {
     /// A comment was posted on a pull request.
     Comment(PullRequestComment),
     /// When a new commit is pushed to the pull request branch.
-    PullRequestPushed(PullRequestPushed),
+    PullRequestCommitPushed(PullRequestPushed),
     /// When the pull request is edited by its author
     PullRequestEdited(PullRequestEdited),
     /// A workflow run on Github Actions or a check run from external CI system has been started.
@@ -23,7 +23,7 @@ impl BorsRepositoryEvent {
     pub fn repository(&self) -> &GithubRepoName {
         match self {
             BorsRepositoryEvent::Comment(comment) => &comment.repository,
-            BorsRepositoryEvent::PullRequestPushed(payload) => &payload.repository,
+            BorsRepositoryEvent::PullRequestCommitPushed(payload) => &payload.repository,
             BorsRepositoryEvent::PullRequestEdited(payload) => &payload.repository,
             BorsRepositoryEvent::WorkflowStarted(workflow) => &workflow.repository,
             BorsRepositoryEvent::WorkflowCompleted(workflow) => &workflow.repository,
