@@ -19,7 +19,7 @@ use sha2::Sha256;
 
 use crate::bors::event::{
     BorsEvent, BorsGlobalEvent, BorsRepositoryEvent, CheckSuiteCompleted, PullRequestComment,
-    PullRequestEdited, WorkflowCompleted, WorkflowStarted,
+    PullRequestEdited, PullRequestPushed, WorkflowCompleted, WorkflowStarted,
 };
 use crate::database::{WorkflowStatus, WorkflowType};
 use crate::github::server::ServerStateRef;
@@ -204,24 +204,31 @@ fn parse_issue_comment_event(body: &[u8]) -> anyhow::Result<Option<BorsEvent>> {
 fn parse_pull_request_events(body: &[u8]) -> anyhow::Result<Option<BorsEvent>> {
     let payload: WebhookPullRequestEvent = serde_json::from_slice(body)?;
     let repository_name = parse_repository_name(&payload.repository)?;
-    if payload.action == PullRequestEventAction::Edited {
-        let Some(changes) = payload.changes else {
-            return Err(anyhow::anyhow!(
-                "Edited pull request event should have `changes` field"
-            ));
-        };
-        Ok(Some(BorsEvent::Repository(
-            BorsRepositoryEvent::PullRequestEdited(PullRequestEdited {
-                repository: repository_name,
+    match payload.action {
+        PullRequestEventAction::Edited => {
+            let Some(changes) = payload.changes else {
+                return Err(anyhow::anyhow!(
+                    "Edited pull request event should have `changes` field"
+                ));
+            };
+            Ok(Some(BorsEvent::Repository(
+                BorsRepositoryEvent::PullRequestEdited(PullRequestEdited {
+                    repository: repository_name,
+                    pull_request: payload.pull_request.into(),
+                    from_base_sha: changes
+                        .base
+                        .and_then(|base| base.sha)
+                        .map(|sha| CommitSha(sha.from)),
+                }),
+            )))
+        }
+        PullRequestEventAction::Synchronize => Ok(Some(BorsEvent::Repository(
+            BorsRepositoryEvent::PullRequestCommitPushed(PullRequestPushed {
                 pull_request: payload.pull_request.into(),
-                from_base_sha: changes
-                    .base
-                    .and_then(|base| base.sha)
-                    .map(|sha| CommitSha(sha.from)),
+                repository: repository_name,
             }),
-        )))
-    } else {
-        Ok(None)
+        ))),
+        _ => Ok(None),
     }
 }
 
@@ -474,6 +481,139 @@ mod tests {
                                 5,
                             ),
                             text: "hello bors",
+                        },
+                    ),
+                ),
+            ),
+        )
+        "###
+        );
+    }
+
+    #[tokio::test]
+    async fn pull_request_edited() {
+        insta::assert_debug_snapshot!(
+            check_webhook("webhook/pull-request-edited.json", "pull_request").await,
+            @r###"
+        Ok(
+            GitHubWebhook(
+                Repository(
+                    PullRequestEdited(
+                        PullRequestEdited {
+                            repository: GithubRepoName {
+                                owner: "vohoanglong0107",
+                                name: "test-bors",
+                            },
+                            pull_request: PullRequest {
+                                number: PullRequestNumber(
+                                    1,
+                                ),
+                                head_label: "vohoanglong0107:test",
+                                head: Branch {
+                                    name: "test",
+                                    sha: CommitSha(
+                                        "bedf96270622ff19b4711dd7df3f19f4be1cba93",
+                                    ),
+                                },
+                                base: Branch {
+                                    name: "testest",
+                                    sha: CommitSha(
+                                        "1f1ee58e3067678d3752dd5f6f3abb936325fbb8",
+                                    ),
+                                },
+                                title: "Create test.txt",
+                                message: "",
+                                author: GithubUser {
+                                    id: UserId(
+                                        78085736,
+                                    ),
+                                    username: "vohoanglong0107",
+                                    html_url: Url {
+                                        scheme: "https",
+                                        cannot_be_a_base: false,
+                                        username: "",
+                                        password: None,
+                                        host: Some(
+                                            Domain(
+                                                "github.com",
+                                            ),
+                                        ),
+                                        port: None,
+                                        path: "/vohoanglong0107",
+                                        query: None,
+                                        fragment: None,
+                                    },
+                                },
+                            },
+                            from_base_sha: Some(
+                                CommitSha(
+                                    "1f1ee58e3067678d3752dd5f6f3abb936325fbb8",
+                                ),
+                            ),
+                        },
+                    ),
+                ),
+            ),
+        )
+        "###
+        );
+    }
+
+    #[tokio::test]
+    async fn pull_request_synchronized() {
+        insta::assert_debug_snapshot!(
+            check_webhook("webhook/pull-request-synchronize.json", "pull_request").await,
+            @r###"
+        Ok(
+            GitHubWebhook(
+                Repository(
+                    PullRequestCommitPushed(
+                        PullRequestPushed {
+                            repository: GithubRepoName {
+                                owner: "vohoanglong0107",
+                                name: "test-bors",
+                            },
+                            pull_request: PullRequest {
+                                number: PullRequestNumber(
+                                    1,
+                                ),
+                                head_label: "vohoanglong0107:test",
+                                head: Branch {
+                                    name: "test",
+                                    sha: CommitSha(
+                                        "bedf96270622ff19b4711dd7df3f19f4be1cba93",
+                                    ),
+                                },
+                                base: Branch {
+                                    name: "main",
+                                    sha: CommitSha(
+                                        "1f1ee58e3067678d3752dd5f6f3abb936325fbb8",
+                                    ),
+                                },
+                                title: "Create test.txt",
+                                message: "",
+                                author: GithubUser {
+                                    id: UserId(
+                                        78085736,
+                                    ),
+                                    username: "vohoanglong0107",
+                                    html_url: Url {
+                                        scheme: "https",
+                                        cannot_be_a_base: false,
+                                        username: "",
+                                        password: None,
+                                        host: Some(
+                                            Domain(
+                                                "github.com",
+                                            ),
+                                        ),
+                                        port: None,
+                                        path: "/vohoanglong0107",
+                                        query: None,
+                                        fragment: None,
+                                    },
+                                },
+                            },
                         },
                     ),
                 ),
