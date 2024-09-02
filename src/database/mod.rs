@@ -2,8 +2,8 @@
 use std::fmt::{Display, Formatter};
 
 use chrono::{DateTime, Utc};
-
 pub use client::PgDbClient;
+use sqlx::error::BoxDynError;
 
 use crate::github::{GithubRepoName, PullRequestNumber};
 
@@ -54,13 +54,16 @@ impl sqlx::Type<sqlx::Postgres> for GithubRepoName {
 }
 
 impl sqlx::Encode<'_, sqlx::Postgres> for GithubRepoName {
-    fn encode_by_ref(&self, buf: &mut sqlx::postgres::PgArgumentBuffer) -> sqlx::encode::IsNull {
+    fn encode_by_ref(
+        &self,
+        buf: &mut sqlx::postgres::PgArgumentBuffer,
+    ) -> Result<sqlx::encode::IsNull, BoxDynError> {
         <String as sqlx::Encode<sqlx::Postgres>>::encode(self.to_string(), buf)
     }
 }
 
 impl sqlx::Decode<'_, sqlx::Postgres> for GithubRepoName {
-    fn decode(value: sqlx::postgres::PgValueRef<'_>) -> Result<Self, sqlx::error::BoxDynError> {
+    fn decode(value: sqlx::postgres::PgValueRef<'_>) -> Result<Self, BoxDynError> {
         let value = <String as sqlx::Decode<sqlx::Postgres>>::decode(value)?;
         Ok(Self::from(value))
     }

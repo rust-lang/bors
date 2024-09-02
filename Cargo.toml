@@ -2,6 +2,7 @@
 name = "bors"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.80.0"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -46,7 +47,7 @@ hex = "0.4"
 secrecy = "0.8"
 
 # Database
-sqlx = { version = "0.7.4", features = ["runtime-tokio", "tls-rustls", "postgres", "chrono"] }
+sqlx = { version = "0.8.1", features = ["runtime-tokio", "tls-rustls", "postgres", "chrono"] }
 
 # Time
 chrono = "0.4"
