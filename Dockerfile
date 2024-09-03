@@ -29,10 +29,14 @@ FROM ubuntu:22.04 as runtime
 
 WORKDIR /
 
-RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates
+# curl is needed for healthcheck
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl
 
 COPY --from=build /app/target/release/bors .
 
 EXPOSE 80
+
+HEALTHCHECK --timeout=10s --start-period=10s \
+  CMD curl -f http://localhost/health || exit 1
 
 ENTRYPOINT ["./bors"]
