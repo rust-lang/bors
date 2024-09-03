@@ -8,7 +8,7 @@ use anyhow::Error;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
-use axum::routing::post;
+use axum::routing::{get, post};
 use axum::Router;
 use octocrab::Octocrab;
 use std::future::Future;
@@ -47,8 +47,13 @@ pub type ServerStateRef = Arc<ServerState>;
 pub fn create_app(state: ServerState) -> Router {
     Router::new()
         .route("/github", post(github_webhook_handler))
+        .route("/health", get(health_handler))
         .layer(ConcurrencyLimitLayer::new(100))
         .with_state(Arc::new(state))
+}
+
+async fn health_handler() -> impl IntoResponse {
+    (StatusCode::OK, "")
 }
 
 /// Axum handler that receives a webhook and sends it to a webhook channel.
