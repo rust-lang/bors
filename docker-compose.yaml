@@ -1,7 +1,7 @@
 version: '3.7'
 services:
   db:
-    image: postgres:15.5
+    image: postgres:15.8
     environment:
       POSTGRES_USER: bors
       POSTGRES_PASSWORD: bors
