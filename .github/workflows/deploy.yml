@@ -28,7 +28,7 @@ jobs:
 
       - name: Login to Amazon ECR
         id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v1
+        uses: aws-actions/amazon-ecr-login@v2
 
       - uses: docker/setup-buildx-action@v2
       - name: Build and tag the Docker image
@@ -66,7 +66,7 @@ jobs:
 
       - name: Login to Amazon ECR
         id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v1
+        uses: aws-actions/amazon-ecr-login@v2
 
       - uses: docker/setup-buildx-action@v2
       - name: Build and tag the Docker image
