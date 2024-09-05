@@ -1,0 +1,19 @@
+[graph]
+exclude-dev = true
+
+[advisories]
+unmaintained = "none"
+
+[licenses]
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "ISC",
+    "Unicode-3.0",
+    "BSD-3-Clause",
+    "Zlib",
+    "CDLA-Permissive-2.0"
+]
+
+[bans]
+multiple-versions = "allow"
