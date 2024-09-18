@@ -5,4 +5,13 @@
     ":maintainLockFilesMonthly",
     "docker:disable",
   ],
+  packageRules: [
+    {
+      matchCategories: ["rust"],
+      updateTypes: ["patch"],
+      // Disable patch updates for single dependencies because patches
+      // are updated periodically with lockfile maintainance.
+      enabled: false,
+    },
+  ],
 }
