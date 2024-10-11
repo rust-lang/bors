@@ -5,7 +5,7 @@ use anyhow::Context;
 use arc_swap::ArcSwap;
 use octocrab::models::{App, AppId, InstallationRepositories, Repository};
 use octocrab::Octocrab;
-use secrecy::{ExposeSecret, SecretVec};
+use secrecy::{ExposeSecret, SecretString};
 
 use client::GithubRepositoryClient;
 
@@ -23,9 +23,9 @@ fn base_github_html_url() -> &'static str {
 pub fn create_github_client(
     app_id: AppId,
     github_url: String,
-    private_key: SecretVec<u8>,
+    private_key: SecretString,
 ) -> anyhow::Result<Octocrab> {
-    let key = jsonwebtoken::EncodingKey::from_rsa_pem(private_key.expose_secret().as_ref())
+    let key = jsonwebtoken::EncodingKey::from_rsa_pem(private_key.expose_secret().as_bytes())
         .context("Could not encode private key")?;
 
     Octocrab::builder()
