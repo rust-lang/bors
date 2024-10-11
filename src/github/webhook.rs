@@ -35,7 +35,7 @@ impl WebhookSecret {
     }
 
     pub fn expose(&self) -> &str {
-        self.0.expose_secret().as_str()
+        self.0.expose_secret()
     }
 }
 

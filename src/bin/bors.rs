@@ -86,7 +86,7 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
         let client = create_github_client(
             opts.app_id.into(),
             "https://api.github.com".to_string(),
-            opts.private_key.into_bytes().into(),
+            opts.private_key.into(),
         )?;
         let repos = RepositoryLoader::new(client.clone())
             .load_repositories(&team_api)

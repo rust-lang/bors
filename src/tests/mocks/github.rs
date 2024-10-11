@@ -85,7 +85,7 @@ impl GitHubMockServer {
         create_github_client(
             default_app_id().into(),
             self.mock_server.uri(),
-            GITHUB_MOCK_PRIVATE_KEY.as_bytes().to_vec().into(),
+            GITHUB_MOCK_PRIVATE_KEY.into(),
         )
         .unwrap()
     }
