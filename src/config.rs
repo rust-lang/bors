@@ -19,10 +19,19 @@ pub struct RepositoryConfig {
     pub timeout: Duration,
     #[serde(default, deserialize_with = "deserialize_labels")]
     pub labels: HashMap<LabelTrigger, Vec<LabelModification>>,
+    #[serde(
+        default = "default_min_ci_duration",
+        deserialize_with = "deserialize_duration_from_secs"
+    )]
+    pub min_ci_time: Duration,
 }
 
 fn default_timeout() -> Duration {
     Duration::from_secs(3600)
+}
+
+fn default_min_ci_duration() -> Duration {
+    Duration::from_secs(60)
 }
 
 fn deserialize_duration_from_secs<'de, D>(deserializer: D) -> Result<Duration, D::Error>
