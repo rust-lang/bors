@@ -19,10 +19,21 @@ pub struct RepositoryConfig {
     pub timeout: Duration,
     #[serde(default, deserialize_with = "deserialize_labels")]
     pub labels: HashMap<LabelTrigger, Vec<LabelModification>>,
+    #[serde(default, deserialize_with = "deserialize_duration_from_secs_opt")]
+    pub min_ci_time: Option<Duration>,
 }
 
 fn default_timeout() -> Duration {
     Duration::from_secs(3600)
+}
+
+fn deserialize_duration_from_secs_opt<'de, D>(deserializer: D) -> Result<Option<Duration>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    // Allow null values for the option
+    let maybe_seconds = Option::<u64>::deserialize(deserializer)?;
+    Ok(maybe_seconds.map(Duration::from_secs))
 }
 
 fn deserialize_duration_from_secs<'de, D>(deserializer: D) -> Result<Duration, D::Error>
@@ -124,7 +135,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
+    use std::{collections::BTreeMap, time::Duration};
 
     use crate::config::{default_timeout, RepositoryConfig};
 
@@ -140,6 +151,20 @@ mod tests {
         let content = "timeout = 3600";
         let config = load_config(content);
         assert_eq!(config.timeout.as_secs(), 3600);
+    }
+
+    #[test]
+    fn deserialize_min_ci_time_empty() {
+        let content = "";
+        let config = load_config(content);
+        assert_eq!(config.min_ci_time, None);
+    }
+
+    #[test]
+    fn deserialize_min_ci_time() {
+        let content = "min_ci_time = 3600";
+        let config = load_config(content);
+        assert_eq!(config.min_ci_time, Some(Duration::from_secs(3600)));
     }
 
     #[test]
