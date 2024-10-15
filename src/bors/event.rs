@@ -1,5 +1,6 @@
 use crate::database::{WorkflowStatus, WorkflowType};
 use crate::github::{CommitSha, GithubRepoName, GithubUser, PullRequest, PullRequestNumber};
+use chrono::Duration;
 use octocrab::models::RunId;
 
 #[derive(Debug)]
@@ -88,6 +89,7 @@ pub struct WorkflowCompleted {
     pub commit_sha: CommitSha,
     pub run_id: RunId,
     pub status: WorkflowStatus,
+    pub running_time: Option<Duration>,
 }
 
 #[derive(Debug)]

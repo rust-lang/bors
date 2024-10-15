@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::Duration;
 
 use crate::bors::comment::try_build_succeeded_comment;
 use crate::bors::event::{CheckSuiteCompleted, WorkflowCompleted, WorkflowStarted};
@@ -77,6 +78,21 @@ pub(super) async fn handle_workflow_completed(
         branch: payload.branch,
         commit_sha: payload.commit_sha,
     };
+
+    if let Some(running_time) = payload.running_time {
+        let running_time_as_duration = chrono::Duration::to_std(&running_time).unwrap_or(Duration::from_secs(0));
+        if running_time_as_duration < repo.config.load().min_ci_time {
+            tracing::warn!(
+            "Workflow running time is less than the minimum CI duration: {:?} < {:?}",
+            payload.running_time,
+            repo.config.load().min_ci_time
+            );
+            return Err(anyhow::anyhow!("Workflow running time is less than the minimum CI duration"));
+        }
+    } else {
+        println!("Running time is not available.");
+    }
+
     try_complete_build(repo.as_ref(), db.as_ref(), event).await
 }
 
