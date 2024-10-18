@@ -8,6 +8,7 @@ use crate::bors::Comment;
 use crate::bors::RepositoryState;
 use crate::database::RunId;
 use crate::database::{BuildModel, BuildStatus, PullRequestModel, WorkflowStatus, WorkflowType};
+use crate::github::GithubRepoName;
 use crate::github::{
     CommitSha, GithubUser, LabelTrigger, MergeError, PullRequest, PullRequestNumber,
 };
@@ -93,7 +94,7 @@ pub(super) async fn command_try_build(
         .merge_branches(
             TRY_MERGE_BRANCH_NAME,
             &pr.head.sha,
-            &auto_merge_commit_message(pr, "<try>", jobs),
+            &auto_merge_commit_message(pr, repo.client.repository(), "<try>", jobs),
         )
         .await
     {
@@ -231,16 +232,23 @@ fn get_pending_build(pr: PullRequestModel) -> Option<BuildModel> {
         .and_then(|b| (b.status == BuildStatus::Pending).then_some(b))
 }
 
-fn auto_merge_commit_message(pr: &PullRequest, reviewer: &str, jobs: Vec<String>) -> String {
+fn auto_merge_commit_message(
+    pr: &PullRequest,
+    name: &GithubRepoName,
+    reviewer: &str,
+    jobs: Vec<String>,
+) -> String {
     let pr_number = pr.number;
     let mut message = format!(
-        r#"Auto merge of #{pr_number} - {pr_label}, r={reviewer}
+        r#"Auto merge of {repo_owner}/{repo_name}#{pr_number} - {pr_label}, r={reviewer}
 {pr_title}
 
 {pr_message}"#,
         pr_label = pr.head_label,
         pr_title = pr.title,
-        pr_message = pr.message
+        pr_message = pr.message,
+        repo_owner = name.owner(),
+        repo_name = name.name()
     );
 
     // if jobs is empty, try-job won't be added to the message
