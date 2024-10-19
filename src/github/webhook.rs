@@ -785,6 +785,12 @@ mod tests {
                                 4900979072,
                             ),
                             status: Failure,
+                            running_time: Some(
+                                TimeDelta {
+                                    secs: 13,
+                                    nanos: 0,
+                                },
+                            ),
                         },
                     ),
                 ),
