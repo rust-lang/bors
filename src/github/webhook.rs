@@ -273,9 +273,9 @@ fn parse_workflow_run_events(body: &[u8]) -> anyhow::Result<Option<BorsEvent>> {
                 url: payload.workflow_run.html_url.into(),
             },
         ))),
-        "completed" =>  {
+        "completed" => {
             let running_time = if let (Some(started_at), Some(completed_at)) = (
-                Some(payload.workflow_run.created_at), 
+                Some(payload.workflow_run.created_at),
                 Some(payload.workflow_run.updated_at),
             ) {
                 Some(completed_at - started_at)
@@ -295,7 +295,7 @@ fn parse_workflow_run_events(body: &[u8]) -> anyhow::Result<Option<BorsEvent>> {
                     },
                 }),
             ))
-        },
+        }
         _ => None,
     };
     Ok(result)

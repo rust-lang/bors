@@ -80,15 +80,18 @@ pub(super) async fn handle_workflow_completed(
     };
 
     if let Some(running_time) = payload.running_time {
-        let running_time_as_duration = chrono::Duration::to_std(&running_time).unwrap_or(Duration::from_secs(0));
+        let running_time_as_duration =
+            chrono::Duration::to_std(&running_time).unwrap_or(Duration::from_secs(0));
         if running_time_as_duration < repo.config.load().min_ci_time {
             payload.status = WorkflowStatus::Failure;
             tracing::warn!(
-            "Workflow running time is less than the minimum CI duration: {:?} < {:?}",
-            payload.running_time,
-            repo.config.load().min_ci_time
+                "Workflow running time is less than the minimum CI duration: {:?} < {:?}",
+                payload.running_time,
+                repo.config.load().min_ci_time
             );
-            return Err(anyhow::anyhow!("Workflow running time is less than the minimum CI duration"));
+            return Err(anyhow::anyhow!(
+                "Workflow running time is less than the minimum CI duration"
+            ));
         }
     } else {
         println!("Running time is not available.");
