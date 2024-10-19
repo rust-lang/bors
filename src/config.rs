@@ -31,7 +31,7 @@ fn default_timeout() -> Duration {
 }
 
 fn default_min_ci_duration() -> Duration {
-    Duration::from_secs(2)
+    Duration::from_secs(0)
 }
 
 fn deserialize_duration_from_secs<'de, D>(deserializer: D) -> Result<Duration, D::Error>
