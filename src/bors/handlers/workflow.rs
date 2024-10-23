@@ -68,20 +68,10 @@ pub(super) async fn handle_workflow_completed(
         return Ok(());
     }
 
-    tracing::info!("Updating status of workflow to {:?}", payload.status);
-    db.update_workflow_status(*payload.run_id, payload.status)
-        .await?;
-
-    // Try to complete the build
-    let event = CheckSuiteCompleted {
-        repository: payload.repository,
-        branch: payload.branch,
-        commit_sha: payload.commit_sha,
-    };
-
+    
     if let Some(running_time) = payload.running_time {
         let running_time_as_duration =
-            chrono::Duration::to_std(&running_time).unwrap_or(Duration::from_secs(0));
+        chrono::Duration::to_std(&running_time).unwrap_or(Duration::from_secs(0));
         if running_time_as_duration < repo.config.load().min_ci_time {
             payload.status = WorkflowStatus::Failure;
             tracing::warn!(
@@ -94,9 +84,19 @@ pub(super) async fn handle_workflow_completed(
             ));
         }
     } else {
-        println!("Running time is not available.");
+        tracing::info!("Running time is not available.");
     }
+    
+    tracing::info!("Updating status of workflow to {:?}", payload.status);
+    db.update_workflow_status(*payload.run_id, payload.status)
+        .await?;
 
+    // Try to complete the build
+    let event = CheckSuiteCompleted {
+        repository: payload.repository,
+        branch: payload.branch,
+        commit_sha: payload.commit_sha,
+    };
     try_complete_build(repo.as_ref(), db.as_ref(), event).await
 }
 

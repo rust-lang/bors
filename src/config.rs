@@ -152,14 +152,14 @@ mod tests {
     }
 
     #[test]
-    fn deserilaize_min_ci_time_empty() {
+    fn deserialize_min_ci_time_empty() {
         let content = "";
         let config = load_config(content);
         assert_eq!(config.min_ci_time, default_min_ci_duration());
     }
 
     #[test]
-    fn deserilaize_min_ci_time() {
+    fn deserialize_min_ci_time() {
         let content = "min_ci_time = 3600";
         let config = load_config(content);
         assert_eq!(config.min_ci_time.as_secs(), 3600);
