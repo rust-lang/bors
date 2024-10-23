@@ -273,18 +273,29 @@ fn parse_workflow_run_events(body: &[u8]) -> anyhow::Result<Option<BorsEvent>> {
                 url: payload.workflow_run.html_url.into(),
             },
         ))),
-        "completed" => Some(BorsEvent::Repository(
-            BorsRepositoryEvent::WorkflowCompleted(WorkflowCompleted {
-                repository: repository_name,
-                branch: payload.workflow_run.head_branch,
-                commit_sha: CommitSha(payload.workflow_run.head_sha),
-                run_id: RunId(payload.workflow_run.id.0),
-                status: match payload.workflow_run.conclusion.unwrap_or_default().as_str() {
-                    "success" => WorkflowStatus::Success,
-                    _ => WorkflowStatus::Failure,
-                },
-            }),
-        )),
+        "completed" => {
+            let running_time = if let (Some(started_at), Some(completed_at)) = (
+                Some(payload.workflow_run.created_at),
+                Some(payload.workflow_run.updated_at),
+            ) {
+                Some(completed_at - started_at)
+            } else {
+                None
+            };
+            Some(BorsEvent::Repository(
+                BorsRepositoryEvent::WorkflowCompleted(WorkflowCompleted {
+                    repository: repository_name,
+                    branch: payload.workflow_run.head_branch,
+                    commit_sha: CommitSha(payload.workflow_run.head_sha),
+                    run_id: RunId(payload.workflow_run.id.0),
+                    running_time,
+                    status: match payload.workflow_run.conclusion.unwrap_or_default().as_str() {
+                        "success" => WorkflowStatus::Success,
+                        _ => WorkflowStatus::Failure,
+                    },
+                }),
+            ))
+        }
         _ => None,
     };
     Ok(result)
@@ -774,6 +785,12 @@ mod tests {
                                 4900979072,
                             ),
                             status: Failure,
+                            running_time: Some(
+                                TimeDelta {
+                                    secs: 13,
+                                    nanos: 0,
+                                },
+                            ),
                         },
                     ),
                 ),
