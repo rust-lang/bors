@@ -68,7 +68,6 @@ pub(super) async fn handle_workflow_completed(
         return Ok(());
     }
 
-    
     if let Some(running_time) = payload.running_time {
         let running_time_as_duration =
             chrono::Duration::to_std(&running_time).unwrap_or(Duration::from_secs(0));
