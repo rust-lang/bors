@@ -57,7 +57,9 @@ pub async fn load_repositories(
 
     let mut repositories = HashMap::default();
     for installation in installations {
-        let installation_client = client.installation(installation.id);
+        let installation_client = client
+            .installation(installation.id)
+            .context("failed to install client")?;
 
         let repos = match load_installation_repos(&installation_client).await {
             Ok(repos) => repos,

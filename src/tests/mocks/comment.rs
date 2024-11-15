@@ -75,7 +75,7 @@ impl From<Comment> for GitHubIssueCommentEventPayload {
                 user: value.author.clone().into(),
                 labels: vec![],
                 assignees: vec![],
-                author_association: "".to_string(),
+                author_association: "OWNER".to_string(),
                 locked: false,
                 comments: 0,
                 pull_request: Some(GitHubPullRequestLink {
@@ -97,6 +97,7 @@ impl From<Comment> for GitHubIssueCommentEventPayload {
                 body_html: Some(value.content.clone()),
                 user: value.author.into(),
                 created_at: time,
+                author_association: "OWNER".to_string(),
             },
             changes: None,
         }
@@ -135,6 +136,7 @@ struct GitHubIssue {
 // Copied from octocrab, since its version if #[non_exhaustive]
 #[derive(Serialize)]
 pub(super) struct GitHubComment {
+    author_association: String,
     id: CommentId,
     node_id: String,
     url: Url,
@@ -160,6 +162,7 @@ impl From<Comment> for GitHubComment {
             body_html: Some(value.content.clone()),
             user: value.author.into(),
             created_at: time,
+            author_association: "OWNER".to_string(),
         }
     }
 }
