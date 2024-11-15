@@ -9,10 +9,11 @@ concurrency: deploy
 
 jobs:
   deploy-to-staging:
-    name: Deploy
+    name: Deploy to staging
     runs-on: ubuntu-latest
     environment: staging
     concurrency: staging
+    if: github.repository_owner == 'rust-lang'
     permissions:
       id-token: write
       contents: read
@@ -47,10 +48,11 @@ jobs:
       - name: Kick ECS to deploy new version
         run: aws ecs update-service --service bors --cluster bors --force-new-deployment
   deploy-to-production:
-    name: Deploy
+    name: Deploy to production
     runs-on: ubuntu-latest
     environment: production
     concurrency: production
+    if: github.repository_owner == 'rust-lang'
     permissions:
       id-token: write
       contents: read
