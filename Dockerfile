@@ -1,16 +1,16 @@
-FROM rust:1.80 as base
+FROM rust:1.80 AS base
 
 ENV CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse
 
 RUN cargo install cargo-chef
 
-FROM base as planner
+FROM base AS planner
 
 WORKDIR /app
 COPY . .
 RUN cargo chef prepare --recipe-path recipe.json
 
-FROM base as build
+FROM base AS build
 
 WORKDIR /app
 COPY --from=planner /app/recipe.json recipe.json
@@ -25,7 +25,7 @@ COPY src src
 
 RUN cargo build --release
 
-FROM ubuntu:22.04 as runtime
+FROM ubuntu:22.04 AS runtime
 
 WORKDIR /
 
