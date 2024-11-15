@@ -88,6 +88,11 @@ If an `.env` file is present, the environment variable listed in it will be pick
 $ export DATABASE_URL=postgres://bors:bors@localhost:5432/bors
 ```
 
+### Running tests
+Having the database up and running, with the `DATABASE_URL` set, is required to run the tests.
+
+Make sure to also run `cargo sqlx migrate run` to apply the migrations to the database.
+
 ### Updating the DB schema
 1) Generate a new migration
     ```console
