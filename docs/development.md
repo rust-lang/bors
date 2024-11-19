@@ -110,3 +110,7 @@ $ cargo sqlx prepare -- --tests
 ```
 
 After that, you should commit the changes to the `.sqlx` directory.
+
+## Logs in tests
+By default, logs are disabled in tests. To enable them, add `#[traced_test]`
+on top of the test function.
