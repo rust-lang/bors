@@ -19,9 +19,6 @@ impl TestSyncMarker {
     pub async fn sync(&self) {
         self.get().sync().await;
     }
-    pub fn hits(&self) -> usize {
-        self.get().hits()
-    }
 
     fn get(&self) -> &TestSyncMarkerInner {
         self.inner
@@ -56,9 +53,5 @@ impl TestSyncMarkerInner {
     /// Wait until code has encountered this location.
     pub async fn sync(&self) {
         self.rx.lock().await.recv().await.unwrap();
-    }
-
-    pub fn hits(&self) -> usize {
-        self.hits.load(Ordering::SeqCst)
     }
 }
