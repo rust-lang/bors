@@ -1,4 +1,4 @@
-FROM rust:1.80 AS base
+FROM rust:1.82 AS base
 
 ENV CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse
 
