@@ -47,3 +47,11 @@ Build commit: {} (`{}`)"#,
         }),
     }
 }
+
+pub fn try_build_in_progress_comment() -> Comment {
+    Comment::new(":exclamation: A try build is currently in progress. You can cancel it using @bors try cancel.".to_string())
+}
+
+pub fn cant_find_last_parent_comment() -> Comment {
+    Comment::new(":exclamation: There was no previous build. Please set an explicit parent or remove the `parent=last` argument to use the default parent.".to_string())
+}

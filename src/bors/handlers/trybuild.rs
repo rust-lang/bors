@@ -3,6 +3,8 @@ use std::sync::Arc;
 use anyhow::{anyhow, Context};
 
 use crate::bors::command::Parent;
+use crate::bors::comment::cant_find_last_parent_comment;
+use crate::bors::comment::try_build_in_progress_comment;
 use crate::bors::handlers::labels::handle_label_trigger;
 use crate::bors::Comment;
 use crate::bors::RepositoryState;
@@ -47,37 +49,17 @@ pub(super) async fn command_try_build(
         .await
         .context("Cannot find or create PR")?;
 
-    let last_parent = if let Some(ref build) = pr_model.try_build {
-        if build.status == BuildStatus::Pending {
-            tracing::warn!("Try build already in progress");
-            repo.client
-                .post_comment(pr.number, Comment::new(":exclamation: A try build is currently in progress. You can cancel it using @bors try cancel.".to_string()))
-                .await?;
-            return Ok(());
-        }
-        Some(CommitSha(build.parent.clone()))
-    } else {
-        None
-    };
-
-    let base_sha = match parent.clone() {
-        Some(parent) => match parent {
-            Parent::Last => match last_parent {
-                None => {
-                    repo.client
-                        .post_comment(pr.number, Comment::new(":exclamation: There was no previous build. Please set an explicit parent or remove the `parent=last` argument to use the default parent.".to_string()))
-                        .await?;
-                    return Ok(());
-                }
-                Some(last_parent) => last_parent,
-            },
-            Parent::CommitSha(parent) => parent,
-        },
-        None => repo
+    let base_sha = match get_base_sha(&pr_model, parent) {
+        Ok(Some(base_sha)) => base_sha,
+        Ok(None) => repo
             .client
             .get_branch_sha(&pr.base.name)
             .await
-            .with_context(|| format!("Cannot get SHA for branch {}", pr.base.name))?,
+            .context(format!("Cannot get SHA for branch {}", pr.base.name))?,
+        Err(comment) => {
+            repo.client.post_comment(pr.number, comment).await?;
+            return Ok(());
+        }
     };
 
     tracing::debug!("Attempting to merge with base SHA {base_sha}");
@@ -137,6 +119,33 @@ pub(super) async fn command_try_build(
             Ok(())
         }
         Err(error) => Err(error.into()),
+    }
+}
+
+fn get_base_sha(
+    pr_model: &PullRequestModel,
+    parent: Option<Parent>,
+) -> Result<Option<CommitSha>, Comment> {
+    let last_parent = if let Some(ref build) = pr_model.try_build {
+        if build.status == BuildStatus::Pending {
+            tracing::warn!("Try build already in progress");
+            return Err(try_build_in_progress_comment());
+        } else {
+            Some(CommitSha(build.parent.clone()))
+        }
+    } else {
+        None
+    };
+
+    match parent.clone() {
+        Some(parent) => match parent {
+            Parent::Last => match last_parent {
+                None => Err(cant_find_last_parent_comment()),
+                Some(last_parent) => Ok(Some(last_parent)),
+            },
+            Parent::CommitSha(parent) => Ok(Some(parent)),
+        },
+        None => Ok(None),
     }
 }
 

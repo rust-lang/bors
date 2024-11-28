@@ -10,6 +10,7 @@ use secrecy::{ExposeSecret, SecretString};
 use client::GithubRepositoryClient;
 
 use crate::bors::RepositoryState;
+use crate::config::RepositoryConfig;
 use crate::github::GithubRepoName;
 use crate::permissions::TeamApiClient;
 
@@ -36,6 +37,9 @@ pub fn create_github_client(
 }
 
 /// Loads repositories that are connected to the given GitHub App client.
+/// The anyhow::Result<RepositoryState> is intended, because we wanted to have
+/// a hard error when the repos fail to load when the bot starts, but only log
+/// a warning when we reload the state during the bot's execution.
 pub async fn load_repositories(
     client: &Octocrab,
     team_api_client: &TeamApiClient,
@@ -152,21 +156,24 @@ async fn create_repo_state(
         .await
         .with_context(|| format!("Could not load permissions for repository {name}"))?;
 
-    let config = match client.load_config().await {
-        Ok(config) => {
-            tracing::info!("Loaded repository config for {name}: {config:#?}");
-            config
-        }
-        Err(error) => {
-            return Err(anyhow::anyhow!(
-                "Could not load repository config for {name}: {error:?}"
-            ));
-        }
-    };
+    let config = load_config(&client).await?;
 
     Ok(RepositoryState {
         client,
         config: ArcSwap::new(Arc::new(config)),
         permissions: ArcSwap::new(Arc::new(permissions)),
     })
+}
+
+async fn load_config(client: &GithubRepositoryClient) -> anyhow::Result<RepositoryConfig> {
+    let name = client.repository();
+    match client.load_config().await {
+        Ok(config) => {
+            tracing::info!("Loaded repository config for {name}: {config:#?}");
+            Ok(config)
+        }
+        Err(error) => Err(anyhow::anyhow!(
+            "Could not load repository config for {name}: {error:?}"
+        )),
+    }
 }
