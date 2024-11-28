@@ -1,4 +1,3 @@
-## Based on https://github.com/actions-rs/meta/blob/master/recipes/quickstart.md
 name: Test
 
 on:
@@ -30,14 +29,10 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install stable toolchain
-        uses: actions-rs/toolchain@v1
+        uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          profile: minimal
-          toolchain: 1.80.0
-          override: true
+          toolchain: 1.82.0
           components: clippy, rustfmt
-
-      - uses: Swatinem/rust-cache@v2
 
       - name: Install sqlx-cli
         run: cargo install sqlx-cli@0.7.4 --no-default-features --features native-tls,postgres
@@ -49,28 +44,17 @@ jobs:
         run: cargo sqlx prepare --check -- --tests
 
       - name: Build
-        uses: actions-rs/cargo@v1
-        with:
-          command: build
-          args: --all --all-targets
+        run: cargo build --workspace --all-targets
 
       - name: Test
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --all
+        run: cargo test --workspace
 
       - name: Lint code
-        uses: actions-rs/cargo@v1
-        with:
-          command: clippy
-          args: --all
+        run: cargo clippy --workspace
 
       - name: Check formatting
-        uses: actions-rs/cargo@v1
-        with:
-          command: fmt
-          args: --all -- --check
+        run: cargo fmt --all --check
+
   docker:
     name: Test Docker
     runs-on: ubuntu-latest
