@@ -6,8 +6,8 @@ use std::time::Duration;
 
 use anyhow::Context;
 use bors::{
-    create_app, create_bors_process, create_github_client, BorsContext, BorsGlobalEvent,
-    CommandParser, PgDbClient, RepositoryLoader, ServerState, TeamApiClient, WebhookSecret,
+    create_app, create_bors_process, create_github_client, load_repositories, BorsContext,
+    BorsGlobalEvent, CommandParser, PgDbClient, ServerState, TeamApiClient, WebhookSecret,
 };
 use clap::Parser;
 use sqlx::postgres::PgConnectOptions;
@@ -88,9 +88,7 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
             "https://api.github.com".to_string(),
             opts.private_key.into(),
         )?;
-        let repos = RepositoryLoader::new(client.clone())
-            .load_repositories(&team_api)
-            .await?;
+        let repos = load_repositories(&client, &team_api).await?;
         Ok::<_, anyhow::Error>((client, repos))
     })?;
 

@@ -1,7 +1,4 @@
-use std::collections::HashMap;
-
 use arc_swap::ArcSwap;
-use octocrab::Octocrab;
 
 pub use command::CommandParser;
 pub use comment::Comment;
@@ -12,35 +9,14 @@ pub use handlers::{handle_bors_global_event, handle_bors_repository_event};
 
 use crate::config::RepositoryConfig;
 use crate::github::api::client::GithubRepositoryClient;
-use crate::github::api::load_repositories;
 use crate::github::GithubRepoName;
 use crate::permissions::UserPermissions;
-use crate::TeamApiClient;
 
 mod command;
 pub mod comment;
 mod context;
 pub mod event;
 mod handlers;
-
-/// Loads repositories through a global GitHub client.
-pub struct RepositoryLoader {
-    client: Octocrab,
-}
-
-impl RepositoryLoader {
-    pub fn new(client: Octocrab) -> Self {
-        Self { client }
-    }
-
-    /// Load state of repositories.
-    pub async fn load_repositories(
-        &self,
-        team_api_client: &TeamApiClient,
-    ) -> anyhow::Result<HashMap<GithubRepoName, anyhow::Result<RepositoryState>>> {
-        load_repositories(&self.client, team_api_client).await
-    }
-}
 
 #[derive(Clone, Debug)]
 pub enum CheckSuiteStatus {

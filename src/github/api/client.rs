@@ -286,12 +286,12 @@ impl GithubRepositoryClient {
 
 #[cfg(test)]
 mod tests {
+    use crate::github::api::load_repositories;
     use crate::github::GithubRepoName;
     use crate::permissions::PermissionType;
     use crate::tests::mocks::Permissions;
     use crate::tests::mocks::{ExternalHttpMock, Repo};
     use crate::tests::mocks::{User, World};
-    use crate::RepositoryLoader;
     use octocrab::models::UserId;
 
     #[tokio::test]
@@ -312,10 +312,7 @@ mod tests {
         .await;
         let client = mock.github_client();
         let team_api_client = mock.team_api_client();
-        let mut repos = RepositoryLoader::new(client)
-            .load_repositories(&team_api_client)
-            .await
-            .unwrap();
+        let mut repos = load_repositories(&client, &team_api_client).await.unwrap();
         assert_eq!(repos.len(), 2);
 
         let repo = repos
