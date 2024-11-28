@@ -6,6 +6,7 @@ use crate::database::BuildStatus;
 use crate::database::WorkflowModel;
 use crate::github::CommitSha;
 use crate::github::GithubRepoName;
+use crate::github::PullRequest;
 use crate::github::PullRequestNumber;
 
 use super::BuildModel;
@@ -56,12 +57,12 @@ WHERE pr.repository = $1
 pub(crate) async fn create_pull_request(
     executor: impl PgExecutor<'_>,
     repo: &GithubRepoName,
-    pr_number: PullRequestNumber,
+    pr: &PullRequest,
 ) -> anyhow::Result<()> {
     sqlx::query!(
         "INSERT INTO pull_request (repository, number) VALUES ($1, $2) ON CONFLICT DO NOTHING",
         repo.to_string(),
-        pr_number.0 as i32
+        pr.number.0 as i32
     )
     .execute(executor)
     .await?;
