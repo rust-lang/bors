@@ -135,7 +135,7 @@ async fn try_complete_build(
     // Ask GitHub what are all the check suites attached to the given commit.
     // This tells us for how many workflows we should wait.
     let checks = repo
-        .client
+        .ci_client
         .get_check_suites_for_commit(&payload.branch, &payload.commit_sha)
         .await?;
 

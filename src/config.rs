@@ -4,7 +4,7 @@ use std::time::Duration;
 use serde::de::Error;
 use serde::{Deserialize, Deserializer};
 
-use crate::github::{LabelModification, LabelTrigger};
+use crate::github::{GithubRepoName, LabelModification, LabelTrigger};
 
 pub const CONFIG_FILE_PATH: &str = "rust-bors.toml";
 
@@ -17,6 +17,7 @@ pub struct RepositoryConfig {
         deserialize_with = "deserialize_duration_from_secs"
     )]
     pub timeout: Duration,
+    pub ci_repo: Option<GithubRepoName>,
     #[serde(default, deserialize_with = "deserialize_labels")]
     pub labels: HashMap<LabelTrigger, Vec<LabelModification>>,
 }

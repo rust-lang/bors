@@ -6,8 +6,9 @@ use std::time::Duration;
 
 use anyhow::Context;
 use bors::{
-    create_app, create_bors_process, create_github_client, load_repositories, BorsContext,
-    BorsGlobalEvent, CommandParser, PgDbClient, ServerState, TeamApiClient, WebhookSecret,
+    create_app, create_bors_process, create_github_client, create_github_client_from_access_token,
+    load_repositories, BorsContextBuilder, BorsGlobalEvent, CommandParser, GithubRepoName,
+    PgDbClient, ServerState, TeamApiClient, WebhookSecret,
 };
 use clap::Parser;
 use sqlx::postgres::PgConnectOptions;
@@ -17,6 +18,8 @@ use tracing_subscriber::filter::EnvFilter;
 
 /// How often should the bot check DB state, e.g. for handling timeouts.
 const PERIODIC_REFRESH: Duration = Duration::from_secs(120);
+
+const GITHUB_API_URL: &str = "https://api.github.com";
 
 #[derive(clap::Parser)]
 struct Opts {
@@ -39,6 +42,10 @@ struct Opts {
     /// Prefix used for bot commands in PR comments.
     #[arg(long, env = "CMD_PREFIX", default_value = "@bors")]
     cmd_prefix: String,
+
+    /// Prefix used for bot commands in PR comments.
+    #[arg(long, env = "CI_ACCESS_TOKEN")]
+    ci_access_token: Option<String>,
 }
 
 /// Starts a server that receives GitHub webhooks and generates events into a queue
@@ -81,18 +88,34 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
     let db = runtime
         .block_on(initialize_db(&opts.db))
         .context("Cannot initialize database")?;
-    let team_api = TeamApiClient::default();
-    let (client, loaded_repos) = runtime.block_on(async {
-        let client = create_github_client(
+    let team_api_client = TeamApiClient::default();
+    let client = runtime.block_on(async {
+        create_github_client(
             opts.app_id.into(),
-            "https://api.github.com".to_string(),
+            GITHUB_API_URL.to_string(),
             opts.private_key.into(),
-        )?;
-        let repos = load_repositories(&client, &team_api).await?;
-        Ok::<_, anyhow::Error>((client, repos))
+        )
+    })?;
+    let ci_client = match opts.ci_access_token {
+        Some(access_token) => {
+            let client = runtime.block_on(async {
+                tracing::warn!("creating client ci");
+                create_github_client_from_access_token(
+                    GITHUB_API_URL.to_string(),
+                    access_token.into(),
+                )
+            })?;
+            Some(client)
+        }
+        None => None,
+    };
+    let loaded_repos = runtime.block_on(async {
+        let repos = load_repositories(&client, ci_client.clone(), &team_api_client).await?;
+        Ok::<_, anyhow::Error>(repos)
     })?;
 
     let mut repos = HashMap::default();
+    let mut ci_repo_map: HashMap<GithubRepoName, GithubRepoName> = HashMap::default();
     for (name, repo) in loaded_repos {
         let repo = match repo {
             Ok(repo) => {
@@ -105,11 +128,27 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
                 ));
             }
         };
+        if repo.ci_client.repository() != repo.client.repository() {
+            ci_repo_map.insert(
+                repo.ci_client.repository().clone(),
+                repo.client.repository().clone(),
+            );
+        }
         repos.insert(name, Arc::new(repo));
     }
 
-    let ctx = BorsContext::new(CommandParser::new(opts.cmd_prefix), Arc::new(db), repos);
-    let (repository_tx, global_tx, bors_process) = create_bors_process(ctx, client, team_api);
+    let ctx = BorsContextBuilder::default()
+        .parser(CommandParser::new(opts.cmd_prefix))
+        .db(Arc::new(db))
+        .repositories(repos)
+        .gh_client(client)
+        .ci_client(ci_client)
+        .ci_repo_map(ci_repo_map)
+        .team_api_client(team_api_client)
+        .build()
+        .unwrap();
+
+    let (repository_tx, global_tx, bors_process) = create_bors_process(ctx);
 
     let refresh_tx = global_tx.clone();
     let refresh_process = async move {

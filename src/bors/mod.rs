@@ -3,6 +3,7 @@ use arc_swap::ArcSwap;
 pub use command::CommandParser;
 pub use comment::Comment;
 pub use context::BorsContext;
+pub use context::BorsContextBuilder;
 #[cfg(test)]
 pub use handlers::WAIT_FOR_REFRESH;
 pub use handlers::{handle_bors_global_event, handle_bors_repository_event};
@@ -32,11 +33,14 @@ pub struct CheckSuite {
     pub(crate) status: CheckSuiteStatus,
 }
 
-/// An access point to a single repository.
+/// An access point to state of a single request
 /// Can be used to query permissions for the repository, and also to perform various
 /// actions using the stored client.
 pub struct RepositoryState {
+    /// Client of the main repo
     pub client: GithubRepositoryClient,
+    /// Client of the ci dedicated repo
+    pub ci_client: GithubRepositoryClient,
     pub permissions: ArcSwap<UserPermissions>,
     pub config: ArcSwap<RepositoryConfig>,
 }

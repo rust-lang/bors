@@ -4,12 +4,16 @@ use anyhow::{anyhow, Context};
 
 use crate::bors::command::Parent;
 use crate::bors::comment::cant_find_last_parent_comment;
+use crate::bors::comment::no_try_build_in_progress_comment;
+use crate::bors::comment::try_build_cancelled_comment;
 use crate::bors::comment::try_build_in_progress_comment;
+use crate::bors::comment::unclean_try_build_cancelled_comment;
 use crate::bors::handlers::labels::handle_label_trigger;
 use crate::bors::Comment;
 use crate::bors::RepositoryState;
 use crate::database::RunId;
-use crate::database::{BuildModel, BuildStatus, PullRequestModel, WorkflowStatus, WorkflowType};
+use crate::database::{BuildModel, BuildStatus, PullRequestModel};
+use crate::github::api::client::GithubRepositoryClient;
 use crate::github::GithubRepoName;
 use crate::github::{
     CommitSha, GithubUser, LabelTrigger, MergeError, PullRequest, PullRequestNumber,
@@ -44,8 +48,10 @@ pub(super) async fn command_try_build(
         return Ok(());
     }
 
+    // Create pr model based on CI repo, so we can retrieve the pr later when
+    // the CI repo emits events
     let pr_model = db
-        .get_or_create_pull_request(repo.client.repository(), pr.number)
+        .get_or_create_pull_request(repo.ci_client.repository(), pr.number)
         .await
         .context("Cannot find or create PR")?;
 
@@ -62,64 +68,92 @@ pub(super) async fn command_try_build(
         }
     };
 
+    match attempt_merge(
+        &repo.ci_client,
+        &pr.head.sha,
+        &base_sha,
+        &auto_merge_commit_message(pr, repo.client.repository(), "<try>", jobs),
+    )
+    .await?
+    {
+        MergeResult::Success(merge_sha) => {
+            // If the merge was succesful, run CI with merged commit
+            run_try_build(&repo.ci_client, &db, pr_model, merge_sha.clone(), base_sha).await?;
+
+            handle_label_trigger(repo, pr.number, LabelTrigger::TryBuildStarted).await?;
+
+            repo.client
+                .post_comment(pr.number, trying_build_comment(&pr.head.sha, &merge_sha))
+                .await
+        }
+        MergeResult::Conflict => {
+            repo.client
+                .post_comment(pr.number, merge_conflict_comment(&pr.head.name))
+                .await
+        }
+    }
+}
+
+async fn attempt_merge(
+    ci_client: &GithubRepositoryClient,
+    head_sha: &CommitSha,
+    base_sha: &CommitSha,
+    merge_message: &str,
+) -> anyhow::Result<MergeResult> {
     tracing::debug!("Attempting to merge with base SHA {base_sha}");
 
     // First set the try branch to our base commit (either the selected parent or the main branch).
-    repo.client
-        .set_branch_to_sha(TRY_MERGE_BRANCH_NAME, &base_sha)
+    ci_client
+        .set_branch_to_sha(TRY_MERGE_BRANCH_NAME, base_sha)
         .await
         .map_err(|error| anyhow!("Cannot set try merge branch to {}: {error:?}", base_sha.0))?;
 
     // Then merge the PR commit into the try branch
-    match repo
-        .client
-        .merge_branches(
-            TRY_MERGE_BRANCH_NAME,
-            &pr.head.sha,
-            &auto_merge_commit_message(pr, repo.client.repository(), "<try>", jobs),
-        )
+    match ci_client
+        .merge_branches(TRY_MERGE_BRANCH_NAME, head_sha, merge_message)
         .await
     {
         Ok(merge_sha) => {
             tracing::debug!("Merge successful, SHA: {merge_sha}");
-            // If the merge was succesful, then set the actual try branch that will run CI to the
-            // merged commit.
-            repo.client
-                .set_branch_to_sha(TRY_BRANCH_NAME, &merge_sha)
-                .await
-                .map_err(|error| anyhow!("Cannot set try branch to main branch: {error:?}"))?;
 
-            db.attach_try_build(
-                pr_model,
-                TRY_BRANCH_NAME.to_string(),
-                merge_sha.clone(),
-                base_sha.clone(),
-            )
-            .await?;
-            tracing::info!("Try build started");
-
-            handle_label_trigger(repo, pr.number, LabelTrigger::TryBuildStarted).await?;
-
-            let comment = Comment::new(format!(
-                ":hourglass: Trying commit {} with merge {}…",
-                pr.head.sha.clone(),
-                merge_sha
-            ));
-            repo.client.post_comment(pr.number, comment).await?;
-            Ok(())
+            Ok(MergeResult::Success(merge_sha))
         }
         Err(MergeError::Conflict) => {
             tracing::warn!("Merge conflict");
-            repo.client
-                .post_comment(
-                    pr.number,
-                    Comment::new(merge_conflict_message(&pr.head.name)),
-                )
-                .await?;
-            Ok(())
+
+            Ok(MergeResult::Conflict)
         }
         Err(error) => Err(error.into()),
     }
+}
+
+async fn run_try_build(
+    ci_client: &GithubRepositoryClient,
+    db: &PgDbClient,
+    pr_model: PullRequestModel,
+    commit_sha: CommitSha,
+    parent_sha: CommitSha,
+) -> anyhow::Result<()> {
+    ci_client
+        .set_branch_to_sha(TRY_BRANCH_NAME, &commit_sha)
+        .await
+        .map_err(|error| anyhow!("Cannot set try branch to main branch: {error:?}"))?;
+
+    db.attach_try_build(
+        pr_model,
+        TRY_BRANCH_NAME.to_string(),
+        commit_sha,
+        parent_sha,
+    )
+    .await?;
+
+    tracing::info!("Try build started");
+    Ok(())
+}
+
+enum MergeResult {
+    Success(CommitSha),
+    Conflict,
 }
 
 fn get_base_sha(
@@ -162,18 +196,13 @@ pub(super) async fn command_try_cancel(
 
     let pr_number: PullRequestNumber = pr.number;
     let pr = db
-        .get_or_create_pull_request(repo.client.repository(), pr_number)
+        .get_or_create_pull_request(repo.ci_client.repository(), pr_number)
         .await?;
 
     let Some(build) = get_pending_build(pr) else {
         tracing::warn!("No build found");
         repo.client
-            .post_comment(
-                pr_number,
-                Comment::new(
-                    ":exclamation: There is currently no try build in progress.".to_string(),
-                ),
-            )
+            .post_comment(pr_number, no_try_build_in_progress_comment())
             .await?;
         return Ok(());
     };
@@ -187,13 +216,7 @@ pub(super) async fn command_try_cancel(
             db.update_build_status(&build, BuildStatus::Cancelled)
                 .await?;
             repo.client
-                .post_comment(
-                    pr_number,
-                    Comment::new(
-                        "Try build was cancelled. It was not possible to cancel some workflows."
-                            .to_string(),
-                    ),
-                )
+                .post_comment(pr_number, unclean_try_build_cancelled_comment())
                 .await?
         }
         Ok(workflow_ids) => {
@@ -201,16 +224,13 @@ pub(super) async fn command_try_cancel(
                 .await?;
             tracing::info!("Try build cancelled");
 
-            let mut try_build_cancelled_comment = r#"Try build cancelled.
-Cancelled workflows:"#
-                .to_string();
-            for id in workflow_ids {
-                let url = repo.client.get_workflow_url(id);
-                try_build_cancelled_comment += format!("\n- {}", url).as_str();
-            }
-
             repo.client
-                .post_comment(pr_number, Comment::new(try_build_cancelled_comment))
+                .post_comment(
+                    pr_number,
+                    try_build_cancelled_comment(
+                        repo.ci_client.get_workflow_urls(workflow_ids.into_iter()),
+                    ),
+                )
                 .await?
         }
     };
@@ -223,16 +243,10 @@ pub async fn cancel_build_workflows(
     db: &PgDbClient,
     build: &BuildModel,
 ) -> anyhow::Result<Vec<RunId>> {
-    let pending_workflows = db
-        .get_workflows_for_build(build)
-        .await?
-        .into_iter()
-        .filter(|w| w.status == WorkflowStatus::Pending && w.workflow_type == WorkflowType::Github)
-        .map(|w| w.run_id)
-        .collect::<Vec<_>>();
+    let pending_workflows = db.get_pending_workflows_for_build(build).await?;
 
     tracing::info!("Cancelling workflows {:?}", pending_workflows);
-    repo.client.cancel_workflows(&pending_workflows).await?;
+    repo.ci_client.cancel_workflows(&pending_workflows).await?;
     Ok(pending_workflows)
 }
 
@@ -267,8 +281,14 @@ fn auto_merge_commit_message(
     message
 }
 
-fn merge_conflict_message(branch: &str) -> String {
-    format!(
+fn trying_build_comment(head_sha: &CommitSha, merge_sha: &CommitSha) -> Comment {
+    Comment::new(format!(
+        ":hourglass: Trying commit {head_sha} with merge {merge_sha}…"
+    ))
+}
+
+fn merge_conflict_comment(branch: &str) -> Comment {
+    let message = format!(
         r#":lock: Merge conflict
 
 This pull request and the master branch diverged in a way that cannot
@@ -298,7 +318,8 @@ handled during merge and rebase. This is normal, and you should still perform st
 
 </details>
 "#
-    )
+    );
+    Comment::new(message)
 }
 
 async fn check_try_permissions(

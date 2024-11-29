@@ -22,6 +22,7 @@ enum CommandPart<'a> {
     KeyValue { key: &'a str, value: &'a str },
 }
 
+#[derive(Clone)]
 pub struct CommandParser {
     prefix: String,
 }
