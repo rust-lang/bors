@@ -24,8 +24,8 @@ use crate::tests::mocks::{
 };
 use crate::tests::webhook::{create_webhook_request, TEST_WEBHOOK_SECRET};
 use crate::{
-    create_app, create_bors_process, BorsContext, BorsGlobalEvent, CommandParser, PgDbClient,
-    ServerState, WebhookSecret,
+    create_app, create_bors_process, BorsContextBuilder, BorsGlobalEvent, CommandParser,
+    PgDbClient, ServerState, WebhookSecret,
 };
 
 use super::pull_request::{GitHubPullRequestEventPayload, PullRequestChangeEvent};
@@ -100,7 +100,7 @@ impl BorsTester {
         let mock = ExternalHttpMock::start(&world).await;
         let db = Arc::new(PgDbClient::new(pool));
 
-        let loaded_repos = load_repositories(&mock.github_client(), &mock.team_api_client())
+        let loaded_repos = load_repositories(&mock.github_client(), None, &mock.team_api_client())
             .await
             .unwrap();
         let mut repos = HashMap::default();
@@ -109,10 +109,16 @@ impl BorsTester {
             repos.insert(name, Arc::new(repo));
         }
 
-        let ctx = BorsContext::new(CommandParser::new("@bors".to_string()), db.clone(), repos);
+        let ctx = BorsContextBuilder::default()
+            .parser(CommandParser::new("@bors".to_string()))
+            .db(db.clone())
+            .repositories(repos)
+            .gh_client(mock.github_client())
+            .team_api_client(mock.team_api_client())
+            .build()
+            .unwrap();
 
-        let (repository_tx, global_tx, bors_process) =
-            create_bors_process(ctx, mock.github_client(), mock.team_api_client());
+        let (repository_tx, global_tx, bors_process) = create_bors_process(ctx);
 
         let state = ServerState::new(
             repository_tx,

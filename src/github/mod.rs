@@ -3,6 +3,7 @@
 use std::fmt::{Debug, Display, Formatter};
 
 use octocrab::models::UserId;
+use serde::Deserialize;
 use url::Url;
 
 pub mod api;
@@ -50,6 +51,16 @@ impl From<String> for GithubRepoName {
         let owner = parts.next().unwrap_or_default();
         let name = parts.next().unwrap_or_default();
         Self::new(owner, name)
+    }
+}
+
+impl<'de> Deserialize<'de> for GithubRepoName {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let full_name = String::deserialize(deserializer)?;
+        Ok(GithubRepoName::from(full_name))
     }
 }
 

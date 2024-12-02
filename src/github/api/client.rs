@@ -279,6 +279,14 @@ impl GithubRepositoryClient {
         format!("{html_url}/actions/runs/{run_id}")
     }
 
+    /// Get workflow url for a list of workflows.
+    pub fn get_workflow_urls<'a>(
+        &'a self,
+        run_ids: impl Iterator<Item = RunId> + 'a,
+    ) -> impl Iterator<Item = String> + 'a {
+        run_ids.map(|workflow_id| self.get_workflow_url(workflow_id))
+    }
+
     fn format_pr(&self, pr: PullRequestNumber) -> String {
         format!("{}/{}", self.repository(), pr)
     }
@@ -312,7 +320,9 @@ mod tests {
         .await;
         let client = mock.github_client();
         let team_api_client = mock.team_api_client();
-        let mut repos = load_repositories(&client, &team_api_client).await.unwrap();
+        let mut repos = load_repositories(&client, None, &team_api_client)
+            .await
+            .unwrap();
         assert_eq!(repos.len(), 2);
 
         let repo = repos

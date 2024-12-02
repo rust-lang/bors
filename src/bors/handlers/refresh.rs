@@ -23,6 +23,8 @@ pub async fn refresh_repository(
     ) {
         Ok(())
     } else {
+        // FIXME: better error handling
+        // If a repo failed to be reload, there is no way to know
         tracing::error!("Failed to refresh repository");
         anyhow::bail!("Failed to refresh repository")
     }
