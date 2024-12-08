@@ -40,7 +40,7 @@ async fn cancel_timed_out_builds(repo: &RepositoryState, db: &PgDbClient) -> any
             db.update_build_status(&build, BuildStatus::Cancelled)
                 .await?;
             if let Some(pr) = db.find_pr_by_build(&build).await? {
-                if let Err(error) = cancel_build_workflows(repo, db, &build).await {
+                if let Err(error) = cancel_build_workflows(&repo.client, db, &build).await {
                     tracing::error!(
                         "Could not cancel workflows for SHA {}: {error:?}",
                         build.commit_sha

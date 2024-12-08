@@ -279,6 +279,14 @@ impl GithubRepositoryClient {
         format!("{html_url}/actions/runs/{run_id}")
     }
 
+    /// Get workflow url for a list of workflows.
+    pub fn get_workflow_urls<'a>(
+        &'a self,
+        run_ids: impl Iterator<Item = RunId> + 'a,
+    ) -> impl Iterator<Item = String> + 'a {
+        run_ids.map(|workflow_id| self.get_workflow_url(workflow_id))
+    }
+
     fn format_pr(&self, pr: PullRequestNumber) -> String {
         format!("{}/{}", self.repository(), pr)
     }
