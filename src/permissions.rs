@@ -37,6 +37,7 @@ pub(crate) struct UserPermissionsResponse {
     github_ids: HashSet<UserId>,
 }
 
+#[derive(Clone)]
 pub struct TeamApiClient {
     base_url: String,
 }

@@ -3,6 +3,7 @@ use arc_swap::ArcSwap;
 pub use command::CommandParser;
 pub use comment::Comment;
 pub use context::BorsContext;
+pub use context::BorsContextBuilder;
 #[cfg(test)]
 pub use handlers::WAIT_FOR_REFRESH;
 pub use handlers::{handle_bors_global_event, handle_bors_repository_event};

@@ -36,6 +36,17 @@ pub fn create_github_client(
         .context("Could not create octocrab builder")
 }
 
+pub fn create_github_client_from_access_token(
+    github_url: String,
+    access_token: SecretString,
+) -> anyhow::Result<Octocrab> {
+    Octocrab::builder()
+        .base_uri(github_url)?
+        .user_access_token(access_token)
+        .build()
+        .context("Could not create octocrab builder")
+}
+
 /// Loads repositories that are connected to the given GitHub App client.
 /// The anyhow::Result<RepositoryState> is intended, because we wanted to have
 /// a hard error when the repos fail to load when the bot starts, but only log
