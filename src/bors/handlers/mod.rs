@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use anyhow::Context;
-use octocrab::Octocrab;
 use tracing::Instrument;
 
 use crate::bors::command::{BorsCommand, CommandParseError};
@@ -17,7 +16,7 @@ use crate::bors::handlers::workflow::{
     handle_check_suite_completed, handle_workflow_completed, handle_workflow_started,
 };
 use crate::bors::{BorsContext, Comment, RepositoryState};
-use crate::{load_repositories, PgDbClient, TeamApiClient};
+use crate::{load_repositories, PgDbClient};
 
 #[cfg(test)]
 use crate::tests::util::TestSyncMarker;
@@ -142,16 +141,12 @@ pub static WAIT_FOR_REFRESH: TestSyncMarker = TestSyncMarker::new();
 pub async fn handle_bors_global_event(
     event: BorsGlobalEvent,
     ctx: Arc<BorsContext>,
-    gh_client: &Octocrab,
-    team_api_client: &TeamApiClient,
 ) -> anyhow::Result<()> {
     let db = Arc::clone(&ctx.db);
     match event {
         BorsGlobalEvent::InstallationsChanged => {
             let span = tracing::info_span!("Installations changed");
-            reload_repos(ctx, gh_client, team_api_client)
-                .instrument(span)
-                .await?;
+            reload_repos(ctx).instrument(span).await?;
         }
         BorsGlobalEvent::Refresh => {
             let span = tracing::info_span!("Refresh");
@@ -161,7 +156,7 @@ pub async fn handle_bors_global_event(
                 let repo = Arc::clone(&repo);
                 async {
                     let subspan = tracing::info_span!("Repo", repo = repo.repository().to_string());
-                    refresh_repository(repo, Arc::clone(&db), team_api_client)
+                    refresh_repository(repo, Arc::clone(&db), &ctx.team_api_client)
                         .instrument(subspan)
                         .await
                 }
@@ -274,12 +269,8 @@ async fn handle_comment(
     Ok(())
 }
 
-async fn reload_repos(
-    ctx: Arc<BorsContext>,
-    gh_client: &Octocrab,
-    team_api_client: &TeamApiClient,
-) -> anyhow::Result<()> {
-    let reloaded_repos = load_repositories(gh_client, team_api_client).await?;
+async fn reload_repos(ctx: Arc<BorsContext>) -> anyhow::Result<()> {
+    let reloaded_repos = load_repositories(&ctx.gh_app_client, &ctx.team_api_client).await?;
     let mut repositories = ctx.repositories.write().unwrap();
     for repo in repositories.values() {
         if !reloaded_repos.contains_key(repo.repository()) {
