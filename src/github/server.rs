@@ -2,7 +2,7 @@ use crate::bors::event::BorsEvent;
 use crate::bors::{handle_bors_global_event, handle_bors_repository_event, BorsContext};
 use crate::github::webhook::GitHubWebhook;
 use crate::github::webhook::WebhookSecret;
-use crate::{BorsGlobalEvent, BorsRepositoryEvent, TeamApiClient};
+use crate::{BorsGlobalEvent, BorsRepositoryEvent};
 
 use anyhow::Error;
 use axum::extract::State;
@@ -10,7 +10,6 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::Router;
-use octocrab::Octocrab;
 use std::future::Future;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -83,8 +82,6 @@ pub async fn github_webhook_handler(
 /// them.
 pub fn create_bors_process(
     ctx: BorsContext,
-    gh_client: Octocrab,
-    team_api: TeamApiClient,
 ) -> (
     mpsc::Sender<BorsRepositoryEvent>,
     mpsc::Sender<BorsGlobalEvent>,
@@ -104,7 +101,7 @@ pub fn create_bors_process(
         {
             tokio::join!(
                 consume_repository_events(ctx.clone(), repository_rx),
-                consume_global_events(ctx.clone(), global_rx, gh_client, team_api)
+                consume_global_events(ctx.clone(), global_rx)
             );
         }
         // In real execution, the bot runs forever. If there is something that finishes
@@ -116,7 +113,7 @@ pub fn create_bors_process(
                 _ = consume_repository_events(ctx.clone(), repository_rx) => {
                     tracing::error!("Repository event handling process has ended");
                 }
-                _ = consume_global_events(ctx.clone(), global_rx, gh_client, team_api) => {
+                _ = consume_global_events(ctx.clone(), global_rx) => {
                     tracing::error!("Global event handling process has ended");
                 }
             }
@@ -146,15 +143,13 @@ async fn consume_repository_events(
 async fn consume_global_events(
     ctx: Arc<BorsContext>,
     mut global_rx: mpsc::Receiver<BorsGlobalEvent>,
-    gh_client: Octocrab,
-    team_api: TeamApiClient,
 ) {
     while let Some(event) = global_rx.recv().await {
         let ctx = ctx.clone();
 
         let span = tracing::info_span!("GlobalEvent");
         tracing::debug!("Received global event: {event:#?}");
-        if let Err(error) = handle_bors_global_event(event, ctx, &gh_client, &team_api)
+        if let Err(error) = handle_bors_global_event(event, ctx)
             .instrument(span.clone())
             .await
         {
