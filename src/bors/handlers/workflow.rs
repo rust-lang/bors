@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
-use crate::bors::comment::try_build_succeeded_comment;
+use crate::bors::comment::{try_build_succeeded_comment, workflow_failed_comment};
 use crate::bors::event::{CheckSuiteCompleted, WorkflowCompleted, WorkflowStarted};
 use crate::bors::handlers::is_bors_observed_branch;
 use crate::bors::handlers::labels::handle_label_trigger;
+use crate::bors::CheckSuiteStatus;
 use crate::bors::RepositoryState;
-use crate::bors::{CheckSuiteStatus, Comment};
 use crate::database::{BuildStatus, WorkflowStatus};
 use crate::github::LabelTrigger;
 use crate::PgDbClient;
@@ -166,23 +166,6 @@ async fn try_complete_build(
         return Ok(());
     }
 
-    let workflow_list = workflows
-        .into_iter()
-        .map(|w| {
-            format!(
-                "- [{}]({}) {}",
-                w.name,
-                w.url,
-                if w.status == WorkflowStatus::Success {
-                    ":white_check_mark:"
-                } else {
-                    ":x:"
-                }
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-
     let (status, trigger) = if has_failure {
         (BuildStatus::Failure, LabelTrigger::TryBuildFailed)
     } else {
@@ -194,15 +177,10 @@ async fn try_complete_build(
 
     let message = if !has_failure {
         tracing::info!("Workflow succeeded");
-
-        try_build_succeeded_comment(workflow_list, payload.commit_sha)
+        try_build_succeeded_comment(&workflows, payload.commit_sha)
     } else {
         tracing::info!("Workflow failed");
-        Comment::new(format!(
-            r#":broken_heart: Test failed
-{}"#,
-            workflow_list
-        ))
+        workflow_failed_comment(&workflows)
     };
     repo.client.post_comment(pr.number, message).await?;
 
