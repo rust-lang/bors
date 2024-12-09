@@ -80,8 +80,6 @@ pub(super) async fn handle_workflow_completed(
                     min_ci_time
                 );
             }
-        } else {
-            tracing::info!("No minimum CI duration configured.");
         }
     } else {
         tracing::warn!("Running time is not available.");
