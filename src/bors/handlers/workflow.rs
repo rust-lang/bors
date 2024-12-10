@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::Duration;
 
 use crate::bors::comment::{try_build_succeeded_comment, workflow_failed_comment};
 use crate::bors::event::{CheckSuiteCompleted, WorkflowCompleted, WorkflowStarted};
@@ -61,10 +62,27 @@ pub(super) async fn handle_workflow_started(
 pub(super) async fn handle_workflow_completed(
     repo: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
-    payload: WorkflowCompleted,
+    mut payload: WorkflowCompleted,
 ) -> anyhow::Result<()> {
     if !is_bors_observed_branch(&payload.branch) {
         return Ok(());
+    }
+
+    if let Some(running_time) = payload.running_time {
+        let running_time_as_duration =
+            chrono::Duration::to_std(&running_time).unwrap_or(Duration::from_secs(0));
+        if let Some(min_ci_time) = repo.config.load().min_ci_time {
+            if running_time_as_duration < min_ci_time {
+                payload.status = WorkflowStatus::Failure;
+                tracing::warn!(
+                    "Workflow running time is less than the minimum CI duration: {:?} < {:?}",
+                    running_time_as_duration,
+                    min_ci_time
+                );
+            }
+        }
+    } else {
+        tracing::warn!("Running time is not available.");
     }
 
     tracing::info!("Updating status of workflow to {:?}", payload.status);
