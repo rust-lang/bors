@@ -3,27 +3,24 @@ use std::{
     sync::{Arc, RwLock},
 };
 
-use crate::{bors::command::CommandParser, github::GithubRepoName, PgDbClient};
+use derive_builder::Builder;
+use octocrab::Octocrab;
+
+use crate::{bors::command::CommandParser, github::GithubRepoName, PgDbClient, TeamApiClient};
 
 use super::RepositoryState;
 
+#[derive(Builder)]
 pub struct BorsContext {
     pub parser: CommandParser,
     pub db: Arc<PgDbClient>,
+    #[builder(field(
+        ty = "HashMap<GithubRepoName, Arc<RepositoryState>>",
+        build = "RwLock::new(self.repositories.clone())"
+    ))]
     pub repositories: RwLock<HashMap<GithubRepoName, Arc<RepositoryState>>>,
-}
-
-impl BorsContext {
-    pub fn new(
-        parser: CommandParser,
-        db: Arc<PgDbClient>,
-        repositories: HashMap<GithubRepoName, Arc<RepositoryState>>,
-    ) -> Self {
-        let repositories = RwLock::new(repositories);
-        Self {
-            parser,
-            db,
-            repositories,
-        }
-    }
+    pub gh_app_client: Octocrab,
+    #[builder(default)]
+    pub ci_client: Option<Octocrab>,
+    pub team_api_client: TeamApiClient,
 }
