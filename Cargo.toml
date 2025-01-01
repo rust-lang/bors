@@ -33,7 +33,7 @@ arc-swap = "1.7.1"
 
 # Web
 hyper = "1.2.0"
-axum = "0.7.4"
+axum = "0.8.0"
 tower = { version = "0.4", features = ["limit"] }
 jsonwebtoken = "9.2.0"
 url = "2.3"
