@@ -5,7 +5,7 @@ use axum::body::Bytes;
 use axum::extract::FromRequest;
 use axum::http::request::Parts;
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
-use axum::{async_trait, RequestExt};
+use axum::RequestExt;
 use hmac::{Hmac, Mac};
 use octocrab::models::events::payload::{
     IssueCommentEventAction, IssueCommentEventPayload, PullRequestEventAction,
@@ -118,7 +118,6 @@ pub struct GitHubWebhook(pub BorsEvent);
 const REQUEST_BODY_LIMIT: usize = 10 * 1024 * 1024;
 
 /// Extracts a webhook event from a HTTP request.
-#[async_trait]
 impl FromRequest<ServerStateRef> for GitHubWebhook {
     type Rejection = StatusCode;
 
