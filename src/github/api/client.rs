@@ -1,6 +1,7 @@
 use anyhow::Context;
 use octocrab::models::{App, Repository};
 use octocrab::{Error, Octocrab};
+use strsim::levenshtein;
 use tracing::log;
 
 use crate::bors::event::PullRequestComment;
@@ -285,6 +286,72 @@ impl GithubRepositoryClient {
         run_ids: impl Iterator<Item = RunId> + 'a,
     ) -> impl Iterator<Item = String> + 'a {
         run_ids.map(|workflow_id| self.get_workflow_url(workflow_id))
+    }
+
+    /// Validates a reviewer's GitHub username and returns validation results if the username is invalid.
+    /// If multiple reviewers are provided (comma-separated), validates each one.
+    /// Returns a validation result for the first invalid username encountered, or None if all usernames are valid.
+    pub async fn validate_reviewers(&self, reviewer_list: &str) -> anyhow::Result<Option<Comment>> {
+        if reviewer_list.trim().is_empty() {
+            return Ok(Some(Comment::new(
+                "Error: No reviewer specified. Use r=username to specify a reviewer.".to_string(),
+            )));
+        }
+
+        for username in reviewer_list.split(',').map(|s| s.trim()) {
+            if username.is_empty() {
+                return Ok(Some(Comment::new(
+                    "Error: Empty reviewer name provided. Use r=username to specify a reviewer."
+                        .to_string(),
+                )));
+            }
+
+            match self.client.users(username).profile().await {
+                Ok(_) => continue, // user exist continue
+                Err(octocrab::Error::GitHub { source, .. }) => {
+                    if source.message.contains("Not Found") {
+                        let similar_usernames = self.find_similar_usernames(username).await?;
+
+                        let mut message = format!("Invalid reviewer username: `{}`", username);
+                        if !similar_usernames.is_empty() {
+                            message.push_str("\nDid you mean one of these users?\n");
+                            for similar in similar_usernames {
+                                message.push_str(&format!("- {}\n", similar));
+                            }
+                        }
+
+                        return Ok(Some(Comment::new(message)));
+                    }
+                }
+                Err(_) => continue,
+            }
+        }
+        Ok(None)
+    }
+
+    /// Searches for GitHub usernames similar to the provided username using Levenshtein distance.
+    async fn find_similar_usernames(&self, username: &str) -> anyhow::Result<Vec<String>> {
+        const MAX_DISTANCE: usize = 2;
+
+        let search_results = self
+            .client
+            .search()
+            .users(username)
+            .send()
+            .await
+            .context("Failed to search for similar usernames")?;
+
+        let similar_usernames = search_results
+            .items
+            .into_iter()
+            .filter(|user| {
+                let distance = levenshtein(username, &user.login);
+                distance > 0 && distance <= MAX_DISTANCE
+            })
+            .map(|user| user.login)
+            .collect();
+
+        Ok(similar_usernames)
     }
 
     fn format_pr(&self, pr: PullRequestNumber) -> String {
