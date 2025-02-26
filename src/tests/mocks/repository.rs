@@ -58,6 +58,8 @@ pub struct Repo {
     pub cancelled_workflows: Vec<u64>,
     pub workflow_cancel_error: bool,
     pub pull_requests: HashMap<u64, PullRequest>,
+    // Cause pull request fetch to fail.
+    pub pull_request_error: bool,
 }
 
 impl Repo {
@@ -73,6 +75,7 @@ impl Repo {
             cancelled_workflows: vec![],
             workflow_cancel_error: false,
             pull_requests,
+            pull_request_error: false,
         }
     }
 

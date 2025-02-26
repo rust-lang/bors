@@ -30,11 +30,17 @@ pub async fn mock_pull_requests(
     let repo_name = repo.lock().name.clone();
     let prs = repo.lock().pull_requests.clone();
     for &pr_number in prs.keys() {
+        let repo_clone = repo.clone();
         Mock::given(method("GET"))
             .and(path(format!("/repos/{repo_name}/pulls/{pr_number}")))
-            .respond_with(
-                ResponseTemplate::new(200).set_body_json(GitHubPullRequest::new(pr_number)),
-            )
+            .respond_with(move |_: &Request| {
+                let pull_request_error = repo_clone.lock().pull_request_error.clone();
+                if pull_request_error {
+                    ResponseTemplate::new(500)
+                } else {
+                    ResponseTemplate::new(200).set_body_json(GitHubPullRequest::new(pr_number))
+                }
+            })
             .mount(mock_server)
             .await;
 

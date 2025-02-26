@@ -185,6 +185,11 @@ async fn handle_comment(
     let pr_number = comment.pr_number;
     let commands = ctx.parser.parse_commands(&comment.text);
 
+    // Bail if no commands
+    if commands.is_empty() {
+        return Ok(());
+    }
+
     tracing::debug!("Commands: {commands:?}");
     tracing::trace!("Text: {}", comment.text);
 
@@ -320,6 +325,16 @@ mod tests {
                 .post_comment(Comment::from("@bors ping").with_author(User::bors_bot()))
                 .await?;
             // Returning here will make sure that no comments were received
+            Ok(tester)
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn do_not_load_pr_on_unrelated_comment(pool: sqlx::PgPool) {
+        run_test(pool, |mut tester| async {
+            tester.default_repo().lock().pull_request_error = true;
+            tester.post_comment("no command").await?;
             Ok(tester)
         })
         .await;
