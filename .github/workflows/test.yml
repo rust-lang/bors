@@ -35,7 +35,7 @@ jobs:
           components: clippy, rustfmt
 
       - name: Install sqlx-cli
-        run: cargo install sqlx-cli@0.7.4 --no-default-features --features native-tls,postgres
+        run: cargo install sqlx-cli@0.7.4 --locked --no-default-features --features native-tls,postgres
 
       - name: Run SQLx migrations
         run: cargo sqlx database create && sqlx migrate run
