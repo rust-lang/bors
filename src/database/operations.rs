@@ -27,6 +27,7 @@ SELECT
     pr.repository,
     pr.number,
     pr.approved_by,
+    pr.priority,
     CASE WHEN pr.build_id IS NULL
         THEN NULL
         ELSE (
@@ -72,11 +73,15 @@ pub(crate) async fn approve_pull_request(
     executor: impl PgExecutor<'_>,
     pr_id: i32,
     approver: &str,
+    priority: Option<u32>,
 ) -> anyhow::Result<()> {
+    let priority_i32 = priority.map(|p| p as i32);
+
     sqlx::query!(
-        "UPDATE pull_request SET approved_by = $1 WHERE id = $2",
+        "UPDATE pull_request SET approved_by = $1, priority = $2 WHERE id = $3",
         approver,
-        pr_id
+        priority_i32,
+        pr_id,
     )
     .execute(executor)
     .await?;
@@ -88,7 +93,7 @@ pub(crate) async fn unapprove_pull_request(
     pr_id: i32,
 ) -> anyhow::Result<()> {
     sqlx::query!(
-        "UPDATE pull_request SET approved_by = NULL WHERE id = $1",
+        "UPDATE pull_request SET approved_by = NULL, priority = NULL WHERE id = $1",
         pr_id
     )
     .execute(executor)
@@ -108,6 +113,7 @@ SELECT
     pr.repository,
     pr.number,
     pr.approved_by,
+    pr.priority,
     CASE WHEN pr.build_id IS NULL
         THEN NULL
         ELSE (
