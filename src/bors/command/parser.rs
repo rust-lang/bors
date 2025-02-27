@@ -118,16 +118,22 @@ fn parse_parts(input: &str) -> Result<Vec<CommandPart>, CommandParseError> {
 
 /// Parsers
 
-/// Parses "@bors r+"
-fn parse_self_approve<'a>(command: &'a str, _parts: &[CommandPart<'a>]) -> ParseResult<'a> {
-    if command == "r+" {
-        Some(Ok(BorsCommand::Approve(Approver::Myself)))
-    } else {
-        None
+/// Parses "@bors r+ <p=priority>"
+fn parse_self_approve<'a>(command: &'a str, parts: &[CommandPart<'a>]) -> ParseResult<'a> {
+    if command != "r+" {
+        return None;
+    }
+
+    match parse_priority(parts) {
+        Ok(priority) => Some(Ok(BorsCommand::Approve {
+            approver: Approver::Myself,
+            priority,
+        })),
+        Err(e) => Some(Err(e)),
     }
 }
 
-/// Parses "@bors r=<username>".
+/// Parses "@bors r=<username> <p=priority>".
 fn parse_approve_on_behalf<'a>(parts: &[CommandPart<'a>]) -> ParseResult<'a> {
     if let Some(CommandPart::KeyValue { key, value }) = parts.first() {
         if *key != "r" {
@@ -135,9 +141,13 @@ fn parse_approve_on_behalf<'a>(parts: &[CommandPart<'a>]) -> ParseResult<'a> {
         } else if value.is_empty() {
             return Some(Err(CommandParseError::MissingArgValue { arg: "r" }));
         } else {
-            Some(Ok(BorsCommand::Approve(Approver::Specified(
-                value.to_string(),
-            ))))
+            match parse_priority(parts) {
+                Ok(priority) => Some(Ok(BorsCommand::Approve {
+                    approver: Approver::Specified(value.to_string()),
+                    priority,
+                })),
+                Err(e) => Some(Err(e)),
+            }
         }
     } else {
         Some(Err(CommandParseError::MissingArgValue { arg: "r" }))
@@ -241,6 +251,29 @@ fn parser_try_cancel<'a>(command: &'a str, parts: &[CommandPart<'a>]) -> ParseRe
     }
 }
 
+/// Parses "p=<priority>"
+fn parse_priority<'a>(parts: &[CommandPart<'a>]) -> Result<Option<u32>, CommandParseError<'a>> {
+    for part in parts {
+        match part {
+            CommandPart::Bare(key) => {
+                return Err(CommandParseError::UnknownArg(key));
+            }
+            CommandPart::KeyValue { key, value } => {
+                if *key == "p" {
+                    return match value.parse::<u32>() {
+                        Ok(p) => Ok(Some(p)),
+                        Err(_) => Err(CommandParseError::ValidationError(
+                            "Priority must be a valid number".to_string(),
+                        )),
+                    };
+                }
+            }
+        }
+    }
+
+    Ok(None)
+}
+
 #[cfg(test)]
 mod tests {
     use crate::bors::command::parser::{CommandParseError, CommandParser};
@@ -293,7 +326,10 @@ mod tests {
         assert_eq!(cmds.len(), 1);
         assert!(matches!(
             cmds[0],
-            Ok(BorsCommand::Approve(Approver::Myself))
+            Ok(BorsCommand::Approve {
+                approver: Approver::Myself,
+                priority: None,
+            })
         ));
     }
 
@@ -301,28 +337,82 @@ mod tests {
     fn parse_approve_on_behalf() {
         let cmds = parse_commands("@bors r=user1");
         assert_eq!(cmds.len(), 1);
-        insta::assert_debug_snapshot!(cmds[0], @r###"
+        insta::assert_debug_snapshot!(cmds[0], @r#"
         Ok(
-            Approve(
-                Specified(
+            Approve {
+                approver: Specified(
                     "user1",
                 ),
-            ),
+                priority: None,
+            },
         )
-        "###);
+        "#);
     }
 
     #[test]
     fn parse_approve_on_behalf_of_only_one_approver() {
         let cmds = parse_commands("@bors r=user1,user2");
         assert_eq!(cmds.len(), 1);
-        insta::assert_debug_snapshot!(cmds[0], @r###"
+        insta::assert_debug_snapshot!(cmds[0], @r#"
         Ok(
-            Approve(
-                Specified(
+            Approve {
+                approver: Specified(
                     "user1,user2",
                 ),
+                priority: None,
+            },
+        )
+        "#);
+    }
+
+    #[test]
+    fn parse_approve_with_priority() {
+        let cmds = parse_commands("@bors r+ p=1");
+        assert_eq!(cmds.len(), 1);
+        assert_eq!(
+            cmds[0],
+            Ok(BorsCommand::Approve {
+                approver: Approver::Myself,
+                priority: Some(1)
+            })
+        )
+    }
+
+    #[test]
+    fn parse_approve_on_behalf_with_priority() {
+        let cmds = parse_commands("@bors r=user1 p=2");
+        assert_eq!(cmds.len(), 1);
+        assert_eq!(
+            cmds[0],
+            Ok(BorsCommand::Approve {
+                approver: Approver::Specified("user1".to_string()),
+                priority: Some(2)
+            })
+        )
+    }
+
+    #[test]
+    fn parse_approve_priority_invalid() {
+        let cmds = parse_commands("@bors r+ p=abc");
+        assert_eq!(cmds.len(), 1);
+        insta::assert_debug_snapshot!(cmds[0], @r###"
+        Err(
+            ValidationError(
+                "Priority must be a valid number",
             ),
+        )
+        "###);
+    }
+
+    #[test]
+    fn parse_approve_priority_empty() {
+        let cmds = parse_commands("@bors r+ p=");
+        assert_eq!(cmds.len(), 1);
+        insta::assert_debug_snapshot!(cmds[0], @r###"
+        Err(
+            MissingArgValue {
+                arg: "p",
+            },
         )
         "###);
     }
