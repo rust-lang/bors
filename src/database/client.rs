@@ -29,9 +29,10 @@ impl PgDbClient {
         repo: &GithubRepoName,
         pr_number: PullRequestNumber,
         approver: &str,
+        priority: Option<u32>,
     ) -> anyhow::Result<()> {
         let pr = self.get_or_create_pull_request(repo, pr_number).await?;
-        approve_pull_request(&self.pool, pr.id, approver).await
+        approve_pull_request(&self.pool, pr.id, approver, priority).await
     }
 
     pub async fn unapprove(
