@@ -259,7 +259,7 @@ fn parse_priority<'a>(parts: &[CommandPart<'a>]) -> Result<Option<u32>, CommandP
                 return Err(CommandParseError::UnknownArg(key));
             }
             CommandPart::KeyValue { key, value } => {
-                if *key == "p" {
+                if *key == "p" || *key == "priority" {
                     return match value.parse::<u32>() {
                         Ok(p) => Ok(Some(p)),
                         Err(_) => Err(CommandParseError::ValidationError(
