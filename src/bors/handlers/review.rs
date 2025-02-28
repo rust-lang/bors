@@ -22,6 +22,7 @@ pub(super) async fn command_approve(
     pr: &PullRequest,
     author: &GithubUser,
     approver: &Approver,
+    priority: Option<u32>,
 ) -> anyhow::Result<()> {
     tracing::info!("Approving PR {}", pr.number);
     if !sufficient_approve_permission(repo_state.clone(), author) {
@@ -32,8 +33,13 @@ pub(super) async fn command_approve(
         Approver::Myself => author.username.clone(),
         Approver::Specified(approver) => approver.clone(),
     };
-    db.approve(repo_state.repository(), pr.number, approver.as_str())
-        .await?;
+    db.approve(
+        repo_state.repository(),
+        pr.number,
+        approver.as_str(),
+        priority,
+    )
+    .await?;
     handle_label_trigger(&repo_state, pr.number, LabelTrigger::Approved).await?;
     notify_of_approval(&repo_state, pr, approver.as_str()).await
 }
@@ -191,7 +197,7 @@ async fn notify_of_edited_pr(
         .post_comment(
             pr_number,
             Comment::new(format!(
-                r#":warning: The base branch changed to `{base_name}`, and the 
+                r#":warning: The base branch changed to `{base_name}`, and the
 PR will need to be re-approved."#,
             )),
         )
@@ -207,7 +213,7 @@ async fn notify_of_pushed_pr(
         .post_comment(
             pr_number,
             Comment::new(format!(
-                r#":warning: A new commit `{}` was pushed to the branch, the 
+                r#":warning: A new commit `{}` was pushed to the branch, the
 PR will need to be re-approved."#,
                 head_sha
             )),
@@ -348,7 +354,7 @@ mod tests {
 
                 assert_eq!(
                     tester.get_comment().await?,
-                    r#":warning: The base branch changed to `main`, and the 
+                    r#":warning: The base branch changed to `main`, and the
 PR will need to be re-approved."#,
                 );
                 check_pr_unapproved(&tester, default_pr_number().into()).await;
@@ -428,7 +434,7 @@ PR will need to be re-approved."#,
                 assert_eq!(
                     tester.get_comment().await?,
                     format!(
-                        r#":warning: A new commit `pr-{}-sha` was pushed to the branch, the 
+                        r#":warning: A new commit `pr-{}-sha` was pushed to the branch, the
 PR will need to be re-approved."#,
                         default_pr_number()
                     )

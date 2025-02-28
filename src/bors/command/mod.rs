@@ -23,10 +23,15 @@ pub enum Approver {
 #[derive(Debug, PartialEq)]
 pub enum BorsCommand {
     /// Approve a commit.
-    Approve(Approver),
+    Approve {
+        /// Who is approving the commit.
+        approver: Approver,
+        /// Priority of the commit.
+        priority: Option<u32>,
+    },
     /// Unapprove a commit.
     Unapprove,
-    /// Print help
+    /// Print help.
     Help,
     /// Ping the bot.
     Ping,

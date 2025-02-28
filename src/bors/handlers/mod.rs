@@ -205,11 +205,18 @@ async fn handle_comment(
                 let repo = Arc::clone(&repo);
                 let database = Arc::clone(&database);
                 let result = match command {
-                    BorsCommand::Approve(approver) => {
+                    BorsCommand::Approve { approver, priority } => {
                         let span = tracing::info_span!("Approve");
-                        command_approve(repo, database, &pull_request, &comment.author, &approver)
-                            .instrument(span)
-                            .await
+                        command_approve(
+                            repo,
+                            database,
+                            &pull_request,
+                            &comment.author,
+                            &approver,
+                            priority,
+                        )
+                        .instrument(span)
+                        .await
                     }
                     BorsCommand::Unapprove => {
                         let span = tracing::info_span!("Unapprove");
