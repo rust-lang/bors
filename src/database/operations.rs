@@ -93,7 +93,7 @@ pub(crate) async fn unapprove_pull_request(
     pr_id: i32,
 ) -> anyhow::Result<()> {
     sqlx::query!(
-        "UPDATE pull_request SET approved_by = NULL, priority = NULL WHERE id = $1",
+        "UPDATE pull_request SET approved_by = NULL WHERE id = $1",
         pr_id
     )
     .execute(executor)
