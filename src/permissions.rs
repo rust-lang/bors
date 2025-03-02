@@ -1,6 +1,7 @@
 use octocrab::models::UserId;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
+use std::fmt;
 
 use crate::github::GithubRepoName;
 
@@ -10,6 +11,15 @@ pub enum PermissionType {
     Review,
     /// Can start a try build.
     Try,
+}
+
+impl fmt::Display for PermissionType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            PermissionType::Review => write!(f, "review"),
+            PermissionType::Try => write!(f, "try"),
+        }
+    }
 }
 
 pub struct UserPermissions {

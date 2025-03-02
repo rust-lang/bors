@@ -9,7 +9,8 @@ use crate::github::{CommitSha, GithubRepoName};
 use super::operations::{
     approve_pull_request, create_build, create_pull_request, create_workflow, find_build,
     find_pr_by_build, get_pull_request, get_running_builds, get_workflows_for_build,
-    unapprove_pull_request, update_build_status, update_pr_build_id, update_workflow_status,
+    set_pr_priority, unapprove_pull_request, update_build_status, update_pr_build_id,
+    update_workflow_status,
 };
 use super::RunId;
 
@@ -29,9 +30,10 @@ impl PgDbClient {
         repo: &GithubRepoName,
         pr_number: PullRequestNumber,
         approver: &str,
+        priority: Option<u32>,
     ) -> anyhow::Result<()> {
         let pr = self.get_or_create_pull_request(repo, pr_number).await?;
-        approve_pull_request(&self.pool, pr.id, approver).await
+        approve_pull_request(&self.pool, pr.id, approver, priority).await
     }
 
     pub async fn unapprove(
@@ -41,6 +43,16 @@ impl PgDbClient {
     ) -> anyhow::Result<()> {
         let pr = self.get_or_create_pull_request(repo, pr_number).await?;
         unapprove_pull_request(&self.pool, pr.id).await
+    }
+
+    pub async fn set_priority(
+        &self,
+        repo: &GithubRepoName,
+        pr_number: PullRequestNumber,
+        priority: u32,
+    ) -> anyhow::Result<()> {
+        let pr = self.get_or_create_pull_request(repo, pr_number).await?;
+        set_pr_priority(&self.pool, pr.id, priority).await
     }
 
     pub async fn get_or_create_pull_request(

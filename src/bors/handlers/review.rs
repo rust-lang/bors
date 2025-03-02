@@ -22,18 +22,24 @@ pub(super) async fn command_approve(
     pr: &PullRequest,
     author: &GithubUser,
     approver: &Approver,
+    priority: Option<u32>,
 ) -> anyhow::Result<()> {
     tracing::info!("Approving PR {}", pr.number);
     if !sufficient_approve_permission(repo_state.clone(), author) {
-        deny_approve_request(&repo_state, pr, author).await?;
+        deny_request(&repo_state, pr, author, PermissionType::Review).await?;
         return Ok(());
     };
     let approver = match approver {
         Approver::Myself => author.username.clone(),
         Approver::Specified(approver) => approver.clone(),
     };
-    db.approve(repo_state.repository(), pr.number, approver.as_str())
-        .await?;
+    db.approve(
+        repo_state.repository(),
+        pr.number,
+        approver.as_str(),
+        priority,
+    )
+    .await?;
     handle_label_trigger(&repo_state, pr.number, LabelTrigger::Approved).await?;
     notify_of_approval(&repo_state, pr, approver.as_str()).await
 }
@@ -48,12 +54,29 @@ pub(super) async fn command_unapprove(
 ) -> anyhow::Result<()> {
     tracing::info!("Unapproving PR {}", pr.number);
     if !sufficient_unapprove_permission(repo_state.clone(), pr, author) {
-        deny_unapprove_request(&repo_state, pr, author).await?;
+        deny_request(&repo_state, pr, author, PermissionType::Review).await?;
         return Ok(());
     };
     db.unapprove(repo_state.repository(), pr.number).await?;
     handle_label_trigger(&repo_state, pr.number, LabelTrigger::Unapproved).await?;
     notify_of_unapproval(&repo_state, pr).await
+}
+
+/// Set the priority of a pull request.
+/// Priority can only be set by a user of sufficient authority.
+pub(super) async fn command_set_priority(
+    repo_state: Arc<RepositoryState>,
+    db: Arc<PgDbClient>,
+    pr: &PullRequest,
+    author: &GithubUser,
+    priority: u32,
+) -> anyhow::Result<()> {
+    if !sufficient_priority_permission(repo_state.clone(), author) {
+        deny_request(&repo_state, pr, author, PermissionType::Review).await?;
+        return Ok(());
+    };
+    db.set_priority(repo_state.repository(), pr.number, priority)
+        .await
 }
 
 pub(super) async fn handle_pull_request_edited(
@@ -105,24 +128,10 @@ fn sufficient_approve_permission(repo: Arc<RepositoryState>, author: &GithubUser
         .has_permission(author.id, PermissionType::Review)
 }
 
-async fn deny_approve_request(
-    repo: &RepositoryState,
-    pr: &PullRequest,
-    author: &GithubUser,
-) -> anyhow::Result<()> {
-    tracing::warn!(
-        "Permission denied for approve command by {}",
-        author.username
-    );
-    repo.client
-        .post_comment(
-            pr.number,
-            Comment::new(format!(
-                "@{}: :key: Insufficient privileges: not in review users",
-                author.username
-            )),
-        )
-        .await
+fn sufficient_priority_permission(repo: Arc<RepositoryState>, author: &GithubUser) -> bool {
+    repo.permissions
+        .load()
+        .has_permission(author.id, PermissionType::Review)
 }
 
 async fn notify_of_approval(
@@ -153,21 +162,22 @@ fn sufficient_unapprove_permission(
             .has_permission(author.id, PermissionType::Review)
 }
 
-async fn deny_unapprove_request(
+async fn deny_request(
     repo: &RepositoryState,
     pr: &PullRequest,
     author: &GithubUser,
+    permission_type: PermissionType,
 ) -> anyhow::Result<()> {
     tracing::warn!(
-        "Permission denied for unapprove command by {}",
+        "Permission denied for request command by {}",
         author.username
     );
     repo.client
         .post_comment(
             pr.number,
             Comment::new(format!(
-                "@{}: :key: Insufficient privileges: not in review users",
-                author.username
+                "@{}: :key: Insufficient privileges: not in {} users",
+                author.username, permission_type
             )),
         )
         .await
@@ -191,7 +201,7 @@ async fn notify_of_edited_pr(
         .post_comment(
             pr_number,
             Comment::new(format!(
-                r#":warning: The base branch changed to `{base_name}`, and the 
+                r#":warning: The base branch changed to `{base_name}`, and the
 PR will need to be re-approved."#,
             )),
         )
@@ -207,7 +217,7 @@ async fn notify_of_pushed_pr(
         .post_comment(
             pr_number,
             Comment::new(format!(
-                r#":warning: A new commit `{}` was pushed to the branch, the 
+                r#":warning: A new commit `{}` was pushed to the branch, the
 PR will need to be re-approved."#,
                 head_sha
             )),
@@ -293,6 +303,24 @@ mod tests {
     }
 
     #[sqlx::test]
+    async fn insufficient_permission_set_priority(pool: sqlx::PgPool) {
+        let world = World::default();
+        world.default_repo().lock().permissions = Permissions::default();
+
+        BorsBuilder::new(pool)
+            .world(world)
+            .run_test(|mut tester| async {
+                tester.post_comment("@bors p=2").await?;
+                assert_eq!(
+                    tester.get_comment().await?,
+                    "@default-user: :key: Insufficient privileges: not in review users"
+                );
+                Ok(tester)
+            })
+            .await;
+    }
+
+    #[sqlx::test]
     async fn unapprove(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
             .world(create_world_with_approve_config())
@@ -348,7 +376,7 @@ mod tests {
 
                 assert_eq!(
                     tester.get_comment().await?,
-                    r#":warning: The base branch changed to `main`, and the 
+                    r#":warning: The base branch changed to `main`, and the
 PR will need to be re-approved."#,
                 );
                 check_pr_unapproved(&tester, default_pr_number().into()).await;
@@ -428,7 +456,7 @@ PR will need to be re-approved."#,
                 assert_eq!(
                     tester.get_comment().await?,
                     format!(
-                        r#":warning: A new commit `pr-{}-sha` was pushed to the branch, the 
+                        r#":warning: A new commit `pr-{}-sha` was pushed to the branch, the
 PR will need to be re-approved."#,
                         default_pr_number()
                     )
@@ -487,5 +515,87 @@ approve = ["+approved"]
         let repo = tester.default_repo();
         let pr = repo.lock().get_pr(default_pr_number()).clone();
         pr.check_removed_labels(&["approved"]);
+    }
+
+    #[sqlx::test]
+    async fn approve_with_priority(pool: sqlx::PgPool) {
+        run_test(pool, |mut tester| async {
+            tester.post_comment("@bors r+ p=10").await?;
+            tester.expect_comments(1).await;
+            let pr = tester.get_default_pr().await?;
+            assert_eq!(pr.priority, Some(10));
+            assert!(pr.is_approved());
+            Ok(tester)
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn approve_on_behalf_with_priority(pool: sqlx::PgPool) {
+        run_test(pool, |mut tester| async {
+            tester.post_comment("@bors r=user1 p=10").await?;
+            tester.expect_comments(1).await;
+            let pr = tester.get_default_pr().await?;
+            assert_eq!(pr.priority, Some(10));
+            assert_eq!(pr.approved_by, Some("user1".to_string()));
+            Ok(tester)
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn set_priority(pool: sqlx::PgPool) {
+        run_test(pool, |mut tester| async {
+            tester.post_comment("@bors p=5").await?;
+            // Wait for db update.
+            tester.expect_comments(1).await;
+            let pr = tester.get_default_pr().await?;
+
+            assert_eq!(pr.priority, Some(5));
+            Ok(tester)
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn priority_preserved_after_approve(pool: sqlx::PgPool) {
+        run_test(pool, |mut tester| async {
+            tester.post_comment("@bors p=5").await?;
+            tester.expect_comments(1).await;
+
+            let pr = tester.get_default_pr().await?;
+            assert_eq!(pr.priority, Some(5));
+
+            tester.post_comment("@bors r+").await?;
+            tester.expect_comments(1).await;
+
+            let pr = tester.get_default_pr().await?;
+            assert_eq!(pr.priority, Some(5));
+            assert!(pr.is_approved());
+
+            Ok(tester)
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn priority_overridden_on_approve_with_priority(pool: sqlx::PgPool) {
+        run_test(pool, |mut tester| async {
+            tester.post_comment("@bors p=5").await?;
+            tester.expect_comments(1).await;
+
+            let pr = tester.get_default_pr().await?;
+            assert_eq!(pr.priority, Some(5));
+
+            tester.post_comment("@bors r+ p=10").await?;
+            tester.expect_comments(1).await;
+
+            let pr = tester.get_default_pr().await?;
+            assert_eq!(pr.priority, Some(10));
+            assert!(pr.is_approved());
+
+            Ok(tester)
+        })
+        .await;
     }
 }
