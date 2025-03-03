@@ -13,7 +13,9 @@ use tokio::task::JoinHandle;
 use tower::Service;
 
 use crate::bors::WAIT_FOR_REFRESH;
+use crate::database::PullRequestModel;
 use crate::github::api::load_repositories;
+use crate::github::PullRequestNumber;
 use crate::tests::mocks::comment::{Comment, GitHubIssueCommentEventPayload};
 use crate::tests::mocks::workflow::{
     CheckSuite, GitHubCheckRunEventPayload, GitHubCheckSuiteEventPayload,
@@ -139,6 +141,15 @@ impl BorsTester {
 
     pub fn default_repo(&self) -> Arc<Mutex<Repo>> {
         self.world.get_repo(default_repo_name())
+    }
+
+    pub async fn get_default_pr(&self) -> anyhow::Result<PullRequestModel> {
+        self.db()
+            .get_or_create_pull_request(
+                &default_repo_name(),
+                PullRequestNumber(default_pr_number()),
+            )
+            .await
     }
 
     pub async fn refresh(&self) {

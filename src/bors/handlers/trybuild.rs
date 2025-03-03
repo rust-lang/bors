@@ -354,7 +354,7 @@ mod tests {
     use crate::bors::handlers::trybuild::{TRY_BRANCH_NAME, TRY_MERGE_BRANCH_NAME};
     use crate::database::operations::get_all_workflows;
     use crate::database::BuildStatus;
-    use crate::github::{CommitSha, PullRequestNumber};
+    use crate::github::CommitSha;
     use crate::tests::mocks::{
         default_pr_number, default_repo_name, run_test, BorsBuilder, Permissions, Workflow,
         WorkflowEvent, World,
@@ -674,13 +674,7 @@ mod tests {
             tester.expect_comments(1).await;
             tester.post_comment("@bors try cancel").await?;
             tester.expect_comments(1).await;
-            let pr = tester
-                .db()
-                .get_or_create_pull_request(
-                    &default_repo_name(),
-                    PullRequestNumber(default_pr_number()),
-                )
-                .await?;
+            let pr = tester.get_default_pr().await?;
             assert_eq!(pr.try_build.unwrap().status, BuildStatus::Cancelled);
             Ok(tester)
         })

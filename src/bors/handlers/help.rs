@@ -9,9 +9,16 @@ pub(super) async fn command_help(
     pr: &PullRequest,
 ) -> anyhow::Result<()> {
     let help = [
-        BorsCommand::Approve(Approver::Myself),
-        BorsCommand::Approve(Approver::Specified("".to_string())),
+        BorsCommand::Approve {
+            approver: Approver::Myself,
+            priority: None,
+        },
+        BorsCommand::Approve {
+            approver: Approver::Specified("".to_string()),
+            priority: None,
+        },
         BorsCommand::Unapprove,
+        BorsCommand::SetPriority(0),
         BorsCommand::Try {
             parent: None,
             jobs: vec![],
@@ -34,14 +41,17 @@ pub(super) async fn command_help(
 fn get_command_help(command: BorsCommand) -> String {
     // !!! When modifying this match, also update the command list above (in [`command_help`]) !!!
     let help = match command {
-        BorsCommand::Approve(Approver::Myself) => {
-            "`r+`: Approve this PR"
+        BorsCommand::Approve { approver: Approver::Myself, .. } => {
+            "`r+ [p=<priority>]`: Approve this PR. Optionally, you can specify a `<priority>`."
         }
-        BorsCommand::Approve(Approver::Specified(_)) => {
-            "`r=<user>`: Approve this PR on behalf of `<user>`"
+        BorsCommand::Approve {approver: Approver::Specified(_), ..} => {
+            "`r=<user> [p=<priority>]`: Approve this PR on behalf of `<user>`. Optionally, you can specify a `<priority>`."
         }
         BorsCommand::Unapprove => {
             "`r-`: Unapprove this PR"
+        }
+        BorsCommand::SetPriority(_) => {
+            "`p=<priority>`: Set the priority of this PR"
         }
         BorsCommand::Help => {
             "`help`: Print this help message"
@@ -68,9 +78,10 @@ mod tests {
         run_test(pool, |mut tester| async {
             tester.post_comment("@bors help").await?;
             insta::assert_snapshot!(tester.get_comment().await?, @r"
-            - `r+`: Approve this PR
-            - `r=<user>`: Approve this PR on behalf of `<user>`
+            - `r+ [p=<priority>]`: Approve this PR. Optionally, you can specify a `<priority>`.
+            - `r=<user> [p=<priority>]`: Approve this PR on behalf of `<user>`. Optionally, you can specify a `<priority>`.
             - `r-`: Unapprove this PR
+            - `p=<priority>`: Set the priority of this PR
             - `try [parent=<parent>] [jobs=<jobs>]`: Start a try build. Optionally, you can specify a `<parent>` SHA or a list of `<jobs>` to run
             - `try cancel`: Cancel a running try build
             - `ping`: Check if the bot is alive

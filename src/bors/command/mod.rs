@@ -2,6 +2,9 @@ mod parser;
 use crate::github::CommitSha;
 pub use parser::{CommandParseError, CommandParser};
 
+/// Priority of a commit.
+pub type Priority = u32;
+
 /// Type of parent allowed in a try build
 #[derive(Clone, Debug, PartialEq)]
 pub enum Parent {
@@ -23,10 +26,15 @@ pub enum Approver {
 #[derive(Debug, PartialEq)]
 pub enum BorsCommand {
     /// Approve a commit.
-    Approve(Approver),
+    Approve {
+        /// Who is approving the commit.
+        approver: Approver,
+        /// Priority of the commit.
+        priority: Option<Priority>,
+    },
     /// Unapprove a commit.
     Unapprove,
-    /// Print help
+    /// Print help.
     Help,
     /// Ping the bot.
     Ping,
@@ -39,4 +47,6 @@ pub enum BorsCommand {
     },
     /// Cancel a try build.
     TryCancel,
+    /// Set the priority of a commit.
+    SetPriority(Priority),
 }

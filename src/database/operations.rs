@@ -27,6 +27,7 @@ SELECT
     pr.repository,
     pr.number,
     pr.approved_by,
+    pr.priority,
     CASE WHEN pr.build_id IS NULL
         THEN NULL
         ELSE (
@@ -72,11 +73,15 @@ pub(crate) async fn approve_pull_request(
     executor: impl PgExecutor<'_>,
     pr_id: i32,
     approver: &str,
+    priority: Option<u32>,
 ) -> anyhow::Result<()> {
+    let priority_i32 = priority.map(|p| p as i32);
+
     sqlx::query!(
-        "UPDATE pull_request SET approved_by = $1 WHERE id = $2",
+        "UPDATE pull_request SET approved_by = $1, priority = COALESCE($2, priority) WHERE id = $3",
         approver,
-        pr_id
+        priority_i32,
+        pr_id,
     )
     .execute(executor)
     .await?;
@@ -108,6 +113,7 @@ SELECT
     pr.repository,
     pr.number,
     pr.approved_by,
+    pr.priority,
     CASE WHEN pr.build_id IS NULL
         THEN NULL
         ELSE (
@@ -279,6 +285,21 @@ pub(crate) async fn update_workflow_status(
         "UPDATE workflow SET status = $1 WHERE run_id = $2",
         status as _,
         run_id as i64
+    )
+    .execute(executor)
+    .await?;
+    Ok(())
+}
+
+pub(crate) async fn set_pr_priority(
+    executor: impl PgExecutor<'_>,
+    pr_id: i32,
+    priority: u32,
+) -> anyhow::Result<()> {
+    sqlx::query!(
+        "UPDATE pull_request SET priority = $1 WHERE id = $2",
+        priority as i32,
+        pr_id,
     )
     .execute(executor)
     .await?;

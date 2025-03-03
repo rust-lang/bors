@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use octocrab::Octocrab;
+use review::command_set_priority;
 use tracing::Instrument;
 
 use crate::bors::command::{BorsCommand, CommandParseError};
@@ -205,17 +206,36 @@ async fn handle_comment(
                 let repo = Arc::clone(&repo);
                 let database = Arc::clone(&database);
                 let result = match command {
-                    BorsCommand::Approve(approver) => {
+                    BorsCommand::Approve { approver, priority } => {
                         let span = tracing::info_span!("Approve");
-                        command_approve(repo, database, &pull_request, &comment.author, &approver)
-                            .instrument(span)
-                            .await
+                        command_approve(
+                            repo,
+                            database,
+                            &pull_request,
+                            &comment.author,
+                            &approver,
+                            priority,
+                        )
+                        .instrument(span)
+                        .await
                     }
                     BorsCommand::Unapprove => {
                         let span = tracing::info_span!("Unapprove");
                         command_unapprove(repo, database, &pull_request, &comment.author)
                             .instrument(span)
                             .await
+                    }
+                    BorsCommand::SetPriority(priority) => {
+                        let span = tracing::info_span!("Priority");
+                        command_set_priority(
+                            repo,
+                            database,
+                            &pull_request,
+                            &comment.author,
+                            priority,
+                        )
+                        .instrument(span)
+                        .await
                     }
                     BorsCommand::Help => {
                         let span = tracing::info_span!("Help");
