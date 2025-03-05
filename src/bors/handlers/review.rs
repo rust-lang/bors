@@ -13,7 +13,6 @@ use crate::github::PullRequest;
 use crate::github::PullRequestNumber;
 use crate::permissions::PermissionType;
 use crate::PgDbClient;
-use crate::database::TreeState;
 
 /// Approve a pull request.
 /// A pull request can only be approved by a user of sufficient authority.

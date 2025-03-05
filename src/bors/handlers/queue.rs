@@ -11,6 +11,7 @@ use crate::bors::command::Parent;
 use tracing::debug;
 
 #[derive(Debug, PartialEq, Clone)]
+#[allow(dead_code)]
 pub enum PrStatus {
     Pending,
     Approved,
@@ -20,6 +21,7 @@ pub enum PrStatus {
     Success,
 }
 
+#[allow(dead_code)]
 impl PrStatus {
     fn priority(&self) -> i32 {
         match self {
@@ -34,6 +36,7 @@ impl PrStatus {
 }
 
 /// Process the queue of pull requests for each repository
+#[allow(dead_code)]
 pub async fn process_queue(
     states: &[(GithubRepoName, Vec<PullRequestModel>)],
     repos: &[(GithubRepoName, Arc<RepositoryState>)],
