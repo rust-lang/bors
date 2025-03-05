@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT id, repo, treeclosed as \"treeclosed: TreeState\", treeclosed_src, created_at\n        FROM repo_model\n        WHERE repo = $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "repo",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "treeclosed: TreeState",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "treeclosed_src",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "1a5c238c7eb428642f3029709a2ccdef294842d9b78e169e64b82018e3c76451"
+}

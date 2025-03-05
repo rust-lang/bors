@@ -51,6 +51,8 @@ impl CommandParser {
             parser_ping,
             parser_try_cancel,
             parser_try,
+            parse_tree_open,
+            parse_tree_closed,
         ];
 
         text.lines()
@@ -319,6 +321,30 @@ fn parse_priority_arg<'a>(parts: &[CommandPart<'a>]) -> Result<Option<u32>, Comm
     }
 
     Ok(priority)
+}
+
+fn parse_tree_open<'a>(command: &'a str, _parts: &[CommandPart<'a>]) -> ParseResult<'a> {
+    if command == "tree" && _parts.len() == 1 {
+        if let CommandPart::Bare("open") = _parts[0] {
+            return Some(Ok(BorsCommand::TreeOpen));
+        }
+    }
+    None
+}
+
+fn parse_tree_closed<'a>(command: &'a str, parts: &[CommandPart<'a>]) -> ParseResult<'a> {
+    if command == "treeclosed" && parts.len() == 1 {
+        if let CommandPart::KeyValue { value, .. } = parts[0] {
+            match validate_priority(value) {
+                Ok(priority) => Some(Ok(BorsCommand::TreeClosed(priority))),
+                Err(e) => Some(Err(e)),
+            }
+        } else {
+            Some(Err(CommandParseError::MissingArgValue { arg: "treeclosed" }))
+        }
+    } else {
+        None
+    }
 }
 
 #[cfg(test)]
@@ -819,6 +845,41 @@ line two
         let cmds = parse_commands("@bors try cancel");
         assert_eq!(cmds.len(), 1);
         assert!(matches!(cmds[0], Ok(BorsCommand::TryCancel)));
+    }
+
+    #[test]
+    fn parse_tree_open() {
+        let parser = CommandParser::new("@bors".to_string());
+        let commands = parser.parse_commands("@bors tree open");
+        assert_eq!(commands.len(), 1);
+        assert_eq!(commands[0], Ok(BorsCommand::TreeOpen));
+    }
+
+    #[test]
+    fn parse_tree_closed() {
+        let cmds = parse_commands("@bors treeclosed=5");
+        assert_eq!(cmds.len(), 1);
+        assert_eq!(cmds[0], Ok(BorsCommand::TreeClosed(5)));
+    }
+
+    #[test]
+    fn parse_tree_closed_invalid() {
+        let cmds = parse_commands("@bors treeclosed=abc");
+        assert_eq!(cmds.len(), 1);
+        assert!(matches!(
+            cmds[0],
+            Err(CommandParseError::ValidationError(_))
+        ));
+    }
+
+    #[test]
+    fn parse_tree_closed_empty() {
+        let cmds = parse_commands("@bors treeclosed=");
+        assert_eq!(cmds.len(), 1);
+        assert!(matches!(
+            cmds[0],
+            Err(CommandParseError::MissingArgValue { arg: "treeclosed" })
+        ));
     }
 
     fn parse_commands(text: &str) -> Vec<Result<BorsCommand, CommandParseError>> {

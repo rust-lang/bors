@@ -21,6 +21,8 @@ pub struct RepositoryConfig {
     pub labels: HashMap<LabelTrigger, Vec<LabelModification>>,
     #[serde(default, deserialize_with = "deserialize_duration_from_secs_opt")]
     pub min_ci_time: Option<Duration>,
+    #[serde(default)]
+    pub treeclosed: Option<u32>,
 }
 
 fn default_timeout() -> Duration {
@@ -219,6 +221,20 @@ try_failed = []
 try = ["foo"]
 "#;
         load_config(content);
+    }
+
+    #[test]
+    fn deserialize_treeclosed() {
+        let content = "treeclosed = 5";
+        let config = load_config(content);
+        assert_eq!(config.treeclosed, Some(5));
+    }
+
+    #[test]
+    fn deserialize_treeclosed_empty() {
+        let content = "";
+        let config = load_config(content);
+        assert_eq!(config.treeclosed, None);
     }
 
     fn load_config(config: &str) -> RepositoryConfig {

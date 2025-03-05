@@ -49,4 +49,8 @@ pub enum BorsCommand {
     TryCancel,
     /// Set the priority of a commit.
     SetPriority(Priority),
+    /// Open the repository tree for merging.
+    TreeOpen,
+    /// Set the tree closed with a priority level.
+    TreeClosed(Priority),
 }

@@ -12,6 +12,7 @@ use crate::bors::handlers::ping::command_ping;
 use crate::bors::handlers::refresh::refresh_repository;
 use crate::bors::handlers::review::{
     command_approve, command_unapprove, handle_pull_request_edited, handle_push_to_pull_request,
+    command_tree_open, command_tree_closed,
 };
 use crate::bors::handlers::trybuild::{command_try_build, command_try_cancel, TRY_BRANCH_NAME};
 use crate::bors::handlers::workflow::{
@@ -30,6 +31,7 @@ mod refresh;
 mod review;
 mod trybuild;
 mod workflow;
+mod queue;
 
 #[cfg(test)]
 pub static WAIT_FOR_WORKFLOW_STARTED: TestSyncMarker = TestSyncMarker::new();
@@ -83,7 +85,10 @@ pub async fn handle_bors_repository_event(
                 return Err(error.context("Cannot perform command"));
             }
         }
-
+        BorsRepositoryEvent::TreeStateChanged(_) => {
+            // Tree state changes are handled by the queue processor
+            ()
+        }
         BorsRepositoryEvent::WorkflowStarted(payload) => {
             let span = tracing::info_span!(
                 "Workflow started",
@@ -218,6 +223,18 @@ async fn handle_comment(
                         )
                         .instrument(span)
                         .await
+                    }
+                    BorsCommand::TreeOpen => {
+                        let span = tracing::info_span!("TreeOpen");
+                        command_tree_open(repo, database, &pull_request, &comment.author)
+                            .instrument(span)
+                            .await
+                    }
+                    BorsCommand::TreeClosed(priority) => {
+                        let span = tracing::info_span!("TreeClosed");
+                        command_tree_closed(repo, database, &pull_request, &comment.author, priority)
+                            .instrument(span)
+                            .await
                     }
                     BorsCommand::Unapprove => {
                         let span = tracing::info_span!("Unapprove");

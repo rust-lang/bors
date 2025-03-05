@@ -13,6 +13,7 @@ use crate::github::PullRequest;
 use crate::github::PullRequestNumber;
 use crate::permissions::PermissionType;
 use crate::PgDbClient;
+use crate::database::TreeState;
 
 /// Approve a pull request.
 /// A pull request can only be approved by a user of sufficient authority.
@@ -122,6 +123,65 @@ pub(super) async fn handle_push_to_pull_request(
     notify_of_pushed_pr(&repo_state, pr_number, pr.head.sha.clone()).await
 }
 
+pub(super) async fn command_tree_closed(
+    repo_state: Arc<RepositoryState>,
+    db: Arc<PgDbClient>,
+    pr: &PullRequest,
+    author: &GithubUser,
+    priority: u32,
+) -> anyhow::Result<()> {
+    if !sufficient_priority_permission(repo_state.clone(), author) {
+        deny_request(&repo_state, pr, author, PermissionType::Review).await?;
+        return Ok(());
+    }
+    
+    db.update_repository_treeclosed(repo_state.repository(), priority).await?;
+    notify_of_tree_closed(&repo_state, pr, priority).await
+}
+
+pub(super) async fn command_tree_open(
+    repo_state: Arc<RepositoryState>,
+    db: Arc<PgDbClient>,
+    pr: &PullRequest,
+    author: &GithubUser,
+) -> anyhow::Result<()> {
+    if !sufficient_priority_permission(repo_state.clone(), author) {
+        deny_request(&repo_state, pr, author, PermissionType::Review).await?;
+        return Ok(());
+    }
+    
+    db.update_repository_treeclosed(repo_state.repository(), 0).await?;
+    notify_of_tree_open(&repo_state, pr).await
+}
+
+async fn notify_of_tree_closed(
+    repo: &RepositoryState,
+    pr: &PullRequest,
+    priority: u32,
+) -> anyhow::Result<()> {
+    repo.client
+        .post_comment(
+            pr.number,
+            Comment::new(format!(
+                "Tree closed for PRs with priority less than {}",
+                priority
+            )),
+        )
+        .await
+}
+
+async fn notify_of_tree_open(
+    repo: &RepositoryState,
+    pr: &PullRequest,
+) -> anyhow::Result<()> {
+    repo.client
+        .post_comment(
+            pr.number,
+            Comment::new("Tree is now open for merging".to_string()),
+        )
+        .await
+}
+
 fn sufficient_approve_permission(repo: Arc<RepositoryState>, author: &GithubUser) -> bool {
     repo.permissions
         .load()
@@ -229,6 +289,7 @@ PR will need to be re-approved."#,
 mod tests {
     use crate::{
         github::PullRequestNumber,
+        database::TreeState,
         tests::mocks::{
             default_pr_number, default_repo_name, run_test, BorsBuilder, BorsTester, Permissions,
             PullRequestChangeEvent, User, World,
@@ -597,5 +658,46 @@ approve = ["+approved"]
             Ok(tester)
         })
         .await;
+    }
+
+    #[sqlx::test]
+    async fn tree_closed_with_priority(pool: sqlx::PgPool) {
+        BorsBuilder::new(pool)
+            .world(create_world_with_approve_config())
+            .run_test(|mut tester| async {
+                tester.post_comment("@bors treeclosed=5").await?;
+                assert_eq!(
+                    tester.get_comment().await?,
+                    "Tree closed for PRs with priority less than 5"
+                );
+                
+                // Verify the treeclosed state in the database
+                let repo_models = tester.db()
+                    .get_repository_treeclosed(&default_repo_name())
+                    .await?;
+                let repo_model = repo_models.first().unwrap();
+                assert_eq!(repo_model.treeclosed, TreeState::Closed(5));
+                
+                Ok(tester)
+            })
+            .await;
+    }
+
+    #[sqlx::test]
+    async fn insufficient_permission_tree_closed(pool: sqlx::PgPool) {
+        let world = World::default();
+        world.default_repo().lock().permissions = Permissions::default();
+
+        BorsBuilder::new(pool)
+            .world(world)
+            .run_test(|mut tester| async {
+                tester.post_comment("@bors treeclosed=5").await?;
+                assert_eq!(
+                    tester.get_comment().await?,
+                    "@default-user: :key: Insufficient privileges: not in review users"
+                );
+                Ok(tester)
+            })
+            .await;
     }
 }

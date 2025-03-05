@@ -83,8 +83,34 @@ impl sqlx::Type<sqlx::Postgres> for PullRequestNumber {
     }
 }
 
+impl sqlx::Encode<'_, sqlx::Postgres> for TreeState {
+    fn encode_by_ref(&self, buf: &mut sqlx::postgres::PgArgumentBuffer) -> Result<sqlx::encode::IsNull, Box<dyn std::error::Error + Send + Sync>> {
+        let value = match self {
+            TreeState::Open => String::from("open"),
+            TreeState::Closed(priority) => format!("closed:{}", priority),
+        };
+        buf.extend(value.as_bytes());
+        Ok(sqlx::encode::IsNull::No)
+    }
+}
+
+impl sqlx::Decode<'_, sqlx::Postgres> for TreeState {
+    fn decode(value: sqlx::postgres::PgValueRef<'_>) -> Result<Self, sqlx::error::BoxDynError> {
+        let value = <&str as sqlx::Decode<sqlx::Postgres>>::decode(value)?;
+        match value {
+            "open" => Ok(TreeState::Open),
+            value if value.starts_with("closed:") => {
+                let priority = value[7..].parse()?;
+                Ok(TreeState::Closed(priority))
+            }
+            _ => Err("invalid tree state".into()),
+        }
+    }
+}
+
+
 /// Status of a GitHub build.
-#[derive(Debug, PartialEq, sqlx::Type)]
+#[derive(Debug, Clone, PartialEq, sqlx::Type)]
 #[sqlx(type_name = "TEXT")]
 #[sqlx(rename_all = "lowercase")]
 pub enum BuildStatus {
@@ -101,7 +127,7 @@ pub enum BuildStatus {
 }
 
 /// Represents a single (merged) commit.
-#[derive(Debug, sqlx::Type)]
+#[derive(Debug, Clone, sqlx::Type)]
 #[sqlx(type_name = "build")]
 pub struct BuildModel {
     pub id: PrimaryKey,
@@ -114,7 +140,7 @@ pub struct BuildModel {
 }
 
 /// Represents a pull request.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct PullRequestModel {
     pub id: PrimaryKey,
     pub repository: GithubRepoName,
@@ -163,5 +189,29 @@ pub struct WorkflowModel {
     pub run_id: RunId,
     pub workflow_type: WorkflowType,
     pub status: WorkflowStatus,
+    pub created_at: DateTime<Utc>,
+}
+
+/// Represents the state of a repository's tree.
+#[derive(Debug, PartialEq, Copy, Clone)]
+pub enum TreeState {
+    /// The repository tree is open for changes
+    Open,
+    /// The repository tree is closed to changes with a priority threshold
+    Closed(u32),
+}
+
+impl sqlx::Type<sqlx::Postgres> for TreeState {
+    fn type_info() -> sqlx::postgres::PgTypeInfo {
+        <String as sqlx::Type<sqlx::Postgres>>::type_info()
+    }
+}
+
+/// Represents a repository configuration.
+pub struct RepoModel {
+    pub id: PrimaryKey,
+    pub repo: GithubRepoName,
+    pub treeclosed: TreeState,
+    pub treeclosed_src: Option<String>,
     pub created_at: DateTime<Utc>,
 }
