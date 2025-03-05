@@ -129,11 +129,10 @@ pub(super) async fn command_tree_closed(
     author: &GithubUser,
     priority: u32,
 ) -> anyhow::Result<()> {
-    if !sufficient_priority_permission(repo_state.clone(), author) {
+    if !sufficient_approve_permission(repo_state.clone(), author) {
         deny_request(&repo_state, pr, author, PermissionType::Review).await?;
         return Ok(());
-    }
-    
+    };
     db.update_repository_treeclosed(repo_state.repository(), priority).await?;
     notify_of_tree_closed(&repo_state, pr, priority).await
 }
@@ -293,6 +292,7 @@ mod tests {
             default_pr_number, default_repo_name, run_test, BorsBuilder, BorsTester, Permissions,
             PullRequestChangeEvent, User, World,
         },
+        permissions::PermissionType,
     };
 
     #[sqlx::test]
@@ -540,11 +540,16 @@ PR will need to be re-approved."#,
 
     fn create_world_with_approve_config() -> World {
         let world = World::default();
-        world.default_repo().lock().set_config(
+        let repo = world.default_repo();
+        repo.lock().set_config(
             r#"
 [labels]
 approve = ["+approved"]
 "#,
+        );
+        repo.lock().permissions.users.insert(
+            User::default(),
+            vec![PermissionType::Review],
         );
         world
     }
@@ -661,9 +666,20 @@ approve = ["+approved"]
 
     #[sqlx::test]
     async fn tree_closed_with_priority(pool: sqlx::PgPool) {
+        let world = create_world_with_approve_config();
         BorsBuilder::new(pool)
-            .world(create_world_with_approve_config())
+            .world(world)
             .run_test(|mut tester| async {
+                // First ensure the tree is open
+                let repo_models = tester.db()
+                    .get_repository_treeclosed(&default_repo_name())
+                    .await?;
+                if repo_models.is_empty() {
+                    tester.db()
+                        .update_repository_treeclosed(&default_repo_name(), 0)
+                        .await?;
+                }
+
                 tester.post_comment("@bors treeclosed=5").await?;
                 assert_eq!(
                     tester.get_comment().await?,

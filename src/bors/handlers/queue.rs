@@ -1,3 +1,4 @@
+#[allow(dead_code)]
 use std::sync::Arc;
 use anyhow::Result;
 use crate::bors::RepositoryState;
@@ -99,6 +100,7 @@ pub async fn process_queue(
     Ok(())
 }
 
+#[allow(dead_code)]
 fn determine_pr_status(pr: &PullRequestModel) -> PrStatus {
     if let Some(build) = &pr.try_build {
         match build.status {
@@ -116,6 +118,7 @@ fn determine_pr_status(pr: &PullRequestModel) -> PrStatus {
 }
 
 /// Check if a PR is blocked by a closed tree
+#[allow(dead_code)]
 pub async fn blocked_by_closed_tree(
     repo: &RepositoryState,
     priority: Option<i32>,
@@ -140,6 +143,7 @@ pub async fn blocked_by_closed_tree(
 }
 
 /// Starts a fresh build for a pull request
+#[allow(dead_code)]
 async fn start_build(
     state: &PullRequestModel,
     repo: &Arc<RepositoryState>,
@@ -164,6 +168,7 @@ async fn start_build(
 }
 
 /// Attempts to rebuild a pull request, falling back to fresh build if needed
+#[allow(dead_code)]
 async fn start_build_or_rebuild(
     state: &PullRequestModel,
     repo: &Arc<RepositoryState>,

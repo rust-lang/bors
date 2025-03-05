@@ -20,7 +20,7 @@ pub enum CommandParseError<'a> {
 }
 
 /// Part of a command, either a bare string like `try` or a key value like `parent=<sha>`.
-#[derive(PartialEq)]
+#[derive(PartialEq, Copy, Clone)]
 enum CommandPart<'a> {
     Bare(&'a str),
     KeyValue { key: &'a str, value: &'a str },
@@ -84,6 +84,12 @@ impl CommandParser {
 
                                         if PRIORITY_NAMES.contains(&key) {
                                             if let Some(result) = parse_priority(&parts) {
+                                                return Some(result);
+                                            }
+                                        }
+
+                                        if key == "treeclosed" {
+                                            if let Some(result) = parse_tree_closed(key, &parts) {
                                                 return Some(result);
                                             }
                                         }
@@ -333,6 +339,7 @@ fn parse_tree_open<'a>(command: &'a str, _parts: &[CommandPart<'a>]) -> ParseRes
 }
 
 fn parse_tree_closed<'a>(command: &'a str, parts: &[CommandPart<'a>]) -> ParseResult<'a> {
+    // Handle both formats: "@bors treeclosed=5" and "@bors tree closed 5"
     if command == "treeclosed" && parts.len() == 1 {
         if let CommandPart::KeyValue { value, .. } = parts[0] {
             match validate_priority(value) {
@@ -341,6 +348,15 @@ fn parse_tree_closed<'a>(command: &'a str, parts: &[CommandPart<'a>]) -> ParseRe
             }
         } else {
             Some(Err(CommandParseError::MissingArgValue { arg: "treeclosed" }))
+        }
+    } else if command == "tree" && parts.len() == 2 {
+        if let (CommandPart::Bare("closed"), CommandPart::Bare(value)) = (parts[0], parts[1]) {
+            match validate_priority(value) {
+                Ok(priority) => Some(Ok(BorsCommand::TreeClosed(priority))),
+                Err(e) => Some(Err(e)),
+            }
+        } else {
+            None
         }
     } else {
         None

@@ -7,12 +7,10 @@ use crate::github::GithubRepoName;
 
 #[derive(Eq, PartialEq, Debug, Clone)]
 pub enum PermissionType {
-    /// Can perform commands like r+.
+    /// Can perform commands like r+ and tree closed operations.
     Review,
     /// Can start a try build.
     Try,
-    /// Can set treeclosed state.
-    TreeClosed,
 }
 
 impl fmt::Display for PermissionType {
@@ -20,7 +18,6 @@ impl fmt::Display for PermissionType {
         match self {
             PermissionType::Review => write!(f, "review"),
             PermissionType::Try => write!(f, "try"),
-            PermissionType::TreeClosed => write!(f, "tree_closed"),
         }
     }
 }
@@ -28,19 +25,16 @@ impl fmt::Display for PermissionType {
 pub struct UserPermissions {
     review_users: HashSet<UserId>,
     try_users: HashSet<UserId>,
-    tree_closed_users: HashSet<UserId>,
 }
 
 impl UserPermissions {
     pub fn new(
         review_users: HashSet<UserId>, 
         try_users: HashSet<UserId>,
-        tree_closed_users: HashSet<UserId>,
     ) -> Self {
         Self {
             review_users,
             try_users,
-            tree_closed_users,
         }
     }
     
@@ -48,7 +42,6 @@ impl UserPermissions {
         match permission {
             PermissionType::Review => self.review_users.contains(&user_id),
             PermissionType::Try => self.try_users.contains(&user_id),
-            PermissionType::TreeClosed => self.tree_closed_users.contains(&user_id),
         }
     }
 }
@@ -85,15 +78,9 @@ impl TeamApiClient {
             .await
             .map_err(|error| anyhow::anyhow!("Cannot load try users: {error:?}"))?;
 
-        let tree_closed_users = self
-            .load_users(repo.name(), PermissionType::TreeClosed)
-            .await
-            .map_err(|error| anyhow::anyhow!("Cannot load tree_closed users: {error:?}"))?;
-
         Ok(UserPermissions {
             review_users,
             try_users,
-            tree_closed_users,
         })
     }
 
@@ -106,7 +93,6 @@ impl TeamApiClient {
         let permission = match permission {
             PermissionType::Review => "review",
             PermissionType::Try => "try",
-            PermissionType::TreeClosed => "tree_closed",
         };
 
         let normalized_name = repository_name.replace('-', "_");
