@@ -77,10 +77,8 @@ pub async fn process_queue(
                     }
                 }
                 PrStatus::Empty => {
-                    if state.approved_by.is_some() {
-                        if start_build_or_rebuild(state, repo, &db).await? {
+                    if state.approved_by.is_some() && start_build_or_rebuild(state, repo, &db).await? {
                             return Ok(());
-                        }
                     }
                 }
                 PrStatus::Error | PrStatus::Failure => {}
@@ -90,10 +88,8 @@ pub async fn process_queue(
 
         // Process try builds
         for state in repo_states.iter() {
-            if state.try_build.is_some() && state.approved_by.is_none() {
-                if start_build(state, repo, &db).await? {
+            if state.try_build.is_some() && state.approved_by.is_none() && start_build(state, repo, &db).await? {
                     return Ok(());
-                }
             }
         }
     }
