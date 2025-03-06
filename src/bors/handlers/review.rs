@@ -547,11 +547,12 @@ approve = ["+approved"]
     async fn set_priority(pool: sqlx::PgPool) {
         run_test(pool, |mut tester| async {
             tester.post_comment("@bors p=5").await?;
-            // Wait for db update.
-            tester.expect_comments(1).await;
-            let pr = tester.get_default_pr().await?;
-
-            assert_eq!(pr.priority, Some(5));
+            tester
+                .wait_for(|| async {
+                    let pr = tester.get_default_pr().await?;
+                    Ok(pr.priority == Some(5))
+                })
+                .await?;
             Ok(tester)
         })
         .await;
@@ -561,10 +562,12 @@ approve = ["+approved"]
     async fn priority_preserved_after_approve(pool: sqlx::PgPool) {
         run_test(pool, |mut tester| async {
             tester.post_comment("@bors p=5").await?;
-            tester.expect_comments(1).await;
-
-            let pr = tester.get_default_pr().await?;
-            assert_eq!(pr.priority, Some(5));
+            tester
+                .wait_for(|| async {
+                    let pr = tester.get_default_pr().await?;
+                    Ok(pr.priority == Some(5))
+                })
+                .await?;
 
             tester.post_comment("@bors r+").await?;
             tester.expect_comments(1).await;
@@ -582,10 +585,12 @@ approve = ["+approved"]
     async fn priority_overridden_on_approve_with_priority(pool: sqlx::PgPool) {
         run_test(pool, |mut tester| async {
             tester.post_comment("@bors p=5").await?;
-            tester.expect_comments(1).await;
-
-            let pr = tester.get_default_pr().await?;
-            assert_eq!(pr.priority, Some(5));
+            tester
+                .wait_for(|| async {
+                    let pr = tester.get_default_pr().await?;
+                    Ok(pr.priority == Some(5))
+                })
+                .await?;
 
             tester.post_comment("@bors r+ p=10").await?;
             tester.expect_comments(1).await;
