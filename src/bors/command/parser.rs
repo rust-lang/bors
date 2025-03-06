@@ -51,6 +51,7 @@ impl CommandParser {
             parser_ping,
             parser_try_cancel,
             parser_try,
+            parser_info,
         ];
 
         text.lines()
@@ -130,7 +131,6 @@ fn parse_parts(input: &str) -> Result<Vec<CommandPart>, CommandParseError> {
 }
 
 /// Parsers
-
 /// Parses "@bors r+ <p=priority>"
 fn parse_self_approve<'a>(command: &'a str, parts: &[CommandPart<'a>]) -> ParseResult<'a> {
     if command != "r+" {
@@ -319,6 +319,15 @@ fn parse_priority_arg<'a>(parts: &[CommandPart<'a>]) -> Result<Option<u32>, Comm
     }
 
     Ok(priority)
+}
+
+/// Parses "@bors info"
+fn parser_info<'a>(command: &'a str, _parts: &[CommandPart<'a>]) -> ParseResult<'a> {
+    if command == "info" {
+        Some(Ok(BorsCommand::Info))
+    } else {
+        None
+    }
 }
 
 #[cfg(test)]
@@ -812,6 +821,20 @@ line two
             },
         )
         "###)
+    }
+
+    #[test]
+    fn parse_info() {
+        let cmds = parse_commands("@bors info");
+        assert_eq!(cmds.len(), 1);
+        assert!(matches!(cmds[0], Ok(BorsCommand::Info)));
+    }
+
+    #[test]
+    fn parse_info_unknown_arg() {
+        let cmds = parse_commands("@bors info a");
+        assert_eq!(cmds.len(), 1);
+        assert!(matches!(cmds[0], Ok(BorsCommand::Info)));
     }
 
     #[test]

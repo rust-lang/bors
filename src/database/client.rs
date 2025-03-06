@@ -168,4 +168,11 @@ impl PgDbClient {
             .collect::<Vec<_>>();
         Ok(workflows)
     }
+    pub async fn get_pull_request(
+        &self,
+        repo: &GithubRepoName,
+        pr_number: PullRequestNumber,
+    ) -> anyhow::Result<Option<PullRequestModel>> {
+        get_pull_request(&self.pool, repo, pr_number).await
+    }
 }
