@@ -53,4 +53,6 @@ pub enum BorsCommand {
     TreeOpen,
     /// Set the tree closed with a priority level.
     TreeClosed(Priority),
+    /// Get information about the current PR.
+    Info,
 }

@@ -184,4 +184,12 @@ impl PgDbClient {
     ) -> anyhow::Result<()> {
         update_repository_treeclosed(&self.pool, repo, TreeState::Closed(priority), None).await
     }
+
+    pub async fn get_pull_request(
+        &self,
+        repo: &GithubRepoName,
+        pr_number: PullRequestNumber,
+    ) -> anyhow::Result<Option<PullRequestModel>> {
+        get_pull_request(&self.pool, repo, pr_number).await
+    }
 }

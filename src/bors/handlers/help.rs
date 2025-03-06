@@ -28,6 +28,7 @@ pub(super) async fn command_help(
         BorsCommand::Help,
         BorsCommand::TreeOpen,
         BorsCommand::TreeClosed(0),
+        BorsCommand::Info,
     ]
     .into_iter()
     .map(|help| format!("- {}", get_command_help(help)))
@@ -73,6 +74,9 @@ fn get_command_help(command: BorsCommand) -> String {
         BorsCommand::TreeClosed(_) => {
             "`treeclosed=<priority>`: Close the tree for PRs with priority less than `<priority>`"
         }
+        BorsCommand::Info => {
+            "`info`: Get information about the current PR including delegation, priority, merge status, and try build status"
+        }
     };
     help.to_string()
 }
@@ -96,6 +100,7 @@ mod tests {
             - `help`: Print this help message
             - `tree open`: Open the repository tree for merging
             - `treeclosed=<priority>`: Close the tree for PRs with priority less than `<priority>`
+            - `info`: Get information about the current PR including delegation, priority, merge status, and try build status
             ");
             Ok(tester)
         })

@@ -8,6 +8,7 @@ use tracing::Instrument;
 use crate::bors::command::{BorsCommand, CommandParseError};
 use crate::bors::event::{BorsGlobalEvent, BorsRepositoryEvent, PullRequestComment};
 use crate::bors::handlers::help::command_help;
+use crate::bors::handlers::info::command_info;
 use crate::bors::handlers::ping::command_ping;
 use crate::bors::handlers::refresh::refresh_repository;
 use crate::bors::handlers::review::{
@@ -25,6 +26,7 @@ use crate::{load_repositories, PgDbClient, TeamApiClient};
 use crate::tests::util::TestSyncMarker;
 
 mod help;
+mod info;
 mod labels;
 mod ping;
 mod queue;
@@ -280,6 +282,12 @@ async fn handle_comment(
                     BorsCommand::TryCancel => {
                         let span = tracing::info_span!("Cancel try");
                         command_try_cancel(repo, database, &pull_request, &comment.author)
+                            .instrument(span)
+                            .await
+                    }
+                    BorsCommand::Info => {
+                        let span = tracing::info_span!("Info");
+                        command_info(repo, &pull_request, database)
                             .instrument(span)
                             .await
                     }
