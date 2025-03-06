@@ -66,7 +66,7 @@ impl BorsBuilder {
             Ok(tester) => tester.finish(bors).await,
             Err(error) => {
                 let result = bors.await;
-                panic!("Error in run_test\n{result:?}\n{error:?}");
+                panic!("Error in test:\n{error:?}\n\nBors service result:\n{result:?}");
             }
         }
     }
