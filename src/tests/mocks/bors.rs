@@ -207,8 +207,10 @@ impl BorsTester {
 
     /// Expect that `count` comments will be received, without checking their contents.
     pub async fn expect_comments(&mut self, count: u64) {
-        for _ in 0..count {
-            let _ = self.get_comment().await;
+        for i in 0..count {
+            self.get_comment()
+                .await
+                .expect(&format!("Failed to get comment #{i}"));
         }
     }
 
