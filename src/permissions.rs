@@ -28,16 +28,13 @@ pub struct UserPermissions {
 }
 
 impl UserPermissions {
-    pub fn new(
-        review_users: HashSet<UserId>, 
-        try_users: HashSet<UserId>,
-    ) -> Self {
+    pub fn new(review_users: HashSet<UserId>, try_users: HashSet<UserId>) -> Self {
         Self {
             review_users,
             try_users,
         }
     }
-    
+
     pub fn has_permission(&self, user_id: UserId, permission: PermissionType) -> bool {
         match permission {
             PermissionType::Review => self.review_users.contains(&user_id),

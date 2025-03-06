@@ -1,17 +1,17 @@
 use sqlx::PgPool;
 
 use crate::database::{
-    BuildModel, BuildStatus, PullRequestModel, WorkflowModel, WorkflowStatus, WorkflowType,
-    RepoModel, TreeState,
+    BuildModel, BuildStatus, PullRequestModel, RepoModel, TreeState, WorkflowModel, WorkflowStatus,
+    WorkflowType,
 };
 use crate::github::PullRequestNumber;
 use crate::github::{CommitSha, GithubRepoName};
 
 use super::operations::{
     approve_pull_request, create_build, create_pull_request, create_workflow, find_build,
-    find_pr_by_build, get_pull_request, get_running_builds, get_workflows_for_build,
-    set_pr_priority, unapprove_pull_request, update_build_status, update_pr_build_id,
-    update_workflow_status, get_repository_treeclosed, update_repository_treeclosed,
+    find_pr_by_build, get_pull_request, get_repository_treeclosed, get_running_builds,
+    get_workflows_for_build, set_pr_priority, unapprove_pull_request, update_build_status,
+    update_pr_build_id, update_repository_treeclosed, update_workflow_status,
 };
 use super::RunId;
 
@@ -170,7 +170,10 @@ impl PgDbClient {
         Ok(workflows)
     }
 
-    pub async fn get_repository_treeclosed(&self, repo: &GithubRepoName) -> anyhow::Result<Vec<RepoModel>> {
+    pub async fn get_repository_treeclosed(
+        &self,
+        repo: &GithubRepoName,
+    ) -> anyhow::Result<Vec<RepoModel>> {
         get_repository_treeclosed(&self.pool, repo).await
     }
 

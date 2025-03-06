@@ -346,7 +346,9 @@ fn parse_tree_closed<'a>(command: &'a str, parts: &[CommandPart<'a>]) -> ParseRe
                 Err(e) => Some(Err(e)),
             }
         } else {
-            Some(Err(CommandParseError::MissingArgValue { arg: "treeclosed" }))
+            Some(Err(CommandParseError::MissingArgValue {
+                arg: "treeclosed",
+            }))
         }
     } else if command == "tree" && parts.len() == 2 {
         if let (CommandPart::Bare("closed"), CommandPart::Bare(value)) = (parts[0], parts[1]) {

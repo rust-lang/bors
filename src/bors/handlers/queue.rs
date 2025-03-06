@@ -1,13 +1,13 @@
+use crate::bors::command::Parent;
+use crate::bors::handlers::trybuild::command_try_build;
+use crate::bors::RepositoryState;
+use crate::database::{BuildStatus, PgDbClient, PullRequestModel, TreeState};
+use crate::github::{CommitSha, GithubRepoName, GithubUser};
+use anyhow::Result;
+use octocrab::models::UserId;
 #[allow(dead_code)]
 use std::sync::Arc;
-use anyhow::Result;
-use crate::bors::RepositoryState;
-use crate::database::{PgDbClient, TreeState, BuildStatus, PullRequestModel};
-use crate::github::{GithubRepoName, GithubUser, CommitSha};
-use crate::bors::handlers::trybuild::command_try_build;
-use octocrab::models::UserId;
 use url::Url;
-use crate::bors::command::Parent;
 
 use tracing::debug;
 
@@ -45,7 +45,8 @@ pub async fn process_queue(
 ) -> Result<()> {
     for (repo_label, repo_states) in states {
         // Get repository state
-        let repo = repos.iter()
+        let repo = repos
+            .iter()
             .find(|(name, _)| name == repo_label)
             .map(|(_, repo)| repo)
             .ok_or_else(|| anyhow::anyhow!("Repository not found"))?;
@@ -56,7 +57,7 @@ pub async fn process_queue(
 
         for state in repo_states.iter() {
             debug!("process_queue: state={:?}, building {}", state, repo_label);
-            
+
             let (tree_state, _) = blocked_by_closed_tree(repo, state.priority, &db).await?;
             if let Some(TreeState::Closed(_)) = tree_state {
                 continue;
@@ -64,7 +65,7 @@ pub async fn process_queue(
 
             // Determine PR status
             let status = determine_pr_status(state);
-            
+
             match status {
                 PrStatus::Pending => {
                     if state.try_build.is_none() {
@@ -77,8 +78,10 @@ pub async fn process_queue(
                     }
                 }
                 PrStatus::Empty => {
-                    if state.approved_by.is_some() && start_build_or_rebuild(state, repo, &db).await? {
-                            return Ok(());
+                    if state.approved_by.is_some()
+                        && start_build_or_rebuild(state, repo, &db).await?
+                    {
+                        return Ok(());
                     }
                 }
                 PrStatus::Error | PrStatus::Failure => {}
@@ -88,8 +91,11 @@ pub async fn process_queue(
 
         // Process try builds
         for state in repo_states.iter() {
-            if state.try_build.is_some() && state.approved_by.is_none() && start_build(state, repo, &db).await? {
-                    return Ok(());
+            if state.try_build.is_some()
+                && state.approved_by.is_none()
+                && start_build(state, repo, &db).await?
+            {
+                return Ok(());
             }
         }
     }
@@ -121,8 +127,10 @@ pub async fn blocked_by_closed_tree(
     db: &PgDbClient,
 ) -> Result<(Option<TreeState>, Option<String>)> {
     let repo_models = db.get_repository_treeclosed(repo.repository()).await?;
-    let repo_model = repo_models.first().ok_or_else(|| anyhow::anyhow!("No repository model found"))?;
-    
+    let repo_model = repo_models
+        .first()
+        .ok_or_else(|| anyhow::anyhow!("No repository model found"))?;
+
     Ok((
         match repo_model.treeclosed {
             TreeState::Open => None,
@@ -134,7 +142,7 @@ pub async fn blocked_by_closed_tree(
                 }
             }
         },
-        repo_model.treeclosed_src.clone()
+        repo_model.treeclosed_src.clone(),
     ))
 }
 
@@ -150,7 +158,7 @@ async fn start_build(
         id: UserId(0), // System action
         username: "bors".to_string(),
         html_url: Url::parse("https://github.com/bors").unwrap(),
-    };    
+    };
     command_try_build(
         repo.clone(),
         Arc::new(db.clone()),
@@ -158,8 +166,9 @@ async fn start_build(
         &author,
         None,
         vec![],
-    ).await?;
-    
+    )
+    .await?;
+
     Ok(true)
 }
 
@@ -187,7 +196,8 @@ async fn start_build_or_rebuild(
                 &author,
                 Some(Parent::CommitSha(CommitSha(prev_build.parent.clone()))),
                 vec![],
-            ).await?;
+            )
+            .await?;
             return Ok(true);
         }
     }

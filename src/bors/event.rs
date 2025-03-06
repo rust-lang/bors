@@ -1,4 +1,4 @@
-use crate::database::{WorkflowStatus, WorkflowType, TreeState};
+use crate::database::{TreeState, WorkflowStatus, WorkflowType};
 use crate::github::{CommitSha, GithubRepoName, GithubUser, PullRequest, PullRequestNumber};
 use chrono::Duration;
 use octocrab::models::RunId;

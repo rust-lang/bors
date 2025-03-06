@@ -3,8 +3,8 @@ use chrono::Utc;
 use sqlx::postgres::PgExecutor;
 
 use crate::database::BuildStatus;
-use crate::database::WorkflowModel;
 use crate::database::RepoModel;
+use crate::database::WorkflowModel;
 use crate::github::CommitSha;
 use crate::github::GithubRepoName;
 use crate::github::PullRequestNumber;
@@ -12,9 +12,9 @@ use crate::github::PullRequestNumber;
 use super::BuildModel;
 use super::PullRequestModel;
 use super::RunId;
+use super::TreeState;
 use super::WorkflowStatus;
 use super::WorkflowType;
-use super::TreeState;
 
 pub(crate) async fn get_pull_request(
     executor: impl PgExecutor<'_>,

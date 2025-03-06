@@ -11,8 +11,8 @@ use crate::bors::handlers::help::command_help;
 use crate::bors::handlers::ping::command_ping;
 use crate::bors::handlers::refresh::refresh_repository;
 use crate::bors::handlers::review::{
-    command_approve, command_unapprove, handle_pull_request_edited, handle_push_to_pull_request,
-    command_tree_open, command_tree_closed,
+    command_approve, command_tree_closed, command_tree_open, command_unapprove,
+    handle_pull_request_edited, handle_push_to_pull_request,
 };
 use crate::bors::handlers::trybuild::{command_try_build, command_try_cancel, TRY_BRANCH_NAME};
 use crate::bors::handlers::workflow::{
@@ -27,11 +27,11 @@ use crate::tests::util::TestSyncMarker;
 mod help;
 mod labels;
 mod ping;
+mod queue;
 mod refresh;
 mod review;
 mod trybuild;
 mod workflow;
-mod queue;
 
 #[cfg(test)]
 pub static WAIT_FOR_WORKFLOW_STARTED: TestSyncMarker = TestSyncMarker::new();
@@ -231,9 +231,15 @@ async fn handle_comment(
                     }
                     BorsCommand::TreeClosed(priority) => {
                         let span = tracing::info_span!("TreeClosed");
-                        command_tree_closed(repo, database, &pull_request, &comment.author, priority)
-                            .instrument(span)
-                            .await
+                        command_tree_closed(
+                            repo,
+                            database,
+                            &pull_request,
+                            &comment.author,
+                            priority,
+                        )
+                        .instrument(span)
+                        .await
                     }
                     BorsCommand::Unapprove => {
                         let span = tracing::info_span!("Unapprove");

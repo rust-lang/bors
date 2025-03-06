@@ -84,7 +84,10 @@ impl sqlx::Type<sqlx::Postgres> for PullRequestNumber {
 }
 
 impl sqlx::Encode<'_, sqlx::Postgres> for TreeState {
-    fn encode_by_ref(&self, buf: &mut sqlx::postgres::PgArgumentBuffer) -> Result<sqlx::encode::IsNull, Box<dyn std::error::Error + Send + Sync>> {
+    fn encode_by_ref(
+        &self,
+        buf: &mut sqlx::postgres::PgArgumentBuffer,
+    ) -> Result<sqlx::encode::IsNull, Box<dyn std::error::Error + Send + Sync>> {
         let value = match self {
             TreeState::Open => String::from("open"),
             TreeState::Closed(priority) => format!("closed:{}", priority),
@@ -107,7 +110,6 @@ impl sqlx::Decode<'_, sqlx::Postgres> for TreeState {
         }
     }
 }
-
 
 /// Status of a GitHub build.
 #[derive(Debug, Clone, PartialEq, sqlx::Type)]

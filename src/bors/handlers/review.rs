@@ -133,7 +133,8 @@ pub(super) async fn command_tree_closed(
         deny_request(&repo_state, pr, author, PermissionType::Review).await?;
         return Ok(());
     };
-    db.update_repository_treeclosed(repo_state.repository(), priority).await?;
+    db.update_repository_treeclosed(repo_state.repository(), priority)
+        .await?;
     notify_of_tree_closed(&repo_state, pr, priority).await
 }
 
@@ -147,8 +148,9 @@ pub(super) async fn command_tree_open(
         deny_request(&repo_state, pr, author, PermissionType::Review).await?;
         return Ok(());
     }
-    
-    db.update_repository_treeclosed(repo_state.repository(), 0).await?;
+
+    db.update_repository_treeclosed(repo_state.repository(), 0)
+        .await?;
     notify_of_tree_open(&repo_state, pr).await
 }
 
@@ -168,10 +170,7 @@ async fn notify_of_tree_closed(
         .await
 }
 
-async fn notify_of_tree_open(
-    repo: &RepositoryState,
-    pr: &PullRequest,
-) -> anyhow::Result<()> {
+async fn notify_of_tree_open(repo: &RepositoryState, pr: &PullRequest) -> anyhow::Result<()> {
     repo.client
         .post_comment(
             pr.number,
@@ -286,13 +285,13 @@ PR will need to be re-approved."#,
 #[cfg(test)]
 mod tests {
     use crate::{
-        github::PullRequestNumber,
         database::TreeState,
+        github::PullRequestNumber,
+        permissions::PermissionType,
         tests::mocks::{
             default_pr_number, default_repo_name, run_test, BorsBuilder, BorsTester, Permissions,
             PullRequestChangeEvent, User, World,
         },
-        permissions::PermissionType,
     };
 
     #[sqlx::test]
@@ -547,10 +546,10 @@ PR will need to be re-approved."#,
 approve = ["+approved"]
 "#,
         );
-        repo.lock().permissions.users.insert(
-            User::default(),
-            vec![PermissionType::Review],
-        );
+        repo.lock()
+            .permissions
+            .users
+            .insert(User::default(), vec![PermissionType::Review]);
         world
     }
 
@@ -671,11 +670,13 @@ approve = ["+approved"]
             .world(world)
             .run_test(|mut tester| async {
                 // First ensure the tree is open
-                let repo_models = tester.db()
+                let repo_models = tester
+                    .db()
                     .get_repository_treeclosed(&default_repo_name())
                     .await?;
                 if repo_models.is_empty() {
-                    tester.db()
+                    tester
+                        .db()
                         .update_repository_treeclosed(&default_repo_name(), 0)
                         .await?;
                 }
@@ -685,14 +686,15 @@ approve = ["+approved"]
                     tester.get_comment().await?,
                     "Tree closed for PRs with priority less than 5"
                 );
-                
+
                 // Verify the treeclosed state in the database
-                let repo_models = tester.db()
+                let repo_models = tester
+                    .db()
                     .get_repository_treeclosed(&default_repo_name())
                     .await?;
                 let repo_model = repo_models.first().unwrap();
                 assert_eq!(repo_model.treeclosed, TreeState::Closed(5));
-                
+
                 Ok(tester)
             })
             .await;
