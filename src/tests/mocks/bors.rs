@@ -1,13 +1,13 @@
 use anyhow::Context;
-use std::collections::HashMap;
-use std::future::Future;
-use std::sync::Arc;
-
 use axum::Router;
 use parking_lot::lock_api::MappedMutexGuard;
 use parking_lot::{Mutex, MutexGuard, RawMutex};
 use serde::Serialize;
 use sqlx::PgPool;
+use std::collections::HashMap;
+use std::future::Future;
+use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::mpsc::Sender;
 use tokio::task::JoinHandle;
 use tower::Service;
@@ -349,6 +349,41 @@ impl BorsTester {
         )?;
         tracing::debug!("Received webhook with status {status} and response body `{body_text}`");
         Ok(())
+    }
+
+    /// Wait until the given condition is true.
+    /// Checks the condition every 500ms.
+    /// Times out if it takes too long (more than 5s).
+    ///
+    /// This method is useful if you execute a command that produces no comment as an output
+    /// and you need to wait until it has been processed by bors.
+    /// Prefer using [BorsTester::expect_comments] or [BorsTester::get_comment] to synchronize
+    /// if you are waiting for a comment to be posted to a PR.
+    pub async fn wait_for<F, Fut>(&self, condition: F) -> anyhow::Result<()>
+    where
+        F: Fn() -> Fut,
+        Fut: Future<Output = anyhow::Result<bool>>,
+    {
+        let wait_fut = async move {
+            loop {
+                let fut = condition();
+                match fut.await {
+                    Ok(res) => {
+                        if res {
+                            return Ok(());
+                        } else {
+                            tokio::time::sleep(Duration::from_millis(500)).await;
+                        }
+                    }
+                    Err(error) => {
+                        return Err(error);
+                    }
+                }
+            }
+        };
+        tokio::time::timeout(Duration::from_secs(5), wait_fut)
+            .await
+            .unwrap_or_else(|_| Err(anyhow::anyhow!("Timed out waiting for condition")))
     }
 
     pub async fn finish(self, bors: JoinHandle<()>) -> World {
