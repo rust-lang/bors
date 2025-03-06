@@ -51,7 +51,6 @@ impl CommandParser {
             parser_ping,
             parser_try_cancel,
             parser_try,
-            parse_tree_open,
             parse_tree_closed,
         ];
 
@@ -118,6 +117,20 @@ fn parse_parts(input: &str) -> Result<Vec<CommandPart>, CommandParseError> {
         // Stop parsing, as this is a command for another bot, such as `@rust-timer queue`.
         if item.starts_with('@') {
             break;
+        }
+
+        // Special handling for r- command
+        if item == "r-" {
+            parts.push(CommandPart::Bare("r-"));
+            continue;
+        }
+
+        // Handle commands with trailing hyphens (e.g., "treeclosed-")
+        if item.ends_with('-') && !item.contains('=') && item != "r-" {
+            let base = &item[..item.len() - 1];
+            parts.push(CommandPart::Bare(base));
+            parts.push(CommandPart::Bare("-"));
+            continue;
         }
 
         match item.split_once('=') {
@@ -328,39 +341,24 @@ fn parse_priority_arg<'a>(parts: &[CommandPart<'a>]) -> Result<Option<u32>, Comm
     Ok(priority)
 }
 
-fn parse_tree_open<'a>(command: &'a str, _parts: &[CommandPart<'a>]) -> ParseResult<'a> {
-    if command == "tree" && _parts.len() == 1 {
-        if let CommandPart::Bare("open") = _parts[0] {
-            return Some(Ok(BorsCommand::TreeOpen));
-        }
-    }
-    None
-}
-
 fn parse_tree_closed<'a>(command: &'a str, parts: &[CommandPart<'a>]) -> ParseResult<'a> {
-    // Handle both formats: "@bors treeclosed=5" and "@bors tree closed 5"
-    if command == "treeclosed" && parts.len() == 1 {
-        if let CommandPart::KeyValue { value, .. } = parts[0] {
-            match validate_priority(value) {
+    if command != "treeclosed" {
+        return None;
+    }
+
+    if parts.len() == 1 {
+        match parts[0] {
+            CommandPart::Bare("-") => Some(Ok(BorsCommand::TreeOpen)),
+            CommandPart::Bare(value) => Some(Err(CommandParseError::UnknownArg(value))),
+            CommandPart::KeyValue { value, .. } => match validate_priority(value) {
                 Ok(priority) => Some(Ok(BorsCommand::TreeClosed(priority))),
                 Err(e) => Some(Err(e)),
-            }
-        } else {
-            Some(Err(CommandParseError::MissingArgValue {
-                arg: "treeclosed",
-            }))
-        }
-    } else if command == "tree" && parts.len() == 2 {
-        if let (CommandPart::Bare("closed"), CommandPart::Bare(value)) = (parts[0], parts[1]) {
-            match validate_priority(value) {
-                Ok(priority) => Some(Ok(BorsCommand::TreeClosed(priority))),
-                Err(e) => Some(Err(e)),
-            }
-        } else {
-            None
+            },
         }
     } else {
-        None
+        Some(Err(CommandParseError::MissingArgValue {
+            arg: "treeclosed",
+        }))
     }
 }
 
@@ -865,14 +863,6 @@ line two
     }
 
     #[test]
-    fn parse_tree_open() {
-        let parser = CommandParser::new("@bors".to_string());
-        let commands = parser.parse_commands("@bors tree open");
-        assert_eq!(commands.len(), 1);
-        assert_eq!(commands[0], Ok(BorsCommand::TreeOpen));
-    }
-
-    #[test]
     fn parse_tree_closed() {
         let cmds = parse_commands("@bors treeclosed=5");
         assert_eq!(cmds.len(), 1);
@@ -896,6 +886,23 @@ line two
         assert!(matches!(
             cmds[0],
             Err(CommandParseError::MissingArgValue { arg: "treeclosed" })
+        ));
+    }
+
+    #[test]
+    fn parse_tree_closed_minus() {
+        let cmds = parse_commands("@bors treeclosed-");
+        assert_eq!(cmds.len(), 1);
+        assert_eq!(cmds[0], Ok(BorsCommand::TreeOpen));
+    }
+
+    #[test]
+    fn parse_tree_closed_unknown_command() {
+        let cmds = parse_commands("@bors tree closed 5");
+        assert_eq!(cmds.len(), 1);
+        assert!(matches!(
+            cmds[0],
+            Err(CommandParseError::UnknownCommand("tree"))
         ));
     }
 

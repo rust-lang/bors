@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT id, repo, treeclosed as \"treeclosed: TreeState\", treeclosed_src, created_at\n        FROM repo_model\n        WHERE repo = $1\n        ",
+  "query": "\n        SELECT id, name, COALESCE(treeclosed, 0) as \"treeclosed: TreeState\", treeclosed_src, created_at\n        FROM repository\n        WHERE name = $1\n        ",
   "describe": {
     "columns": [
       {
@@ -10,13 +10,13 @@
       },
       {
         "ordinal": 1,
-        "name": "repo",
+        "name": "name",
         "type_info": "Text"
       },
       {
         "ordinal": 2,
         "name": "treeclosed: TreeState",
-        "type_info": "Text"
+        "type_info": "Int4"
       },
       {
         "ordinal": 3,
@@ -37,10 +37,10 @@
     "nullable": [
       false,
       false,
-      false,
+      null,
       true,
       false
     ]
   },
-  "hash": "1a5c238c7eb428642f3029709a2ccdef294842d9b78e169e64b82018e3c76451"
+  "hash": "43ed886559298a4d88c3c4055f627a0034bf62fa2f70300970935b67ec389bb9"
 }

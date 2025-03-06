@@ -85,9 +85,6 @@ pub async fn handle_bors_repository_event(
                 return Err(error.context("Cannot perform command"));
             }
         }
-        BorsRepositoryEvent::TreeStateChanged(_) => {
-            // Tree state changes are handled by the queue processor
-        }
         BorsRepositoryEvent::WorkflowStarted(payload) => {
             let span = tracing::info_span!(
                 "Workflow started",

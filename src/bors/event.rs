@@ -1,4 +1,4 @@
-use crate::database::{TreeState, WorkflowStatus, WorkflowType};
+use crate::database::{WorkflowStatus, WorkflowType};
 use crate::github::{CommitSha, GithubRepoName, GithubUser, PullRequest, PullRequestNumber};
 use chrono::Duration;
 use octocrab::models::RunId;
@@ -18,8 +18,6 @@ pub enum BorsRepositoryEvent {
     /// A check suite has been completed, either as a workflow run on Github Actions, or as a
     /// workflow from some external CI system.
     CheckSuiteCompleted(CheckSuiteCompleted),
-    /// When a repository's tree state changes (open/closed)
-    TreeStateChanged(TreeStateChanged),
 }
 
 impl BorsRepositoryEvent {
@@ -31,7 +29,6 @@ impl BorsRepositoryEvent {
             BorsRepositoryEvent::WorkflowStarted(workflow) => &workflow.repository,
             BorsRepositoryEvent::WorkflowCompleted(workflow) => &workflow.repository,
             BorsRepositoryEvent::CheckSuiteCompleted(payload) => &payload.repository,
-            BorsRepositoryEvent::TreeStateChanged(payload) => &payload.repository,
         }
     }
 }
@@ -100,11 +97,4 @@ pub struct CheckSuiteCompleted {
     pub repository: GithubRepoName,
     pub branch: String,
     pub commit_sha: CommitSha,
-}
-
-#[derive(Debug)]
-pub struct TreeStateChanged {
-    pub repository: GithubRepoName,
-    pub tree_state: TreeState,
-    pub source: Option<String>,
 }

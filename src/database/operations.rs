@@ -384,9 +384,9 @@ pub(crate) async fn get_repository_treeclosed(
     let row = sqlx::query_as!(
         RepoModel,
         r#"
-        SELECT id, repo, treeclosed as "treeclosed: TreeState", treeclosed_src, created_at
-        FROM repo_model
-        WHERE repo = $1
+        SELECT id, name, COALESCE(treeclosed, 0) as "treeclosed: TreeState", treeclosed_src, created_at
+        FROM repository
+        WHERE name = $1
         "#,
         repo.to_string()
     )
@@ -405,9 +405,9 @@ pub(crate) async fn update_repository_treeclosed(
 ) -> anyhow::Result<()> {
     sqlx::query!(
         r#"
-        INSERT INTO repo_model (repo, treeclosed, treeclosed_src)
+        INSERT INTO repository (name, treeclosed, treeclosed_src)
         VALUES ($1, $2, $3)
-        ON CONFLICT (repo)
+        ON CONFLICT (name)
         DO UPDATE SET treeclosed = EXCLUDED.treeclosed, treeclosed_src = EXCLUDED.treeclosed_src
         "#,
         repo.to_string(),

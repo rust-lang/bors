@@ -83,31 +83,39 @@ impl sqlx::Type<sqlx::Postgres> for PullRequestNumber {
     }
 }
 
+impl sqlx::Type<sqlx::Postgres> for TreeState {
+    fn type_info() -> sqlx::postgres::PgTypeInfo {
+        <i32 as sqlx::Type<sqlx::Postgres>>::type_info()
+    }
+}
+
 impl sqlx::Encode<'_, sqlx::Postgres> for TreeState {
     fn encode_by_ref(
         &self,
         buf: &mut sqlx::postgres::PgArgumentBuffer,
     ) -> Result<sqlx::encode::IsNull, Box<dyn std::error::Error + Send + Sync>> {
-        let value = match self {
-            TreeState::Open => String::from("open"),
-            TreeState::Closed(priority) => format!("closed:{}", priority),
-        };
-        buf.extend(value.as_bytes());
-        Ok(sqlx::encode::IsNull::No)
+        match self {
+            TreeState::Open => Ok(sqlx::encode::IsNull::Yes),
+            TreeState::Closed(priority) => {
+                <i32 as sqlx::Encode<sqlx::Postgres>>::encode(*priority as i32, buf)
+            }
+        }
     }
 }
 
 impl sqlx::Decode<'_, sqlx::Postgres> for TreeState {
     fn decode(value: sqlx::postgres::PgValueRef<'_>) -> Result<Self, sqlx::error::BoxDynError> {
-        let value = <&str as sqlx::Decode<sqlx::Postgres>>::decode(value)?;
-        match value {
-            "open" => Ok(TreeState::Open),
-            value if value.starts_with("closed:") => {
-                let priority = value[7..].parse()?;
-                Ok(TreeState::Closed(priority))
-            }
-            _ => Err("invalid tree state".into()),
+        let priority = <Option<i32> as sqlx::Decode<sqlx::Postgres>>::decode(value)?;
+        match priority {
+            None => Ok(TreeState::Open),
+            Some(p) => Ok(TreeState::Closed(p as u32)),
         }
+    }
+}
+
+impl From<Option<TreeState>> for TreeState {
+    fn from(value: Option<TreeState>) -> Self {
+        value.unwrap_or(TreeState::Open)
     }
 }
 
@@ -203,16 +211,10 @@ pub enum TreeState {
     Closed(u32),
 }
 
-impl sqlx::Type<sqlx::Postgres> for TreeState {
-    fn type_info() -> sqlx::postgres::PgTypeInfo {
-        <String as sqlx::Type<sqlx::Postgres>>::type_info()
-    }
-}
-
 /// Represents a repository configuration.
 pub struct RepoModel {
     pub id: PrimaryKey,
-    pub repo: GithubRepoName,
+    pub name: GithubRepoName,
     pub treeclosed: TreeState,
     pub treeclosed_src: Option<String>,
     pub created_at: DateTime<Utc>,

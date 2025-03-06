@@ -1,16 +1,63 @@
-use crate::bors::command::Parent;
-use crate::bors::handlers::trybuild::command_try_build;
 use crate::bors::RepositoryState;
-use crate::database::{BuildStatus, PgDbClient, PullRequestModel, TreeState};
-use crate::github::{CommitSha, GithubRepoName, GithubUser};
+use crate::database::{PgDbClient, PullRequestModel, TreeState};
+use crate::github::GithubRepoName;
 use anyhow::Result;
-use octocrab::models::UserId;
-#[allow(dead_code)]
 use std::sync::Arc;
-use url::Url;
 
 use tracing::debug;
 
+/// Process the queue of pull requests for each repository
+#[allow(dead_code)]
+pub async fn process_queue(
+    states: &[(GithubRepoName, Vec<PullRequestModel>)],
+    repos: &[(GithubRepoName, Arc<RepositoryState>)],
+    db: Arc<PgDbClient>,
+) -> Result<()> {
+    for (repo_label, _repo_states) in states {
+        // Get repository state
+        let repo = repos
+            .iter()
+            .find(|(name, _)| name == repo_label)
+            .map(|(_, repo)| repo)
+            .ok_or_else(|| anyhow::anyhow!("Repository not found"))?;
+
+        debug!("process_queue: checking tree state for {}", repo_label);
+        let (tree_state, _) = blocked_by_closed_tree(repo, None, &db).await?;
+        debug!(
+            "process_queue: tree state for {} is {:?}",
+            repo_label, tree_state
+        );
+    }
+    Ok(())
+}
+
+/// Check if a PR is blocked by a closed tree
+pub async fn blocked_by_closed_tree(
+    repo: &RepositoryState,
+    priority: Option<i32>,
+    db: &PgDbClient,
+) -> Result<(Option<TreeState>, Option<String>)> {
+    let repo_models = db.get_repository_treeclosed(repo.repository()).await?;
+    let repo_model = repo_models
+        .first()
+        .ok_or_else(|| anyhow::anyhow!("No repository model found"))?;
+
+    Ok((
+        match repo_model.treeclosed {
+            TreeState::Open => None,
+            TreeState::Closed(threshold) => {
+                if priority.unwrap_or(0) < threshold as i32 {
+                    Some(repo_model.treeclosed)
+                } else {
+                    None
+                }
+            }
+        },
+        repo_model.treeclosed_src.clone(),
+    ))
+}
+
+/*
 #[derive(Debug, PartialEq, Clone)]
 #[allow(dead_code)]
 pub enum PrStatus {
@@ -36,72 +83,6 @@ impl PrStatus {
     }
 }
 
-/// Process the queue of pull requests for each repository
-#[allow(dead_code)]
-pub async fn process_queue(
-    states: &[(GithubRepoName, Vec<PullRequestModel>)],
-    repos: &[(GithubRepoName, Arc<RepositoryState>)],
-    db: Arc<PgDbClient>,
-) -> Result<()> {
-    for (repo_label, repo_states) in states {
-        // Get repository state
-        let repo = repos
-            .iter()
-            .find(|(name, _)| name == repo_label)
-            .map(|(_, repo)| repo)
-            .ok_or_else(|| anyhow::anyhow!("Repository not found"))?;
-
-        // Sort states by priority
-        let mut repo_states = repo_states.to_vec();
-        repo_states.sort_by(|a, b| a.priority.cmp(&b.priority));
-
-        for state in repo_states.iter() {
-            debug!("process_queue: state={:?}, building {}", state, repo_label);
-
-            let (tree_state, _) = blocked_by_closed_tree(repo, state.priority, &db).await?;
-            if let Some(TreeState::Closed(_)) = tree_state {
-                continue;
-            }
-
-            // Determine PR status
-            let status = determine_pr_status(state);
-
-            match status {
-                PrStatus::Pending => {
-                    if state.try_build.is_none() {
-                        break;
-                    }
-                }
-                PrStatus::Success => {
-                    if state.try_build.is_some() {
-                        break;
-                    }
-                }
-                PrStatus::Empty => {
-                    if state.approved_by.is_some()
-                        && start_build_or_rebuild(state, repo, &db).await?
-                    {
-                        return Ok(());
-                    }
-                }
-                PrStatus::Error | PrStatus::Failure => {}
-                PrStatus::Approved => {}
-            }
-        }
-
-        // Process try builds
-        for state in repo_states.iter() {
-            if state.try_build.is_some()
-                && state.approved_by.is_none()
-                && start_build(state, repo, &db).await?
-            {
-                return Ok(());
-            }
-        }
-    }
-    Ok(())
-}
-
 #[allow(dead_code)]
 fn determine_pr_status(pr: &PullRequestModel) -> PrStatus {
     if let Some(build) = &pr.try_build {
@@ -117,33 +98,6 @@ fn determine_pr_status(pr: &PullRequestModel) -> PrStatus {
     } else {
         PrStatus::Empty
     }
-}
-
-/// Check if a PR is blocked by a closed tree
-#[allow(dead_code)]
-pub async fn blocked_by_closed_tree(
-    repo: &RepositoryState,
-    priority: Option<i32>,
-    db: &PgDbClient,
-) -> Result<(Option<TreeState>, Option<String>)> {
-    let repo_models = db.get_repository_treeclosed(repo.repository()).await?;
-    let repo_model = repo_models
-        .first()
-        .ok_or_else(|| anyhow::anyhow!("No repository model found"))?;
-
-    Ok((
-        match repo_model.treeclosed {
-            TreeState::Open => None,
-            TreeState::Closed(threshold) => {
-                if priority.unwrap_or(0) < threshold as i32 {
-                    Some(repo_model.treeclosed)
-                } else {
-                    None
-                }
-            }
-        },
-        repo_model.treeclosed_src.clone(),
-    ))
 }
 
 /// Starts a fresh build for a pull request
@@ -204,3 +158,4 @@ async fn start_build_or_rebuild(
 
     start_build(state, repo, db).await
 }
+*/
