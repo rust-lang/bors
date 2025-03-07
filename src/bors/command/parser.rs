@@ -148,8 +148,6 @@ fn parse_parts(input: &str) -> Result<Vec<CommandPart>, CommandParseError> {
     Ok(parts)
 }
 
-/// Parsers
-
 /// Parses "@bors r+ <p=priority> <rollup=[never/iffy/maybe/always]>"
 fn parse_self_approve<'a>(command: &'a str, parts: &[CommandPart<'a>]) -> ParseResult<'a> {
     if command != "r+" {
