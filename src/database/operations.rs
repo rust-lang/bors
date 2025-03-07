@@ -53,7 +53,7 @@ WHERE pr.repository = $1
     )
     .fetch_optional(executor)
     .await?;
-    Ok(pull_request.map(Into::into))
+    Ok(pull_request)
 }
 
 pub(crate) async fn create_pull_request(

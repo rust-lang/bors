@@ -381,13 +381,13 @@ fn parse_priority_rollup_arg<'a>(
     Ok((priority, rollup_status.unwrap_or("maybe".to_string())))
 }
 
-fn parse_rollup_bare_helper<'a>(arg: &'a str) -> Result<&'a str, CommandParseError<'a>> {
+fn parse_rollup_bare_helper(arg: &str) -> Result<&str, CommandParseError<'_>> {
     if arg == "rollup" {
         return Ok("always");
     } else if arg == "rollup-" {
         return Ok("maybe");
     }
-    return Err(CommandParseError::UnknownArg(arg));
+    Err(CommandParseError::UnknownArg(arg))
 }
 
 /// Parses "rollup=<never/iffy/maybe/always>"
