@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use octocrab::Octocrab;
-use review::{command_delegate, command_set_priority, command_undelegate, command_set_rollup};
+use review::{command_delegate, command_set_priority, command_set_rollup, command_undelegate};
 use tracing::Instrument;
 
 use crate::bors::command::{BorsCommand, CommandParseError};
