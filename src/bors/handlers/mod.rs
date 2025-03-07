@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use octocrab::Octocrab;
-use review::command_set_priority;
+use review::{command_delegate, command_set_priority, command_undelegate};
 use tracing::Instrument;
 
 use crate::bors::command::{BorsCommand, CommandParseError};
@@ -18,6 +18,8 @@ use crate::bors::handlers::workflow::{
     handle_check_suite_completed, handle_workflow_completed, handle_workflow_started,
 };
 use crate::bors::{BorsContext, Comment, RepositoryState};
+use crate::github::{GithubUser, PullRequest};
+use crate::permissions::PermissionType;
 use crate::{load_repositories, PgDbClient, TeamApiClient};
 
 #[cfg(test)]
@@ -237,6 +239,18 @@ async fn handle_comment(
                         .instrument(span)
                         .await
                     }
+                    BorsCommand::Delegate => {
+                        let span = tracing::info_span!("Delegate");
+                        command_delegate(repo, database, &pull_request, &comment.author)
+                            .instrument(span)
+                            .await
+                    }
+                    BorsCommand::Undelegate => {
+                        let span = tracing::info_span!("Undelegate");
+                        command_undelegate(repo, database, &pull_request, &comment.author)
+                            .instrument(span)
+                            .await
+                    }
                     BorsCommand::Help => {
                         let span = tracing::info_span!("Help");
                         command_help(repo, &pull_request).instrument(span).await
@@ -332,6 +346,52 @@ async fn reload_repos(
 /// Is this branch interesting for the bot?
 fn is_bors_observed_branch(branch: &str) -> bool {
     branch == TRY_BRANCH_NAME
+}
+
+/// Deny permission for a request.
+async fn deny_request(
+    repo: &RepositoryState,
+    pr: &PullRequest,
+    author: &GithubUser,
+    permission_type: PermissionType,
+) -> anyhow::Result<()> {
+    tracing::warn!(
+        "Permission denied for request command by {}",
+        author.username
+    );
+    repo.client
+        .post_comment(
+            pr.number,
+            Comment::new(format!(
+                "@{}: :key: Insufficient privileges: not in {} users",
+                author.username, permission_type
+            )),
+        )
+        .await
+}
+
+/// Check if a user has specified permission or has been delegated.
+async fn has_permission(
+    repo_state: &RepositoryState,
+    author: &GithubUser,
+    pr: &PullRequest,
+    db: &PgDbClient,
+    permission: PermissionType,
+) -> anyhow::Result<bool> {
+    if repo_state
+        .permissions
+        .load()
+        .has_permission(author.id, permission.clone())
+    {
+        return Ok(true);
+    }
+
+    let pr_model = db
+        .get_or_create_pull_request(repo_state.repository(), pr.number)
+        .await?;
+    let is_delegated = pr_model.delegated && author.id == pr.author.id;
+
+    Ok(is_delegated)
 }
 
 #[cfg(test)]

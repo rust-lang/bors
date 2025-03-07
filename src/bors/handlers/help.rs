@@ -19,6 +19,8 @@ pub(super) async fn command_help(
         },
         BorsCommand::Unapprove,
         BorsCommand::SetPriority(0),
+        BorsCommand::Delegate,
+        BorsCommand::Undelegate,
         BorsCommand::Try {
             parent: None,
             jobs: vec![],
@@ -53,6 +55,12 @@ fn get_command_help(command: BorsCommand) -> String {
         BorsCommand::SetPriority(_) => {
             "`p=<priority>`: Set the priority of this PR"
         }
+        BorsCommand::Delegate => {
+            "`delegate+`: Delegate approval authority to the PR author"
+        }
+        BorsCommand::Undelegate => {
+            "`delegate-`: Remove any previously granted delegation"
+        }
         BorsCommand::Help => {
             "`help`: Print this help message"
         }
@@ -82,6 +90,8 @@ mod tests {
             - `r=<user> [p=<priority>]`: Approve this PR on behalf of `<user>`. Optionally, you can specify a `<priority>`.
             - `r-`: Unapprove this PR
             - `p=<priority>`: Set the priority of this PR
+            - `delegate+`: Delegate approval authority to the PR author
+            - `delegate-`: Remove any previously granted delegation
             - `try [parent=<parent>] [jobs=<jobs>]`: Start a try build. Optionally, you can specify a `<parent>` SHA or a list of `<jobs>` to run
             - `try cancel`: Cancel a running try build
             - `ping`: Check if the bot is alive

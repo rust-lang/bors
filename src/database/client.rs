@@ -7,10 +7,10 @@ use crate::github::PullRequestNumber;
 use crate::github::{CommitSha, GithubRepoName};
 
 use super::operations::{
-    approve_pull_request, create_build, create_pull_request, create_workflow, find_build,
-    find_pr_by_build, get_pull_request, get_running_builds, get_workflows_for_build,
-    set_pr_priority, unapprove_pull_request, update_build_status, update_pr_build_id,
-    update_workflow_status,
+    approve_pull_request, create_build, create_pull_request, create_workflow,
+    delegate_pull_request, find_build, find_pr_by_build, get_pull_request, get_running_builds,
+    get_workflows_for_build, set_pr_priority, unapprove_pull_request, undelegate_pull_request,
+    update_build_status, update_pr_build_id, update_workflow_status,
 };
 use super::RunId;
 
@@ -53,6 +53,24 @@ impl PgDbClient {
     ) -> anyhow::Result<()> {
         let pr = self.get_or_create_pull_request(repo, pr_number).await?;
         set_pr_priority(&self.pool, pr.id, priority).await
+    }
+
+    pub async fn delegate(
+        &self,
+        repo: &GithubRepoName,
+        pr_number: PullRequestNumber,
+    ) -> anyhow::Result<()> {
+        let pr = self.get_or_create_pull_request(repo, pr_number).await?;
+        delegate_pull_request(&self.pool, pr.id).await
+    }
+
+    pub async fn undelegate(
+        &self,
+        repo: &GithubRepoName,
+        pr_number: PullRequestNumber,
+    ) -> anyhow::Result<()> {
+        let pr = self.get_or_create_pull_request(repo, pr_number).await?;
+        undelegate_pull_request(&self.pool, pr.id).await
     }
 
     pub async fn get_or_create_pull_request(

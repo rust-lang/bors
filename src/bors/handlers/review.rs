@@ -3,6 +3,8 @@ use std::sync::Arc;
 use crate::bors::command::Approver;
 use crate::bors::event::PullRequestEdited;
 use crate::bors::event::PullRequestPushed;
+use crate::bors::handlers::deny_request;
+use crate::bors::handlers::has_permission;
 use crate::bors::handlers::labels::handle_label_trigger;
 use crate::bors::Comment;
 use crate::bors::RepositoryState;
@@ -25,7 +27,7 @@ pub(super) async fn command_approve(
     priority: Option<u32>,
 ) -> anyhow::Result<()> {
     tracing::info!("Approving PR {}", pr.number);
-    if !sufficient_approve_permission(repo_state.clone(), author) {
+    if !has_permission(&repo_state, author, pr, &db, PermissionType::Review).await? {
         deny_request(&repo_state, pr, author, PermissionType::Review).await?;
         return Ok(());
     };
@@ -53,7 +55,7 @@ pub(super) async fn command_unapprove(
     author: &GithubUser,
 ) -> anyhow::Result<()> {
     tracing::info!("Unapproving PR {}", pr.number);
-    if !sufficient_unapprove_permission(repo_state.clone(), pr, author) {
+    if !has_permission(&repo_state, author, pr, &db, PermissionType::Review).await? {
         deny_request(&repo_state, pr, author, PermissionType::Review).await?;
         return Ok(());
     };
@@ -71,12 +73,45 @@ pub(super) async fn command_set_priority(
     author: &GithubUser,
     priority: u32,
 ) -> anyhow::Result<()> {
-    if !sufficient_priority_permission(repo_state.clone(), author) {
+    if !has_permission(&repo_state, author, pr, &db, PermissionType::Review).await? {
         deny_request(&repo_state, pr, author, PermissionType::Review).await?;
         return Ok(());
     };
     db.set_priority(repo_state.repository(), pr.number, priority)
         .await
+}
+
+/// Delegate approval authority of a pull request to its author.
+pub(super) async fn command_delegate(
+    repo_state: Arc<RepositoryState>,
+    db: Arc<PgDbClient>,
+    pr: &PullRequest,
+    author: &GithubUser,
+) -> anyhow::Result<()> {
+    tracing::info!("Delegating PR {} approval", pr.number);
+    if !sufficient_delegate_permission(repo_state.clone(), author) {
+        deny_request(&repo_state, pr, author, PermissionType::Review).await?;
+        return Ok(());
+    }
+
+    let delegatee = pr.author.username.clone();
+    db.delegate(repo_state.repository(), pr.number).await?;
+    notify_of_delegation(&repo_state, pr, &delegatee).await
+}
+
+/// Revoke any previously granted delegation.
+pub(super) async fn command_undelegate(
+    repo_state: Arc<RepositoryState>,
+    db: Arc<PgDbClient>,
+    pr: &PullRequest,
+    author: &GithubUser,
+) -> anyhow::Result<()> {
+    tracing::info!("Undelegating PR {} approval", pr.number);
+    if !has_permission(&repo_state, author, pr, &db, PermissionType::Review).await? {
+        deny_request(&repo_state, pr, author, PermissionType::Review).await?;
+        return Ok(());
+    }
+    db.undelegate(repo_state.repository(), pr.number).await
 }
 
 pub(super) async fn handle_pull_request_edited(
@@ -122,13 +157,7 @@ pub(super) async fn handle_push_to_pull_request(
     notify_of_pushed_pr(&repo_state, pr_number, pr.head.sha.clone()).await
 }
 
-fn sufficient_approve_permission(repo: Arc<RepositoryState>, author: &GithubUser) -> bool {
-    repo.permissions
-        .load()
-        .has_permission(author.id, PermissionType::Review)
-}
-
-fn sufficient_priority_permission(repo: Arc<RepositoryState>, author: &GithubUser) -> bool {
+fn sufficient_delegate_permission(repo: Arc<RepositoryState>, author: &GithubUser) -> bool {
     repo.permissions
         .load()
         .has_permission(author.id, PermissionType::Review)
@@ -145,39 +174,6 @@ async fn notify_of_approval(
             Comment::new(format!(
                 "Commit {} has been approved by `{}`",
                 pr.head.sha, approver
-            )),
-        )
-        .await
-}
-
-fn sufficient_unapprove_permission(
-    repo: Arc<RepositoryState>,
-    pr: &PullRequest,
-    author: &GithubUser,
-) -> bool {
-    author.id == pr.author.id
-        || repo
-            .permissions
-            .load()
-            .has_permission(author.id, PermissionType::Review)
-}
-
-async fn deny_request(
-    repo: &RepositoryState,
-    pr: &PullRequest,
-    author: &GithubUser,
-    permission_type: PermissionType,
-) -> anyhow::Result<()> {
-    tracing::warn!(
-        "Permission denied for request command by {}",
-        author.username
-    );
-    repo.client
-        .post_comment(
-            pr.number,
-            Comment::new(format!(
-                "@{}: :key: Insufficient privileges: not in {} users",
-                author.username, permission_type
             )),
         )
         .await
@@ -225,13 +221,28 @@ PR will need to be re-approved."#,
         .await
 }
 
+async fn notify_of_delegation(
+    repo: &RepositoryState,
+    pr: &PullRequest,
+    delegatee: &str,
+) -> anyhow::Result<()> {
+    repo.client
+        .post_comment(
+            pr.number,
+            Comment::new(format!("@{} can now approve this pull request", delegatee)),
+        )
+        .await
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{
+        bors::handlers::{trybuild::TRY_MERGE_BRANCH_NAME, TRY_BRANCH_NAME},
         github::PullRequestNumber,
+        permissions::PermissionType,
         tests::mocks::{
-            default_pr_number, default_repo_name, run_test, BorsBuilder, BorsTester, Permissions,
-            PullRequestChangeEvent, User, World,
+            default_pr_number, default_repo_name, run_test, BorsBuilder, BorsTester, Comment,
+            Permissions, PullRequestChangeEvent, User, World,
         },
     };
 
@@ -602,5 +613,285 @@ approve = ["+approved"]
             Ok(tester)
         })
         .await;
+    }
+
+    fn reviewer() -> User {
+        User::new(10, "reviewer")
+    }
+
+    fn as_reviewer(text: &str) -> Comment {
+        Comment::from(text).with_author(reviewer())
+    }
+
+    fn create_world_with_delegate_config() -> World {
+        let world = World::default();
+        world.default_repo().lock().set_config(
+            r#"
+[labels]
+approve = ["+approved"]
+"#,
+        );
+        world.default_repo().lock().permissions = Permissions::default();
+        world
+            .default_repo()
+            .lock()
+            .permissions
+            .users
+            .insert(reviewer(), vec![PermissionType::Review]);
+
+        world
+    }
+
+    #[sqlx::test]
+    async fn delegate_author(pool: sqlx::PgPool) {
+        BorsBuilder::new(pool)
+            .world(create_world_with_delegate_config())
+            .run_test(|mut tester| async {
+                tester.post_comment(as_reviewer("@bors delegate+")).await?;
+                assert_eq!(
+                    tester.get_comment().await?,
+                    format!(
+                        "@{} can now approve this pull request",
+                        User::default().name
+                    )
+                );
+
+                let pr = tester.get_default_pr().await?;
+                assert!(pr.delegated);
+                Ok(tester)
+            })
+            .await;
+    }
+
+    #[sqlx::test]
+    async fn delegatee_can_approve(pool: sqlx::PgPool) {
+        BorsBuilder::new(pool)
+            .world(create_world_with_delegate_config())
+            .run_test(|mut tester| async {
+                tester.post_comment(as_reviewer("@bors delegate+")).await?;
+                tester.expect_comments(1).await;
+
+                tester.post_comment("@bors r+").await?;
+                tester.expect_comments(1).await;
+
+                check_pr_approved_by(&tester, default_pr_number().into(), &User::default().name)
+                    .await;
+                Ok(tester)
+            })
+            .await;
+    }
+
+    #[sqlx::test]
+    async fn delegatee_can_try(pool: sqlx::PgPool) {
+        let world = BorsBuilder::new(pool)
+            .world(create_world_with_delegate_config())
+            .run_test(|mut tester| async {
+                tester.post_comment(as_reviewer("@bors delegate+")).await?;
+                tester.expect_comments(1).await;
+
+                tester.post_comment("@bors try").await?;
+                tester.expect_comments(1).await;
+
+                Ok(tester)
+            })
+            .await;
+        world.check_sha_history(
+            default_repo_name(),
+            TRY_MERGE_BRANCH_NAME,
+            &["main-sha1", "merge-main-sha1-pr-1-sha-0"],
+        );
+        world.check_sha_history(
+            default_repo_name(),
+            TRY_BRANCH_NAME,
+            &["merge-main-sha1-pr-1-sha-0"],
+        );
+    }
+
+    #[sqlx::test]
+    async fn delegatee_can_set_priority(pool: sqlx::PgPool) {
+        BorsBuilder::new(pool)
+            .world(create_world_with_delegate_config())
+            .run_test(|mut tester| async {
+                tester.post_comment(as_reviewer("@bors delegate+")).await?;
+                tester.expect_comments(1).await;
+
+                tester.post_comment("@bors p=7").await?;
+                tester
+                    .wait_for(|| async {
+                        let pr = tester.get_default_pr().await?;
+                        Ok(pr.priority == Some(7))
+                    })
+                    .await?;
+
+                Ok(tester)
+            })
+            .await;
+    }
+
+    #[sqlx::test]
+    async fn delegate_insufficient_permission(pool: sqlx::PgPool) {
+        BorsBuilder::new(pool)
+            .world(create_world_with_delegate_config())
+            .run_test(|mut tester| async {
+                tester.post_comment("@bors delegate+").await?;
+                assert_eq!(
+                    tester.get_comment().await?,
+                    format!(
+                        "@{}: :key: Insufficient privileges: not in review users",
+                        User::default().name
+                    )
+                );
+
+                let pr = tester.get_default_pr().await?;
+                assert!(!pr.delegated);
+                Ok(tester)
+            })
+            .await;
+    }
+
+    #[sqlx::test]
+    async fn undelegate_by_reviewer(pool: sqlx::PgPool) {
+        BorsBuilder::new(pool)
+            .world(create_world_with_delegate_config())
+            .run_test(|mut tester| async {
+                tester.post_comment(as_reviewer("@bors delegate+")).await?;
+                tester.expect_comments(1).await;
+
+                let pr = tester.get_default_pr().await?;
+                assert!(pr.delegated);
+
+                tester.post_comment(as_reviewer("@bors delegate-")).await?;
+                tester
+                    .wait_for(|| async {
+                        let pr = tester.get_default_pr().await?;
+                        Ok(!pr.delegated)
+                    })
+                    .await?;
+
+                Ok(tester)
+            })
+            .await;
+    }
+
+    #[sqlx::test]
+    async fn undelegate_by_delegatee(pool: sqlx::PgPool) {
+        BorsBuilder::new(pool)
+            .world(create_world_with_delegate_config())
+            .run_test(|mut tester| async {
+                tester.post_comment(as_reviewer("@bors delegate+")).await?;
+                tester.expect_comments(1).await;
+
+                tester.post_comment("@bors delegate-").await?;
+                tester
+                    .wait_for(|| async {
+                        let pr = tester.get_default_pr().await?;
+                        Ok(!pr.delegated)
+                    })
+                    .await?;
+
+                Ok(tester)
+            })
+            .await;
+    }
+
+    #[sqlx::test]
+    async fn undelegate_insufficient_permission(pool: sqlx::PgPool) {
+        BorsBuilder::new(pool)
+            .world(create_world_with_delegate_config())
+            .run_test(|mut tester| async {
+                tester.post_comment("@bors delegate-").await?;
+                assert_eq!(
+                    tester.get_comment().await?,
+                    format!(
+                        "@{}: :key: Insufficient privileges: not in review users",
+                        User::default().name
+                    )
+                    .as_str()
+                );
+
+                let pr = tester.get_default_pr().await?;
+                assert!(!pr.delegated);
+                Ok(tester)
+            })
+            .await;
+    }
+
+    #[sqlx::test]
+    async fn reviewer_unapprove_delegated_approval(pool: sqlx::PgPool) {
+        BorsBuilder::new(pool)
+            .world(create_world_with_delegate_config())
+            .run_test(|mut tester| async {
+                tester.post_comment(as_reviewer("@bors delegate+")).await?;
+                tester.expect_comments(1).await;
+
+                tester
+                    .post_comment(Comment::from("@bors r+").with_author(User::default()))
+                    .await?;
+                tester.expect_comments(1).await;
+                check_pr_approved_by(&tester, default_pr_number().into(), &User::default().name)
+                    .await;
+
+                tester.post_comment(as_reviewer("@bors r-")).await?;
+                tester.expect_comments(1).await;
+
+                let pr = tester.get_default_pr().await?;
+                assert!(!pr.is_approved());
+
+                Ok(tester)
+            })
+            .await;
+    }
+
+    #[sqlx::test]
+    async fn non_author_cannot_use_delegation(pool: sqlx::PgPool) {
+        BorsBuilder::new(pool)
+            .world(create_world_with_delegate_config())
+            .run_test(|mut tester| async {
+                tester.post_comment(as_reviewer("@bors delegate+")).await?;
+                tester.expect_comments(1).await;
+
+                tester
+                    .post_comment(
+                        Comment::from("@bors r+").with_author(User::new(999, "not-the-author")),
+                    )
+                    .await?;
+                tester.expect_comments(1).await;
+
+                let pr = tester.get_default_pr().await?;
+                assert!(!pr.is_approved());
+
+                Ok(tester)
+            })
+            .await;
+    }
+
+    #[sqlx::test]
+    async fn delegate_insufficient_permission_try_user(pool: sqlx::PgPool) {
+        let world = World::default();
+        let try_user = User::new(200, "try-user");
+        world.default_repo().lock().permissions = Permissions::default();
+        world
+            .default_repo()
+            .lock()
+            .permissions
+            .users
+            .insert(try_user.clone(), vec![PermissionType::Try]);
+
+        BorsBuilder::new(pool)
+            .world(world)
+            .run_test(|mut tester| async {
+                tester
+                    .post_comment(Comment::from("@bors delegate+").with_author(try_user))
+                    .await?;
+                assert_eq!(
+                    tester.get_comment().await?,
+                    "@try-user: :key: Insufficient privileges: not in review users"
+                );
+
+                let pr = tester.get_default_pr().await?;
+                assert!(!pr.delegated);
+                Ok(tester)
+            })
+            .await;
     }
 }

@@ -51,6 +51,8 @@ impl CommandParser {
             parser_ping,
             parser_try_cancel,
             parser_try,
+            parse_delegate_author,
+            parse_undelegate,
         ];
 
         text.lines()
@@ -152,6 +154,7 @@ fn parse_approve_on_behalf<'a>(parts: &[CommandPart<'a>]) -> ParseResult<'a> {
         if value.is_empty() {
             return Some(Err(CommandParseError::MissingArgValue { arg: "r" }));
         }
+
         match parse_priority_arg(&parts[1..]) {
             Ok(priority) => Some(Ok(BorsCommand::Approve {
                 approver: Approver::Specified(value.to_string()),
@@ -265,6 +268,24 @@ fn parser_try<'a>(command: &'a str, parts: &[CommandPart<'a>]) -> ParseResult<'a
 fn parser_try_cancel<'a>(command: &'a str, parts: &[CommandPart<'a>]) -> ParseResult<'a> {
     if command == "try" && parts.first() == Some(&CommandPart::Bare("cancel")) {
         Some(Ok(BorsCommand::TryCancel))
+    } else {
+        None
+    }
+}
+
+/// Parses "@bors delegate+"
+fn parse_delegate_author<'a>(command: &'a str, _parts: &[CommandPart<'a>]) -> ParseResult<'a> {
+    if command == "delegate+" {
+        Some(Ok(BorsCommand::Delegate))
+    } else {
+        None
+    }
+}
+
+/// Parses "@bors delegate-"
+fn parse_undelegate<'a>(command: &'a str, _parts: &[CommandPart<'a>]) -> ParseResult<'a> {
+    if command == "delegate-" {
+        Some(Ok(BorsCommand::Undelegate))
     } else {
         None
     }
@@ -819,6 +840,27 @@ line two
         let cmds = parse_commands("@bors try cancel");
         assert_eq!(cmds.len(), 1);
         assert!(matches!(cmds[0], Ok(BorsCommand::TryCancel)));
+    }
+
+    #[test]
+    fn parse_delegate_author() {
+        let cmds = parse_commands("@bors delegate+");
+        assert_eq!(cmds.len(), 1);
+        assert!(matches!(cmds[0], Ok(BorsCommand::Delegate)));
+    }
+
+    #[test]
+    fn parse_undelegate() {
+        let cmds = parse_commands("@bors delegate-");
+        assert_eq!(cmds.len(), 1);
+        assert_eq!(cmds[0], Ok(BorsCommand::Undelegate));
+    }
+
+    #[test]
+    fn parse_delegate_author_unknown_arg() {
+        let cmds = parse_commands("@bors delegate+ a");
+        assert_eq!(cmds.len(), 1);
+        assert_eq!(cmds[0], Ok(BorsCommand::Delegate));
     }
 
     fn parse_commands(text: &str) -> Vec<Result<BorsCommand, CommandParseError>> {

@@ -28,6 +28,7 @@ SELECT
     pr.number,
     pr.approved_by,
     pr.priority,
+    pr.delegated,
     CASE WHEN pr.build_id IS NULL
         THEN NULL
         ELSE (
@@ -101,6 +102,32 @@ pub(crate) async fn unapprove_pull_request(
     Ok(())
 }
 
+pub(crate) async fn delegate_pull_request(
+    executor: impl PgExecutor<'_>,
+    pr_id: i32,
+) -> anyhow::Result<()> {
+    sqlx::query!(
+        "UPDATE pull_request SET delegated = TRUE WHERE id = $1",
+        pr_id,
+    )
+    .execute(executor)
+    .await?;
+    Ok(())
+}
+
+pub(crate) async fn undelegate_pull_request(
+    executor: impl PgExecutor<'_>,
+    pr_id: i32,
+) -> anyhow::Result<()> {
+    sqlx::query!(
+        "UPDATE pull_request SET delegated = FALSE WHERE id = $1",
+        pr_id
+    )
+    .execute(executor)
+    .await?;
+    Ok(())
+}
+
 pub(crate) async fn find_pr_by_build(
     executor: impl PgExecutor<'_>,
     build_id: i32,
@@ -114,6 +141,7 @@ SELECT
     pr.number,
     pr.approved_by,
     pr.priority,
+    pr.delegated,
     CASE WHEN pr.build_id IS NULL
         THEN NULL
         ELSE (
