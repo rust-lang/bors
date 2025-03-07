@@ -16,6 +16,18 @@ impl User {
         Self::new(102, "bors-bot")
     }
 
+    pub fn unprivileged() -> Self {
+        Self::new(103, "unprivileged-user")
+    }
+
+    pub fn try_user() -> Self {
+        Self::new(104, "try-user")
+    }
+
+    pub fn reviewer() -> Self {
+        Self::new(105, "reviewer")
+    }
+
     pub fn new(id: u64, name: &str) -> Self {
         Self {
             github_id: id,

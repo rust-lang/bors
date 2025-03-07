@@ -297,38 +297,33 @@ mod tests {
 
     #[sqlx::test]
     async fn insufficient_permission_approve(pool: sqlx::PgPool) {
-        let world = World::default();
-        world.default_repo().lock().permissions = Permissions::default();
-
-        BorsBuilder::new(pool)
-            .world(world)
-            .run_test(|mut tester| async {
-                tester.post_comment("@bors try").await?;
-                assert_eq!(
-                    tester.get_comment().await?,
-                    "@default-user: :key: Insufficient privileges: not in try users"
-                );
-                Ok(tester)
-            })
-            .await;
+        run_test(pool, |mut tester| async {
+            tester
+                .post_comment(Comment::from("@bors try").with_author(User::unprivileged()))
+                .await?;
+            assert_eq!(
+                tester.get_comment().await?,
+                "@unprivileged-user: :key: Insufficient privileges: not in try users"
+            );
+            Ok(tester)
+        })
+        .await;
     }
 
     #[sqlx::test]
     async fn insufficient_permission_set_priority(pool: sqlx::PgPool) {
-        let world = World::default();
-        world.default_repo().lock().permissions = Permissions::default();
-
-        BorsBuilder::new(pool)
-            .world(world)
-            .run_test(|mut tester| async {
-                tester.post_comment("@bors p=2").await?;
-                assert_eq!(
-                    tester.get_comment().await?,
-                    "@default-user: :key: Insufficient privileges: not in review users"
-                );
-                Ok(tester)
-            })
-            .await;
+        run_test(pool, |mut tester| async {
+            tester
+                .post_comment(Comment::from("@bors p=2").with_author(User::unprivileged()))
+                .await?;
+            tester.post_comment("@bors p=2").await?;
+            assert_eq!(
+                tester.get_comment().await?,
+                "@unprivileged-user: :key: Insufficient privileges: not in review users"
+            );
+            Ok(tester)
+        })
+        .await;
     }
 
     #[sqlx::test]
