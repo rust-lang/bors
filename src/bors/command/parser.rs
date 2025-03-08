@@ -20,7 +20,7 @@ pub enum CommandParseError<'a> {
 }
 
 /// Part of a command, either a bare string like `try` or a key value like `parent=<sha>`.
-#[derive(PartialEq)]
+#[derive(PartialEq, Copy, Clone)]
 enum CommandPart<'a> {
     Bare(&'a str),
     KeyValue { key: &'a str, value: &'a str },
@@ -53,6 +53,8 @@ impl CommandParser {
             parser_try,
             parse_delegate_author,
             parse_undelegate,
+            parse_tree_closed,
+            parse_tree_open,
         ];
 
         text.lines()
@@ -84,6 +86,12 @@ impl CommandParser {
 
                                         if PRIORITY_NAMES.contains(&key) {
                                             if let Some(result) = parse_priority(&parts) {
+                                                return Some(result);
+                                            }
+                                        }
+
+                                        if key == "treeclosed" {
+                                            if let Some(result) = parse_tree_closed(key, &parts) {
                                                 return Some(result);
                                             }
                                         }
@@ -132,7 +140,6 @@ fn parse_parts(input: &str) -> Result<Vec<CommandPart>, CommandParseError> {
 }
 
 /// Parsers
-
 /// Parses "@bors r+ <p=priority>"
 fn parse_self_approve<'a>(command: &'a str, parts: &[CommandPart<'a>]) -> ParseResult<'a> {
     if command != "r+" {
@@ -340,6 +347,37 @@ fn parse_priority_arg<'a>(parts: &[CommandPart<'a>]) -> Result<Option<u32>, Comm
     }
 
     Ok(priority)
+}
+
+/// Parses "@bors treeclosed-"
+fn parse_tree_open<'a>(command: &'a str, _parts: &[CommandPart<'a>]) -> ParseResult<'a> {
+    if command != "treeclosed-" {
+        return None;
+    }
+    Some(Ok(BorsCommand::TreeOpen))
+}
+
+/// Parses "@bors treeclosed=<priority>"
+fn parse_tree_closed<'a>(command: &'a str, parts: &[CommandPart<'a>]) -> ParseResult<'a> {
+    if command != "treeclosed" {
+        return None;
+    }
+
+    if parts.len() == 1 {
+        match parts {
+            [CommandPart::KeyValue { value, .. }] => match validate_priority(value) {
+                Ok(priority) => Some(Ok(BorsCommand::TreeClosed(priority))),
+                Err(e) => Some(Err(e)),
+            },
+            _ => Some(Err(CommandParseError::MissingArgValue {
+                arg: "treeclosed",
+            })),
+        }
+    } else {
+        Some(Err(CommandParseError::MissingArgValue {
+            arg: "treeclosed",
+        }))
+    }
 }
 
 #[cfg(test)]
@@ -861,6 +899,50 @@ line two
         let cmds = parse_commands("@bors delegate+ a");
         assert_eq!(cmds.len(), 1);
         assert_eq!(cmds[0], Ok(BorsCommand::Delegate));
+    }
+
+    #[test]
+    fn parse_tree_closed() {
+        let cmds = parse_commands("@bors treeclosed=5");
+        assert_eq!(cmds.len(), 1);
+        assert_eq!(cmds[0], Ok(BorsCommand::TreeClosed(5)));
+    }
+
+    #[test]
+    fn parse_tree_closed_invalid() {
+        let cmds = parse_commands("@bors treeclosed=abc");
+        assert_eq!(cmds.len(), 1);
+        assert!(matches!(
+            cmds[0],
+            Err(CommandParseError::ValidationError(_))
+        ));
+    }
+
+    #[test]
+    fn parse_tree_closed_empty() {
+        let cmds = parse_commands("@bors treeclosed=");
+        assert_eq!(cmds.len(), 1);
+        assert!(matches!(
+            cmds[0],
+            Err(CommandParseError::MissingArgValue { arg: "treeclosed" })
+        ));
+    }
+
+    #[test]
+    fn parse_tree_closed_minus() {
+        let cmds = parse_commands("@bors treeclosed-");
+        assert_eq!(cmds.len(), 1);
+        assert_eq!(cmds[0], Ok(BorsCommand::TreeOpen));
+    }
+
+    #[test]
+    fn parse_tree_closed_unknown_command() {
+        let cmds = parse_commands("@bors tree closed 5");
+        assert_eq!(cmds.len(), 1);
+        assert!(matches!(
+            cmds[0],
+            Err(CommandParseError::UnknownCommand("tree"))
+        ));
     }
 
     fn parse_commands(text: &str) -> Vec<Result<BorsCommand, CommandParseError>> {

@@ -28,6 +28,8 @@ pub(super) async fn command_help(
         BorsCommand::TryCancel,
         BorsCommand::Ping,
         BorsCommand::Help,
+        BorsCommand::TreeOpen,
+        BorsCommand::TreeClosed(0),
     ]
     .into_iter()
     .map(|help| format!("- {}", get_command_help(help)))
@@ -73,6 +75,12 @@ fn get_command_help(command: BorsCommand) -> String {
         BorsCommand::TryCancel => {
             "`try cancel`: Cancel a running try build"
         }
+        BorsCommand::TreeOpen => {
+            "`treeclosed-`: Open the repository tree for merging"
+        }
+        BorsCommand::TreeClosed(_) => {
+            "`treeclosed=<priority>`: Close the tree for PRs with priority less than `<priority>`"
+        }
     };
     help.to_string()
 }
@@ -96,6 +104,8 @@ mod tests {
             - `try cancel`: Cancel a running try build
             - `ping`: Check if the bot is alive
             - `help`: Print this help message
+            - `treeclosed-`: Open the repository tree for merging
+            - `treeclosed=<priority>`: Close the tree for PRs with priority less than `<priority>`
             ");
             Ok(tester)
         })
