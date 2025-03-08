@@ -83,8 +83,44 @@ impl sqlx::Type<sqlx::Postgres> for PullRequestNumber {
     }
 }
 
+impl sqlx::Type<sqlx::Postgres> for TreeState {
+    fn type_info() -> sqlx::postgres::PgTypeInfo {
+        <i32 as sqlx::Type<sqlx::Postgres>>::type_info()
+    }
+}
+
+impl sqlx::Encode<'_, sqlx::Postgres> for TreeState {
+    fn encode_by_ref(
+        &self,
+        buf: &mut sqlx::postgres::PgArgumentBuffer,
+    ) -> Result<sqlx::encode::IsNull, Box<dyn std::error::Error + Send + Sync>> {
+        match self {
+            TreeState::Open => Ok(sqlx::encode::IsNull::Yes),
+            TreeState::Closed(priority) => {
+                <i32 as sqlx::Encode<sqlx::Postgres>>::encode(*priority as i32, buf)
+            }
+        }
+    }
+}
+
+impl sqlx::Decode<'_, sqlx::Postgres> for TreeState {
+    fn decode(value: sqlx::postgres::PgValueRef<'_>) -> Result<Self, sqlx::error::BoxDynError> {
+        let priority = <Option<i32> as sqlx::Decode<sqlx::Postgres>>::decode(value)?;
+        match priority {
+            None => Ok(TreeState::Open),
+            Some(p) => Ok(TreeState::Closed(p as u32)),
+        }
+    }
+}
+
+impl From<Option<TreeState>> for TreeState {
+    fn from(value: Option<TreeState>) -> Self {
+        value.unwrap_or(TreeState::Open)
+    }
+}
+
 /// Status of a GitHub build.
-#[derive(Debug, PartialEq, sqlx::Type)]
+#[derive(Debug, Clone, PartialEq, sqlx::Type)]
 #[sqlx(type_name = "TEXT")]
 #[sqlx(rename_all = "lowercase")]
 pub enum BuildStatus {
@@ -101,7 +137,7 @@ pub enum BuildStatus {
 }
 
 /// Represents a single (merged) commit.
-#[derive(Debug, sqlx::Type)]
+#[derive(Debug, Clone, sqlx::Type)]
 #[sqlx(type_name = "build")]
 pub struct BuildModel {
     pub id: PrimaryKey,
@@ -114,7 +150,7 @@ pub struct BuildModel {
 }
 
 /// Represents a pull request.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct PullRequestModel {
     pub id: PrimaryKey,
     pub repository: GithubRepoName,
@@ -164,5 +200,23 @@ pub struct WorkflowModel {
     pub run_id: RunId,
     pub workflow_type: WorkflowType,
     pub status: WorkflowStatus,
+    pub created_at: DateTime<Utc>,
+}
+
+/// Represents the state of a repository's tree.
+#[derive(Debug, PartialEq, Copy, Clone)]
+pub enum TreeState {
+    /// The repository tree is open for changes
+    Open,
+    /// The repository tree is closed to changes with a priority threshold
+    Closed(u32),
+}
+
+/// Represents a repository configuration.
+pub struct RepoModel {
+    pub id: PrimaryKey,
+    pub name: GithubRepoName,
+    pub treeclosed: TreeState,
+    pub treeclosed_src: Option<String>,
     pub created_at: DateTime<Utc>,
 }

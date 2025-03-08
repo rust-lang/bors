@@ -156,6 +156,68 @@ pub(super) async fn handle_push_to_pull_request(
     handle_label_trigger(&repo_state, pr_number, LabelTrigger::Unapproved).await?;
     notify_of_pushed_pr(&repo_state, pr_number, pr.head.sha.clone()).await
 }
+pub(super) async fn command_tree_closed(
+    repo_state: Arc<RepositoryState>,
+    db: Arc<PgDbClient>,
+    pr: &PullRequest,
+    author: &GithubUser,
+    priority: u32,
+) -> anyhow::Result<()> {
+    if !sufficient_approve_permission(repo_state.clone(), author) {
+        deny_request(&repo_state, pr, author, PermissionType::Review).await?;
+        return Ok(());
+    };
+    db.update_repository_treeclosed(repo_state.repository(), priority)
+        .await?;
+    notify_of_tree_closed(&repo_state, pr, priority).await
+}
+
+pub(super) async fn command_tree_open(
+    repo_state: Arc<RepositoryState>,
+    db: Arc<PgDbClient>,
+    pr: &PullRequest,
+    author: &GithubUser,
+) -> anyhow::Result<()> {
+    if !sufficient_delegate_permission(repo_state.clone(), author) {
+        deny_request(&repo_state, pr, author, PermissionType::Review).await?;
+        return Ok(());
+    }
+
+    db.update_repository_treeclosed(repo_state.repository(), 0)
+        .await?;
+    notify_of_tree_open(&repo_state, pr).await
+}
+
+async fn notify_of_tree_closed(
+    repo: &RepositoryState,
+    pr: &PullRequest,
+    priority: u32,
+) -> anyhow::Result<()> {
+    repo.client
+        .post_comment(
+            pr.number,
+            Comment::new(format!(
+                "Tree closed for PRs with priority less than {}",
+                priority
+            )),
+        )
+        .await
+}
+
+async fn notify_of_tree_open(repo: &RepositoryState, pr: &PullRequest) -> anyhow::Result<()> {
+    repo.client
+        .post_comment(
+            pr.number,
+            Comment::new("Tree is now open for merging".to_string()),
+        )
+        .await
+}
+
+fn sufficient_approve_permission(repo: Arc<RepositoryState>, author: &GithubUser) -> bool {
+    repo.permissions
+        .load()
+        .has_permission(author.id, PermissionType::Review)
+}
 
 fn sufficient_delegate_permission(repo: Arc<RepositoryState>, author: &GithubUser) -> bool {
     repo.permissions
@@ -238,6 +300,7 @@ async fn notify_of_delegation(
 mod tests {
     use crate::{
         bors::handlers::{trybuild::TRY_MERGE_BRANCH_NAME, TRY_BRANCH_NAME},
+        database::TreeState,
         github::PullRequestNumber,
         permissions::PermissionType,
         tests::mocks::{
@@ -486,12 +549,17 @@ PR will need to be re-approved."#,
 
     fn create_world_with_approve_config() -> World {
         let world = World::default();
-        world.default_repo().lock().set_config(
+        let repo = world.default_repo();
+        repo.lock().set_config(
             r#"
 [labels]
 approve = ["+approved"]
 "#,
         );
+        repo.lock()
+            .permissions
+            .users
+            .insert(User::default(), vec![PermissionType::Review]);
         world
     }
 
@@ -608,6 +676,61 @@ approve = ["+approved"]
             Ok(tester)
         })
         .await;
+    }
+
+    #[sqlx::test]
+    async fn tree_closed_with_priority(pool: sqlx::PgPool) {
+        let world = create_world_with_approve_config();
+        BorsBuilder::new(pool)
+            .world(world)
+            .run_test(|mut tester| async {
+                // First ensure the tree is open
+                let repo_models = tester
+                    .db()
+                    .get_repository_treeclosed(&default_repo_name())
+                    .await?;
+                if repo_models.is_empty() {
+                    tester
+                        .db()
+                        .update_repository_treeclosed(&default_repo_name(), 0)
+                        .await?;
+                }
+
+                tester.post_comment("@bors treeclosed=5").await?;
+                assert_eq!(
+                    tester.get_comment().await?,
+                    "Tree closed for PRs with priority less than 5"
+                );
+
+                // Verify the treeclosed state in the database
+                let repo_models = tester
+                    .db()
+                    .get_repository_treeclosed(&default_repo_name())
+                    .await?;
+                let repo_model = repo_models.first().unwrap();
+                assert_eq!(repo_model.treeclosed, TreeState::Closed(5));
+
+                Ok(tester)
+            })
+            .await;
+    }
+
+    #[sqlx::test]
+    async fn insufficient_permission_tree_closed(pool: sqlx::PgPool) {
+        let world = World::default();
+        world.default_repo().lock().permissions = Permissions::default();
+
+        BorsBuilder::new(pool)
+            .world(world)
+            .run_test(|mut tester| async {
+                tester.post_comment("@bors treeclosed=5").await?;
+                assert_eq!(
+                    tester.get_comment().await?,
+                    "@default-user: :key: Insufficient privileges: not in review users"
+                );
+                Ok(tester)
+            })
+            .await;
     }
 
     fn reviewer() -> User {

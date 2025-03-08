@@ -3,6 +3,7 @@ use chrono::Utc;
 use sqlx::postgres::PgExecutor;
 
 use crate::database::BuildStatus;
+use crate::database::RepoModel;
 use crate::database::WorkflowModel;
 use crate::github::CommitSha;
 use crate::github::GithubRepoName;
@@ -11,6 +12,7 @@ use crate::github::PullRequestNumber;
 use super::BuildModel;
 use super::PullRequestModel;
 use super::RunId;
+use super::TreeState;
 use super::WorkflowStatus;
 use super::WorkflowType;
 
@@ -400,4 +402,48 @@ FROM workflow
     .fetch_all(executor)
     .await?;
     Ok(workflows)
+}
+
+/// Gets the treeclosed state for a repository.
+pub(crate) async fn get_repository_treeclosed(
+    executor: impl PgExecutor<'_>,
+    repo: &GithubRepoName,
+) -> anyhow::Result<Vec<RepoModel>> {
+    let row = sqlx::query_as!(
+        RepoModel,
+        r#"
+        SELECT id, name, treeclosed as "treeclosed: TreeState", treeclosed_src, created_at
+        FROM repository
+        WHERE name = $1
+        "#,
+        repo.to_string()
+    )
+    .fetch_all(executor)
+    .await?;
+
+    Ok(row)
+}
+
+/// Updates the treeclosed state for a repository.
+pub(crate) async fn update_repository_treeclosed(
+    executor: impl PgExecutor<'_>,
+    repo: &GithubRepoName,
+    value: TreeState,
+    src: Option<String>,
+) -> anyhow::Result<()> {
+    sqlx::query!(
+        r#"
+        INSERT INTO repository (name, treeclosed, treeclosed_src)
+        VALUES ($1, $2, $3)
+        ON CONFLICT (name)
+        DO UPDATE SET treeclosed = EXCLUDED.treeclosed, treeclosed_src = EXCLUDED.treeclosed_src
+        "#,
+        repo.to_string(),
+        value as TreeState,
+        src
+    )
+    .execute(executor)
+    .await?;
+
+    Ok(())
 }

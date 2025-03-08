@@ -11,7 +11,8 @@ use crate::bors::handlers::help::command_help;
 use crate::bors::handlers::ping::command_ping;
 use crate::bors::handlers::refresh::refresh_repository;
 use crate::bors::handlers::review::{
-    command_approve, command_unapprove, handle_pull_request_edited, handle_push_to_pull_request,
+    command_approve, command_tree_closed, command_tree_open, command_unapprove,
+    handle_pull_request_edited, handle_push_to_pull_request,
 };
 use crate::bors::handlers::trybuild::{command_try_build, command_try_cancel, TRY_BRANCH_NAME};
 use crate::bors::handlers::workflow::{
@@ -28,6 +29,7 @@ use crate::tests::util::TestSyncMarker;
 mod help;
 mod labels;
 mod ping;
+mod queue;
 mod refresh;
 mod review;
 mod trybuild;
@@ -85,7 +87,6 @@ pub async fn handle_bors_repository_event(
                 return Err(error.context("Cannot perform command"));
             }
         }
-
         BorsRepositoryEvent::WorkflowStarted(payload) => {
             let span = tracing::info_span!(
                 "Workflow started",
@@ -216,6 +217,24 @@ async fn handle_comment(
                             &pull_request,
                             &comment.author,
                             &approver,
+                            priority,
+                        )
+                        .instrument(span)
+                        .await
+                    }
+                    BorsCommand::TreeOpen => {
+                        let span = tracing::info_span!("TreeOpen");
+                        command_tree_open(repo, database, &pull_request, &comment.author)
+                            .instrument(span)
+                            .await
+                    }
+                    BorsCommand::TreeClosed(priority) => {
+                        let span = tracing::info_span!("TreeClosed");
+                        command_tree_closed(
+                            repo,
+                            database,
+                            &pull_request,
+                            &comment.author,
                             priority,
                         )
                         .instrument(span)

@@ -53,4 +53,8 @@ pub enum BorsCommand {
     Delegate,
     /// Revoke any previously granted delegation.
     Undelegate,
+    /// Open the repository tree for merging.
+    TreeOpen,
+    /// Set the tree closed with a priority level.
+    TreeClosed(Priority),
 }
