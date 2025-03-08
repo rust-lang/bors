@@ -49,6 +49,8 @@ pub enum BorsCommand {
     TryCancel,
     /// Set the priority of a commit.
     SetPriority(Priority),
+    /// Get information about the current PR.
+    Info,
     /// Delegate approval authority to the pull request author.
     Delegate,
     /// Revoke any previously granted delegation.

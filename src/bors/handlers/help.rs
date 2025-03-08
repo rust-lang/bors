@@ -28,6 +28,7 @@ pub(super) async fn command_help(
         BorsCommand::TryCancel,
         BorsCommand::Ping,
         BorsCommand::Help,
+        BorsCommand::Info,
     ]
     .into_iter()
     .map(|help| format!("- {}", get_command_help(help)))
@@ -73,6 +74,9 @@ fn get_command_help(command: BorsCommand) -> String {
         BorsCommand::TryCancel => {
             "`try cancel`: Cancel a running try build"
         }
+        BorsCommand::Info => {
+            "`info`: Get information about the current PR including delegation, priority, merge status, and try build status"
+        }
     };
     help.to_string()
 }
@@ -96,6 +100,7 @@ mod tests {
             - `try cancel`: Cancel a running try build
             - `ping`: Check if the bot is alive
             - `help`: Print this help message
+            - `info`: Get information about the current PR including delegation, priority, merge status, and try build status
             ");
             Ok(tester)
         })
