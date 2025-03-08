@@ -8,9 +8,9 @@ use crate::github::{CommitSha, GithubRepoName};
 
 use super::operations::{
     approve_pull_request, create_build, create_pull_request, create_workflow, find_build,
-    find_pr_by_build, get_pull_request, get_running_builds, get_workflows_for_build,
-    set_pr_priority, unapprove_pull_request, update_build_status, update_pr_build_id,
-    update_workflow_status,
+    find_pr_by_build, get_pull_request, get_running_builds, get_workflow_url_for_build,
+    get_workflows_for_build, set_pr_priority, unapprove_pull_request, update_build_status,
+    update_pr_build_id, update_workflow_status,
 };
 use super::RunId;
 
@@ -174,5 +174,12 @@ impl PgDbClient {
         pr_number: PullRequestNumber,
     ) -> anyhow::Result<Option<PullRequestModel>> {
         get_pull_request(&self.pool, repo, pr_number).await
+    }
+
+    pub async fn get_workflow_url_for_build(
+        &self,
+        build: &BuildModel,
+    ) -> anyhow::Result<Option<String>> {
+        get_workflow_url_for_build(&self.pool, build.id).await
     }
 }
