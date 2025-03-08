@@ -8,4 +8,6 @@ which is by default set to `@bors`.
 | `try`              | `try`           | Start a try build based on the most recent commit from the main branch. |
 | `try parent=<sha>` | `try`           | Start a try build based on the specified parent commit `sha`.           |
 | `try cancel`       | `try`           | Cancel a running try build.                                             |
-| `p=<priority>`     | `try`           | Set the priority of a PR.                                               |
+| `p=<priority>`     | `review`        | Set the priority of a PR.                                               |
+| `delegate+`        | `review`        | Delegate approval authority to the PR author.                           |
+| `delegate-`        | `review`        | Remove any previously granted delegation.                               |

@@ -116,6 +116,11 @@ timeout = 3600
             User::default(),
             vec![PermissionType::Try, PermissionType::Review],
         );
+        users.insert(User::try_user(), vec![PermissionType::Try]);
+        users.insert(
+            User::reviewer(),
+            vec![PermissionType::Try, PermissionType::Review],
+        );
 
         Self::new(
             default_repo_name().owner(),
