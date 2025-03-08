@@ -334,7 +334,7 @@ mod tests {
     use crate::database::BuildStatus;
     use crate::github::CommitSha;
     use crate::tests::mocks::{
-        default_pr_number, default_repo_name, run_test, BorsBuilder, Permissions, Workflow,
+        default_pr_number, default_repo_name, run_test, BorsBuilder, Comment, User, Workflow,
         WorkflowEvent, World,
     };
 
@@ -380,20 +380,32 @@ mod tests {
 
     #[sqlx::test]
     async fn try_no_permissions(pool: sqlx::PgPool) {
-        let world = World::default();
-        world.get_repo(default_repo_name()).lock().permissions = Permissions::default();
+        run_test(pool, |mut tester| async {
+            tester
+                .post_comment(Comment::from("@bors try").with_author(User::unprivileged()))
+                .await?;
+            assert_eq!(
+                tester.get_comment().await?,
+                "@unprivileged-user: :key: Insufficient privileges: not in try users"
+            );
+            Ok(tester)
+        })
+        .await;
+    }
 
-        BorsBuilder::new(pool)
-            .world(world)
-            .run_test(|mut tester| async {
-                tester.post_comment("@bors try").await?;
-                assert_eq!(
-                    tester.get_comment().await?,
-                    "@default-user: :key: Insufficient privileges: not in try users"
-                );
-                Ok(tester)
-            })
-            .await;
+    #[sqlx::test]
+    async fn try_only_requires_try_permission(pool: sqlx::PgPool) {
+        run_test(pool, |mut tester| async {
+            tester
+                .post_comment(Comment::from("@bors try").with_author(User::try_user()))
+                .await?;
+            assert_eq!(
+                tester.get_comment().await?,
+                ":hourglass: Trying commit pr-1-sha with merge merge-main-sha1-pr-1-sha-0…"
+            );
+            Ok(tester)
+        })
+        .await;
     }
 
     #[sqlx::test]
