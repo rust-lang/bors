@@ -47,7 +47,6 @@ impl fmt::Display for RollupMode {
     }
 }
 
-
 impl FromStr for RollupMode {
     type Err = ();
 
