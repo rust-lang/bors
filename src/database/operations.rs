@@ -28,6 +28,7 @@ SELECT
     pr.number,
     pr.approved_by,
     pr.priority,
+    pr.rollup,
     pr.delegated,
     CASE WHEN pr.build_id IS NULL
         THEN NULL
@@ -52,7 +53,7 @@ WHERE pr.repository = $1
     )
     .fetch_optional(executor)
     .await?;
-    Ok(pull_request.map(Into::into))
+    Ok(pull_request)
 }
 
 pub(crate) async fn create_pull_request(
@@ -75,13 +76,15 @@ pub(crate) async fn approve_pull_request(
     pr_id: i32,
     approver: &str,
     priority: Option<u32>,
+    rollup: &str,
 ) -> anyhow::Result<()> {
     let priority_i32 = priority.map(|p| p as i32);
 
     sqlx::query!(
-        "UPDATE pull_request SET approved_by = $1, priority = COALESCE($2, priority) WHERE id = $3",
+        "UPDATE pull_request SET approved_by = $1, priority = COALESCE($2, priority), rollup = $3 WHERE id = $4",
         approver,
         priority_i32,
+        rollup,
         pr_id,
     )
     .execute(executor)
@@ -141,6 +144,7 @@ SELECT
     pr.number,
     pr.approved_by,
     pr.priority,
+    pr.rollup,
     pr.delegated,
     CASE WHEN pr.build_id IS NULL
         THEN NULL
@@ -327,6 +331,21 @@ pub(crate) async fn set_pr_priority(
     sqlx::query!(
         "UPDATE pull_request SET priority = $1 WHERE id = $2",
         priority as i32,
+        pr_id,
+    )
+    .execute(executor)
+    .await?;
+    Ok(())
+}
+
+pub(crate) async fn set_pr_rollup(
+    executor: impl PgExecutor<'_>,
+    pr_id: i32,
+    rollup: &str,
+) -> anyhow::Result<()> {
+    sqlx::query!(
+        "UPDATE pull_request SET rollup = $1 WHERE id = $2",
+        rollup,
         pr_id,
     )
     .execute(executor)

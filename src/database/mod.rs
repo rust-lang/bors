@@ -122,6 +122,7 @@ pub struct PullRequestModel {
     pub approved_by: Option<String>,
     pub delegated: bool,
     pub priority: Option<i32>,
+    pub rollup: Option<String>,
     pub try_build: Option<BuildModel>,
     pub created_at: DateTime<Utc>,
 }

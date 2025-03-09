@@ -1,4 +1,4 @@
-use crate::bors::command::{Approver, BorsCommand};
+use crate::bors::command::{Approver, BorsCommand, RollupMode};
 use crate::bors::Comment;
 use crate::bors::RepositoryState;
 use crate::github::PullRequest;
@@ -12,10 +12,12 @@ pub(super) async fn command_help(
         BorsCommand::Approve {
             approver: Approver::Myself,
             priority: None,
+            rollup: None,
         },
         BorsCommand::Approve {
             approver: Approver::Specified("".to_string()),
             priority: None,
+            rollup: None,
         },
         BorsCommand::Unapprove,
         BorsCommand::SetPriority(0),
@@ -28,6 +30,7 @@ pub(super) async fn command_help(
         BorsCommand::TryCancel,
         BorsCommand::Ping,
         BorsCommand::Help,
+        BorsCommand::Rollup(RollupMode::Always),
     ]
     .into_iter()
     .map(|help| format!("- {}", get_command_help(help)))
@@ -44,7 +47,7 @@ fn get_command_help(command: BorsCommand) -> String {
     // !!! When modifying this match, also update the command list above (in [`command_help`]) !!!
     let help = match command {
         BorsCommand::Approve { approver: Approver::Myself, .. } => {
-            "`r+ [p=<priority>]`: Approve this PR. Optionally, you can specify a `<priority>`."
+            "`r+ [p=<priority>] [rollup=<never/iffy/maybe/always>]`: Approve this PR. Optionally, you can specify `<priority>`, `<rollup>`."
         }
         BorsCommand::Approve {approver: Approver::Specified(_), ..} => {
             "`r=<user> [p=<priority>]`: Approve this PR on behalf of `<user>`. Optionally, you can specify a `<priority>`."
@@ -73,6 +76,9 @@ fn get_command_help(command: BorsCommand) -> String {
         BorsCommand::TryCancel => {
             "`try cancel`: Cancel a running try build"
         }
+        BorsCommand::Rollup(_) => {
+            "`rollup=<never/iffy/maybe/always>`: Mark the rollup status of the PR"
+        }
     };
     help.to_string()
 }
@@ -86,7 +92,7 @@ mod tests {
         run_test(pool, |mut tester| async {
             tester.post_comment("@bors help").await?;
             insta::assert_snapshot!(tester.get_comment().await?, @r"
-            - `r+ [p=<priority>]`: Approve this PR. Optionally, you can specify a `<priority>`.
+            - `r+ [p=<priority>] [rollup=<never/iffy/maybe/always>]`: Approve this PR. Optionally, you can specify `<priority>`, `<rollup>`.
             - `r=<user> [p=<priority>]`: Approve this PR on behalf of `<user>`. Optionally, you can specify a `<priority>`.
             - `r-`: Unapprove this PR
             - `p=<priority>`: Set the priority of this PR
@@ -96,6 +102,7 @@ mod tests {
             - `try cancel`: Cancel a running try build
             - `ping`: Check if the bot is alive
             - `help`: Print this help message
+            - `rollup=<never/iffy/maybe/always>`: Mark the rollup status of the PR
             ");
             Ok(tester)
         })
