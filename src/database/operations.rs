@@ -76,7 +76,7 @@ pub(crate) async fn approve_pull_request(
     pr_id: i32,
     approver: &str,
     priority: Option<u32>,
-    rollup: &str,
+    rollup: Option<&str>,
 ) -> anyhow::Result<()> {
     let priority_i32 = priority.map(|p| p as i32);
 

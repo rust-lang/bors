@@ -1,4 +1,4 @@
-use crate::bors::command::{Approver, BorsCommand};
+use crate::bors::command::{Approver, BorsCommand, RollupMode};
 use crate::bors::Comment;
 use crate::bors::RepositoryState;
 use crate::github::PullRequest;
@@ -12,12 +12,12 @@ pub(super) async fn command_help(
         BorsCommand::Approve {
             approver: Approver::Myself,
             priority: None,
-            rollup: "maybe".to_string(),
+            rollup: None,
         },
         BorsCommand::Approve {
             approver: Approver::Specified("".to_string()),
             priority: None,
-            rollup: "maybe".to_string(),
+            rollup: None,
         },
         BorsCommand::Unapprove,
         BorsCommand::SetPriority(0),
@@ -30,7 +30,7 @@ pub(super) async fn command_help(
         BorsCommand::TryCancel,
         BorsCommand::Ping,
         BorsCommand::Help,
-        BorsCommand::Rollup("maybe".to_string()),
+        BorsCommand::Rollup(RollupMode::Always),
     ]
     .into_iter()
     .map(|help| format!("- {}", get_command_help(help)))

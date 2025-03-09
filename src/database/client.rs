@@ -31,10 +31,19 @@ impl PgDbClient {
         pr_number: PullRequestNumber,
         approver: &str,
         priority: Option<u32>,
-        rollup: &str,
+        mut rollup: Option<&str>,
     ) -> anyhow::Result<()> {
         let pr = self.get_or_create_pull_request(repo, pr_number).await?;
-        approve_pull_request(&self.pool, pr.id, approver, priority, rollup).await
+        if rollup.is_none() {
+            if pr.rollup.is_some() {
+                // don't change rollup mode in db if it is already set before
+                rollup = pr.rollup.as_deref();
+            }
+            else{
+                rollup = Some("always");
+            }
+        }
+        approve_pull_request(&self.pool, pr.id, approver, priority, rollup.as_deref()).await
     }
 
     pub async fn unapprove(

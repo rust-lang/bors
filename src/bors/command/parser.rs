@@ -1,14 +1,14 @@
 //! Defines parsers for bors commands.
 
 use std::collections::HashSet;
+use std::str::FromStr;
 
-use crate::bors::command::{Approver, BorsCommand, Parent};
+use crate::bors::command::{Approver, BorsCommand, Parent, ROLLUP_VALUES};
 use crate::github::CommitSha;
 
-use super::Priority;
+use super::{Priority, RollupMode};
 
 const PRIORITY_NAMES: [&str; 2] = ["p", "priority"];
-const ROLLUP_VALUES: [&str; 4] = ["always", "maybe", "iffy", "never"];
 
 #[derive(Debug, PartialEq)]
 pub enum CommandParseError<'a> {
@@ -85,18 +85,21 @@ impl CommandParser {
                                         }
 
                                         if key == "rollup" {
-                                            if ROLLUP_VALUES.contains(&value) {
-                                                return Some(Ok(BorsCommand::Rollup(
-                                                    value.to_string(),
-                                                )));
-                                            } else {
-                                                return Some(Err(
-                                                    CommandParseError::ValidationError(
-                                                        "rollup status can be never/iffy/maybe/always"
+                                            return Some({
+                                                let tmp = RollupMode::from_str(value);
+                                                match tmp {
+                                                    Ok(x) => Ok(BorsCommand::Rollup(x)),
+                                                    Err(_) => {
+                                                        Err(CommandParseError::ValidationError(
+                                                            format!(
+                                                                "rollup mode can be {}",
+                                                                ROLLUP_VALUES.join("/")
+                                                            )
                                                             .to_string(),
-                                                    ),
-                                                ));
-                                            }
+                                                        ))
+                                                    }
+                                                }
+                                            });
                                         }
 
                                         if PRIORITY_NAMES.contains(&key) {
@@ -337,7 +340,7 @@ fn parse_priority<'a>(parts: &[CommandPart<'a>]) -> ParseResult<'a> {
 /// Parses "p=<priority> rollup=<never/iffy/maybe/always>"
 fn parse_priority_rollup_arg<'a>(
     parts: &[CommandPart<'a>],
-) -> Result<(Option<u32>, String), CommandParseError<'a>> {
+) -> Result<(Option<u32>, Option<RollupMode>), CommandParseError<'a>> {
     let mut priority = None;
     let mut rollup_status = None;
 
@@ -348,7 +351,7 @@ fn parse_priority_rollup_arg<'a>(
                 if rollup_status.is_some() {
                     return Err(CommandParseError::DuplicateArg("rollup"));
                 }
-                rollup_status = Some(status.to_string());
+                rollup_status = Some(status);
             }
             CommandPart::KeyValue { key, value } => {
                 if PRIORITY_NAMES.contains(key) {
@@ -360,30 +363,28 @@ fn parse_priority_rollup_arg<'a>(
                 }
 
                 if *key == "rollup" {
-                    if ROLLUP_VALUES.contains(value) {
-                        if rollup_status.is_some() {
-                            return Err(CommandParseError::DuplicateArg("rollup"));
-                        }
-
-                        rollup_status = Some(value.to_string());
-                    } else {
-                        return Err(CommandParseError::ValidationError(
-                            "rollup status can be never/iffy/maybe/always".to_string(),
-                        ));
+                    if rollup_status.is_some() {
+                        return Err(CommandParseError::DuplicateArg("rollup"));
                     }
+
+                    rollup_status = Some(RollupMode::from_str(value).map_err(|_| {
+                        CommandParseError::ValidationError(
+                            format!("rollup mode can be {}", ROLLUP_VALUES.join("/")).to_string(),
+                        )
+                    })?);
                 }
             }
         }
     }
 
-    Ok((priority, rollup_status.unwrap_or("maybe".to_string())))
+    Ok((priority, rollup_status))
 }
 
-fn parse_rollup_bare_helper(arg: &str) -> Result<&str, CommandParseError<'_>> {
+fn parse_rollup_bare_helper(arg: &str) -> Result<RollupMode, CommandParseError<'_>> {
     if arg == "rollup" {
-        return Ok("always");
+        return Ok(RollupMode::Always);
     } else if arg == "rollup-" {
-        return Ok("maybe");
+        return Ok(RollupMode::Maybe);
     }
     Err(CommandParseError::UnknownArg(arg))
 }
@@ -403,18 +404,18 @@ fn parse_rollup<'a>(command: &'a str, parts: &[CommandPart<'a>]) -> ParseResult<
         return Some(Err(CommandParseError::DuplicateArg("rollup")));
     }
 
-    let rollup_value = if command == "rollup" {
-        "always"
+    let rollup_cmd = if command == "rollup" {
+        BorsCommand::Rollup(RollupMode::Always)
     } else {
-        "maybe"
+        BorsCommand::Rollup(RollupMode::Maybe)
     };
-    Some(Ok(BorsCommand::Rollup(rollup_value.to_string())))
+    Some(Ok(rollup_cmd))
 }
 
 #[cfg(test)]
 mod tests {
     use crate::bors::command::parser::{CommandParseError, CommandParser};
-    use crate::bors::command::{Approver, BorsCommand, Parent};
+    use crate::bors::command::{Approver, BorsCommand, Parent, RollupMode};
     use crate::github::CommitSha;
 
     #[test]
@@ -466,7 +467,7 @@ mod tests {
             Ok(BorsCommand::Approve {
                 approver: Approver::Myself,
                 priority: None,
-                rollup: "maybe".to_string(),
+                rollup: None,
             })
         );
     }
@@ -482,7 +483,7 @@ mod tests {
                     "user1",
                 ),
                 priority: None,
-                rollup: "maybe",
+                rollup: None,
             },
         )
         "#);
@@ -499,7 +500,7 @@ mod tests {
                     "user1,user2",
                 ),
                 priority: None,
-                rollup: "maybe",
+                rollup: None,
             },
         )
         "#);
@@ -514,7 +515,7 @@ mod tests {
             Ok(BorsCommand::Approve {
                 approver: Approver::Myself,
                 priority: Some(1),
-                rollup: "maybe".to_string()
+                rollup: None
             })
         )
     }
@@ -528,7 +529,7 @@ mod tests {
             Ok(BorsCommand::Approve {
                 approver: Approver::Specified("user1".to_string()),
                 priority: Some(2),
-                rollup: "maybe".to_string()
+                rollup: None
             })
         )
     }
@@ -547,7 +548,7 @@ mod tests {
             Ok(BorsCommand::Approve {
                 approver: Approver::Myself,
                 priority: Some(1),
-                rollup: "maybe".to_string()
+                rollup: None
             })
         );
         assert_eq!(
@@ -555,7 +556,7 @@ mod tests {
             Ok(BorsCommand::Approve {
                 approver: Approver::Specified("user2".to_string()),
                 priority: Some(2),
-                rollup: "maybe".to_string()
+                rollup: None
             })
         );
     }
@@ -609,7 +610,7 @@ mod tests {
             Ok(BorsCommand::Approve {
                 approver: Approver::Specified("user1".to_string()),
                 priority: Some(2),
-                rollup: "maybe".to_string()
+                rollup: None
             })
         )
     }
@@ -739,7 +740,7 @@ mod tests {
             Ok(BorsCommand::Approve {
                 approver: Approver::Myself,
                 priority: None,
-                rollup: "always".to_string()
+                rollup: Some(RollupMode::Always)
             })
         )
     }
@@ -753,7 +754,7 @@ mod tests {
             Ok(BorsCommand::Approve {
                 approver: Approver::Specified("user1".to_string()),
                 priority: None,
-                rollup: "never".to_string()
+                rollup: Some(RollupMode::Never)
             })
         )
     }
@@ -767,7 +768,7 @@ mod tests {
             Ok(BorsCommand::Approve {
                 approver: Approver::Specified("user1".to_string()),
                 priority: None,
-                rollup: "always".to_string()
+                rollup: Some(RollupMode::Always)
             })
         )
     }
@@ -781,7 +782,7 @@ mod tests {
             Ok(BorsCommand::Approve {
                 approver: Approver::Specified("user1".to_string()),
                 priority: None,
-                rollup: "maybe".to_string()
+                rollup: Some(RollupMode::Maybe)
             })
         )
     }
@@ -800,7 +801,7 @@ mod tests {
             Ok(BorsCommand::Approve {
                 approver: Approver::Myself,
                 priority: None,
-                rollup: "always".to_string()
+                rollup: Some(RollupMode::Always)
             })
         );
         assert_eq!(
@@ -808,7 +809,7 @@ mod tests {
             Ok(BorsCommand::Approve {
                 approver: Approver::Specified("user2".to_string()),
                 priority: None,
-                rollup: "iffy".to_string()
+                rollup: Some(RollupMode::Iffy)
             })
         );
     }
@@ -820,7 +821,7 @@ mod tests {
         insta::assert_debug_snapshot!(cmds[0], @r#"
         Err(
             ValidationError(
-                "rollup status can be never/iffy/maybe/always",
+                "rollup mode can be always/iffy/maybe/never",
             ),
         )
         "#);
@@ -840,7 +841,6 @@ mod tests {
     fn parse_approve_duplicate_rollup_args2() {
         let cmds = parse_commands("@bors r+ rollup rollup-");
         assert_eq!(cmds.len(), 1);
-        println!("{:?}", cmds[0]);
         assert!(matches!(
             cmds[0],
             Err(CommandParseError::DuplicateArg("rollup"))
@@ -874,21 +874,21 @@ mod tests {
     fn parse_rollup_bare1() {
         let cmds = parse_commands("@bors rollup");
         assert_eq!(cmds.len(), 1);
-        assert_eq!(cmds[0], Ok(BorsCommand::Rollup("always".to_string())));
+        assert_eq!(cmds[0], Ok(BorsCommand::Rollup(RollupMode::Always)));
     }
 
     #[test]
     fn parse_rollup_bare2() {
         let cmds = parse_commands("@bors rollup-");
         assert_eq!(cmds.len(), 1);
-        assert_eq!(cmds[0], Ok(BorsCommand::Rollup("maybe".to_string())));
+        assert_eq!(cmds[0], Ok(BorsCommand::Rollup(RollupMode::Maybe)));
     }
 
     #[test]
     fn parse_priority_rollup() {
         let cmds = parse_commands("@bors rollup=always");
         assert_eq!(cmds.len(), 1);
-        assert_eq!(cmds[0], Ok(BorsCommand::Rollup("always".to_string())));
+        assert_eq!(cmds[0], Ok(BorsCommand::Rollup(RollupMode::Always)));
     }
 
     #[test]
@@ -911,7 +911,7 @@ mod tests {
         insta::assert_debug_snapshot!(cmds[0], @r#"
         Err(
             ValidationError(
-                "rollup status can be never/iffy/maybe/always",
+                "rollup mode can be always/iffy/maybe/never",
             ),
         )
         "#);
@@ -951,7 +951,7 @@ mod tests {
     fn parse_rollup_unknown_arg() {
         let cmds = parse_commands("@bors rollup a");
         assert_eq!(cmds.len(), 1);
-        assert_eq!(cmds[0], Ok(BorsCommand::Rollup("always".to_string())));
+        assert_eq!(cmds[0], Ok(BorsCommand::Rollup(RollupMode::Always)));
     }
 
     #[test]
@@ -963,7 +963,7 @@ mod tests {
             Ok(BorsCommand::Approve {
                 approver: Approver::Myself,
                 priority: Some(1),
-                rollup: "always".to_string()
+                rollup: Some(RollupMode::Always)
             })
         );
     }
@@ -977,7 +977,7 @@ mod tests {
             Ok(BorsCommand::Approve {
                 approver: Approver::Myself,
                 priority: Some(1),
-                rollup: "always".to_string()
+                rollup: Some(RollupMode::Always)
             })
         );
     }
@@ -991,7 +991,7 @@ mod tests {
             Ok(BorsCommand::Approve {
                 approver: Approver::Myself,
                 priority: Some(1),
-                rollup: "iffy".to_string()
+                rollup: Some(RollupMode::Iffy)
             })
         );
     }

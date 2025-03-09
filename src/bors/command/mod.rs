@@ -1,4 +1,6 @@
 mod parser;
+use std::str::FromStr;
+
 use crate::github::CommitSha;
 pub use parser::{CommandParseError, CommandParser};
 
@@ -22,6 +24,41 @@ pub enum Approver {
     Specified(String),
 }
 
+const ROLLUP_VALUES: [&str; 4] = ["always", "iffy", "maybe", "never"];
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum RollupMode {
+    Always,
+    Iffy,
+    Maybe,
+    Never,
+}
+
+impl ToString for RollupMode {
+    fn to_string(&self) -> String {
+        match self {
+            RollupMode::Always => "always".to_string(),
+            RollupMode::Iffy => "iffy".to_string(),
+            RollupMode::Never => "never".to_string(),
+            RollupMode::Maybe => "maybe".to_string(),
+        }
+    }
+}
+
+impl<'a> FromStr for RollupMode {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "always" => Ok(RollupMode::Always),
+            "iffy" => Ok(RollupMode::Iffy),
+            "never" => Ok(RollupMode::Never),
+            "maybe" => Ok(RollupMode::Maybe),
+            _ => Err(()),
+        }
+    }
+}
+
 /// Bors command specified by a user.
 #[derive(Debug, PartialEq)]
 pub enum BorsCommand {
@@ -32,7 +69,7 @@ pub enum BorsCommand {
         /// Priority of the commit.
         priority: Option<Priority>,
         // Rollup status of the commit.
-        rollup: String,
+        rollup: Option<RollupMode>,
     },
     /// Unapprove a commit.
     Unapprove,
@@ -56,5 +93,5 @@ pub enum BorsCommand {
     /// Revoke any previously granted delegation.
     Undelegate,
     /// Rollup status.
-    Rollup(String),
+    Rollup(RollupMode),
 }
