@@ -1011,7 +1011,9 @@ approve = ["+approved"]
     #[sqlx::test]
     async fn approve_on_behalf_with_priority_rollup1(pool: sqlx::PgPool) {
         run_test(pool, |mut tester| async {
-            tester.post_comment("@bors r=user1 rollup=always priority=10").await?;
+            tester
+                .post_comment("@bors r=user1 rollup=always priority=10")
+                .await?;
             tester.expect_comments(1).await;
             let pr = tester.get_default_pr().await?;
             assert_eq!(pr.rollup, Some("always".to_string()));
@@ -1025,7 +1027,9 @@ approve = ["+approved"]
     #[sqlx::test]
     async fn approve_on_behalf_with_priority_rollup2(pool: sqlx::PgPool) {
         run_test(pool, |mut tester| async {
-            tester.post_comment("@bors r=user1 rollup- priority=10").await?;
+            tester
+                .post_comment("@bors r=user1 rollup- priority=10")
+                .await?;
             tester.expect_comments(1).await;
             let pr = tester.get_default_pr().await?;
             assert_eq!(pr.rollup, Some("maybe".to_string()));
@@ -1111,5 +1115,4 @@ approve = ["+approved"]
         })
         .await;
     }
-
 }

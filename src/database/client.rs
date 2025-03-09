@@ -38,12 +38,11 @@ impl PgDbClient {
             if pr.rollup.is_some() {
                 // don't change rollup mode in db if it is already set before
                 rollup = pr.rollup.as_deref();
-            }
-            else{
+            } else {
                 rollup = Some("always");
             }
         }
-        approve_pull_request(&self.pool, pr.id, approver, priority, rollup.as_deref()).await
+        approve_pull_request(&self.pool, pr.id, approver, priority, rollup).await
     }
 
     pub async fn unapprove(

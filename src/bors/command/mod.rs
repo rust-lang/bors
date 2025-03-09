@@ -1,4 +1,5 @@
 mod parser;
+use std::fmt;
 use std::str::FromStr;
 
 use crate::github::CommitSha;
@@ -34,18 +35,20 @@ pub enum RollupMode {
     Never,
 }
 
-impl ToString for RollupMode {
-    fn to_string(&self) -> String {
-        match self {
-            RollupMode::Always => "always".to_string(),
-            RollupMode::Iffy => "iffy".to_string(),
-            RollupMode::Never => "never".to_string(),
-            RollupMode::Maybe => "maybe".to_string(),
-        }
+impl fmt::Display for RollupMode {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let s = match self {
+            RollupMode::Always => "always",
+            RollupMode::Iffy => "iffy",
+            RollupMode::Never => "never",
+            RollupMode::Maybe => "maybe",
+        };
+        write!(f, "{}", s)
     }
 }
 
-impl<'a> FromStr for RollupMode {
+
+impl FromStr for RollupMode {
     type Err = ();
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
