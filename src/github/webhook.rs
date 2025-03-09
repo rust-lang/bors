@@ -504,7 +504,7 @@ mod tests {
     async fn pull_request_edited() {
         insta::assert_debug_snapshot!(
             check_webhook("webhook/pull-request-edited.json", "pull_request").await,
-            @r###"
+            @r#"
         Ok(
             GitHubWebhook(
                 Repository(
@@ -554,6 +554,7 @@ mod tests {
                                         fragment: None,
                                     },
                                 },
+                                mergeable_state: Unknown,
                             },
                             from_base_sha: Some(
                                 CommitSha(
@@ -565,7 +566,7 @@ mod tests {
                 ),
             ),
         )
-        "###
+        "#
         );
     }
 
@@ -573,7 +574,7 @@ mod tests {
     async fn pull_request_synchronized() {
         insta::assert_debug_snapshot!(
             check_webhook("webhook/pull-request-synchronize.json", "pull_request").await,
-            @r###"
+            @r#"
         Ok(
             GitHubWebhook(
                 Repository(
@@ -623,13 +624,14 @@ mod tests {
                                         fragment: None,
                                     },
                                 },
+                                mergeable_state: Unknown,
                             },
                         },
                     ),
                 ),
             ),
         )
-        "###
+        "#
         );
     }
 

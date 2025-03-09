@@ -9,6 +9,7 @@ use crate::github::GithubRepoName;
 use crate::github::PullRequestNumber;
 
 use super::BuildModel;
+use super::MergeableState;
 use super::PullRequestModel;
 use super::RunId;
 use super::WorkflowStatus;
@@ -29,6 +30,7 @@ SELECT
     pr.approved_by,
     pr.priority,
     pr.delegated,
+    pr.mergeable_state as "mergeable_state: MergeableState",
     CASE WHEN pr.build_id IS NULL
         THEN NULL
         ELSE (
@@ -142,6 +144,7 @@ SELECT
     pr.approved_by,
     pr.priority,
     pr.delegated,
+    pr.mergeable_state as "mergeable_state: MergeableState",
     CASE WHEN pr.build_id IS NULL
         THEN NULL
         ELSE (
