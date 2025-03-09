@@ -27,7 +27,7 @@ pub enum Approver {
 
 const ROLLUP_VALUES: [&str; 4] = ["always", "iffy", "maybe", "never"];
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub enum RollupMode {
     Always,
     Iffy,

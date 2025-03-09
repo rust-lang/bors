@@ -746,7 +746,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_approve_on_behalf_with_rollup1() {
+    fn parse_approve_on_behalf_with_rollup_value() {
         let cmds = parse_commands("@bors r=user1 rollup=never");
         assert_eq!(cmds.len(), 1);
         assert_eq!(
@@ -760,7 +760,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_approve_on_behalf_with_rollup2() {
+    fn parse_approve_on_behalf_with_rollup_bare() {
         let cmds = parse_commands("@bors r=user1 rollup");
         assert_eq!(cmds.len(), 1);
         assert_eq!(
@@ -774,7 +774,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_approve_on_behalf_with_rollup3() {
+    fn parse_approve_on_behalf_with_rollup_bare_maybe() {
         let cmds = parse_commands("@bors r=user1 rollup-");
         assert_eq!(cmds.len(), 1);
         assert_eq!(
@@ -828,7 +828,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_approve_duplicate_rollup_args1() {
+    fn parse_approve_duplicate_rollup_args_bare_value() {
         let cmds = parse_commands("@bors r+ rollup rollup=never");
         assert_eq!(cmds.len(), 1);
         assert!(matches!(
@@ -838,7 +838,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_approve_duplicate_rollup_args2() {
+    fn parse_approve_duplicate_rollup_args_bare_bare() {
         let cmds = parse_commands("@bors r+ rollup rollup-");
         assert_eq!(cmds.len(), 1);
         assert!(matches!(
@@ -848,7 +848,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_approve_duplicate_rollup_args3() {
+    fn parse_approve_duplicate_rollup_args_value_value() {
         let cmds = parse_commands("@bors r+ rollup=iffy rollup=never");
         assert_eq!(cmds.len(), 1);
         assert!(matches!(
@@ -871,14 +871,14 @@ mod tests {
     }
 
     #[test]
-    fn parse_rollup_bare1() {
+    fn parse_rollup_bare() {
         let cmds = parse_commands("@bors rollup");
         assert_eq!(cmds.len(), 1);
         assert_eq!(cmds[0], Ok(BorsCommand::Rollup(RollupMode::Always)));
     }
 
     #[test]
-    fn parse_rollup_bare2() {
+    fn parse_rollup_bare_maybe() {
         let cmds = parse_commands("@bors rollup-");
         assert_eq!(cmds.len(), 1);
         assert_eq!(cmds[0], Ok(BorsCommand::Rollup(RollupMode::Maybe)));
@@ -905,7 +905,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_rollup_invalid() {
+    fn parse_rollup_invalid_with_int() {
         let cmds = parse_commands("@bors rollup=3");
         assert_eq!(cmds.len(), 1);
         insta::assert_debug_snapshot!(cmds[0], @r#"
@@ -918,7 +918,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_duplicate_rollup1() {
+    fn parse_duplicate_rollup_bare_bare() {
         let cmds = parse_commands("@bors rollup rollup-");
         assert_eq!(cmds.len(), 1);
         assert!(matches!(
@@ -928,7 +928,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_duplicate_rollup2() {
+    fn parse_duplicate_rollup_bare_value() {
         let cmds = parse_commands("@bors rollup rollup=maybe");
         assert_eq!(cmds.len(), 1);
         assert!(matches!(
@@ -938,7 +938,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_duplicate_rollup3() {
+    fn parse_duplicate_rollup_value_value() {
         let cmds = parse_commands("@bors rollup=always rollup=never");
         assert_eq!(cmds.len(), 1);
         assert!(matches!(
@@ -955,7 +955,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_approve_with_rollup_priority1() {
+    fn parse_approve_with_rollup_bare_priority() {
         let cmds = parse_commands("@bors r+ rollup p=1");
         assert_eq!(cmds.len(), 1);
         assert_eq!(
@@ -969,21 +969,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_approve_with_rollup_priority2() {
-        let cmds = parse_commands("@bors r+ rollup priority=1");
-        assert_eq!(cmds.len(), 1);
-        assert_eq!(
-            cmds[0],
-            Ok(BorsCommand::Approve {
-                approver: Approver::Myself,
-                priority: Some(1),
-                rollup: Some(RollupMode::Always)
-            })
-        );
-    }
-
-    #[test]
-    fn parse_approve_with_rollup_priority3() {
+    fn parse_approve_with_rollup_value_priority() {
         let cmds = parse_commands("@bors r+ rollup=iffy p=1");
         assert_eq!(cmds.len(), 1);
         assert_eq!(

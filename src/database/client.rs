@@ -1,5 +1,8 @@
+use std::str::FromStr;
+
 use sqlx::PgPool;
 
+use crate::bors::RollupMode;
 use crate::database::{
     BuildModel, BuildStatus, PullRequestModel, WorkflowModel, WorkflowStatus, WorkflowType,
 };
@@ -31,18 +34,16 @@ impl PgDbClient {
         pr_number: PullRequestNumber,
         approver: &str,
         priority: Option<u32>,
-        mut rollup: Option<&str>,
+        rollup: Option<RollupMode>,
     ) -> anyhow::Result<()> {
         let pr = self.get_or_create_pull_request(repo, pr_number).await?;
-        if rollup.is_none() {
-            if pr.rollup.is_some() {
-                // don't change rollup mode in db if it is already set before
-                rollup = pr.rollup.as_deref();
-            } else {
-                rollup = Some("always");
-            }
-        }
-        approve_pull_request(&self.pool, pr.id, approver, priority, rollup).await
+        let rollup = rollup
+            .or(pr
+                .rollup
+                .map(|r| RollupMode::from_str(&r).expect("Rollup mode in the db should be valid")))
+            .unwrap_or(RollupMode::Maybe);
+
+        approve_pull_request(&self.pool, pr.id, approver, priority, &rollup.to_string()).await
     }
 
     pub async fn unapprove(
@@ -86,10 +87,10 @@ impl PgDbClient {
         &self,
         repo: &GithubRepoName,
         pr_number: PullRequestNumber,
-        rollup: &str,
+        rollup: RollupMode,
     ) -> anyhow::Result<()> {
         let pr = self.get_or_create_pull_request(repo, pr_number).await?;
-        set_pr_rollup(&self.pool, pr.id, rollup).await
+        set_pr_rollup(&self.pool, pr.id, rollup.to_string().as_ref()).await
     }
 
     pub async fn get_or_create_pull_request(
