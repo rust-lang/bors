@@ -9,6 +9,7 @@ use crate::github::GithubRepoName;
 use crate::github::PullRequestNumber;
 
 use super::BuildModel;
+use super::MergeableState;
 use super::PullRequestModel;
 use super::RunId;
 use super::WorkflowStatus;
@@ -29,6 +30,8 @@ SELECT
     pr.approved_by,
     pr.priority,
     pr.delegated,
+    pr.mergeable_state as "mergeable_state: MergeableState",
+    pr.base_branch,
     CASE WHEN pr.build_id IS NULL
         THEN NULL
         ELSE (
@@ -64,6 +67,21 @@ pub(crate) async fn create_pull_request(
         "INSERT INTO pull_request (repository, number) VALUES ($1, $2) ON CONFLICT DO NOTHING",
         repo.to_string(),
         pr_number.0 as i32
+    )
+    .execute(executor)
+    .await?;
+    Ok(())
+}
+
+pub(crate) async fn update_pr_base_branch(
+    executor: impl PgExecutor<'_>,
+    pr_id: i32,
+    base_branch: &str,
+) -> anyhow::Result<()> {
+    sqlx::query!(
+        "UPDATE pull_request SET base_branch = $1 WHERE id = $2",
+        base_branch,
+        pr_id
     )
     .execute(executor)
     .await?;
@@ -121,6 +139,21 @@ pub(crate) async fn undelegate_pull_request(
 ) -> anyhow::Result<()> {
     sqlx::query!(
         "UPDATE pull_request SET delegated = FALSE WHERE id = $1",
+        pr_id,
+    )
+    .execute(executor)
+    .await?;
+    Ok(())
+}
+
+pub(crate) async fn update_pr_mergeable_state(
+    executor: impl PgExecutor<'_>,
+    pr_id: i32,
+    mergeable_state: MergeableState,
+) -> anyhow::Result<()> {
+    sqlx::query!(
+        "UPDATE pull_request SET mergeable_state = $1 WHERE id = $2",
+        mergeable_state as _,
         pr_id
     )
     .execute(executor)
@@ -142,6 +175,8 @@ SELECT
     pr.approved_by,
     pr.priority,
     pr.delegated,
+    pr.mergeable_state as "mergeable_state: MergeableState",
+    pr.base_branch,
     CASE WHEN pr.build_id IS NULL
         THEN NULL
         ELSE (
@@ -164,6 +199,90 @@ WHERE build.id = $1
     .fetch_optional(executor)
     .await?;
     Ok(pr)
+}
+
+pub(crate) async fn get_prs_by_base_branch(
+    executor: impl PgExecutor<'_>,
+    repo: &GithubRepoName,
+    base_branch: &str,
+) -> anyhow::Result<Vec<PullRequestModel>> {
+    let prs = sqlx::query_as!(
+        PullRequestModel,
+        r#"
+SELECT
+    pr.id,
+    pr.repository,
+    pr.number,
+    pr.approved_by,
+    pr.priority,
+    pr.delegated,
+    pr.mergeable_state as "mergeable_state: MergeableState",
+    pr.base_branch,
+    CASE WHEN pr.build_id IS NULL
+        THEN NULL
+        ELSE (
+            build.id,
+            build.repository,
+            build.branch,
+            build.commit_sha,
+            build.status,
+            build.parent,
+            build.created_at
+        )
+    END AS "try_build: BuildModel",
+    pr.created_at as "created_at: DateTime<Utc>"
+FROM pull_request as pr
+    LEFT JOIN build ON pr.build_id = build.id
+WHERE pr.repository = $1
+    AND pr.base_branch = $2
+"#,
+        repo.to_string(),
+        base_branch
+    )
+    .fetch_all(executor)
+    .await?;
+    Ok(prs)
+}
+
+pub(crate) async fn get_prs_with_unknown_mergeable_state(
+    executor: impl PgExecutor<'_>,
+    repo: &GithubRepoName,
+) -> anyhow::Result<Vec<PullRequestModel>> {
+    let prs = sqlx::query_as!(
+        PullRequestModel,
+        r#"
+SELECT
+    pr.id,
+    pr.repository,
+    pr.number,
+    pr.approved_by,
+    pr.priority,
+    pr.delegated,
+    pr.mergeable_state as "mergeable_state: MergeableState",
+    pr.base_branch,
+    CASE WHEN pr.build_id IS NULL
+        THEN NULL
+        ELSE (
+            build.id,
+            build.repository,
+            build.branch,
+            build.commit_sha,
+            build.status,
+            build.parent,
+            build.created_at
+        )
+    END AS "try_build: BuildModel",
+    pr.created_at as "created_at: DateTime<Utc>"
+FROM pull_request as pr
+    LEFT JOIN build ON pr.build_id = build.id
+WHERE pr.repository = $1
+    AND (pr.mergeable_state = 'unknown' OR pr.mergeable_state IS NULL)
+"#,
+        repo.to_string(),
+    )
+    .fetch_all(executor)
+    .await?;
+    Ok(prs)
 }
 
 pub(crate) async fn update_pr_build_id(

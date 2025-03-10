@@ -3,6 +3,7 @@ use std::fmt::{Display, Formatter};
 
 use chrono::{DateTime, Utc};
 pub use client::PgDbClient;
+use octocrab::models::pulls::MergeableState as OctocrabMergeableState;
 use sqlx::error::BoxDynError;
 
 use crate::github::{GithubRepoName, PullRequestNumber};
@@ -69,7 +70,7 @@ impl sqlx::Decode<'_, sqlx::Postgres> for GithubRepoName {
     }
 }
 
-// to load from/ save to Postgres, as it doesn't have unsigned integer types.
+// To load from/save to Postgres, as it doesn't have unsigned integer types.
 impl From<i64> for PullRequestNumber {
     fn from(value: i64) -> Self {
         Self(value as u64)
@@ -80,6 +81,63 @@ impl sqlx::Type<sqlx::Postgres> for PullRequestNumber {
     fn type_info() -> sqlx::postgres::PgTypeInfo {
         // Postgres don't have unsigned integer types.
         <i64 as sqlx::Type<sqlx::Postgres>>::type_info()
+    }
+}
+
+/// Detailed status information about a pull request merge.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MergeableState(pub OctocrabMergeableState);
+
+impl From<MergeableState> for OctocrabMergeableState {
+    fn from(state: MergeableState) -> Self {
+        state.0
+    }
+}
+
+impl From<OctocrabMergeableState> for MergeableState {
+    fn from(state: OctocrabMergeableState) -> Self {
+        Self(state)
+    }
+}
+
+impl sqlx::Type<sqlx::Postgres> for MergeableState {
+    fn type_info() -> sqlx::postgres::PgTypeInfo {
+        <String as sqlx::Type<sqlx::Postgres>>::type_info()
+    }
+}
+
+impl sqlx::Encode<'_, sqlx::Postgres> for MergeableState {
+    fn encode_by_ref(
+        &self,
+        buf: &mut sqlx::postgres::PgArgumentBuffer,
+    ) -> Result<sqlx::encode::IsNull, BoxDynError> {
+        let state = match self.0 {
+            OctocrabMergeableState::Behind => "behind",
+            OctocrabMergeableState::Blocked => "blocked",
+            OctocrabMergeableState::Clean => "clean",
+            OctocrabMergeableState::Dirty => "dirty",
+            OctocrabMergeableState::Draft => "draft",
+            OctocrabMergeableState::HasHooks => "has_hooks",
+            OctocrabMergeableState::Unstable => "unstable",
+            _ => "unknown",
+        };
+        <String as sqlx::Encode<sqlx::Postgres>>::encode(state.to_string(), buf)
+    }
+}
+
+impl sqlx::Decode<'_, sqlx::Postgres> for MergeableState {
+    fn decode(value: sqlx::postgres::PgValueRef<'_>) -> Result<Self, BoxDynError> {
+        let value = <String as sqlx::Decode<sqlx::Postgres>>::decode(value)?;
+        Ok(Self(match value.as_str() {
+            "behind" => OctocrabMergeableState::Behind,
+            "blocked" => OctocrabMergeableState::Blocked,
+            "clean" => OctocrabMergeableState::Clean,
+            "dirty" => OctocrabMergeableState::Dirty,
+            "draft" => OctocrabMergeableState::Draft,
+            "has_hooks" => OctocrabMergeableState::HasHooks,
+            "unstable" => OctocrabMergeableState::Unstable,
+            _ => OctocrabMergeableState::Unknown,
+        }))
     }
 }
 
@@ -123,6 +181,8 @@ pub struct PullRequestModel {
     pub delegated: bool,
     pub priority: Option<i32>,
     pub try_build: Option<BuildModel>,
+    pub mergeable_state: MergeableState,
+    pub base_branch: Option<String>,
     pub created_at: DateTime<Utc>,
 }
 

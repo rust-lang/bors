@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\nSELECT\n    pr.id,\n    pr.repository,\n    pr.number,\n    pr.approved_by,\n    pr.priority,\n    pr.delegated,\n    CASE WHEN pr.build_id IS NULL\n        THEN NULL\n        ELSE (\n            build.id,\n            build.repository,\n            build.branch,\n            build.commit_sha,\n            build.status,\n            build.parent,\n            build.created_at\n        )\n    END AS \"try_build: BuildModel\",\n    pr.created_at as \"created_at: DateTime<Utc>\"\nFROM pull_request as pr\n    LEFT JOIN build ON pr.build_id = build.id\nWHERE pr.repository = $1\n    AND pr.number = $2\n",
+  "query": "\nSELECT\n    pr.id,\n    pr.repository,\n    pr.number,\n    pr.approved_by,\n    pr.priority,\n    pr.delegated,\n    pr.mergeable_state as \"mergeable_state: MergeableState\",\n    pr.base_branch,\n    CASE WHEN pr.build_id IS NULL\n        THEN NULL\n        ELSE (\n            build.id,\n            build.repository,\n            build.branch,\n            build.commit_sha,\n            build.status,\n            build.parent,\n            build.created_at\n        )\n    END AS \"try_build: BuildModel\",\n    pr.created_at as \"created_at: DateTime<Utc>\"\nFROM pull_request as pr\n    LEFT JOIN build ON pr.build_id = build.id\nWHERE pr.repository = $1\n    AND pr.number = $2\n",
   "describe": {
     "columns": [
       {
@@ -35,11 +35,21 @@
       },
       {
         "ordinal": 6,
+        "name": "mergeable_state: MergeableState",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "base_branch",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
         "name": "try_build: BuildModel",
         "type_info": "Record"
       },
       {
-        "ordinal": 7,
+        "ordinal": 9,
         "name": "created_at: DateTime<Utc>",
         "type_info": "Timestamptz"
       }
@@ -57,9 +67,11 @@
       true,
       true,
       false,
+      false,
+      true,
       null,
       false
     ]
   },
-  "hash": "c4b0d4ed216c6b8efceb1b65ae0ad9d830e8870cfdf37542a408b99c961318f7"
+  "hash": "b84193381489159bc201bdb7230dcad61f78a24e84f325553d632497bea5021c"
 }

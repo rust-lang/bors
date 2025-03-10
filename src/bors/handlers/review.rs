@@ -2,10 +2,12 @@ use std::sync::Arc;
 
 use crate::bors::command::Approver;
 use crate::bors::event::PullRequestEdited;
+use crate::bors::event::PullRequestOpened;
 use crate::bors::event::PullRequestPushed;
-use crate::bors::handlers::deny_request;
-use crate::bors::handlers::has_permission;
+use crate::bors::event::PullRequestReopened;
+use crate::bors::event::PushToBranch;
 use crate::bors::handlers::labels::handle_label_trigger;
+use crate::bors::handlers::{deny_request, has_permission};
 use crate::bors::Comment;
 use crate::bors::RepositoryState;
 use crate::github::CommitSha;
@@ -119,22 +121,32 @@ pub(super) async fn handle_pull_request_edited(
     db: Arc<PgDbClient>,
     payload: PullRequestEdited,
 ) -> anyhow::Result<()> {
+    let pr = &payload.pull_request;
+    let pr_number = pr.number;
+    db.update_pr_mergeable_state(
+        repo_state.repository(),
+        pr_number,
+        pr.mergeable_state.clone().into(),
+    )
+    .await?;
+    db.update_pr_base_branch(repo_state.repository(), pr_number, &pr.base.name)
+        .await?;
+
     // If the base branch has changed, unapprove the PR
     let Some(_) = payload.from_base_sha else {
         return Ok(());
     };
 
     let pr_model = db
-        .get_or_create_pull_request(repo_state.repository(), payload.pull_request.number)
+        .get_or_create_pull_request(repo_state.repository(), pr_number)
         .await?;
     if !pr_model.is_approved() {
         return Ok(());
     }
 
-    let pr_number = payload.pull_request.number;
     db.unapprove(repo_state.repository(), pr_number).await?;
     handle_label_trigger(&repo_state, pr_number, LabelTrigger::Unapproved).await?;
-    notify_of_edited_pr(&repo_state, pr_number, &payload.pull_request.base.name).await
+    notify_of_edited_pr(&repo_state, pr_number, &pr.base.name).await
 }
 
 pub(super) async fn handle_push_to_pull_request(
@@ -143,15 +155,21 @@ pub(super) async fn handle_push_to_pull_request(
     payload: PullRequestPushed,
 ) -> anyhow::Result<()> {
     let pr = &payload.pull_request;
+    let pr_number = pr.number;
     let pr_model = db
         .get_or_create_pull_request(repo_state.repository(), pr.number)
         .await?;
+    db.update_pr_mergeable_state(
+        repo_state.repository(),
+        pr_number,
+        pr.mergeable_state.clone().into(),
+    )
+    .await?;
 
     if !pr_model.is_approved() {
         return Ok(());
     }
 
-    let pr_number = pr_model.number;
     db.unapprove(repo_state.repository(), pr_number).await?;
     handle_label_trigger(&repo_state, pr_number, LabelTrigger::Unapproved).await?;
     notify_of_pushed_pr(&repo_state, pr_number, pr.head.sha.clone()).await
@@ -161,6 +179,66 @@ fn sufficient_delegate_permission(repo: Arc<RepositoryState>, author: &GithubUse
     repo.permissions
         .load()
         .has_permission(author.id, PermissionType::Review)
+}
+
+pub(super) async fn handle_pull_request_opened(
+    repo_state: Arc<RepositoryState>,
+    db: Arc<PgDbClient>,
+    payload: PullRequestOpened,
+) -> anyhow::Result<()> {
+    db.update_pr_base_branch(
+        repo_state.repository(),
+        payload.pull_request.number,
+        &payload.pull_request.base.name,
+    )
+    .await?;
+    db.update_pr_mergeable_state(
+        repo_state.repository(),
+        payload.pull_request.number,
+        payload.pull_request.mergeable_state.clone().into(),
+    )
+    .await
+}
+
+pub(super) async fn handle_pull_request_reopened(
+    repo_state: Arc<RepositoryState>,
+    db: Arc<PgDbClient>,
+    payload: PullRequestReopened,
+) -> anyhow::Result<()> {
+    db.update_pr_base_branch(
+        repo_state.repository(),
+        payload.pull_request.number,
+        &payload.pull_request.base.name,
+    )
+    .await?;
+    db.update_pr_mergeable_state(
+        repo_state.repository(),
+        payload.pull_request.number,
+        payload.pull_request.mergeable_state.clone().into(),
+    )
+    .await
+}
+
+pub(super) async fn handle_push_to_branch(
+    repo_state: Arc<RepositoryState>,
+    db: Arc<PgDbClient>,
+    payload: PushToBranch,
+) -> anyhow::Result<()> {
+    let prs = db
+        .get_prs_by_base_branch(repo_state.repository(), &payload.branch)
+        .await?;
+
+    for pr in prs {
+        let pr = repo_state.client.get_pull_request(pr.number).await?;
+        db.update_pr_mergeable_state(
+            repo_state.repository(),
+            pr.number,
+            pr.mergeable_state.into(),
+        )
+        .await?;
+    }
+
+    Ok(())
 }
 
 async fn notify_of_approval(

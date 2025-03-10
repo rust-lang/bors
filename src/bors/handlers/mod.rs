@@ -2,7 +2,10 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use octocrab::Octocrab;
-use review::{command_delegate, command_set_priority, command_undelegate};
+use review::{
+    command_delegate, command_set_priority, command_undelegate, handle_pull_request_opened,
+    handle_pull_request_reopened, handle_push_to_branch,
+};
 use tracing::Instrument;
 
 use crate::bors::command::{BorsCommand, CommandParseError};
@@ -131,6 +134,30 @@ pub async fn handle_bors_repository_event(
                 tracing::info_span!("Pull request pushed", repo = payload.repository.to_string());
 
             handle_push_to_pull_request(repo, db, payload)
+                .instrument(span.clone())
+                .await?;
+        }
+        BorsRepositoryEvent::PullRequestOpened(payload) => {
+            let span =
+                tracing::info_span!("Pull request opened", repo = payload.repository.to_string());
+
+            handle_pull_request_opened(repo, db, payload)
+                .instrument(span.clone())
+                .await?;
+        }
+        BorsRepositoryEvent::PullRequestReopened(payload) => {
+            let span = tracing::info_span!(
+                "Pull request reopened",
+                repo = payload.repository.to_string()
+            );
+
+            handle_pull_request_reopened(repo, db, payload)
+                .instrument(span.clone())
+                .await?;
+        }
+        BorsRepositoryEvent::PushToBranch(payload) => {
+            let span = tracing::info_span!("Push to branch", repo = payload.repository.to_string());
+            handle_push_to_branch(repo, db, payload)
                 .instrument(span.clone())
                 .await?;
         }

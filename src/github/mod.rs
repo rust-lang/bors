@@ -2,7 +2,7 @@
 //! for working with (GitHub) repositories.
 use std::fmt::{Debug, Display, Formatter};
 
-use octocrab::models::UserId;
+use octocrab::models::{pulls::MergeableState, UserId};
 use url::Url;
 
 pub mod api;
@@ -105,6 +105,7 @@ pub struct PullRequest {
     pub title: String,
     pub message: String,
     pub author: GithubUser,
+    pub mergeable_state: MergeableState,
 }
 
 impl From<octocrab::models::pulls::PullRequest> for PullRequest {
@@ -125,6 +126,7 @@ impl From<octocrab::models::pulls::PullRequest> for PullRequest {
             author: (*pr.user.unwrap()).into(),
             title: pr.title.unwrap_or_default(),
             message: pr.body.unwrap_or_default(),
+            mergeable_state: pr.mergeable_state.unwrap_or(MergeableState::Unknown),
         }
     }
 }

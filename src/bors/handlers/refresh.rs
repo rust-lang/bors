@@ -16,10 +16,11 @@ pub async fn refresh_repository(
     team_api_client: &TeamApiClient,
 ) -> anyhow::Result<()> {
     let repo = repo.as_ref();
-    if let (Ok(_), _, Ok(_)) = tokio::join!(
+    if let (Ok(_), _, Ok(_), Ok(_)) = tokio::join!(
         cancel_timed_out_builds(repo, db.as_ref()),
         reload_permission(repo, team_api_client),
-        reload_config(repo)
+        reload_config(repo),
+        refresh_unknown_mergeable_prs(repo, db.as_ref())
     ) {
         Ok(())
     } else {
@@ -59,6 +60,33 @@ async fn cancel_timed_out_builds(repo: &RepositoryState, db: &PgDbClient) -> any
             }
         }
     }
+    Ok(())
+}
+
+async fn refresh_unknown_mergeable_prs(
+    repo: &RepositoryState,
+    db: &PgDbClient,
+) -> anyhow::Result<()> {
+    let prs = db
+        .get_prs_with_unknown_mergeable_state(repo.repository())
+        .await?;
+
+    for pr in prs {
+        match repo.client.get_pull_request(pr.number).await {
+            Ok(pr) => {
+                db.update_pr_mergeable_state(
+                    repo.repository(),
+                    pr.number,
+                    pr.mergeable_state.into(),
+                )
+                .await?;
+            }
+            Err(error) => {
+                tracing::warn!("Failed to refresh PR {}: {error:?}", pr.number);
+            }
+        }
+    }
+
     Ok(())
 }
 
