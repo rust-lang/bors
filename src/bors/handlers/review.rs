@@ -5,9 +5,9 @@ use crate::bors::event::PullRequestEdited;
 use crate::bors::event::PullRequestOpened;
 use crate::bors::event::PullRequestPushed;
 use crate::bors::event::PullRequestReopened;
-use crate::bors::handlers::deny_request;
-use crate::bors::handlers::has_permission;
+use crate::bors::event::PushToBranch;
 use crate::bors::handlers::labels::handle_label_trigger;
+use crate::bors::handlers::{deny_request, has_permission};
 use crate::bors::Comment;
 use crate::bors::RepositoryState;
 use crate::github::CommitSha;
@@ -217,6 +217,28 @@ pub(super) async fn handle_pull_request_reopened(
         payload.pull_request.mergeable_state.clone().into(),
     )
     .await
+}
+
+pub(super) async fn handle_push_to_branch(
+    repo_state: Arc<RepositoryState>,
+    db: Arc<PgDbClient>,
+    payload: PushToBranch,
+) -> anyhow::Result<()> {
+    let prs = db
+        .get_prs_by_base_branch(repo_state.repository(), &payload.branch)
+        .await?;
+
+    for pr in prs {
+        let pr = repo_state.client.get_pull_request(pr.number).await?;
+        db.update_pr_mergeable_state(
+            repo_state.repository(),
+            pr.number,
+            pr.mergeable_state.into(),
+        )
+        .await?;
+    }
+
+    Ok(())
 }
 
 async fn notify_of_approval(

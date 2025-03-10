@@ -10,7 +10,7 @@ use hmac::{Hmac, Mac};
 use octocrab::models::events::payload::{
     IssueCommentEventAction, IssueCommentEventPayload, PullRequestEventAction,
     PullRequestEventChangesFrom, PullRequestReviewCommentEventAction,
-    PullRequestReviewCommentEventPayload,
+    PullRequestReviewCommentEventPayload, PushEventPayload,
 };
 use octocrab::models::pulls::{PullRequest, Review};
 use octocrab::models::{workflows, App, Author, CheckRun, Repository, RunId};
@@ -19,7 +19,7 @@ use sha2::Sha256;
 
 use crate::bors::event::{
     BorsEvent, BorsGlobalEvent, BorsRepositoryEvent, CheckSuiteCompleted, PullRequestComment,
-    PullRequestEdited, PullRequestOpened, PullRequestPushed, PullRequestReopened,
+    PullRequestEdited, PullRequestOpened, PullRequestPushed, PullRequestReopened, PushToBranch,
     WorkflowCompleted, WorkflowStarted,
 };
 use crate::database::{WorkflowStatus, WorkflowType};
@@ -179,6 +179,7 @@ fn parse_webhook_event(request: Parts, body: &[u8]) -> anyhow::Result<Option<Bor
         b"workflow_run" => parse_workflow_run_events(body),
         b"check_run" => parse_check_run_events(body),
         b"check_suite" => parse_check_suite_events(body),
+        b"push" => parse_push_event(body),
         _ => {
             tracing::debug!("Ignoring unknown event type {:?}", event_type.to_str());
             Ok(None)
@@ -255,6 +256,7 @@ fn parse_pull_request_review_events(body: &[u8]) -> anyhow::Result<Option<BorsEv
         Ok(None)
     }
 }
+
 fn parse_pull_request_review_comment_events(body: &[u8]) -> anyhow::Result<Option<BorsEvent>> {
     let repository: WebhookRepository = serde_json::from_slice(body)?;
     let repository_name = parse_repository_name(&repository.repository)?;
@@ -311,6 +313,30 @@ fn parse_workflow_run_events(body: &[u8]) -> anyhow::Result<Option<BorsEvent>> {
         _ => None,
     };
     Ok(result)
+}
+
+fn parse_push_event(body: &[u8]) -> anyhow::Result<Option<BorsEvent>> {
+    let payload: PushEventPayload = serde_json::from_slice(body)?;
+    let branch = payload
+        .r#ref
+        .strip_prefix("refs/heads/")
+        .unwrap_or("")
+        .to_string();
+
+    if branch.is_empty() {
+        tracing::warn!("Push event with invalid ref: {}", payload.r#ref);
+        return Ok(None);
+    }
+
+    let repository: WebhookRepository = serde_json::from_slice(body)?;
+    let repository_name = parse_repository_name(&repository.repository)?;
+
+    Ok(Some(BorsEvent::Repository(
+        BorsRepositoryEvent::PushToBranch(PushToBranch {
+            repository: repository_name,
+            branch,
+        }),
+    )))
 }
 
 fn parse_check_run_events(body: &[u8]) -> anyhow::Result<Option<BorsEvent>> {

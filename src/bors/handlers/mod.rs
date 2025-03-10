@@ -4,7 +4,7 @@ use anyhow::Context;
 use octocrab::Octocrab;
 use review::{
     command_delegate, command_set_priority, command_undelegate, handle_pull_request_opened,
-    handle_pull_request_reopened,
+    handle_pull_request_reopened, handle_push_to_branch,
 };
 use tracing::Instrument;
 
@@ -152,6 +152,12 @@ pub async fn handle_bors_repository_event(
             );
 
             handle_pull_request_reopened(repo, db, payload)
+                .instrument(span.clone())
+                .await?;
+        }
+        BorsRepositoryEvent::PushToBranch(payload) => {
+            let span = tracing::info_span!("Push to branch", repo = payload.repository.to_string());
+            handle_push_to_branch(repo, db, payload)
                 .instrument(span.clone())
                 .await?;
         }
