@@ -6,6 +6,7 @@ use crate::bors::event::PullRequestOpened;
 use crate::bors::event::PullRequestPushed;
 use crate::bors::handlers::deny_request;
 use crate::bors::handlers::has_permission;
+use crate::bors::event::PullRequestReopened;
 use crate::bors::handlers::labels::handle_label_trigger;
 use crate::bors::Comment;
 use crate::bors::RepositoryState;
@@ -179,6 +180,19 @@ pub(super) async fn handle_pull_request_opened(
     repo_state: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
     payload: PullRequestOpened,
+) -> anyhow::Result<()> {
+    db.update_pr_mergeable_state(
+        repo_state.repository(),
+        payload.pull_request.number,
+        payload.pull_request.mergeable_state.clone().into(),
+    )
+    .await
+}
+
+pub(super) async fn handle_pull_request_reopened(
+    repo_state: Arc<RepositoryState>,
+    db: Arc<PgDbClient>,
+    payload: PullRequestReopened,
 ) -> anyhow::Result<()> {
     db.update_pr_mergeable_state(
         repo_state.repository(),

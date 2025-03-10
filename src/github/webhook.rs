@@ -19,7 +19,8 @@ use sha2::Sha256;
 
 use crate::bors::event::{
     BorsEvent, BorsGlobalEvent, BorsRepositoryEvent, CheckSuiteCompleted, PullRequestComment,
-    PullRequestEdited, PullRequestOpened, PullRequestPushed, WorkflowCompleted, WorkflowStarted,
+    PullRequestEdited, PullRequestOpened, PullRequestPushed, PullRequestReopened,
+    WorkflowCompleted, WorkflowStarted,
 };
 use crate::database::{WorkflowStatus, WorkflowType};
 use crate::github::server::ServerStateRef;
@@ -229,6 +230,12 @@ fn parse_pull_request_events(body: &[u8]) -> anyhow::Result<Option<BorsEvent>> {
         ))),
         PullRequestEventAction::Opened => Ok(Some(BorsEvent::Repository(
             BorsRepositoryEvent::PullRequestOpened(PullRequestOpened {
+                repository: repository_name,
+                pull_request: payload.pull_request.into(),
+            }),
+        ))),
+        PullRequestEventAction::Reopened => Ok(Some(BorsEvent::Repository(
+            BorsRepositoryEvent::PullRequestReopened(PullRequestReopened {
                 repository: repository_name,
                 pull_request: payload.pull_request.into(),
             }),
