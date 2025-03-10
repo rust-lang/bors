@@ -2,7 +2,11 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use octocrab::Octocrab;
+<<<<<<< HEAD
 use review::{command_delegate, command_set_priority, command_undelegate};
+=======
+use review::{command_set_priority, handle_pull_request_opened};
+>>>>>>> 511ddd3 (Update PR mergeable_state on PR open)
 use tracing::Instrument;
 
 use crate::bors::command::{BorsCommand, CommandParseError};
@@ -131,6 +135,14 @@ pub async fn handle_bors_repository_event(
                 tracing::info_span!("Pull request pushed", repo = payload.repository.to_string());
 
             handle_push_to_pull_request(repo, db, payload)
+                .instrument(span.clone())
+                .await?;
+        }
+        BorsRepositoryEvent::PullRequestOpened(payload) => {
+            let span =
+                tracing::info_span!("Pull request opened", repo = payload.repository.to_string());
+
+            handle_pull_request_opened(repo, db, payload)
                 .instrument(span.clone())
                 .await?;
         }

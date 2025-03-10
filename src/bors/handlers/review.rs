@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use crate::bors::command::Approver;
 use crate::bors::event::PullRequestEdited;
+use crate::bors::event::PullRequestOpened;
 use crate::bors::event::PullRequestPushed;
 use crate::bors::handlers::deny_request;
 use crate::bors::handlers::has_permission;
@@ -171,7 +172,30 @@ pub(super) async fn handle_push_to_pull_request(
     notify_of_pushed_pr(&repo_state, pr_number, pr.head.sha.clone()).await
 }
 
+<<<<<<< HEAD
 fn sufficient_delegate_permission(repo: Arc<RepositoryState>, author: &GithubUser) -> bool {
+=======
+pub(super) async fn handle_pull_request_opened(
+    repo_state: Arc<RepositoryState>,
+    db: Arc<PgDbClient>,
+    payload: PullRequestOpened,
+) -> anyhow::Result<()> {
+    db.update_pr_mergeable_state(
+        repo_state.repository(),
+        payload.pull_request.number,
+        payload.pull_request.mergeable_state.clone().into(),
+    )
+    .await
+}
+
+fn sufficient_approve_permission(repo: Arc<RepositoryState>, author: &GithubUser) -> bool {
+    repo.permissions
+        .load()
+        .has_permission(author.id, PermissionType::Review)
+}
+
+fn sufficient_priority_permission(repo: Arc<RepositoryState>, author: &GithubUser) -> bool {
+>>>>>>> 511ddd3 (Update PR mergeable_state on PR open)
     repo.permissions
         .load()
         .has_permission(author.id, PermissionType::Review)
