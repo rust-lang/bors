@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use octocrab::Octocrab;
-use review::{command_delegate, command_set_priority, command_undelegate};
+use review::{command_delegate, command_set_priority, command_set_rollup, command_undelegate};
 use tracing::Instrument;
 
 use crate::bors::command::{BorsCommand, CommandParseError};
@@ -208,7 +208,11 @@ async fn handle_comment(
                 let repo = Arc::clone(&repo);
                 let database = Arc::clone(&database);
                 let result = match command {
-                    BorsCommand::Approve { approver, priority } => {
+                    BorsCommand::Approve {
+                        approver,
+                        priority,
+                        rollup,
+                    } => {
                         let span = tracing::info_span!("Approve");
                         command_approve(
                             repo,
@@ -217,6 +221,7 @@ async fn handle_comment(
                             &comment.author,
                             &approver,
                             priority,
+                            rollup,
                         )
                         .instrument(span)
                         .await
@@ -275,6 +280,12 @@ async fn handle_comment(
                     BorsCommand::TryCancel => {
                         let span = tracing::info_span!("Cancel try");
                         command_try_cancel(repo, database, &pull_request, &comment.author)
+                            .instrument(span)
+                            .await
+                    }
+                    BorsCommand::Rollup(rollup) => {
+                        let span = tracing::info_span!("Rollup");
+                        command_set_rollup(repo, database, &pull_request, &comment.author, rollup)
                             .instrument(span)
                             .await
                     }
