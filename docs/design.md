@@ -47,6 +47,7 @@ Periodically (every few minutes), the bot will perform a refresh action, which w
 repository:
 - Check the currently running CI workflow. If some of them are running for too long
 (based on the `timeout` configured for the repository), it will cancel them.
+- Update the `mergeable_state` of all PRs with unknown state.
 - Reload user permissions from the Team API.
 - Reload `rust-bors.toml` config for the repository from its main branch.
 

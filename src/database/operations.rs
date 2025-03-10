@@ -244,6 +244,47 @@ WHERE pr.repository = $1
     Ok(prs)
 }
 
+pub(crate) async fn get_prs_with_unknown_mergeable_state(
+    executor: impl PgExecutor<'_>,
+    repo: &GithubRepoName,
+) -> anyhow::Result<Vec<PullRequestModel>> {
+    let prs = sqlx::query_as!(
+        PullRequestModel,
+        r#"
+SELECT
+    pr.id,
+    pr.repository,
+    pr.number,
+    pr.approved_by,
+    pr.priority,
+    pr.delegated,
+    pr.mergeable_state as "mergeable_state: MergeableState",
+    pr.base_branch,
+    CASE WHEN pr.build_id IS NULL
+        THEN NULL
+        ELSE (
+            build.id,
+            build.repository,
+            build.branch,
+            build.commit_sha,
+            build.status,
+            build.parent,
+            build.created_at
+        )
+    END AS "try_build: BuildModel",
+    pr.created_at as "created_at: DateTime<Utc>"
+FROM pull_request as pr
+    LEFT JOIN build ON pr.build_id = build.id
+WHERE pr.repository = $1
+    AND (pr.mergeable_state = 'unknown' OR pr.mergeable_state IS NULL)
+"#,
+        repo.to_string(),
+    )
+    .fetch_all(executor)
+    .await?;
+    Ok(prs)
+}
+
 pub(crate) async fn update_pr_build_id(
     executor: impl PgExecutor<'_>,
     pr_id: i32,
