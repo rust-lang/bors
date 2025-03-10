@@ -10,9 +10,9 @@ use super::operations::{
     approve_pull_request, create_build, create_pull_request, create_workflow,
     delegate_pull_request, find_build, find_pr_by_build, get_pull_request, get_running_builds,
     get_workflows_for_build, set_pr_priority, unapprove_pull_request, undelegate_pull_request,
-    update_build_status, update_pr_build_id, update_workflow_status,
+    update_build_status, update_pr_build_id, update_pr_mergeable_state, update_workflow_status,
 };
-use super::RunId;
+use super::{MergeableState, RunId};
 
 /// Provides access to a database using sqlx operations.
 #[derive(Clone)]
@@ -70,7 +70,18 @@ impl PgDbClient {
         pr_number: PullRequestNumber,
     ) -> anyhow::Result<()> {
         let pr = self.get_or_create_pull_request(repo, pr_number).await?;
-        undelegate_pull_request(&self.pool, pr.id).await
+        undelegate_pull_request(&self.pool, pr.id).await?;
+        Ok(())
+    }
+
+    pub async fn update_pr_mergeable_state(
+        &self,
+        repo: &GithubRepoName,
+        pr_number: PullRequestNumber,
+        mergeable_state: MergeableState,
+    ) -> anyhow::Result<()> {
+        let pr = self.get_or_create_pull_request(repo, pr_number).await?;
+        update_pr_mergeable_state(&self.pool, pr.id, mergeable_state).await
     }
 
     pub async fn get_or_create_pull_request(

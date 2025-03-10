@@ -123,6 +123,21 @@ pub(crate) async fn undelegate_pull_request(
 ) -> anyhow::Result<()> {
     sqlx::query!(
         "UPDATE pull_request SET delegated = FALSE WHERE id = $1",
+        pr_id,
+    )
+    .execute(executor)
+    .await?;
+    Ok(())
+}
+
+pub(crate) async fn update_pr_mergeable_state(
+    executor: impl PgExecutor<'_>,
+    pr_id: i32,
+    mergeable_state: MergeableState,
+) -> anyhow::Result<()> {
+    sqlx::query!(
+        "UPDATE pull_request SET mergeable_state = $1 WHERE id = $2",
+        mergeable_state as _,
         pr_id
     )
     .execute(executor)
