@@ -2,15 +2,10 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use octocrab::Octocrab;
-<<<<<<< HEAD
-<<<<<<< HEAD
-use review::{command_delegate, command_set_priority, command_undelegate};
-=======
-use review::{command_set_priority, handle_pull_request_opened};
->>>>>>> 511ddd3 (Update PR mergeable_state on PR open)
-=======
-use review::{command_set_priority, handle_pull_request_opened, handle_pull_request_reopened};
->>>>>>> e4f7891 (Update mergeable_state on PR reopen)
+use review::{
+    command_delegate, command_set_priority, command_undelegate, handle_pull_request_opened,
+    handle_pull_request_reopened,
+};
 use tracing::Instrument;
 
 use crate::bors::command::{BorsCommand, CommandParseError};

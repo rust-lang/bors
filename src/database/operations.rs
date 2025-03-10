@@ -31,6 +31,7 @@ SELECT
     pr.priority,
     pr.delegated,
     pr.mergeable_state as "mergeable_state: MergeableState",
+    pr.base_branch,
     CASE WHEN pr.build_id IS NULL
         THEN NULL
         ELSE (
@@ -66,6 +67,21 @@ pub(crate) async fn create_pull_request(
         "INSERT INTO pull_request (repository, number) VALUES ($1, $2) ON CONFLICT DO NOTHING",
         repo.to_string(),
         pr_number.0 as i32
+    )
+    .execute(executor)
+    .await?;
+    Ok(())
+}
+
+pub(crate) async fn update_pr_base_branch(
+    executor: impl PgExecutor<'_>,
+    pr_id: i32,
+    base_branch: &str,
+) -> anyhow::Result<()> {
+    sqlx::query!(
+        "UPDATE pull_request SET base_branch = $1 WHERE id = $2",
+        base_branch,
+        pr_id
     )
     .execute(executor)
     .await?;
@@ -160,6 +176,7 @@ SELECT
     pr.priority,
     pr.delegated,
     pr.mergeable_state as "mergeable_state: MergeableState",
+    pr.base_branch,
     CASE WHEN pr.build_id IS NULL
         THEN NULL
         ELSE (

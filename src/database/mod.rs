@@ -182,6 +182,7 @@ pub struct PullRequestModel {
     pub priority: Option<i32>,
     pub try_build: Option<BuildModel>,
     pub mergeable_state: MergeableState,
+    pub base_branch: Option<String>,
     pub created_at: DateTime<Utc>,
 }
 

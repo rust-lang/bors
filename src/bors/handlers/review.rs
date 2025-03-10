@@ -4,9 +4,9 @@ use crate::bors::command::Approver;
 use crate::bors::event::PullRequestEdited;
 use crate::bors::event::PullRequestOpened;
 use crate::bors::event::PullRequestPushed;
+use crate::bors::event::PullRequestReopened;
 use crate::bors::handlers::deny_request;
 use crate::bors::handlers::has_permission;
-use crate::bors::event::PullRequestReopened;
 use crate::bors::handlers::labels::handle_label_trigger;
 use crate::bors::Comment;
 use crate::bors::RepositoryState;
@@ -129,6 +129,8 @@ pub(super) async fn handle_pull_request_edited(
         pr.mergeable_state.clone().into(),
     )
     .await?;
+    db.update_pr_base_branch(repo_state.repository(), pr_number, &pr.base.name)
+        .await?;
 
     // If the base branch has changed, unapprove the PR
     let Some(_) = payload.from_base_sha else {
@@ -173,14 +175,23 @@ pub(super) async fn handle_push_to_pull_request(
     notify_of_pushed_pr(&repo_state, pr_number, pr.head.sha.clone()).await
 }
 
-<<<<<<< HEAD
 fn sufficient_delegate_permission(repo: Arc<RepositoryState>, author: &GithubUser) -> bool {
-=======
+    repo.permissions
+        .load()
+        .has_permission(author.id, PermissionType::Review)
+}
+
 pub(super) async fn handle_pull_request_opened(
     repo_state: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
     payload: PullRequestOpened,
 ) -> anyhow::Result<()> {
+    db.update_pr_base_branch(
+        repo_state.repository(),
+        payload.pull_request.number,
+        &payload.pull_request.base.name,
+    )
+    .await?;
     db.update_pr_mergeable_state(
         repo_state.repository(),
         payload.pull_request.number,
@@ -194,25 +205,18 @@ pub(super) async fn handle_pull_request_reopened(
     db: Arc<PgDbClient>,
     payload: PullRequestReopened,
 ) -> anyhow::Result<()> {
+    db.update_pr_base_branch(
+        repo_state.repository(),
+        payload.pull_request.number,
+        &payload.pull_request.base.name,
+    )
+    .await?;
     db.update_pr_mergeable_state(
         repo_state.repository(),
         payload.pull_request.number,
         payload.pull_request.mergeable_state.clone().into(),
     )
     .await
-}
-
-fn sufficient_approve_permission(repo: Arc<RepositoryState>, author: &GithubUser) -> bool {
-    repo.permissions
-        .load()
-        .has_permission(author.id, PermissionType::Review)
-}
-
-fn sufficient_priority_permission(repo: Arc<RepositoryState>, author: &GithubUser) -> bool {
->>>>>>> 511ddd3 (Update PR mergeable_state on PR open)
-    repo.permissions
-        .load()
-        .has_permission(author.id, PermissionType::Review)
 }
 
 async fn notify_of_approval(
