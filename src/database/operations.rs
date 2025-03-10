@@ -25,7 +25,7 @@ pub(crate) async fn get_pull_request(
         r#"
 SELECT
     pr.id,
-    pr.repository,
+    pr.repository as "repository: GithubRepoName",
     pr.number,
     pr.approved_by,
     pr.priority,
@@ -141,7 +141,7 @@ pub(crate) async fn find_pr_by_build(
         r#"
 SELECT
     pr.id,
-    pr.repository,
+    pr.repository as "repository: GithubRepoName",
     pr.number,
     pr.approved_by,
     pr.priority,
@@ -221,7 +221,7 @@ pub(crate) async fn find_build(
         r#"
 SELECT
     id,
-    repository,
+    repository as "repository: GithubRepoName",
     branch,
     commit_sha,
     parent,
@@ -250,7 +250,7 @@ pub(crate) async fn get_running_builds(
         r#"
 SELECT
     id,
-    repository,
+    repository as "repository: GithubRepoName",
     branch,
     commit_sha,
     parent,

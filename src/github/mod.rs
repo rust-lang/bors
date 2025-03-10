@@ -1,8 +1,8 @@
 //! Contains definitions of common types (pull request, user, repository name) needed
 //! for working with (GitHub) repositories.
-use std::fmt::{Debug, Display, Formatter};
-
 use octocrab::models::UserId;
+use std::fmt::{Debug, Display, Formatter};
+use std::str::FromStr;
 use url::Url;
 
 pub mod api;
@@ -44,12 +44,20 @@ impl Display for GithubRepoName {
     }
 }
 
-impl From<String> for GithubRepoName {
-    fn from(value: String) -> Self {
+// This implementation should be kept in sync with the `Display`
+// implementation above.
+impl FromStr for GithubRepoName {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
         let mut parts = value.split('/');
-        let owner = parts.next().unwrap_or_default();
-        let name = parts.next().unwrap_or_default();
-        Self::new(owner, name)
+        let owner = parts
+            .next()
+            .ok_or_else(|| "GitHub repository name must not be empty".to_string())?;
+        let name = parts
+            .next()
+            .ok_or_else(|| "GitHub repository name must be in the format `<owner>/<name>`")?;
+        Ok(Self::new(owner, name))
     }
 }
 
