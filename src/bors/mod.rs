@@ -1,6 +1,7 @@
 use arc_swap::ArcSwap;
 
 pub use command::CommandParser;
+pub use command::RollupMode;
 pub use comment::Comment;
 pub use context::BorsContext;
 #[cfg(test)]

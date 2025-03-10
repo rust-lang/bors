@@ -210,7 +210,7 @@ impl BorsTester {
         for i in 0..count {
             self.get_comment()
                 .await
-                .expect(&format!("Failed to get comment #{i}"));
+                .unwrap_or_else(|_| panic!("Failed to get comment #{i}"));
         }
     }
 

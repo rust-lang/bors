@@ -34,7 +34,7 @@ pub async fn mock_pull_requests(
         Mock::given(method("GET"))
             .and(path(format!("/repos/{repo_name}/pulls/{pr_number}")))
             .respond_with(move |_: &Request| {
-                let pull_request_error = repo_clone.lock().pull_request_error.clone();
+                let pull_request_error = repo_clone.lock().pull_request_error;
                 if pull_request_error {
                     ResponseTemplate::new(500)
                 } else {

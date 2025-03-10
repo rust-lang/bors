@@ -92,7 +92,7 @@ fn now() -> DateTime<Utc> {
 
 #[cfg(test)]
 thread_local! {
-    static MOCK_TIME: std::cell::RefCell<Option<DateTime<Utc>>> = std::cell::RefCell::new(None);
+    static MOCK_TIME: std::cell::RefCell<Option<DateTime<Utc>>> = const { std::cell::RefCell::new(None) };
 }
 
 #[cfg(test)]
