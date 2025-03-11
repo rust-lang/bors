@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use crate::bors::command::Approver;
+use crate::bors::command::RollupMode;
 use crate::bors::event::PullRequestEdited;
 use crate::bors::event::PullRequestPushed;
 use crate::bors::handlers::deny_request;
@@ -25,6 +26,7 @@ pub(super) async fn command_approve(
     author: &GithubUser,
     approver: &Approver,
     priority: Option<u32>,
+    rollup: Option<RollupMode>,
 ) -> anyhow::Result<()> {
     tracing::info!("Approving PR {}", pr.number);
     if !has_permission(&repo_state, author, pr, &db, PermissionType::Review).await? {
@@ -40,6 +42,7 @@ pub(super) async fn command_approve(
         pr.number,
         approver.as_str(),
         priority,
+        rollup,
     )
     .await?;
     handle_label_trigger(&repo_state, pr.number, LabelTrigger::Approved).await?;
@@ -112,6 +115,23 @@ pub(super) async fn command_undelegate(
         return Ok(());
     }
     db.undelegate(repo_state.repository(), pr.number).await
+}
+
+/// Set the rollup of a pull request.
+/// rollup can only be set by a user of sufficient authority.
+pub(super) async fn command_set_rollup(
+    repo_state: Arc<RepositoryState>,
+    db: Arc<PgDbClient>,
+    pr: &PullRequest,
+    author: &GithubUser,
+    rollup: RollupMode,
+) -> anyhow::Result<()> {
+    if !has_permission(&repo_state, author, pr, &db, PermissionType::Review).await? {
+        deny_request(&repo_state, pr, author, PermissionType::Review).await?;
+        return Ok(());
+    }
+    db.set_rollup(repo_state.repository(), pr.number, rollup)
+        .await
 }
 
 pub(super) async fn handle_pull_request_edited(
@@ -237,7 +257,10 @@ async fn notify_of_delegation(
 #[cfg(test)]
 mod tests {
     use crate::{
-        bors::handlers::{trybuild::TRY_MERGE_BRANCH_NAME, TRY_BRANCH_NAME},
+        bors::{
+            handlers::{trybuild::TRY_MERGE_BRANCH_NAME, TRY_BRANCH_NAME},
+            RollupMode,
+        },
         github::PullRequestNumber,
         permissions::PermissionType,
         tests::mocks::{
@@ -260,6 +283,13 @@ mod tests {
                         User::default_user().name
                     ),
                 );
+
+                tester
+                    .wait_for(|| async {
+                        let pr = tester.get_default_pr().await?;
+                        Ok(pr.rollup == Some(RollupMode::Maybe))
+                    })
+                    .await?;
 
                 check_pr_approved_by(
                     &tester,
@@ -888,5 +918,192 @@ approve = ["+approved"]
                 Ok(tester)
             })
             .await;
+    }
+
+    #[sqlx::test]
+    async fn approve_with_rollup_value(pool: sqlx::PgPool) {
+        run_test(pool, |mut tester| async {
+            tester.post_comment("@bors r+ rollup=never").await?;
+            tester.expect_comments(1).await;
+            let pr = tester.get_default_pr().await?;
+            assert_eq!(pr.rollup, Some(RollupMode::Never));
+            assert!(pr.is_approved());
+            Ok(tester)
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn approve_with_rollup_bare(pool: sqlx::PgPool) {
+        run_test(pool, |mut tester| async {
+            tester.post_comment("@bors r+ rollup").await?;
+            tester.expect_comments(1).await;
+            let pr = tester.get_default_pr().await?;
+            assert_eq!(pr.rollup, Some(RollupMode::Always));
+            assert!(pr.is_approved());
+            Ok(tester)
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn approve_with_rollup_bare_maybe(pool: sqlx::PgPool) {
+        run_test(pool, |mut tester| async {
+            tester.post_comment("@bors r+ rollup-").await?;
+            tester.expect_comments(1).await;
+            let pr = tester.get_default_pr().await?;
+            assert_eq!(pr.rollup, Some(RollupMode::Maybe));
+            assert!(pr.is_approved());
+            Ok(tester)
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn approve_with_priority_rollup(pool: sqlx::PgPool) {
+        run_test(pool, |mut tester| async {
+            tester.post_comment("@bors r+ p=10 rollup=never").await?;
+            tester.expect_comments(1).await;
+            let pr = tester.get_default_pr().await?;
+            assert_eq!(pr.priority, Some(10));
+            assert_eq!(pr.rollup, Some(RollupMode::Never));
+            assert!(pr.is_approved());
+            Ok(tester)
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn approve_on_behalf_with_rollup_bare(pool: sqlx::PgPool) {
+        run_test(pool, |mut tester| async {
+            tester.post_comment("@bors r=user1 rollup").await?;
+            tester.expect_comments(1).await;
+            let pr = tester.get_default_pr().await?;
+            assert_eq!(pr.rollup, Some(RollupMode::Always));
+            assert_eq!(pr.approved_by, Some("user1".to_string()));
+            Ok(tester)
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn approve_on_behalf_with_rollup_value(pool: sqlx::PgPool) {
+        run_test(pool, |mut tester| async {
+            tester.post_comment("@bors r=user1 rollup=always").await?;
+            tester.expect_comments(1).await;
+            let pr = tester.get_default_pr().await?;
+            assert_eq!(pr.rollup, Some(RollupMode::Always));
+            assert_eq!(pr.approved_by, Some("user1".to_string()));
+            Ok(tester)
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn approve_on_behalf_with_priority_rollup_value(pool: sqlx::PgPool) {
+        run_test(pool, |mut tester| async {
+            tester
+                .post_comment("@bors r=user1 rollup=always priority=10")
+                .await?;
+            tester.expect_comments(1).await;
+            let pr = tester.get_default_pr().await?;
+            assert_eq!(pr.rollup, Some(RollupMode::Always));
+            assert_eq!(pr.priority, Some(10));
+            assert_eq!(pr.approved_by, Some("user1".to_string()));
+            Ok(tester)
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn approve_on_behalf_with_priority_rollup_bare(pool: sqlx::PgPool) {
+        run_test(pool, |mut tester| async {
+            tester
+                .post_comment("@bors r=user1 rollup- priority=10")
+                .await?;
+            tester.expect_comments(1).await;
+            let pr = tester.get_default_pr().await?;
+            assert_eq!(pr.rollup, Some(RollupMode::Maybe));
+            assert_eq!(pr.priority, Some(10));
+            assert_eq!(pr.approved_by, Some("user1".to_string()));
+            Ok(tester)
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn set_rollup_default(pool: sqlx::PgPool) {
+        run_test(pool, |mut tester| async {
+            tester.post_comment("@bors rollup").await?;
+            tester
+                .wait_for(|| async {
+                    let pr = tester.get_default_pr().await?;
+                    Ok(pr.rollup == Some(RollupMode::Always))
+                })
+                .await?;
+            Ok(tester)
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn set_rollup_with_value(pool: sqlx::PgPool) {
+        run_test(pool, |mut tester| async {
+            tester.post_comment("@bors rollup=maybe").await?;
+            tester
+                .wait_for(|| async {
+                    let pr = tester.get_default_pr().await?;
+                    Ok(pr.rollup == Some(RollupMode::Maybe))
+                })
+                .await?;
+            Ok(tester)
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn rollup_preserved_after_approve(pool: sqlx::PgPool) {
+        run_test(pool, |mut tester| async {
+            tester.post_comment("@bors rollup").await?;
+            tester
+                .wait_for(|| async {
+                    let pr = tester.get_default_pr().await?;
+                    Ok(pr.rollup == Some(RollupMode::Always))
+                })
+                .await?;
+
+            tester.post_comment("@bors r+").await?;
+            tester.expect_comments(1).await;
+
+            let pr = tester.get_default_pr().await?;
+            assert_eq!(pr.rollup, Some(RollupMode::Always));
+            assert!(pr.is_approved());
+
+            Ok(tester)
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn rollup_overridden_on_approve_with_rollup(pool: sqlx::PgPool) {
+        run_test(pool, |mut tester| async {
+            tester.post_comment("@bors rollup=never").await?;
+            tester
+                .wait_for(|| async {
+                    let pr = tester.get_default_pr().await?;
+                    Ok(pr.rollup == Some(RollupMode::Never))
+                })
+                .await?;
+
+            tester.post_comment("@bors r+ rollup").await?;
+            tester.expect_comments(1).await;
+
+            let pr = tester.get_default_pr().await?;
+            assert_eq!(pr.rollup, Some(RollupMode::Always));
+            assert!(pr.is_approved());
+
+            Ok(tester)
+        })
+        .await;
     }
 }

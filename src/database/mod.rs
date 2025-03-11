@@ -1,11 +1,17 @@
 //! Provides access to the database.
-use std::fmt::{Display, Formatter};
+use std::{
+    fmt::{Display, Formatter},
+    str::FromStr,
+};
 
 use chrono::{DateTime, Utc};
 pub use client::PgDbClient;
 use sqlx::error::BoxDynError;
 
-use crate::github::{GithubRepoName, PullRequestNumber};
+use crate::{
+    bors::RollupMode,
+    github::{GithubRepoName, PullRequestNumber},
+};
 
 mod client;
 pub(crate) mod operations;
@@ -83,6 +89,29 @@ impl sqlx::Type<sqlx::Postgres> for PullRequestNumber {
     }
 }
 
+impl sqlx::Type<sqlx::Postgres> for RollupMode {
+    fn type_info() -> sqlx::postgres::PgTypeInfo {
+        <String as sqlx::Type<sqlx::Postgres>>::type_info() // Store as TEXT in Postgres
+    }
+}
+
+impl sqlx::Encode<'_, sqlx::Postgres> for RollupMode {
+    fn encode_by_ref(
+        &self,
+        buf: &mut sqlx::postgres::PgArgumentBuffer,
+    ) -> Result<sqlx::encode::IsNull, BoxDynError> {
+        <String as sqlx::Encode<sqlx::Postgres>>::encode(self.to_string(), buf)
+    }
+}
+
+impl sqlx::Decode<'_, sqlx::Postgres> for RollupMode {
+    fn decode(value: sqlx::postgres::PgValueRef<'_>) -> Result<Self, BoxDynError> {
+        let value = <String as sqlx::Decode<sqlx::Postgres>>::decode(value)?;
+
+        Self::from_str(&value).map_err(|_| panic!("Invalid RollupMode value: {}", value))
+    }
+}
+
 /// Status of a GitHub build.
 #[derive(Debug, PartialEq, sqlx::Type)]
 #[sqlx(type_name = "TEXT")]
@@ -122,6 +151,7 @@ pub struct PullRequestModel {
     pub approved_by: Option<String>,
     pub delegated: bool,
     pub priority: Option<i32>,
+    pub rollup: Option<RollupMode>,
     pub try_build: Option<BuildModel>,
     pub created_at: DateTime<Utc>,
 }
