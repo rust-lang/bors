@@ -236,9 +236,16 @@ async fn handle_comment(
                     }
                     BorsCommand::TreeClosed(priority) => {
                         let span = tracing::info_span!("TreeClosed");
-                        command_close_tree(repo, database, &pull_request, &comment.author, priority)
-                            .instrument(span)
-                            .await
+                        command_close_tree(
+                            repo,
+                            database,
+                            &pull_request,
+                            &comment.author,
+                            priority,
+                            &comment.html_url,
+                        )
+                        .instrument(span)
+                        .await
                     }
                     BorsCommand::Unapprove => {
                         let span = tracing::info_span!("Unapprove");

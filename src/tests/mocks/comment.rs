@@ -16,6 +16,7 @@ pub struct Comment {
     pub pr: u64,
     pub author: User,
     pub content: String,
+    pub comment_id: u64,
 }
 
 impl Comment {
@@ -25,11 +26,19 @@ impl Comment {
             pr,
             author: User::default(),
             content: content.to_string(),
+            comment_id: 1, // comment_id will be updated by the mock server
         }
     }
 
     pub fn with_author(self, author: User) -> Self {
         Self { author, ..self }
+    }
+
+    pub fn with_id(self, id: u64) -> Self {
+        Self {
+            comment_id: id,
+            ..self
+        }
     }
 }
 
@@ -52,7 +61,11 @@ pub struct GitHubIssueCommentEventPayload {
 impl From<Comment> for GitHubIssueCommentEventPayload {
     fn from(value: Comment) -> Self {
         let time = Utc::now();
-        let url = Url::parse("https://foo.bar").unwrap();
+        let html_url = format!(
+            "https://github.com/{}/pull/{}#issuecomment-{}",
+            value.repo, value.pr, value.comment_id
+        );
+        let url = Url::parse(&html_url).unwrap();
         Self {
             repository: value.repo.into(),
             action: IssueCommentEventAction::Created,
@@ -88,8 +101,8 @@ impl From<Comment> for GitHubIssueCommentEventPayload {
                 updated_at: time,
             },
             comment: GitHubComment {
-                id: CommentId(1),
-                node_id: "1".to_string(),
+                id: CommentId(value.comment_id),
+                node_id: value.comment_id.to_string(),
                 url: url.clone(),
                 html_url: url,
                 body: Some(value.content.clone()),
@@ -151,10 +164,14 @@ pub(super) struct GitHubComment {
 impl From<Comment> for GitHubComment {
     fn from(value: Comment) -> Self {
         let time = Utc::now();
-        let url = Url::parse("https://foo.bar").unwrap();
+        let html_url = format!(
+            "https://github.com/{}/pull/{}#issuecomment-{}",
+            value.repo, value.pr, value.comment_id
+        );
+        let url = Url::parse(&html_url).unwrap();
         Self {
-            id: CommentId(1),
-            node_id: "1".to_string(),
+            id: CommentId(value.comment_id),
+            node_id: value.comment_id.to_string(),
             url: url.clone(),
             html_url: url,
             body: Some(value.content.clone()),

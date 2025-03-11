@@ -45,7 +45,7 @@ pub async fn mock_pull_requests(
             .await;
 
         mock_pr_comments(
-            repo_name.clone(),
+            repo.clone(),
             pr_number,
             comments_tx.clone(),
             mock_server,
@@ -56,11 +56,12 @@ pub async fn mock_pull_requests(
 }
 
 async fn mock_pr_comments(
-    repo_name: GithubRepoName,
+    repo: Arc<Mutex<Repo>>,
     pr_number: u64,
     comments_tx: Sender<Comment>,
     mock_server: &MockServer,
 ) {
+    let repo_name = repo.lock().name.clone();
     Mock::given(method("POST"))
         .and(path(format!(
             "/repos/{repo_name}/issues/{pr_number}/comments",
@@ -72,9 +73,13 @@ async fn mock_pr_comments(
             }
 
             let comment_payload: CommentCreatePayload = req.body_json().unwrap();
-            let comment: Comment =
-                Comment::new(repo_name.clone(), pr_number, &comment_payload.body)
-                    .with_author(User::bors_bot());
+            let mut repo = repo.lock();
+            let pr = repo.pull_requests.get_mut(&pr_number).unwrap();
+            let comment_id = pr.next_comment_id();
+
+            let comment = Comment::new(repo_name.clone(), pr_number, &comment_payload.body)
+                .with_author(User::bors_bot())
+                .with_id(comment_id);
 
             // We cannot use `tx.blocking_send()`, because this function is actually called
             // from within an async task, but it is not async, so we also cannot use

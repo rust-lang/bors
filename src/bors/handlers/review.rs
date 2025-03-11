@@ -136,6 +136,7 @@ pub(super) async fn command_close_tree(
     pr: &PullRequest,
     author: &GithubUser,
     priority: u32,
+    comment_url: &str,
 ) -> anyhow::Result<()> {
     if !sufficient_approve_permission(repo_state.clone(), author) {
         deny_request(&repo_state, pr, author, PermissionType::Review).await?;
@@ -145,11 +146,7 @@ pub(super) async fn command_close_tree(
         repo_state.repository(),
         TreeState::Closed {
             priority,
-            source: format!(
-                "https://github.com/{}/pull/{}",
-                repo_state.repository(),
-                pr.number
-            ),
+            source: comment_url.to_string(),
         },
     )
     .await?;
@@ -484,9 +481,8 @@ mod tests {
                     TreeState::Closed {
                         priority: 5,
                         source: format!(
-                            "https://github.com/{}/pull/{}",
-                            default_repo_name(),
-                            default_pr_number()
+                            "https://github.com/{}/pull/1#issuecomment-1",
+                            default_repo_name()
                         ),
                     }
                 );
