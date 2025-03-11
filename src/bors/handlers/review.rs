@@ -206,12 +206,8 @@ mod tests {
                     ),
                 );
 
-                tester
-                    .wait_for(|| async {
-                        let pr = tester.get_default_pr().await?;
-                        Ok(pr.rollup == Some(RollupMode::Maybe))
-                    })
-                    .await?;
+                let pr = tester.get_default_pr().await?;
+                assert!(pr.rollup.is_none());
 
                 assert_pr_approved_by(
                     &tester,

@@ -35,8 +35,6 @@ impl PgDbClient {
         rollup: Option<RollupMode>,
     ) -> anyhow::Result<()> {
         let pr = self.get_or_create_pull_request(repo, pr_number).await?;
-        let rollup = rollup.or(pr.rollup).unwrap_or(RollupMode::Maybe);
-
         approve_pull_request(&self.pool, pr.id, approver, priority, rollup).await
     }
 
