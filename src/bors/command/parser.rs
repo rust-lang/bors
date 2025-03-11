@@ -3,12 +3,13 @@
 use std::collections::HashSet;
 use std::str::FromStr;
 
-use crate::bors::command::{Approver, BorsCommand, Parent, ROLLUP_VALUES};
+use crate::bors::command::{Approver, BorsCommand, Parent};
 use crate::github::CommitSha;
 
 use super::{Priority, RollupMode};
 
 const PRIORITY_NAMES: [&str; 2] = ["p", "priority"];
+const ROLLUP_VALUES: [&str; 4] = ["always", "iffy", "maybe", "never"];
 
 #[derive(Debug, PartialEq)]
 pub enum CommandParseError<'a> {

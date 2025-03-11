@@ -25,8 +25,6 @@ pub enum Approver {
     Specified(String),
 }
 
-const ROLLUP_VALUES: [&str; 4] = ["always", "iffy", "maybe", "never"];
-
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum RollupMode {
     Always,
