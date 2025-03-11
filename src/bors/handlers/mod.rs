@@ -1,18 +1,11 @@
 use std::sync::Arc;
 
-use anyhow::Context;
-use octocrab::Octocrab;
-use review::{command_delegate, command_set_priority, command_set_rollup, command_undelegate};
-use tracing::Instrument;
-
 use crate::bors::command::{BorsCommand, CommandParseError};
 use crate::bors::event::{BorsGlobalEvent, BorsRepositoryEvent, PullRequestComment};
 use crate::bors::handlers::help::command_help;
 use crate::bors::handlers::ping::command_ping;
 use crate::bors::handlers::refresh::refresh_repository;
-use crate::bors::handlers::review::{
-    command_approve, command_unapprove, handle_pull_request_edited, handle_push_to_pull_request,
-};
+use crate::bors::handlers::review::{command_approve, command_unapprove};
 use crate::bors::handlers::trybuild::{command_try_build, command_try_cancel, TRY_BRANCH_NAME};
 use crate::bors::handlers::workflow::{
     handle_check_suite_completed, handle_workflow_completed, handle_workflow_started,
@@ -21,6 +14,11 @@ use crate::bors::{BorsContext, Comment, RepositoryState};
 use crate::github::{GithubUser, PullRequest};
 use crate::permissions::PermissionType;
 use crate::{load_repositories, PgDbClient, TeamApiClient};
+use anyhow::Context;
+use octocrab::Octocrab;
+use pr_events::{handle_pull_request_edited, handle_push_to_pull_request};
+use review::{command_delegate, command_set_priority, command_set_rollup, command_undelegate};
+use tracing::Instrument;
 
 #[cfg(test)]
 use crate::tests::util::TestSyncMarker;
@@ -28,6 +26,7 @@ use crate::tests::util::TestSyncMarker;
 mod help;
 mod labels;
 mod ping;
+mod pr_events;
 mod refresh;
 mod review;
 mod trybuild;
