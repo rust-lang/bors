@@ -56,7 +56,7 @@ impl FromStr for GithubRepoName {
             .ok_or_else(|| "GitHub repository name must not be empty".to_string())?;
         let name = parts
             .next()
-            .ok_or_else(|| "GitHub repository name must be in the format `<owner>/<name>`")?;
+            .ok_or("GitHub repository name must be in the format `<owner>/<name>`")?;
         Ok(Self::new(owner, name))
     }
 }
