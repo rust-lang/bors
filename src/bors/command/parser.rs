@@ -88,7 +88,7 @@ impl CommandParser {
                                             return Some({
                                                 let tmp = RollupMode::from_str(value);
                                                 match tmp {
-                                                    Ok(x) => Ok(BorsCommand::Rollup(x)),
+                                                    Ok(x) => Ok(BorsCommand::SetRollupMode(x)),
                                                     Err(_) => {
                                                         Err(CommandParseError::ValidationError(
                                                             format!(
@@ -405,9 +405,9 @@ fn parse_rollup<'a>(command: &'a str, parts: &[CommandPart<'a>]) -> ParseResult<
     }
 
     let rollup_cmd = if command == "rollup" {
-        BorsCommand::Rollup(RollupMode::Always)
+        BorsCommand::SetRollupMode(RollupMode::Always)
     } else {
-        BorsCommand::Rollup(RollupMode::Maybe)
+        BorsCommand::SetRollupMode(RollupMode::Maybe)
     };
     Some(Ok(rollup_cmd))
 }
@@ -874,21 +874,21 @@ mod tests {
     fn parse_rollup_bare() {
         let cmds = parse_commands("@bors rollup");
         assert_eq!(cmds.len(), 1);
-        assert_eq!(cmds[0], Ok(BorsCommand::Rollup(RollupMode::Always)));
+        assert_eq!(cmds[0], Ok(BorsCommand::SetRollupMode(RollupMode::Always)));
     }
 
     #[test]
     fn parse_rollup_bare_maybe() {
         let cmds = parse_commands("@bors rollup-");
         assert_eq!(cmds.len(), 1);
-        assert_eq!(cmds[0], Ok(BorsCommand::Rollup(RollupMode::Maybe)));
+        assert_eq!(cmds[0], Ok(BorsCommand::SetRollupMode(RollupMode::Maybe)));
     }
 
     #[test]
     fn parse_priority_rollup() {
         let cmds = parse_commands("@bors rollup=always");
         assert_eq!(cmds.len(), 1);
-        assert_eq!(cmds[0], Ok(BorsCommand::Rollup(RollupMode::Always)));
+        assert_eq!(cmds[0], Ok(BorsCommand::SetRollupMode(RollupMode::Always)));
     }
 
     #[test]
@@ -951,7 +951,7 @@ mod tests {
     fn parse_rollup_unknown_arg() {
         let cmds = parse_commands("@bors rollup a");
         assert_eq!(cmds.len(), 1);
-        assert_eq!(cmds[0], Ok(BorsCommand::Rollup(RollupMode::Always)));
+        assert_eq!(cmds[0], Ok(BorsCommand::SetRollupMode(RollupMode::Always)));
     }
 
     #[test]

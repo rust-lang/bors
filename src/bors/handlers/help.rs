@@ -30,7 +30,7 @@ pub(super) async fn command_help(
         BorsCommand::TryCancel,
         BorsCommand::Ping,
         BorsCommand::Help,
-        BorsCommand::Rollup(RollupMode::Always),
+        BorsCommand::SetRollupMode(RollupMode::Always),
     ]
     .into_iter()
     .map(|help| format!("- {}", get_command_help(help)))
@@ -76,7 +76,7 @@ fn get_command_help(command: BorsCommand) -> String {
         BorsCommand::TryCancel => {
             "`try cancel`: Cancel a running try build"
         }
-        BorsCommand::Rollup(_) => {
+        BorsCommand::SetRollupMode(_) => {
             "`rollup=<never/iffy/maybe/always>`: Mark the rollup status of the PR"
         }
     };

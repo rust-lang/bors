@@ -89,12 +89,12 @@ pub enum BorsCommand {
     },
     /// Cancel a try build.
     TryCancel,
-    /// Set the priority of a commit.
+    /// Set the priority of a PR.
     SetPriority(Priority),
     /// Delegate approval authority to the pull request author.
     Delegate,
     /// Revoke any previously granted delegation.
     Undelegate,
-    /// Rollup status.
-    Rollup(RollupMode),
+    /// Set the rollup mode of a PRstatus.
+    SetRollupMode(RollupMode),
 }

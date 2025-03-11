@@ -283,7 +283,7 @@ async fn handle_comment(
                             .instrument(span)
                             .await
                     }
-                    BorsCommand::Rollup(rollup) => {
+                    BorsCommand::SetRollupMode(rollup) => {
                         let span = tracing::info_span!("Rollup");
                         command_set_rollup(repo, database, &pull_request, &comment.author, rollup)
                             .instrument(span)
