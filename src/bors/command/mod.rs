@@ -99,4 +99,8 @@ pub enum BorsCommand {
     Undelegate,
     /// Set the rollup mode of a PRstatus.
     SetRollupMode(RollupMode),
+    /// Open the repository tree for merging.
+    OpenTree,
+    /// Set the tree closed with a priority level.
+    TreeClosed(Priority),
 }

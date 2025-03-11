@@ -2,17 +2,18 @@ use sqlx::PgPool;
 
 use crate::bors::RollupMode;
 use crate::database::{
-    BuildModel, BuildStatus, PullRequestModel, WorkflowModel, WorkflowStatus, WorkflowType,
+    BuildModel, BuildStatus, PullRequestModel, RepoModel, TreeState, WorkflowModel, WorkflowStatus,
+    WorkflowType,
 };
 use crate::github::PullRequestNumber;
 use crate::github::{CommitSha, GithubRepoName};
 
 use super::operations::{
     approve_pull_request, create_build, create_pull_request, create_workflow,
-    delegate_pull_request, find_build, find_pr_by_build, get_pull_request, get_running_builds,
-    get_workflow_urls_for_build, get_workflows_for_build, set_pr_priority, set_pr_rollup,
-    unapprove_pull_request, undelegate_pull_request, update_build_status, update_pr_build_id,
-    update_workflow_status,
+    delegate_pull_request, find_build, find_pr_by_build, get_pull_request, get_repository,
+    get_running_builds, get_workflow_urls_for_build, get_workflows_for_build, set_pr_priority,
+    set_pr_rollup, unapprove_pull_request, undelegate_pull_request, update_build_status,
+    update_pr_build_id, update_workflow_status, upsert_repository,
 };
 use super::RunId;
 
@@ -205,5 +206,17 @@ impl PgDbClient {
             .map(|w| w.run_id)
             .collect::<Vec<_>>();
         Ok(workflows)
+    }
+
+    pub async fn get_repository(&self, repo: &GithubRepoName) -> anyhow::Result<Option<RepoModel>> {
+        get_repository(&self.pool, repo).await
+    }
+
+    pub async fn upsert_repository(
+        &self,
+        repo: &GithubRepoName,
+        tree_state: TreeState,
+    ) -> anyhow::Result<()> {
+        upsert_repository(&self.pool, repo, tree_state).await
     }
 }

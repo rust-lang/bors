@@ -4,6 +4,7 @@ use sqlx::postgres::PgExecutor;
 
 use crate::bors::RollupMode;
 use crate::database::BuildStatus;
+use crate::database::RepoModel;
 use crate::database::WorkflowModel;
 use crate::github::CommitSha;
 use crate::github::GithubRepoName;
@@ -12,6 +13,7 @@ use crate::github::PullRequestNumber;
 use super::BuildModel;
 use super::PullRequestModel;
 use super::RunId;
+use super::TreeState;
 use super::WorkflowStatus;
 use super::WorkflowType;
 
@@ -447,4 +449,66 @@ FROM workflow
     .fetch_all(executor)
     .await?;
     Ok(workflows)
+}
+
+/// Retrieves a repository from the database or creates it if it does not exist.
+pub(crate) async fn get_repository(
+    executor: impl PgExecutor<'_>,
+    repo: &GithubRepoName,
+) -> anyhow::Result<Option<RepoModel>> {
+    let repo = sqlx::query!(
+        r#"
+        SELECT id, name as "name: GithubRepoName", tree_state, treeclosed_src, created_at
+        FROM repository
+        WHERE name = $1
+        "#,
+        repo.to_string()
+    )
+    .fetch_optional(executor)
+    .await?;
+
+    Ok(repo.map(|repo| {
+        let tree_state = match repo.tree_state {
+            None => TreeState::Open,
+            Some(priority) => TreeState::Closed {
+                priority: priority as u32,
+                source: repo
+                    .treeclosed_src
+                    .expect("treeclosed_src is NULL even though tree_state is non-NULL"),
+            },
+        };
+        RepoModel {
+            id: repo.id,
+            name: repo.name,
+            tree_state,
+            created_at: repo.created_at,
+        }
+    }))
+}
+
+/// Updates the tree state of a repository.
+pub(crate) async fn upsert_repository(
+    executor: impl PgExecutor<'_>,
+    repo: &GithubRepoName,
+    tree_state: TreeState,
+) -> anyhow::Result<()> {
+    let (priority, src) = match tree_state {
+        TreeState::Open => (None, None),
+        TreeState::Closed { priority, source } => (Some(priority as i32), Some(source)),
+    };
+    sqlx::query!(
+        r#"
+        INSERT INTO repository (name, tree_state, treeclosed_src)
+        VALUES ($1, $2, $3)
+        ON CONFLICT (name)
+        DO UPDATE SET tree_state = EXCLUDED.tree_state, treeclosed_src = EXCLUDED.treeclosed_src
+        "#,
+        repo.to_string(),
+        priority,
+        src
+    )
+    .execute(executor)
+    .await?;
+
+    Ok(())
 }
