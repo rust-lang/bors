@@ -106,7 +106,7 @@ Make sure to also run `cargo sqlx migrate run` to apply the migrations to the da
 
 ### Generate `.sqlx` directory
 ```console
-$ cargo sqlx prepare -- --tests
+$ cargo sqlx prepare -- --all-targets
 ```
 
 After that, you should commit the changes to the `.sqlx` directory.
