@@ -44,13 +44,7 @@ pub async fn mock_pull_requests(
             .mount(mock_server)
             .await;
 
-        mock_pr_comments(
-            repo.clone(),
-            pr_number,
-            comments_tx.clone(),
-            mock_server,
-        )
-        .await;
+        mock_pr_comments(repo.clone(), pr_number, comments_tx.clone(), mock_server).await;
         mock_pr_labels(repo.clone(), repo_name.clone(), pr_number, mock_server).await;
     }
 }
