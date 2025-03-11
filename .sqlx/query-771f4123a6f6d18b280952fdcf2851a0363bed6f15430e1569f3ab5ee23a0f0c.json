@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\nSELECT\n    pr.id,\n    pr.repository,\n    pr.number,\n    pr.approved_by,\n    pr.priority,\n    pr.rollup as \"rollup: _\",\n    pr.delegated,\n    CASE WHEN pr.build_id IS NULL\n        THEN NULL\n        ELSE (\n            build.id,\n            build.repository,\n            build.branch,\n            build.commit_sha,\n            build.status,\n            build.parent,\n            build.created_at\n        )\n    END AS \"try_build: BuildModel\",\n    pr.created_at as \"created_at: DateTime<Utc>\"\nFROM pull_request as pr\n    LEFT JOIN build ON pr.build_id = build.id\nWHERE pr.repository = $1\n    AND pr.number = $2\n",
+  "query": "\nSELECT\n    pr.id,\n    pr.repository as \"repository: GithubRepoName\",\n    pr.number,\n    pr.approved_by,\n    pr.priority,\n    pr.rollup as \"rollup: _\",\n    pr.delegated,\n    CASE WHEN pr.build_id IS NULL\n        THEN NULL\n        ELSE (\n            build.id,\n            build.repository,\n            build.branch,\n            build.commit_sha,\n            build.status,\n            build.parent,\n            build.created_at\n        )\n    END AS \"try_build: BuildModel\",\n    pr.created_at as \"created_at: DateTime<Utc>\"\nFROM pull_request as pr\n    LEFT JOIN build ON pr.build_id = build.id\nWHERE pr.repository = $1\n    AND pr.number = $2\n",
   "describe": {
     "columns": [
       {
@@ -10,7 +10,7 @@
       },
       {
         "ordinal": 1,
-        "name": "repository",
+        "name": "repository: GithubRepoName",
         "type_info": "Text"
       },
       {
@@ -67,5 +67,5 @@
       false
     ]
   },
-  "hash": "aaceccc739564492d8424e6951f9c272c88dd4d34199c7ee4346462867029823"
+  "hash": "771f4123a6f6d18b280952fdcf2851a0363bed6f15430e1569f3ab5ee23a0f0c"
 }

@@ -70,8 +70,8 @@ impl sqlx::Encode<'_, sqlx::Postgres> for GithubRepoName {
 
 impl sqlx::Decode<'_, sqlx::Postgres> for GithubRepoName {
     fn decode(value: sqlx::postgres::PgValueRef<'_>) -> Result<Self, BoxDynError> {
-        let value = <String as sqlx::Decode<sqlx::Postgres>>::decode(value)?;
-        Ok(Self::from(value))
+        let value = <&str as sqlx::Decode<sqlx::Postgres>>::decode(value)?;
+        Ok(value.parse()?)
     }
 }
 
@@ -84,7 +84,7 @@ impl From<i64> for PullRequestNumber {
 
 impl sqlx::Type<sqlx::Postgres> for PullRequestNumber {
     fn type_info() -> sqlx::postgres::PgTypeInfo {
-        // Postgres don't have unsigned integer types.
+        // Postgres doesn't have unsigned integer types.
         <i64 as sqlx::Type<sqlx::Postgres>>::type_info()
     }
 }

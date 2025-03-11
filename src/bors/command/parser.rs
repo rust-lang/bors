@@ -3,12 +3,10 @@
 use std::collections::HashSet;
 use std::str::FromStr;
 
-use crate::bors::command::{Approver, BorsCommand, Parent, ROLLUP_VALUES};
+use crate::bors::command::{Approver, BorsCommand, Parent};
 use crate::github::CommitSha;
 
 use super::{Priority, RollupMode};
-
-const PRIORITY_NAMES: [&str; 2] = ["p", "priority"];
 
 #[derive(Debug, PartialEq)]
 pub enum CommandParseError<'a> {
@@ -44,77 +42,11 @@ impl CommandParser {
         &self,
         text: &'a str,
     ) -> Vec<Result<BorsCommand, CommandParseError<'a>>> {
-        // The order of the parsers in the vector is important
-        let parsers: Vec<for<'b> fn(&'b str, &[CommandPart<'b>]) -> ParseResult<'b>> = vec![
-            parse_self_approve,
-            parse_unapprove,
-            parse_rollup,
-            parser_help,
-            parser_ping,
-            parser_try_cancel,
-            parser_try,
-            parse_delegate_author,
-            parse_undelegate,
-        ];
-
         text.lines()
             .filter_map(|line| match line.find(&self.prefix) {
                 Some(index) => {
-                    let command = &line[index + self.prefix.len()..];
-                    match parse_parts(command) {
-                        Ok(parts) => {
-                            if parts.is_empty() {
-                                Some(Err(CommandParseError::MissingCommand))
-                            } else {
-                                let (command, rest) = parts.split_at(1);
-                                match command[0] {
-                                    CommandPart::Bare(command) => {
-                                        for parser in &parsers {
-                                            if let Some(result) = parser(command, rest) {
-                                                return Some(result);
-                                            }
-                                        }
-                                        Some(Err(CommandParseError::UnknownCommand(command)))
-                                    }
-                                    // For `@bors key=<value>`.
-                                    CommandPart::KeyValue { key, value } => {
-                                        if key == "r" {
-                                            if let Some(result) = parse_approve_on_behalf(&parts) {
-                                                return Some(result);
-                                            }
-                                        }
-
-                                        if key == "rollup" {
-                                            return Some({
-                                                let tmp = RollupMode::from_str(value);
-                                                match tmp {
-                                                    Ok(x) => Ok(BorsCommand::Rollup(x)),
-                                                    Err(_) => {
-                                                        Err(CommandParseError::ValidationError(
-                                                            format!(
-                                                                "rollup mode can be {}",
-                                                                ROLLUP_VALUES.join("/")
-                                                            )
-                                                            .to_string(),
-                                                        ))
-                                                    }
-                                                }
-                                            });
-                                        }
-
-                                        if PRIORITY_NAMES.contains(&key) {
-                                            if let Some(result) = parse_priority(&parts) {
-                                                return Some(result);
-                                            }
-                                        }
-
-                                        Some(Err(CommandParseError::MissingCommand))
-                                    }
-                                }
-                            }
-                        }
-                        Err(error) => Some(Err(error)),
-                    }
+                    let input = &line[index + self.prefix.len()..];
+                    parse_command(input)
                 }
                 None => None,
             })
@@ -122,7 +54,41 @@ impl CommandParser {
     }
 }
 
-type ParseResult<'a> = Option<Result<BorsCommand, CommandParseError<'a>>>;
+type ParseResult<'a, T = BorsCommand> = Option<Result<T, CommandParseError<'a>>>;
+
+// The order of the parsers in the vector is important
+const PARSERS: &[for<'b> fn(&CommandPart<'b>, &[CommandPart<'b>]) -> ParseResult<'b>] = &[
+    parser_approval,
+    parser_unapprove,
+    parser_rollup,
+    parser_priority,
+    parser_try_cancel,
+    parser_try,
+    parser_delegation,
+    parser_help,
+    parser_ping,
+];
+
+fn parse_command(input: &str) -> ParseResult {
+    match parse_parts(input) {
+        Ok(parts) => match parts.as_slice() {
+            [] => Some(Err(CommandParseError::MissingCommand)),
+            [command, arguments @ ..] => {
+                for parser in PARSERS {
+                    if let Some(result) = parser(command, arguments) {
+                        return Some(result);
+                    }
+                }
+                let unknown = match command {
+                    CommandPart::Bare(c) => c,
+                    CommandPart::KeyValue { key, .. } => key,
+                };
+                Some(Err(CommandParseError::UnknownCommand(unknown)))
+            }
+        },
+        Err(error) => Some(Err(error)),
+    }
+}
 
 fn parse_parts(input: &str) -> Result<Vec<CommandPart>, CommandParseError> {
     let mut parts = vec![];
@@ -151,44 +117,41 @@ fn parse_parts(input: &str) -> Result<Vec<CommandPart>, CommandParseError> {
     Ok(parts)
 }
 
-/// Parses "@bors r+ <p=priority> <rollup=[never/iffy/maybe/always]>"
-fn parse_self_approve<'a>(command: &'a str, parts: &[CommandPart<'a>]) -> ParseResult<'a> {
-    if command != "r+" {
-        return None;
-    }
-
-    match parse_priority_rollup_arg(parts) {
-        Ok((priority, rollup)) => Some(Ok(BorsCommand::Approve {
-            approver: Approver::Myself,
-            priority,
-            rollup,
-        })),
-        Err(e) => Some(Err(e)),
-    }
-}
-
-/// Parses "@bors r=<username> <p=priority> <rollup=[never/iffy/maybe/always]>".
-fn parse_approve_on_behalf<'a>(parts: &[CommandPart<'a>]) -> ParseResult<'a> {
-    if let Some(CommandPart::KeyValue { value, .. }) = parts.first() {
-        if value.is_empty() {
-            return Some(Err(CommandParseError::MissingArgValue { arg: "r" }));
+/// Parses:
+/// - "@bors r+ [p=<priority>] [rollup=<never|iffy|maybe|always>]"
+/// - "@bors r=<user> [p=<priority>] [rollup=<never|iffy|maybe|always>]"
+fn parser_approval<'a>(command: &CommandPart<'a>, parts: &[CommandPart<'a>]) -> ParseResult<'a> {
+    let approver = match command {
+        CommandPart::Bare("r+") => Approver::Myself,
+        CommandPart::KeyValue { key: "r", value } => {
+            if value.is_empty() {
+                return Some(Err(CommandParseError::MissingArgValue { arg: "r" }));
+            }
+            Approver::Specified(value.to_string())
         }
-        match parse_priority_rollup_arg(&parts[1..]) {
-            Ok((priority, rollup)) => Some(Ok(BorsCommand::Approve {
-                approver: Approver::Specified(value.to_string()),
-                priority,
-                rollup,
-            })),
-            Err(e) => Some(Err(e)),
-        }
-    } else {
-        Some(Err(CommandParseError::MissingArgValue { arg: "r" }))
-    }
+        _ => return None,
+    };
+
+    let priority = match parse_priority(parts) {
+        Some(Ok(p)) => Some(p),
+        Some(Err(e)) => return Some(Err(e)),
+        None => None,
+    };
+    let rollup = match parse_rollup(parts) {
+        Some(Ok(p)) => Some(p),
+        Some(Err(e)) => return Some(Err(e)),
+        None => None,
+    };
+    Some(Ok(BorsCommand::Approve {
+        approver,
+        priority,
+        rollup,
+    }))
 }
 
 /// Parses "@bors r-"
-fn parse_unapprove<'a>(command: &'a str, _parts: &[CommandPart<'a>]) -> ParseResult<'a> {
-    if command == "r-" {
+fn parser_unapprove<'a>(command: &CommandPart<'a>, _parts: &[CommandPart<'a>]) -> ParseResult<'a> {
+    if let CommandPart::Bare("r-") = command {
         Some(Ok(BorsCommand::Unapprove))
     } else {
         None
@@ -196,8 +159,8 @@ fn parse_unapprove<'a>(command: &'a str, _parts: &[CommandPart<'a>]) -> ParseRes
 }
 
 /// Parses "@bors help".
-fn parser_help<'a>(command: &'a str, _parts: &[CommandPart<'a>]) -> ParseResult<'a> {
-    if command == "help" {
+fn parser_help<'a>(command: &CommandPart<'a>, _parts: &[CommandPart<'a>]) -> ParseResult<'a> {
+    if let CommandPart::Bare("help") = command {
         Some(Ok(BorsCommand::Help))
     } else {
         None
@@ -205,8 +168,8 @@ fn parser_help<'a>(command: &'a str, _parts: &[CommandPart<'a>]) -> ParseResult<
 }
 
 /// Parses "@bors ping".
-fn parser_ping<'a>(command: &'a str, _parts: &[CommandPart<'a>]) -> ParseResult<'a> {
-    if command == "ping" {
+fn parser_ping<'a>(command: &CommandPart<'a>, _parts: &[CommandPart<'a>]) -> ParseResult<'a> {
+    if let CommandPart::Bare("ping") = command {
         Some(Ok(BorsCommand::Ping))
     } else {
         None
@@ -220,18 +183,9 @@ fn parse_sha(input: &str) -> Result<CommitSha, String> {
     Ok(CommitSha(input.to_string()))
 }
 
-fn validate_priority(value: &str) -> Result<u32, CommandParseError> {
-    match value.parse::<Priority>() {
-        Ok(p) => Ok(p),
-        Err(_) => Err(CommandParseError::ValidationError(
-            "Priority must be a non-negative integer".to_string(),
-        )),
-    }
-}
-
 /// Parses "@bors try <parent=sha>".
-fn parser_try<'a>(command: &'a str, parts: &[CommandPart<'a>]) -> ParseResult<'a> {
-    if command != "try" {
+fn parser_try<'a>(command: &CommandPart<'a>, parts: &[CommandPart<'a>]) -> ParseResult<'a> {
+    if *command != CommandPart::Bare("try") {
         return None;
     }
 
@@ -243,22 +197,17 @@ fn parser_try<'a>(command: &'a str, parts: &[CommandPart<'a>]) -> ParseResult<'a
             CommandPart::Bare(key) => {
                 return Some(Err(CommandParseError::UnknownArg(key)));
             }
-            CommandPart::KeyValue { key, value } => match *key {
-                "parent" => {
-                    parent = if *value == "last" {
-                        Some(Parent::Last)
-                    } else {
-                        match parse_sha(value) {
-                            Ok(sha) => Some(Parent::CommitSha(sha)),
-                            Err(error) => {
-                                return Some(Err(CommandParseError::ValidationError(format!(
-                                    "Try parent has to be a valid commit SHA: {error}"
-                                ))));
-                            }
-                        }
+            CommandPart::KeyValue { key, value } => match (*key, *value) {
+                ("parent", "last") => parent = Some(Parent::Last),
+                ("parent", value) => match parse_sha(value) {
+                    Ok(sha) => parent = Some(Parent::CommitSha(sha)),
+                    Err(error) => {
+                        return Some(Err(CommandParseError::ValidationError(format!(
+                            "Try parent has to be a valid commit SHA: {error}"
+                        ))));
                     }
-                }
-                "jobs" => {
+                },
+                ("jobs", value) => {
                     let raw_jobs: Vec<_> = value.split(',').map(|s| s.to_string()).collect();
                     if raw_jobs.is_empty() {
                         return Some(Err(CommandParseError::ValidationError(
@@ -284,132 +233,74 @@ fn parser_try<'a>(command: &'a str, parts: &[CommandPart<'a>]) -> ParseResult<'a
 }
 
 /// Parses "@bors try cancel".
-fn parser_try_cancel<'a>(command: &'a str, parts: &[CommandPart<'a>]) -> ParseResult<'a> {
-    if command == "try" && parts.first() == Some(&CommandPart::Bare("cancel")) {
-        Some(Ok(BorsCommand::TryCancel))
-    } else {
-        None
+fn parser_try_cancel<'a>(command: &CommandPart<'a>, parts: &[CommandPart<'a>]) -> ParseResult<'a> {
+    match (command, parts) {
+        (CommandPart::Bare("try"), [CommandPart::Bare("cancel"), ..]) => {
+            Some(Ok(BorsCommand::TryCancel))
+        }
+        _ => None,
     }
 }
 
-/// Parses "@bors delegate+"
-fn parse_delegate_author<'a>(command: &'a str, _parts: &[CommandPart<'a>]) -> ParseResult<'a> {
-    if command == "delegate+" {
-        Some(Ok(BorsCommand::Delegate))
-    } else {
-        None
+/// Parses "@bors delegate+" and "@bors delegate-".
+fn parser_delegation<'a>(command: &CommandPart<'a>, _parts: &[CommandPart<'a>]) -> ParseResult<'a> {
+    match command {
+        CommandPart::Bare("delegate+") => Some(Ok(BorsCommand::Delegate)),
+        CommandPart::Bare("delegate-") => Some(Ok(BorsCommand::Undelegate)),
+        _ => None,
     }
 }
 
-/// Parses "@bors delegate-"
-fn parse_undelegate<'a>(command: &'a str, _parts: &[CommandPart<'a>]) -> ParseResult<'a> {
-    if command == "delegate-" {
-        Some(Ok(BorsCommand::Undelegate))
-    } else {
-        None
+fn parse_priority_value(value: &str) -> Result<Priority, CommandParseError> {
+    match value.parse::<Priority>() {
+        Ok(p) => Ok(p),
+        Err(_) => Err(CommandParseError::ValidationError(
+            "Priority must be a non-negative integer".to_string(),
+        )),
     }
+}
+
+/// Parses the first occurrence of `p|priority=<priority>` in `parts`.
+fn parse_priority<'a>(parts: &[CommandPart<'a>]) -> ParseResult<'a, Priority> {
+    parts
+        .iter()
+        .filter_map(|part| match part {
+            CommandPart::KeyValue {
+                key: "p" | "priority",
+                value,
+            } => Some(parse_priority_value(value)),
+            _ => None,
+        })
+        .next()
 }
 
 /// Parses "@bors p=<priority>"
-fn parse_priority<'a>(parts: &[CommandPart<'a>]) -> ParseResult<'a> {
-    // If we have more than one part, check for duplicate priority arguments
-    if parts.len() > 1 {
-        for part in &parts[1..] {
-            if let CommandPart::KeyValue { key, .. } = part {
-                if PRIORITY_NAMES.contains(key) {
-                    return Some(Err(CommandParseError::DuplicateArg(key)));
-                }
-            }
-        }
-    }
-
-    if let Some(CommandPart::KeyValue { value, .. }) = parts.first() {
-        if value.is_empty() {
-            return Some(Err(CommandParseError::MissingArgValue { arg: "p" }));
-        }
-
-        match validate_priority(value) {
-            Ok(p) => Some(Ok(BorsCommand::SetPriority(p))),
-            Err(e) => Some(Err(e)),
-        }
-    } else {
-        Some(Err(CommandParseError::MissingArgValue { arg: "p" }))
-    }
+fn parser_priority<'a>(command: &CommandPart<'a>, _parts: &[CommandPart<'a>]) -> ParseResult<'a> {
+    parse_priority(std::slice::from_ref(command)).map(|res| res.map(BorsCommand::SetPriority))
 }
 
-/// Parses "p=<priority> rollup=<never/iffy/maybe/always>"
-fn parse_priority_rollup_arg<'a>(
-    parts: &[CommandPart<'a>],
-) -> Result<(Option<u32>, Option<RollupMode>), CommandParseError<'a>> {
-    let mut priority = None;
-    let mut rollup_status = None;
-
-    for part in parts {
-        match part {
-            CommandPart::Bare(key) => {
-                let status = parse_rollup_bare_helper(key)?;
-                if rollup_status.is_some() {
-                    return Err(CommandParseError::DuplicateArg("rollup"));
-                }
-                rollup_status = Some(status);
-            }
-            CommandPart::KeyValue { key, value } => {
-                if PRIORITY_NAMES.contains(key) {
-                    if priority.is_some() {
-                        return Err(CommandParseError::DuplicateArg(key));
-                    }
-
-                    priority = Some(validate_priority(value)?);
-                }
-
-                if *key == "rollup" {
-                    if rollup_status.is_some() {
-                        return Err(CommandParseError::DuplicateArg("rollup"));
-                    }
-
-                    rollup_status = Some(RollupMode::from_str(value).map_err(|_| {
-                        CommandParseError::ValidationError(
-                            format!("rollup mode can be {}", ROLLUP_VALUES.join("/")).to_string(),
-                        )
-                    })?);
-                }
-            }
-        }
-    }
-
-    Ok((priority, rollup_status))
-}
-
-fn parse_rollup_bare_helper(arg: &str) -> Result<RollupMode, CommandParseError<'_>> {
-    if arg == "rollup" {
-        return Ok(RollupMode::Always);
-    } else if arg == "rollup-" {
-        return Ok(RollupMode::Maybe);
-    }
-    Err(CommandParseError::UnknownArg(arg))
+/// Parses the first occurrence of `rollup=<never/iffy/maybe/always>` in `parts`.
+fn parse_rollup<'a>(parts: &[CommandPart<'a>]) -> ParseResult<'a, RollupMode> {
+    parts
+        .iter()
+        .filter_map(|part| match part {
+            CommandPart::Bare("rollup-") => Some(Ok(RollupMode::Maybe)),
+            CommandPart::Bare("rollup") => Some(Ok(RollupMode::Always)),
+            CommandPart::KeyValue {
+                key: "rollup",
+                value,
+            } => match RollupMode::from_str(value) {
+                Ok(mode) => Some(Ok(mode)),
+                Err(error) => Some(Err(CommandParseError::ValidationError(error))),
+            },
+            _ => None,
+        })
+        .next()
 }
 
 /// Parses "rollup=<never/iffy/maybe/always>"
-fn parse_rollup<'a>(command: &'a str, parts: &[CommandPart<'a>]) -> ParseResult<'a> {
-    if command != "rollup" && command != "rollup-" {
-        return None;
-    }
-
-    // Check for duplicate rollup arguments
-    if parts.iter().any(|part| match part {
-        CommandPart::Bare("rollup") | CommandPart::Bare("rollup-") => true,
-        CommandPart::KeyValue { key, .. } if *key == "rollup" => true,
-        _ => false,
-    }) {
-        return Some(Err(CommandParseError::DuplicateArg("rollup")));
-    }
-
-    let rollup_cmd = if command == "rollup" {
-        BorsCommand::Rollup(RollupMode::Always)
-    } else {
-        BorsCommand::Rollup(RollupMode::Maybe)
-    };
-    Some(Ok(rollup_cmd))
+fn parser_rollup<'a>(command: &CommandPart<'a>, _parts: &[CommandPart<'a>]) -> ParseResult<'a> {
+    parse_rollup(std::slice::from_ref(command)).map(|res| res.map(BorsCommand::SetRollupMode))
 }
 
 #[cfg(test)]
@@ -575,33 +466,6 @@ mod tests {
     }
 
     #[test]
-    fn parse_approve_duplicate_priority_alias() {
-        let cmds = parse_commands("@bors r+ p=1 priority=2");
-        assert_eq!(cmds.len(), 1);
-        assert!(matches!(
-            cmds[0],
-            Err(CommandParseError::DuplicateArg("priority"))
-        ));
-    }
-
-    #[test]
-    fn parse_approve_duplicate_priority_args() {
-        let cmds = parse_commands("@bors r+ p=1 p=2");
-        assert_eq!(cmds.len(), 1);
-        assert!(matches!(cmds[0], Err(CommandParseError::DuplicateArg("p"))));
-    }
-
-    #[test]
-    fn parse_approve_duplicate_priority_alias_args() {
-        let cmds = parse_commands("@bors r+ priority=1 priority=2");
-        assert_eq!(cmds.len(), 1);
-        assert!(matches!(
-            cmds[0],
-            Err(CommandParseError::DuplicateArg("priority"))
-        ));
-    }
-
-    #[test]
     fn parse_approve_on_behalf_with_priority_alias() {
         let cmds = parse_commands("@bors r=user1 priority=2");
         assert_eq!(cmds.len(), 1);
@@ -715,16 +579,6 @@ mod tests {
     }
 
     #[test]
-    fn parse_duplicate_alias_priority() {
-        let cmds = parse_commands("@bors p=1 priority=2");
-        assert_eq!(cmds.len(), 1);
-        assert!(matches!(
-            cmds[0],
-            Err(CommandParseError::DuplicateArg("priority"))
-        ));
-    }
-
-    #[test]
     fn parse_priority_unknown_arg() {
         let cmds = parse_commands("@bors p=1 a");
         assert_eq!(cmds.len(), 1);
@@ -821,40 +675,10 @@ mod tests {
         insta::assert_debug_snapshot!(cmds[0], @r#"
         Err(
             ValidationError(
-                "rollup mode can be always/iffy/maybe/never",
+                "Invalid rollup mode `abc`. Possible values are always/iffy/never/maybe",
             ),
         )
         "#);
-    }
-
-    #[test]
-    fn parse_approve_duplicate_rollup_args_bare_value() {
-        let cmds = parse_commands("@bors r+ rollup rollup=never");
-        assert_eq!(cmds.len(), 1);
-        assert!(matches!(
-            cmds[0],
-            Err(CommandParseError::DuplicateArg("rollup"))
-        ));
-    }
-
-    #[test]
-    fn parse_approve_duplicate_rollup_args_bare_bare() {
-        let cmds = parse_commands("@bors r+ rollup rollup-");
-        assert_eq!(cmds.len(), 1);
-        assert!(matches!(
-            cmds[0],
-            Err(CommandParseError::DuplicateArg("rollup"))
-        ));
-    }
-
-    #[test]
-    fn parse_approve_duplicate_rollup_args_value_value() {
-        let cmds = parse_commands("@bors r+ rollup=iffy rollup=never");
-        assert_eq!(cmds.len(), 1);
-        assert!(matches!(
-            cmds[0],
-            Err(CommandParseError::DuplicateArg("rollup"))
-        ));
     }
 
     #[test]
@@ -874,21 +698,21 @@ mod tests {
     fn parse_rollup_bare() {
         let cmds = parse_commands("@bors rollup");
         assert_eq!(cmds.len(), 1);
-        assert_eq!(cmds[0], Ok(BorsCommand::Rollup(RollupMode::Always)));
+        assert_eq!(cmds[0], Ok(BorsCommand::SetRollupMode(RollupMode::Always)));
     }
 
     #[test]
     fn parse_rollup_bare_maybe() {
         let cmds = parse_commands("@bors rollup-");
         assert_eq!(cmds.len(), 1);
-        assert_eq!(cmds[0], Ok(BorsCommand::Rollup(RollupMode::Maybe)));
+        assert_eq!(cmds[0], Ok(BorsCommand::SetRollupMode(RollupMode::Maybe)));
     }
 
     #[test]
     fn parse_priority_rollup() {
         let cmds = parse_commands("@bors rollup=always");
         assert_eq!(cmds.len(), 1);
-        assert_eq!(cmds[0], Ok(BorsCommand::Rollup(RollupMode::Always)));
+        assert_eq!(cmds[0], Ok(BorsCommand::SetRollupMode(RollupMode::Always)));
     }
 
     #[test]
@@ -911,47 +735,17 @@ mod tests {
         insta::assert_debug_snapshot!(cmds[0], @r#"
         Err(
             ValidationError(
-                "rollup mode can be always/iffy/maybe/never",
+                "Invalid rollup mode `3`. Possible values are always/iffy/never/maybe",
             ),
         )
         "#);
     }
 
     #[test]
-    fn parse_duplicate_rollup_bare_bare() {
-        let cmds = parse_commands("@bors rollup rollup-");
-        assert_eq!(cmds.len(), 1);
-        assert!(matches!(
-            cmds[0],
-            Err(CommandParseError::DuplicateArg("rollup"))
-        ));
-    }
-
-    #[test]
-    fn parse_duplicate_rollup_bare_value() {
-        let cmds = parse_commands("@bors rollup rollup=maybe");
-        assert_eq!(cmds.len(), 1);
-        assert!(matches!(
-            cmds[0],
-            Err(CommandParseError::DuplicateArg("rollup"))
-        ));
-    }
-
-    #[test]
-    fn parse_duplicate_rollup_value_value() {
-        let cmds = parse_commands("@bors rollup=always rollup=never");
-        assert_eq!(cmds.len(), 1);
-        assert!(matches!(
-            cmds[0],
-            Err(CommandParseError::DuplicateArg("rollup"))
-        ));
-    }
-
-    #[test]
     fn parse_rollup_unknown_arg() {
         let cmds = parse_commands("@bors rollup a");
         assert_eq!(cmds.len(), 1);
-        assert_eq!(cmds[0], Ok(BorsCommand::Rollup(RollupMode::Always)));
+        assert_eq!(cmds[0], Ok(BorsCommand::SetRollupMode(RollupMode::Always)));
     }
 
     #[test]

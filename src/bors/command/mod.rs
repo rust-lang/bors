@@ -25,8 +25,6 @@ pub enum Approver {
     Specified(String),
 }
 
-const ROLLUP_VALUES: [&str; 4] = ["always", "iffy", "maybe", "never"];
-
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum RollupMode {
     Always,
@@ -47,8 +45,9 @@ impl fmt::Display for RollupMode {
     }
 }
 
+// Has to be kept in sync with the `Display` implementation above.
 impl FromStr for RollupMode {
-    type Err = ();
+    type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
@@ -56,7 +55,9 @@ impl FromStr for RollupMode {
             "iffy" => Ok(RollupMode::Iffy),
             "never" => Ok(RollupMode::Never),
             "maybe" => Ok(RollupMode::Maybe),
-            _ => Err(()),
+            _ => Err(format!(
+                "Invalid rollup mode `{s}`. Possible values are always/iffy/never/maybe"
+            )),
         }
     }
 }
@@ -88,12 +89,12 @@ pub enum BorsCommand {
     },
     /// Cancel a try build.
     TryCancel,
-    /// Set the priority of a commit.
+    /// Set the priority of a PR.
     SetPriority(Priority),
     /// Delegate approval authority to the pull request author.
     Delegate,
     /// Revoke any previously granted delegation.
     Undelegate,
-    /// Rollup status.
-    Rollup(RollupMode),
+    /// Set the rollup mode of a PRstatus.
+    SetRollupMode(RollupMode),
 }

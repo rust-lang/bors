@@ -41,7 +41,7 @@ jobs:
         run: cargo sqlx database create && sqlx migrate run
 
       - name: Check .sqlx files
-        run: cargo sqlx prepare --check -- --tests
+        run: cargo sqlx prepare --check -- --all-targets
 
       - name: Build
         run: cargo build --workspace --all-targets

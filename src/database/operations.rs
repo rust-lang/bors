@@ -25,7 +25,7 @@ pub(crate) async fn get_pull_request(
         r#"
 SELECT
     pr.id,
-    pr.repository,
+    pr.repository as "repository: GithubRepoName",
     pr.number,
     pr.approved_by,
     pr.priority,
@@ -63,7 +63,10 @@ pub(crate) async fn create_pull_request(
     pr_number: PullRequestNumber,
 ) -> anyhow::Result<()> {
     sqlx::query!(
-        "INSERT INTO pull_request (repository, number) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+        r#"
+INSERT INTO pull_request (repository, number)
+VALUES ($1, $2) ON CONFLICT DO NOTHING
+"#,
         repo.to_string(),
         pr_number.0 as i32
     )
@@ -77,15 +80,21 @@ pub(crate) async fn approve_pull_request(
     pr_id: i32,
     approver: &str,
     priority: Option<u32>,
-    rollup: RollupMode,
+    rollup: Option<RollupMode>,
 ) -> anyhow::Result<()> {
     let priority_i32 = priority.map(|p| p as i32);
 
     sqlx::query!(
-        "UPDATE pull_request SET approved_by = $1, priority = COALESCE($2, priority), rollup = $3 WHERE id = $4",
+        r#"
+UPDATE pull_request
+SET approved_by = $1,
+    priority = COALESCE($2, priority),
+    rollup = COALESCE($3, rollup)
+WHERE id = $4
+"#,
         approver,
         priority_i32,
-        rollup.to_string(),
+        rollup.map(|r| r.to_string()),
         pr_id,
     )
     .execute(executor)
@@ -141,7 +150,7 @@ pub(crate) async fn find_pr_by_build(
         r#"
 SELECT
     pr.id,
-    pr.repository,
+    pr.repository as "repository: GithubRepoName",
     pr.number,
     pr.approved_by,
     pr.priority,
@@ -221,7 +230,7 @@ pub(crate) async fn find_build(
         r#"
 SELECT
     id,
-    repository,
+    repository as "repository: GithubRepoName",
     branch,
     commit_sha,
     parent,
@@ -250,7 +259,7 @@ pub(crate) async fn get_running_builds(
         r#"
 SELECT
     id,
-    repository,
+    repository as "repository: GithubRepoName",
     branch,
     commit_sha,
     parent,

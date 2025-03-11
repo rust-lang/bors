@@ -7,7 +7,7 @@ use regex::Regex;
 use wiremock::matchers::{method, path_regex};
 use wiremock::{Mock, Request, ResponseTemplate};
 
-use crate::github::GithubRepoName;
+use crate::github::{GithubRepoName, PullRequestNumber};
 use crate::tests::mocks::github::GitHubMockServer;
 use crate::tests::mocks::permissions::TeamApiMockServer;
 use crate::TeamApiClient;
@@ -139,4 +139,43 @@ fn dynamic_mock_req<
                 .1;
             f(req, captured)
         })
+}
+
+pub fn create_world_with_approve_config() -> World {
+    let world = World::default();
+    world.default_repo().lock().set_config(
+        r#"
+[labels]
+approve = ["+approved"]
+"#,
+    );
+    world
+}
+
+pub async fn assert_pr_approved_by(
+    tester: &BorsTester,
+    pr_number: PullRequestNumber,
+    approved_by: &str,
+) {
+    let pr_in_db = tester
+        .db()
+        .get_or_create_pull_request(&default_repo_name(), pr_number)
+        .await
+        .unwrap();
+    assert_eq!(pr_in_db.approved_by, Some(approved_by.to_string()));
+    let repo = tester.default_repo();
+    let pr = repo.lock().get_pr(default_pr_number()).clone();
+    pr.check_added_labels(&["approved"]);
+}
+
+pub async fn assert_pr_unapproved(tester: &BorsTester, pr_number: PullRequestNumber) {
+    let pr_in_db = tester
+        .db()
+        .get_or_create_pull_request(&default_repo_name(), pr_number)
+        .await
+        .unwrap();
+    assert_eq!(pr_in_db.approved_by, None);
+    let repo = tester.default_repo();
+    let pr = repo.lock().get_pr(default_pr_number()).clone();
+    pr.check_removed_labels(&["approved"]);
 }
