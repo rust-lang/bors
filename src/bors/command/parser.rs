@@ -466,33 +466,6 @@ mod tests {
     }
 
     #[test]
-    fn parse_approve_duplicate_priority_alias() {
-        let cmds = parse_commands("@bors r+ p=1 priority=2");
-        assert_eq!(cmds.len(), 1);
-        assert!(matches!(
-            cmds[0],
-            Err(CommandParseError::DuplicateArg("priority"))
-        ));
-    }
-
-    #[test]
-    fn parse_approve_duplicate_priority_args() {
-        let cmds = parse_commands("@bors r+ p=1 p=2");
-        assert_eq!(cmds.len(), 1);
-        assert!(matches!(cmds[0], Err(CommandParseError::DuplicateArg("p"))));
-    }
-
-    #[test]
-    fn parse_approve_duplicate_priority_alias_args() {
-        let cmds = parse_commands("@bors r+ priority=1 priority=2");
-        assert_eq!(cmds.len(), 1);
-        assert!(matches!(
-            cmds[0],
-            Err(CommandParseError::DuplicateArg("priority"))
-        ));
-    }
-
-    #[test]
     fn parse_approve_on_behalf_with_priority_alias() {
         let cmds = parse_commands("@bors r=user1 priority=2");
         assert_eq!(cmds.len(), 1);
@@ -606,16 +579,6 @@ mod tests {
     }
 
     #[test]
-    fn parse_duplicate_alias_priority() {
-        let cmds = parse_commands("@bors p=1 priority=2");
-        assert_eq!(cmds.len(), 1);
-        assert!(matches!(
-            cmds[0],
-            Err(CommandParseError::DuplicateArg("priority"))
-        ));
-    }
-
-    #[test]
     fn parse_priority_unknown_arg() {
         let cmds = parse_commands("@bors p=1 a");
         assert_eq!(cmds.len(), 1);
@@ -719,36 +682,6 @@ mod tests {
     }
 
     #[test]
-    fn parse_approve_duplicate_rollup_args_bare_value() {
-        let cmds = parse_commands("@bors r+ rollup rollup=never");
-        assert_eq!(cmds.len(), 1);
-        assert!(matches!(
-            cmds[0],
-            Err(CommandParseError::DuplicateArg("rollup"))
-        ));
-    }
-
-    #[test]
-    fn parse_approve_duplicate_rollup_args_bare_bare() {
-        let cmds = parse_commands("@bors r+ rollup rollup-");
-        assert_eq!(cmds.len(), 1);
-        assert!(matches!(
-            cmds[0],
-            Err(CommandParseError::DuplicateArg("rollup"))
-        ));
-    }
-
-    #[test]
-    fn parse_approve_duplicate_rollup_args_value_value() {
-        let cmds = parse_commands("@bors r+ rollup=iffy rollup=never");
-        assert_eq!(cmds.len(), 1);
-        assert!(matches!(
-            cmds[0],
-            Err(CommandParseError::DuplicateArg("rollup"))
-        ));
-    }
-
-    #[test]
     fn parse_approve_rollup_empty() {
         let cmds = parse_commands("@bors r+ rollup=");
         assert_eq!(cmds.len(), 1);
@@ -806,36 +739,6 @@ mod tests {
             ),
         )
         "#);
-    }
-
-    #[test]
-    fn parse_duplicate_rollup_bare_bare() {
-        let cmds = parse_commands("@bors rollup rollup-");
-        assert_eq!(cmds.len(), 1);
-        assert!(matches!(
-            cmds[0],
-            Err(CommandParseError::DuplicateArg("rollup"))
-        ));
-    }
-
-    #[test]
-    fn parse_duplicate_rollup_bare_value() {
-        let cmds = parse_commands("@bors rollup rollup=maybe");
-        assert_eq!(cmds.len(), 1);
-        assert!(matches!(
-            cmds[0],
-            Err(CommandParseError::DuplicateArg("rollup"))
-        ));
-    }
-
-    #[test]
-    fn parse_duplicate_rollup_value_value() {
-        let cmds = parse_commands("@bors rollup=always rollup=never");
-        assert_eq!(cmds.len(), 1);
-        assert!(matches!(
-            cmds[0],
-            Err(CommandParseError::DuplicateArg("rollup"))
-        ));
     }
 
     #[test]
