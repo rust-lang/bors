@@ -28,9 +28,10 @@ pub(super) async fn command_help(
             jobs: vec![],
         },
         BorsCommand::TryCancel,
+        BorsCommand::SetRollupMode(RollupMode::Always),
+        BorsCommand::Info,
         BorsCommand::Ping,
         BorsCommand::Help,
-        BorsCommand::SetRollupMode(RollupMode::Always),
     ]
     .into_iter()
     .map(|help| format!("- {}", get_command_help(help)))
@@ -79,6 +80,10 @@ fn get_command_help(command: BorsCommand) -> String {
         BorsCommand::SetRollupMode(_) => {
             "`rollup=<never/iffy/maybe/always>`: Mark the rollup status of the PR"
         }
+        BorsCommand::Info => {
+        "`info`: Get information about the current PR including delegation, priority, merge status, and try build status"
+        }
+
     };
     help.to_string()
 }
@@ -100,9 +105,10 @@ mod tests {
             - `delegate-`: Remove any previously granted delegation
             - `try [parent=<parent>] [jobs=<jobs>]`: Start a try build. Optionally, you can specify a `<parent>` SHA or a list of `<jobs>` to run
             - `try cancel`: Cancel a running try build
+            - `rollup=<never/iffy/maybe/always>`: Mark the rollup status of the PR
+            - `info`: Get information about the current PR including delegation, priority, merge status, and try build status
             - `ping`: Check if the bot is alive
             - `help`: Print this help message
-            - `rollup=<never/iffy/maybe/always>`: Mark the rollup status of the PR
             ");
             Ok(tester)
         })

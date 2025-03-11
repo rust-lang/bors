@@ -398,6 +398,24 @@ WHERE build.id = $1
     Ok(workflows)
 }
 
+pub(crate) async fn get_workflow_urls_for_build(
+    executor: impl PgExecutor<'_>,
+    build_id: i32,
+) -> anyhow::Result<Vec<String>> {
+    let results = sqlx::query!(
+        r#"
+SELECT url
+FROM workflow
+WHERE build_id = $1
+"#,
+        build_id
+    )
+    .fetch_all(executor)
+    .await?;
+
+    Ok(results.into_iter().map(|r| r.url).collect())
+}
+
 #[cfg(test)]
 pub(crate) async fn get_all_workflows(
     executor: impl PgExecutor<'_>,

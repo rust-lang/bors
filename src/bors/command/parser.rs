@@ -65,6 +65,7 @@ const PARSERS: &[for<'b> fn(&CommandPart<'b>, &[CommandPart<'b>]) -> ParseResult
     parser_try_cancel,
     parser_try,
     parser_delegation,
+    parser_info,
     parser_help,
     parser_ping,
 ];
@@ -301,6 +302,15 @@ fn parse_rollup<'a>(parts: &[CommandPart<'a>]) -> ParseResult<'a, RollupMode> {
 /// Parses "rollup=<never/iffy/maybe/always>"
 fn parser_rollup<'a>(command: &CommandPart<'a>, _parts: &[CommandPart<'a>]) -> ParseResult<'a> {
     parse_rollup(std::slice::from_ref(command)).map(|res| res.map(BorsCommand::SetRollupMode))
+}
+
+/// Parses "@bors info"
+fn parser_info<'a>(command: &CommandPart<'a>, _parts: &[CommandPart<'a>]) -> ParseResult<'a> {
+    if *command == CommandPart::Bare("info") {
+        Some(Ok(BorsCommand::Info))
+    } else {
+        None
+    }
 }
 
 #[cfg(test)]
@@ -956,6 +966,20 @@ line two
             },
         )
         "###)
+    }
+
+    #[test]
+    fn parse_info() {
+        let cmds = parse_commands("@bors info");
+        assert_eq!(cmds.len(), 1);
+        assert!(matches!(cmds[0], Ok(BorsCommand::Info)));
+    }
+
+    #[test]
+    fn parse_info_unknown_arg() {
+        let cmds = parse_commands("@bors info a");
+        assert_eq!(cmds.len(), 1);
+        assert!(matches!(cmds[0], Ok(BorsCommand::Info)));
     }
 
     #[test]
