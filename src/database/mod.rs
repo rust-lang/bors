@@ -196,3 +196,25 @@ pub struct WorkflowModel {
     pub status: WorkflowStatus,
     pub created_at: DateTime<Utc>,
 }
+
+/// Represents the state of a repository's tree.
+#[derive(Debug, PartialEq, Clone)]
+pub enum TreeState {
+    /// The repository tree is open for changes
+    Open,
+    /// The repository tree is closed to changes with a priority threshold
+    Closed {
+        /// PRs with priority lower than this value cannot be merged.
+        priority: u32,
+        /// URL to a PR comment that closed the tree.
+        source: String,
+    },
+}
+
+/// Represents a repository configuration.
+pub struct RepoModel {
+    pub id: PrimaryKey,
+    pub name: GithubRepoName,
+    pub tree_state: TreeState,
+    pub created_at: DateTime<Utc>,
+}

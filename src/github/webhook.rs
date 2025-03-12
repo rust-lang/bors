@@ -352,6 +352,7 @@ fn parse_pr_review_comment(
         author: user,
         pr_number: PullRequestNumber(payload.pull_request.number),
         text: payload.comment.body.unwrap_or_default(),
+        html_url: payload.comment.html_url.to_string(),
     }
 }
 
@@ -366,6 +367,7 @@ fn parse_comment_from_pr_review(
         author: user,
         pr_number: PullRequestNumber(payload.pull_request.number),
         text: payload.review.body.unwrap_or_default(),
+        html_url: payload.review.html_url.to_string(),
     })
 }
 
@@ -384,6 +386,7 @@ fn parse_pr_comment(
         author: payload.comment.user.into(),
         text: payload.comment.body.unwrap_or_default(),
         pr_number: PullRequestNumber(payload.issue.number),
+        html_url: payload.comment.html_url.to_string(),
     })
 }
 
@@ -456,7 +459,7 @@ mod tests {
     async fn issue_comment() {
         insta::assert_debug_snapshot!(
             check_webhook("webhook/issue-comment.json", "issue_comment").await,
-            @r###"
+            @r#"
         Ok(
             GitHubWebhook(
                 Repository(
@@ -491,12 +494,13 @@ mod tests {
                                 5,
                             ),
                             text: "hello bors",
+                            html_url: "https://github.com/Kobzol/bors-kindergarten/pull/5#issuecomment-1420770715",
                         },
                     ),
                 ),
             ),
         )
-        "###
+        "#
         );
     }
 
@@ -637,7 +641,7 @@ mod tests {
     async fn pull_request_review() {
         insta::assert_debug_snapshot!(
             check_webhook("webhook/pull-request-review.json", "pull_request_review").await,
-            @r###"
+            @r#"
         Ok(
             GitHubWebhook(
                 Repository(
@@ -672,12 +676,13 @@ mod tests {
                                 6,
                             ),
                             text: "review comment",
+                            html_url: "https://github.com/Kobzol/bors-kindergarten/pull/6#pullrequestreview-1476702458",
                         },
                     ),
                 ),
             ),
         )
-        "###
+        "#
         );
     }
 
@@ -685,7 +690,7 @@ mod tests {
     async fn pull_request_review_comment() {
         insta::assert_debug_snapshot!(
             check_webhook("webhook/pull-request-review-comment.json", "pull_request_review_comment").await,
-            @r###"
+            @r#"
         Ok(
             GitHubWebhook(
                 Repository(
@@ -720,12 +725,13 @@ mod tests {
                                 6,
                             ),
                             text: "Foo",
+                            html_url: "https://github.com/Kobzol/bors-kindergarten/pull/6#discussion_r1227824551",
                         },
                     ),
                 ),
             ),
         )
-        "###
+        "#
         );
     }
 

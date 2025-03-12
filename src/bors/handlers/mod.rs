@@ -6,7 +6,9 @@ use crate::bors::handlers::help::command_help;
 use crate::bors::handlers::info::command_info;
 use crate::bors::handlers::ping::command_ping;
 use crate::bors::handlers::refresh::refresh_repository;
-use crate::bors::handlers::review::{command_approve, command_unapprove};
+use crate::bors::handlers::review::{
+    command_approve, command_close_tree, command_open_tree, command_unapprove,
+};
 use crate::bors::handlers::trybuild::{command_try_build, command_try_cancel, TRY_BRANCH_NAME};
 use crate::bors::handlers::workflow::{
     handle_check_suite_completed, handle_workflow_completed, handle_workflow_started,
@@ -86,7 +88,6 @@ pub async fn handle_bors_repository_event(
                 return Err(error.context("Cannot perform command"));
             }
         }
-
         BorsRepositoryEvent::WorkflowStarted(payload) => {
             let span = tracing::info_span!(
                 "Workflow started",
@@ -223,6 +224,25 @@ async fn handle_comment(
                             &approver,
                             priority,
                             rollup,
+                        )
+                        .instrument(span)
+                        .await
+                    }
+                    BorsCommand::OpenTree => {
+                        let span = tracing::info_span!("TreeOpen");
+                        command_open_tree(repo, database, &pull_request, &comment.author)
+                            .instrument(span)
+                            .await
+                    }
+                    BorsCommand::TreeClosed(priority) => {
+                        let span = tracing::info_span!("TreeClosed");
+                        command_close_tree(
+                            repo,
+                            database,
+                            &pull_request,
+                            &comment.author,
+                            priority,
+                            &comment.html_url,
                         )
                         .instrument(span)
                         .await

@@ -7,7 +7,7 @@ use crate::github::GithubRepoName;
 
 #[derive(Eq, PartialEq, Debug, Clone)]
 pub enum PermissionType {
-    /// Can perform commands like r+.
+    /// Can perform commands like r+
     Review,
     /// Can start a try build.
     Try,
@@ -34,6 +34,7 @@ impl UserPermissions {
             try_users,
         }
     }
+
     pub fn has_permission(&self, user_id: UserId, permission: PermissionType) -> bool {
         match permission {
             PermissionType::Review => self.review_users.contains(&user_id),
@@ -73,6 +74,7 @@ impl TeamApiClient {
             .load_users(repo.name(), PermissionType::Try)
             .await
             .map_err(|error| anyhow::anyhow!("Cannot load try users: {error:?}"))?;
+
         Ok(UserPermissions {
             review_users,
             try_users,

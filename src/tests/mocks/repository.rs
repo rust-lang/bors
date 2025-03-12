@@ -27,6 +27,7 @@ use super::user::{GitHubUser, User};
 pub struct PullRequest {
     pub added_labels: Vec<String>,
     pub removed_labels: Vec<String>,
+    pub comment_counter: u64,
 }
 
 impl PullRequest {
@@ -46,6 +47,11 @@ impl PullRequest {
             .map(|s| s.as_str())
             .collect::<Vec<_>>();
         assert_eq!(&removed_labels, labels);
+    }
+
+    pub fn next_comment_id(&mut self) -> u64 {
+        self.comment_counter += 1;
+        self.comment_counter
     }
 }
 

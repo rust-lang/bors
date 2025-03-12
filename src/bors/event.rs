@@ -56,6 +56,7 @@ pub struct PullRequestComment {
     pub author: GithubUser,
     pub pr_number: PullRequestNumber,
     pub text: String,
+    pub html_url: String,
 }
 
 #[derive(Debug)]
