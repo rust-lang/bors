@@ -4,14 +4,14 @@ use std::{
     str::FromStr,
 };
 
-use chrono::{DateTime, Utc};
-pub use client::PgDbClient;
-use sqlx::error::BoxDynError;
-
 use crate::{
     bors::RollupMode,
     github::{GithubRepoName, PullRequestNumber},
 };
+use chrono::{DateTime, Utc};
+pub use client::PgDbClient;
+use sqlx::error::BoxDynError;
+use sqlx::{Database, Postgres};
 
 mod client;
 pub(crate) mod operations;
@@ -209,6 +209,30 @@ pub enum TreeState {
         /// URL to a PR comment that closed the tree.
         source: String,
     },
+}
+
+impl sqlx::Type<sqlx::Postgres> for TreeState {
+    fn type_info() -> sqlx::postgres::PgTypeInfo {
+        <(Option<i32>, Option<String>) as sqlx::Type<sqlx::Postgres>>::type_info()
+    }
+}
+
+impl sqlx::Decode<'_, sqlx::Postgres> for TreeState {
+    fn decode(value: <Postgres as Database>::ValueRef<'_>) -> Result<Self, BoxDynError> {
+        let data = <(Option<i32>, Option<String>) as sqlx::Decode<sqlx::Postgres>>::decode(value)?;
+        match data {
+            (Some(priority), Some(source)) => Ok(TreeState::Closed {
+                priority: priority as u32,
+                source,
+            }),
+            (None, None) => Ok(TreeState::Open),
+            _ => Err(
+                "Cannot deserialize TreeState, priority is non-NULL, but source is NULL"
+                    .to_string()
+                    .into(),
+            ),
+        }
+    }
 }
 
 /// Represents a repository configuration.

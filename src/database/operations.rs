@@ -456,9 +456,17 @@ pub(crate) async fn get_repository(
     executor: impl PgExecutor<'_>,
     repo: &GithubRepoName,
 ) -> anyhow::Result<Option<RepoModel>> {
-    let repo = sqlx::query!(
+    let repo = sqlx::query_as!(
+        RepoModel,
         r#"
-        SELECT id, name as "name: GithubRepoName", tree_state, treeclosed_src, created_at
+        SELECT
+            id,
+            name as "name: GithubRepoName",
+            (
+                tree_state,
+                treeclosed_src
+            ) AS "tree_state!: TreeState",
+            created_at
         FROM repository
         WHERE name = $1
         "#,
@@ -467,23 +475,7 @@ pub(crate) async fn get_repository(
     .fetch_optional(executor)
     .await?;
 
-    Ok(repo.map(|repo| {
-        let tree_state = match repo.tree_state {
-            None => TreeState::Open,
-            Some(priority) => TreeState::Closed {
-                priority: priority as u32,
-                source: repo
-                    .treeclosed_src
-                    .expect("treeclosed_src is NULL even though tree_state is non-NULL"),
-            },
-        };
-        RepoModel {
-            id: repo.id,
-            name: repo.name,
-            tree_state,
-            created_at: repo.created_at,
-        }
-    }))
+    Ok(repo)
 }
 
 /// Updates the tree state of a repository.
