@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE pull_request SET base_branch = $1 WHERE id = $2 AND repository = $3",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int4",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "96805d5e3b9f430d100135ba4dc9face8cca0684d03343d5466deffbdb4fbdac"
+}

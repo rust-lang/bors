@@ -19,7 +19,7 @@ use sha2::Sha256;
 
 use crate::bors::event::{
     BorsEvent, BorsGlobalEvent, BorsRepositoryEvent, CheckSuiteCompleted, PullRequestComment,
-    PullRequestEdited, PullRequestPushed, WorkflowCompleted, WorkflowStarted,
+    PullRequestEdited, PullRequestOpened, PullRequestPushed, WorkflowCompleted, WorkflowStarted,
 };
 use crate::database::{WorkflowStatus, WorkflowType};
 use crate::github::server::ServerStateRef;
@@ -225,6 +225,12 @@ fn parse_pull_request_events(body: &[u8]) -> anyhow::Result<Option<BorsEvent>> {
             BorsRepositoryEvent::PullRequestCommitPushed(PullRequestPushed {
                 pull_request: payload.pull_request.into(),
                 repository: repository_name,
+            }),
+        ))),
+        PullRequestEventAction::Opened => Ok(Some(BorsEvent::Repository(
+            BorsRepositoryEvent::PullRequestOpened(PullRequestOpened {
+                repository: repository_name,
+                pull_request: payload.pull_request.into(),
             }),
         ))),
         _ => Ok(None),
@@ -677,6 +683,70 @@ mod tests {
                             ),
                             text: "review comment",
                             html_url: "https://github.com/Kobzol/bors-kindergarten/pull/6#pullrequestreview-1476702458",
+                        },
+                    ),
+                ),
+            ),
+        )
+        "#
+        );
+    }
+
+    #[tokio::test]
+    async fn pull_request_opened() {
+        insta::assert_debug_snapshot!(
+            check_webhook("webhook/pull-request-opened.json", "pull_request").await,
+            @r#"
+        Ok(
+            GitHubWebhook(
+                Repository(
+                    PullRequestOpened(
+                        PullRequestOpened {
+                            repository: GithubRepoName {
+                                owner: "sakib25800",
+                                name: "bors-test",
+                            },
+                            pull_request: PullRequest {
+                                number: PullRequestNumber(
+                                    2,
+                                ),
+                                head_label: "Sakib25800:new-added-branch",
+                                head: Branch {
+                                    name: "new-added-branch",
+                                    sha: CommitSha(
+                                        "5f935077074fb7e225332e672399306591db30dd",
+                                    ),
+                                },
+                                base: Branch {
+                                    name: "main",
+                                    sha: CommitSha(
+                                        "a0d1e8a8a457bcea7550865cae33caf3a06699a6",
+                                    ),
+                                },
+                                title: "New added branch",
+                                message: "This is a newly added branch from a just-opened PR. ",
+                                author: GithubUser {
+                                    id: UserId(
+                                        66968718,
+                                    ),
+                                    username: "Sakib25800",
+                                    html_url: Url {
+                                        scheme: "https",
+                                        cannot_be_a_base: false,
+                                        username: "",
+                                        password: None,
+                                        host: Some(
+                                            Domain(
+                                                "github.com",
+                                            ),
+                                        ),
+                                        port: None,
+                                        path: "/Sakib25800",
+                                        query: None,
+                                        fragment: None,
+                                    },
+                                },
+                            },
                         },
                     ),
                 ),

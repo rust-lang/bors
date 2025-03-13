@@ -204,6 +204,7 @@ pub struct PullRequestModel {
     pub id: PrimaryKey,
     pub repository: GithubRepoName,
     pub number: PullRequestNumber,
+    pub base_branch: String,
     pub approval_status: ApprovalStatus,
     pub delegated: bool,
     pub priority: Option<i32>,

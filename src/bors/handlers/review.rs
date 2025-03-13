@@ -44,6 +44,7 @@ pub(super) async fn command_approve(
         pr.number,
         approval_info,
         priority,
+        &pr.base.name,
         rollup,
     )
     .await?;
@@ -64,7 +65,8 @@ pub(super) async fn command_unapprove(
         deny_request(&repo_state, pr, author, PermissionType::Review).await?;
         return Ok(());
     };
-    db.unapprove(repo_state.repository(), pr.number).await?;
+    db.unapprove(repo_state.repository(), pr.number, &pr.base.name)
+        .await?;
     handle_label_trigger(&repo_state, pr.number, LabelTrigger::Unapproved).await?;
     notify_of_unapproval(&repo_state, pr).await
 }
@@ -82,7 +84,7 @@ pub(super) async fn command_set_priority(
         deny_request(&repo_state, pr, author, PermissionType::Review).await?;
         return Ok(());
     };
-    db.set_priority(repo_state.repository(), pr.number, priority)
+    db.set_priority(repo_state.repository(), pr.number, &pr.base.name, priority)
         .await
 }
 
@@ -100,7 +102,8 @@ pub(super) async fn command_delegate(
     }
 
     let delegatee = pr.author.username.clone();
-    db.delegate(repo_state.repository(), pr.number).await?;
+    db.delegate(repo_state.repository(), pr.number, &pr.base.name)
+        .await?;
     notify_of_delegation(&repo_state, pr, &delegatee).await
 }
 
@@ -116,7 +119,8 @@ pub(super) async fn command_undelegate(
         deny_request(&repo_state, pr, author, PermissionType::Review).await?;
         return Ok(());
     }
-    db.undelegate(repo_state.repository(), pr.number).await
+    db.undelegate(repo_state.repository(), pr.number, &pr.base.name)
+        .await
 }
 
 /// Set the rollup of a pull request.
@@ -132,9 +136,10 @@ pub(super) async fn command_set_rollup(
         deny_request(&repo_state, pr, author, PermissionType::Review).await?;
         return Ok(());
     }
-    db.set_rollup(repo_state.repository(), pr.number, rollup)
+    db.set_rollup(repo_state.repository(), pr.number, &pr.base.name, rollup)
         .await
 }
+
 pub(super) async fn command_close_tree(
     repo_state: Arc<RepositoryState>,
     db: Arc<PgDbClient>,

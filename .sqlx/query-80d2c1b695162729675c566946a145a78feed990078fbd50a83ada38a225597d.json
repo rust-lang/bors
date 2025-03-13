@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n    SELECT\n        pr.id,\n        pr.repository as \"repository: GithubRepoName\",\n        pr.number as \"number!: i64\",\n        (\n            pr.approved_by,\n            pr.approved_sha\n        ) AS \"approval_status!: ApprovalStatus\",\n        pr.priority,\n        pr.rollup as \"rollup: RollupMode\",\n        pr.delegated,\n        pr.created_at as \"created_at: DateTime<Utc>\",\n        build AS \"try_build: BuildModel\"\n    FROM pull_request as pr\n    LEFT JOIN build ON pr.build_id = build.id\n    WHERE pr.repository = $1 AND\n          pr.number = $2\n    ",
+  "query": "\nSELECT\n    pr.id,\n    pr.repository as \"repository: GithubRepoName\",\n    pr.number as \"number!: i64\",\n    (\n        pr.approved_by,\n        pr.approved_sha\n    ) AS \"approval_status!: ApprovalStatus\",\n    pr.delegated,\n    pr.priority,\n    pr.base_branch,\n    pr.rollup as \"rollup: RollupMode\",\n    pr.created_at as \"created_at: DateTime<Utc>\",\n    build AS \"try_build: BuildModel\"\nFROM pull_request as pr\nLEFT JOIN build ON pr.build_id = build.id\nWHERE build.id = $1\n",
   "describe": {
     "columns": [
       {
@@ -25,26 +25,31 @@
       },
       {
         "ordinal": 4,
-        "name": "priority",
-        "type_info": "Int4"
-      },
-      {
-        "ordinal": 5,
-        "name": "rollup: RollupMode",
-        "type_info": "Text"
-      },
-      {
-        "ordinal": 6,
         "name": "delegated",
         "type_info": "Bool"
       },
       {
+        "ordinal": 5,
+        "name": "priority",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 6,
+        "name": "base_branch",
+        "type_info": "Text"
+      },
+      {
         "ordinal": 7,
+        "name": "rollup: RollupMode",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
         "name": "created_at: DateTime<Utc>",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 8,
+        "ordinal": 9,
         "name": "try_build: BuildModel",
         "type_info": {
           "Custom": {
@@ -87,8 +92,7 @@
     ],
     "parameters": {
       "Left": [
-        "Text",
-        "Int8"
+        "Int4"
       ]
     },
     "nullable": [
@@ -96,12 +100,13 @@
       false,
       false,
       null,
-      true,
+      false,
       true,
       false,
+      true,
       false,
       null
     ]
   },
-  "hash": "181b548e2a8a50573b30c7d7c703ca6b49c8278bddd103dcb2c84e0b3c95cc3d"
+  "hash": "80d2c1b695162729675c566946a145a78feed990078fbd50a83ada38a225597d"
 }

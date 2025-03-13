@@ -30,7 +30,10 @@ use crate::{
     ServerState, WebhookSecret,
 };
 
-use super::pull_request::{GitHubPullRequestEventPayload, PullRequestChangeEvent};
+use super::pull_request::{
+    GitHubPullRequest, GitHubPullRequestEventPayload, PullRequestChangeEvent,
+};
+use super::repository::default_branch_name;
 
 pub struct BorsBuilder {
     world: World,
@@ -148,6 +151,7 @@ impl BorsTester {
             .get_or_create_pull_request(
                 &default_repo_name(),
                 PullRequestNumber(default_pr_number()),
+                &default_branch_name(),
             )
             .await
     }
@@ -281,6 +285,14 @@ impl BorsTester {
         self.webhook_check_suite(check_suite.into()).await
     }
 
+    pub async fn open_pr(&mut self, pr_number: u64) -> anyhow::Result<()> {
+        self.send_webhook(
+            "pull_request",
+            GitHubPullRequestEventPayload::new(pr_number, "opened".to_string(), None),
+        )
+        .await
+    }
+
     pub async fn edit_pull_request(
         &mut self,
         pr_number: u64,
@@ -289,6 +301,20 @@ impl BorsTester {
         self.send_webhook(
             "pull_request",
             GitHubPullRequestEventPayload::new(pr_number, "edited".to_string(), Some(changes)),
+        )
+        .await
+    }
+
+    pub async fn edit_pull_request_with_pr(
+        &mut self,
+        pr_number: u64,
+        changes: PullRequestChangeEvent,
+        pr: GitHubPullRequest,
+    ) -> anyhow::Result<()> {
+        self.send_webhook(
+            "pull_request",
+            GitHubPullRequestEventPayload::new(pr_number, "edited".to_string(), Some(changes))
+                .with_pr(pr),
         )
         .await
     }
