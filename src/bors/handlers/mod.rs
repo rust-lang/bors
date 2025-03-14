@@ -19,7 +19,9 @@ use crate::permissions::PermissionType;
 use crate::{load_repositories, PgDbClient, TeamApiClient};
 use anyhow::Context;
 use octocrab::Octocrab;
-use pr_events::{handle_pull_request_edited, handle_push_to_pull_request};
+use pr_events::{
+    handle_pull_request_edited, handle_pull_request_opened, handle_push_to_pull_request,
+};
 use review::{command_delegate, command_set_priority, command_set_rollup, command_undelegate};
 use tracing::Instrument;
 
@@ -133,6 +135,14 @@ pub async fn handle_bors_repository_event(
                 tracing::info_span!("Pull request pushed", repo = payload.repository.to_string());
 
             handle_push_to_pull_request(repo, db, payload)
+                .instrument(span.clone())
+                .await?;
+        }
+        BorsRepositoryEvent::PullRequestOpened(payload) => {
+            let span =
+                tracing::info_span!("Pull request opened", repo = payload.repository.to_string());
+
+            handle_pull_request_opened(repo, db, payload)
                 .instrument(span.clone())
                 .await?;
         }
@@ -425,7 +435,7 @@ async fn has_permission(
     }
 
     let pr_model = db
-        .get_or_create_pull_request(repo_state.repository(), pr.number)
+        .get_or_create_pull_request(repo_state.repository(), pr.number, &pr.base.name)
         .await?;
     let is_delegated = pr_model.delegated && author.id == pr.author.id;
 

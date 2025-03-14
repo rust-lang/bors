@@ -154,7 +154,7 @@ async fn mock_pr_labels(
 }
 
 #[derive(Serialize)]
-struct GitHubPullRequest {
+pub struct GitHubPullRequest {
     url: String,
     id: u64,
     title: String,
@@ -171,7 +171,7 @@ struct GitHubPullRequest {
 }
 
 impl GitHubPullRequest {
-    fn new(number: u64) -> Self {
+    pub fn new(number: u64) -> Self {
         GitHubPullRequest {
             user: User::default().into(),
             url: "https://test.com".to_string(),
@@ -189,6 +189,11 @@ impl GitHubPullRequest {
                 sha: "main-sha".to_string(),
             }),
         }
+    }
+
+    pub fn with_base(mut self, ref_field: String, sha: String) -> Self {
+        self.base = Box::new(GitHubBase { ref_field, sha });
+        self
     }
 }
 
@@ -240,6 +245,13 @@ impl GitHubPullRequestEventPayload {
             repository: default_repo_name().into(),
         }
     }
+
+    pub fn with_pr(self, pull_request: GitHubPullRequest) -> Self {
+        Self {
+            pull_request,
+            ..self
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -250,6 +262,8 @@ struct GitHubPullRequestChanges {
 #[derive(Serialize)]
 struct GitHubPullRequestBaseChanges {
     sha: Option<PullRequestEventChangesFrom>,
+    #[serde(rename = "ref")]
+    ref_field: Option<PullRequestEventChangesFrom>,
 }
 
 #[derive(Serialize)]
@@ -259,14 +273,24 @@ struct PullRequestEventChangesFrom {
 
 impl From<PullRequestChangeEvent> for GitHubPullRequestChanges {
     fn from(value: PullRequestChangeEvent) -> Self {
-        GitHubPullRequestChanges {
-            base: value.from_base_sha.map(|sha| GitHubPullRequestBaseChanges {
-                sha: Some(PullRequestEventChangesFrom { from: sha }),
-            }),
-        }
+        let base = if value.from_base_sha.is_some() || value.from_base_ref.is_some() {
+            Some(GitHubPullRequestBaseChanges {
+                sha: value
+                    .from_base_sha
+                    .map(|sha| PullRequestEventChangesFrom { from: sha }),
+                ref_field: value
+                    .from_base_ref
+                    .map(|ref_val| PullRequestEventChangesFrom { from: ref_val }),
+            })
+        } else {
+            None
+        };
+
+        GitHubPullRequestChanges { base }
     }
 }
 
 pub struct PullRequestChangeEvent {
     pub from_base_sha: Option<String>,
+    pub from_base_ref: Option<String>,
 }

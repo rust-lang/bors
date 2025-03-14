@@ -12,7 +12,7 @@ pub(super) async fn command_info(
 ) -> anyhow::Result<()> {
     // Geting PR info from database
     let pr_model = db
-        .get_or_create_pull_request(repo.client.repository(), pr.number)
+        .get_or_create_pull_request(repo.client.repository(), pr.number, &pr.base.name)
         .await?;
 
     // Building the info message

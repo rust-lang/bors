@@ -38,6 +38,7 @@ pub(crate) async fn get_pull_request(
         pr.priority,
         pr.rollup as "rollup: RollupMode",
         pr.delegated,
+        pr.base_branch,
         pr.created_at as "created_at: DateTime<Utc>",
         build AS "try_build: BuildModel"
     FROM pull_request as pr
@@ -58,14 +59,33 @@ pub(crate) async fn create_pull_request(
     executor: impl PgExecutor<'_>,
     repo: &GithubRepoName,
     pr_number: PullRequestNumber,
+    base_branch: &str,
 ) -> anyhow::Result<()> {
     sqlx::query!(
         r#"
-INSERT INTO pull_request (repository, number)
-VALUES ($1, $2) ON CONFLICT DO NOTHING
+INSERT INTO pull_request (repository, number, base_branch)
+VALUES ($1, $2, $3) ON CONFLICT DO NOTHING
 "#,
         repo as &GithubRepoName,
-        pr_number.0 as i32
+        pr_number.0 as i32,
+        base_branch
+    )
+    .execute(executor)
+    .await?;
+    Ok(())
+}
+
+pub(crate) async fn update_pr_base_branch(
+    executor: impl PgExecutor<'_>,
+    repo: &GithubRepoName,
+    pr_id: i32,
+    base_branch: &str,
+) -> anyhow::Result<()> {
+    sqlx::query!(
+        "UPDATE pull_request SET base_branch = $1 WHERE id = $2 AND repository = $3",
+        base_branch,
+        pr_id,
+        repo.to_string()
     )
     .execute(executor)
     .await?;
@@ -157,6 +177,7 @@ SELECT
     ) AS "approval_status!: ApprovalStatus",
     pr.delegated,
     pr.priority,
+    pr.base_branch,
     pr.rollup as "rollup: RollupMode",
     pr.created_at as "created_at: DateTime<Utc>",
     build AS "try_build: BuildModel"

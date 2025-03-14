@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\nSELECT\n    pr.id,\n    pr.repository as \"repository: GithubRepoName\",\n    pr.number as \"number!: i64\",\n    (\n        pr.approved_by,\n        pr.approved_sha\n    ) AS \"approval_status!: ApprovalStatus\",\n    pr.delegated,\n    pr.priority,\n    pr.rollup as \"rollup: RollupMode\",\n    pr.created_at as \"created_at: DateTime<Utc>\",\n    build AS \"try_build: BuildModel\"\nFROM pull_request as pr\nLEFT JOIN build ON pr.build_id = build.id\nWHERE build.id = $1\n",
+  "query": "\n    SELECT\n        pr.id,\n        pr.repository as \"repository: GithubRepoName\",\n        pr.number as \"number!: i64\",\n        (\n            pr.approved_by,\n            pr.approved_sha\n        ) AS \"approval_status!: ApprovalStatus\",\n        pr.priority,\n        pr.rollup as \"rollup: RollupMode\",\n        pr.delegated,\n        pr.base_branch,\n        pr.created_at as \"created_at: DateTime<Utc>\",\n        build AS \"try_build: BuildModel\"\n    FROM pull_request as pr\n    LEFT JOIN build ON pr.build_id = build.id\n    WHERE pr.repository = $1 AND\n          pr.number = $2\n    ",
   "describe": {
     "columns": [
       {
@@ -25,26 +25,31 @@
       },
       {
         "ordinal": 4,
-        "name": "delegated",
-        "type_info": "Bool"
-      },
-      {
-        "ordinal": 5,
         "name": "priority",
         "type_info": "Int4"
       },
       {
-        "ordinal": 6,
+        "ordinal": 5,
         "name": "rollup: RollupMode",
         "type_info": "Text"
       },
       {
+        "ordinal": 6,
+        "name": "delegated",
+        "type_info": "Bool"
+      },
+      {
         "ordinal": 7,
+        "name": "base_branch",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
         "name": "created_at: DateTime<Utc>",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 8,
+        "ordinal": 9,
         "name": "try_build: BuildModel",
         "type_info": {
           "Custom": {
@@ -87,7 +92,8 @@
     ],
     "parameters": {
       "Left": [
-        "Int4"
+        "Text",
+        "Int8"
       ]
     },
     "nullable": [
@@ -95,12 +101,13 @@
       false,
       false,
       null,
+      true,
+      true,
       false,
-      true,
-      true,
+      false,
       false,
       null
     ]
   },
-  "hash": "171a79e16e89f8ad9d2fd897455d87ad5a7ca3eba6f59eabe66a008d1ce864c4"
+  "hash": "d6aed6aa0d89754e5dbe1fdafd3fbccb522960b2a1b81bba5fa197e9da710126"
 }

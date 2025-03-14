@@ -11,6 +11,8 @@ pub enum BorsRepositoryEvent {
     PullRequestCommitPushed(PullRequestPushed),
     /// When the pull request is edited by its author
     PullRequestEdited(PullRequestEdited),
+    /// When a pull request is opened.
+    PullRequestOpened(PullRequestOpened),
     /// A workflow run on Github Actions or a check run from external CI system has been started.
     WorkflowStarted(WorkflowStarted),
     /// A workflow run on Github Actions or a check run from external CI system has been completed.
@@ -26,6 +28,7 @@ impl BorsRepositoryEvent {
             BorsRepositoryEvent::Comment(comment) => &comment.repository,
             BorsRepositoryEvent::PullRequestCommitPushed(payload) => &payload.repository,
             BorsRepositoryEvent::PullRequestEdited(payload) => &payload.repository,
+            BorsRepositoryEvent::PullRequestOpened(payload) => &payload.repository,
             BorsRepositoryEvent::WorkflowStarted(workflow) => &workflow.repository,
             BorsRepositoryEvent::WorkflowCompleted(workflow) => &workflow.repository,
             BorsRepositoryEvent::CheckSuiteCompleted(payload) => &payload.repository,
@@ -70,6 +73,12 @@ pub struct PullRequestEdited {
     pub repository: GithubRepoName,
     pub pull_request: PullRequest,
     pub from_base_sha: Option<CommitSha>,
+}
+
+#[derive(Debug)]
+pub struct PullRequestOpened {
+    pub repository: GithubRepoName,
+    pub pull_request: PullRequest,
 }
 
 #[derive(Debug)]

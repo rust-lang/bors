@@ -13,7 +13,7 @@ use super::operations::{
     delegate_pull_request, find_build, find_pr_by_build, get_pull_request, get_repository,
     get_running_builds, get_workflow_urls_for_build, get_workflows_for_build, set_pr_priority,
     set_pr_rollup, unapprove_pull_request, undelegate_pull_request, update_build_status,
-    update_pr_build_id, update_workflow_status, upsert_repository,
+    update_pr_base_branch, update_pr_build_id, update_workflow_status, upsert_repository,
 };
 use super::{ApprovalInfo, RunId};
 
@@ -30,60 +30,43 @@ impl PgDbClient {
 
     pub async fn approve(
         &self,
-        repo: &GithubRepoName,
-        pr_number: PullRequestNumber,
+        pr: &PullRequestModel,
         approval_info: ApprovalInfo,
         priority: Option<u32>,
         rollup: Option<RollupMode>,
     ) -> anyhow::Result<()> {
-        let pr = self.get_or_create_pull_request(repo, pr_number).await?;
         approve_pull_request(&self.pool, pr.id, approval_info, priority, rollup).await
     }
 
-    pub async fn unapprove(
-        &self,
-        repo: &GithubRepoName,
-        pr_number: PullRequestNumber,
-    ) -> anyhow::Result<()> {
-        let pr = self.get_or_create_pull_request(repo, pr_number).await?;
+    pub async fn unapprove(&self, pr: &PullRequestModel) -> anyhow::Result<()> {
         unapprove_pull_request(&self.pool, pr.id).await
     }
 
-    pub async fn set_priority(
-        &self,
-        repo: &GithubRepoName,
-        pr_number: PullRequestNumber,
-        priority: u32,
-    ) -> anyhow::Result<()> {
-        let pr = self.get_or_create_pull_request(repo, pr_number).await?;
+    pub async fn set_priority(&self, pr: &PullRequestModel, priority: u32) -> anyhow::Result<()> {
         set_pr_priority(&self.pool, pr.id, priority).await
     }
 
-    pub async fn delegate(
-        &self,
-        repo: &GithubRepoName,
-        pr_number: PullRequestNumber,
-    ) -> anyhow::Result<()> {
-        let pr = self.get_or_create_pull_request(repo, pr_number).await?;
+    pub async fn delegate(&self, pr: &PullRequestModel) -> anyhow::Result<()> {
         delegate_pull_request(&self.pool, pr.id).await
     }
 
-    pub async fn undelegate(
-        &self,
-        repo: &GithubRepoName,
-        pr_number: PullRequestNumber,
-    ) -> anyhow::Result<()> {
-        let pr = self.get_or_create_pull_request(repo, pr_number).await?;
+    pub async fn undelegate(&self, pr: &PullRequestModel) -> anyhow::Result<()> {
         undelegate_pull_request(&self.pool, pr.id).await
+    }
+
+    pub async fn update_pr_base_branch(
+        &self,
+        pr: &PullRequestModel,
+        base_branch: &str,
+    ) -> anyhow::Result<()> {
+        update_pr_base_branch(&self.pool, &pr.repository, pr.id, base_branch).await
     }
 
     pub async fn set_rollup(
         &self,
-        repo: &GithubRepoName,
-        pr_number: PullRequestNumber,
+        pr: &PullRequestModel,
         rollup: RollupMode,
     ) -> anyhow::Result<()> {
-        let pr = self.get_or_create_pull_request(repo, pr_number).await?;
         set_pr_rollup(&self.pool, pr.id, rollup).await
     }
 
@@ -91,16 +74,26 @@ impl PgDbClient {
         &self,
         repo: &GithubRepoName,
         pr_number: PullRequestNumber,
+        base_branch: &str,
     ) -> anyhow::Result<PullRequestModel> {
         if let Some(pr) = get_pull_request(&self.pool, repo, pr_number).await? {
             return Ok(pr);
         }
-        create_pull_request(&self.pool, repo, pr_number).await?;
+        create_pull_request(&self.pool, repo, pr_number, base_branch).await?;
         let pr = get_pull_request(&self.pool, repo, pr_number)
             .await?
             .expect("PR not found after creation");
 
         Ok(pr)
+    }
+
+    pub async fn create_pull_request(
+        &self,
+        repo: &GithubRepoName,
+        pr_number: PullRequestNumber,
+        base_branch: &str,
+    ) -> anyhow::Result<()> {
+        create_pull_request(&self.pool, repo, pr_number, base_branch).await
     }
 
     pub async fn find_pr_by_build(
