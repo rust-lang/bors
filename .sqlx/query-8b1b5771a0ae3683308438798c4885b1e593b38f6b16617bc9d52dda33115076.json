@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\nUPDATE pull_request\nSET approved_by = $1,\n    approved_sha = $2,\n    priority = COALESCE($3, priority),\n    rollup = COALESCE($4, rollup)\nWHERE id = $5\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Int4",
+        "Text",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "8b1b5771a0ae3683308438798c4885b1e593b38f6b16617bc9d52dda33115076"
+}

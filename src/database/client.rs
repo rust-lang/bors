@@ -15,7 +15,7 @@ use super::operations::{
     set_pr_rollup, unapprove_pull_request, undelegate_pull_request, update_build_status,
     update_pr_build_id, update_workflow_status, upsert_repository,
 };
-use super::RunId;
+use super::{ApprovalInfo, RunId};
 
 /// Provides access to a database using sqlx operations.
 #[derive(Clone)]
@@ -32,12 +32,12 @@ impl PgDbClient {
         &self,
         repo: &GithubRepoName,
         pr_number: PullRequestNumber,
-        approver: &str,
+        approval_info: ApprovalInfo,
         priority: Option<u32>,
         rollup: Option<RollupMode>,
     ) -> anyhow::Result<()> {
         let pr = self.get_or_create_pull_request(repo, pr_number).await?;
-        approve_pull_request(&self.pool, pr.id, approver, priority, rollup).await
+        approve_pull_request(&self.pool, pr.id, approval_info, priority, rollup).await
     }
 
     pub async fn unapprove(

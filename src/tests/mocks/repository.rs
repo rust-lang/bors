@@ -23,11 +23,23 @@ use crate::tests::mocks::{default_pr_number, dynamic_mock_req, TestWorkflowStatu
 
 use super::user::{GitHubUser, User};
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct PullRequest {
     pub added_labels: Vec<String>,
     pub removed_labels: Vec<String>,
     pub comment_counter: u64,
+    pub head_sha: String,
+}
+
+impl Default for PullRequest {
+    fn default() -> Self {
+        Self {
+            added_labels: Vec::new(),
+            removed_labels: Vec::new(),
+            comment_counter: 0,
+            head_sha: format!("pr-{}-sha", default_pr_number()),
+        }
+    }
 }
 
 impl PullRequest {
@@ -66,6 +78,7 @@ pub struct Repo {
     pub pull_requests: HashMap<u64, PullRequest>,
     // Cause pull request fetch to fail.
     pub pull_request_error: bool,
+    pub pr_push_counter: u64,
 }
 
 impl Repo {
@@ -77,11 +90,12 @@ impl Repo {
             name: GithubRepoName::new(owner, name),
             permissions,
             config,
+            pull_requests,
             branches: vec![Branch::default()],
             cancelled_workflows: vec![],
             workflow_cancel_error: false,
-            pull_requests,
             pull_request_error: false,
+            pr_push_counter: 0,
         }
     }
 
@@ -108,6 +122,11 @@ impl Repo {
 
     pub fn add_cancelled_workflow(&mut self, run_id: u64) {
         self.cancelled_workflows.push(run_id);
+    }
+
+    pub fn get_next_pr_push_count(&mut self) -> u64 {
+        self.pr_push_counter += 1;
+        self.pr_push_counter
     }
 }
 
