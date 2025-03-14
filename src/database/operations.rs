@@ -51,7 +51,7 @@ FROM pull_request as pr
 WHERE pr.repository = $1
     AND pr.number = $2
 "#,
-        repo.to_string(),
+        repo as &GithubRepoName,
         pr_number.0 as i32
     )
     .fetch_optional(executor)
@@ -69,7 +69,7 @@ pub(crate) async fn create_pull_request(
 INSERT INTO pull_request (repository, number)
 VALUES ($1, $2) ON CONFLICT DO NOTHING
 "#,
-        repo.to_string(),
+        repo as &GithubRepoName,
         pr_number.0 as i32
     )
     .execute(executor)
@@ -210,7 +210,7 @@ INSERT INTO build (repository, branch, commit_sha, parent, status)
 VALUES ($1, $2, $3, $4, $5)
 RETURNING id
 "#,
-        repo.to_string(),
+        repo as &GithubRepoName,
         branch,
         commit_sha.0,
         parent.0,
@@ -243,7 +243,7 @@ WHERE repository = $1
     AND branch = $2
     AND commit_sha = $3
 "#,
-        repo.to_string(),
+        repo as &GithubRepoName,
         branch,
         commit_sha.0
     )
@@ -271,7 +271,7 @@ FROM build
 WHERE repository = $1
     AND status = $2
 "#,
-        repo.to_string(),
+        repo as &GithubRepoName,
         BuildStatus::Pending as BuildStatus
     )
     .fetch_all(executor)
@@ -470,7 +470,7 @@ pub(crate) async fn get_repository(
         FROM repository
         WHERE name = $1
         "#,
-        repo.to_string()
+        repo as &GithubRepoName
     )
     .fetch_optional(executor)
     .await?;
@@ -495,7 +495,7 @@ pub(crate) async fn upsert_repository(
         ON CONFLICT (name)
         DO UPDATE SET tree_state = EXCLUDED.tree_state, treeclosed_src = EXCLUDED.treeclosed_src
         "#,
-        repo.to_string(),
+        repo as &GithubRepoName,
         priority,
         src
     )
