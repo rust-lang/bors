@@ -112,6 +112,62 @@ impl sqlx::Decode<'_, sqlx::Postgres> for RollupMode {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct ApprovalInfo {
+    /// The user who approved the pull request.
+    pub approver: String,
+    /// The SHA of the commit that was approved.
+    pub sha: String,
+}
+
+/// Represents the approval status of a pull request.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ApprovalStatus {
+    NotApproved,
+    Approved(ApprovalInfo),
+}
+
+impl ApprovalStatus {
+    pub fn approver(&self) -> Option<&str> {
+        match self {
+            ApprovalStatus::Approved(info) => Some(info.approver.as_str()),
+            ApprovalStatus::NotApproved => None,
+        }
+    }
+
+    pub fn sha(&self) -> Option<&str> {
+        match self {
+            ApprovalStatus::Approved(info) => Some(info.sha.as_str()),
+            ApprovalStatus::NotApproved => None,
+        }
+    }
+}
+
+impl sqlx::Type<sqlx::Postgres> for ApprovalStatus {
+    fn type_info() -> sqlx::postgres::PgTypeInfo {
+        <(Option<String>, Option<String>) as sqlx::Type<sqlx::Postgres>>::type_info()
+    }
+}
+
+impl<'r> sqlx::Decode<'r, sqlx::Postgres> for ApprovalStatus {
+    fn decode(value: sqlx::postgres::PgValueRef<'r>) -> Result<Self, BoxDynError> {
+        let (approver, sha) =
+            <(Option<String>, Option<String>) as sqlx::Decode<sqlx::Postgres>>::decode(value)?;
+
+        match (approver, sha) {
+            (Some(approver), Some(sha)) => {
+                Ok(ApprovalStatus::Approved(ApprovalInfo { approver, sha }))
+            }
+            (None, None) => Ok(ApprovalStatus::NotApproved),
+            (approver, sha) => Err(format!(
+                "Inconsistent approval state: approver={:?}, sha={:?}",
+                approver, sha
+            )
+            .into()),
+        }
+    }
+}
+
 /// Status of a GitHub build.
 #[derive(Debug, PartialEq, sqlx::Type)]
 #[sqlx(type_name = "TEXT")]
@@ -148,7 +204,7 @@ pub struct PullRequestModel {
     pub id: PrimaryKey,
     pub repository: GithubRepoName,
     pub number: PullRequestNumber,
-    pub approved_by: Option<String>,
+    pub approval_status: ApprovalStatus,
     pub delegated: bool,
     pub priority: Option<i32>,
     pub rollup: Option<RollupMode>,
@@ -158,7 +214,7 @@ pub struct PullRequestModel {
 
 impl PullRequestModel {
     pub fn is_approved(&self) -> bool {
-        self.approved_by.is_some()
+        matches!(self.approval_status, ApprovalStatus::Approved(_))
     }
 }
 

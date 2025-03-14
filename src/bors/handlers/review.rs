@@ -7,6 +7,7 @@ use crate::bors::handlers::has_permission;
 use crate::bors::handlers::labels::handle_label_trigger;
 use crate::bors::Comment;
 use crate::bors::RepositoryState;
+use crate::database::ApprovalInfo;
 use crate::database::TreeState;
 use crate::github::GithubUser;
 use crate::github::LabelTrigger;
@@ -34,10 +35,14 @@ pub(super) async fn command_approve(
         Approver::Myself => author.username.clone(),
         Approver::Specified(approver) => approver.clone(),
     };
+    let approval_info = ApprovalInfo {
+        approver: approver.clone(),
+        sha: pr.head.sha.to_string(),
+    };
     db.approve(
         repo_state.repository(),
         pr.number,
-        approver.as_str(),
+        approval_info,
         priority,
         rollup,
     )
@@ -396,7 +401,7 @@ mod tests {
             tester.expect_comments(1).await;
             let pr = tester.get_default_pr().await?;
             assert_eq!(pr.priority, Some(10));
-            assert_eq!(pr.approved_by, Some("user1".to_string()));
+            assert_eq!(pr.approval_status.approver(), Some("user1"));
             Ok(tester)
         })
         .await;
@@ -850,7 +855,7 @@ approve = ["+approved"]
             tester.expect_comments(1).await;
             let pr = tester.get_default_pr().await?;
             assert_eq!(pr.rollup, Some(RollupMode::Always));
-            assert_eq!(pr.approved_by, Some("user1".to_string()));
+            assert_eq!(pr.approval_status.approver(), Some("user1"));
             Ok(tester)
         })
         .await;
@@ -863,7 +868,7 @@ approve = ["+approved"]
             tester.expect_comments(1).await;
             let pr = tester.get_default_pr().await?;
             assert_eq!(pr.rollup, Some(RollupMode::Always));
-            assert_eq!(pr.approved_by, Some("user1".to_string()));
+            assert_eq!(pr.approval_status.approver(), Some("user1"));
             Ok(tester)
         })
         .await;
@@ -879,7 +884,7 @@ approve = ["+approved"]
             let pr = tester.get_default_pr().await?;
             assert_eq!(pr.rollup, Some(RollupMode::Always));
             assert_eq!(pr.priority, Some(10));
-            assert_eq!(pr.approved_by, Some("user1".to_string()));
+            assert_eq!(pr.approval_status.approver(), Some("user1"));
             Ok(tester)
         })
         .await;
@@ -895,7 +900,7 @@ approve = ["+approved"]
             let pr = tester.get_default_pr().await?;
             assert_eq!(pr.rollup, Some(RollupMode::Maybe));
             assert_eq!(pr.priority, Some(10));
-            assert_eq!(pr.approved_by, Some("user1".to_string()));
+            assert_eq!(pr.approval_status.approver(), Some("user1"));
             Ok(tester)
         })
         .await;
@@ -971,6 +976,52 @@ approve = ["+approved"]
             let pr = tester.get_default_pr().await?;
             assert_eq!(pr.rollup, Some(RollupMode::Always));
             assert!(pr.is_approved());
+
+            Ok(tester)
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn approve_with_sha(pool: sqlx::PgPool) {
+        run_test(pool, |mut tester| async {
+            tester.post_comment("@bors r+").await?;
+            tester.expect_comments(1).await;
+
+            let pr = tester.get_default_pr().await?;
+            assert_eq!(
+                pr.approval_status.sha(),
+                Some(format!("pr-{}-sha", default_pr_number())).as_deref()
+            );
+
+            Ok(tester)
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn reapproved_pr_uses_latest_sha(pool: sqlx::PgPool) {
+        run_test(pool, |mut tester| async {
+            tester.post_comment("@bors r+").await?;
+            tester.expect_comments(1).await;
+
+            let pr = tester.get_default_pr().await?;
+            assert_eq!(
+                pr.approval_status.sha(),
+                Some(format!("pr-{}-sha", default_pr_number())).as_deref()
+            );
+
+            tester.push_to_pull_request(default_pr_number()).await?;
+            tester.expect_comments(1).await;
+
+            tester.post_comment("@bors r+").await?;
+            tester.expect_comments(1).await;
+
+            let pr = tester.get_default_pr().await?;
+            assert_eq!(
+                pr.approval_status.sha(),
+                Some(format!("pr-{}-sha-1", default_pr_number())).as_deref()
+            );
 
             Ok(tester)
         })

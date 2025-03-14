@@ -10,6 +10,8 @@ use crate::github::CommitSha;
 use crate::github::GithubRepoName;
 use crate::github::PullRequestNumber;
 
+use super::ApprovalInfo;
+use super::ApprovalStatus;
 use super::BuildModel;
 use super::PullRequestModel;
 use super::RunId;
@@ -22,41 +24,34 @@ pub(crate) async fn get_pull_request(
     repo: &GithubRepoName,
     pr_number: PullRequestNumber,
 ) -> anyhow::Result<Option<PullRequestModel>> {
-    let pull_request = sqlx::query_as!(
+    let record = sqlx::query_as!(
         PullRequestModel,
         r#"
-SELECT
-    pr.id,
-    pr.repository as "repository: GithubRepoName",
-    pr.number,
-    pr.approved_by,
-    pr.priority,
-    pr.rollup as "rollup: _",
-    pr.delegated,
-    CASE WHEN pr.build_id IS NULL
-        THEN NULL
-        ELSE (
-            build.id,
-            build.repository,
-            build.branch,
-            build.commit_sha,
-            build.status,
-            build.parent,
-            build.created_at
-        )
-    END AS "try_build: BuildModel",
-    pr.created_at as "created_at: DateTime<Utc>"
-FROM pull_request as pr
+    SELECT
+        pr.id,
+        pr.repository as "repository: GithubRepoName",
+        pr.number as "number!: i64",
+        (
+            pr.approved_by,
+            pr.approved_sha
+        ) AS "approval_status!: ApprovalStatus",
+        pr.priority,
+        pr.rollup as "rollup: RollupMode",
+        pr.delegated,
+        pr.created_at as "created_at: DateTime<Utc>",
+        build AS "try_build: BuildModel"
+    FROM pull_request as pr
     LEFT JOIN build ON pr.build_id = build.id
-WHERE pr.repository = $1
-    AND pr.number = $2
-"#,
+    WHERE pr.repository = $1 AND
+          pr.number = $2
+    "#,
         repo as &GithubRepoName,
         pr_number.0 as i32
     )
     .fetch_optional(executor)
     .await?;
-    Ok(pull_request)
+
+    Ok(record)
 }
 
 pub(crate) async fn create_pull_request(
@@ -80,7 +75,7 @@ VALUES ($1, $2) ON CONFLICT DO NOTHING
 pub(crate) async fn approve_pull_request(
     executor: impl PgExecutor<'_>,
     pr_id: i32,
-    approver: &str,
+    approval_info: ApprovalInfo,
     priority: Option<u32>,
     rollup: Option<RollupMode>,
 ) -> anyhow::Result<()> {
@@ -90,11 +85,13 @@ pub(crate) async fn approve_pull_request(
         r#"
 UPDATE pull_request
 SET approved_by = $1,
-    priority = COALESCE($2, priority),
-    rollup = COALESCE($3, rollup)
-WHERE id = $4
+    approved_sha = $2,
+    priority = COALESCE($3, priority),
+    rollup = COALESCE($4, rollup)
+WHERE id = $5
 "#,
-        approver,
+        approval_info.approver,
+        approval_info.sha,
         priority_i32,
         rollup.map(|r| r.to_string()),
         pr_id,
@@ -109,7 +106,7 @@ pub(crate) async fn unapprove_pull_request(
     pr_id: i32,
 ) -> anyhow::Result<()> {
     sqlx::query!(
-        "UPDATE pull_request SET approved_by = NULL WHERE id = $1",
+        "UPDATE pull_request SET approved_by = NULL, approved_sha = NULL WHERE id = $1",
         pr_id
     )
     .execute(executor)
@@ -147,39 +144,32 @@ pub(crate) async fn find_pr_by_build(
     executor: impl PgExecutor<'_>,
     build_id: i32,
 ) -> anyhow::Result<Option<PullRequestModel>> {
-    let pr = sqlx::query_as!(
+    let record = sqlx::query_as!(
         PullRequestModel,
         r#"
 SELECT
     pr.id,
     pr.repository as "repository: GithubRepoName",
-    pr.number,
-    pr.approved_by,
-    pr.priority,
-    pr.rollup as "rollup: _",
+    pr.number as "number!: i64",
+    (
+        pr.approved_by,
+        pr.approved_sha
+    ) AS "approval_status!: ApprovalStatus",
     pr.delegated,
-    CASE WHEN pr.build_id IS NULL
-        THEN NULL
-        ELSE (
-            build.id,
-            build.repository,
-            build.branch,
-            build.commit_sha,
-            build.status,
-            build.parent,
-            build.created_at
-        )
-    END AS "try_build: BuildModel",
-    pr.created_at as "created_at: DateTime<Utc>"
+    pr.priority,
+    pr.rollup as "rollup: RollupMode",
+    pr.created_at as "created_at: DateTime<Utc>",
+    build AS "try_build: BuildModel"
 FROM pull_request as pr
-    LEFT JOIN build ON pr.build_id = build.id
+LEFT JOIN build ON pr.build_id = build.id
 WHERE build.id = $1
 "#,
         build_id
     )
     .fetch_optional(executor)
     .await?;
-    Ok(pr)
+
+    Ok(record)
 }
 
 pub(crate) async fn update_pr_build_id(

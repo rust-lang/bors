@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE pull_request SET approved_by = NULL, approved_sha = NULL WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d9ad32b76bb43454ff5621205314fc26fdcf5a17acb5e9f8ca406a67b645f026"
+}
