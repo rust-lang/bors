@@ -39,15 +39,12 @@ pub(super) async fn command_approve(
         approver: approver.clone(),
         sha: pr.head.sha.to_string(),
     };
-    db.approve(
-        repo_state.repository(),
-        pr.number,
-        approval_info,
-        priority,
-        &pr.base.name,
-        rollup,
-    )
-    .await?;
+    let pr_model = db
+        .get_or_create_pull_request(repo_state.repository(), pr.number, &pr.base.name)
+        .await?;
+
+    db.approve(&pr_model, approval_info, priority, rollup)
+        .await?;
     handle_label_trigger(&repo_state, pr.number, LabelTrigger::Approved).await?;
     notify_of_approval(&repo_state, pr, approver.as_str()).await
 }
@@ -65,8 +62,11 @@ pub(super) async fn command_unapprove(
         deny_request(&repo_state, pr, author, PermissionType::Review).await?;
         return Ok(());
     };
-    db.unapprove(repo_state.repository(), pr.number, &pr.base.name)
+    let pr_model = db
+        .get_or_create_pull_request(repo_state.repository(), pr.number, &pr.base.name)
         .await?;
+
+    db.unapprove(&pr_model).await?;
     handle_label_trigger(&repo_state, pr.number, LabelTrigger::Unapproved).await?;
     notify_of_unapproval(&repo_state, pr).await
 }
@@ -84,8 +84,11 @@ pub(super) async fn command_set_priority(
         deny_request(&repo_state, pr, author, PermissionType::Review).await?;
         return Ok(());
     };
-    db.set_priority(repo_state.repository(), pr.number, &pr.base.name, priority)
-        .await
+    let pr_model = db
+        .get_or_create_pull_request(repo_state.repository(), pr.number, &pr.base.name)
+        .await?;
+
+    db.set_priority(&pr_model, priority).await
 }
 
 /// Delegate approval authority of a pull request to its author.
@@ -101,10 +104,12 @@ pub(super) async fn command_delegate(
         return Ok(());
     }
 
-    let delegatee = pr.author.username.clone();
-    db.delegate(repo_state.repository(), pr.number, &pr.base.name)
+    let pr_model = db
+        .get_or_create_pull_request(repo_state.repository(), pr.number, &pr.base.name)
         .await?;
-    notify_of_delegation(&repo_state, pr, &delegatee).await
+
+    db.delegate(&pr_model).await?;
+    notify_of_delegation(&repo_state, pr, &pr.author.username).await
 }
 
 /// Revoke any previously granted delegation.
@@ -119,8 +124,11 @@ pub(super) async fn command_undelegate(
         deny_request(&repo_state, pr, author, PermissionType::Review).await?;
         return Ok(());
     }
-    db.undelegate(repo_state.repository(), pr.number, &pr.base.name)
-        .await
+    let pr_model = db
+        .get_or_create_pull_request(repo_state.repository(), pr.number, &pr.base.name)
+        .await?;
+
+    db.undelegate(&pr_model).await
 }
 
 /// Set the rollup of a pull request.
@@ -136,8 +144,11 @@ pub(super) async fn command_set_rollup(
         deny_request(&repo_state, pr, author, PermissionType::Review).await?;
         return Ok(());
     }
-    db.set_rollup(repo_state.repository(), pr.number, &pr.base.name, rollup)
-        .await
+    let pr_model = db
+        .get_or_create_pull_request(repo_state.repository(), pr.number, &pr.base.name)
+        .await?;
+
+    db.set_rollup(&pr_model, rollup).await
 }
 
 pub(super) async fn command_close_tree(

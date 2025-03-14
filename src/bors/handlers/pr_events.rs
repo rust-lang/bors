@@ -18,17 +18,15 @@ pub(super) async fn handle_pull_request_edited(
         return Ok(());
     };
 
-    db.update_pr_base_branch(repo_state.repository(), pr_number, &pr.base.name)
-        .await?;
     let pr_model = db
         .get_or_create_pull_request(repo_state.repository(), pr_number, &pr.base.name)
         .await?;
+    db.update_pr_base_branch(&pr_model, &pr.base.name).await?;
     if !pr_model.is_approved() {
         return Ok(());
     }
 
-    db.unapprove(repo_state.repository(), pr_number, &pr.base.name)
-        .await?;
+    db.unapprove(&pr_model).await?;
     handle_label_trigger(&repo_state, pr_number, LabelTrigger::Unapproved).await?;
     notify_of_edited_pr(&repo_state, pr_number, &payload.pull_request.base.name).await
 }
@@ -48,8 +46,7 @@ pub(super) async fn handle_push_to_pull_request(
     }
 
     let pr_number = pr_model.number;
-    db.unapprove(repo_state.repository(), pr_number, &pr.base.name)
-        .await?;
+    db.unapprove(&pr_model).await?;
     handle_label_trigger(&repo_state, pr_number, LabelTrigger::Unapproved).await?;
     notify_of_pushed_pr(&repo_state, pr_number, pr.head.sha.clone()).await
 }
