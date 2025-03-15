@@ -1,5 +1,6 @@
 //! Contains definitions of common types (pull request, user, repository name) needed
 //! for working with (GitHub) repositories.
+use octocrab::models::pulls::MergeableState;
 use octocrab::models::UserId;
 use std::fmt::{Debug, Display, Formatter};
 use std::str::FromStr;
@@ -111,6 +112,7 @@ pub struct PullRequest {
     pub head: Branch,
     pub base: Branch,
     pub title: String,
+    pub mergeable_state: MergeableState,
     pub message: String,
     pub author: GithubUser,
 }
@@ -133,6 +135,7 @@ impl From<octocrab::models::pulls::PullRequest> for PullRequest {
             author: (*pr.user.unwrap()).into(),
             title: pr.title.unwrap_or_default(),
             message: pr.body.unwrap_or_default(),
+            mergeable_state: pr.mergeable_state.unwrap_or(MergeableState::Unknown),
         }
     }
 }
