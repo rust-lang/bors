@@ -31,9 +31,11 @@ use crate::{
 };
 
 use super::pull_request::{
-    GitHubPullRequest, GitHubPullRequestEventPayload, PullRequestChangeEvent,
+    default_mergeable_state, GitHubPullRequest, GitHubPullRequestEventPayload,
+    PullRequestChangeEvent,
 };
 use super::repository::default_branch_name;
+use super::GitHubPushEventPayload;
 
 pub struct BorsBuilder {
     world: World,
@@ -152,6 +154,7 @@ impl BorsTester {
                 &default_repo_name(),
                 PullRequestNumber(default_pr_number()),
                 &default_branch_name(),
+                default_mergeable_state(),
             )
             .await
     }
@@ -337,6 +340,11 @@ impl BorsTester {
             GitHubPullRequestEventPayload::new(pr_number, "synchronize".to_string(), None),
         )
         .await
+    }
+
+    pub async fn push_to_branch(&mut self) -> anyhow::Result<()> {
+        self.send_webhook("push", GitHubPushEventPayload::new("main"))
+            .await
     }
 
     async fn webhook_comment(&mut self, comment: Comment) -> anyhow::Result<()> {

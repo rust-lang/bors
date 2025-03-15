@@ -10,12 +10,13 @@ use crate::github::{CommitSha, GithubRepoName};
 
 use super::operations::{
     approve_pull_request, create_build, create_pull_request, create_workflow,
-    delegate_pull_request, find_build, find_pr_by_build, get_pull_request, get_repository,
-    get_running_builds, get_workflow_urls_for_build, get_workflows_for_build, set_pr_priority,
-    set_pr_rollup, unapprove_pull_request, undelegate_pull_request, update_build_status,
-    update_pr_base_branch, update_pr_build_id, update_workflow_status, upsert_repository,
+    delegate_pull_request, find_build, find_pr_by_build, get_repository, get_running_builds,
+    get_workflow_urls_for_build, get_workflows_for_build, set_pr_priority, set_pr_rollup,
+    unapprove_pull_request, undelegate_pull_request, update_build_status,
+    update_mergeable_states_by_base_branch, update_pr_build_id, update_workflow_status,
+    upsert_pull_request, upsert_repository,
 };
-use super::{ApprovalInfo, RunId};
+use super::{ApprovalInfo, MergeableState, RunId};
 
 /// Provides access to a database using sqlx operations.
 #[derive(Clone)]
@@ -54,12 +55,13 @@ impl PgDbClient {
         undelegate_pull_request(&self.pool, pr.id).await
     }
 
-    pub async fn update_pr_base_branch(
+    pub async fn update_mergeable_states_by_base_branch(
         &self,
-        pr: &PullRequestModel,
+        repo: &GithubRepoName,
         base_branch: &str,
-    ) -> anyhow::Result<()> {
-        update_pr_base_branch(&self.pool, &pr.repository, pr.id, base_branch).await
+        mergeable_state: MergeableState,
+    ) -> anyhow::Result<u64> {
+        update_mergeable_states_by_base_branch(&self.pool, repo, base_branch, mergeable_state).await
     }
 
     pub async fn set_rollup(
@@ -75,15 +77,10 @@ impl PgDbClient {
         repo: &GithubRepoName,
         pr_number: PullRequestNumber,
         base_branch: &str,
+        mergeable_state: MergeableState,
     ) -> anyhow::Result<PullRequestModel> {
-        if let Some(pr) = get_pull_request(&self.pool, repo, pr_number).await? {
-            return Ok(pr);
-        }
-        create_pull_request(&self.pool, repo, pr_number, base_branch).await?;
-        let pr = get_pull_request(&self.pool, repo, pr_number)
-            .await?
-            .expect("PR not found after creation");
-
+        let pr =
+            upsert_pull_request(&self.pool, repo, pr_number, base_branch, mergeable_state).await?;
         Ok(pr)
     }
 

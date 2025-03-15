@@ -1,4 +1,5 @@
-use crate::github::GithubRepoName;
+use crate::{database::MergeableState, github::GithubRepoName};
+use octocrab::models::pulls::MergeableState as OctocrabMergeableState;
 use octocrab::models::LabelId;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
@@ -20,6 +21,10 @@ use super::{
 
 pub fn default_pr_number() -> u64 {
     1
+}
+
+pub fn default_mergeable_state() -> MergeableState {
+    MergeableState::Unknown
 }
 
 pub async fn mock_pull_requests(
@@ -159,6 +164,7 @@ pub struct GitHubPullRequest {
     id: u64,
     title: String,
     body: String,
+    mergeable_state: OctocrabMergeableState,
 
     /// The pull request number.  Note that GitHub's REST API
     /// considers every pull-request an issue with the same number.
@@ -178,6 +184,7 @@ impl GitHubPullRequest {
             id: number + 1000,
             title: format!("PR #{number}"),
             body: format!("Description of PR #{number}"),
+            mergeable_state: OctocrabMergeableState::Unknown,
             number,
             head: Box::new(GitHubHead {
                 label: format!("pr-{number}"),
@@ -193,6 +200,11 @@ impl GitHubPullRequest {
 
     pub fn with_base(mut self, ref_field: String, sha: String) -> Self {
         self.base = Box::new(GitHubBase { ref_field, sha });
+        self
+    }
+
+    pub fn with_mergeable_state(mut self, state: OctocrabMergeableState) -> Self {
+        self.mergeable_state = state;
         self
     }
 }
@@ -293,4 +305,20 @@ impl From<PullRequestChangeEvent> for GitHubPullRequestChanges {
 pub struct PullRequestChangeEvent {
     pub from_base_sha: Option<String>,
     pub from_base_ref: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct GitHubPushEventPayload {
+    pub repository: GitHubRepository,
+    #[serde(rename = "ref")]
+    pub ref_field: String,
+}
+
+impl GitHubPushEventPayload {
+    pub fn new(branch_name: &str) -> Self {
+        GitHubPushEventPayload {
+            repository: default_repo_name().into(),
+            ref_field: format!("refs/heads/{branch_name}"),
+        }
+    }
 }

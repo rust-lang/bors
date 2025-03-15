@@ -13,12 +13,14 @@ use crate::github::PullRequestNumber;
 use super::ApprovalInfo;
 use super::ApprovalStatus;
 use super::BuildModel;
+use super::MergeableState;
 use super::PullRequestModel;
 use super::RunId;
 use super::TreeState;
 use super::WorkflowStatus;
 use super::WorkflowType;
 
+#[cfg(test)]
 pub(crate) async fn get_pull_request(
     executor: impl PgExecutor<'_>,
     repo: &GithubRepoName,
@@ -39,6 +41,7 @@ pub(crate) async fn get_pull_request(
         pr.rollup as "rollup: RollupMode",
         pr.delegated,
         pr.base_branch,
+        pr.mergeable_state as "mergeable_state: MergeableState",
         pr.created_at as "created_at: DateTime<Utc>",
         build AS "try_build: BuildModel"
     FROM pull_request as pr
@@ -75,21 +78,76 @@ VALUES ($1, $2, $3) ON CONFLICT DO NOTHING
     Ok(())
 }
 
-pub(crate) async fn update_pr_base_branch(
+pub(crate) async fn upsert_pull_request(
     executor: impl PgExecutor<'_>,
     repo: &GithubRepoName,
-    pr_id: i32,
+    pr_number: PullRequestNumber,
     base_branch: &str,
-) -> anyhow::Result<()> {
-    sqlx::query!(
-        "UPDATE pull_request SET base_branch = $1 WHERE id = $2 AND repository = $3",
+    mergeable_state: MergeableState,
+) -> anyhow::Result<PullRequestModel> {
+    let record = sqlx::query_as!(
+        PullRequestModel,
+        r#"
+        WITH upserted_pr AS (
+            INSERT INTO pull_request (repository, number, base_branch, mergeable_state)
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT (repository, number)
+            DO UPDATE SET
+                base_branch = $3,
+                mergeable_state = $4
+            RETURNING *
+        )
+        SELECT
+            pr.id,
+            pr.repository as "repository: GithubRepoName",
+            pr.number as "number!: i64",
+            (
+                pr.approved_by,
+                pr.approved_sha
+            ) AS "approval_status!: ApprovalStatus",
+            pr.priority,
+            pr.rollup as "rollup: RollupMode",
+            pr.delegated,
+            pr.base_branch,
+            pr.mergeable_state as "mergeable_state: MergeableState",
+            pr.created_at as "created_at: DateTime<Utc>",
+            build AS "try_build: BuildModel"
+        FROM upserted_pr as pr
+        LEFT JOIN build ON pr.build_id = build.id
+        "#,
+        repo as &GithubRepoName,
+        pr_number.0 as i32,
         base_branch,
-        pr_id,
-        repo.to_string()
+        mergeable_state as _
+    )
+    .fetch_one(executor)
+    .await?;
+    Ok(record)
+}
+
+// FIXME:
+// 1) Add a database index on (repository, base_branch)
+// 2) Filter PRs by state (only update open PRs, once we have PR state tracking)
+pub(crate) async fn update_mergeable_states_by_base_branch(
+    executor: impl PgExecutor<'_>,
+    repo: &GithubRepoName,
+    base_branch: &str,
+    mergeable_state: MergeableState,
+) -> anyhow::Result<u64> {
+    let result = sqlx::query!(
+        r#"
+        UPDATE pull_request
+        SET mergeable_state = $1
+        WHERE repository = $2 AND base_branch = $3
+        "#,
+        mergeable_state as _,
+        repo as &GithubRepoName,
+        base_branch,
     )
     .execute(executor)
     .await?;
-    Ok(())
+
+    Ok(result.rows_affected())
 }
 
 pub(crate) async fn approve_pull_request(
@@ -178,6 +236,7 @@ SELECT
     pr.delegated,
     pr.priority,
     pr.base_branch,
+    pr.mergeable_state as "mergeable_state: MergeableState",
     pr.rollup as "rollup: RollupMode",
     pr.created_at as "created_at: DateTime<Utc>",
     build AS "try_build: BuildModel"

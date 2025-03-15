@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use octocrab::Octocrab;
 use parking_lot::Mutex;
+use pull_request::default_mergeable_state;
 use regex::Regex;
 use wiremock::matchers::{method, path_regex};
 use wiremock::{Mock, Request, ResponseTemplate};
@@ -19,6 +20,7 @@ pub use comment::Comment;
 pub use permissions::Permissions;
 pub use pull_request::default_pr_number;
 pub use pull_request::GitHubPullRequest;
+pub use pull_request::GitHubPushEventPayload;
 pub use pull_request::PullRequestChangeEvent;
 pub use repository::default_branch_name;
 pub use repository::default_branch_sha;
@@ -162,7 +164,12 @@ pub async fn assert_pr_approved_by(
 ) {
     let pr_in_db = tester
         .db()
-        .get_or_create_pull_request(&default_repo_name(), pr_number, &default_branch_name())
+        .get_or_create_pull_request(
+            &default_repo_name(),
+            pr_number,
+            &default_branch_name(),
+            default_mergeable_state(),
+        )
         .await
         .unwrap();
     assert_eq!(pr_in_db.approval_status.approver(), Some(approved_by));
@@ -174,7 +181,12 @@ pub async fn assert_pr_approved_by(
 pub async fn assert_pr_unapproved(tester: &BorsTester, pr_number: PullRequestNumber) {
     let pr_in_db = tester
         .db()
-        .get_or_create_pull_request(&default_repo_name(), pr_number, &default_branch_name())
+        .get_or_create_pull_request(
+            &default_repo_name(),
+            pr_number,
+            &default_branch_name(),
+            default_mergeable_state(),
+        )
         .await
         .unwrap();
     assert!(!pr_in_db.is_approved());

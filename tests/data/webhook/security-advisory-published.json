@@ -1,0 +1,65 @@
+{
+    "action": "published",
+    "security_advisory": {
+        "ghsa_id": "GHSA-mrrh-fwg8-r2c3",
+        "cve_id": "CVE-2025-30066",
+        "summary": "tj-actions changed-files through 45.0.7 allows remote attackers to discover secrets by reading actions logs.",
+        "description": "tj-actions changed-files through 45.0.7 allows remote attackers to discover secrets by reading actions logs. (The tags v1 through v45.0.7 were not originally affected, but were modified by a threat actor to point at commit 0e58ed8, which contains the malicious updateFeatures code.)",
+        "severity": "high",
+        "identifiers": [
+            { "value": "GHSA-mrrh-fwg8-r2c3", "type": "GHSA" },
+            { "value": "CVE-2025-30066", "type": "CVE" }
+        ],
+        "references": [
+            { "url": "https://nvd.nist.gov/vuln/detail/CVE-2025-30066" },
+            {
+                "url": "https://github.com/tj-actions/changed-files/issues/2463"
+            },
+            {
+                "url": "https://github.com/github/docs/blob/962a1c8dccb8c0f66548b324e5b921b5e4fbc3d6/content/actions/security-for-github-actions/security-guides/security-hardening-for-github-actions.md?plain=1#L191-L193"
+            },
+            { "url": "https://news.ycombinator.com/item?id=43368870" },
+            {
+                "url": "https://semgrep.dev/blog/2025/popular-github-action-tj-actionschanged-files-is-compromised"
+            },
+            {
+                "url": "https://www.stepsecurity.io/blog/harden-runner-detection-tj-actions-changed-files-action-is-compromised"
+            },
+            {
+                "url": "https://github.com/chains-project/maven-lockfile/pull/1111"
+            },
+            { "url": "https://github.com/rackerlabs/genestack/pull/903" },
+            { "url": "https://news.ycombinator.com/item?id=43367987" },
+            {
+                "url": "https://web.archive.org/web/20250315060250/https://github.com/tj-actions/changed-files/issues/2463"
+            },
+            { "url": "https://github.com/advisories/GHSA-mrrh-fwg8-r2c3" }
+        ],
+        "published_at": "2025-03-15T06:30:34Z",
+        "updated_at": "2025-03-15T16:39:06Z",
+        "withdrawn_at": null,
+        "vulnerabilities": [
+            {
+                "package": {
+                    "ecosystem": "actions",
+                    "name": "tj-actions/changed-files"
+                },
+                "severity": "high",
+                "vulnerable_version_range": "<= 45.0.7",
+                "first_patched_version": null
+            }
+        ],
+        "cvss_severities": {
+            "cvss_v3": {
+                "vector_string": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:N/A:N",
+                "score": 8.6
+            },
+            "cvss_v4": { "vector_string": null, "score": 0.0 }
+        },
+        "cvss": {
+            "vector_string": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:N/A:N",
+            "score": 8.6
+        },
+        "cwes": [{ "cwe_id": "CWE-506", "name": "Embedded Malicious Code" }]
+    }
+}
