@@ -1,5 +1,5 @@
 use crate::github::GithubRepoName;
-use octocrab::models::LabelId;
+use octocrab::models::{pulls::MergeableState, LabelId};
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -159,6 +159,7 @@ pub struct GitHubPullRequest {
     id: u64,
     title: String,
     body: String,
+    mergeable_state: MergeableState,
 
     /// The pull request number.  Note that GitHub's REST API
     /// considers every pull-request an issue with the same number.
@@ -178,6 +179,7 @@ impl GitHubPullRequest {
             id: number + 1000,
             title: format!("PR #{number}"),
             body: format!("Description of PR #{number}"),
+            mergeable_state: MergeableState::Unknown,
             number,
             head: Box::new(GitHubHead {
                 label: format!("pr-{number}"),
@@ -193,6 +195,11 @@ impl GitHubPullRequest {
 
     pub fn with_base(mut self, ref_field: String, sha: String) -> Self {
         self.base = Box::new(GitHubBase { ref_field, sha });
+        self
+    }
+
+    pub fn with_mergeable_state(mut self, state: MergeableState) -> Self {
+        self.mergeable_state = state;
         self
     }
 }

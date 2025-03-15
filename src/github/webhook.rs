@@ -514,7 +514,7 @@ mod tests {
     async fn pull_request_edited() {
         insta::assert_debug_snapshot!(
             check_webhook("webhook/pull-request-edited.json", "pull_request").await,
-            @r###"
+            @r#"
         Ok(
             GitHubWebhook(
                 Repository(
@@ -542,6 +542,7 @@ mod tests {
                                     ),
                                 },
                                 title: "Create test.txt",
+                                mergeable_state: Unknown,
                                 message: "",
                                 author: GithubUser {
                                     id: UserId(
@@ -575,7 +576,7 @@ mod tests {
                 ),
             ),
         )
-        "###
+        "#
         );
     }
 
@@ -583,7 +584,7 @@ mod tests {
     async fn pull_request_synchronized() {
         insta::assert_debug_snapshot!(
             check_webhook("webhook/pull-request-synchronize.json", "pull_request").await,
-            @r###"
+            @r#"
         Ok(
             GitHubWebhook(
                 Repository(
@@ -611,6 +612,7 @@ mod tests {
                                     ),
                                 },
                                 title: "Create test.txt",
+                                mergeable_state: Unknown,
                                 message: "",
                                 author: GithubUser {
                                     id: UserId(
@@ -639,7 +641,7 @@ mod tests {
                 ),
             ),
         )
-        "###
+        "#
         );
     }
 
@@ -724,6 +726,7 @@ mod tests {
                                     ),
                                 },
                                 title: "New added branch",
+                                mergeable_state: Unknown,
                                 message: "This is a newly added branch from a just-opened PR. ",
                                 author: GithubUser {
                                     id: UserId(

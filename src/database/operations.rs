@@ -87,7 +87,24 @@ pub(crate) async fn update_pr_base_branch(
         "UPDATE pull_request SET base_branch = $1 WHERE id = $2 AND repository = $3",
         base_branch,
         pr_id,
-        repo.to_string()
+        repo as &GithubRepoName
+    )
+    .execute(executor)
+    .await?;
+    Ok(())
+}
+
+pub(crate) async fn update_pr_merge_state(
+    executor: impl PgExecutor<'_>,
+    repo: &GithubRepoName,
+    pr_id: i32,
+    merge_state: MergeState,
+) -> anyhow::Result<()> {
+    sqlx::query!(
+        "UPDATE pull_request SET merge_state = $1 WHERE id = $2 AND repository = $3",
+        merge_state as _,
+        pr_id,
+        repo as &GithubRepoName
     )
     .execute(executor)
     .await?;
