@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        WITH upserted_pr AS (\n            INSERT INTO pull_request (repository, number, base_branch, mergeable_state)\n            VALUES ($1, $2, $3, $4)\n            ON CONFLICT (repository, number)\n            DO UPDATE SET\n                base_branch = $3,\n                mergeable_state = $4\n            RETURNING *\n        )\n        SELECT\n            pr.id,\n            pr.repository as \"repository: GithubRepoName\",\n            pr.number as \"number!: i64\",\n            (\n                pr.approved_by,\n                pr.approved_sha\n            ) AS \"approval_status!: ApprovalStatus\",\n            pr.priority,\n            pr.rollup as \"rollup: RollupMode\",\n            pr.delegated,\n            pr.base_branch,\n            pr.mergeable_state as \"mergeable_state: MergeableState\",\n            pr.created_at as \"created_at: DateTime<Utc>\",\n            build AS \"try_build: BuildModel\"\n        FROM upserted_pr as pr\n        LEFT JOIN build ON pr.build_id = build.id\n        ",
+  "query": "\n            WITH upserted_pr AS (\n                INSERT INTO pull_request (repository, number, base_branch, mergeable_state)\n                VALUES ($1, $2, $3, $4)\n                ON CONFLICT (repository, number)\n                DO UPDATE SET\n                    base_branch = $3,\n                    mergeable_state = $4\n                RETURNING *\n            )\n            SELECT\n                pr.id,\n                pr.repository as \"repository: GithubRepoName\",\n                pr.number as \"number!: i64\",\n                (\n                    pr.approved_by,\n                    pr.approved_sha\n                ) AS \"approval_status!: ApprovalStatus\",\n                pr.priority,\n                pr.rollup as \"rollup: RollupMode\",\n                pr.delegated,\n                pr.base_branch,\n                pr.mergeable_state as \"mergeable_state: MergeableState\",\n                pr.created_at as \"created_at: DateTime<Utc>\",\n                build AS \"try_build: BuildModel\"\n            FROM upserted_pr as pr\n            LEFT JOIN build ON pr.build_id = build.id\n            ",
   "describe": {
     "columns": [
       {
@@ -117,5 +117,5 @@
       true
     ]
   },
-  "hash": "eba0377c0959404d5d208aae9763a92186f2a784639b87661f4d1ce68cc995ea"
+  "hash": "a19b72ce7c397928e41f52137bb3ecd62b02d1ab3830724ee5a107a9b6f1dbdd"
 }
