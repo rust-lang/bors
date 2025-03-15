@@ -13,6 +13,7 @@ use crate::github::PullRequestNumber;
 use super::ApprovalInfo;
 use super::ApprovalStatus;
 use super::BuildModel;
+use super::MergeState;
 use super::PullRequestModel;
 use super::RunId;
 use super::TreeState;
@@ -39,6 +40,7 @@ pub(crate) async fn get_pull_request(
         pr.rollup as "rollup: RollupMode",
         pr.delegated,
         pr.base_branch,
+        pr.merge_state as "merge_state: MergeState",
         pr.created_at as "created_at: DateTime<Utc>",
         build AS "try_build: BuildModel"
     FROM pull_request as pr
@@ -178,6 +180,7 @@ SELECT
     pr.delegated,
     pr.priority,
     pr.base_branch,
+    pr.merge_state as "merge_state: MergeState",
     pr.rollup as "rollup: RollupMode",
     pr.created_at as "created_at: DateTime<Utc>",
     build AS "try_build: BuildModel"
