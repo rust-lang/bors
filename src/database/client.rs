@@ -13,9 +13,10 @@ use super::operations::{
     delegate_pull_request, find_build, find_pr_by_build, get_pull_request, get_repository,
     get_running_builds, get_workflow_urls_for_build, get_workflows_for_build, set_pr_priority,
     set_pr_rollup, unapprove_pull_request, undelegate_pull_request, update_build_status,
-    update_pr_base_branch, update_pr_build_id, update_workflow_status, upsert_repository,
+    update_pr_base_branch, update_pr_build_id, update_pr_merge_state, update_workflow_status,
+    upsert_repository,
 };
-use super::{ApprovalInfo, RunId};
+use super::{ApprovalInfo, MergeState, RunId};
 
 /// Provides access to a database using sqlx operations.
 #[derive(Clone)]
@@ -52,6 +53,14 @@ impl PgDbClient {
 
     pub async fn undelegate(&self, pr: &PullRequestModel) -> anyhow::Result<()> {
         undelegate_pull_request(&self.pool, pr.id).await
+    }
+
+    pub async fn update_pr_merge_state(
+        &self,
+        pr: &PullRequestModel,
+        merge_state: MergeState,
+    ) -> anyhow::Result<()> {
+        update_pr_merge_state(&self.pool, &pr.repository, pr.id, merge_state).await
     }
 
     pub async fn update_pr_base_branch(

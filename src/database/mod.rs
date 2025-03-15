@@ -10,6 +10,7 @@ use crate::{
 };
 use chrono::{DateTime, Utc};
 pub use client::PgDbClient;
+use octocrab::models::pulls::MergeableState;
 use sqlx::error::BoxDynError;
 use sqlx::{Database, Postgres};
 
@@ -168,6 +169,31 @@ impl<'r> sqlx::Decode<'r, sqlx::Postgres> for ApprovalStatus {
     }
 }
 
+/// State of a pull request merge.
+#[derive(Debug, PartialEq, sqlx::Type)]
+#[sqlx(type_name = "TEXT")]
+#[sqlx(rename_all = "snake_case")]
+pub enum MergeState {
+    Mergeable,
+    HasConflicts,
+    Unknown,
+}
+
+impl From<MergeableState> for MergeState {
+    fn from(state: MergeableState) -> Self {
+        match state {
+            MergeableState::Behind
+            | MergeableState::Blocked
+            | MergeableState::Dirty
+            | MergeableState::Draft => MergeState::HasConflicts,
+            MergeableState::Clean | MergeableState::HasHooks | MergeableState::Unstable => {
+                MergeState::Mergeable
+            }
+            _ => MergeState::Unknown,
+        }
+    }
+}
+
 /// Status of a GitHub build.
 #[derive(Debug, PartialEq, sqlx::Type)]
 #[sqlx(type_name = "TEXT")]
@@ -205,6 +231,7 @@ pub struct PullRequestModel {
     pub repository: GithubRepoName,
     pub number: PullRequestNumber,
     pub base_branch: String,
+    pub merge_state: MergeState,
     pub approval_status: ApprovalStatus,
     pub delegated: bool,
     pub priority: Option<i32>,

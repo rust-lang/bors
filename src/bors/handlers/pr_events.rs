@@ -12,15 +12,17 @@ pub(super) async fn handle_pull_request_edited(
 ) -> anyhow::Result<()> {
     let pr = &payload.pull_request;
     let pr_number = pr.number;
+    let pr_model = db
+        .get_or_create_pull_request(repo_state.repository(), pr_number, &pr.base.name)
+        .await?;
+    db.update_pr_merge_state(&pr_model, pr.mergeable_state.clone().into())
+        .await?;
 
     // If the base branch has changed, unapprove the PR
     let Some(_) = payload.from_base_sha else {
         return Ok(());
     };
 
-    let pr_model = db
-        .get_or_create_pull_request(repo_state.repository(), pr_number, &pr.base.name)
-        .await?;
     db.update_pr_base_branch(&pr_model, &pr.base.name).await?;
     if !pr_model.is_approved() {
         return Ok(());
@@ -99,10 +101,13 @@ PR will need to be re-approved."#,
 
 #[cfg(test)]
 mod tests {
-    use crate::tests::mocks::{
-        assert_pr_approved_by, assert_pr_unapproved, create_world_with_approve_config,
-        default_branch_name, default_branch_sha, default_pr_number, run_test, BorsBuilder,
-        GitHubPullRequest, PullRequestChangeEvent, User,
+    use crate::{
+        database::MergeState,
+        tests::mocks::{
+            assert_pr_approved_by, assert_pr_unapproved, create_world_with_approve_config,
+            default_branch_name, default_branch_sha, default_pr_number, run_test, BorsBuilder,
+            GitHubPullRequest, PullRequestChangeEvent, User,
+        },
     };
 
     #[sqlx::test]
@@ -293,6 +298,31 @@ PR will need to be re-approved."#,
                 .wait_for(|| async {
                     let pr = tester.get_default_pr().await?;
                     Ok(pr.base_branch == "main".to_string())
+                })
+                .await?;
+            Ok(tester)
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn update_mergeable_state_on_pr_edited(pool: sqlx::PgPool) {
+        run_test(pool, |mut tester| async {
+            tester
+                .edit_pull_request_with_pr(
+                    default_pr_number(),
+                    PullRequestChangeEvent {
+                        from_base_sha: None,
+                        from_base_ref: None,
+                    },
+                    GitHubPullRequest::new(default_pr_number())
+                        .with_mergeable_state(octocrab::models::pulls::MergeableState::HasHooks),
+                )
+                .await?;
+            tester
+                .wait_for(|| async {
+                    let pr = tester.get_default_pr().await?;
+                    Ok(pr.merge_state == MergeState::Mergeable)
                 })
                 .await?;
             Ok(tester)

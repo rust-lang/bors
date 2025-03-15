@@ -13,6 +13,7 @@ use crate::github::PullRequestNumber;
 use super::ApprovalInfo;
 use super::ApprovalStatus;
 use super::BuildModel;
+use super::MergeState;
 use super::PullRequestModel;
 use super::RunId;
 use super::TreeState;
@@ -39,6 +40,7 @@ pub(crate) async fn get_pull_request(
         pr.rollup as "rollup: RollupMode",
         pr.delegated,
         pr.base_branch,
+        pr.merge_state as "merge_state: MergeState",
         pr.created_at as "created_at: DateTime<Utc>",
         build AS "try_build: BuildModel"
     FROM pull_request as pr
@@ -85,7 +87,24 @@ pub(crate) async fn update_pr_base_branch(
         "UPDATE pull_request SET base_branch = $1 WHERE id = $2 AND repository = $3",
         base_branch,
         pr_id,
-        repo.to_string()
+        repo as &GithubRepoName
+    )
+    .execute(executor)
+    .await?;
+    Ok(())
+}
+
+pub(crate) async fn update_pr_merge_state(
+    executor: impl PgExecutor<'_>,
+    repo: &GithubRepoName,
+    pr_id: i32,
+    merge_state: MergeState,
+) -> anyhow::Result<()> {
+    sqlx::query!(
+        "UPDATE pull_request SET merge_state = $1 WHERE id = $2 AND repository = $3",
+        merge_state as _,
+        pr_id,
+        repo as &GithubRepoName
     )
     .execute(executor)
     .await?;
@@ -178,6 +197,7 @@ SELECT
     pr.delegated,
     pr.priority,
     pr.base_branch,
+    pr.merge_state as "merge_state: MergeState",
     pr.rollup as "rollup: RollupMode",
     pr.created_at as "created_at: DateTime<Utc>",
     build AS "try_build: BuildModel"

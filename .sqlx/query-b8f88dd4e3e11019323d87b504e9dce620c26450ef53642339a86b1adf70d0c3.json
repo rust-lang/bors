@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE pull_request SET merge_state = $1 WHERE id = $2 AND repository = $3",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int4",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b8f88dd4e3e11019323d87b504e9dce620c26450ef53642339a86b1adf70d0c3"
+}
