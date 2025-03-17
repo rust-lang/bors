@@ -10,6 +10,7 @@ use crate::database::RunId;
 use crate::github::api::base_github_html_url;
 use crate::github::api::operations::{merge_branches, set_branch_to_commit, MergeError};
 use crate::github::{CommitSha, GithubRepoName, PullRequest, PullRequestNumber};
+use crate::utils::timing::measure_network_request;
 
 /// Provides access to a single app installation (repository) using the GitHub API.
 pub struct GithubRepositoryClient {
@@ -54,59 +55,68 @@ impl GithubRepositoryClient {
     /// Loads repository configuration from a file located at `[CONFIG_FILE_PATH]` in the main
     /// branch.
     pub async fn load_config(&self) -> anyhow::Result<RepositoryConfig> {
-        let mut response = self
-            .client
-            .repos(&self.repo_name.owner, &self.repo_name.name)
-            .get_content()
-            .path(CONFIG_FILE_PATH)
-            .send()
-            .await
-            .map_err(|error| {
-                anyhow::anyhow!(
-                    "Could not fetch {CONFIG_FILE_PATH} from {}: {error:?}",
-                    self.repo_name
-                )
-            })?;
-
-        response
-            .take_items()
-            .into_iter()
-            .next()
-            .and_then(|content| content.decoded_content())
-            .ok_or_else(|| anyhow::anyhow!("Configuration file not found"))
-            .and_then(|content| {
-                let config: RepositoryConfig = toml::from_str(&content).map_err(|error| {
-                    anyhow::anyhow!("Could not deserialize repository config: {error:?}")
+        measure_network_request("load_config", || async {
+            let mut response = self
+                .client
+                .repos(&self.repo_name.owner, &self.repo_name.name)
+                .get_content()
+                .path(CONFIG_FILE_PATH)
+                .send()
+                .await
+                .map_err(|error| {
+                    anyhow::anyhow!(
+                        "Could not fetch {CONFIG_FILE_PATH} from {}: {error:?}",
+                        self.repo_name
+                    )
                 })?;
-                Ok(config)
-            })
+
+            response
+                .take_items()
+                .into_iter()
+                .next()
+                .and_then(|content| content.decoded_content())
+                .ok_or_else(|| anyhow::anyhow!("Configuration file not found"))
+                .and_then(|content| {
+                    let config: RepositoryConfig = toml::from_str(&content).map_err(|error| {
+                        anyhow::anyhow!("Could not deserialize repository config: {error:?}")
+                    })?;
+                    Ok(config)
+                })
+        })
+        .await
     }
 
     /// Return the current SHA of the given branch.
     pub async fn get_branch_sha(&self, name: &str) -> anyhow::Result<CommitSha> {
-        // https://docs.github.com/en/rest/branches/branches?apiVersion=2022-11-28#get-a-branch
-        let branch: octocrab::models::repos::Branch = self
-            .client
-            .get(
-                format!("/repos/{}/branches/{name}", self.repository()).as_str(),
-                None::<&()>,
-            )
-            .await
-            .context("Cannot deserialize branch")?;
-        Ok(CommitSha(branch.commit.sha))
+        measure_network_request("get_branch_sha", || async {
+            // https://docs.github.com/en/rest/branches/branches?apiVersion=2022-11-28#get-a-branch
+            let branch: octocrab::models::repos::Branch = self
+                .client
+                .get(
+                    format!("/repos/{}/branches/{name}", self.repository()).as_str(),
+                    None::<&()>,
+                )
+                .await
+                .context("Cannot deserialize branch")?;
+            Ok(CommitSha(branch.commit.sha))
+        })
+        .await
     }
 
     /// Resolve a pull request from this repository by it's number.
     pub async fn get_pull_request(&self, pr: PullRequestNumber) -> anyhow::Result<PullRequest> {
-        let pr = self
-            .client
-            .pulls(self.repository().owner(), self.repository().name())
-            .get(pr.0)
-            .await
-            .map_err(|error| {
-                anyhow::anyhow!("Could not get PR {}/{}: {error:?}", self.repository(), pr.0)
-            })?;
-        Ok(pr.into())
+        measure_network_request("get_pull_request", || async {
+            let pr = self
+                .client
+                .pulls(self.repository().owner(), self.repository().name())
+                .get(pr.0)
+                .await
+                .map_err(|error| {
+                    anyhow::anyhow!("Could not get PR {}/{}: {error:?}", self.repository(), pr.0)
+                })?;
+            Ok(pr.into())
+        })
+        .await
     }
 
     /// Post a comment to the pull request with the given number.
@@ -116,17 +126,23 @@ impl GithubRepositoryClient {
         pr: PullRequestNumber,
         comment: Comment,
     ) -> anyhow::Result<()> {
-        self.client
-            .issues(&self.repository().owner, &self.repository().name)
-            .create_comment(pr.0, comment.render())
-            .await
-            .with_context(|| format!("Cannot post comment to {}", self.format_pr(pr)))?;
-        Ok(())
+        measure_network_request("post_comment", || async {
+            self.client
+                .issues(&self.repository().owner, &self.repository().name)
+                .create_comment(pr.0, comment.render())
+                .await
+                .with_context(|| format!("Cannot post comment to {}", self.format_pr(pr)))?;
+            Ok(())
+        })
+        .await
     }
 
     /// Set the given branch to a commit with the given `sha`.
     pub async fn set_branch_to_sha(&self, branch: &str, sha: &CommitSha) -> anyhow::Result<()> {
-        Ok(set_branch_to_commit(self, branch.to_string(), sha).await?)
+        measure_network_request("set_branch_to_sha", || async {
+            Ok(set_branch_to_commit(self, branch.to_string(), sha).await?)
+        })
+        .await
     }
 
     /// Merge `head` into `base`. Returns the SHA of the merge commit.
@@ -136,7 +152,10 @@ impl GithubRepositoryClient {
         head: &CommitSha,
         commit_message: &str,
     ) -> Result<CommitSha, MergeError> {
-        merge_branches(self, base, head, commit_message).await
+        measure_network_request("merge_branches", || async {
+            merge_branches(self, base, head, commit_message).await
+        })
+        .await
     }
 
     /// Find all check suites attached to the given commit and branch.
@@ -145,92 +164,101 @@ impl GithubRepositoryClient {
         branch: &str,
         sha: &CommitSha,
     ) -> anyhow::Result<Vec<CheckSuite>> {
-        #[derive(serde::Deserialize, Debug)]
-        struct CheckSuitePayload {
-            conclusion: Option<String>,
-            head_branch: String,
-        }
+        measure_network_request("get_check_suites_for_commit", || async {
+            #[derive(serde::Deserialize, Debug)]
+            struct CheckSuitePayload {
+                conclusion: Option<String>,
+                head_branch: String,
+            }
 
-        #[derive(serde::Deserialize, Debug)]
-        struct CheckSuiteResponse {
-            check_suites: Vec<CheckSuitePayload>,
-        }
+            #[derive(serde::Deserialize, Debug)]
+            struct CheckSuiteResponse {
+                check_suites: Vec<CheckSuitePayload>,
+            }
 
-        let response: CheckSuiteResponse = self
-            .client
-            .get(
-                format!(
-                    "/repos/{}/{}/commits/{}/check-suites",
-                    self.repo_name.owner(),
-                    self.repo_name.name(),
-                    sha.0
+            let response: CheckSuiteResponse = self
+                .client
+                .get(
+                    format!(
+                        "/repos/{}/{}/commits/{}/check-suites",
+                        self.repo_name.owner(),
+                        self.repo_name.name(),
+                        sha.0
+                    )
+                    .as_str(),
+                    None::<&()>,
                 )
-                .as_str(),
-                None::<&()>,
-            )
-            .await
-            .context("Cannot fetch CheckSuiteResponse")?;
+                .await
+                .context("Cannot fetch CheckSuiteResponse")?;
 
-        let suites = response
-            .check_suites
-            .into_iter()
-            .filter(|suite| suite.head_branch == branch)
-            .map(|suite| CheckSuite {
-                status: match suite.conclusion {
-                    Some(status) => match status.as_str() {
-                        "success" => CheckSuiteStatus::Success,
-                        "failure" | "neutral" | "cancelled" | "skipped" | "timed_out"
-                        | "action_required" | "startup_failure" | "stale" => {
-                            CheckSuiteStatus::Failure
-                        }
-                        _ => {
-                            tracing::warn!(
-                                "Received unknown check suite status for {}/{}: {status}",
-                                self.repo_name,
-                                sha
-                            );
-                            CheckSuiteStatus::Pending
-                        }
+            let suites = response
+                .check_suites
+                .into_iter()
+                .filter(|suite| suite.head_branch == branch)
+                .map(|suite| CheckSuite {
+                    status: match suite.conclusion {
+                        Some(status) => match status.as_str() {
+                            "success" => CheckSuiteStatus::Success,
+                            "failure" | "neutral" | "cancelled" | "skipped" | "timed_out"
+                            | "action_required" | "startup_failure" | "stale" => {
+                                CheckSuiteStatus::Failure
+                            }
+                            _ => {
+                                tracing::warn!(
+                                    "Received unknown check suite status for {}/{}: {status}",
+                                    self.repo_name,
+                                    sha
+                                );
+                                CheckSuiteStatus::Pending
+                            }
+                        },
+                        None => CheckSuiteStatus::Pending,
                     },
-                    None => CheckSuiteStatus::Pending,
-                },
-            })
-            .collect();
-        Ok(suites)
+                })
+                .collect();
+            Ok(suites)
+        })
+        .await
     }
 
     /// Cancels Github Actions workflows.
     pub async fn cancel_workflows(&self, run_ids: &[RunId]) -> anyhow::Result<()> {
-        let actions = self.client.actions();
+        measure_network_request("cancel_workflows", || async {
+            let actions = self.client.actions();
 
-        // Cancel all workflows in parallel
-        futures::future::join_all(run_ids.iter().map(|run_id| {
-            actions.cancel_workflow_run(
-                self.repo_name.owner(),
-                self.repo_name.name(),
-                (*run_id).into(),
-            )
-        }))
+            // Cancel all workflows in parallel
+            futures::future::join_all(run_ids.iter().map(|run_id| {
+                actions.cancel_workflow_run(
+                    self.repo_name.owner(),
+                    self.repo_name.name(),
+                    (*run_id).into(),
+                )
+            }))
+            .await
+            .into_iter()
+            .collect::<Result<Vec<_>, _>>()?;
+
+            Ok(())
+        })
         .await
-        .into_iter()
-        .collect::<Result<Vec<_>, _>>()?;
-
-        Ok(())
     }
 
     /// Add a set of labels to a PR.
     pub async fn add_labels(&self, pr: PullRequestNumber, labels: &[String]) -> anyhow::Result<()> {
-        let client = self
-            .client
-            .issues(self.repository().owner(), self.repository().name());
-        if !labels.is_empty() {
-            client
-                .add_labels(pr.0, labels)
-                .await
-                .context("Cannot add label(s) to PR")?;
-        }
+        measure_network_request("add_labels", || async {
+            let client = self
+                .client
+                .issues(self.repository().owner(), self.repository().name());
+            if !labels.is_empty() {
+                client
+                    .add_labels(pr.0, labels)
+                    .await
+                    .context("Cannot add label(s) to PR")?;
+            }
 
-        Ok(())
+            Ok(())
+        })
+        .await
     }
 
     /// Remove a set of labels from a PR.
@@ -239,33 +267,36 @@ impl GithubRepositoryClient {
         pr: PullRequestNumber,
         labels: &[String],
     ) -> anyhow::Result<()> {
-        let client = self
-            .client
-            .issues(self.repository().owner(), self.repository().name());
-        // The GitHub API only allows removing labels one by one, so we remove all of them in
-        // parallel to speed it up a little.
-        let labels_to_remove_futures = labels.iter().map(|label| client.remove_label(pr.0, label));
-        futures::future::join_all(labels_to_remove_futures)
-            .await
-            .into_iter()
-            .filter(|result| match result {
-                Ok(_) => false,
-                Err(error) => match error {
-                    // This error is returned if we try to remove a label that does not exist on the issue.
-                    // This should be a no-op, rather than an error, therefore we swallow this error.
-                    Error::GitHub { source, .. }
-                        if source.message.contains("Label does not exist") =>
-                    {
-                        log::trace!("Trying to remove label which does not exist on PR {pr}");
-                        false
-                    }
-                    _ => true,
-                },
-            })
-            .collect::<Result<Vec<_>, _>>()
-            .context("Cannot remove label(s) from PR")?;
-
-        Ok(())
+        measure_network_request("remove_labels", || async {
+            let client = self
+                .client
+                .issues(self.repository().owner(), self.repository().name());
+            // The GitHub API only allows removing labels one by one, so we remove all of them in
+            // parallel to speed it up a little.
+            let labels_to_remove_futures =
+                labels.iter().map(|label| client.remove_label(pr.0, label));
+            futures::future::join_all(labels_to_remove_futures)
+                .await
+                .into_iter()
+                .filter(|result| match result {
+                    Ok(_) => false,
+                    Err(error) => match error {
+                        // This error is returned if we try to remove a label that does not exist on the issue.
+                        // This should be a no-op, rather than an error, therefore we swallow this error.
+                        Error::GitHub { source, .. }
+                            if source.message.contains("Label does not exist") =>
+                        {
+                            log::trace!("Trying to remove label which does not exist on PR {pr}");
+                            false
+                        }
+                        _ => true,
+                    },
+                })
+                .collect::<Result<Vec<_>, _>>()
+                .context("Cannot remove label(s) from PR")?;
+            Ok(())
+        })
+        .await
     }
 
     /// Get a workflow url.
