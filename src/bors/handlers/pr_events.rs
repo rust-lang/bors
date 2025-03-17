@@ -131,7 +131,6 @@ mod tests {
         database::{operations::get_pull_request, MergeableState},
         github::PullRequestNumber,
         tests::mocks::{
-            assert_pr_approved_by, assert_pr_unapproved, create_world_with_approve_config,
             default_branch_name, default_branch_sha, default_pr_number, default_repo_name,
             run_test, BorsBuilder, GitHubPullRequest, PullRequestChangeEvent, User,
         },
@@ -140,7 +139,6 @@ mod tests {
     #[sqlx::test]
     async fn unapprove_on_base_edited(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
-            .github(create_gh_with_approve_config())
             .run_test(|mut tester| async {
                 tester.post_comment("@bors r+").await?;
                 assert_eq!(
@@ -166,7 +164,9 @@ mod tests {
                     r#":warning: The base branch changed to `main`, and the
 PR will need to be re-approved."#,
                 );
-                assert_pr_unapproved(&tester, default_pr_number().into()).await;
+                tester
+                    .expect_pr_unapproved(default_pr_number().into())
+                    .await;
                 Ok(tester)
             })
             .await;
@@ -175,7 +175,6 @@ PR will need to be re-approved."#,
     #[sqlx::test]
     async fn edit_pr_do_nothing_when_base_not_edited(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
-            .github(create_gh_with_approve_config())
             .run_test(|mut tester| async {
                 tester.post_comment("@bors r+").await?;
                 assert_eq!(
@@ -196,12 +195,9 @@ PR will need to be re-approved."#,
                     )
                     .await?;
 
-                assert_pr_approved_by(
-                    &tester,
-                    default_pr_number().into(),
-                    &User::default_user().name,
-                )
-                .await;
+                tester
+                    .expect_pr_approved_by(default_pr_number().into(), &User::default_user().name)
+                    .await;
                 Ok(tester)
             })
             .await;
@@ -229,7 +225,6 @@ PR will need to be re-approved."#,
     #[sqlx::test]
     async fn unapprove_on_push(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
-            .github(create_gh_with_approve_config())
             .run_test(|mut tester| async {
                 tester.post_comment("@bors r+").await?;
                 assert_eq!(
@@ -250,7 +245,9 @@ PR will need to be re-approved."#,
                         default_pr_number()
                     )
                 );
-                assert_pr_unapproved(&tester, default_pr_number().into()).await;
+                tester
+                    .expect_pr_unapproved(default_pr_number().into())
+                    .await;
                 Ok(tester)
             })
             .await;

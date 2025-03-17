@@ -3,19 +3,17 @@ use std::sync::Arc;
 
 use octocrab::Octocrab;
 use parking_lot::Mutex;
-use pull_request::default_mergeable_state;
 use regex::Regex;
 use wiremock::matchers::{method, path_regex};
 use wiremock::{Mock, Request, ResponseTemplate};
 
-use crate::github::{GithubRepoName, PullRequestNumber};
+use crate::github::GithubRepoName;
 use crate::tests::mocks::github::GitHubMockServer;
 use crate::tests::mocks::permissions::TeamApiMockServer;
 use crate::TeamApiClient;
 
 pub use bors::run_test;
 pub use bors::BorsBuilder;
-pub use bors::BorsTester;
 pub use comment::Comment;
 pub use permissions::Permissions;
 pub use pull_request::default_pr_number;
@@ -156,42 +154,4 @@ approve = ["+approved"]
 "#,
     );
     gh
-}
-
-pub async fn assert_pr_approved_by(
-    tester: &BorsTester,
-    pr_number: PullRequestNumber,
-    approved_by: &str,
-) {
-    let pr_in_db = tester
-        .db()
-        .get_or_create_pull_request(
-            &default_repo_name(),
-            pr_number,
-            &default_branch_name(),
-            default_mergeable_state(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(pr_in_db.approval_status.approver(), Some(approved_by));
-    let repo = tester.default_repo();
-    let pr = repo.lock().get_pr(default_pr_number()).clone();
-    pr.check_added_labels(&["approved"]);
-}
-
-pub async fn assert_pr_unapproved(tester: &BorsTester, pr_number: PullRequestNumber) {
-    let pr_in_db = tester
-        .db()
-        .get_or_create_pull_request(
-            &default_repo_name(),
-            pr_number,
-            &default_branch_name(),
-            default_mergeable_state(),
-        )
-        .await
-        .unwrap();
-    assert!(!pr_in_db.is_approved());
-    let repo = tester.default_repo();
-    let pr = repo.lock().get_pr(default_pr_number()).clone();
-    pr.check_removed_labels(&["approved"]);
 }

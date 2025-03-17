@@ -298,9 +298,7 @@ async fn notify_of_delegation(
 #[cfg(test)]
 mod tests {
     use crate::database::TreeState;
-    use crate::tests::mocks::{
-        assert_pr_approved_by, assert_pr_unapproved, create_gh_with_approve_config,
-    };
+    use crate::tests::mocks::create_gh_with_approve_config;
     use crate::{
         bors::{
             handlers::{trybuild::TRY_MERGE_BRANCH_NAME, TRY_BRANCH_NAME},
@@ -331,12 +329,9 @@ mod tests {
                 let pr = tester.get_default_pr().await?;
                 assert!(pr.rollup.is_none());
 
-                assert_pr_approved_by(
-                    &tester,
-                    default_pr_number().into(),
-                    &User::default_user().name,
-                )
-                .await;
+                tester
+                    .expect_pr_approved_by(default_pr_number().into(), &User::default_user().name)
+                    .await;
                 Ok(tester)
             })
             .await;
@@ -359,7 +354,9 @@ mod tests {
                     ),
                 );
 
-                assert_pr_approved_by(&tester, default_pr_number().into(), approve_user).await;
+                tester
+                    .expect_pr_approved_by(default_pr_number().into(), approve_user)
+                    .await;
                 Ok(tester)
             })
             .await;
@@ -410,18 +407,17 @@ mod tests {
                         User::default_user().name
                     ),
                 );
-                assert_pr_approved_by(
-                    &tester,
-                    default_pr_number().into(),
-                    &User::default_user().name,
-                )
-                .await;
+                tester
+                    .expect_pr_approved_by(default_pr_number().into(), &User::default_user().name)
+                    .await;
                 tester.post_comment("@bors r-").await?;
                 assert_eq!(
                     tester.get_comment().await?,
                     format!("Commit pr-{}-sha has been unapproved", default_pr_number()),
                 );
-                assert_pr_unapproved(&tester, default_pr_number().into()).await;
+                tester
+                    .expect_pr_unapproved(default_pr_number().into())
+                    .await;
                 Ok(tester)
             })
             .await;
@@ -619,7 +615,8 @@ approve = ["+approved"]
                 tester.post_comment("@bors r+").await?;
                 tester.expect_comments(1).await;
 
-                assert_pr_approved_by(&tester, default_pr_number().into(), &User::default().name)
+                tester
+                    .expect_pr_approved_by(default_pr_number().into(), &User::default().name)
                     .await;
                 Ok(tester)
             })
@@ -773,7 +770,8 @@ approve = ["+approved"]
                     .post_comment(Comment::from("@bors r+").with_author(User::default()))
                     .await?;
                 tester.expect_comments(1).await;
-                assert_pr_approved_by(&tester, default_pr_number().into(), &User::default().name)
+                tester
+                    .expect_pr_approved_by(default_pr_number().into(), &User::default().name)
                     .await;
 
                 tester.post_comment(as_reviewer("@bors r-")).await?;

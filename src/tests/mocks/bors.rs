@@ -353,6 +353,44 @@ impl BorsTester {
         }
     }
 
+    /// Assert that the given pull request is approved by the passed user and that the
+    /// corresponding labels have been set.
+    pub async fn expect_pr_approved_by(&self, pr_number: PullRequestNumber, approved_by: &str) {
+        let pr_in_db = self
+            .db()
+            .get_or_create_pull_request(
+                &default_repo_name(),
+                pr_number,
+                &default_branch_name(),
+                default_mergeable_state(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(pr_in_db.approval_status.approver(), Some(approved_by));
+        let repo = self.default_repo();
+        let pr = repo.lock().get_pr(default_pr_number()).clone();
+        pr.check_added_labels(&["approved"]);
+    }
+
+    /// Assert that the PR is **not** approved and that it does not have the corresponding
+    /// approve labels.
+    pub async fn expect_pr_unapproved(&self, pr_number: PullRequestNumber) {
+        let pr_in_db = self
+            .db()
+            .get_or_create_pull_request(
+                &default_repo_name(),
+                pr_number,
+                &default_branch_name(),
+                default_mergeable_state(),
+            )
+            .await
+            .unwrap();
+        assert!(!pr_in_db.is_approved());
+        let repo = self.default_repo();
+        let pr = repo.lock().get_pr(default_pr_number()).clone();
+        pr.check_removed_labels(&["approved"]);
+    }
+
     /// Wait until the given condition is true.
     /// Checks the condition every 500ms.
     /// Times out if it takes too long (more than 5s).
