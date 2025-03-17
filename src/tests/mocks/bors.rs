@@ -30,11 +30,8 @@ use crate::{
     ServerState, WebhookSecret,
 };
 
-use super::pull_request::{
-    default_mergeable_state, GitHubPullRequestEventPayload, PullRequestChangeEvent,
-};
-use super::repository::{default_branch_name, PullRequest};
-use super::GitHubPushEventPayload;
+use super::pull_request::{GitHubPullRequestEventPayload, PullRequestChangeEvent};
+use super::repository::PullRequest;
 
 pub struct BorsBuilder {
     github: GitHubState,
@@ -50,10 +47,7 @@ impl BorsBuilder {
     }
 
     pub fn github(self, github: GitHubState) -> Self {
-        Self {
-            github: github,
-            ..self
-        }
+        Self { github, ..self }
     }
 
     /// This closure is used to ensure that the test has to return `BorsTester`
@@ -297,9 +291,11 @@ impl BorsTester {
     }
 
     pub async fn open_pr(&mut self, repo_name: GithubRepoName) -> anyhow::Result<PullRequest> {
-        let repo = self.github.get_repo(&repo_name);
-        let repo = repo.lock();
-        let number = repo.pull_requests.keys().max().copied().unwrap_or(1);
+        let number = {
+            let repo = self.github.get_repo(&repo_name);
+            let repo = repo.lock();
+            repo.pull_requests.keys().max().copied().unwrap_or(1)
+        };
 
         let pr = PullRequest::new(repo_name, number, User::default_pr_author());
         self.send_webhook(
@@ -322,20 +318,24 @@ impl BorsTester {
         F: FnOnce(&mut PullRequest),
     {
         let repo = self.github.get_repo(&repo);
-        let mut repo = repo.lock();
-        let mut pr = repo.get_pr_mut(pr_number);
-        let base_before = pr.base_branch.clone();
-        func(&mut pr);
 
-        let changes = if base_before != pr.base_branch {
-            Some(PullRequestChangeEvent {
-                from_base_sha: Some(base_before.get_sha().to_string()),
-            })
-        } else {
-            None
+        let (pr, changes) = {
+            let mut repo = repo.lock();
+            let pr = repo.get_pr_mut(pr_number);
+            let base_before = pr.base_branch.clone();
+            func(pr);
+
+            let changes = if base_before != pr.base_branch {
+                Some(PullRequestChangeEvent {
+                    from_base_sha: Some(base_before.get_sha().to_string()),
+                })
+            } else {
+                None
+            };
+            (pr.clone(), changes)
         };
 
-        self.pull_request_edited(pr.clone(), changes).await
+        self.pull_request_edited(pr, changes).await
     }
 
     pub async fn push_to_pr(&mut self, repo: GithubRepoName, pr_number: u64) -> anyhow::Result<()> {
@@ -358,11 +358,6 @@ impl BorsTester {
             GitHubPullRequestEventPayload::new(pr, "synchronize", None),
         )
         .await
-    }
-
-    pub async fn push_to_branch(&mut self) -> anyhow::Result<()> {
-        self.send_webhook("push", GitHubPushEventPayload::new("main"))
-            .await
     }
 
     //-- Test assertions --//
@@ -445,11 +440,7 @@ impl BorsTester {
     ) -> anyhow::Result<()> {
         self.send_webhook(
             "pull_request",
-            GitHubPullRequestEventPayload::new(
-                pr,
-                "edited",
-                Some(changes.unwrap_or(PullRequestChangeEvent::default())),
-            ),
+            GitHubPullRequestEventPayload::new(pr, "edited", Some(changes.unwrap_or_default())),
         )
         .await
     }
@@ -506,10 +497,6 @@ impl PullRequestProxy {
         Self { gh_pr, db_pr }
     }
 
-    pub fn get_db_pr(&self) -> Option<&PullRequestModel> {
-        self.db_pr.as_ref()
-    }
-
     pub fn get_gh_pr(&self) -> PullRequest {
         self.gh_pr.clone()
     }
@@ -542,12 +529,6 @@ impl PullRequestProxy {
     #[track_caller]
     pub fn expect_delegated(&self) -> &Self {
         assert!(self.require_db_pr().delegated);
-        self
-    }
-
-    #[track_caller]
-    pub fn expect_not_delegated(&self) -> &Self {
-        assert!(!self.require_db_pr().delegated);
         self
     }
 

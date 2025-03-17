@@ -5,8 +5,8 @@ use super::{
     user::GitHubUser,
     Repo, User,
 };
+use crate::github::GithubRepoName;
 use crate::tests::mocks::repository::PullRequest;
-use crate::{database::MergeableState, github::GithubRepoName};
 use octocrab::models::pulls::MergeableState as OctocrabMergeableState;
 use octocrab::models::LabelId;
 use parking_lot::Mutex;
@@ -21,10 +21,6 @@ use wiremock::{
 
 pub fn default_pr_number() -> u64 {
     1
-}
-
-pub fn default_mergeable_state() -> MergeableState {
-    MergeableState::Unknown
 }
 
 pub async fn mock_pull_requests(
@@ -42,13 +38,10 @@ pub async fn mock_pull_requests(
                 let pull_request_error = repo_clone.lock().pull_request_error;
                 if pull_request_error {
                     ResponseTemplate::new(500)
+                } else if let Some(pr) = repo_clone.lock().pull_requests.get(&pr_number) {
+                    ResponseTemplate::new(200).set_body_json(GitHubPullRequest::from(pr.clone()))
                 } else {
-                    if let Some(pr) = repo_clone.lock().pull_requests.get(&pr_number) {
-                        ResponseTemplate::new(200)
-                            .set_body_json(GitHubPullRequest::from(pr.clone()))
-                    } else {
-                        ResponseTemplate::new(404)
-                    }
+                    ResponseTemplate::new(404)
                 }
             })
             .mount(mock_server)
@@ -175,18 +168,6 @@ pub struct GitHubPullRequest {
     user: GitHubUser,
 }
 
-impl GitHubPullRequest {
-    pub fn with_base(mut self, ref_field: String, sha: String) -> Self {
-        self.base = Box::new(GitHubBase { ref_field, sha });
-        self
-    }
-
-    pub fn with_mergeable_state(mut self, state: OctocrabMergeableState) -> Self {
-        self.mergeable_state = state;
-        self
-    }
-}
-
 impl From<PullRequest> for GitHubPullRequest {
     fn from(pr: PullRequest) -> Self {
         let number = pr.number.0;
@@ -196,7 +177,7 @@ impl From<PullRequest> for GitHubPullRequest {
             id: number + 1000,
             title: format!("PR #{number}"),
             body: format!("Description of PR #{number}"),
-            mergeable_state: OctocrabMergeableState::Unknown,
+            mergeable_state: pr.mergeable_state,
             number,
             head: Box::new(GitHubHead {
                 label: format!("pr-{number}"),
@@ -258,13 +239,6 @@ impl GitHubPullRequestEventPayload {
             repository: repository.into(),
         }
     }
-
-    pub fn with_pr(self, pull_request: GitHubPullRequest) -> Self {
-        Self {
-            pull_request,
-            ..self
-        }
-    }
 }
 
 #[derive(Serialize)]
@@ -311,6 +285,7 @@ pub struct GitHubPushEventPayload {
 }
 
 impl GitHubPushEventPayload {
+    #[allow(unused)]
     pub fn new(branch_name: &str) -> Self {
         GitHubPushEventPayload {
             repository: default_repo_name().into(),

@@ -127,13 +127,10 @@ PR will need to be re-approved."#,
 
 #[cfg(test)]
 mod tests {
+    use crate::tests::mocks::default_pr_number;
     use crate::{
-        database::{operations::get_pull_request, MergeableState},
-        github::PullRequestNumber,
-        tests::mocks::{
-            default_branch_name, default_branch_sha, default_pr_number, default_repo_name,
-            run_test, GitHubPullRequest, PullRequestChangeEvent, User,
-        },
+        database::MergeableState,
+        tests::mocks::{default_branch_name, default_repo_name, run_test, User},
     };
 
     #[sqlx::test]
@@ -239,7 +236,7 @@ mod tests {
                     let Some(pr) = tester.pr_db(default_repo_name(), pr.number.0).await? else {
                         return Ok(false);
                     };
-                    Ok(pr.base_branch == default_branch_name().to_string())
+                    Ok(pr.base_branch == *default_branch_name())
                 })
                 .await?;
             Ok(tester)
@@ -269,73 +266,24 @@ mod tests {
         .await;
     }
 
-    // TODO
-    // #[sqlx::test]
-    // async fn update_mergeable_state_on_pr_edited(pool: sqlx::PgPool) {
-    //     run_test(pool.clone(), |mut tester| async {
-    //         tester
-    //             .edit_pull_request_with_pr(
-    //                 default_pr_number(),
-    //                 PullRequestChangeEvent {
-    //                     from_base_sha: None,
-    //                     from_base_ref: None,
-    //                 },
-    //                 GitHubPullRequest::new(default_pr_number())
-    //                     .with_mergeable_state(octocrab::models::pulls::MergeableState::Dirty),
-    //             )
-    //             .await?;
-    //         tester
-    //             .wait_for(|| async {
-    //                 let pr = get_pull_request(
-    //                     &pool,
-    //                     &default_repo_name(),
-    //                     PullRequestNumber(default_pr_number()),
-    //                 )
-    //                 .await?;
-    //                 Ok(pr.map_or(false, |pr| {
-    //                     pr.mergeable_state == MergeableState::HasConflicts
-    //                 }))
-    //             })
-    //             .await?;
-    //         Ok(tester)
-    //     })
-    //     .await;
-    // }
-
-    // #[sqlx::test]
-    // async fn update_mergeable_state_on_pr_push(pool: sqlx::PgPool) {
-    //     run_test(pool, |mut tester| async {
-    //         tester
-    //             .push_to_pr(default_repo_name(), default_pr_number())
-    //             .await?;
-    //         tester
-    //             .wait_for(|| async {
-    //                 let Some(pr) = tester.default_pr_db().await? else {
-    //                     return Ok(false);
-    //                 };
-    //                 Ok(pr.mergeable_state == MergeableState::Unknown)
-    //             })
-    //             .await?;
-    //         Ok(tester)
-    //     })
-    //     .await;
-    // }
-
-    // TODO: fix test
-    // #[sqlx::test]
-    // async fn update_mergeable_state_on_push_to_branch(pool: sqlx::PgPool) {
-    //     run_test(pool, |mut tester| async {
-    //         tester.push_to_branch().await?;
-    //         tester
-    //             .wait_for(|| async {
-    //                 let Some(pr) = tester.get_default_pr().await? else {
-    //                     return Ok(false);
-    //                 };
-    //                 Ok(pr.mergeable_state == MergeableState::Unknown)
-    //             })
-    //             .await?;
-    //         Ok(tester)
-    //     })
-    //     .await;
-    // }
+    #[sqlx::test]
+    async fn update_mergeable_state_on_pr_edited(pool: sqlx::PgPool) {
+        run_test(pool.clone(), |mut tester| async {
+            tester
+                .edit_pr(default_repo_name(), default_pr_number(), |pr| {
+                    pr.mergeable_state = octocrab::models::pulls::MergeableState::Dirty;
+                })
+                .await?;
+            tester
+                .wait_for(|| async {
+                    let Some(pr) = tester.default_pr_db().await? else {
+                        return Ok(false);
+                    };
+                    Ok(pr.mergeable_state == MergeableState::HasConflicts)
+                })
+                .await?;
+            Ok(tester)
+        })
+        .await;
+    }
 }

@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use crate::bors::CheckSuiteStatus;
 use base64::Engine;
+use octocrab::models::pulls::MergeableState;
 use octocrab::models::repos::Object;
 use octocrab::models::repos::Object::Commit;
 use parking_lot::Mutex;
@@ -33,6 +34,7 @@ pub struct PullRequest {
     pub head_sha: String,
     pub author: User,
     pub base_branch: Branch,
+    pub mergeable_state: MergeableState,
 }
 
 impl PullRequest {
@@ -46,6 +48,7 @@ impl PullRequest {
             head_sha: format!("pr-{number}-sha"),
             author,
             base_branch: Branch::default(),
+            mergeable_state: MergeableState::Clean,
         }
     }
 }
