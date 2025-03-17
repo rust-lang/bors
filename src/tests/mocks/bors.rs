@@ -12,17 +12,17 @@ use tokio::sync::mpsc::Sender;
 use tokio::task::JoinHandle;
 use tower::Service;
 
-use crate::bors::WAIT_FOR_REFRESH;
-use crate::database::PullRequestModel;
+use crate::bors::{RollupMode, WAIT_FOR_REFRESH};
+use crate::database::{BuildStatus, PullRequestModel};
 use crate::github::api::load_repositories;
-use crate::github::PullRequestNumber;
+use crate::github::{GithubRepoName, PullRequestNumber};
 use crate::tests::mocks::comment::{Comment, GitHubIssueCommentEventPayload};
 use crate::tests::mocks::workflow::{
     CheckSuite, GitHubCheckRunEventPayload, GitHubCheckSuiteEventPayload,
     GitHubWorkflowEventPayload, TestWorkflowStatus, Workflow, WorkflowEvent, WorkflowEventKind,
 };
 use crate::tests::mocks::{
-    default_pr_number, default_repo_name, Branch, ExternalHttpMock, Repo, World,
+    default_pr_number, default_repo_name, Branch, ExternalHttpMock, GitHubState, Repo, User,
 };
 use crate::tests::webhook::{create_webhook_request, TEST_WEBHOOK_SECRET};
 use crate::{
@@ -30,15 +30,11 @@ use crate::{
     ServerState, WebhookSecret,
 };
 
-use super::pull_request::{
-    default_mergeable_state, GitHubPullRequest, GitHubPullRequestEventPayload,
-    PullRequestChangeEvent,
-};
-use super::repository::default_branch_name;
-use super::GitHubPushEventPayload;
+use super::pull_request::{GitHubPullRequestEventPayload, PullRequestChangeEvent};
+use super::repository::PullRequest;
 
 pub struct BorsBuilder {
-    world: World,
+    github: GitHubState,
     pool: PgPool,
 }
 
@@ -46,12 +42,12 @@ impl BorsBuilder {
     pub fn new(pool: PgPool) -> Self {
         Self {
             pool,
-            world: Default::default(),
+            github: Default::default(),
         }
     }
 
-    pub fn world(self, world: World) -> Self {
-        Self { world, ..self }
+    pub fn github(self, github: GitHubState) -> Self {
+        Self { github, ..self }
     }
 
     /// This closure is used to ensure that the test has to return `BorsTester`
@@ -63,10 +59,10 @@ impl BorsBuilder {
     >(
         self,
         f: F,
-    ) -> World {
+    ) -> GitHubState {
         // We return `tester` and `bors` separately, so that we can finish `bors`
         // even if `f` returns a result, for better error propagation.
-        let (tester, bors) = BorsTester::new(self.pool, self.world).await;
+        let (tester, bors) = BorsTester::new(self.pool, self.github).await;
         match f(tester).await {
             Ok(tester) => tester.finish(bors).await,
             Err(error) => {
@@ -78,13 +74,14 @@ impl BorsBuilder {
 }
 
 /// Simple end-to-end test entrypoint for tests that don't need to prepare any custom state.
+/// See [GitHubState::default] for how does the default state look like.
 pub async fn run_test<
     F: FnOnce(BorsTester) -> Fut,
     Fut: Future<Output = anyhow::Result<BorsTester>>,
 >(
     pool: PgPool,
     f: F,
-) -> World {
+) -> GitHubState {
     BorsBuilder::new(pool).run_test(f).await
 }
 
@@ -96,15 +93,15 @@ pub async fn run_test<
 pub struct BorsTester {
     app: Router,
     http_mock: ExternalHttpMock,
-    world: World,
+    github: GitHubState,
     db: Arc<PgDbClient>,
     // Sender for bors global events
     global_tx: Sender<BorsGlobalEvent>,
 }
 
 impl BorsTester {
-    async fn new(pool: PgPool, world: World) -> (Self, JoinHandle<()>) {
-        let mock = ExternalHttpMock::start(&world).await;
+    async fn new(pool: PgPool, github: GitHubState) -> (Self, JoinHandle<()>) {
+        let mock = ExternalHttpMock::start(&github).await;
         let db = Arc::new(PgDbClient::new(pool));
 
         let loaded_repos = load_repositories(&mock.github_client(), &mock.team_api_client())
@@ -132,7 +129,7 @@ impl BorsTester {
             Self {
                 app,
                 http_mock: mock,
-                world,
+                github,
                 db,
                 global_tx,
             },
@@ -140,34 +137,41 @@ impl BorsTester {
         )
     }
 
+    //--- Getters for various test state ---//
     pub fn db(&self) -> Arc<PgDbClient> {
         self.db.clone()
     }
 
     pub fn default_repo(&self) -> Arc<Mutex<Repo>> {
-        self.world.get_repo(default_repo_name())
+        self.github.get_repo(&default_repo_name())
     }
 
-    pub async fn get_default_pr(&self) -> anyhow::Result<PullRequestModel> {
+    pub async fn default_pr(&self) -> PullRequestProxy {
+        let pr = self
+            .default_repo()
+            .lock()
+            .get_pr(default_pr_number())
+            .clone();
+        PullRequestProxy::new(self, pr).await
+    }
+
+    pub async fn pr_db(
+        &self,
+        repo: GithubRepoName,
+        number: u64,
+    ) -> anyhow::Result<Option<PullRequestModel>> {
         self.db()
-            .get_or_create_pull_request(
-                &default_repo_name(),
-                PullRequestNumber(default_pr_number()),
-                &default_branch_name(),
-                default_mergeable_state(),
-            )
+            .get_pull_request(&repo, PullRequestNumber(number))
             .await
     }
 
-    pub async fn refresh(&self) {
-        self.global_tx.send(BorsGlobalEvent::Refresh).await.unwrap();
-        // Wait until the refresh is fully handled
-        WAIT_FOR_REFRESH.sync().await;
+    pub async fn default_pr_db(&self) -> anyhow::Result<Option<PullRequestModel>> {
+        self.pr_db(default_repo_name(), default_pr_number()).await
     }
 
     pub fn create_branch(&mut self, name: &str) -> MappedMutexGuard<RawMutex, Branch> {
         // We cannot clone the Arc, otherwise it won't work
-        let repo = self.world.repos.get(&default_repo_name()).unwrap();
+        let repo = self.github.repos.get(&default_repo_name()).unwrap();
         let mut repo = repo.lock();
 
         // Polonius where art thou :/
@@ -176,21 +180,21 @@ impl BorsTester {
         } else {
             MutexGuard::map(repo, move |repo| {
                 repo.branches
-                    .push(Branch::new(name, &format!("{name}-empty")));
+                    .push(Branch::new(name, &format!("{name}-initial")));
                 repo.branches.last_mut().unwrap()
             })
         }
     }
 
     pub fn get_branch_mut(&mut self, name: &str) -> MappedMutexGuard<RawMutex, Branch> {
-        let repo = self.world.repos.get(&default_repo_name()).unwrap();
+        let repo = self.github.repos.get(&default_repo_name()).unwrap();
         MutexGuard::map(repo.lock(), move |repo| {
             repo.get_branch_by_name(name).unwrap()
         })
     }
 
     pub fn get_branch(&self, name: &str) -> Branch {
-        self.world
+        self.github
             .default_repo()
             .lock()
             .get_branch_by_name(name)
@@ -212,24 +216,22 @@ impl BorsTester {
             .content)
     }
 
-    /// Expect that `count` comments will be received, without checking their contents.
-    pub async fn expect_comments(&mut self, count: u64) {
-        for i in 0..count {
-            self.get_comment()
-                .await
-                .unwrap_or_else(|_| panic!("Failed to get comment #{i}"));
-        }
-    }
-
+    //-- Generation of GitHub events --//
     pub async fn post_comment<C: Into<Comment>>(&mut self, comment: C) -> anyhow::Result<()> {
         self.webhook_comment(comment.into()).await
+    }
+
+    pub async fn refresh(&self) {
+        self.global_tx.send(BorsGlobalEvent::Refresh).await.unwrap();
+        // Wait until the refresh is fully handled
+        WAIT_FOR_REFRESH.sync().await;
     }
 
     /// Performs a single started/success/failure workflow event.
     pub async fn workflow_event(&mut self, event: WorkflowEvent) -> anyhow::Result<()> {
         if let Some(branch) = self
-            .world
-            .get_repo(event.workflow.repository.clone())
+            .github
+            .get_repo(&event.workflow.repository.clone())
             .lock()
             .get_branch_by_name(&event.workflow.head_branch)
         {
@@ -288,113 +290,84 @@ impl BorsTester {
         self.webhook_check_suite(check_suite.into()).await
     }
 
-    pub async fn open_pr(&mut self, pr_number: u64) -> anyhow::Result<()> {
+    pub async fn open_pr(&mut self, repo_name: GithubRepoName) -> anyhow::Result<PullRequest> {
+        let number = {
+            let repo = self.github.get_repo(&repo_name);
+            let repo = repo.lock();
+            repo.pull_requests.keys().max().copied().unwrap_or(1)
+        };
+
+        let pr = PullRequest::new(repo_name, number, User::default_pr_author());
         self.send_webhook(
             "pull_request",
-            GitHubPullRequestEventPayload::new(pr_number, "opened".to_string(), None),
+            GitHubPullRequestEventPayload::new(pr.clone(), "opened", None),
         )
-        .await
+        .await?;
+        Ok(pr)
     }
 
-    pub async fn edit_pull_request(
+    /// Perform an arbitrary modification of the given PR, and then send the "edited" PR webhook
+    /// to bors.
+    pub async fn edit_pr<F>(
         &mut self,
+        repo: GithubRepoName,
         pr_number: u64,
-        changes: PullRequestChangeEvent,
-    ) -> anyhow::Result<()> {
+        func: F,
+    ) -> anyhow::Result<()>
+    where
+        F: FnOnce(&mut PullRequest),
+    {
+        let repo = self.github.get_repo(&repo);
+
+        let (pr, changes) = {
+            let mut repo = repo.lock();
+            let pr = repo.get_pr_mut(pr_number);
+            let base_before = pr.base_branch.clone();
+            func(pr);
+
+            let changes = if base_before != pr.base_branch {
+                Some(PullRequestChangeEvent {
+                    from_base_sha: Some(base_before.get_sha().to_string()),
+                })
+            } else {
+                None
+            };
+            (pr.clone(), changes)
+        };
+
+        self.pull_request_edited(pr, changes).await
+    }
+
+    pub async fn push_to_pr(&mut self, repo: GithubRepoName, pr_number: u64) -> anyhow::Result<()> {
+        let pr = {
+            let repo = self.github.get_repo(&repo);
+            let mut repo = repo.lock();
+
+            let counter = repo.get_next_pr_push_counter();
+
+            let pr = repo
+                .pull_requests
+                .get_mut(&pr_number)
+                .expect("PR must be initialized before pushing to it");
+            pr.head_sha = format!("pr-{pr_number}-commit-{counter}");
+            pr.clone()
+        };
+
         self.send_webhook(
             "pull_request",
-            GitHubPullRequestEventPayload::new(pr_number, "edited".to_string(), Some(changes)),
+            GitHubPullRequestEventPayload::new(pr, "synchronize", None),
         )
         .await
     }
 
-    pub async fn edit_pull_request_with_pr(
-        &mut self,
-        pr_number: u64,
-        changes: PullRequestChangeEvent,
-        pr: GitHubPullRequest,
-    ) -> anyhow::Result<()> {
-        self.send_webhook(
-            "pull_request",
-            GitHubPullRequestEventPayload::new(pr_number, "edited".to_string(), Some(changes))
-                .with_pr(pr),
-        )
-        .await
-    }
-
-    pub async fn push_to_pull_request(&mut self, pr_number: u64) -> anyhow::Result<()> {
-        let repo = self.default_repo();
-        let mut repo = repo.lock();
-
-        let count = repo.get_next_pr_push_count();
-
-        let pr = repo
-            .pull_requests
-            .get_mut(&pr_number)
-            .expect("PR must be initialized before pushing to it");
-        pr.head_sha = format!("pr-{}-sha-{}", pr_number, count);
-
-        drop(repo);
-        self.send_webhook(
-            "pull_request",
-            GitHubPullRequestEventPayload::new(pr_number, "synchronize".to_string(), None),
-        )
-        .await
-    }
-
-    pub async fn push_to_branch(&mut self) -> anyhow::Result<()> {
-        self.send_webhook("push", GitHubPushEventPayload::new("main"))
-            .await
-    }
-
-    async fn webhook_comment(&mut self, comment: Comment) -> anyhow::Result<()> {
-        self.send_webhook(
-            "issue_comment",
-            // The Box is here to prevent a stack overflow in debug mode
-            Box::from(GitHubIssueCommentEventPayload::from(comment)),
-        )
-        .await
-    }
-
-    async fn webhook_workflow(&mut self, event: WorkflowEvent) -> anyhow::Result<()> {
-        self.send_webhook("workflow_run", GitHubWorkflowEventPayload::from(event))
-            .await
-    }
-
-    async fn webhook_external_workflow(&mut self, workflow: Workflow) -> anyhow::Result<()> {
-        self.send_webhook("check_run", GitHubCheckRunEventPayload::from(workflow))
-            .await
-    }
-
-    async fn webhook_check_suite(&mut self, check_suite: CheckSuite) -> anyhow::Result<()> {
-        self.send_webhook(
-            "check_suite",
-            GitHubCheckSuiteEventPayload::from(check_suite),
-        )
-        .await
-    }
-
-    async fn send_webhook<S: Serialize>(&mut self, event: &str, content: S) -> anyhow::Result<()> {
-        let serialized = serde_json::to_string(&content).unwrap();
-        let webhook = create_webhook_request(event, &serialized);
-        let response = self
-            .app
-            .call(webhook)
-            .await
-            .context("Cannot send webhook request")?;
-        let status = response.status();
-        if !status.is_success() {
-            return Err(anyhow::anyhow!(
-                "Wrong status code {status} when sending {event}"
-            ));
+    //-- Test assertions --//
+    /// Expect that `count` comments will be received, without checking their contents.
+    pub async fn expect_comments(&mut self, count: u64) {
+        for i in 0..count {
+            self.get_comment()
+                .await
+                .unwrap_or_else(|_| panic!("Failed to get comment #{i}"));
         }
-        let body_text = String::from_utf8(
-            axum::body::to_bytes(response.into_body(), 10 * 1024 * 1024)
-                .await?
-                .to_vec(),
-        )?;
-        tracing::debug!("Received webhook with status {status} and response body `{body_text}`");
-        Ok(())
     }
 
     /// Wait until the given condition is true.
@@ -432,7 +405,70 @@ impl BorsTester {
             .unwrap_or_else(|_| Err(anyhow::anyhow!("Timed out waiting for condition")))
     }
 
-    pub async fn finish(self, bors: JoinHandle<()>) -> World {
+    //-- Internal helper functions --/
+    async fn webhook_comment(&mut self, comment: Comment) -> anyhow::Result<()> {
+        self.send_webhook(
+            "issue_comment",
+            // The Box is here to prevent a stack overflow in debug mode
+            Box::from(GitHubIssueCommentEventPayload::from(comment)),
+        )
+        .await
+    }
+
+    async fn webhook_workflow(&mut self, event: WorkflowEvent) -> anyhow::Result<()> {
+        self.send_webhook("workflow_run", GitHubWorkflowEventPayload::from(event))
+            .await
+    }
+
+    async fn webhook_external_workflow(&mut self, workflow: Workflow) -> anyhow::Result<()> {
+        self.send_webhook("check_run", GitHubCheckRunEventPayload::from(workflow))
+            .await
+    }
+
+    async fn webhook_check_suite(&mut self, check_suite: CheckSuite) -> anyhow::Result<()> {
+        self.send_webhook(
+            "check_suite",
+            GitHubCheckSuiteEventPayload::from(check_suite),
+        )
+        .await
+    }
+
+    async fn pull_request_edited(
+        &mut self,
+        pr: PullRequest,
+        changes: Option<PullRequestChangeEvent>,
+    ) -> anyhow::Result<()> {
+        self.send_webhook(
+            "pull_request",
+            GitHubPullRequestEventPayload::new(pr, "edited", Some(changes.unwrap_or_default())),
+        )
+        .await
+    }
+
+    async fn send_webhook<S: Serialize>(&mut self, event: &str, content: S) -> anyhow::Result<()> {
+        let serialized = serde_json::to_string(&content)?;
+        let webhook = create_webhook_request(event, &serialized);
+        let response = self
+            .app
+            .call(webhook)
+            .await
+            .context("Cannot send webhook request")?;
+        let status = response.status();
+        if !status.is_success() {
+            return Err(anyhow::anyhow!(
+                "Wrong status code {status} when sending {event}"
+            ));
+        }
+        let body_text = String::from_utf8(
+            axum::body::to_bytes(response.into_body(), 10 * 1024 * 1024)
+                .await?
+                .to_vec(),
+        )?;
+        tracing::debug!("Received webhook with status {status} and response body `{body_text}`");
+        Ok(())
+    }
+
+    async fn finish(self, bors: JoinHandle<()>) -> GitHubState {
         // Make sure that the event channel senders are closed
         drop(self.app);
         drop(self.global_tx);
@@ -440,6 +476,78 @@ impl BorsTester {
         bors.await.unwrap();
         // Flush any local queues
         self.http_mock.gh_server.assert_empty_queues().await;
-        self.world
+        self.github
+    }
+}
+
+/// A proxy object for checking assertions on a pull request.
+/// It creates a state snapshot when it is created, therefore it will not be updated as state
+/// on GitHub/database changes.
+pub struct PullRequestProxy {
+    gh_pr: PullRequest,
+    db_pr: Option<PullRequestModel>,
+}
+
+impl PullRequestProxy {
+    async fn new(tester: &BorsTester, gh_pr: PullRequest) -> Self {
+        let db_pr = tester
+            .pr_db(gh_pr.repo.clone(), gh_pr.number.0)
+            .await
+            .unwrap();
+        Self { gh_pr, db_pr }
+    }
+
+    pub fn get_gh_pr(&self) -> PullRequest {
+        self.gh_pr.clone()
+    }
+
+    #[track_caller]
+    pub fn expect_rollup(&self, rollup: Option<RollupMode>) -> &Self {
+        assert_eq!(self.require_db_pr().rollup, rollup);
+        self
+    }
+
+    #[track_caller]
+    pub fn expect_approved_by(&self, approved_by: &str) -> &Self {
+        assert_eq!(self.require_db_pr().approver(), Some(approved_by));
+        self.gh_pr.check_added_labels(&["approved"]);
+        self
+    }
+
+    #[track_caller]
+    pub fn expect_unapproved(&self) -> &Self {
+        assert!(!self.require_db_pr().is_approved());
+        self
+    }
+
+    #[track_caller]
+    pub fn expect_priority(&self, priority: Option<i32>) -> &Self {
+        assert_eq!(self.require_db_pr().priority, priority);
+        self
+    }
+
+    #[track_caller]
+    pub fn expect_delegated(&self) -> &Self {
+        assert!(self.require_db_pr().delegated);
+        self
+    }
+
+    #[track_caller]
+    pub fn expect_approved_sha(&self, sha: &str) -> &Self {
+        assert_eq!(self.require_db_pr().approved_sha(), Some(sha));
+        self
+    }
+
+    #[track_caller]
+    pub fn expect_try_build_cancelled(&self) {
+        assert_eq!(
+            self.require_db_pr().try_build.as_ref().unwrap().status,
+            BuildStatus::Cancelled
+        );
+    }
+
+    #[track_caller]
+    fn require_db_pr(&self) -> &PullRequestModel {
+        self.db_pr.as_ref().unwrap()
     }
 }

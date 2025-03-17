@@ -3,27 +3,21 @@ use std::sync::Arc;
 
 use octocrab::Octocrab;
 use parking_lot::Mutex;
-use pull_request::default_mergeable_state;
 use regex::Regex;
 use wiremock::matchers::{method, path_regex};
 use wiremock::{Mock, Request, ResponseTemplate};
 
-use crate::github::{GithubRepoName, PullRequestNumber};
+use crate::github::GithubRepoName;
 use crate::tests::mocks::github::GitHubMockServer;
 use crate::tests::mocks::permissions::TeamApiMockServer;
 use crate::TeamApiClient;
 
 pub use bors::run_test;
 pub use bors::BorsBuilder;
-pub use bors::BorsTester;
 pub use comment::Comment;
 pub use permissions::Permissions;
 pub use pull_request::default_pr_number;
-pub use pull_request::GitHubPullRequest;
-pub use pull_request::GitHubPushEventPayload;
-pub use pull_request::PullRequestChangeEvent;
 pub use repository::default_branch_name;
-pub use repository::default_branch_sha;
 pub use repository::default_repo_name;
 pub use repository::Branch;
 pub use repository::Repo;
@@ -43,23 +37,41 @@ mod repository;
 mod user;
 mod workflow;
 
-pub struct World {
+/// Represents the state of GitHub.
+pub struct GitHubState {
     repos: HashMap<GithubRepoName, Arc<Mutex<Repo>>>,
 }
 
-impl World {
+impl GitHubState {
     pub fn new() -> Self {
         Self {
             repos: Default::default(),
         }
     }
 
-    pub fn default_repo(&self) -> Arc<Mutex<Repo>> {
-        self.get_repo(default_repo_name())
+    /// Creates a new GitHubState where the default PR author has no permissions.
+    pub fn unauthorized_pr_author() -> Self {
+        let state = Self::default();
+        state
+            .default_repo()
+            .lock()
+            .permissions
+            .users
+            .insert(User::default_pr_author(), vec![]);
+        state
     }
 
-    pub fn get_repo(&self, name: GithubRepoName) -> Arc<Mutex<Repo>> {
-        self.repos.get(&name).unwrap().clone()
+    pub fn with_default_config(self, config: &str) -> Self {
+        self.default_repo().lock().config = config.to_string();
+        self
+    }
+
+    pub fn default_repo(&self) -> Arc<Mutex<Repo>> {
+        self.get_repo(&default_repo_name())
+    }
+
+    pub fn get_repo(&self, name: &GithubRepoName) -> Arc<Mutex<Repo>> {
+        self.repos.get(name).unwrap().clone()
     }
 
     pub fn with_repo(mut self, repo: Repo) -> Self {
@@ -70,7 +82,7 @@ impl World {
 
     pub fn check_sha_history(&self, repo: GithubRepoName, branch: &str, expected_shas: &[&str]) {
         let actual_shas = self
-            .get_repo(repo)
+            .get_repo(&repo)
             .lock()
             .get_branch_by_name(branch)
             .expect("Branch not found")
@@ -81,13 +93,13 @@ impl World {
 
     pub fn check_cancelled_workflows(&self, repo: GithubRepoName, expected_run_ids: &[u64]) {
         assert_eq!(
-            &self.get_repo(repo).lock().cancelled_workflows,
+            &self.get_repo(&repo).lock().cancelled_workflows,
             expected_run_ids
         );
     }
 }
 
-impl Default for World {
+impl Default for GitHubState {
     fn default() -> Self {
         let repo = Repo::default();
         Self {
@@ -102,9 +114,9 @@ pub struct ExternalHttpMock {
 }
 
 impl ExternalHttpMock {
-    pub async fn start(world: &World) -> Self {
-        let gh_server = GitHubMockServer::start(world).await;
-        let team_api_server = TeamApiMockServer::start(world).await;
+    pub async fn start(github: &GitHubState) -> Self {
+        let gh_server = GitHubMockServer::start(github).await;
+        let team_api_server = TeamApiMockServer::start(github).await;
         Self {
             gh_server,
             team_api_server,
@@ -144,53 +156,4 @@ fn dynamic_mock_req<
                 .1;
             f(req, captured)
         })
-}
-
-pub fn create_world_with_approve_config() -> World {
-    let world = World::default();
-    world.default_repo().lock().set_config(
-        r#"
-[labels]
-approve = ["+approved"]
-"#,
-    );
-    world
-}
-
-pub async fn assert_pr_approved_by(
-    tester: &BorsTester,
-    pr_number: PullRequestNumber,
-    approved_by: &str,
-) {
-    let pr_in_db = tester
-        .db()
-        .get_or_create_pull_request(
-            &default_repo_name(),
-            pr_number,
-            &default_branch_name(),
-            default_mergeable_state(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(pr_in_db.approval_status.approver(), Some(approved_by));
-    let repo = tester.default_repo();
-    let pr = repo.lock().get_pr(default_pr_number()).clone();
-    pr.check_added_labels(&["approved"]);
-}
-
-pub async fn assert_pr_unapproved(tester: &BorsTester, pr_number: PullRequestNumber) {
-    let pr_in_db = tester
-        .db()
-        .get_or_create_pull_request(
-            &default_repo_name(),
-            pr_number,
-            &default_branch_name(),
-            default_mergeable_state(),
-        )
-        .await
-        .unwrap();
-    assert!(!pr_in_db.is_approved());
-    let repo = tester.default_repo();
-    let pr = repo.lock().get_pr(default_pr_number()).clone();
-    pr.check_removed_labels(&["approved"]);
 }

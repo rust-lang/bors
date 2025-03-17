@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use crate::bors::CheckSuiteStatus;
 use base64::Engine;
+use octocrab::models::pulls::MergeableState;
 use octocrab::models::repos::Object;
 use octocrab::models::repos::Object::Commit;
 use parking_lot::Mutex;
@@ -14,31 +15,53 @@ use wiremock::{
     Mock, MockServer, Request, ResponseTemplate,
 };
 
-use crate::github::GithubRepoName;
+use crate::github::{GithubRepoName, PullRequestNumber};
 use crate::permissions::PermissionType;
 use crate::tests::mocks::comment::Comment;
 use crate::tests::mocks::permissions::Permissions;
 use crate::tests::mocks::pull_request::mock_pull_requests;
-use crate::tests::mocks::{default_pr_number, dynamic_mock_req, TestWorkflowStatus, World};
+use crate::tests::mocks::{default_pr_number, dynamic_mock_req, GitHubState, TestWorkflowStatus};
 
 use super::user::{GitHubUser, User};
 
 #[derive(Clone)]
 pub struct PullRequest {
+    pub number: PullRequestNumber,
+    pub repo: GithubRepoName,
     pub added_labels: Vec<String>,
     pub removed_labels: Vec<String>,
     pub comment_counter: u64,
     pub head_sha: String,
+    pub author: User,
+    pub base_branch: Branch,
+    pub mergeable_state: MergeableState,
 }
 
-impl Default for PullRequest {
-    fn default() -> Self {
+impl PullRequest {
+    pub fn new(repo: GithubRepoName, number: u64, author: User) -> Self {
         Self {
+            number: PullRequestNumber(number),
+            repo,
             added_labels: Vec::new(),
             removed_labels: Vec::new(),
             comment_counter: 0,
-            head_sha: format!("pr-{}-sha", default_pr_number()),
+            head_sha: format!("pr-{number}-sha"),
+            author,
+            base_branch: Branch::default(),
+            mergeable_state: MergeableState::Clean,
         }
+    }
+}
+
+/// Creates a default pull request with number set to
+/// [default_pr_number].
+impl Default for PullRequest {
+    fn default() -> Self {
+        Self::new(
+            default_repo_name(),
+            default_pr_number(),
+            User::default_pr_author(),
+        )
     }
 }
 
@@ -82,15 +105,12 @@ pub struct Repo {
 }
 
 impl Repo {
-    pub fn new(owner: &str, name: &str, permissions: Permissions, config: String) -> Self {
-        let pull_requests = [(default_pr_number(), PullRequest::default())]
-            .into_iter()
-            .collect();
+    pub fn new(name: GithubRepoName, permissions: Permissions, config: String) -> Self {
         Self {
-            name: GithubRepoName::new(owner, name),
+            name,
             permissions,
             config,
-            pull_requests,
+            pull_requests: Default::default(),
             branches: vec![Branch::default()],
             cancelled_workflows: vec![],
             workflow_cancel_error: false,
@@ -99,8 +119,14 @@ impl Repo {
         }
     }
 
-    pub fn with_perms(mut self, user: User, permissions: &[PermissionType]) -> Self {
+    pub fn with_user_perms(mut self, user: User, permissions: &[PermissionType]) -> Self {
         self.permissions.users.insert(user, permissions.to_vec());
+        self
+    }
+
+    pub fn with_pr(mut self, pull_request: PullRequest) -> Self {
+        self.pull_requests
+            .insert(pull_request.number.0, pull_request);
         self
     }
 
@@ -108,8 +134,8 @@ impl Repo {
         self.pull_requests.get(&pr).unwrap()
     }
 
-    pub fn set_config(&mut self, config: &str) {
-        self.config = config.to_string();
+    pub fn get_pr_mut(&mut self, pr: u64) -> &mut PullRequest {
+        self.pull_requests.get_mut(&pr).unwrap()
     }
 
     pub fn get_branch_by_name(&mut self, name: &str) -> Option<&mut Branch> {
@@ -124,21 +150,31 @@ impl Repo {
         self.cancelled_workflows.push(run_id);
     }
 
-    pub fn get_next_pr_push_count(&mut self) -> u64 {
+    pub fn get_next_pr_push_counter(&mut self) -> u64 {
         self.pr_push_counter += 1;
         self.pr_push_counter
     }
 }
 
+/// Represents the default repository for tests.
+/// It uses a basic configuration that might be also encountered on a real repository.
+///
+/// It contains a single pull request by default, [PullRequest::default], and a single
+/// branch called `main`.
 impl Default for Repo {
     fn default() -> Self {
         let config = r#"
 timeout = 3600
+
+# Set labels on PR approvals
+[labels]
+approve = ["+approved"]
 "#
         .to_string();
+
         let mut users = HashMap::default();
         users.insert(
-            User::default(),
+            User::default_pr_author(),
             vec![PermissionType::Try, PermissionType::Review],
         );
         users.insert(User::try_user(), vec![PermissionType::Try]);
@@ -147,12 +183,8 @@ timeout = 3600
             vec![PermissionType::Try, PermissionType::Review],
         );
 
-        Self::new(
-            default_repo_name().owner(),
-            default_repo_name().name(),
-            Permissions { users },
-            config,
-        )
+        Self::new(default_repo_name(), Permissions { users }, config)
+            .with_pr(PullRequest::default())
     }
 }
 
@@ -160,7 +192,7 @@ pub fn default_repo_name() -> GithubRepoName {
     GithubRepoName::new("rust-lang", "borstest")
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct Branch {
     name: String,
     sha: String,
@@ -246,10 +278,10 @@ pub fn default_branch_sha() -> &'static str {
     "main-sha1"
 }
 
-pub async fn mock_repo_list(world: &World, mock_server: &MockServer) {
+pub async fn mock_repo_list(github: &GitHubState, mock_server: &MockServer) {
     let repos = GitHubRepositories {
-        total_count: world.repos.len() as u64,
-        repositories: world
+        total_count: github.repos.len() as u64,
+        repositories: github
             .repos
             .iter()
             .enumerate()

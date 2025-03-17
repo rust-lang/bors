@@ -330,21 +330,24 @@ mod tests {
     use crate::permissions::PermissionType;
     use crate::tests::mocks::Permissions;
     use crate::tests::mocks::{ExternalHttpMock, Repo};
-    use crate::tests::mocks::{User, World};
+    use crate::tests::mocks::{GitHubState, User};
     use octocrab::models::UserId;
 
     #[tokio::test]
     async fn load_installed_repos() {
         let mock = ExternalHttpMock::start(
-            &World::new()
+            &GitHubState::new()
                 .with_repo(
-                    Repo::new("foo", "bar", Permissions::default(), "".to_string())
-                        .with_perms(User::new(1, "user"), &[PermissionType::Try]),
+                    Repo::new(
+                        GithubRepoName::new("foo", "bar"),
+                        Permissions::empty(),
+                        "".to_string(),
+                    )
+                    .with_user_perms(User::new(1, "user"), &[PermissionType::Try]),
                 )
                 .with_repo(Repo::new(
-                    "foo",
-                    "baz",
-                    Permissions::default(),
+                    GithubRepoName::new("foo", "baz"),
+                    Permissions::empty(),
                     "".to_string(),
                 )),
         )

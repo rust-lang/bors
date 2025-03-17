@@ -8,7 +8,8 @@ pub struct User {
 }
 
 impl User {
-    pub fn default_user() -> Self {
+    /// The user that creates a pull request by default.
+    pub fn default_pr_author() -> Self {
         Self::new(101, "default-user")
     }
 
@@ -16,14 +17,17 @@ impl User {
         Self::new(102, "bors-bot")
     }
 
+    /// User that should not have any privileges.
     pub fn unprivileged() -> Self {
         Self::new(103, "unprivileged-user")
     }
 
+    /// User that should have `try` privileges.
     pub fn try_user() -> Self {
-        Self::new(104, "try-user")
+        Self::new(104, "user-with-try-privileges")
     }
 
+    /// User that should have `try` and review privileges.
     pub fn reviewer() -> Self {
         Self::new(105, "reviewer")
     }
@@ -33,12 +37,6 @@ impl User {
             github_id: id,
             name: name.to_string(),
         }
-    }
-}
-
-impl Default for User {
-    fn default() -> Self {
-        Self::default_user()
     }
 }
 
@@ -113,7 +111,7 @@ impl GitHubUser {
 
 impl Default for GitHubUser {
     fn default() -> Self {
-        User::default().into()
+        User::default_pr_author().into()
     }
 }
 

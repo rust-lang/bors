@@ -19,7 +19,7 @@ mod context;
 pub mod event;
 mod handlers;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CheckSuiteStatus {
     Pending,
     Failure,

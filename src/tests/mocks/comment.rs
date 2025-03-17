@@ -24,7 +24,7 @@ impl Comment {
         Self {
             repo,
             pr,
-            author: User::default(),
+            author: User::default_pr_author(),
             content: content.to_string(),
             comment_id: 1, // comment_id will be updated by the mock server
         }
