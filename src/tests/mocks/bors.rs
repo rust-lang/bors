@@ -81,6 +81,7 @@ impl BorsBuilder {
 }
 
 /// Simple end-to-end test entrypoint for tests that don't need to prepare any custom state.
+/// See [GitHubState::default] for how does the default state look like.
 pub async fn run_test<
     F: FnOnce(BorsTester) -> Fut,
     Fut: Future<Output = anyhow::Result<BorsTester>>,

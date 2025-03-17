@@ -14,7 +14,7 @@ use wiremock::{
     Mock, MockServer, Request, ResponseTemplate,
 };
 
-use crate::github::GithubRepoName;
+use crate::github::{GithubRepoName, PullRequestNumber};
 use crate::permissions::PermissionType;
 use crate::tests::mocks::comment::Comment;
 use crate::tests::mocks::permissions::Permissions;
@@ -25,19 +25,24 @@ use super::user::{GitHubUser, User};
 
 #[derive(Clone)]
 pub struct PullRequest {
+    pub number: PullRequestNumber,
     pub added_labels: Vec<String>,
     pub removed_labels: Vec<String>,
     pub comment_counter: u64,
     pub head_sha: String,
 }
 
+/// Creates a default pull request with number set to
+/// [default_pr_number].
 impl Default for PullRequest {
     fn default() -> Self {
+        let number = default_pr_number();
         Self {
+            number: PullRequestNumber(number),
             added_labels: Vec::new(),
             removed_labels: Vec::new(),
             comment_counter: 0,
-            head_sha: format!("pr-{}-sha", default_pr_number()),
+            head_sha: format!("pr-{number}-sha"),
         }
     }
 }
@@ -82,15 +87,12 @@ pub struct Repo {
 }
 
 impl Repo {
-    pub fn new(owner: &str, name: &str, permissions: Permissions, config: String) -> Self {
-        let pull_requests = [(default_pr_number(), PullRequest::default())]
-            .into_iter()
-            .collect();
+    pub fn new(name: GithubRepoName, permissions: Permissions, config: String) -> Self {
         Self {
-            name: GithubRepoName::new(owner, name),
+            name,
             permissions,
             config,
-            pull_requests,
+            pull_requests: Default::default(),
             branches: vec![Branch::default()],
             cancelled_workflows: vec![],
             workflow_cancel_error: false,
@@ -99,8 +101,14 @@ impl Repo {
         }
     }
 
-    pub fn with_perms(mut self, user: User, permissions: &[PermissionType]) -> Self {
+    pub fn with_user_perms(mut self, user: User, permissions: &[PermissionType]) -> Self {
         self.permissions.users.insert(user, permissions.to_vec());
+        self
+    }
+
+    pub fn with_pr(mut self, pull_request: PullRequest) -> Self {
+        self.pull_requests
+            .insert(pull_request.number.0, pull_request);
         self
     }
 
@@ -130,12 +138,22 @@ impl Repo {
     }
 }
 
+/// Represents the default repository for tests.
+/// It uses a basic configuration that might be also encountered on a real repository.
+///
+/// It contains a single pull request by default, [PullRequest::default], and a single
+/// branch called `main`.
 impl Default for Repo {
     fn default() -> Self {
         let config = r#"
 timeout = 3600
+
+# Set labels on PR approvals
+[labels]
+approve = ["+approved"]
 "#
         .to_string();
+
         let mut users = HashMap::default();
         users.insert(
             User::default(),
@@ -147,12 +165,8 @@ timeout = 3600
             vec![PermissionType::Try, PermissionType::Review],
         );
 
-        Self::new(
-            default_repo_name().owner(),
-            default_repo_name().name(),
-            Permissions { users },
-            config,
-        )
+        Self::new(default_repo_name(), Permissions { users }, config)
+            .with_pr(PullRequest::default())
     }
 }
 

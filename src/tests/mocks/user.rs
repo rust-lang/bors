@@ -8,6 +8,7 @@ pub struct User {
 }
 
 impl User {
+    /// The user that creates a pull request by default.
     pub fn default_user() -> Self {
         Self::new(101, "default-user")
     }
@@ -16,14 +17,17 @@ impl User {
         Self::new(102, "bors-bot")
     }
 
+    /// User that should not have any privileges.
     pub fn unprivileged() -> Self {
         Self::new(103, "unprivileged-user")
     }
 
+    /// User that should have `try` privileges.
     pub fn try_user() -> Self {
-        Self::new(104, "try-user")
+        Self::new(104, "user-with-try-privileges")
     }
 
+    /// User that should have `try` and review privileges.
     pub fn reviewer() -> Self {
         Self::new(105, "reviewer")
     }
