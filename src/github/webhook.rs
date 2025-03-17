@@ -19,7 +19,8 @@ use sha2::Sha256;
 
 use crate::bors::event::{
     BorsEvent, BorsGlobalEvent, BorsRepositoryEvent, CheckSuiteCompleted, PullRequestComment,
-    PullRequestEdited, PullRequestOpened, PullRequestPushed, WorkflowCompleted, WorkflowStarted,
+    PullRequestEdited, PullRequestOpened, PullRequestPushed, PushToBranch, WorkflowCompleted,
+    WorkflowStarted,
 };
 use crate::database::{WorkflowStatus, WorkflowType};
 use crate::github::server::ServerStateRef;
@@ -37,6 +38,13 @@ impl WebhookSecret {
     pub fn expose(&self) -> &str {
         self.0.expose_secret()
     }
+}
+
+#[derive(serde::Deserialize, Debug)]
+pub struct WebhookPushToBranchEvent {
+    repository: Repository,
+    #[serde(rename = "ref")]
+    ref_field: String,
 }
 
 /// This struct is used to extract the repository and user from a GitHub webhook event.
@@ -168,6 +176,7 @@ fn parse_webhook_event(request: Parts, body: &[u8]) -> anyhow::Result<Option<Bor
     );
 
     match event_type.as_bytes() {
+        b"push" => parse_push_event(body),
         b"issue_comment" => parse_issue_comment_event(body),
         b"pull_request" => parse_pull_request_events(body),
         b"pull_request_review" => parse_pull_request_review_events(body),
@@ -183,6 +192,21 @@ fn parse_webhook_event(request: Parts, body: &[u8]) -> anyhow::Result<Option<Bor
             Ok(None)
         }
     }
+}
+
+fn parse_push_event(body: &[u8]) -> anyhow::Result<Option<BorsEvent>> {
+    let payload: WebhookPushToBranchEvent = serde_json::from_slice(body)?;
+    let repository = parse_repository_name(&payload.repository)?;
+
+    let branch = if let Some(branch) = payload.ref_field.strip_prefix("refs/heads/") {
+        branch.to_string()
+    } else {
+        return Ok(None);
+    };
+
+    Ok(Some(BorsEvent::Repository(
+        BorsRepositoryEvent::PushToBranch(PushToBranch { repository, branch }),
+    )))
 }
 
 fn parse_issue_comment_event(body: &[u8]) -> anyhow::Result<Option<BorsEvent>> {
@@ -462,6 +486,30 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn push_to_branch() {
+        insta::assert_debug_snapshot!(
+            check_webhook("webhook/push.json", "push").await,
+            @r#"
+            Ok(
+                GitHubWebhook(
+                    Repository(
+                        PushToBranch(
+                            PushToBranch {
+                                repository: GithubRepoName {
+                                    owner: "kobzol",
+                                    name: "bors-kindergarten",
+                                },
+                                branch: "main",
+                            },
+                        ),
+                    ),
+                ),
+            )
+            "#
+        );
+    }
+
+    #[tokio::test]
     async fn issue_comment() {
         insta::assert_debug_snapshot!(
             check_webhook("webhook/issue-comment.json", "issue_comment").await,
@@ -514,7 +562,7 @@ mod tests {
     async fn pull_request_edited() {
         insta::assert_debug_snapshot!(
             check_webhook("webhook/pull-request-edited.json", "pull_request").await,
-            @r###"
+            @r#"
         Ok(
             GitHubWebhook(
                 Repository(
@@ -542,6 +590,7 @@ mod tests {
                                     ),
                                 },
                                 title: "Create test.txt",
+                                mergeable_state: Unknown,
                                 message: "",
                                 author: GithubUser {
                                     id: UserId(
@@ -575,7 +624,7 @@ mod tests {
                 ),
             ),
         )
-        "###
+        "#
         );
     }
 
@@ -583,7 +632,7 @@ mod tests {
     async fn pull_request_synchronized() {
         insta::assert_debug_snapshot!(
             check_webhook("webhook/pull-request-synchronize.json", "pull_request").await,
-            @r###"
+            @r#"
         Ok(
             GitHubWebhook(
                 Repository(
@@ -611,6 +660,7 @@ mod tests {
                                     ),
                                 },
                                 title: "Create test.txt",
+                                mergeable_state: Unknown,
                                 message: "",
                                 author: GithubUser {
                                     id: UserId(
@@ -639,7 +689,7 @@ mod tests {
                 ),
             ),
         )
-        "###
+        "#
         );
     }
 
@@ -724,6 +774,7 @@ mod tests {
                                     ),
                                 },
                                 title: "New added branch",
+                                mergeable_state: Unknown,
                                 message: "This is a newly added branch from a just-opened PR. ",
                                 author: GithubUser {
                                     id: UserId(
@@ -919,9 +970,12 @@ mod tests {
     #[tokio::test]
     async fn unknown_event() {
         assert_eq!(
-            check_webhook("webhook/push.json", "push")
-                .await
-                .unwrap_err(),
+            check_webhook(
+                "webhook/security-advisory-published.json",
+                "security_advisory"
+            )
+            .await
+            .unwrap_err(),
             StatusCode::OK
         );
     }

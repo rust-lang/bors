@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\nSELECT\n    pr.id,\n    pr.repository as \"repository: GithubRepoName\",\n    pr.number as \"number!: i64\",\n    (\n        pr.approved_by,\n        pr.approved_sha\n    ) AS \"approval_status!: ApprovalStatus\",\n    pr.delegated,\n    pr.priority,\n    pr.base_branch,\n    pr.rollup as \"rollup: RollupMode\",\n    pr.created_at as \"created_at: DateTime<Utc>\",\n    build AS \"try_build: BuildModel\"\nFROM pull_request as pr\nLEFT JOIN build ON pr.build_id = build.id\nWHERE build.id = $1\n",
+  "query": "\n    SELECT\n        pr.id,\n        pr.repository as \"repository: GithubRepoName\",\n        pr.number as \"number!: i64\",\n        (\n            pr.approved_by,\n            pr.approved_sha\n        ) AS \"approval_status!: ApprovalStatus\",\n        pr.priority,\n        pr.rollup as \"rollup: RollupMode\",\n        pr.delegated,\n        pr.base_branch,\n        pr.mergeable_state as \"mergeable_state: MergeableState\",\n        pr.created_at as \"created_at: DateTime<Utc>\",\n        build AS \"try_build: BuildModel\"\n    FROM pull_request as pr\n    LEFT JOIN build ON pr.build_id = build.id\n    WHERE pr.repository = $1 AND\n          pr.number = $2\n    ",
   "describe": {
     "columns": [
       {
@@ -25,31 +25,36 @@
       },
       {
         "ordinal": 4,
-        "name": "delegated",
-        "type_info": "Bool"
-      },
-      {
-        "ordinal": 5,
         "name": "priority",
         "type_info": "Int4"
       },
       {
-        "ordinal": 6,
-        "name": "base_branch",
-        "type_info": "Text"
-      },
-      {
-        "ordinal": 7,
+        "ordinal": 5,
         "name": "rollup: RollupMode",
         "type_info": "Text"
       },
       {
+        "ordinal": 6,
+        "name": "delegated",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 7,
+        "name": "base_branch",
+        "type_info": "Text"
+      },
+      {
         "ordinal": 8,
+        "name": "mergeable_state: MergeableState",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
         "name": "created_at: DateTime<Utc>",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 9,
+        "ordinal": 10,
         "name": "try_build: BuildModel",
         "type_info": {
           "Custom": {
@@ -92,7 +97,8 @@
     ],
     "parameters": {
       "Left": [
-        "Int4"
+        "Text",
+        "Int8"
       ]
     },
     "nullable": [
@@ -100,13 +106,14 @@
       false,
       false,
       null,
-      false,
+      true,
       true,
       false,
-      true,
+      false,
+      false,
       false,
       null
     ]
   },
-  "hash": "80d2c1b695162729675c566946a145a78feed990078fbd50a83ada38a225597d"
+  "hash": "44415582f7be15fa152e086db4e664a82180544d4152e616a77f5e50f9d75145"
 }

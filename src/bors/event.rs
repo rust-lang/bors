@@ -13,6 +13,9 @@ pub enum BorsRepositoryEvent {
     PullRequestEdited(PullRequestEdited),
     /// When a pull request is opened.
     PullRequestOpened(PullRequestOpened),
+    /// When there is a push to a branch. This includes when a commit is pushed, when a commit tag is pushed,
+    /// when a branch is deleted or when a tag is deleted.
+    PushToBranch(PushToBranch),
     /// A workflow run on Github Actions or a check run from external CI system has been started.
     WorkflowStarted(WorkflowStarted),
     /// A workflow run on Github Actions or a check run from external CI system has been completed.
@@ -29,6 +32,7 @@ impl BorsRepositoryEvent {
             BorsRepositoryEvent::PullRequestCommitPushed(payload) => &payload.repository,
             BorsRepositoryEvent::PullRequestEdited(payload) => &payload.repository,
             BorsRepositoryEvent::PullRequestOpened(payload) => &payload.repository,
+            BorsRepositoryEvent::PushToBranch(payload) => &payload.repository,
             BorsRepositoryEvent::WorkflowStarted(workflow) => &workflow.repository,
             BorsRepositoryEvent::WorkflowCompleted(workflow) => &workflow.repository,
             BorsRepositoryEvent::CheckSuiteCompleted(payload) => &payload.repository,
@@ -79,6 +83,12 @@ pub struct PullRequestEdited {
 pub struct PullRequestOpened {
     pub repository: GithubRepoName,
     pub pull_request: PullRequest,
+}
+
+#[derive(Debug)]
+pub struct PushToBranch {
+    pub repository: GithubRepoName,
+    pub branch: String,
 }
 
 #[derive(Debug)]
