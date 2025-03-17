@@ -15,7 +15,7 @@ use tower::Service;
 use crate::bors::WAIT_FOR_REFRESH;
 use crate::database::PullRequestModel;
 use crate::github::api::load_repositories;
-use crate::github::PullRequestNumber;
+use crate::github::{GithubRepoName, PullRequestNumber};
 use crate::tests::mocks::comment::{Comment, GitHubIssueCommentEventPayload};
 use crate::tests::mocks::workflow::{
     CheckSuite, GitHubCheckRunEventPayload, GitHubCheckSuiteEventPayload,
@@ -153,9 +153,18 @@ impl BorsTester {
         self.github.get_repo(default_repo_name())
     }
 
-    pub async fn get_default_pr(&self) -> anyhow::Result<Option<PullRequestModel>> {
+    pub async fn get_pr_db(
+        &self,
+        repo: &GithubRepoName,
+        number: u64,
+    ) -> anyhow::Result<Option<PullRequestModel>> {
         self.db()
-            .get_pull_request(&default_repo_name(), PullRequestNumber(default_pr_number()))
+            .get_pull_request(repo, PullRequestNumber(number))
+            .await
+    }
+
+    pub async fn get_default_pr_db(&self) -> anyhow::Result<Option<PullRequestModel>> {
+        self.get_pr_db(&default_repo_name(), default_pr_number())
             .await
     }
 

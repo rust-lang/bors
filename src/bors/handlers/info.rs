@@ -111,7 +111,7 @@ mod tests {
                 tester.post_comment("@bors p=5").await?;
                 tester
                     .wait_for(|| async {
-                        let Some(pr) = tester.get_default_pr().await? else {
+                        let Some(pr) = tester.get_default_pr_db().await? else {
                             return Ok(false);
                         };
                         Ok(pr.priority == Some(5))

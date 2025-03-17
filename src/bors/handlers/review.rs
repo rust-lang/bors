@@ -326,7 +326,7 @@ mod tests {
                     ),
                 );
 
-                let pr = tester.get_default_pr().await?.unwrap();
+                let pr = tester.get_default_pr_db().await?.unwrap();
                 assert!(pr.rollup.is_none());
 
                 tester
@@ -434,7 +434,7 @@ mod tests {
         run_test(pool, |mut tester| async {
             tester.post_comment("@bors r+ p=10").await?;
             tester.expect_comments(1).await;
-            let pr = tester.get_default_pr().await?.unwrap();
+            let pr = tester.get_default_pr_db().await?.unwrap();
             assert_eq!(pr.priority, Some(10));
             assert!(pr.is_approved());
             Ok(tester)
@@ -447,7 +447,7 @@ mod tests {
         run_test(pool, |mut tester| async {
             tester.post_comment("@bors r=user1 p=10").await?;
             tester.expect_comments(1).await;
-            let pr = tester.get_default_pr().await?.unwrap();
+            let pr = tester.get_default_pr_db().await?.unwrap();
             assert_eq!(pr.priority, Some(10));
             assert_eq!(pr.approval_status.approver(), Some("user1"));
             Ok(tester)
@@ -461,7 +461,7 @@ mod tests {
             tester.post_comment("@bors p=5").await?;
             tester
                 .wait_for(|| async {
-                    let Some(pr) = tester.get_default_pr().await? else {
+                    let Some(pr) = tester.get_default_pr_db().await? else {
                         return Ok(false);
                     };
                     Ok(pr.priority == Some(5))
@@ -478,7 +478,7 @@ mod tests {
             tester.post_comment("@bors p=5").await?;
             tester
                 .wait_for(|| async {
-                    let Some(pr) = tester.get_default_pr().await? else {
+                    let Some(pr) = tester.get_default_pr_db().await? else {
                         return Ok(false);
                     };
                     Ok(pr.priority == Some(5))
@@ -488,7 +488,7 @@ mod tests {
             tester.post_comment("@bors r+").await?;
             tester.expect_comments(1).await;
 
-            let pr = tester.get_default_pr().await?.unwrap();
+            let pr = tester.get_default_pr_db().await?.unwrap();
             assert_eq!(pr.priority, Some(5));
             assert!(pr.is_approved());
 
@@ -503,7 +503,7 @@ mod tests {
             tester.post_comment("@bors p=5").await?;
             tester
                 .wait_for(|| async {
-                    let Some(pr) = tester.get_default_pr().await? else {
+                    let Some(pr) = tester.get_default_pr_db().await? else {
                         return Ok(false);
                     };
                     Ok(pr.priority == Some(5))
@@ -513,7 +513,7 @@ mod tests {
             tester.post_comment("@bors r+ p=10").await?;
             tester.expect_comments(1).await;
 
-            let pr = tester.get_default_pr().await?.unwrap();
+            let pr = tester.get_default_pr_db().await?.unwrap();
 
             assert_eq!(pr.priority, Some(10));
             assert!(pr.is_approved());
@@ -610,7 +610,7 @@ approve = ["+approved"]
                     )
                 );
 
-                let pr = tester.get_default_pr().await?.unwrap();
+                let pr = tester.get_default_pr_db().await?.unwrap();
 
                 assert!(pr.delegated);
                 Ok(tester)
@@ -674,7 +674,7 @@ approve = ["+approved"]
                 tester.post_comment("@bors p=7").await?;
                 tester
                     .wait_for(|| async {
-                        let Some(pr) = tester.get_default_pr().await? else {
+                        let Some(pr) = tester.get_default_pr_db().await? else {
                             return Ok(false);
                         };
                         Ok(pr.priority == Some(7))
@@ -700,7 +700,7 @@ approve = ["+approved"]
                     )
                 );
 
-                assert!(tester.get_default_pr().await?.is_none());
+                assert!(tester.get_default_pr_db().await?.is_none());
                 Ok(tester)
             })
             .await;
@@ -714,14 +714,14 @@ approve = ["+approved"]
                 tester.post_comment(as_reviewer("@bors delegate+")).await?;
                 tester.expect_comments(1).await;
 
-                let pr = tester.get_default_pr().await?.unwrap();
+                let pr = tester.get_default_pr_db().await?.unwrap();
 
                 assert!(pr.delegated);
 
                 tester.post_comment(as_reviewer("@bors delegate-")).await?;
                 tester
                     .wait_for(|| async {
-                        let Some(pr) = tester.get_default_pr().await? else {
+                        let Some(pr) = tester.get_default_pr_db().await? else {
                             return Ok(false);
                         };
                         Ok(!pr.delegated)
@@ -744,7 +744,7 @@ approve = ["+approved"]
                 tester.post_comment("@bors delegate-").await?;
                 tester
                     .wait_for(|| async {
-                        let Some(pr) = tester.get_default_pr().await? else {
+                        let Some(pr) = tester.get_default_pr_db().await? else {
                             return Ok(false);
                         };
                         Ok(!pr.delegated)
@@ -771,7 +771,7 @@ approve = ["+approved"]
                     .as_str()
                 );
 
-                let pr = tester.get_default_pr().await?.unwrap();
+                let pr = tester.get_default_pr_db().await?.unwrap();
 
                 assert!(!pr.delegated);
                 Ok(tester)
@@ -798,7 +798,7 @@ approve = ["+approved"]
                 tester.post_comment(as_reviewer("@bors r-")).await?;
                 tester.expect_comments(1).await;
 
-                let pr = tester.get_default_pr().await?.unwrap();
+                let pr = tester.get_default_pr_db().await?.unwrap();
 
                 assert!(!pr.is_approved());
 
@@ -822,7 +822,7 @@ approve = ["+approved"]
                     .await?;
                 tester.expect_comments(1).await;
 
-                let pr = tester.get_default_pr().await?.unwrap();
+                let pr = tester.get_default_pr_db().await?.unwrap();
                 assert!(!pr.is_approved());
 
                 Ok(tester)
@@ -851,7 +851,7 @@ approve = ["+approved"]
                     tester.get_comment().await?,
                     "@try-user: :key: Insufficient privileges: not in review users"
                 );
-                assert!(tester.get_default_pr().await?.is_none());
+                assert!(tester.get_default_pr_db().await?.is_none());
                 Ok(tester)
             })
             .await;
@@ -862,7 +862,7 @@ approve = ["+approved"]
         run_test(pool, |mut tester| async {
             tester.post_comment("@bors r+ rollup=never").await?;
             tester.expect_comments(1).await;
-            let pr = tester.get_default_pr().await?.unwrap();
+            let pr = tester.get_default_pr_db().await?.unwrap();
 
             assert_eq!(pr.rollup, Some(RollupMode::Never));
             assert!(pr.is_approved());
@@ -876,7 +876,7 @@ approve = ["+approved"]
         run_test(pool, |mut tester| async {
             tester.post_comment("@bors r+ rollup").await?;
             tester.expect_comments(1).await;
-            let pr = tester.get_default_pr().await?.unwrap();
+            let pr = tester.get_default_pr_db().await?.unwrap();
 
             assert_eq!(pr.rollup, Some(RollupMode::Always));
             assert!(pr.is_approved());
@@ -890,7 +890,7 @@ approve = ["+approved"]
         run_test(pool, |mut tester| async {
             tester.post_comment("@bors r+ rollup-").await?;
             tester.expect_comments(1).await;
-            let pr = tester.get_default_pr().await?.unwrap();
+            let pr = tester.get_default_pr_db().await?.unwrap();
 
             assert_eq!(pr.rollup, Some(RollupMode::Maybe));
             assert!(pr.is_approved());
@@ -904,7 +904,7 @@ approve = ["+approved"]
         run_test(pool, |mut tester| async {
             tester.post_comment("@bors r+ p=10 rollup=never").await?;
             tester.expect_comments(1).await;
-            let pr = tester.get_default_pr().await?.unwrap();
+            let pr = tester.get_default_pr_db().await?.unwrap();
 
             assert_eq!(pr.priority, Some(10));
             assert_eq!(pr.rollup, Some(RollupMode::Never));
@@ -919,7 +919,7 @@ approve = ["+approved"]
         run_test(pool, |mut tester| async {
             tester.post_comment("@bors r=user1 rollup").await?;
             tester.expect_comments(1).await;
-            let pr = tester.get_default_pr().await?.unwrap();
+            let pr = tester.get_default_pr_db().await?.unwrap();
 
             assert_eq!(pr.rollup, Some(RollupMode::Always));
             assert_eq!(pr.approval_status.approver(), Some("user1"));
@@ -933,7 +933,7 @@ approve = ["+approved"]
         run_test(pool, |mut tester| async {
             tester.post_comment("@bors r=user1 rollup=always").await?;
             tester.expect_comments(1).await;
-            let pr = tester.get_default_pr().await?.unwrap();
+            let pr = tester.get_default_pr_db().await?.unwrap();
 
             assert_eq!(pr.rollup, Some(RollupMode::Always));
             assert_eq!(pr.approval_status.approver(), Some("user1"));
@@ -949,7 +949,7 @@ approve = ["+approved"]
                 .post_comment("@bors r=user1 rollup=always priority=10")
                 .await?;
             tester.expect_comments(1).await;
-            let pr = tester.get_default_pr().await?.unwrap();
+            let pr = tester.get_default_pr_db().await?.unwrap();
 
             assert_eq!(pr.rollup, Some(RollupMode::Always));
             assert_eq!(pr.priority, Some(10));
@@ -966,7 +966,7 @@ approve = ["+approved"]
                 .post_comment("@bors r=user1 rollup- priority=10")
                 .await?;
             tester.expect_comments(1).await;
-            let pr = tester.get_default_pr().await?.unwrap();
+            let pr = tester.get_default_pr_db().await?.unwrap();
 
             assert_eq!(pr.rollup, Some(RollupMode::Maybe));
             assert_eq!(pr.priority, Some(10));
@@ -982,7 +982,7 @@ approve = ["+approved"]
             tester.post_comment("@bors rollup").await?;
             tester
                 .wait_for(|| async {
-                    let Some(pr) = tester.get_default_pr().await? else {
+                    let Some(pr) = tester.get_default_pr_db().await? else {
                         return Ok(false);
                     };
                     Ok(pr.rollup == Some(RollupMode::Always))
@@ -999,7 +999,7 @@ approve = ["+approved"]
             tester.post_comment("@bors rollup=maybe").await?;
             tester
                 .wait_for(|| async {
-                    let Some(pr) = tester.get_default_pr().await? else {
+                    let Some(pr) = tester.get_default_pr_db().await? else {
                         return Ok(false);
                     };
                     Ok(pr.rollup == Some(RollupMode::Maybe))
@@ -1016,7 +1016,7 @@ approve = ["+approved"]
             tester.post_comment("@bors rollup").await?;
             tester
                 .wait_for(|| async {
-                    let Some(pr) = tester.get_default_pr().await? else {
+                    let Some(pr) = tester.get_default_pr_db().await? else {
                         return Ok(false);
                     };
                     Ok(pr.rollup == Some(RollupMode::Always))
@@ -1026,7 +1026,7 @@ approve = ["+approved"]
             tester.post_comment("@bors r+").await?;
             tester.expect_comments(1).await;
 
-            let pr = tester.get_default_pr().await?.unwrap();
+            let pr = tester.get_default_pr_db().await?.unwrap();
 
             assert_eq!(pr.rollup, Some(RollupMode::Always));
             assert!(pr.is_approved());
@@ -1042,7 +1042,7 @@ approve = ["+approved"]
             tester.post_comment("@bors rollup=never").await?;
             tester
                 .wait_for(|| async {
-                    let Some(pr) = tester.get_default_pr().await? else {
+                    let Some(pr) = tester.get_default_pr_db().await? else {
                         return Ok(false);
                     };
                     Ok(pr.rollup == Some(RollupMode::Never))
@@ -1052,7 +1052,7 @@ approve = ["+approved"]
             tester.post_comment("@bors r+ rollup").await?;
             tester.expect_comments(1).await;
 
-            let pr = tester.get_default_pr().await?.unwrap();
+            let pr = tester.get_default_pr_db().await?.unwrap();
 
             assert_eq!(pr.rollup, Some(RollupMode::Always));
             assert!(pr.is_approved());
@@ -1068,7 +1068,7 @@ approve = ["+approved"]
             tester.post_comment("@bors r+").await?;
             tester.expect_comments(1).await;
 
-            let pr = tester.get_default_pr().await?.unwrap();
+            let pr = tester.get_default_pr_db().await?.unwrap();
 
             assert_eq!(
                 pr.approval_status.sha(),
@@ -1086,7 +1086,7 @@ approve = ["+approved"]
             tester.post_comment("@bors r+").await?;
             tester.expect_comments(1).await;
 
-            let pr = tester.get_default_pr().await?.unwrap();
+            let pr = tester.get_default_pr_db().await?.unwrap();
             assert_eq!(
                 pr.approval_status.sha(),
                 Some(format!("pr-{}-sha", default_pr_number())).as_deref()
@@ -1098,7 +1098,7 @@ approve = ["+approved"]
             tester.post_comment("@bors r+").await?;
             tester.expect_comments(1).await;
 
-            let pr = tester.get_default_pr().await?.unwrap();
+            let pr = tester.get_default_pr_db().await?.unwrap();
 
             assert_eq!(
                 pr.approval_status.sha(),
