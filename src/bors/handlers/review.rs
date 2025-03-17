@@ -220,6 +220,18 @@ pub(super) async fn command_open_tree(
     notify_of_tree_open(&repo_state, pr).await
 }
 
+fn sufficient_approve_permission(repo: Arc<RepositoryState>, author: &GithubUser) -> bool {
+    repo.permissions
+        .load()
+        .has_permission(author.id, PermissionType::Review)
+}
+
+fn sufficient_delegate_permission(repo: Arc<RepositoryState>, author: &GithubUser) -> bool {
+    repo.permissions
+        .load()
+        .has_permission(author.id, PermissionType::Review)
+}
+
 async fn notify_of_tree_closed(
     repo: &RepositoryState,
     pr: &PullRequest,
@@ -243,18 +255,6 @@ async fn notify_of_tree_open(repo: &RepositoryState, pr: &PullRequest) -> anyhow
             Comment::new("Tree is now open for merging".to_string()),
         )
         .await
-}
-
-fn sufficient_approve_permission(repo: Arc<RepositoryState>, author: &GithubUser) -> bool {
-    repo.permissions
-        .load()
-        .has_permission(author.id, PermissionType::Review)
-}
-
-fn sufficient_delegate_permission(repo: Arc<RepositoryState>, author: &GithubUser) -> bool {
-    repo.permissions
-        .load()
-        .has_permission(author.id, PermissionType::Review)
 }
 
 async fn notify_of_unapproval(repo: &RepositoryState, pr: &PullRequest) -> anyhow::Result<()> {
