@@ -371,7 +371,7 @@ impl BorsTester {
             )
             .await
             .unwrap();
-        assert_eq!(pr_in_db.approval_status.approver(), Some(approved_by));
+        assert_eq!(pr_in_db.approver(), Some(approved_by));
         let repo = self.default_repo();
         let pr = repo.lock().get_pr(default_pr_number()).clone();
         pr.check_added_labels(&["approved"]);

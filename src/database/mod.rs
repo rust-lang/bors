@@ -128,22 +128,6 @@ pub enum ApprovalStatus {
     Approved(ApprovalInfo),
 }
 
-impl ApprovalStatus {
-    pub fn approver(&self) -> Option<&str> {
-        match self {
-            ApprovalStatus::Approved(info) => Some(info.approver.as_str()),
-            ApprovalStatus::NotApproved => None,
-        }
-    }
-
-    pub fn sha(&self) -> Option<&str> {
-        match self {
-            ApprovalStatus::Approved(info) => Some(info.sha.as_str()),
-            ApprovalStatus::NotApproved => None,
-        }
-    }
-}
-
 impl sqlx::Type<sqlx::Postgres> for ApprovalStatus {
     fn type_info() -> sqlx::postgres::PgTypeInfo {
         <(Option<String>, Option<String>) as sqlx::Type<sqlx::Postgres>>::type_info()
@@ -243,6 +227,20 @@ pub struct PullRequestModel {
 impl PullRequestModel {
     pub fn is_approved(&self) -> bool {
         matches!(self.approval_status, ApprovalStatus::Approved(_))
+    }
+
+    pub fn approver(&self) -> Option<&str> {
+        match &self.approval_status {
+            ApprovalStatus::Approved(info) => Some(info.approver.as_str()),
+            ApprovalStatus::NotApproved => None,
+        }
+    }
+
+    pub fn approved_sha(&self) -> Option<&str> {
+        match &self.approval_status {
+            ApprovalStatus::Approved(info) => Some(info.sha.as_str()),
+            ApprovalStatus::NotApproved => None,
+        }
     }
 }
 

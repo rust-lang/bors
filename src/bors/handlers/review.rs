@@ -436,7 +436,7 @@ mod tests {
             tester.expect_comments(1).await;
             let pr = tester.get_default_pr_db().await?.unwrap();
             assert_eq!(pr.priority, Some(10));
-            assert_eq!(pr.approval_status.approver(), Some("user1"));
+            assert_eq!(pr.approver(), Some("user1"));
             Ok(tester)
         })
         .await;
@@ -906,7 +906,7 @@ approve = ["+approved"]
             let pr = tester.get_default_pr_db().await?.unwrap();
 
             assert_eq!(pr.rollup, Some(RollupMode::Always));
-            assert_eq!(pr.approval_status.approver(), Some("user1"));
+            assert_eq!(pr.approver(), Some("user1"));
             Ok(tester)
         })
         .await;
@@ -920,7 +920,7 @@ approve = ["+approved"]
             let pr = tester.get_default_pr_db().await?.unwrap();
 
             assert_eq!(pr.rollup, Some(RollupMode::Always));
-            assert_eq!(pr.approval_status.approver(), Some("user1"));
+            assert_eq!(pr.approver(), Some("user1"));
             Ok(tester)
         })
         .await;
@@ -937,7 +937,7 @@ approve = ["+approved"]
 
             assert_eq!(pr.rollup, Some(RollupMode::Always));
             assert_eq!(pr.priority, Some(10));
-            assert_eq!(pr.approval_status.approver(), Some("user1"));
+            assert_eq!(pr.approver(), Some("user1"));
             Ok(tester)
         })
         .await;
@@ -954,7 +954,7 @@ approve = ["+approved"]
 
             assert_eq!(pr.rollup, Some(RollupMode::Maybe));
             assert_eq!(pr.priority, Some(10));
-            assert_eq!(pr.approval_status.approver(), Some("user1"));
+            assert_eq!(pr.approver(), Some("user1"));
             Ok(tester)
         })
         .await;
@@ -1055,7 +1055,7 @@ approve = ["+approved"]
             let pr = tester.get_default_pr_db().await?.unwrap();
 
             assert_eq!(
-                pr.approval_status.sha(),
+                pr.approved_sha(),
                 Some(format!("pr-{}-sha", default_pr_number())).as_deref()
             );
 
@@ -1072,7 +1072,7 @@ approve = ["+approved"]
 
             let pr = tester.get_default_pr_db().await?.unwrap();
             assert_eq!(
-                pr.approval_status.sha(),
+                pr.approved_sha(),
                 Some(format!("pr-{}-sha", default_pr_number())).as_deref()
             );
 
@@ -1085,7 +1085,7 @@ approve = ["+approved"]
             let pr = tester.get_default_pr_db().await?.unwrap();
 
             assert_eq!(
-                pr.approval_status.sha(),
+                pr.approved_sha(),
                 Some(format!("pr-{}-sha-1", default_pr_number())).as_deref()
             );
 
