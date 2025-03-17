@@ -143,6 +143,7 @@ impl BorsTester {
         )
     }
 
+    //--- Getters for various test state ---//
     pub fn db(&self) -> Arc<PgDbClient> {
         self.db.clone()
     }
@@ -160,12 +161,6 @@ impl BorsTester {
                 default_mergeable_state(),
             )
             .await
-    }
-
-    pub async fn refresh(&self) {
-        self.global_tx.send(BorsGlobalEvent::Refresh).await.unwrap();
-        // Wait until the refresh is fully handled
-        WAIT_FOR_REFRESH.sync().await;
     }
 
     pub fn create_branch(&mut self, name: &str) -> MappedMutexGuard<RawMutex, Branch> {
@@ -215,17 +210,15 @@ impl BorsTester {
             .content)
     }
 
-    /// Expect that `count` comments will be received, without checking their contents.
-    pub async fn expect_comments(&mut self, count: u64) {
-        for i in 0..count {
-            self.get_comment()
-                .await
-                .unwrap_or_else(|_| panic!("Failed to get comment #{i}"));
-        }
-    }
-
+    //-- Generation of GitHub events --//
     pub async fn post_comment<C: Into<Comment>>(&mut self, comment: C) -> anyhow::Result<()> {
         self.webhook_comment(comment.into()).await
+    }
+
+    pub async fn refresh(&self) {
+        self.global_tx.send(BorsGlobalEvent::Refresh).await.unwrap();
+        // Wait until the refresh is fully handled
+        WAIT_FOR_REFRESH.sync().await;
     }
 
     /// Performs a single started/success/failure workflow event.
@@ -350,6 +343,52 @@ impl BorsTester {
             .await
     }
 
+    //-- Test assertions --//
+    /// Expect that `count` comments will be received, without checking their contents.
+    pub async fn expect_comments(&mut self, count: u64) {
+        for i in 0..count {
+            self.get_comment()
+                .await
+                .unwrap_or_else(|_| panic!("Failed to get comment #{i}"));
+        }
+    }
+
+    /// Wait until the given condition is true.
+    /// Checks the condition every 500ms.
+    /// Times out if it takes too long (more than 5s).
+    ///
+    /// This method is useful if you execute a command that produces no comment as an output
+    /// and you need to wait until it has been processed by bors.
+    /// Prefer using [BorsTester::expect_comments] or [BorsTester::get_comment] to synchronize
+    /// if you are waiting for a comment to be posted to a PR.
+    pub async fn wait_for<F, Fut>(&self, condition: F) -> anyhow::Result<()>
+    where
+        F: Fn() -> Fut,
+        Fut: Future<Output = anyhow::Result<bool>>,
+    {
+        let wait_fut = async move {
+            loop {
+                let fut = condition();
+                match fut.await {
+                    Ok(res) => {
+                        if res {
+                            return Ok(());
+                        } else {
+                            tokio::time::sleep(Duration::from_millis(500)).await;
+                        }
+                    }
+                    Err(error) => {
+                        return Err(error);
+                    }
+                }
+            }
+        };
+        tokio::time::timeout(Duration::from_secs(5), wait_fut)
+            .await
+            .unwrap_or_else(|_| Err(anyhow::anyhow!("Timed out waiting for condition")))
+    }
+
+    //-- Internal helper functions --/
     async fn webhook_comment(&mut self, comment: Comment) -> anyhow::Result<()> {
         self.send_webhook(
             "issue_comment",
@@ -400,42 +439,7 @@ impl BorsTester {
         Ok(())
     }
 
-    /// Wait until the given condition is true.
-    /// Checks the condition every 500ms.
-    /// Times out if it takes too long (more than 5s).
-    ///
-    /// This method is useful if you execute a command that produces no comment as an output
-    /// and you need to wait until it has been processed by bors.
-    /// Prefer using [BorsTester::expect_comments] or [BorsTester::get_comment] to synchronize
-    /// if you are waiting for a comment to be posted to a PR.
-    pub async fn wait_for<F, Fut>(&self, condition: F) -> anyhow::Result<()>
-    where
-        F: Fn() -> Fut,
-        Fut: Future<Output = anyhow::Result<bool>>,
-    {
-        let wait_fut = async move {
-            loop {
-                let fut = condition();
-                match fut.await {
-                    Ok(res) => {
-                        if res {
-                            return Ok(());
-                        } else {
-                            tokio::time::sleep(Duration::from_millis(500)).await;
-                        }
-                    }
-                    Err(error) => {
-                        return Err(error);
-                    }
-                }
-            }
-        };
-        tokio::time::timeout(Duration::from_secs(5), wait_fut)
-            .await
-            .unwrap_or_else(|_| Err(anyhow::anyhow!("Timed out waiting for condition")))
-    }
-
-    pub async fn finish(self, bors: JoinHandle<()>) -> GitHubState {
+    async fn finish(self, bors: JoinHandle<()>) -> GitHubState {
         // Make sure that the event channel senders are closed
         drop(self.app);
         drop(self.global_tx);
