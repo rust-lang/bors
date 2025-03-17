@@ -547,7 +547,7 @@ mod tests {
     #[sqlx::test]
     async fn cannot_approve_without_delegation(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
-            .github(GitHubState::with_unauthorized_pr_author())
+            .github(GitHubState::unauthorized_pr_author())
             .run_test(|mut tester| async {
                 tester.post_comment("@bors r+").await?;
                 insta::assert_snapshot!(
@@ -562,7 +562,7 @@ mod tests {
     #[sqlx::test]
     async fn delegate_author(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
-            .github(GitHubState::with_unauthorized_pr_author())
+            .github(GitHubState::unauthorized_pr_author())
             .run_test(|mut tester| async {
                 tester
                     .post_comment(review_comment("@bors delegate+"))
@@ -581,7 +581,7 @@ mod tests {
     #[sqlx::test]
     async fn delegatee_can_approve(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
-            .github(GitHubState::with_unauthorized_pr_author())
+            .github(GitHubState::unauthorized_pr_author())
             .run_test(|mut tester| async {
                 tester
                     .post_comment(review_comment("@bors delegate+"))
@@ -603,7 +603,7 @@ mod tests {
     #[sqlx::test]
     async fn delegatee_can_try(pool: sqlx::PgPool) {
         let gh = BorsBuilder::new(pool)
-            .github(GitHubState::with_unauthorized_pr_author())
+            .github(GitHubState::unauthorized_pr_author())
             .run_test(|mut tester| async {
                 tester
                     .post_comment(review_comment("@bors delegate+"))
@@ -630,7 +630,7 @@ mod tests {
     #[sqlx::test]
     async fn delegatee_can_set_priority(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
-            .github(GitHubState::with_unauthorized_pr_author())
+            .github(GitHubState::unauthorized_pr_author())
             .run_test(|mut tester| async {
                 tester
                     .post_comment(review_comment("@bors delegate+"))
@@ -655,7 +655,7 @@ mod tests {
     #[sqlx::test]
     async fn delegate_insufficient_permission(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
-            .github(GitHubState::with_unauthorized_pr_author())
+            .github(GitHubState::unauthorized_pr_author())
             .run_test(|mut tester| async {
                 tester.post_comment("@bors delegate+").await?;
                 insta::assert_snapshot!(
@@ -672,7 +672,7 @@ mod tests {
     #[sqlx::test]
     async fn undelegate_by_reviewer(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
-            .github(GitHubState::with_unauthorized_pr_author())
+            .github(GitHubState::unauthorized_pr_author())
             .run_test(|mut tester| async {
                 tester
                     .post_comment(review_comment("@bors delegate+"))
@@ -700,7 +700,7 @@ mod tests {
     #[sqlx::test]
     async fn undelegate_by_delegatee(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
-            .github(GitHubState::with_unauthorized_pr_author())
+            .github(GitHubState::unauthorized_pr_author())
             .run_test(|mut tester| async {
                 tester
                     .post_comment(review_comment("@bors delegate+"))
@@ -725,7 +725,7 @@ mod tests {
     #[sqlx::test]
     async fn reviewer_unapprove_delegated_approval(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
-            .github(GitHubState::with_unauthorized_pr_author())
+            .github(GitHubState::unauthorized_pr_author())
             .run_test(|mut tester| async {
                 tester
                     .post_comment(review_comment("@bors delegate+"))
@@ -752,7 +752,7 @@ mod tests {
     #[sqlx::test]
     async fn non_author_cannot_use_delegation(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
-            .github(GitHubState::with_unauthorized_pr_author())
+            .github(GitHubState::unauthorized_pr_author())
             .run_test(|mut tester| async {
                 tester
                     .post_comment(review_comment("@bors delegate+"))

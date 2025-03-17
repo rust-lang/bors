@@ -341,7 +341,6 @@ handled during merge and rebase. This is normal, and you should still perform st
 mod tests {
     use crate::bors::handlers::trybuild::{TRY_BRANCH_NAME, TRY_MERGE_BRANCH_NAME};
     use crate::database::operations::get_all_workflows;
-    use crate::database::BuildStatus;
     use crate::github::CommitSha;
     use crate::tests::mocks::{
         default_pr_number, default_repo_name, run_test, BorsBuilder, Comment, GitHubState, User,
@@ -394,9 +393,9 @@ mod tests {
             tester
                 .post_comment(Comment::from("@bors try").with_author(User::unprivileged()))
                 .await?;
-            assert_eq!(
+            insta::assert_snapshot!(
                 tester.get_comment().await?,
-                "@unprivileged-user: :key: Insufficient privileges: not in try users"
+                @"@unprivileged-user: :key: Insufficient privileges: not in try users"
             );
             Ok(tester)
         })
@@ -409,9 +408,9 @@ mod tests {
             tester
                 .post_comment(Comment::from("@bors try").with_author(User::try_user()))
                 .await?;
-            assert_eq!(
+            insta::assert_snapshot!(
                 tester.get_comment().await?,
-                ":hourglass: Trying commit pr-1-sha with merge merge-main-sha1-pr-1-sha-0…"
+                @":hourglass: Trying commit pr-1-sha with merge merge-main-sha1-pr-1-sha-0…"
             );
             Ok(tester)
         })
@@ -422,9 +421,9 @@ mod tests {
     async fn try_merge_comment(pool: sqlx::PgPool) {
         run_test(pool, |mut tester| async {
             tester.post_comment("@bors try").await?;
-            assert_eq!(
+            insta::assert_snapshot!(
                 tester.get_comment().await?,
-                ":hourglass: Trying commit pr-1-sha with merge merge-main-sha1-pr-1-sha-0…"
+                @":hourglass: Trying commit pr-1-sha with merge merge-main-sha1-pr-1-sha-0…"
             );
             Ok(tester)
         })
@@ -674,8 +673,8 @@ mod tests {
             tester.expect_comments(1).await;
             tester.post_comment("@bors try cancel").await?;
             tester.expect_comments(1).await;
-            let pr = tester.default_pr_db().await?.unwrap();
-            assert_eq!(pr.try_build.unwrap().status, BuildStatus::Cancelled);
+
+            tester.default_pr().await.expect_try_build_cancelled();
             Ok(tester)
         })
         .await;
@@ -744,15 +743,11 @@ mod tests {
 
     #[sqlx::test]
     async fn try_build_start_modify_labels(pool: sqlx::PgPool) {
-        let gh = GitHubState::default();
-        gh.default_repo().lock().set_config(
-            r#"
+        BorsBuilder::new(pool)
+            .github(GitHubState::default().with_default_config(r#"
 [labels]
 try = ["+foo", "+bar", "-baz"]
-"#,
-        );
-        BorsBuilder::new(pool)
-            .github(gh)
+"#))
             .run_test(|mut tester| async {
                 tester.post_comment("@bors try").await?;
                 insta::assert_snapshot!(tester.get_comment().await?, @":hourglass: Trying commit pr-1-sha with merge merge-main-sha1-pr-1-sha-0…");
@@ -767,15 +762,11 @@ try = ["+foo", "+bar", "-baz"]
 
     #[sqlx::test]
     async fn try_build_succeeded_modify_labels(pool: sqlx::PgPool) {
-        let gh = GitHubState::default();
-        gh.default_repo().lock().set_config(
-            r#"
+        BorsBuilder::new(pool)
+            .github(GitHubState::default().with_default_config(r#"
 [labels]
 try_succeed = ["+foo", "+bar", "-baz"]
-"#,
-        );
-        BorsBuilder::new(pool)
-            .github(gh)
+"#))
             .run_test(|mut tester| async {
                 tester.post_comment("@bors try").await?;
                 insta::assert_snapshot!(tester.get_comment().await?, @":hourglass: Trying commit pr-1-sha with merge merge-main-sha1-pr-1-sha-0…");
@@ -795,15 +786,11 @@ try_succeed = ["+foo", "+bar", "-baz"]
 
     #[sqlx::test]
     async fn try_build_failed_modify_labels(pool: sqlx::PgPool) {
-        let gh = GitHubState::default();
-        gh.default_repo().lock().set_config(
-            r#"
+        BorsBuilder::new(pool)
+            .github(GitHubState::default().with_default_config(r#"
 [labels]
 try_failed = ["+foo", "+bar", "-baz"]
-"#,
-        );
-        BorsBuilder::new(pool)
-            .github(gh)
+"#))
             .run_test(|mut tester| async {
                 tester.create_branch(TRY_BRANCH_NAME).expect_suites(1);
                 tester.post_comment("@bors try").await?;

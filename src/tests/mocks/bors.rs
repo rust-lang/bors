@@ -13,7 +13,7 @@ use tokio::task::JoinHandle;
 use tower::Service;
 
 use crate::bors::{RollupMode, WAIT_FOR_REFRESH};
-use crate::database::PullRequestModel;
+use crate::database::{BuildStatus, PullRequestModel};
 use crate::github::api::load_repositories;
 use crate::github::{GithubRepoName, PullRequestNumber};
 use crate::tests::mocks::comment::{Comment, GitHubIssueCommentEventPayload};
@@ -536,6 +536,14 @@ impl PullRequestProxy {
     pub fn expect_approved_sha(&self, sha: &str) -> &Self {
         assert_eq!(self.require_db_pr().approved_sha(), Some(sha));
         self
+    }
+
+    #[track_caller]
+    pub fn expect_try_build_cancelled(&self) {
+        assert_eq!(
+            self.require_db_pr().try_build.as_ref().unwrap().status,
+            BuildStatus::Cancelled
+        );
     }
 
     #[track_caller]

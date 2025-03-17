@@ -50,7 +50,7 @@ impl GitHubState {
     }
 
     /// Creates a new GitHubState where the default PR author has no permissions.
-    pub fn with_unauthorized_pr_author() -> Self {
+    pub fn unauthorized_pr_author() -> Self {
         let state = Self::default();
         state
             .default_repo()
@@ -59,6 +59,11 @@ impl GitHubState {
             .users
             .insert(User::default_pr_author(), vec![]);
         state
+    }
+
+    pub fn with_default_config(self, config: &str) -> Self {
+        self.default_repo().lock().config = config.to_string();
+        self
     }
 
     pub fn default_repo(&self) -> Arc<Mutex<Repo>> {

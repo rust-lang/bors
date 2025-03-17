@@ -126,16 +126,17 @@ mod tests {
         .await;
     }
 
-    #[sqlx::test]
-    async fn refresh_do_nothing_before_timeout(pool: sqlx::PgPool) {
-        let gh = GitHubState::default();
-        gh.default_repo().lock().set_config(
+    fn gh_state_with_long_timeout() -> GitHubState {
+        GitHubState::default().with_default_config(
             r#"
 timeout = 3600
 "#,
-        );
+        )
+    }
+    #[sqlx::test]
+    async fn refresh_do_nothing_before_timeout(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
-            .github(gh)
+            .github(gh_state_with_long_timeout())
             .run_test(|mut tester| async move {
                 tester.post_comment("@bors try").await?;
                 tester.expect_comments(1).await;
@@ -150,14 +151,8 @@ timeout = 3600
 
     #[sqlx::test]
     async fn refresh_cancel_build_after_timeout(pool: sqlx::PgPool) {
-        let gh = GitHubState::default();
-        gh.default_repo().lock().set_config(
-            r#"
-timeout = 3600
-"#,
-        );
         BorsBuilder::new(pool)
-            .github(gh)
+            .github(gh_state_with_long_timeout())
             .run_test(|mut tester| async move {
                 tester.post_comment("@bors try").await?;
                 tester.expect_comments(1).await;
@@ -191,14 +186,8 @@ timeout = 3600
 
     #[sqlx::test]
     async fn refresh_cancel_workflow_after_timeout(pool: sqlx::PgPool) {
-        let gh = GitHubState::default();
-        gh.default_repo().lock().set_config(
-            r#"
-timeout = 3600
-"#,
-        );
         let gh = BorsBuilder::new(pool)
-            .github(gh)
+            .github(gh_state_with_long_timeout())
             .run_test(|mut tester| async move {
                 tester.post_comment("@bors try").await?;
                 tester.expect_comments(1).await;

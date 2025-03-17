@@ -138,10 +138,6 @@ impl Repo {
         self.pull_requests.get_mut(&pr).unwrap()
     }
 
-    pub fn set_config(&mut self, config: &str) {
-        self.config = config.to_string();
-    }
-
     pub fn get_branch_by_name(&mut self, name: &str) -> Option<&mut Branch> {
         self.branches.iter_mut().find(|b| b.name == name)
     }
