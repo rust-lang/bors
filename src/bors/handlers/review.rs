@@ -298,7 +298,6 @@ async fn notify_of_delegation(
 #[cfg(test)]
 mod tests {
     use crate::database::TreeState;
-    use crate::tests::mocks::create_gh_with_approve_config;
     use crate::{
         bors::{
             handlers::{trybuild::TRY_MERGE_BRANCH_NAME, TRY_BRANCH_NAME},
@@ -313,56 +312,49 @@ mod tests {
 
     #[sqlx::test]
     async fn default_approve(pool: sqlx::PgPool) {
-        BorsBuilder::new(pool)
-            .github(create_gh_with_approve_config())
-            .run_test(|mut tester| async {
-                tester.post_comment("@bors r+").await?;
-                assert_eq!(
-                    tester.get_comment().await?,
-                    format!(
-                        "Commit pr-{}-sha has been approved by `{}`",
-                        default_pr_number(),
-                        User::default_pr_author().name
-                    ),
-                );
+        run_test(pool, |mut tester| async {
+            tester.post_comment("@bors r+").await?;
+            assert_eq!(
+                tester.get_comment().await?,
+                format!(
+                    "Commit pr-{}-sha has been approved by `{}`",
+                    default_pr_number(),
+                    User::default_pr_author().name
+                ),
+            );
 
-                let pr = tester.get_default_pr_db().await?.unwrap();
-                assert!(pr.rollup.is_none());
+            let pr = tester.get_default_pr_db().await?.unwrap();
+            assert!(pr.rollup.is_none());
 
-                tester
-                    .expect_pr_approved_by(
-                        default_pr_number().into(),
-                        &User::default_pr_author().name,
-                    )
-                    .await;
-                Ok(tester)
-            })
-            .await;
+            tester
+                .expect_pr_approved_by(default_pr_number().into(), &User::default_pr_author().name)
+                .await;
+            Ok(tester)
+        })
+        .await;
     }
 
     #[sqlx::test]
     async fn approve_on_behalf(pool: sqlx::PgPool) {
-        BorsBuilder::new(pool)
-            .github(create_gh_with_approve_config())
-            .run_test(|mut tester| async {
-                let approve_user = "user1";
-                tester
-                    .post_comment(format!(r#"@bors r={approve_user}"#).as_str())
-                    .await?;
-                assert_eq!(
-                    tester.get_comment().await?,
-                    format!(
-                        "Commit pr-{}-sha has been approved by `{approve_user}`",
-                        default_pr_number(),
-                    ),
-                );
+        run_test(pool, |mut tester| async {
+            let approve_user = "user1";
+            tester
+                .post_comment(format!(r#"@bors r={approve_user}"#).as_str())
+                .await?;
+            assert_eq!(
+                tester.get_comment().await?,
+                format!(
+                    "Commit pr-{}-sha has been approved by `{approve_user}`",
+                    default_pr_number(),
+                ),
+            );
 
-                tester
-                    .expect_pr_approved_by(default_pr_number().into(), approve_user)
-                    .await;
-                Ok(tester)
-            })
-            .await;
+            tester
+                .expect_pr_approved_by(default_pr_number().into(), approve_user)
+                .await;
+            Ok(tester)
+        })
+        .await;
     }
 
     #[sqlx::test]
@@ -398,35 +390,30 @@ mod tests {
 
     #[sqlx::test]
     async fn unapprove(pool: sqlx::PgPool) {
-        BorsBuilder::new(pool)
-            .github(create_gh_with_approve_config())
-            .run_test(|mut tester| async {
-                tester.post_comment("@bors r+").await?;
-                assert_eq!(
-                    tester.get_comment().await?,
-                    format!(
-                        "Commit pr-{}-sha has been approved by `{}`",
-                        default_pr_number(),
-                        User::default_pr_author().name
-                    ),
-                );
-                tester
-                    .expect_pr_approved_by(
-                        default_pr_number().into(),
-                        &User::default_pr_author().name,
-                    )
-                    .await;
-                tester.post_comment("@bors r-").await?;
-                assert_eq!(
-                    tester.get_comment().await?,
-                    format!("Commit pr-{}-sha has been unapproved", default_pr_number()),
-                );
-                tester
-                    .expect_pr_unapproved(default_pr_number().into())
-                    .await;
-                Ok(tester)
-            })
-            .await;
+        run_test(pool, |mut tester| async {
+            tester.post_comment("@bors r+").await?;
+            assert_eq!(
+                tester.get_comment().await?,
+                format!(
+                    "Commit pr-{}-sha has been approved by `{}`",
+                    default_pr_number(),
+                    User::default_pr_author().name
+                ),
+            );
+            tester
+                .expect_pr_approved_by(default_pr_number().into(), &User::default_pr_author().name)
+                .await;
+            tester.post_comment("@bors r-").await?;
+            assert_eq!(
+                tester.get_comment().await?,
+                format!("Commit pr-{}-sha has been unapproved", default_pr_number()),
+            );
+            tester
+                .expect_pr_unapproved(default_pr_number().into())
+                .await;
+            Ok(tester)
+        })
+        .await;
     }
 
     #[sqlx::test]
@@ -525,31 +512,28 @@ mod tests {
 
     #[sqlx::test]
     async fn tree_closed_with_priority(pool: sqlx::PgPool) {
-        let gh = create_gh_with_approve_config();
-        BorsBuilder::new(pool)
-            .github(gh)
-            .run_test(|mut tester| async {
-                tester.post_comment("@bors treeclosed=5").await?;
-                assert_eq!(
-                    tester.get_comment().await?,
-                    "Tree closed for PRs with priority less than 5"
-                );
+        run_test(pool, |mut tester| async {
+            tester.post_comment("@bors treeclosed=5").await?;
+            assert_eq!(
+                tester.get_comment().await?,
+                "Tree closed for PRs with priority less than 5"
+            );
 
-                let repo = tester.db().get_repository(&default_repo_name()).await?;
-                assert_eq!(
-                    repo.unwrap().tree_state,
-                    TreeState::Closed {
-                        priority: 5,
-                        source: format!(
-                            "https://github.com/{}/pull/1#issuecomment-1",
-                            default_repo_name()
-                        ),
-                    }
-                );
+            let repo = tester.db().get_repository(&default_repo_name()).await?;
+            assert_eq!(
+                repo.unwrap().tree_state,
+                TreeState::Closed {
+                    priority: 5,
+                    source: format!(
+                        "https://github.com/{}/pull/1#issuecomment-1",
+                        default_repo_name()
+                    ),
+                }
+            );
 
-                Ok(tester)
-            })
-            .await;
+            Ok(tester)
+        })
+        .await;
     }
 
     #[sqlx::test]

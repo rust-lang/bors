@@ -132,78 +132,73 @@ mod tests {
         github::PullRequestNumber,
         tests::mocks::{
             default_branch_name, default_branch_sha, default_pr_number, default_repo_name,
-            run_test, BorsBuilder, GitHubPullRequest, PullRequestChangeEvent, User,
+            run_test, GitHubPullRequest, PullRequestChangeEvent, User,
         },
     };
 
     #[sqlx::test]
     async fn unapprove_on_base_edited(pool: sqlx::PgPool) {
-        BorsBuilder::new(pool)
-            .run_test(|mut tester| async {
-                tester.post_comment("@bors r+").await?;
-                assert_eq!(
-                    tester.get_comment().await?,
-                    format!(
-                        "Commit pr-{}-sha has been approved by `{}`",
-                        default_pr_number(),
-                        User::default_pr_author().name
-                    ),
-                );
-                tester
-                    .edit_pull_request(
-                        default_pr_number(),
-                        PullRequestChangeEvent {
-                            from_base_sha: Some("main-sha".to_string()),
-                            from_base_ref: Some("main".to_string()),
-                        },
-                    )
-                    .await?;
+        run_test(pool, |mut tester| async {
+            tester.post_comment("@bors r+").await?;
+            assert_eq!(
+                tester.get_comment().await?,
+                format!(
+                    "Commit pr-{}-sha has been approved by `{}`",
+                    default_pr_number(),
+                    User::default_pr_author().name
+                ),
+            );
+            tester
+                .edit_pull_request(
+                    default_pr_number(),
+                    PullRequestChangeEvent {
+                        from_base_sha: Some("main-sha".to_string()),
+                        from_base_ref: Some("main".to_string()),
+                    },
+                )
+                .await?;
 
-                assert_eq!(
-                    tester.get_comment().await?,
-                    r#":warning: The base branch changed to `main`, and the
+            assert_eq!(
+                tester.get_comment().await?,
+                r#":warning: The base branch changed to `main`, and the
 PR will need to be re-approved."#,
-                );
-                tester
-                    .expect_pr_unapproved(default_pr_number().into())
-                    .await;
-                Ok(tester)
-            })
-            .await;
+            );
+            tester
+                .expect_pr_unapproved(default_pr_number().into())
+                .await;
+            Ok(tester)
+        })
+        .await;
     }
 
     #[sqlx::test]
     async fn edit_pr_do_nothing_when_base_not_edited(pool: sqlx::PgPool) {
-        BorsBuilder::new(pool)
-            .run_test(|mut tester| async {
-                tester.post_comment("@bors r+").await?;
-                assert_eq!(
-                    tester.get_comment().await?,
-                    format!(
-                        "Commit pr-{}-sha has been approved by `{}`",
-                        default_pr_number(),
-                        User::default_pr_author().name
-                    ),
-                );
-                tester
-                    .edit_pull_request(
-                        default_pr_number(),
-                        PullRequestChangeEvent {
-                            from_base_sha: None,
-                            from_base_ref: None,
-                        },
-                    )
-                    .await?;
+        run_test(pool, |mut tester| async {
+            tester.post_comment("@bors r+").await?;
+            assert_eq!(
+                tester.get_comment().await?,
+                format!(
+                    "Commit pr-{}-sha has been approved by `{}`",
+                    default_pr_number(),
+                    User::default_pr_author().name
+                ),
+            );
+            tester
+                .edit_pull_request(
+                    default_pr_number(),
+                    PullRequestChangeEvent {
+                        from_base_sha: None,
+                        from_base_ref: None,
+                    },
+                )
+                .await?;
 
-                tester
-                    .expect_pr_approved_by(
-                        default_pr_number().into(),
-                        &User::default_pr_author().name,
-                    )
-                    .await;
-                Ok(tester)
-            })
-            .await;
+            tester
+                .expect_pr_approved_by(default_pr_number().into(), &User::default_pr_author().name)
+                .await;
+            Ok(tester)
+        })
+        .await;
     }
 
     #[sqlx::test]
@@ -227,33 +222,32 @@ PR will need to be re-approved."#,
 
     #[sqlx::test]
     async fn unapprove_on_push(pool: sqlx::PgPool) {
-        BorsBuilder::new(pool)
-            .run_test(|mut tester| async {
-                tester.post_comment("@bors r+").await?;
-                assert_eq!(
-                    tester.get_comment().await?,
-                    format!(
-                        "Commit pr-{}-sha has been approved by `{}`",
-                        default_pr_number(),
-                        User::default_pr_author().name
-                    ),
-                );
-                tester.push_to_pull_request(default_pr_number()).await?;
+        run_test(pool, |mut tester| async {
+            tester.post_comment("@bors r+").await?;
+            assert_eq!(
+                tester.get_comment().await?,
+                format!(
+                    "Commit pr-{}-sha has been approved by `{}`",
+                    default_pr_number(),
+                    User::default_pr_author().name
+                ),
+            );
+            tester.push_to_pull_request(default_pr_number()).await?;
 
-                assert_eq!(
-                    tester.get_comment().await?,
-                    format!(
-                        r#":warning: A new commit `pr-{}-sha` was pushed to the branch, the
+            assert_eq!(
+                tester.get_comment().await?,
+                format!(
+                    r#":warning: A new commit `pr-{}-sha` was pushed to the branch, the
 PR will need to be re-approved."#,
-                        default_pr_number()
-                    )
-                );
-                tester
-                    .expect_pr_unapproved(default_pr_number().into())
-                    .await;
-                Ok(tester)
-            })
-            .await;
+                    default_pr_number()
+                )
+            );
+            tester
+                .expect_pr_unapproved(default_pr_number().into())
+                .await;
+            Ok(tester)
+        })
+        .await;
     }
 
     #[sqlx::test]

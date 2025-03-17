@@ -144,14 +144,3 @@ fn dynamic_mock_req<
             f(req, captured)
         })
 }
-
-pub fn create_gh_with_approve_config() -> GitHubState {
-    let gh = GitHubState::default();
-    gh.default_repo().lock().set_config(
-        r#"
-[labels]
-approve = ["+approved"]
-"#,
-    );
-    gh
-}

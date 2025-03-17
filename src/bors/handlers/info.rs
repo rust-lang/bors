@@ -62,119 +62,109 @@ pub(super) async fn command_info(
 
 #[cfg(test)]
 mod tests {
-    use crate::tests::mocks::{create_gh_with_approve_config, BorsBuilder, GitHubState};
+    use crate::tests::mocks::run_test;
 
     #[sqlx::test]
     async fn info_for_unapproved_pr(pool: sqlx::PgPool) {
-        BorsBuilder::new(pool)
-            .github(GitHubState::default())
-            .run_test(|mut tester| async {
-                tester.post_comment("@bors info").await?;
-                insta::assert_snapshot!(
-                    tester.get_comment().await?,
-                    @r"
+        run_test(pool, |mut tester| async {
+            tester.post_comment("@bors info").await?;
+            insta::assert_snapshot!(
+                tester.get_comment().await?,
+                @r"
                 - **Not Approved:**
                 - **Priority:** Not set
                 "
-                );
-                Ok(tester)
-            })
-            .await;
+            );
+            Ok(tester)
+        })
+        .await;
     }
 
     #[sqlx::test]
     async fn info_for_approved_pr(pool: sqlx::PgPool) {
-        BorsBuilder::new(pool)
-            .github(create_gh_with_approve_config())
-            .run_test(|mut tester| async {
-                tester.post_comment("@bors r+").await?;
-                tester.expect_comments(1).await;
+        run_test(pool, |mut tester| async {
+            tester.post_comment("@bors r+").await?;
+            tester.expect_comments(1).await;
 
-                tester.post_comment("@bors info").await?;
-                insta::assert_snapshot!(
-                    tester.get_comment().await?,
-                    @r"
+            tester.post_comment("@bors info").await?;
+            insta::assert_snapshot!(
+                tester.get_comment().await?,
+                @r"
                 - **Approved by:** @default-user
                 - **Priority:** Not set
                 "
-                );
-                Ok(tester)
-            })
-            .await;
+            );
+            Ok(tester)
+        })
+        .await;
     }
 
     #[sqlx::test]
     async fn info_for_pr_with_priority(pool: sqlx::PgPool) {
-        BorsBuilder::new(pool)
-            .github(create_gh_with_approve_config())
-            .run_test(|mut tester| async {
-                tester.post_comment("@bors p=5").await?;
-                tester
-                    .wait_for(|| async {
-                        let Some(pr) = tester.get_default_pr_db().await? else {
-                            return Ok(false);
-                        };
-                        Ok(pr.priority == Some(5))
-                    })
-                    .await?;
+        run_test(pool, |mut tester| async {
+            tester.post_comment("@bors p=5").await?;
+            tester
+                .wait_for(|| async {
+                    let Some(pr) = tester.get_default_pr_db().await? else {
+                        return Ok(false);
+                    };
+                    Ok(pr.priority == Some(5))
+                })
+                .await?;
 
-                tester.post_comment("@bors info").await?;
-                insta::assert_snapshot!(
-                    tester.get_comment().await?,
-                    @r"
+            tester.post_comment("@bors info").await?;
+            insta::assert_snapshot!(
+                tester.get_comment().await?,
+                @r"
                 - **Not Approved:**
                 - **Priority:** 5
                 "
-                );
-                Ok(tester)
-            })
-            .await;
+            );
+            Ok(tester)
+        })
+        .await;
     }
 
     #[sqlx::test]
     async fn info_for_pr_with_try_build(pool: sqlx::PgPool) {
-        BorsBuilder::new(pool)
-            .github(create_gh_with_approve_config())
-            .run_test(|mut tester| async {
-                tester.post_comment("@bors try").await?;
-                tester.expect_comments(1).await;
+        run_test(pool, |mut tester| async {
+            tester.post_comment("@bors try").await?;
+            tester.expect_comments(1).await;
 
-                tester.post_comment("@bors info").await?;
-                insta::assert_snapshot!(
-                    tester.get_comment().await?,
-                    @r"
+            tester.post_comment("@bors info").await?;
+            insta::assert_snapshot!(
+                tester.get_comment().await?,
+                @r"
                 - **Not Approved:**
                 - **Priority:** Not set
                 - **Try build branch:** automation/bors/try
                 "
-                );
-                Ok(tester)
-            })
-            .await;
+            );
+            Ok(tester)
+        })
+        .await;
     }
 
     #[sqlx::test]
     async fn info_for_pr_with_everything(pool: sqlx::PgPool) {
-        BorsBuilder::new(pool)
-            .github(create_gh_with_approve_config())
-            .run_test(|mut tester| async {
-                tester.post_comment("@bors r+ p=10").await?;
-                tester.expect_comments(1).await;
+        run_test(pool, |mut tester| async {
+            tester.post_comment("@bors r+ p=10").await?;
+            tester.expect_comments(1).await;
 
-                tester.post_comment("@bors try").await?;
-                tester.expect_comments(1).await;
+            tester.post_comment("@bors try").await?;
+            tester.expect_comments(1).await;
 
-                tester.post_comment("@bors info").await?;
-                insta::assert_snapshot!(
-                    tester.get_comment().await?,
-                    @r"
+            tester.post_comment("@bors info").await?;
+            insta::assert_snapshot!(
+                tester.get_comment().await?,
+                @r"
                 - **Approved by:** @default-user
                 - **Priority:** 10
                 - **Try build branch:** automation/bors/try
                 "
-                );
-                Ok(tester)
-            })
-            .await;
+            );
+            Ok(tester)
+        })
+        .await;
     }
 }
