@@ -354,7 +354,7 @@ mod tests {
                 .await?;
             insta::assert_snapshot!(
                 tester.get_comment().await?,
-                @""
+                @"@unprivileged-user: :key: Insufficient privileges: not in try users"
             );
             Ok(tester)
         })
@@ -370,7 +370,7 @@ mod tests {
             tester.post_comment("@bors p=2").await?;
             insta::assert_snapshot!(
                 tester.get_comment().await?,
-                @""
+                @"@unprivileged-user: :key: Insufficient privileges: not in review users"
             );
             Ok(tester)
         })
@@ -392,7 +392,7 @@ mod tests {
             tester.post_comment("@bors r-").await?;
             insta::assert_snapshot!(
                 tester.get_comment().await?,
-                @""
+                @"Commit pr-1-sha has been unapproved"
             );
 
             tester.default_pr().await.expect_unapproved();
@@ -502,7 +502,7 @@ mod tests {
             tester.post_comment("@bors treeclosed=5").await?;
             insta::assert_snapshot!(
                 tester.get_comment().await?,
-                @""
+                @"Tree closed for PRs with priority less than 5"
             );
 
             let repo = tester.db().repo_db(&default_repo_name()).await?;
@@ -533,7 +533,7 @@ mod tests {
                 tester.post_comment("@bors treeclosed=5").await?;
                 insta::assert_snapshot!(
                     tester.get_comment().await?,
-                    @""
+                    @"@default-user: :key: Insufficient privileges: not in review users"
                 );
                 Ok(tester)
             })
@@ -569,7 +569,7 @@ mod tests {
                     .await?;
                 insta::assert_snapshot!(
                     tester.get_comment().await?,
-                    @""
+                    @"@default-user can now approve this pull request"
                 );
 
                 tester.default_pr().await.expect_delegated();
@@ -660,7 +660,7 @@ mod tests {
                 tester.post_comment("@bors delegate+").await?;
                 insta::assert_snapshot!(
                     tester.get_comment().await?,
-                    @""
+                    @"@default-user: :key: Insufficient privileges: not in review users"
                 );
 
                 assert!(tester.default_pr_db().await?.is_none());
