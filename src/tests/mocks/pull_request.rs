@@ -1,3 +1,11 @@
+use super::{
+    comment::{Comment, GitHubComment},
+    default_repo_name, dynamic_mock_req,
+    repository::GitHubRepository,
+    user::GitHubUser,
+    Repo, User,
+};
+use crate::tests::mocks::repository::PullRequest;
 use crate::{database::MergeableState, github::GithubRepoName};
 use octocrab::models::pulls::MergeableState as OctocrabMergeableState;
 use octocrab::models::LabelId;
@@ -9,14 +17,6 @@ use url::Url;
 use wiremock::{
     matchers::{method, path},
     Mock, MockServer, Request, ResponseTemplate,
-};
-
-use super::{
-    comment::{Comment, GitHubComment},
-    default_repo_name, dynamic_mock_req,
-    repository::GitHubRepository,
-    user::GitHubUser,
-    Repo, User,
 };
 
 pub fn default_pr_number() -> u64 {
@@ -43,13 +43,12 @@ pub async fn mock_pull_requests(
                 if pull_request_error {
                     ResponseTemplate::new(500)
                 } else {
-                    let mut pr = GitHubPullRequest::new(pr_number);
-
-                    if let Some(repo_pr) = repo_clone.lock().pull_requests.get(&pr_number) {
-                        pr.head.sha = repo_pr.head_sha.clone();
+                    if let Some(pr) = repo_clone.lock().pull_requests.get(&pr_number) {
+                        ResponseTemplate::new(200)
+                            .set_body_json(GitHubPullRequest::from(pr.clone()))
+                    } else {
+                        ResponseTemplate::new(404)
                     }
-
-                    ResponseTemplate::new(200).set_body_json(pr)
                 }
             })
             .mount(mock_server)
@@ -177,28 +176,6 @@ pub struct GitHubPullRequest {
 }
 
 impl GitHubPullRequest {
-    // TODO: remove this method
-    pub fn new(number: u64) -> Self {
-        GitHubPullRequest {
-            user: User::default_pr_author().into(),
-            url: "https://test.com".to_string(),
-            id: number + 1000,
-            title: format!("PR #{number}"),
-            body: format!("Description of PR #{number}"),
-            mergeable_state: OctocrabMergeableState::Unknown,
-            number,
-            head: Box::new(GitHubHead {
-                label: format!("pr-{number}"),
-                ref_field: format!("pr-{number}"),
-                sha: format!("pr-{number}-sha"),
-            }),
-            base: Box::new(GitHubBase {
-                ref_field: "main".to_string(),
-                sha: "main-sha".to_string(),
-            }),
-        }
-    }
-
     pub fn with_base(mut self, ref_field: String, sha: String) -> Self {
         self.base = Box::new(GitHubBase { ref_field, sha });
         self
@@ -210,9 +187,27 @@ impl GitHubPullRequest {
     }
 }
 
-impl Default for GitHubPullRequest {
-    fn default() -> Self {
-        Self::new(default_pr_number())
+impl From<PullRequest> for GitHubPullRequest {
+    fn from(pr: PullRequest) -> Self {
+        let number = pr.number.0;
+        GitHubPullRequest {
+            user: pr.author.clone().into(),
+            url: "https://test.com".to_string(),
+            id: number + 1000,
+            title: format!("PR #{number}"),
+            body: format!("Description of PR #{number}"),
+            mergeable_state: OctocrabMergeableState::Unknown,
+            number,
+            head: Box::new(GitHubHead {
+                label: format!("pr-{number}"),
+                ref_field: format!("pr-{number}"),
+                sha: pr.head_sha,
+            }),
+            base: Box::new(GitHubBase {
+                ref_field: pr.base_branch.get_name().to_string(),
+                sha: pr.base_branch.get_sha().to_string(),
+            }),
+        }
     }
 }
 
@@ -250,12 +245,17 @@ pub(super) struct GitHubPullRequestEventPayload {
 }
 
 impl GitHubPullRequestEventPayload {
-    pub fn new(pr_number: u64, action: String, changes: Option<PullRequestChangeEvent>) -> Self {
+    pub fn new(
+        pull_request: PullRequest,
+        action: &str,
+        changes: Option<PullRequestChangeEvent>,
+    ) -> Self {
+        let repository = pull_request.repo.clone();
         GitHubPullRequestEventPayload {
-            action,
-            pull_request: GitHubPullRequest::new(pr_number),
+            action: action.to_string(),
+            pull_request: pull_request.into(),
             changes: changes.map(Into::into),
-            repository: default_repo_name().into(),
+            repository: repository.into(),
         }
     }
 
@@ -275,6 +275,7 @@ struct GitHubPullRequestChanges {
 #[derive(Serialize)]
 struct GitHubPullRequestBaseChanges {
     sha: Option<PullRequestEventChangesFrom>,
+    // TODO: remove
     #[serde(rename = "ref")]
     ref_field: Option<PullRequestEventChangesFrom>,
 }
@@ -303,6 +304,7 @@ impl From<PullRequestChangeEvent> for GitHubPullRequestChanges {
     }
 }
 
+#[derive(Default)]
 pub struct PullRequestChangeEvent {
     pub from_base_sha: Option<String>,
     pub from_base_ref: Option<String>,

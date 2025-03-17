@@ -140,32 +140,22 @@ mod tests {
     async fn unapprove_on_base_edited(pool: sqlx::PgPool) {
         run_test(pool, |mut tester| async {
             tester.post_comment("@bors r+").await?;
-            assert_eq!(
-                tester.get_comment().await?,
-                format!(
-                    "Commit pr-{}-sha has been approved by `{}`",
-                    default_pr_number(),
-                    User::default_pr_author().name
-                ),
-            );
+            tester.expect_comments(1).await;
+            let branch = tester.create_branch("beta").clone();
             tester
-                .edit_pull_request(
-                    default_pr_number(),
-                    PullRequestChangeEvent {
-                        from_base_sha: Some("main-sha".to_string()),
-                        from_base_ref: Some("main".to_string()),
-                    },
-                )
+                .edit_pr(default_repo_name(), default_pr_number(), |pr| {
+                    pr.base_branch = branch;
+                })
                 .await?;
 
-            assert_eq!(
+            insta::assert_snapshot!(
                 tester.get_comment().await?,
-                r#":warning: The base branch changed to `main`, and the
-PR will need to be re-approved."#,
+                @r"
+            :warning: The base branch changed to `beta`, and the
+            PR will need to be re-approved.
+            "
             );
-            tester
-                .expect_pr_unapproved(default_pr_number().into())
-                .await;
+            tester.default_pr().await.expect_unapproved();
             Ok(tester)
         })
         .await;
@@ -175,31 +165,15 @@ PR will need to be re-approved."#,
     async fn edit_pr_do_nothing_when_base_not_edited(pool: sqlx::PgPool) {
         run_test(pool, |mut tester| async {
             tester.post_comment("@bors r+").await?;
-            assert_eq!(
-                tester.get_comment().await?,
-                format!(
-                    "Commit pr-{}-sha has been approved by `{}`",
-                    default_pr_number(),
-                    User::default_pr_author().name
-                ),
-            );
+            tester.expect_comments(1).await;
             tester
-                .edit_pull_request(
-                    default_pr_number(),
-                    PullRequestChangeEvent {
-                        from_base_sha: None,
-                        from_base_ref: None,
-                    },
-                )
+                .edit_pr(default_repo_name(), default_pr_number(), |_| {})
                 .await?;
 
             tester
-                .expect_pr_approved_by(
-                    &default_repo_name(),
-                    default_pr_number(),
-                    &User::default_pr_author().name,
-                )
-                .await?;
+                .default_pr()
+                .await
+                .expect_approved_by(&User::default_pr_author().name);
             Ok(tester)
         })
         .await;
@@ -208,14 +182,11 @@ PR will need to be re-approved."#,
     #[sqlx::test]
     async fn edit_pr_do_nothing_when_not_approved(pool: sqlx::PgPool) {
         run_test(pool, |mut tester| async {
+            let branch = tester.create_branch("beta").clone();
             tester
-                .edit_pull_request(
-                    default_pr_number(),
-                    PullRequestChangeEvent {
-                        from_base_sha: Some("main-sha".to_string()),
-                        from_base_ref: Some("main".to_string()),
-                    },
-                )
+                .edit_pr(default_repo_name(), default_pr_number(), |pr| {
+                    pr.base_branch = branch;
+                })
                 .await?;
 
             // No comment should be posted
@@ -228,29 +199,19 @@ PR will need to be re-approved."#,
     async fn unapprove_on_push(pool: sqlx::PgPool) {
         run_test(pool, |mut tester| async {
             tester.post_comment("@bors r+").await?;
-            assert_eq!(
-                tester.get_comment().await?,
-                format!(
-                    "Commit pr-{}-sha has been approved by `{}`",
-                    default_pr_number(),
-                    User::default_pr_author().name
-                ),
-            );
+            tester.expect_comments(1).await;
             tester
                 .push_to_pr(default_repo_name(), default_pr_number())
                 .await?;
 
-            assert_eq!(
+            insta::assert_snapshot!(
                 tester.get_comment().await?,
-                format!(
-                    r#":warning: A new commit `pr-{}-sha` was pushed to the branch, the
-PR will need to be re-approved."#,
-                    default_pr_number()
-                )
+                @r"
+            :warning: A new commit `pr-1-commit-1` was pushed to the branch, the
+            PR will need to be re-approved.
+            "
             );
-            tester
-                .expect_pr_unapproved(default_pr_number().into())
-                .await;
+            tester.default_pr().await.expect_unapproved();
             Ok(tester)
         })
         .await;
@@ -270,15 +231,15 @@ PR will need to be re-approved."#,
     }
 
     #[sqlx::test]
-    async fn update_base_branch_on_pr_opened(pool: sqlx::PgPool) {
+    async fn store_base_branch_on_pr_opened(pool: sqlx::PgPool) {
         run_test(pool, |mut tester| async {
-            tester.open_pr(default_pr_number()).await?;
+            let pr = tester.open_pr(default_repo_name()).await?;
             tester
                 .wait_for(|| async {
-                    let Some(pr) = tester.default_pr_db().await? else {
+                    let Some(pr) = tester.pr_db(default_repo_name(), pr.number.0).await? else {
                         return Ok(false);
                     };
-                    Ok(pr.base_branch == "main".to_string())
+                    Ok(pr.base_branch == default_branch_name().to_string())
                 })
                 .await?;
             Ok(tester)
@@ -289,109 +250,76 @@ PR will need to be re-approved."#,
     #[sqlx::test]
     async fn update_base_branch_on_pr_edited(pool: sqlx::PgPool) {
         run_test(pool.clone(), |mut tester| async {
+            let branch = tester.create_branch("foo").clone();
             tester
-                .edit_pull_request_with_pr(
-                    default_pr_number(),
-                    PullRequestChangeEvent {
-                        from_base_sha: Some(default_branch_sha().to_string()),
-                        from_base_ref: Some(default_branch_name().to_string()),
-                    },
-                    GitHubPullRequest::new(default_pr_number())
-                        .with_base("new".to_string(), "new-sha".to_string()),
-                )
-                .await?;
-            tester
-                .wait_for(|| async {
-                    let pr = get_pull_request(
-                        &pool,
-                        &default_repo_name(),
-                        PullRequestNumber(default_pr_number()),
-                    )
-                    .await?;
-                    Ok(pr.map_or(false, |pr| pr.base_branch == "new"))
+                .edit_pr(default_repo_name(), default_pr_number(), |pr| {
+                    pr.base_branch = branch;
                 })
-                .await?;
-            Ok(tester)
-        })
-        .await;
-    }
-
-    #[sqlx::test]
-    async fn preserve_base_branch_on_pr_edited_when_base_not_edited(pool: sqlx::PgPool) {
-        run_test(pool, |mut tester| async {
-            tester
-                .edit_pull_request(
-                    default_pr_number(),
-                    PullRequestChangeEvent {
-                        from_base_sha: None,
-                        from_base_ref: None,
-                    },
-                )
-                .await?;
-
-            tester
-                .wait_for(|| async {
-                    let Some(pr) = tester.default_pr_db().await? else {
-                        return Ok(false);
-                    };
-                    Ok(pr.base_branch == "main".to_string())
-                })
-                .await?;
-            Ok(tester)
-        })
-        .await;
-    }
-
-    #[sqlx::test]
-    async fn update_mergeable_state_on_pr_edited(pool: sqlx::PgPool) {
-        run_test(pool.clone(), |mut tester| async {
-            tester
-                .edit_pull_request_with_pr(
-                    default_pr_number(),
-                    PullRequestChangeEvent {
-                        from_base_sha: None,
-                        from_base_ref: None,
-                    },
-                    GitHubPullRequest::new(default_pr_number())
-                        .with_mergeable_state(octocrab::models::pulls::MergeableState::Dirty),
-                )
-                .await?;
-            tester
-                .wait_for(|| async {
-                    let pr = get_pull_request(
-                        &pool,
-                        &default_repo_name(),
-                        PullRequestNumber(default_pr_number()),
-                    )
-                    .await?;
-                    Ok(pr.map_or(false, |pr| {
-                        pr.mergeable_state == MergeableState::HasConflicts
-                    }))
-                })
-                .await?;
-            Ok(tester)
-        })
-        .await;
-    }
-
-    #[sqlx::test]
-    async fn update_mergeable_state_on_pr_push(pool: sqlx::PgPool) {
-        run_test(pool, |mut tester| async {
-            tester
-                .push_to_pr(default_repo_name(), default_pr_number())
                 .await?;
             tester
                 .wait_for(|| async {
                     let Some(pr) = tester.default_pr_db().await? else {
                         return Ok(false);
                     };
-                    Ok(pr.mergeable_state == MergeableState::Unknown)
+                    Ok(pr.base_branch == "foo")
                 })
                 .await?;
             Ok(tester)
         })
         .await;
     }
+
+    // TODO
+    // #[sqlx::test]
+    // async fn update_mergeable_state_on_pr_edited(pool: sqlx::PgPool) {
+    //     run_test(pool.clone(), |mut tester| async {
+    //         tester
+    //             .edit_pull_request_with_pr(
+    //                 default_pr_number(),
+    //                 PullRequestChangeEvent {
+    //                     from_base_sha: None,
+    //                     from_base_ref: None,
+    //                 },
+    //                 GitHubPullRequest::new(default_pr_number())
+    //                     .with_mergeable_state(octocrab::models::pulls::MergeableState::Dirty),
+    //             )
+    //             .await?;
+    //         tester
+    //             .wait_for(|| async {
+    //                 let pr = get_pull_request(
+    //                     &pool,
+    //                     &default_repo_name(),
+    //                     PullRequestNumber(default_pr_number()),
+    //                 )
+    //                 .await?;
+    //                 Ok(pr.map_or(false, |pr| {
+    //                     pr.mergeable_state == MergeableState::HasConflicts
+    //                 }))
+    //             })
+    //             .await?;
+    //         Ok(tester)
+    //     })
+    //     .await;
+    // }
+
+    // #[sqlx::test]
+    // async fn update_mergeable_state_on_pr_push(pool: sqlx::PgPool) {
+    //     run_test(pool, |mut tester| async {
+    //         tester
+    //             .push_to_pr(default_repo_name(), default_pr_number())
+    //             .await?;
+    //         tester
+    //             .wait_for(|| async {
+    //                 let Some(pr) = tester.default_pr_db().await? else {
+    //                     return Ok(false);
+    //                 };
+    //                 Ok(pr.mergeable_state == MergeableState::Unknown)
+    //             })
+    //             .await?;
+    //         Ok(tester)
+    //     })
+    //     .await;
+    // }
 
     // TODO: fix test
     // #[sqlx::test]

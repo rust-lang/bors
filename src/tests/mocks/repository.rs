@@ -32,22 +32,33 @@ pub struct PullRequest {
     pub comment_counter: u64,
     pub head_sha: String,
     pub author: User,
+    pub base_branch: Branch,
+}
+
+impl PullRequest {
+    pub fn new(repo: GithubRepoName, number: u64, author: User) -> Self {
+        Self {
+            number: PullRequestNumber(number),
+            repo,
+            added_labels: Vec::new(),
+            removed_labels: Vec::new(),
+            comment_counter: 0,
+            head_sha: format!("pr-{number}-sha"),
+            author,
+            base_branch: Branch::default(),
+        }
+    }
 }
 
 /// Creates a default pull request with number set to
 /// [default_pr_number].
 impl Default for PullRequest {
     fn default() -> Self {
-        let number = default_pr_number();
-        Self {
-            number: PullRequestNumber(number),
-            repo: default_repo_name(),
-            added_labels: Vec::new(),
-            removed_labels: Vec::new(),
-            comment_counter: 0,
-            head_sha: format!("pr-{number}-sha"),
-            author: User::default_pr_author(),
-        }
+        Self::new(
+            default_repo_name(),
+            default_pr_number(),
+            User::default_pr_author(),
+        )
     }
 }
 
@@ -120,6 +131,10 @@ impl Repo {
         self.pull_requests.get(&pr).unwrap()
     }
 
+    pub fn get_pr_mut(&mut self, pr: u64) -> &mut PullRequest {
+        self.pull_requests.get_mut(&pr).unwrap()
+    }
+
     pub fn set_config(&mut self, config: &str) {
         self.config = config.to_string();
     }
@@ -178,7 +193,7 @@ pub fn default_repo_name() -> GithubRepoName {
     GithubRepoName::new("rust-lang", "borstest")
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct Branch {
     name: String,
     sha: String,

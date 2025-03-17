@@ -22,7 +22,7 @@ use crate::tests::mocks::workflow::{
     GitHubWorkflowEventPayload, TestWorkflowStatus, Workflow, WorkflowEvent, WorkflowEventKind,
 };
 use crate::tests::mocks::{
-    default_pr_number, default_repo_name, Branch, ExternalHttpMock, GitHubState, Repo,
+    default_pr_number, default_repo_name, Branch, ExternalHttpMock, GitHubState, Repo, User,
 };
 use crate::tests::webhook::{create_webhook_request, TEST_WEBHOOK_SECRET};
 use crate::{
@@ -31,8 +31,7 @@ use crate::{
 };
 
 use super::pull_request::{
-    default_mergeable_state, GitHubPullRequest, GitHubPullRequestEventPayload,
-    PullRequestChangeEvent,
+    default_mergeable_state, GitHubPullRequestEventPayload, PullRequestChangeEvent,
 };
 use super::repository::{default_branch_name, PullRequest};
 use super::GitHubPushEventPayload;
@@ -164,16 +163,16 @@ impl BorsTester {
 
     pub async fn pr_db(
         &self,
-        repo: &GithubRepoName,
+        repo: GithubRepoName,
         number: u64,
     ) -> anyhow::Result<Option<PullRequestModel>> {
         self.db()
-            .get_pull_request(repo, PullRequestNumber(number))
+            .get_pull_request(&repo, PullRequestNumber(number))
             .await
     }
 
     pub async fn default_pr_db(&self) -> anyhow::Result<Option<PullRequestModel>> {
-        self.pr_db(&default_repo_name(), default_pr_number()).await
+        self.pr_db(default_repo_name(), default_pr_number()).await
     }
 
     pub fn create_branch(&mut self, name: &str) -> MappedMutexGuard<RawMutex, Branch> {
@@ -187,7 +186,7 @@ impl BorsTester {
         } else {
             MutexGuard::map(repo, move |repo| {
                 repo.branches
-                    .push(Branch::new(name, &format!("{name}-empty")));
+                    .push(Branch::new(name, &format!("{name}-initial")));
                 repo.branches.last_mut().unwrap()
             })
         }
@@ -297,42 +296,51 @@ impl BorsTester {
         self.webhook_check_suite(check_suite.into()).await
     }
 
-    pub async fn open_pr(&mut self, pr_number: u64) -> anyhow::Result<()> {
+    pub async fn open_pr(&mut self, repo_name: GithubRepoName) -> anyhow::Result<PullRequest> {
+        let repo = self.github.get_repo(&repo_name);
+        let repo = repo.lock();
+        let number = repo.pull_requests.keys().max().copied().unwrap_or(1);
+
+        let pr = PullRequest::new(repo_name, number, User::default_pr_author());
         self.send_webhook(
             "pull_request",
-            GitHubPullRequestEventPayload::new(pr_number, "opened".to_string(), None),
+            GitHubPullRequestEventPayload::new(pr.clone(), "opened", None),
         )
-        .await
+        .await?;
+        Ok(pr)
     }
 
-    pub async fn edit_pull_request(
+    /// Perform an arbitrary modification of the given PR, and then send the "edited" PR webhook
+    /// to bors.
+    pub async fn edit_pr<F>(
         &mut self,
+        repo: GithubRepoName,
         pr_number: u64,
-        changes: PullRequestChangeEvent,
-    ) -> anyhow::Result<()> {
-        self.send_webhook(
-            "pull_request",
-            GitHubPullRequestEventPayload::new(pr_number, "edited".to_string(), Some(changes)),
-        )
-        .await
-    }
+        func: F,
+    ) -> anyhow::Result<()>
+    where
+        F: FnOnce(&mut PullRequest),
+    {
+        let repo = self.github.get_repo(&repo);
+        let mut repo = repo.lock();
+        let mut pr = repo.get_pr_mut(pr_number);
+        let base_before = pr.base_branch.clone();
+        func(&mut pr);
 
-    pub async fn edit_pull_request_with_pr(
-        &mut self,
-        pr_number: u64,
-        changes: PullRequestChangeEvent,
-        pr: GitHubPullRequest,
-    ) -> anyhow::Result<()> {
-        self.send_webhook(
-            "pull_request",
-            GitHubPullRequestEventPayload::new(pr_number, "edited".to_string(), Some(changes))
-                .with_pr(pr),
-        )
-        .await
+        let changes = if base_before != pr.base_branch {
+            Some(PullRequestChangeEvent {
+                from_base_sha: Some(base_before.get_sha().to_string()),
+                from_base_ref: Some(base_before.get_name().to_string()),
+            })
+        } else {
+            None
+        };
+
+        self.pull_request_edited(pr.clone(), changes).await
     }
 
     pub async fn push_to_pr(&mut self, repo: GithubRepoName, pr_number: u64) -> anyhow::Result<()> {
-        {
+        let pr = {
             let repo = self.github.get_repo(&repo);
             let mut repo = repo.lock();
 
@@ -343,11 +351,12 @@ impl BorsTester {
                 .get_mut(&pr_number)
                 .expect("PR must be initialized before pushing to it");
             pr.head_sha = format!("pr-{pr_number}-commit-{counter}");
-        }
+            pr.clone()
+        };
 
         self.send_webhook(
             "pull_request",
-            GitHubPullRequestEventPayload::new(pr_number, "synchronize".to_string(), None),
+            GitHubPullRequestEventPayload::new(pr, "synchronize", None),
         )
         .await
     }
@@ -365,41 +374,6 @@ impl BorsTester {
                 .await
                 .unwrap_or_else(|_| panic!("Failed to get comment #{i}"));
         }
-    }
-
-    /// Assert that the given pull request is approved by the passed user and that the
-    /// corresponding labels have been set.
-    pub async fn expect_pr_approved_by(
-        &self,
-        repo: &GithubRepoName,
-        pr_number: u64,
-        approved_by: &str,
-    ) -> anyhow::Result<()> {
-        let pr_in_db = self.pr_db(repo, pr_number).await?.unwrap();
-        assert_eq!(pr_in_db.approver(), Some(approved_by));
-
-        let pr = self.github.get_repo(repo).lock().get_pr(pr_number).clone();
-        pr.check_added_labels(&["approved"]);
-        Ok(())
-    }
-
-    /// Assert that the PR is **not** approved and that it does not have the corresponding
-    /// approve labels.
-    pub async fn expect_pr_unapproved(&self, pr_number: PullRequestNumber) {
-        let pr_in_db = self
-            .db()
-            .get_or_create_pull_request(
-                &default_repo_name(),
-                pr_number,
-                &default_branch_name(),
-                default_mergeable_state(),
-            )
-            .await
-            .unwrap();
-        assert!(!pr_in_db.is_approved());
-        let repo = self.default_repo();
-        let pr = repo.lock().get_pr(default_pr_number()).clone();
-        pr.check_removed_labels(&["approved"]);
     }
 
     /// Wait until the given condition is true.
@@ -465,8 +439,24 @@ impl BorsTester {
         .await
     }
 
+    async fn pull_request_edited(
+        &mut self,
+        pr: PullRequest,
+        changes: Option<PullRequestChangeEvent>,
+    ) -> anyhow::Result<()> {
+        self.send_webhook(
+            "pull_request",
+            GitHubPullRequestEventPayload::new(
+                pr,
+                "edited",
+                Some(changes.unwrap_or(PullRequestChangeEvent::default())),
+            ),
+        )
+        .await
+    }
+
     async fn send_webhook<S: Serialize>(&mut self, event: &str, content: S) -> anyhow::Result<()> {
-        let serialized = serde_json::to_string(&content).unwrap();
+        let serialized = serde_json::to_string(&content)?;
         let webhook = create_webhook_request(event, &serialized);
         let response = self
             .app
@@ -510,7 +500,10 @@ pub struct PullRequestProxy {
 
 impl PullRequestProxy {
     async fn new(tester: &BorsTester, gh_pr: PullRequest) -> Self {
-        let db_pr = tester.pr_db(&gh_pr.repo, gh_pr.number.0).await.unwrap();
+        let db_pr = tester
+            .pr_db(gh_pr.repo.clone(), gh_pr.number.0)
+            .await
+            .unwrap();
         Self { gh_pr, db_pr }
     }
 
