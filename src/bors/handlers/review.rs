@@ -1011,7 +1011,9 @@ mod tests {
 
             tester.default_pr().await.expect_approved_sha(&pr.head_sha);
 
-            tester.push_to_pull_request(default_pr_number()).await?;
+            tester
+                .push_to_pr(default_repo_name(), default_pr_number())
+                .await?;
             let pr2 = tester.default_pr().await.get_gh_pr();
             assert_ne!(pr.head_sha, pr2.head_sha);
 

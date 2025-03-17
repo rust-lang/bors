@@ -331,19 +331,20 @@ impl BorsTester {
         .await
     }
 
-    pub async fn push_to_pull_request(&mut self, pr_number: u64) -> anyhow::Result<()> {
-        let repo = self.default_repo();
-        let mut repo = repo.lock();
+    pub async fn push_to_pr(&mut self, repo: GithubRepoName, pr_number: u64) -> anyhow::Result<()> {
+        {
+            let repo = self.github.get_repo(&repo);
+            let mut repo = repo.lock();
 
-        let count = repo.get_next_pr_push_count();
+            let counter = repo.get_next_pr_push_counter();
 
-        let pr = repo
-            .pull_requests
-            .get_mut(&pr_number)
-            .expect("PR must be initialized before pushing to it");
-        pr.head_sha = format!("pr-{}-sha-{}", pr_number, count);
+            let pr = repo
+                .pull_requests
+                .get_mut(&pr_number)
+                .expect("PR must be initialized before pushing to it");
+            pr.head_sha = format!("pr-{pr_number}-commit-{counter}");
+        }
 
-        drop(repo);
         self.send_webhook(
             "pull_request",
             GitHubPullRequestEventPayload::new(pr_number, "synchronize".to_string(), None),

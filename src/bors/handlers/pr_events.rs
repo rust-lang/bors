@@ -236,7 +236,9 @@ PR will need to be re-approved."#,
                     User::default_pr_author().name
                 ),
             );
-            tester.push_to_pull_request(default_pr_number()).await?;
+            tester
+                .push_to_pr(default_repo_name(), default_pr_number())
+                .await?;
 
             assert_eq!(
                 tester.get_comment().await?,
@@ -257,7 +259,9 @@ PR will need to be re-approved."#,
     #[sqlx::test]
     async fn push_to_pr_do_nothing_when_not_approved(pool: sqlx::PgPool) {
         run_test(pool, |mut tester| async {
-            tester.push_to_pull_request(default_pr_number()).await?;
+            tester
+                .push_to_pr(default_repo_name(), default_pr_number())
+                .await?;
 
             // No comment should be posted
             Ok(tester)
@@ -373,7 +377,9 @@ PR will need to be re-approved."#,
     #[sqlx::test]
     async fn update_mergeable_state_on_pr_push(pool: sqlx::PgPool) {
         run_test(pool, |mut tester| async {
-            tester.push_to_pull_request(default_pr_number()).await?;
+            tester
+                .push_to_pr(default_repo_name(), default_pr_number())
+                .await?;
             tester
                 .wait_for(|| async {
                     let Some(pr) = tester.default_pr_db().await? else {

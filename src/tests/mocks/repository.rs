@@ -136,7 +136,7 @@ impl Repo {
         self.cancelled_workflows.push(run_id);
     }
 
-    pub fn get_next_pr_push_count(&mut self) -> u64 {
+    pub fn get_next_pr_push_counter(&mut self) -> u64 {
         self.pr_push_counter += 1;
         self.pr_push_counter
     }
