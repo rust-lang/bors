@@ -10,9 +10,18 @@ use crate::tests::mocks::repository::Repo;
 use crate::tests::mocks::{GitHubState, User};
 use crate::TeamApiClient;
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct Permissions {
     pub users: HashMap<User, Vec<PermissionType>>,
+}
+
+impl Permissions {
+    /// Empty permissions => no one has permissions.
+    pub fn empty() -> Self {
+        Self {
+            users: HashMap::default(),
+        }
+    }
 }
 
 pub struct TeamApiMockServer {

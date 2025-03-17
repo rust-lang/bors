@@ -542,7 +542,7 @@ mod tests {
     #[sqlx::test]
     async fn insufficient_permission_tree_closed(pool: sqlx::PgPool) {
         let gh = GitHubState::default();
-        gh.default_repo().lock().permissions = Permissions::default();
+        gh.default_repo().lock().permissions = Permissions::empty();
 
         BorsBuilder::new(pool)
             .github(gh)
@@ -573,7 +573,7 @@ mod tests {
 approve = ["+approved"]
 "#,
         );
-        gh.default_repo().lock().permissions = Permissions::default();
+        gh.default_repo().lock().permissions = Permissions::empty();
         gh.default_repo()
             .lock()
             .permissions
@@ -812,7 +812,7 @@ approve = ["+approved"]
     async fn delegate_insufficient_permission_try_user(pool: sqlx::PgPool) {
         let gh = GitHubState::default();
         let try_user = User::new(200, "try-user");
-        gh.default_repo().lock().permissions = Permissions::default();
+        gh.default_repo().lock().permissions = Permissions::empty();
         gh.default_repo()
             .lock()
             .permissions
