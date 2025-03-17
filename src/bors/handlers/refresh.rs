@@ -4,9 +4,9 @@ use std::time::Duration;
 use anyhow::Context;
 use chrono::{DateTime, Utc};
 
-use crate::bors::handlers::trybuild::cancel_build_workflows;
 use crate::bors::Comment;
 use crate::bors::RepositoryState;
+use crate::bors::handlers::trybuild::cancel_build_workflows;
 use crate::database::BuildStatus;
 use crate::{PgDbClient, TeamApiClient};
 
@@ -107,10 +107,10 @@ fn elapsed_time(date: DateTime<Utc>) -> Duration {
 
 #[cfg(test)]
 mod tests {
-    use crate::bors::handlers::refresh::MOCK_TIME;
     use crate::bors::handlers::WAIT_FOR_WORKFLOW_STARTED;
+    use crate::bors::handlers::refresh::MOCK_TIME;
     use crate::tests::mocks::{
-        default_repo_name, run_test, BorsBuilder, GitHubState, WorkflowEvent,
+        BorsBuilder, GitHubState, WorkflowEvent, default_repo_name, run_test,
     };
     use chrono::Utc;
     use std::future::Future;

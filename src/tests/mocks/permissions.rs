@@ -4,11 +4,11 @@ use serde_json::json;
 use std::collections::HashMap;
 use std::sync::Arc;
 use wiremock::matchers::path;
-use wiremock::{matchers::method, Mock, MockServer, ResponseTemplate};
+use wiremock::{Mock, MockServer, ResponseTemplate, matchers::method};
 
+use crate::TeamApiClient;
 use crate::tests::mocks::repository::Repo;
 use crate::tests::mocks::{GitHubState, User};
-use crate::TeamApiClient;
 
 #[derive(Clone)]
 pub struct Permissions {

@@ -1,7 +1,10 @@
 use std::sync::Arc;
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 
+use crate::PgDbClient;
+use crate::bors::Comment;
+use crate::bors::RepositoryState;
 use crate::bors::command::Parent;
 use crate::bors::comment::cant_find_last_parent_comment;
 use crate::bors::comment::no_try_build_in_progress_comment;
@@ -9,17 +12,14 @@ use crate::bors::comment::try_build_cancelled_comment;
 use crate::bors::comment::try_build_in_progress_comment;
 use crate::bors::comment::unclean_try_build_cancelled_comment;
 use crate::bors::handlers::labels::handle_label_trigger;
-use crate::bors::Comment;
-use crate::bors::RepositoryState;
 use crate::database::RunId;
 use crate::database::{BuildModel, BuildStatus, PullRequestModel};
-use crate::github::api::client::GithubRepositoryClient;
 use crate::github::GithubRepoName;
+use crate::github::api::client::GithubRepositoryClient;
 use crate::github::{
     CommitSha, GithubUser, LabelTrigger, MergeError, PullRequest, PullRequestNumber,
 };
 use crate::permissions::PermissionType;
-use crate::PgDbClient;
 
 use super::deny_request;
 use super::has_permission;
@@ -343,8 +343,8 @@ mod tests {
     use crate::database::operations::get_all_workflows;
     use crate::github::CommitSha;
     use crate::tests::mocks::{
-        default_pr_number, default_repo_name, run_test, BorsBuilder, Comment, GitHubState, User,
-        Workflow, WorkflowEvent,
+        BorsBuilder, Comment, GitHubState, User, Workflow, WorkflowEvent, default_pr_number,
+        default_repo_name, run_test,
     };
 
     #[sqlx::test]
@@ -556,15 +556,17 @@ mod tests {
         run_test(pool, |mut tester| async {
             tester.post_comment("@bors try").await?;
             tester.expect_comments(1).await;
-            assert!(tester
-                .db()
-                .find_build(
-                    &default_repo_name(),
-                    TRY_BRANCH_NAME.to_string(),
-                    CommitSha(tester.try_branch().get_sha().to_string()),
-                )
-                .await?
-                .is_some());
+            assert!(
+                tester
+                    .db()
+                    .find_build(
+                        &default_repo_name(),
+                        TRY_BRANCH_NAME.to_string(),
+                        CommitSha(tester.try_branch().get_sha().to_string()),
+                    )
+                    .await?
+                    .is_some()
+            );
             Ok(tester)
         })
         .await;

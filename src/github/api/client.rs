@@ -5,10 +5,10 @@ use tracing::log;
 
 use crate::bors::event::PullRequestComment;
 use crate::bors::{CheckSuite, CheckSuiteStatus, Comment};
-use crate::config::{RepositoryConfig, CONFIG_FILE_PATH};
+use crate::config::{CONFIG_FILE_PATH, RepositoryConfig};
 use crate::database::RunId;
 use crate::github::api::base_github_html_url;
-use crate::github::api::operations::{merge_branches, set_branch_to_commit, MergeError};
+use crate::github::api::operations::{MergeError, merge_branches, set_branch_to_commit};
 use crate::github::{CommitSha, GithubRepoName, PullRequest, PullRequestNumber};
 use crate::utils::timing::measure_network_request;
 
@@ -325,8 +325,8 @@ impl GithubRepositoryClient {
 
 #[cfg(test)]
 mod tests {
-    use crate::github::api::load_repositories;
     use crate::github::GithubRepoName;
+    use crate::github::api::load_repositories;
     use crate::permissions::PermissionType;
     use crate::tests::mocks::Permissions;
     use crate::tests::mocks::{ExternalHttpMock, Repo};
@@ -361,13 +361,16 @@ mod tests {
             .remove(&GithubRepoName::new("foo", "bar"))
             .unwrap()
             .unwrap();
-        assert!(repo
-            .permissions
-            .load()
-            .has_permission(UserId(1), PermissionType::Try));
-        assert!(!repo
-            .permissions
-            .load()
-            .has_permission(UserId(1), PermissionType::Review));
+        assert!(
+            repo.permissions
+                .load()
+                .has_permission(UserId(1), PermissionType::Try)
+        );
+        assert!(
+            !repo
+                .permissions
+                .load()
+                .has_permission(UserId(1), PermissionType::Review)
+        );
     }
 }

@@ -1,15 +1,15 @@
 use crate::bors::event::BorsEvent;
-use crate::bors::{handle_bors_global_event, handle_bors_repository_event, BorsContext};
+use crate::bors::{BorsContext, handle_bors_global_event, handle_bors_repository_event};
 use crate::github::webhook::GitHubWebhook;
 use crate::github::webhook::WebhookSecret;
 use crate::{BorsGlobalEvent, BorsRepositoryEvent, TeamApiClient};
 
 use anyhow::Error;
+use axum::Router;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
-use axum::Router;
 use octocrab::Octocrab;
 use std::future::Future;
 use std::sync::Arc;

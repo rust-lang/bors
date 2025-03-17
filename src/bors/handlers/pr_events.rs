@@ -1,9 +1,9 @@
+use crate::PgDbClient;
 use crate::bors::event::{PullRequestEdited, PullRequestOpened, PullRequestPushed, PushToBranch};
 use crate::bors::handlers::labels::handle_label_trigger;
 use crate::bors::{Comment, RepositoryState};
 use crate::database::MergeableState;
 use crate::github::{CommitSha, LabelTrigger, PullRequestNumber};
-use crate::PgDbClient;
 use std::sync::Arc;
 
 pub(super) async fn handle_pull_request_edited(
@@ -130,7 +130,7 @@ mod tests {
     use crate::tests::mocks::default_pr_number;
     use crate::{
         database::MergeableState,
-        tests::mocks::{default_branch_name, default_repo_name, run_test, User},
+        tests::mocks::{User, default_branch_name, default_repo_name, run_test},
     };
 
     #[sqlx::test]

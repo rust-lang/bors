@@ -3,7 +3,7 @@ use std::{
     sync::{Arc, RwLock},
 };
 
-use crate::{bors::command::CommandParser, github::GithubRepoName, PgDbClient};
+use crate::{PgDbClient, bors::command::CommandParser, github::GithubRepoName};
 
 use super::RepositoryState;
 

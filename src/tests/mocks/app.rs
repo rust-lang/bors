@@ -2,8 +2,8 @@ use crate::tests::mocks::User;
 use serde::Serialize;
 use url::Url;
 use wiremock::{
-    matchers::{method, path, path_regex},
     Mock, MockServer, ResponseTemplate,
+    matchers::{method, path, path_regex},
 };
 
 use super::user::GitHubUser;

@@ -9,14 +9,14 @@ use crate::bors::handlers::refresh::refresh_repository;
 use crate::bors::handlers::review::{
     command_approve, command_close_tree, command_open_tree, command_unapprove,
 };
-use crate::bors::handlers::trybuild::{command_try_build, command_try_cancel, TRY_BRANCH_NAME};
+use crate::bors::handlers::trybuild::{TRY_BRANCH_NAME, command_try_build, command_try_cancel};
 use crate::bors::handlers::workflow::{
     handle_check_suite_completed, handle_workflow_completed, handle_workflow_started,
 };
 use crate::bors::{BorsContext, Comment, RepositoryState};
 use crate::github::{GithubUser, PullRequest};
 use crate::permissions::PermissionType;
-use crate::{load_repositories, PgDbClient, TeamApiClient};
+use crate::{PgDbClient, TeamApiClient, load_repositories};
 use anyhow::Context;
 use octocrab::Octocrab;
 use pr_events::{
@@ -458,7 +458,7 @@ async fn has_permission(
 
 #[cfg(test)]
 mod tests {
-    use crate::tests::mocks::{run_test, Comment, User};
+    use crate::tests::mocks::{Comment, User, run_test};
 
     #[sqlx::test]
     async fn ignore_bot_comment(pool: sqlx::PgPool) {

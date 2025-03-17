@@ -9,8 +9,8 @@ pub use handlers::WAIT_FOR_REFRESH;
 pub use handlers::{handle_bors_global_event, handle_bors_repository_event};
 
 use crate::config::RepositoryConfig;
-use crate::github::api::client::GithubRepositoryClient;
 use crate::github::GithubRepoName;
+use crate::github::api::client::GithubRepositoryClient;
 use crate::permissions::UserPermissions;
 
 mod command;

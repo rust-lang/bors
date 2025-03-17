@@ -1,22 +1,22 @@
 use super::{
+    Repo, User,
     comment::{Comment, GitHubComment},
     default_repo_name, dynamic_mock_req,
     repository::GitHubRepository,
     user::GitHubUser,
-    Repo, User,
 };
 use crate::github::GithubRepoName;
 use crate::tests::mocks::repository::PullRequest;
-use octocrab::models::pulls::MergeableState as OctocrabMergeableState;
 use octocrab::models::LabelId;
+use octocrab::models::pulls::MergeableState as OctocrabMergeableState;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::mpsc::Sender;
 use url::Url;
 use wiremock::{
-    matchers::{method, path},
     Mock, MockServer, Request, ResponseTemplate,
+    matchers::{method, path},
 };
 
 pub fn default_pr_number() -> u64 {

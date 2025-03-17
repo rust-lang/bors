@@ -1,7 +1,7 @@
 //! Contains definitions of common types (pull request, user, repository name) needed
 //! for working with (GitHub) repositories.
-use octocrab::models::pulls::MergeableState;
 use octocrab::models::UserId;
+use octocrab::models::pulls::MergeableState;
 use std::fmt::{Debug, Display, Formatter};
 use std::str::FromStr;
 use url::Url;

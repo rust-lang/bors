@@ -1,11 +1,11 @@
 //! This module handles parsing webhooks and generating [`BorsEvent`]s from them.
 use std::fmt::Debug;
 
+use axum::RequestExt;
 use axum::body::Bytes;
 use axum::extract::FromRequest;
 use axum::http::request::Parts;
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
-use axum::RequestExt;
 use hmac::{Hmac, Mac};
 use octocrab::models::events::payload::{
     IssueCommentEventAction, IssueCommentEventPayload, PullRequestEventAction,
@@ -13,7 +13,7 @@ use octocrab::models::events::payload::{
     PullRequestReviewCommentEventPayload,
 };
 use octocrab::models::pulls::{PullRequest, Review};
-use octocrab::models::{workflows, App, Author, CheckRun, Repository, RunId};
+use octocrab::models::{App, Author, CheckRun, Repository, RunId, workflows};
 use secrecy::{ExposeSecret, SecretString};
 use sha2::Sha256;
 
@@ -463,7 +463,7 @@ mod tests {
     use crate::github::webhook::GitHubWebhook;
     use crate::github::webhook::WebhookSecret;
     use crate::tests::io::load_test_file;
-    use crate::tests::webhook::{create_webhook_request, TEST_WEBHOOK_SECRET};
+    use crate::tests::webhook::{TEST_WEBHOOK_SECRET, create_webhook_request};
 
     #[tokio::test]
     async fn installation_suspend() {
