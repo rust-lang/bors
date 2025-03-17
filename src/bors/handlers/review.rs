@@ -303,7 +303,6 @@ mod tests {
             handlers::{trybuild::TRY_MERGE_BRANCH_NAME, TRY_BRANCH_NAME},
             RollupMode,
         },
-        permissions::PermissionType,
         tests::mocks::{
             default_pr_number, default_repo_name, run_test, BorsBuilder, Comment, GitHubState,
             Permissions, User,
@@ -314,21 +313,16 @@ mod tests {
     async fn default_approve(pool: sqlx::PgPool) {
         run_test(pool, |mut tester| async {
             tester.post_comment("@bors r+").await?;
-            assert_eq!(
+            insta::assert_snapshot!(
                 tester.get_comment().await?,
-                format!(
-                    "Commit pr-{}-sha has been approved by `{}`",
-                    default_pr_number(),
-                    User::default_pr_author().name
-                ),
+                @"Commit pr-1-sha has been approved by `default-user`"
             );
 
-            let pr = tester.get_default_pr_db().await?.unwrap();
-            assert!(pr.rollup.is_none());
-
             tester
-                .expect_pr_approved_by(default_pr_number().into(), &User::default_pr_author().name)
-                .await;
+                .default_pr()
+                .await
+                .expect_rollup(None)
+                .expect_approved_by(&User::default_pr_author().name);
             Ok(tester)
         })
         .await;
@@ -341,17 +335,12 @@ mod tests {
             tester
                 .post_comment(format!(r#"@bors r={approve_user}"#).as_str())
                 .await?;
-            assert_eq!(
+            insta::assert_snapshot!(
                 tester.get_comment().await?,
-                format!(
-                    "Commit pr-{}-sha has been approved by `{approve_user}`",
-                    default_pr_number(),
-                ),
+                @"Commit pr-1-sha has been approved by `user1`"
             );
 
-            tester
-                .expect_pr_approved_by(default_pr_number().into(), approve_user)
-                .await;
+            tester.default_pr().await.expect_approved_by(approve_user);
             Ok(tester)
         })
         .await;
@@ -363,9 +352,9 @@ mod tests {
             tester
                 .post_comment(Comment::from("@bors try").with_author(User::unprivileged()))
                 .await?;
-            assert_eq!(
+            insta::assert_snapshot!(
                 tester.get_comment().await?,
-                "@unprivileged-user: :key: Insufficient privileges: not in try users"
+                @""
             );
             Ok(tester)
         })
@@ -379,9 +368,9 @@ mod tests {
                 .post_comment(Comment::from("@bors p=2").with_author(User::unprivileged()))
                 .await?;
             tester.post_comment("@bors p=2").await?;
-            assert_eq!(
+            insta::assert_snapshot!(
                 tester.get_comment().await?,
-                "@unprivileged-user: :key: Insufficient privileges: not in review users"
+                @""
             );
             Ok(tester)
         })
@@ -392,25 +381,21 @@ mod tests {
     async fn unapprove(pool: sqlx::PgPool) {
         run_test(pool, |mut tester| async {
             tester.post_comment("@bors r+").await?;
-            assert_eq!(
+            insta::assert_snapshot!(
                 tester.get_comment().await?,
-                format!(
-                    "Commit pr-{}-sha has been approved by `{}`",
-                    default_pr_number(),
-                    User::default_pr_author().name
-                ),
+                @"Commit pr-1-sha has been approved by `default-user`",
             );
             tester
-                .expect_pr_approved_by(default_pr_number().into(), &User::default_pr_author().name)
-                .await;
+                .default_pr()
+                .await
+                .expect_approved_by(&User::default_pr_author().name);
             tester.post_comment("@bors r-").await?;
-            assert_eq!(
+            insta::assert_snapshot!(
                 tester.get_comment().await?,
-                format!("Commit pr-{}-sha has been unapproved", default_pr_number()),
+                @""
             );
-            tester
-                .expect_pr_unapproved(default_pr_number().into())
-                .await;
+
+            tester.default_pr().await.expect_unapproved();
             Ok(tester)
         })
         .await;
@@ -421,9 +406,12 @@ mod tests {
         run_test(pool, |mut tester| async {
             tester.post_comment("@bors r+ p=10").await?;
             tester.expect_comments(1).await;
-            let pr = tester.get_default_pr_db().await?.unwrap();
-            assert_eq!(pr.priority, Some(10));
-            assert!(pr.is_approved());
+
+            tester
+                .default_pr()
+                .await
+                .expect_priority(Some(10))
+                .expect_approved_by(&User::default_pr_author().name);
             Ok(tester)
         })
         .await;
@@ -434,9 +422,12 @@ mod tests {
         run_test(pool, |mut tester| async {
             tester.post_comment("@bors r=user1 p=10").await?;
             tester.expect_comments(1).await;
-            let pr = tester.get_default_pr_db().await?.unwrap();
-            assert_eq!(pr.priority, Some(10));
-            assert_eq!(pr.approver(), Some("user1"));
+
+            tester
+                .default_pr()
+                .await
+                .expect_priority(Some(10))
+                .expect_approved_by("user1");
             Ok(tester)
         })
         .await;
@@ -448,7 +439,7 @@ mod tests {
             tester.post_comment("@bors p=5").await?;
             tester
                 .wait_for(|| async {
-                    let Some(pr) = tester.get_default_pr_db().await? else {
+                    let Some(pr) = tester.default_pr_db().await? else {
                         return Ok(false);
                     };
                     Ok(pr.priority == Some(5))
@@ -465,7 +456,7 @@ mod tests {
             tester.post_comment("@bors p=5").await?;
             tester
                 .wait_for(|| async {
-                    let Some(pr) = tester.get_default_pr_db().await? else {
+                    let Some(pr) = tester.default_pr_db().await? else {
                         return Ok(false);
                     };
                     Ok(pr.priority == Some(5))
@@ -475,9 +466,7 @@ mod tests {
             tester.post_comment("@bors r+").await?;
             tester.expect_comments(1).await;
 
-            let pr = tester.get_default_pr_db().await?.unwrap();
-            assert_eq!(pr.priority, Some(5));
-            assert!(pr.is_approved());
+            tester.default_pr().await.expect_priority(Some(5));
 
             Ok(tester)
         })
@@ -490,7 +479,7 @@ mod tests {
             tester.post_comment("@bors p=5").await?;
             tester
                 .wait_for(|| async {
-                    let Some(pr) = tester.get_default_pr_db().await? else {
+                    let Some(pr) = tester.default_pr_db().await? else {
                         return Ok(false);
                     };
                     Ok(pr.priority == Some(5))
@@ -500,10 +489,7 @@ mod tests {
             tester.post_comment("@bors r+ p=10").await?;
             tester.expect_comments(1).await;
 
-            let pr = tester.get_default_pr_db().await?.unwrap();
-
-            assert_eq!(pr.priority, Some(10));
-            assert!(pr.is_approved());
+            tester.default_pr().await.expect_priority(Some(10));
 
             Ok(tester)
         })
@@ -514,12 +500,12 @@ mod tests {
     async fn tree_closed_with_priority(pool: sqlx::PgPool) {
         run_test(pool, |mut tester| async {
             tester.post_comment("@bors treeclosed=5").await?;
-            assert_eq!(
+            insta::assert_snapshot!(
                 tester.get_comment().await?,
-                "Tree closed for PRs with priority less than 5"
+                @""
             );
 
-            let repo = tester.db().get_repository(&default_repo_name()).await?;
+            let repo = tester.db().repo_db(&default_repo_name()).await?;
             assert_eq!(
                 repo.unwrap().tree_state,
                 TreeState::Closed {
@@ -545,58 +531,48 @@ mod tests {
             .github(gh)
             .run_test(|mut tester| async {
                 tester.post_comment("@bors treeclosed=5").await?;
-                assert_eq!(
+                insta::assert_snapshot!(
                     tester.get_comment().await?,
-                    "@default-user: :key: Insufficient privileges: not in review users"
+                    @""
                 );
                 Ok(tester)
             })
             .await;
     }
 
-    fn reviewer() -> User {
-        User::new(10, "reviewer")
+    fn review_comment(text: &str) -> Comment {
+        Comment::from(text).with_author(User::reviewer())
     }
 
-    fn as_reviewer(text: &str) -> Comment {
-        Comment::from(text).with_author(reviewer())
-    }
-
-    fn create_gh_with_delegate_config() -> GitHubState {
-        let gh = GitHubState::default();
-        gh.default_repo().lock().set_config(
-            r#"
-[labels]
-approve = ["+approved"]
-"#,
-        );
-        gh.default_repo().lock().permissions = Permissions::empty();
-        gh.default_repo()
-            .lock()
-            .permissions
-            .users
-            .insert(reviewer(), vec![PermissionType::Review]);
-
-        gh
+    #[sqlx::test]
+    async fn cannot_approve_without_delegation(pool: sqlx::PgPool) {
+        BorsBuilder::new(pool)
+            .github(GitHubState::with_unauthorized_pr_author())
+            .run_test(|mut tester| async {
+                tester.post_comment("@bors r+").await?;
+                insta::assert_snapshot!(
+                    tester.get_comment().await?,
+                    @"@default-user: :key: Insufficient privileges: not in review users"
+                );
+                Ok(tester)
+            })
+            .await;
     }
 
     #[sqlx::test]
     async fn delegate_author(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
-            .github(create_gh_with_delegate_config())
+            .github(GitHubState::with_unauthorized_pr_author())
             .run_test(|mut tester| async {
-                tester.post_comment(as_reviewer("@bors delegate+")).await?;
-                assert_eq!(
+                tester
+                    .post_comment(review_comment("@bors delegate+"))
+                    .await?;
+                insta::assert_snapshot!(
                     tester.get_comment().await?,
-                    format!(
-                        "@{} can now approve this pull request",
-                        User::default().name
-                    )
+                    @""
                 );
 
-                let pr = tester.get_default_pr_db().await?.unwrap();
-
-                assert!(pr.delegated);
+                tester.default_pr().await.expect_delegated();
                 Ok(tester)
             })
             .await;
@@ -605,17 +581,20 @@ approve = ["+approved"]
     #[sqlx::test]
     async fn delegatee_can_approve(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
-            .github(create_gh_with_delegate_config())
+            .github(GitHubState::with_unauthorized_pr_author())
             .run_test(|mut tester| async {
-                tester.post_comment(as_reviewer("@bors delegate+")).await?;
+                tester
+                    .post_comment(review_comment("@bors delegate+"))
+                    .await?;
                 tester.expect_comments(1).await;
 
                 tester.post_comment("@bors r+").await?;
                 tester.expect_comments(1).await;
 
                 tester
-                    .expect_pr_approved_by(default_pr_number().into(), &User::default().name)
-                    .await;
+                    .default_pr()
+                    .await
+                    .expect_approved_by(&User::default_pr_author().name);
                 Ok(tester)
             })
             .await;
@@ -624,11 +603,12 @@ approve = ["+approved"]
     #[sqlx::test]
     async fn delegatee_can_try(pool: sqlx::PgPool) {
         let gh = BorsBuilder::new(pool)
-            .github(create_gh_with_delegate_config())
+            .github(GitHubState::with_unauthorized_pr_author())
             .run_test(|mut tester| async {
-                tester.post_comment(as_reviewer("@bors delegate+")).await?;
+                tester
+                    .post_comment(review_comment("@bors delegate+"))
+                    .await?;
                 tester.expect_comments(1).await;
-
                 tester.post_comment("@bors try").await?;
                 tester.expect_comments(1).await;
 
@@ -650,15 +630,17 @@ approve = ["+approved"]
     #[sqlx::test]
     async fn delegatee_can_set_priority(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
-            .github(create_gh_with_delegate_config())
+            .github(GitHubState::with_unauthorized_pr_author())
             .run_test(|mut tester| async {
-                tester.post_comment(as_reviewer("@bors delegate+")).await?;
+                tester
+                    .post_comment(review_comment("@bors delegate+"))
+                    .await?;
                 tester.expect_comments(1).await;
 
                 tester.post_comment("@bors p=7").await?;
                 tester
                     .wait_for(|| async {
-                        let Some(pr) = tester.get_default_pr_db().await? else {
+                        let Some(pr) = tester.default_pr_db().await? else {
                             return Ok(false);
                         };
                         Ok(pr.priority == Some(7))
@@ -673,18 +655,15 @@ approve = ["+approved"]
     #[sqlx::test]
     async fn delegate_insufficient_permission(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
-            .github(create_gh_with_delegate_config())
+            .github(GitHubState::with_unauthorized_pr_author())
             .run_test(|mut tester| async {
                 tester.post_comment("@bors delegate+").await?;
-                assert_eq!(
+                insta::assert_snapshot!(
                     tester.get_comment().await?,
-                    format!(
-                        "@{}: :key: Insufficient privileges: not in review users",
-                        User::default().name
-                    )
+                    @""
                 );
 
-                assert!(tester.get_default_pr_db().await?.is_none());
+                assert!(tester.default_pr_db().await?.is_none());
                 Ok(tester)
             })
             .await;
@@ -693,19 +672,20 @@ approve = ["+approved"]
     #[sqlx::test]
     async fn undelegate_by_reviewer(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
-            .github(create_gh_with_delegate_config())
+            .github(GitHubState::with_unauthorized_pr_author())
             .run_test(|mut tester| async {
-                tester.post_comment(as_reviewer("@bors delegate+")).await?;
+                tester
+                    .post_comment(review_comment("@bors delegate+"))
+                    .await?;
                 tester.expect_comments(1).await;
+                tester.default_pr().await.expect_delegated();
 
-                let pr = tester.get_default_pr_db().await?.unwrap();
-
-                assert!(pr.delegated);
-
-                tester.post_comment(as_reviewer("@bors delegate-")).await?;
+                tester
+                    .post_comment(review_comment("@bors delegate-"))
+                    .await?;
                 tester
                     .wait_for(|| async {
-                        let Some(pr) = tester.get_default_pr_db().await? else {
+                        let Some(pr) = tester.default_pr_db().await? else {
                             return Ok(false);
                         };
                         Ok(!pr.delegated)
@@ -720,15 +700,17 @@ approve = ["+approved"]
     #[sqlx::test]
     async fn undelegate_by_delegatee(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
-            .github(create_gh_with_delegate_config())
+            .github(GitHubState::with_unauthorized_pr_author())
             .run_test(|mut tester| async {
-                tester.post_comment(as_reviewer("@bors delegate+")).await?;
+                tester
+                    .post_comment(review_comment("@bors delegate+"))
+                    .await?;
                 tester.expect_comments(1).await;
 
                 tester.post_comment("@bors delegate-").await?;
                 tester
                     .wait_for(|| async {
-                        let Some(pr) = tester.get_default_pr_db().await? else {
+                        let Some(pr) = tester.default_pr_db().await? else {
                             return Ok(false);
                         };
                         Ok(!pr.delegated)
@@ -741,50 +723,26 @@ approve = ["+approved"]
     }
 
     #[sqlx::test]
-    async fn undelegate_insufficient_permission(pool: sqlx::PgPool) {
-        BorsBuilder::new(pool)
-            .github(create_gh_with_delegate_config())
-            .run_test(|mut tester| async {
-                tester.post_comment("@bors delegate-").await?;
-                assert_eq!(
-                    tester.get_comment().await?,
-                    format!(
-                        "@{}: :key: Insufficient privileges: not in review users",
-                        User::default().name
-                    )
-                    .as_str()
-                );
-
-                let pr = tester.get_default_pr_db().await?.unwrap();
-
-                assert!(!pr.delegated);
-                Ok(tester)
-            })
-            .await;
-    }
-
-    #[sqlx::test]
     async fn reviewer_unapprove_delegated_approval(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
-            .github(create_gh_with_delegate_config())
+            .github(GitHubState::with_unauthorized_pr_author())
             .run_test(|mut tester| async {
-                tester.post_comment(as_reviewer("@bors delegate+")).await?;
-                tester.expect_comments(1).await;
-
                 tester
-                    .post_comment(Comment::from("@bors r+").with_author(User::default()))
+                    .post_comment(review_comment("@bors delegate+"))
                     .await?;
                 tester.expect_comments(1).await;
-                tester
-                    .expect_pr_approved_by(default_pr_number().into(), &User::default().name)
-                    .await;
 
-                tester.post_comment(as_reviewer("@bors r-")).await?;
+                tester.post_comment("@bors r+").await?;
+                tester.expect_comments(1).await;
+                tester
+                    .default_pr()
+                    .await
+                    .expect_approved_by(&User::default_pr_author().name);
+
+                tester.post_comment(review_comment("@bors r-")).await?;
                 tester.expect_comments(1).await;
 
-                let pr = tester.get_default_pr_db().await?.unwrap();
-
-                assert!(!pr.is_approved());
+                tester.default_pr().await.expect_unapproved();
 
                 Ok(tester)
             })
@@ -794,20 +752,19 @@ approve = ["+approved"]
     #[sqlx::test]
     async fn non_author_cannot_use_delegation(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
-            .github(create_gh_with_delegate_config())
+            .github(GitHubState::with_unauthorized_pr_author())
             .run_test(|mut tester| async {
-                tester.post_comment(as_reviewer("@bors delegate+")).await?;
-                tester.expect_comments(1).await;
-
                 tester
-                    .post_comment(
-                        Comment::from("@bors r+").with_author(User::new(999, "not-the-author")),
-                    )
+                    .post_comment(review_comment("@bors delegate+"))
                     .await?;
                 tester.expect_comments(1).await;
 
-                let pr = tester.get_default_pr_db().await?.unwrap();
-                assert!(!pr.is_approved());
+                tester
+                    .post_comment(Comment::from("@bors r+").with_author(User::unprivileged()))
+                    .await?;
+                tester.expect_comments(1).await;
+
+                tester.default_pr().await.expect_unapproved();
 
                 Ok(tester)
             })
@@ -816,26 +773,16 @@ approve = ["+approved"]
 
     #[sqlx::test]
     async fn delegate_insufficient_permission_try_user(pool: sqlx::PgPool) {
-        let gh = GitHubState::default();
-        let try_user = User::new(200, "try-user");
-        gh.default_repo().lock().permissions = Permissions::empty();
-        gh.default_repo()
-            .lock()
-            .permissions
-            .users
-            .insert(try_user.clone(), vec![PermissionType::Try]);
-
         BorsBuilder::new(pool)
-            .github(gh)
             .run_test(|mut tester| async {
                 tester
-                    .post_comment(Comment::from("@bors delegate+").with_author(try_user))
+                    .post_comment(Comment::from("@bors delegate+").with_author(User::try_user()))
                     .await?;
-                assert_eq!(
+                insta::assert_snapshot!(
                     tester.get_comment().await?,
-                    "@try-user: :key: Insufficient privileges: not in review users"
+                    @"@user-with-try-privileges: :key: Insufficient privileges: not in review users"
                 );
-                assert!(tester.get_default_pr_db().await?.is_none());
+                assert!(tester.default_pr_db().await?.is_none());
                 Ok(tester)
             })
             .await;
@@ -846,10 +793,12 @@ approve = ["+approved"]
         run_test(pool, |mut tester| async {
             tester.post_comment("@bors r+ rollup=never").await?;
             tester.expect_comments(1).await;
-            let pr = tester.get_default_pr_db().await?.unwrap();
 
-            assert_eq!(pr.rollup, Some(RollupMode::Never));
-            assert!(pr.is_approved());
+            tester
+                .default_pr()
+                .await
+                .expect_rollup(Some(RollupMode::Never))
+                .expect_approved_by(&User::default_pr_author().name);
             Ok(tester)
         })
         .await;
@@ -860,10 +809,12 @@ approve = ["+approved"]
         run_test(pool, |mut tester| async {
             tester.post_comment("@bors r+ rollup").await?;
             tester.expect_comments(1).await;
-            let pr = tester.get_default_pr_db().await?.unwrap();
 
-            assert_eq!(pr.rollup, Some(RollupMode::Always));
-            assert!(pr.is_approved());
+            tester
+                .default_pr()
+                .await
+                .expect_rollup(Some(RollupMode::Always))
+                .expect_approved_by(&User::default_pr_author().name);
             Ok(tester)
         })
         .await;
@@ -874,10 +825,11 @@ approve = ["+approved"]
         run_test(pool, |mut tester| async {
             tester.post_comment("@bors r+ rollup-").await?;
             tester.expect_comments(1).await;
-            let pr = tester.get_default_pr_db().await?.unwrap();
-
-            assert_eq!(pr.rollup, Some(RollupMode::Maybe));
-            assert!(pr.is_approved());
+            tester
+                .default_pr()
+                .await
+                .expect_rollup(Some(RollupMode::Maybe))
+                .expect_approved_by(&User::default_pr_author().name);
             Ok(tester)
         })
         .await;
@@ -888,11 +840,13 @@ approve = ["+approved"]
         run_test(pool, |mut tester| async {
             tester.post_comment("@bors r+ p=10 rollup=never").await?;
             tester.expect_comments(1).await;
-            let pr = tester.get_default_pr_db().await?.unwrap();
 
-            assert_eq!(pr.priority, Some(10));
-            assert_eq!(pr.rollup, Some(RollupMode::Never));
-            assert!(pr.is_approved());
+            tester
+                .default_pr()
+                .await
+                .expect_priority(Some(10))
+                .expect_rollup(Some(RollupMode::Never))
+                .expect_approved_by(&User::default_pr_author().name);
             Ok(tester)
         })
         .await;
@@ -903,10 +857,11 @@ approve = ["+approved"]
         run_test(pool, |mut tester| async {
             tester.post_comment("@bors r=user1 rollup").await?;
             tester.expect_comments(1).await;
-            let pr = tester.get_default_pr_db().await?.unwrap();
-
-            assert_eq!(pr.rollup, Some(RollupMode::Always));
-            assert_eq!(pr.approver(), Some("user1"));
+            tester
+                .default_pr()
+                .await
+                .expect_rollup(Some(RollupMode::Always))
+                .expect_approved_by("user1");
             Ok(tester)
         })
         .await;
@@ -917,10 +872,11 @@ approve = ["+approved"]
         run_test(pool, |mut tester| async {
             tester.post_comment("@bors r=user1 rollup=always").await?;
             tester.expect_comments(1).await;
-            let pr = tester.get_default_pr_db().await?.unwrap();
-
-            assert_eq!(pr.rollup, Some(RollupMode::Always));
-            assert_eq!(pr.approver(), Some("user1"));
+            tester
+                .default_pr()
+                .await
+                .expect_rollup(Some(RollupMode::Always))
+                .expect_approved_by("user1");
             Ok(tester)
         })
         .await;
@@ -933,28 +889,12 @@ approve = ["+approved"]
                 .post_comment("@bors r=user1 rollup=always priority=10")
                 .await?;
             tester.expect_comments(1).await;
-            let pr = tester.get_default_pr_db().await?.unwrap();
-
-            assert_eq!(pr.rollup, Some(RollupMode::Always));
-            assert_eq!(pr.priority, Some(10));
-            assert_eq!(pr.approver(), Some("user1"));
-            Ok(tester)
-        })
-        .await;
-    }
-
-    #[sqlx::test]
-    async fn approve_on_behalf_with_priority_rollup_bare(pool: sqlx::PgPool) {
-        run_test(pool, |mut tester| async {
             tester
-                .post_comment("@bors r=user1 rollup- priority=10")
-                .await?;
-            tester.expect_comments(1).await;
-            let pr = tester.get_default_pr_db().await?.unwrap();
-
-            assert_eq!(pr.rollup, Some(RollupMode::Maybe));
-            assert_eq!(pr.priority, Some(10));
-            assert_eq!(pr.approver(), Some("user1"));
+                .default_pr()
+                .await
+                .expect_priority(Some(10))
+                .expect_rollup(Some(RollupMode::Always))
+                .expect_approved_by("user1");
             Ok(tester)
         })
         .await;
@@ -966,7 +906,7 @@ approve = ["+approved"]
             tester.post_comment("@bors rollup").await?;
             tester
                 .wait_for(|| async {
-                    let Some(pr) = tester.get_default_pr_db().await? else {
+                    let Some(pr) = tester.default_pr_db().await? else {
                         return Ok(false);
                     };
                     Ok(pr.rollup == Some(RollupMode::Always))
@@ -983,7 +923,7 @@ approve = ["+approved"]
             tester.post_comment("@bors rollup=maybe").await?;
             tester
                 .wait_for(|| async {
-                    let Some(pr) = tester.get_default_pr_db().await? else {
+                    let Some(pr) = tester.default_pr_db().await? else {
                         return Ok(false);
                     };
                     Ok(pr.rollup == Some(RollupMode::Maybe))
@@ -1000,7 +940,7 @@ approve = ["+approved"]
             tester.post_comment("@bors rollup").await?;
             tester
                 .wait_for(|| async {
-                    let Some(pr) = tester.get_default_pr_db().await? else {
+                    let Some(pr) = tester.default_pr_db().await? else {
                         return Ok(false);
                     };
                     Ok(pr.rollup == Some(RollupMode::Always))
@@ -1010,10 +950,11 @@ approve = ["+approved"]
             tester.post_comment("@bors r+").await?;
             tester.expect_comments(1).await;
 
-            let pr = tester.get_default_pr_db().await?.unwrap();
-
-            assert_eq!(pr.rollup, Some(RollupMode::Always));
-            assert!(pr.is_approved());
+            tester
+                .default_pr()
+                .await
+                .expect_rollup(Some(RollupMode::Always))
+                .expect_approved_by(&User::default_pr_author().name);
 
             Ok(tester)
         })
@@ -1026,7 +967,7 @@ approve = ["+approved"]
             tester.post_comment("@bors rollup=never").await?;
             tester
                 .wait_for(|| async {
-                    let Some(pr) = tester.get_default_pr_db().await? else {
+                    let Some(pr) = tester.default_pr_db().await? else {
                         return Ok(false);
                     };
                     Ok(pr.rollup == Some(RollupMode::Never))
@@ -1036,10 +977,11 @@ approve = ["+approved"]
             tester.post_comment("@bors r+ rollup").await?;
             tester.expect_comments(1).await;
 
-            let pr = tester.get_default_pr_db().await?.unwrap();
-
-            assert_eq!(pr.rollup, Some(RollupMode::Always));
-            assert!(pr.is_approved());
+            tester
+                .default_pr()
+                .await
+                .expect_rollup(Some(RollupMode::Always))
+                .expect_approved_by(&User::default_pr_author().name);
 
             Ok(tester)
         })
@@ -1047,17 +989,13 @@ approve = ["+approved"]
     }
 
     #[sqlx::test]
-    async fn approve_with_sha(pool: sqlx::PgPool) {
+    async fn approve_store_sha(pool: sqlx::PgPool) {
         run_test(pool, |mut tester| async {
+            let pr = tester.default_pr().await.get_gh_pr();
             tester.post_comment("@bors r+").await?;
             tester.expect_comments(1).await;
 
-            let pr = tester.get_default_pr_db().await?.unwrap();
-
-            assert_eq!(
-                pr.approved_sha(),
-                Some(format!("pr-{}-sha", default_pr_number())).as_deref()
-            );
+            tester.default_pr().await.expect_approved_sha(&pr.head_sha);
 
             Ok(tester)
         })
@@ -1067,27 +1005,22 @@ approve = ["+approved"]
     #[sqlx::test]
     async fn reapproved_pr_uses_latest_sha(pool: sqlx::PgPool) {
         run_test(pool, |mut tester| async {
+            let pr = tester.default_pr().await.get_gh_pr();
             tester.post_comment("@bors r+").await?;
             tester.expect_comments(1).await;
 
-            let pr = tester.get_default_pr_db().await?.unwrap();
-            assert_eq!(
-                pr.approved_sha(),
-                Some(format!("pr-{}-sha", default_pr_number())).as_deref()
-            );
+            tester.default_pr().await.expect_approved_sha(&pr.head_sha);
 
             tester.push_to_pull_request(default_pr_number()).await?;
+            let pr2 = tester.default_pr().await.get_gh_pr();
+            assert_ne!(pr.head_sha, pr2.head_sha);
+
             tester.expect_comments(1).await;
 
             tester.post_comment("@bors r+").await?;
             tester.expect_comments(1).await;
 
-            let pr = tester.get_default_pr_db().await?.unwrap();
-
-            assert_eq!(
-                pr.approved_sha(),
-                Some(format!("pr-{}-sha-1", default_pr_number())).as_deref()
-            );
+            tester.default_pr().await.expect_approved_sha(&pr2.head_sha);
 
             Ok(tester)
         })

@@ -12,7 +12,7 @@ use tokio::sync::mpsc::Sender;
 use tokio::task::JoinHandle;
 use tower::Service;
 
-use crate::bors::WAIT_FOR_REFRESH;
+use crate::bors::{RollupMode, WAIT_FOR_REFRESH};
 use crate::database::PullRequestModel;
 use crate::github::api::load_repositories;
 use crate::github::{GithubRepoName, PullRequestNumber};
@@ -153,14 +153,16 @@ impl BorsTester {
         self.github.get_repo(&default_repo_name())
     }
 
-    pub fn default_pr(&self) -> PullRequest {
-        self.default_repo()
+    pub async fn default_pr(&self) -> PullRequestProxy {
+        let pr = self
+            .default_repo()
             .lock()
             .get_pr(default_pr_number())
-            .clone()
+            .clone();
+        PullRequestProxy::new(self, pr).await
     }
 
-    pub async fn get_pr_db(
+    pub async fn pr_db(
         &self,
         repo: &GithubRepoName,
         number: u64,
@@ -170,9 +172,8 @@ impl BorsTester {
             .await
     }
 
-    pub async fn get_default_pr_db(&self) -> anyhow::Result<Option<PullRequestModel>> {
-        self.get_pr_db(&default_repo_name(), default_pr_number())
-            .await
+    pub async fn default_pr_db(&self) -> anyhow::Result<Option<PullRequestModel>> {
+        self.pr_db(&default_repo_name(), default_pr_number()).await
     }
 
     pub fn create_branch(&mut self, name: &str) -> MappedMutexGuard<RawMutex, Branch> {
@@ -373,7 +374,7 @@ impl BorsTester {
         pr_number: u64,
         approved_by: &str,
     ) -> anyhow::Result<()> {
-        let pr_in_db = self.get_pr_db(repo, pr_number).await?.unwrap();
+        let pr_in_db = self.pr_db(repo, pr_number).await?.unwrap();
         assert_eq!(pr_in_db.approver(), Some(approved_by));
 
         let pr = self.github.get_repo(repo).lock().get_pr(pr_number).clone();
@@ -495,5 +496,76 @@ impl BorsTester {
         // Flush any local queues
         self.http_mock.gh_server.assert_empty_queues().await;
         self.github
+    }
+}
+
+/// A proxy object for checking assertions on a pull request.
+/// It creates a state snapshot when it is created, therefore it will not be updated as state
+/// on GitHub/database changes.
+pub struct PullRequestProxy {
+    gh_pr: PullRequest,
+    db_pr: Option<PullRequestModel>,
+}
+
+impl PullRequestProxy {
+    async fn new(tester: &BorsTester, gh_pr: PullRequest) -> Self {
+        let db_pr = tester.pr_db(&gh_pr.repo, gh_pr.number.0).await.unwrap();
+        Self { gh_pr, db_pr }
+    }
+
+    pub fn get_db_pr(&self) -> Option<&PullRequestModel> {
+        self.db_pr.as_ref()
+    }
+
+    pub fn get_gh_pr(&self) -> PullRequest {
+        self.gh_pr.clone()
+    }
+
+    #[track_caller]
+    pub fn expect_rollup(&self, rollup: Option<RollupMode>) -> &Self {
+        assert_eq!(self.require_db_pr().rollup, rollup);
+        self
+    }
+
+    #[track_caller]
+    pub fn expect_approved_by(&self, approved_by: &str) -> &Self {
+        assert_eq!(self.require_db_pr().approver(), Some(approved_by));
+        self.gh_pr.check_added_labels(&["approved"]);
+        self
+    }
+
+    #[track_caller]
+    pub fn expect_unapproved(&self) -> &Self {
+        assert!(!self.require_db_pr().is_approved());
+        self
+    }
+
+    #[track_caller]
+    pub fn expect_priority(&self, priority: Option<i32>) -> &Self {
+        assert_eq!(self.require_db_pr().priority, priority);
+        self
+    }
+
+    #[track_caller]
+    pub fn expect_delegated(&self) -> &Self {
+        assert!(self.require_db_pr().delegated);
+        self
+    }
+
+    #[track_caller]
+    pub fn expect_not_delegated(&self) -> &Self {
+        assert!(!self.require_db_pr().delegated);
+        self
+    }
+
+    #[track_caller]
+    pub fn expect_approved_sha(&self, sha: &str) -> &Self {
+        assert_eq!(self.require_db_pr().approved_sha(), Some(sha));
+        self
+    }
+
+    #[track_caller]
+    fn require_db_pr(&self) -> &PullRequestModel {
+        self.db_pr.as_ref().unwrap()
     }
 }

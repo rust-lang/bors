@@ -40,12 +40,6 @@ impl User {
     }
 }
 
-impl Default for User {
-    fn default() -> Self {
-        Self::default_pr_author()
-    }
-}
-
 #[derive(Serialize)]
 pub struct GitHubUser {
     login: String,
@@ -117,7 +111,7 @@ impl GitHubUser {
 
 impl Default for GitHubUser {
     fn default() -> Self {
-        User::default().into()
+        User::default_pr_author().into()
     }
 }
 

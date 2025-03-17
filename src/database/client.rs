@@ -206,7 +206,7 @@ impl PgDbClient {
         Ok(workflows)
     }
 
-    pub async fn get_repository(&self, repo: &GithubRepoName) -> anyhow::Result<Option<RepoModel>> {
+    pub async fn repo_db(&self, repo: &GithubRepoName) -> anyhow::Result<Option<RepoModel>> {
         get_repository(&self.pool, repo).await
     }
 

@@ -26,6 +26,7 @@ use super::user::{GitHubUser, User};
 #[derive(Clone)]
 pub struct PullRequest {
     pub number: PullRequestNumber,
+    pub repo: GithubRepoName,
     pub added_labels: Vec<String>,
     pub removed_labels: Vec<String>,
     pub comment_counter: u64,
@@ -40,6 +41,7 @@ impl Default for PullRequest {
         let number = default_pr_number();
         Self {
             number: PullRequestNumber(number),
+            repo: default_repo_name(),
             added_labels: Vec::new(),
             removed_labels: Vec::new(),
             comment_counter: 0,
@@ -158,7 +160,7 @@ approve = ["+approved"]
 
         let mut users = HashMap::default();
         users.insert(
-            User::default(),
+            User::default_pr_author(),
             vec![PermissionType::Try, PermissionType::Review],
         );
         users.insert(User::try_user(), vec![PermissionType::Try]);

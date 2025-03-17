@@ -177,9 +177,10 @@ pub struct GitHubPullRequest {
 }
 
 impl GitHubPullRequest {
+    // TODO: remove this method
     pub fn new(number: u64) -> Self {
         GitHubPullRequest {
-            user: User::default().into(),
+            user: User::default_pr_author().into(),
             url: "https://test.com".to_string(),
             id: number + 1000,
             title: format!("PR #{number}"),

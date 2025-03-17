@@ -674,7 +674,7 @@ mod tests {
             tester.expect_comments(1).await;
             tester.post_comment("@bors try cancel").await?;
             tester.expect_comments(1).await;
-            let pr = tester.get_default_pr_db().await?.unwrap();
+            let pr = tester.default_pr_db().await?.unwrap();
             assert_eq!(pr.try_build.unwrap().status, BuildStatus::Cancelled);
             Ok(tester)
         })

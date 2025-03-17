@@ -271,7 +271,7 @@ PR will need to be re-approved."#,
             tester.open_pr(default_pr_number()).await?;
             tester
                 .wait_for(|| async {
-                    let Some(pr) = tester.get_default_pr_db().await? else {
+                    let Some(pr) = tester.default_pr_db().await? else {
                         return Ok(false);
                     };
                     Ok(pr.base_branch == "main".to_string())
@@ -327,7 +327,7 @@ PR will need to be re-approved."#,
 
             tester
                 .wait_for(|| async {
-                    let Some(pr) = tester.get_default_pr_db().await? else {
+                    let Some(pr) = tester.default_pr_db().await? else {
                         return Ok(false);
                     };
                     Ok(pr.base_branch == "main".to_string())
@@ -376,7 +376,7 @@ PR will need to be re-approved."#,
             tester.push_to_pull_request(default_pr_number()).await?;
             tester
                 .wait_for(|| async {
-                    let Some(pr) = tester.get_default_pr_db().await? else {
+                    let Some(pr) = tester.default_pr_db().await? else {
                         return Ok(false);
                     };
                     Ok(pr.mergeable_state == MergeableState::Unknown)
