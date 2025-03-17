@@ -330,7 +330,6 @@ impl BorsTester {
         let changes = if base_before != pr.base_branch {
             Some(PullRequestChangeEvent {
                 from_base_sha: Some(base_before.get_sha().to_string()),
-                from_base_ref: Some(base_before.get_name().to_string()),
             })
         } else {
             None

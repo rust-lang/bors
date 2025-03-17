@@ -275,9 +275,6 @@ struct GitHubPullRequestChanges {
 #[derive(Serialize)]
 struct GitHubPullRequestBaseChanges {
     sha: Option<PullRequestEventChangesFrom>,
-    // TODO: remove
-    #[serde(rename = "ref")]
-    ref_field: Option<PullRequestEventChangesFrom>,
 }
 
 #[derive(Serialize)]
@@ -287,14 +284,11 @@ struct PullRequestEventChangesFrom {
 
 impl From<PullRequestChangeEvent> for GitHubPullRequestChanges {
     fn from(value: PullRequestChangeEvent) -> Self {
-        let base = if value.from_base_sha.is_some() || value.from_base_ref.is_some() {
+        let base = if value.from_base_sha.is_some() {
             Some(GitHubPullRequestBaseChanges {
                 sha: value
                     .from_base_sha
                     .map(|sha| PullRequestEventChangesFrom { from: sha }),
-                ref_field: value
-                    .from_base_ref
-                    .map(|ref_val| PullRequestEventChangesFrom { from: ref_val }),
             })
         } else {
             None
@@ -307,7 +301,6 @@ impl From<PullRequestChangeEvent> for GitHubPullRequestChanges {
 #[derive(Default)]
 pub struct PullRequestChangeEvent {
     pub from_base_sha: Option<String>,
-    pub from_base_ref: Option<String>,
 }
 
 #[derive(Serialize)]
