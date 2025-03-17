@@ -21,7 +21,6 @@ use super::TreeState;
 use super::WorkflowStatus;
 use super::WorkflowType;
 
-#[cfg(test)]
 pub(crate) async fn get_pull_request(
     executor: impl PgExecutor<'_>,
     repo: &GithubRepoName,

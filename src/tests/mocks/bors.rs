@@ -153,14 +153,9 @@ impl BorsTester {
         self.github.get_repo(default_repo_name())
     }
 
-    pub async fn get_default_pr(&self) -> anyhow::Result<PullRequestModel> {
+    pub async fn get_default_pr(&self) -> anyhow::Result<Option<PullRequestModel>> {
         self.db()
-            .get_or_create_pull_request(
-                &default_repo_name(),
-                PullRequestNumber(default_pr_number()),
-                &default_branch_name(),
-                default_mergeable_state(),
-            )
+            .get_pull_request(&default_repo_name(), PullRequestNumber(default_pr_number()))
             .await
     }
 
