@@ -146,7 +146,7 @@ mod tests {
                     format!(
                         "Commit pr-{}-sha has been approved by `{}`",
                         default_pr_number(),
-                        User::default_user().name
+                        User::default_pr_author().name
                     ),
                 );
                 tester
@@ -182,7 +182,7 @@ PR will need to be re-approved."#,
                     format!(
                         "Commit pr-{}-sha has been approved by `{}`",
                         default_pr_number(),
-                        User::default_user().name
+                        User::default_pr_author().name
                     ),
                 );
                 tester
@@ -196,7 +196,10 @@ PR will need to be re-approved."#,
                     .await?;
 
                 tester
-                    .expect_pr_approved_by(default_pr_number().into(), &User::default_user().name)
+                    .expect_pr_approved_by(
+                        default_pr_number().into(),
+                        &User::default_pr_author().name,
+                    )
                     .await;
                 Ok(tester)
             })
@@ -232,7 +235,7 @@ PR will need to be re-approved."#,
                     format!(
                         "Commit pr-{}-sha has been approved by `{}`",
                         default_pr_number(),
-                        User::default_user().name
+                        User::default_pr_author().name
                     ),
                 );
                 tester.push_to_pull_request(default_pr_number()).await?;

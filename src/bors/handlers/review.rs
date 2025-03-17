@@ -322,7 +322,7 @@ mod tests {
                     format!(
                         "Commit pr-{}-sha has been approved by `{}`",
                         default_pr_number(),
-                        User::default_user().name
+                        User::default_pr_author().name
                     ),
                 );
 
@@ -330,7 +330,10 @@ mod tests {
                 assert!(pr.rollup.is_none());
 
                 tester
-                    .expect_pr_approved_by(default_pr_number().into(), &User::default_user().name)
+                    .expect_pr_approved_by(
+                        default_pr_number().into(),
+                        &User::default_pr_author().name,
+                    )
                     .await;
                 Ok(tester)
             })
@@ -404,11 +407,14 @@ mod tests {
                     format!(
                         "Commit pr-{}-sha has been approved by `{}`",
                         default_pr_number(),
-                        User::default_user().name
+                        User::default_pr_author().name
                     ),
                 );
                 tester
-                    .expect_pr_approved_by(default_pr_number().into(), &User::default_user().name)
+                    .expect_pr_approved_by(
+                        default_pr_number().into(),
+                        &User::default_pr_author().name,
+                    )
                     .await;
                 tester.post_comment("@bors r-").await?;
                 assert_eq!(

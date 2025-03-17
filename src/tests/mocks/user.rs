@@ -9,7 +9,7 @@ pub struct User {
 
 impl User {
     /// The user that creates a pull request by default.
-    pub fn default_user() -> Self {
+    pub fn default_pr_author() -> Self {
         Self::new(101, "default-user")
     }
 
@@ -42,7 +42,7 @@ impl User {
 
 impl Default for User {
     fn default() -> Self {
-        Self::default_user()
+        Self::default_pr_author()
     }
 }
 
