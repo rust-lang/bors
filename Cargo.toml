@@ -34,7 +34,7 @@ arc-swap = "1.7.1"
 # Web
 hyper = "1.2.0"
 axum = "0.8.1"
-tower = { version = "0.4", features = ["limit"] }
+tower = { version = "0.5", features = ["limit"] }
 jsonwebtoken = "9.2.0"
 url = "2.3"
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
