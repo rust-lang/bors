@@ -344,8 +344,8 @@ mod tests {
     use crate::database::BuildStatus;
     use crate::github::CommitSha;
     use crate::tests::mocks::{
-        default_pr_number, default_repo_name, run_test, BorsBuilder, Comment, User, Workflow,
-        WorkflowEvent, World,
+        default_pr_number, default_repo_name, run_test, BorsBuilder, Comment, GitHubState, User,
+        Workflow, WorkflowEvent,
     };
 
     #[sqlx::test]
@@ -433,18 +433,18 @@ mod tests {
 
     #[sqlx::test]
     async fn try_merge_branch_history(pool: sqlx::PgPool) {
-        let world = run_test(pool, |mut tester| async {
+        let gh = run_test(pool, |mut tester| async {
             tester.post_comment("@bors try").await?;
             tester.expect_comments(1).await;
             Ok(tester)
         })
         .await;
-        world.check_sha_history(
+        gh.check_sha_history(
             default_repo_name(),
             TRY_MERGE_BRANCH_NAME,
             &["main-sha1", "merge-main-sha1-pr-1-sha-0"],
         );
-        world.check_sha_history(
+        gh.check_sha_history(
             default_repo_name(),
             TRY_BRANCH_NAME,
             &["merge-main-sha1-pr-1-sha-0"],
@@ -453,7 +453,7 @@ mod tests {
 
     #[sqlx::test]
     async fn try_merge_explicit_parent(pool: sqlx::PgPool) {
-        let world = run_test(pool, |mut tester| async {
+        let gh = run_test(pool, |mut tester| async {
             tester
                 .post_comment("@bors try parent=ea9c1b050cc8b420c2c211d2177811e564a4dc60")
                 .await?;
@@ -461,7 +461,7 @@ mod tests {
             Ok(tester)
         })
         .await;
-        world.check_sha_history(
+        gh.check_sha_history(
             default_repo_name(),
             TRY_MERGE_BRANCH_NAME,
             &[
@@ -473,7 +473,7 @@ mod tests {
 
     #[sqlx::test]
     async fn try_merge_last_parent(pool: sqlx::PgPool) {
-        let world = run_test(pool, |mut tester| async {
+        let gh = run_test(pool, |mut tester| async {
             tester
                 .post_comment("@bors try parent=ea9c1b050cc8b420c2c211d2177811e564a4dc60")
                 .await?;
@@ -485,7 +485,7 @@ mod tests {
             Ok(tester)
         })
         .await;
-        world.check_sha_history(
+        gh.check_sha_history(
             default_repo_name(),
             TRY_MERGE_BRANCH_NAME,
             &[
@@ -622,7 +622,7 @@ mod tests {
 
     #[sqlx::test]
     async fn try_cancel_cancel_workflows(pool: sqlx::PgPool) {
-        let world = run_test(pool, |mut tester| async {
+        let gh = run_test(pool, |mut tester| async {
             tester.post_comment("@bors try").await?;
             tester.expect_comments(1).await;
 
@@ -647,7 +647,7 @@ mod tests {
             Ok(tester)
         })
         .await;
-        world.check_cancelled_workflows(default_repo_name(), &[123, 124]);
+        gh.check_cancelled_workflows(default_repo_name(), &[123, 124]);
     }
 
     #[sqlx::test]
@@ -683,7 +683,7 @@ mod tests {
 
     #[sqlx::test]
     async fn try_cancel_ignore_finished_workflows(pool: sqlx::PgPool) {
-        let world = run_test(pool, |mut tester| async {
+        let gh = run_test(pool, |mut tester| async {
             tester.create_branch(TRY_BRANCH_NAME).expect_suites(3);
             tester.post_comment("@bors try").await?;
             tester.expect_comments(1).await;
@@ -705,12 +705,12 @@ mod tests {
             Ok(tester)
         })
         .await;
-        world.check_cancelled_workflows(default_repo_name(), &[3]);
+        gh.check_cancelled_workflows(default_repo_name(), &[3]);
     }
 
     #[sqlx::test]
     async fn try_cancel_ignore_external_workflows(pool: sqlx::PgPool) {
-        let world = run_test(pool, |mut tester| async {
+        let gh = run_test(pool, |mut tester| async {
             tester.create_branch(TRY_BRANCH_NAME).expect_suites(1);
             tester.post_comment("@bors try").await?;
             tester.expect_comments(1).await;
@@ -722,7 +722,7 @@ mod tests {
             Ok(tester)
         })
         .await;
-        world.check_cancelled_workflows(default_repo_name(), &[]);
+        gh.check_cancelled_workflows(default_repo_name(), &[]);
     }
 
     #[sqlx::test]
@@ -744,15 +744,15 @@ mod tests {
 
     #[sqlx::test]
     async fn try_build_start_modify_labels(pool: sqlx::PgPool) {
-        let world = World::default();
-        world.default_repo().lock().set_config(
+        let gh = GitHubState::default();
+        gh.default_repo().lock().set_config(
             r#"
 [labels]
 try = ["+foo", "+bar", "-baz"]
 "#,
         );
         BorsBuilder::new(pool)
-            .world(world)
+            .github(gh)
             .run_test(|mut tester| async {
                 tester.post_comment("@bors try").await?;
                 insta::assert_snapshot!(tester.get_comment().await?, @":hourglass: Trying commit pr-1-sha with merge merge-main-sha1-pr-1-sha-0…");
@@ -767,15 +767,15 @@ try = ["+foo", "+bar", "-baz"]
 
     #[sqlx::test]
     async fn try_build_succeeded_modify_labels(pool: sqlx::PgPool) {
-        let world = World::default();
-        world.default_repo().lock().set_config(
+        let gh = GitHubState::default();
+        gh.default_repo().lock().set_config(
             r#"
 [labels]
 try_succeed = ["+foo", "+bar", "-baz"]
 "#,
         );
         BorsBuilder::new(pool)
-            .world(world)
+            .github(gh)
             .run_test(|mut tester| async {
                 tester.post_comment("@bors try").await?;
                 insta::assert_snapshot!(tester.get_comment().await?, @":hourglass: Trying commit pr-1-sha with merge merge-main-sha1-pr-1-sha-0…");
@@ -795,15 +795,15 @@ try_succeed = ["+foo", "+bar", "-baz"]
 
     #[sqlx::test]
     async fn try_build_failed_modify_labels(pool: sqlx::PgPool) {
-        let world = World::default();
-        world.default_repo().lock().set_config(
+        let gh = GitHubState::default();
+        gh.default_repo().lock().set_config(
             r#"
 [labels]
 try_failed = ["+foo", "+bar", "-baz"]
 "#,
         );
         BorsBuilder::new(pool)
-            .world(world)
+            .github(gh)
             .run_test(|mut tester| async {
                 tester.create_branch(TRY_BRANCH_NAME).expect_suites(1);
                 tester.post_comment("@bors try").await?;

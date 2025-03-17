@@ -43,11 +43,12 @@ mod repository;
 mod user;
 mod workflow;
 
-pub struct World {
+/// Represents the state of GitHub.
+pub struct GitHubState {
     repos: HashMap<GithubRepoName, Arc<Mutex<Repo>>>,
 }
 
-impl World {
+impl GitHubState {
     pub fn new() -> Self {
         Self {
             repos: Default::default(),
@@ -87,7 +88,7 @@ impl World {
     }
 }
 
-impl Default for World {
+impl Default for GitHubState {
     fn default() -> Self {
         let repo = Repo::default();
         Self {
@@ -102,9 +103,9 @@ pub struct ExternalHttpMock {
 }
 
 impl ExternalHttpMock {
-    pub async fn start(world: &World) -> Self {
-        let gh_server = GitHubMockServer::start(world).await;
-        let team_api_server = TeamApiMockServer::start(world).await;
+    pub async fn start(github: &GitHubState) -> Self {
+        let gh_server = GitHubMockServer::start(github).await;
+        let team_api_server = TeamApiMockServer::start(github).await;
         Self {
             gh_server,
             team_api_server,
@@ -146,15 +147,15 @@ fn dynamic_mock_req<
         })
 }
 
-pub fn create_world_with_approve_config() -> World {
-    let world = World::default();
-    world.default_repo().lock().set_config(
+pub fn create_gh_with_approve_config() -> GitHubState {
+    let gh = GitHubState::default();
+    gh.default_repo().lock().set_config(
         r#"
 [labels]
 approve = ["+approved"]
 "#,
     );
-    world
+    gh
 }
 
 pub async fn assert_pr_approved_by(

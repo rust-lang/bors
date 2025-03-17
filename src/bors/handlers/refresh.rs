@@ -109,7 +109,9 @@ fn elapsed_time(date: DateTime<Utc>) -> Duration {
 mod tests {
     use crate::bors::handlers::refresh::MOCK_TIME;
     use crate::bors::handlers::WAIT_FOR_WORKFLOW_STARTED;
-    use crate::tests::mocks::{default_repo_name, run_test, BorsBuilder, WorkflowEvent, World};
+    use crate::tests::mocks::{
+        default_repo_name, run_test, BorsBuilder, GitHubState, WorkflowEvent,
+    };
     use chrono::Utc;
     use std::future::Future;
     use std::time::Duration;
@@ -126,14 +128,14 @@ mod tests {
 
     #[sqlx::test]
     async fn refresh_do_nothing_before_timeout(pool: sqlx::PgPool) {
-        let world = World::default();
-        world.default_repo().lock().set_config(
+        let gh = GitHubState::default();
+        gh.default_repo().lock().set_config(
             r#"
 timeout = 3600
 "#,
         );
         BorsBuilder::new(pool)
-            .world(world)
+            .github(gh)
             .run_test(|mut tester| async move {
                 tester.post_comment("@bors try").await?;
                 tester.expect_comments(1).await;
@@ -148,14 +150,14 @@ timeout = 3600
 
     #[sqlx::test]
     async fn refresh_cancel_build_after_timeout(pool: sqlx::PgPool) {
-        let world = World::default();
-        world.default_repo().lock().set_config(
+        let gh = GitHubState::default();
+        gh.default_repo().lock().set_config(
             r#"
 timeout = 3600
 "#,
         );
         BorsBuilder::new(pool)
-            .world(world)
+            .github(gh)
             .run_test(|mut tester| async move {
                 tester.post_comment("@bors try").await?;
                 tester.expect_comments(1).await;
@@ -189,14 +191,14 @@ timeout = 3600
 
     #[sqlx::test]
     async fn refresh_cancel_workflow_after_timeout(pool: sqlx::PgPool) {
-        let world = World::default();
-        world.default_repo().lock().set_config(
+        let gh = GitHubState::default();
+        gh.default_repo().lock().set_config(
             r#"
 timeout = 3600
 "#,
         );
-        let world = BorsBuilder::new(pool)
-            .world(world)
+        let gh = BorsBuilder::new(pool)
+            .github(gh)
             .run_test(|mut tester| async move {
                 tester.post_comment("@bors try").await?;
                 tester.expect_comments(1).await;
@@ -213,7 +215,7 @@ timeout = 3600
                 Ok(tester)
             })
             .await;
-        world.check_cancelled_workflows(default_repo_name(), &[1]);
+        gh.check_cancelled_workflows(default_repo_name(), &[1]);
     }
 
     async fn with_mocked_time<Fut: Future<Output = ()>>(in_future: Duration, future: Fut) {

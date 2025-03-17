@@ -62,12 +62,12 @@ pub(super) async fn command_info(
 
 #[cfg(test)]
 mod tests {
-    use crate::tests::mocks::{create_world_with_approve_config, BorsBuilder, World};
+    use crate::tests::mocks::{create_gh_with_approve_config, BorsBuilder, GitHubState};
 
     #[sqlx::test]
     async fn info_for_unapproved_pr(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
-            .world(World::default())
+            .github(GitHubState::default())
             .run_test(|mut tester| async {
                 tester.post_comment("@bors info").await?;
                 insta::assert_snapshot!(
@@ -85,7 +85,7 @@ mod tests {
     #[sqlx::test]
     async fn info_for_approved_pr(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
-            .world(create_world_with_approve_config())
+            .github(create_gh_with_approve_config())
             .run_test(|mut tester| async {
                 tester.post_comment("@bors r+").await?;
                 tester.expect_comments(1).await;
@@ -106,7 +106,7 @@ mod tests {
     #[sqlx::test]
     async fn info_for_pr_with_priority(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
-            .world(create_world_with_approve_config())
+            .github(create_gh_with_approve_config())
             .run_test(|mut tester| async {
                 tester.post_comment("@bors p=5").await?;
                 tester
@@ -132,7 +132,7 @@ mod tests {
     #[sqlx::test]
     async fn info_for_pr_with_try_build(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
-            .world(create_world_with_approve_config())
+            .github(create_gh_with_approve_config())
             .run_test(|mut tester| async {
                 tester.post_comment("@bors try").await?;
                 tester.expect_comments(1).await;
@@ -154,7 +154,7 @@ mod tests {
     #[sqlx::test]
     async fn info_for_pr_with_everything(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
-            .world(create_world_with_approve_config())
+            .github(create_gh_with_approve_config())
             .run_test(|mut tester| async {
                 tester.post_comment("@bors r+ p=10").await?;
                 tester.expect_comments(1).await;

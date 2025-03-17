@@ -7,7 +7,7 @@ use wiremock::matchers::path;
 use wiremock::{matchers::method, Mock, MockServer, ResponseTemplate};
 
 use crate::tests::mocks::repository::Repo;
-use crate::tests::mocks::{User, World};
+use crate::tests::mocks::{GitHubState, User};
 use crate::TeamApiClient;
 
 #[derive(Clone, Default)]
@@ -20,7 +20,7 @@ pub struct TeamApiMockServer {
 }
 
 impl TeamApiMockServer {
-    pub async fn start(world: &World) -> Self {
+    pub async fn start(github: &GitHubState) -> Self {
         let mock_server = MockServer::start().await;
 
         let add_mock = |repo: Arc<Mutex<Repo>>, kind: PermissionType, name: &str| {
@@ -40,7 +40,7 @@ impl TeamApiMockServer {
                 .respond_with(ResponseTemplate::new(200).set_body_json(permissions))
         };
 
-        for repo in world.repos.values() {
+        for repo in github.repos.values() {
             add_mock(repo.clone(), PermissionType::Review, "review")
                 .mount(&mock_server)
                 .await;

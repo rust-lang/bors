@@ -299,7 +299,7 @@ async fn notify_of_delegation(
 mod tests {
     use crate::database::TreeState;
     use crate::tests::mocks::{
-        assert_pr_approved_by, assert_pr_unapproved, create_world_with_approve_config,
+        assert_pr_approved_by, assert_pr_unapproved, create_gh_with_approve_config,
     };
     use crate::{
         bors::{
@@ -308,15 +308,15 @@ mod tests {
         },
         permissions::PermissionType,
         tests::mocks::{
-            default_pr_number, default_repo_name, run_test, BorsBuilder, Comment, Permissions,
-            User, World,
+            default_pr_number, default_repo_name, run_test, BorsBuilder, Comment, GitHubState,
+            Permissions, User,
         },
     };
 
     #[sqlx::test]
     async fn default_approve(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
-            .world(create_world_with_approve_config())
+            .github(create_gh_with_approve_config())
             .run_test(|mut tester| async {
                 tester.post_comment("@bors r+").await?;
                 assert_eq!(
@@ -345,7 +345,7 @@ mod tests {
     #[sqlx::test]
     async fn approve_on_behalf(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
-            .world(create_world_with_approve_config())
+            .github(create_gh_with_approve_config())
             .run_test(|mut tester| async {
                 let approve_user = "user1";
                 tester
@@ -399,7 +399,7 @@ mod tests {
     #[sqlx::test]
     async fn unapprove(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
-            .world(create_world_with_approve_config())
+            .github(create_gh_with_approve_config())
             .run_test(|mut tester| async {
                 tester.post_comment("@bors r+").await?;
                 assert_eq!(
@@ -516,9 +516,9 @@ mod tests {
 
     #[sqlx::test]
     async fn tree_closed_with_priority(pool: sqlx::PgPool) {
-        let world = create_world_with_approve_config();
+        let gh = create_gh_with_approve_config();
         BorsBuilder::new(pool)
-            .world(world)
+            .github(gh)
             .run_test(|mut tester| async {
                 tester.post_comment("@bors treeclosed=5").await?;
                 assert_eq!(
@@ -545,11 +545,11 @@ mod tests {
 
     #[sqlx::test]
     async fn insufficient_permission_tree_closed(pool: sqlx::PgPool) {
-        let world = World::default();
-        world.default_repo().lock().permissions = Permissions::default();
+        let gh = GitHubState::default();
+        gh.default_repo().lock().permissions = Permissions::default();
 
         BorsBuilder::new(pool)
-            .world(world)
+            .github(gh)
             .run_test(|mut tester| async {
                 tester.post_comment("@bors treeclosed=5").await?;
                 assert_eq!(
@@ -569,29 +569,28 @@ mod tests {
         Comment::from(text).with_author(reviewer())
     }
 
-    fn create_world_with_delegate_config() -> World {
-        let world = World::default();
-        world.default_repo().lock().set_config(
+    fn create_gh_with_delegate_config() -> GitHubState {
+        let gh = GitHubState::default();
+        gh.default_repo().lock().set_config(
             r#"
 [labels]
 approve = ["+approved"]
 "#,
         );
-        world.default_repo().lock().permissions = Permissions::default();
-        world
-            .default_repo()
+        gh.default_repo().lock().permissions = Permissions::default();
+        gh.default_repo()
             .lock()
             .permissions
             .users
             .insert(reviewer(), vec![PermissionType::Review]);
 
-        world
+        gh
     }
 
     #[sqlx::test]
     async fn delegate_author(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
-            .world(create_world_with_delegate_config())
+            .github(create_gh_with_delegate_config())
             .run_test(|mut tester| async {
                 tester.post_comment(as_reviewer("@bors delegate+")).await?;
                 assert_eq!(
@@ -612,7 +611,7 @@ approve = ["+approved"]
     #[sqlx::test]
     async fn delegatee_can_approve(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
-            .world(create_world_with_delegate_config())
+            .github(create_gh_with_delegate_config())
             .run_test(|mut tester| async {
                 tester.post_comment(as_reviewer("@bors delegate+")).await?;
                 tester.expect_comments(1).await;
@@ -629,8 +628,8 @@ approve = ["+approved"]
 
     #[sqlx::test]
     async fn delegatee_can_try(pool: sqlx::PgPool) {
-        let world = BorsBuilder::new(pool)
-            .world(create_world_with_delegate_config())
+        let gh = BorsBuilder::new(pool)
+            .github(create_gh_with_delegate_config())
             .run_test(|mut tester| async {
                 tester.post_comment(as_reviewer("@bors delegate+")).await?;
                 tester.expect_comments(1).await;
@@ -641,12 +640,12 @@ approve = ["+approved"]
                 Ok(tester)
             })
             .await;
-        world.check_sha_history(
+        gh.check_sha_history(
             default_repo_name(),
             TRY_MERGE_BRANCH_NAME,
             &["main-sha1", "merge-main-sha1-pr-1-sha-0"],
         );
-        world.check_sha_history(
+        gh.check_sha_history(
             default_repo_name(),
             TRY_BRANCH_NAME,
             &["merge-main-sha1-pr-1-sha-0"],
@@ -656,7 +655,7 @@ approve = ["+approved"]
     #[sqlx::test]
     async fn delegatee_can_set_priority(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
-            .world(create_world_with_delegate_config())
+            .github(create_gh_with_delegate_config())
             .run_test(|mut tester| async {
                 tester.post_comment(as_reviewer("@bors delegate+")).await?;
                 tester.expect_comments(1).await;
@@ -677,7 +676,7 @@ approve = ["+approved"]
     #[sqlx::test]
     async fn delegate_insufficient_permission(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
-            .world(create_world_with_delegate_config())
+            .github(create_gh_with_delegate_config())
             .run_test(|mut tester| async {
                 tester.post_comment("@bors delegate+").await?;
                 assert_eq!(
@@ -698,7 +697,7 @@ approve = ["+approved"]
     #[sqlx::test]
     async fn undelegate_by_reviewer(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
-            .world(create_world_with_delegate_config())
+            .github(create_gh_with_delegate_config())
             .run_test(|mut tester| async {
                 tester.post_comment(as_reviewer("@bors delegate+")).await?;
                 tester.expect_comments(1).await;
@@ -722,7 +721,7 @@ approve = ["+approved"]
     #[sqlx::test]
     async fn undelegate_by_delegatee(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
-            .world(create_world_with_delegate_config())
+            .github(create_gh_with_delegate_config())
             .run_test(|mut tester| async {
                 tester.post_comment(as_reviewer("@bors delegate+")).await?;
                 tester.expect_comments(1).await;
@@ -743,7 +742,7 @@ approve = ["+approved"]
     #[sqlx::test]
     async fn undelegate_insufficient_permission(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
-            .world(create_world_with_delegate_config())
+            .github(create_gh_with_delegate_config())
             .run_test(|mut tester| async {
                 tester.post_comment("@bors delegate-").await?;
                 assert_eq!(
@@ -765,7 +764,7 @@ approve = ["+approved"]
     #[sqlx::test]
     async fn reviewer_unapprove_delegated_approval(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
-            .world(create_world_with_delegate_config())
+            .github(create_gh_with_delegate_config())
             .run_test(|mut tester| async {
                 tester.post_comment(as_reviewer("@bors delegate+")).await?;
                 tester.expect_comments(1).await;
@@ -791,7 +790,7 @@ approve = ["+approved"]
     #[sqlx::test]
     async fn non_author_cannot_use_delegation(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
-            .world(create_world_with_delegate_config())
+            .github(create_gh_with_delegate_config())
             .run_test(|mut tester| async {
                 tester.post_comment(as_reviewer("@bors delegate+")).await?;
                 tester.expect_comments(1).await;
@@ -813,18 +812,17 @@ approve = ["+approved"]
 
     #[sqlx::test]
     async fn delegate_insufficient_permission_try_user(pool: sqlx::PgPool) {
-        let world = World::default();
+        let gh = GitHubState::default();
         let try_user = User::new(200, "try-user");
-        world.default_repo().lock().permissions = Permissions::default();
-        world
-            .default_repo()
+        gh.default_repo().lock().permissions = Permissions::default();
+        gh.default_repo()
             .lock()
             .permissions
             .users
             .insert(try_user.clone(), vec![PermissionType::Try]);
 
         BorsBuilder::new(pool)
-            .world(world)
+            .github(gh)
             .run_test(|mut tester| async {
                 tester
                     .post_comment(Comment::from("@bors delegate+").with_author(try_user))

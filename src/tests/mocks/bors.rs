@@ -22,7 +22,7 @@ use crate::tests::mocks::workflow::{
     GitHubWorkflowEventPayload, TestWorkflowStatus, Workflow, WorkflowEvent, WorkflowEventKind,
 };
 use crate::tests::mocks::{
-    default_pr_number, default_repo_name, Branch, ExternalHttpMock, Repo, World,
+    default_pr_number, default_repo_name, Branch, ExternalHttpMock, GitHubState, Repo,
 };
 use crate::tests::webhook::{create_webhook_request, TEST_WEBHOOK_SECRET};
 use crate::{
@@ -38,7 +38,7 @@ use super::repository::default_branch_name;
 use super::GitHubPushEventPayload;
 
 pub struct BorsBuilder {
-    world: World,
+    github: GitHubState,
     pool: PgPool,
 }
 
@@ -46,12 +46,15 @@ impl BorsBuilder {
     pub fn new(pool: PgPool) -> Self {
         Self {
             pool,
-            world: Default::default(),
+            github: Default::default(),
         }
     }
 
-    pub fn world(self, world: World) -> Self {
-        Self { world, ..self }
+    pub fn github(self, github: GitHubState) -> Self {
+        Self {
+            github: github,
+            ..self
+        }
     }
 
     /// This closure is used to ensure that the test has to return `BorsTester`
@@ -63,10 +66,10 @@ impl BorsBuilder {
     >(
         self,
         f: F,
-    ) -> World {
+    ) -> GitHubState {
         // We return `tester` and `bors` separately, so that we can finish `bors`
         // even if `f` returns a result, for better error propagation.
-        let (tester, bors) = BorsTester::new(self.pool, self.world).await;
+        let (tester, bors) = BorsTester::new(self.pool, self.github).await;
         match f(tester).await {
             Ok(tester) => tester.finish(bors).await,
             Err(error) => {
@@ -84,7 +87,7 @@ pub async fn run_test<
 >(
     pool: PgPool,
     f: F,
-) -> World {
+) -> GitHubState {
     BorsBuilder::new(pool).run_test(f).await
 }
 
@@ -96,15 +99,15 @@ pub async fn run_test<
 pub struct BorsTester {
     app: Router,
     http_mock: ExternalHttpMock,
-    world: World,
+    github: GitHubState,
     db: Arc<PgDbClient>,
     // Sender for bors global events
     global_tx: Sender<BorsGlobalEvent>,
 }
 
 impl BorsTester {
-    async fn new(pool: PgPool, world: World) -> (Self, JoinHandle<()>) {
-        let mock = ExternalHttpMock::start(&world).await;
+    async fn new(pool: PgPool, github: GitHubState) -> (Self, JoinHandle<()>) {
+        let mock = ExternalHttpMock::start(&github).await;
         let db = Arc::new(PgDbClient::new(pool));
 
         let loaded_repos = load_repositories(&mock.github_client(), &mock.team_api_client())
@@ -132,7 +135,7 @@ impl BorsTester {
             Self {
                 app,
                 http_mock: mock,
-                world,
+                github,
                 db,
                 global_tx,
             },
@@ -145,7 +148,7 @@ impl BorsTester {
     }
 
     pub fn default_repo(&self) -> Arc<Mutex<Repo>> {
-        self.world.get_repo(default_repo_name())
+        self.github.get_repo(default_repo_name())
     }
 
     pub async fn get_default_pr(&self) -> anyhow::Result<PullRequestModel> {
@@ -167,7 +170,7 @@ impl BorsTester {
 
     pub fn create_branch(&mut self, name: &str) -> MappedMutexGuard<RawMutex, Branch> {
         // We cannot clone the Arc, otherwise it won't work
-        let repo = self.world.repos.get(&default_repo_name()).unwrap();
+        let repo = self.github.repos.get(&default_repo_name()).unwrap();
         let mut repo = repo.lock();
 
         // Polonius where art thou :/
@@ -183,14 +186,14 @@ impl BorsTester {
     }
 
     pub fn get_branch_mut(&mut self, name: &str) -> MappedMutexGuard<RawMutex, Branch> {
-        let repo = self.world.repos.get(&default_repo_name()).unwrap();
+        let repo = self.github.repos.get(&default_repo_name()).unwrap();
         MutexGuard::map(repo.lock(), move |repo| {
             repo.get_branch_by_name(name).unwrap()
         })
     }
 
     pub fn get_branch(&self, name: &str) -> Branch {
-        self.world
+        self.github
             .default_repo()
             .lock()
             .get_branch_by_name(name)
@@ -228,7 +231,7 @@ impl BorsTester {
     /// Performs a single started/success/failure workflow event.
     pub async fn workflow_event(&mut self, event: WorkflowEvent) -> anyhow::Result<()> {
         if let Some(branch) = self
-            .world
+            .github
             .get_repo(event.workflow.repository.clone())
             .lock()
             .get_branch_by_name(&event.workflow.head_branch)
@@ -432,7 +435,7 @@ impl BorsTester {
             .unwrap_or_else(|_| Err(anyhow::anyhow!("Timed out waiting for condition")))
     }
 
-    pub async fn finish(self, bors: JoinHandle<()>) -> World {
+    pub async fn finish(self, bors: JoinHandle<()>) -> GitHubState {
         // Make sure that the event channel senders are closed
         drop(self.app);
         drop(self.global_tx);
@@ -440,6 +443,6 @@ impl BorsTester {
         bors.await.unwrap();
         // Flush any local queues
         self.http_mock.gh_server.assert_empty_queues().await;
-        self.world
+        self.github
     }
 }

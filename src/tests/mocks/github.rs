@@ -9,7 +9,7 @@ use crate::github::GithubRepoName;
 use crate::tests::mocks::app::{default_app_id, AppHandler};
 use crate::tests::mocks::comment::Comment;
 use crate::tests::mocks::repository::{mock_repo, mock_repo_list};
-use crate::tests::mocks::World;
+use crate::tests::mocks::GitHubState;
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(3);
 
@@ -57,14 +57,14 @@ pub struct GitHubMockServer {
 }
 
 impl GitHubMockServer {
-    pub async fn start(world: &World) -> Self {
+    pub async fn start(github: &GitHubState) -> Self {
         let mock_server = MockServer::start().await;
-        mock_repo_list(world, &mock_server).await;
+        mock_repo_list(github, &mock_server).await;
 
         // Repositories are mocked separately to make it easier to
         // pass comm. channels to them.
         let mut repos = HashMap::default();
-        for (name, repo) in &world.repos {
+        for (name, repo) in &github.repos {
             let (comments_tx, comments_rx) = tokio::sync::mpsc::channel(1024);
             mock_repo(repo.clone(), comments_tx, &mock_server).await;
             repos.insert(

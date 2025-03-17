@@ -140,7 +140,7 @@ mod tests {
     #[sqlx::test]
     async fn unapprove_on_base_edited(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
-            .world(create_world_with_approve_config())
+            .github(create_gh_with_approve_config())
             .run_test(|mut tester| async {
                 tester.post_comment("@bors r+").await?;
                 assert_eq!(
@@ -175,7 +175,7 @@ PR will need to be re-approved."#,
     #[sqlx::test]
     async fn edit_pr_do_nothing_when_base_not_edited(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
-            .world(create_world_with_approve_config())
+            .github(create_gh_with_approve_config())
             .run_test(|mut tester| async {
                 tester.post_comment("@bors r+").await?;
                 assert_eq!(
@@ -229,7 +229,7 @@ PR will need to be re-approved."#,
     #[sqlx::test]
     async fn unapprove_on_push(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
-            .world(create_world_with_approve_config())
+            .github(create_gh_with_approve_config())
             .run_test(|mut tester| async {
                 tester.post_comment("@bors r+").await?;
                 assert_eq!(

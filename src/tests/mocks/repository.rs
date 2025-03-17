@@ -19,7 +19,7 @@ use crate::permissions::PermissionType;
 use crate::tests::mocks::comment::Comment;
 use crate::tests::mocks::permissions::Permissions;
 use crate::tests::mocks::pull_request::mock_pull_requests;
-use crate::tests::mocks::{default_pr_number, dynamic_mock_req, TestWorkflowStatus, World};
+use crate::tests::mocks::{default_pr_number, dynamic_mock_req, GitHubState, TestWorkflowStatus};
 
 use super::user::{GitHubUser, User};
 
@@ -246,10 +246,10 @@ pub fn default_branch_sha() -> &'static str {
     "main-sha1"
 }
 
-pub async fn mock_repo_list(world: &World, mock_server: &MockServer) {
+pub async fn mock_repo_list(github: &GitHubState, mock_server: &MockServer) {
     let repos = GitHubRepositories {
-        total_count: world.repos.len() as u64,
-        repositories: world
+        total_count: github.repos.len() as u64,
+        repositories: github
             .repos
             .iter()
             .enumerate()
