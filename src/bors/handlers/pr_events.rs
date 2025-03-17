@@ -194,8 +194,12 @@ PR will need to be re-approved."#,
                 .await?;
 
             tester
-                .expect_pr_approved_by(default_pr_number().into(), &User::default_pr_author().name)
-                .await;
+                .expect_pr_approved_by(
+                    &default_repo_name(),
+                    default_pr_number(),
+                    &User::default_pr_author().name,
+                )
+                .await?;
             Ok(tester)
         })
         .await;

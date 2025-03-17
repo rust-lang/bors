@@ -54,11 +54,11 @@ impl GitHubState {
     }
 
     pub fn default_repo(&self) -> Arc<Mutex<Repo>> {
-        self.get_repo(default_repo_name())
+        self.get_repo(&default_repo_name())
     }
 
-    pub fn get_repo(&self, name: GithubRepoName) -> Arc<Mutex<Repo>> {
-        self.repos.get(&name).unwrap().clone()
+    pub fn get_repo(&self, name: &GithubRepoName) -> Arc<Mutex<Repo>> {
+        self.repos.get(name).unwrap().clone()
     }
 
     pub fn with_repo(mut self, repo: Repo) -> Self {
@@ -69,7 +69,7 @@ impl GitHubState {
 
     pub fn check_sha_history(&self, repo: GithubRepoName, branch: &str, expected_shas: &[&str]) {
         let actual_shas = self
-            .get_repo(repo)
+            .get_repo(&repo)
             .lock()
             .get_branch_by_name(branch)
             .expect("Branch not found")
@@ -80,7 +80,7 @@ impl GitHubState {
 
     pub fn check_cancelled_workflows(&self, repo: GithubRepoName, expected_run_ids: &[u64]) {
         assert_eq!(
-            &self.get_repo(repo).lock().cancelled_workflows,
+            &self.get_repo(&repo).lock().cancelled_workflows,
             expected_run_ids
         );
     }

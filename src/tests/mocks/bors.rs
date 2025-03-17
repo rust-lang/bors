@@ -34,7 +34,7 @@ use super::pull_request::{
     default_mergeable_state, GitHubPullRequest, GitHubPullRequestEventPayload,
     PullRequestChangeEvent,
 };
-use super::repository::default_branch_name;
+use super::repository::{default_branch_name, PullRequest};
 use super::GitHubPushEventPayload;
 
 pub struct BorsBuilder {
@@ -150,7 +150,14 @@ impl BorsTester {
     }
 
     pub fn default_repo(&self) -> Arc<Mutex<Repo>> {
-        self.github.get_repo(default_repo_name())
+        self.github.get_repo(&default_repo_name())
+    }
+
+    pub fn default_pr(&self) -> PullRequest {
+        self.default_repo()
+            .lock()
+            .get_pr(default_pr_number())
+            .clone()
     }
 
     pub async fn get_pr_db(
@@ -230,7 +237,7 @@ impl BorsTester {
     pub async fn workflow_event(&mut self, event: WorkflowEvent) -> anyhow::Result<()> {
         if let Some(branch) = self
             .github
-            .get_repo(event.workflow.repository.clone())
+            .get_repo(&event.workflow.repository.clone())
             .lock()
             .get_branch_by_name(&event.workflow.head_branch)
         {
@@ -360,21 +367,18 @@ impl BorsTester {
 
     /// Assert that the given pull request is approved by the passed user and that the
     /// corresponding labels have been set.
-    pub async fn expect_pr_approved_by(&self, pr_number: PullRequestNumber, approved_by: &str) {
-        let pr_in_db = self
-            .db()
-            .get_or_create_pull_request(
-                &default_repo_name(),
-                pr_number,
-                &default_branch_name(),
-                default_mergeable_state(),
-            )
-            .await
-            .unwrap();
+    pub async fn expect_pr_approved_by(
+        &self,
+        repo: &GithubRepoName,
+        pr_number: u64,
+        approved_by: &str,
+    ) -> anyhow::Result<()> {
+        let pr_in_db = self.get_pr_db(repo, pr_number).await?.unwrap();
         assert_eq!(pr_in_db.approver(), Some(approved_by));
-        let repo = self.default_repo();
-        let pr = repo.lock().get_pr(default_pr_number()).clone();
+
+        let pr = self.github.get_repo(repo).lock().get_pr(pr_number).clone();
         pr.check_added_labels(&["approved"]);
+        Ok(())
     }
 
     /// Assert that the PR is **not** approved and that it does not have the corresponding

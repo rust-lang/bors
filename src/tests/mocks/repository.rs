@@ -30,6 +30,7 @@ pub struct PullRequest {
     pub removed_labels: Vec<String>,
     pub comment_counter: u64,
     pub head_sha: String,
+    pub author: User,
 }
 
 /// Creates a default pull request with number set to
@@ -43,6 +44,7 @@ impl Default for PullRequest {
             removed_labels: Vec::new(),
             comment_counter: 0,
             head_sha: format!("pr-{number}-sha"),
+            author: User::default_pr_author(),
         }
     }
 }
