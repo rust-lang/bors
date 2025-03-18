@@ -3,8 +3,8 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use arc_swap::ArcSwap;
-use octocrab::models::{App, AppId, InstallationRepositories, Repository};
 use octocrab::Octocrab;
+use octocrab::models::{App, AppId, InstallationRepositories, Repository};
 use secrecy::{ExposeSecret, SecretString};
 
 use client::GithubRepositoryClient;

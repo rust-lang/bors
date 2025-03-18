@@ -7,20 +7,20 @@ use regex::Regex;
 use wiremock::matchers::{method, path_regex};
 use wiremock::{Mock, Request, ResponseTemplate};
 
+use crate::TeamApiClient;
 use crate::github::GithubRepoName;
 use crate::tests::mocks::github::GitHubMockServer;
 use crate::tests::mocks::permissions::TeamApiMockServer;
-use crate::TeamApiClient;
 
-pub use bors::run_test;
 pub use bors::BorsBuilder;
+pub use bors::run_test;
 pub use comment::Comment;
 pub use permissions::Permissions;
 pub use pull_request::default_pr_number;
-pub use repository::default_branch_name;
-pub use repository::default_repo_name;
 pub use repository::Branch;
 pub use repository::Repo;
+pub use repository::default_branch_name;
+pub use repository::default_repo_name;
 pub use user::User;
 pub use workflow::CheckSuite;
 pub use workflow::TestWorkflowStatus;

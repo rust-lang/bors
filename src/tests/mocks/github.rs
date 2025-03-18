@@ -6,10 +6,10 @@ use wiremock::MockServer;
 
 use crate::create_github_client;
 use crate::github::GithubRepoName;
-use crate::tests::mocks::app::{default_app_id, AppHandler};
+use crate::tests::mocks::GitHubState;
+use crate::tests::mocks::app::{AppHandler, default_app_id};
 use crate::tests::mocks::comment::Comment;
 use crate::tests::mocks::repository::{mock_repo, mock_repo_list};
-use crate::tests::mocks::GitHubState;
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(3);
 

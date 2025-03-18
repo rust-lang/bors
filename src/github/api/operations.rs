@@ -2,8 +2,8 @@ use http::StatusCode;
 use octocrab::params::repos::Reference;
 use thiserror::Error;
 
-use crate::github::api::client::GithubRepositoryClient;
 use crate::github::CommitSha;
+use crate::github::api::client::GithubRepositoryClient;
 
 #[derive(Error, Debug)]
 pub enum MergeError {

@@ -8,7 +8,7 @@ use url::Url;
 use crate::github::GithubRepoName;
 use crate::tests::mocks::repository::GitHubRepository;
 use crate::tests::mocks::user::{GitHubUser, User};
-use crate::tests::mocks::{default_pr_number, Repo};
+use crate::tests::mocks::{Repo, default_pr_number};
 
 #[derive(Clone, Debug)]
 pub struct Comment {

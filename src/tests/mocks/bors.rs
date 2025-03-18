@@ -22,12 +22,12 @@ use crate::tests::mocks::workflow::{
     GitHubWorkflowEventPayload, TestWorkflowStatus, Workflow, WorkflowEvent, WorkflowEventKind,
 };
 use crate::tests::mocks::{
-    default_pr_number, default_repo_name, Branch, ExternalHttpMock, GitHubState, Repo, User,
+    Branch, ExternalHttpMock, GitHubState, Repo, User, default_pr_number, default_repo_name,
 };
-use crate::tests::webhook::{create_webhook_request, TEST_WEBHOOK_SECRET};
+use crate::tests::webhook::{TEST_WEBHOOK_SECRET, create_webhook_request};
 use crate::{
-    create_app, create_bors_process, BorsContext, BorsGlobalEvent, CommandParser, PgDbClient,
-    ServerState, WebhookSecret,
+    BorsContext, BorsGlobalEvent, CommandParser, PgDbClient, ServerState, WebhookSecret,
+    create_app, create_bors_process,
 };
 
 use super::pull_request::{GitHubPullRequestEventPayload, PullRequestChangeEvent};

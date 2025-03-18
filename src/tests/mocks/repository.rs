@@ -11,8 +11,8 @@ use serde::Serialize;
 use tokio::sync::mpsc::Sender;
 use url::Url;
 use wiremock::{
-    matchers::{method, path},
     Mock, MockServer, Request, ResponseTemplate,
+    matchers::{method, path},
 };
 
 use crate::github::{GithubRepoName, PullRequestNumber};
@@ -20,7 +20,7 @@ use crate::permissions::PermissionType;
 use crate::tests::mocks::comment::Comment;
 use crate::tests::mocks::permissions::Permissions;
 use crate::tests::mocks::pull_request::mock_pull_requests;
-use crate::tests::mocks::{default_pr_number, dynamic_mock_req, GitHubState, TestWorkflowStatus};
+use crate::tests::mocks::{GitHubState, TestWorkflowStatus, default_pr_number, dynamic_mock_req};
 
 use super::user::{GitHubUser, User};
 

@@ -1,15 +1,15 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::PgDbClient;
+use crate::bors::CheckSuiteStatus;
+use crate::bors::RepositoryState;
 use crate::bors::comment::{try_build_succeeded_comment, workflow_failed_comment};
 use crate::bors::event::{CheckSuiteCompleted, WorkflowCompleted, WorkflowStarted};
 use crate::bors::handlers::is_bors_observed_branch;
 use crate::bors::handlers::labels::handle_label_trigger;
-use crate::bors::CheckSuiteStatus;
-use crate::bors::RepositoryState;
 use crate::database::{BuildStatus, WorkflowStatus};
 use crate::github::LabelTrigger;
-use crate::PgDbClient;
 
 pub(super) async fn handle_workflow_started(
     db: Arc<PgDbClient>,
@@ -208,9 +208,9 @@ async fn try_complete_build(
 #[cfg(test)]
 mod tests {
     use crate::bors::handlers::trybuild::TRY_BRANCH_NAME;
-    use crate::database::operations::get_all_workflows;
     use crate::database::WorkflowStatus;
-    use crate::tests::mocks::{run_test, Branch, CheckSuite, Workflow, WorkflowEvent};
+    use crate::database::operations::get_all_workflows;
+    use crate::tests::mocks::{Branch, CheckSuite, Workflow, WorkflowEvent, run_test};
 
     #[sqlx::test]
     async fn workflow_started_unknown_build(pool: sqlx::PgPool) {

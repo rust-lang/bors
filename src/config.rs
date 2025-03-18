@@ -137,7 +137,7 @@ where
 mod tests {
     use std::{collections::BTreeMap, time::Duration};
 
-    use crate::config::{default_timeout, RepositoryConfig};
+    use crate::config::{RepositoryConfig, default_timeout};
 
     #[test]
     fn deserialize_empty() {

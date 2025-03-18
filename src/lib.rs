@@ -8,13 +8,13 @@ mod github;
 mod permissions;
 mod utils;
 
-pub use bors::{event::BorsGlobalEvent, event::BorsRepositoryEvent, BorsContext, CommandParser};
+pub use bors::{BorsContext, CommandParser, event::BorsGlobalEvent, event::BorsRepositoryEvent};
 pub use database::PgDbClient;
 pub use github::{
+    WebhookSecret,
     api::create_github_client,
     api::load_repositories,
-    server::{create_app, create_bors_process, ServerState},
-    WebhookSecret,
+    server::{ServerState, create_app, create_bors_process},
 };
 pub use permissions::TeamApiClient;
 

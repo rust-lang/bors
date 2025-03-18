@@ -1,19 +1,19 @@
 use std::sync::Arc;
 
+use crate::PgDbClient;
+use crate::bors::Comment;
+use crate::bors::RepositoryState;
 use crate::bors::command::Approver;
 use crate::bors::command::RollupMode;
 use crate::bors::handlers::deny_request;
 use crate::bors::handlers::has_permission;
 use crate::bors::handlers::labels::handle_label_trigger;
-use crate::bors::Comment;
-use crate::bors::RepositoryState;
 use crate::database::ApprovalInfo;
 use crate::database::TreeState;
 use crate::github::GithubUser;
 use crate::github::LabelTrigger;
 use crate::github::PullRequest;
 use crate::permissions::PermissionType;
-use crate::PgDbClient;
 
 /// Approve a pull request.
 /// A pull request can only be approved by a user of sufficient authority.
@@ -300,12 +300,12 @@ mod tests {
     use crate::database::TreeState;
     use crate::{
         bors::{
-            handlers::{trybuild::TRY_MERGE_BRANCH_NAME, TRY_BRANCH_NAME},
             RollupMode,
+            handlers::{TRY_BRANCH_NAME, trybuild::TRY_MERGE_BRANCH_NAME},
         },
         tests::mocks::{
-            default_pr_number, default_repo_name, run_test, BorsBuilder, Comment, GitHubState,
-            Permissions, User,
+            BorsBuilder, Comment, GitHubState, Permissions, User, default_pr_number,
+            default_repo_name, run_test,
         },
     };
 

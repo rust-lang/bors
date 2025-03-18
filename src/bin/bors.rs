@@ -6,8 +6,8 @@ use std::time::Duration;
 
 use anyhow::Context;
 use bors::{
-    create_app, create_bors_process, create_github_client, load_repositories, BorsContext,
-    BorsGlobalEvent, CommandParser, PgDbClient, ServerState, TeamApiClient, WebhookSecret,
+    BorsContext, BorsGlobalEvent, CommandParser, PgDbClient, ServerState, TeamApiClient,
+    WebhookSecret, create_app, create_bors_process, create_github_client, load_repositories,
 };
 use clap::Parser;
 use sqlx::postgres::PgConnectOptions;

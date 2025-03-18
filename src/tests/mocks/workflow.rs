@@ -6,7 +6,7 @@ use url::Url;
 use crate::github::GithubRepoName;
 use crate::tests::mocks::app::GitHubApp;
 use crate::tests::mocks::repository::{Branch, GitHubRepository};
-use crate::tests::mocks::{default_repo_name, User};
+use crate::tests::mocks::{User, default_repo_name};
 
 pub struct CheckSuite {
     repo: GithubRepoName,
