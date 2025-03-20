@@ -17,6 +17,7 @@ pub(super) async fn command_info(
             pr.number,
             &pr.base.name,
             pr.mergeable_state.clone().into(),
+            &pr.status,
         )
         .await?;
 

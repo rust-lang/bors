@@ -15,6 +15,8 @@ pub use api::operations::MergeError;
 pub use labels::{LabelModification, LabelTrigger};
 pub use webhook::WebhookSecret;
 
+use crate::bors::PullRequestStatus;
+
 /// Unique identifier of a GitHub repository
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub struct GithubRepoName {
@@ -115,6 +117,7 @@ pub struct PullRequest {
     pub mergeable_state: MergeableState,
     pub message: String,
     pub author: GithubUser,
+    pub status: PullRequestStatus,
 }
 
 impl From<octocrab::models::pulls::PullRequest> for PullRequest {
@@ -136,6 +139,15 @@ impl From<octocrab::models::pulls::PullRequest> for PullRequest {
             title: pr.title.unwrap_or_default(),
             message: pr.body.unwrap_or_default(),
             mergeable_state: pr.mergeable_state.unwrap_or(MergeableState::Unknown),
+            status: if pr.draft == Some(true) {
+                PullRequestStatus::Draft
+            } else if pr.merged_at.is_some() {
+                PullRequestStatus::Merged
+            } else if pr.closed_at.is_some() {
+                PullRequestStatus::Closed
+            } else {
+                PullRequestStatus::Open
+            },
         }
     }
 }

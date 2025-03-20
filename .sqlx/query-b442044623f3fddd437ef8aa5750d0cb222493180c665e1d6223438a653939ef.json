@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\nSELECT\n    pr.id,\n    pr.repository as \"repository: GithubRepoName\",\n    pr.number as \"number!: i64\",\n    (\n        pr.approved_by,\n        pr.approved_sha\n    ) AS \"approval_status!: ApprovalStatus\",\n    pr.delegated,\n    pr.priority,\n    pr.base_branch,\n    pr.mergeable_state as \"mergeable_state: MergeableState\",\n    pr.rollup as \"rollup: RollupMode\",\n    pr.created_at as \"created_at: DateTime<Utc>\",\n    build AS \"try_build: BuildModel\"\nFROM pull_request as pr\nLEFT JOIN build ON pr.build_id = build.id\nWHERE build.id = $1\n",
+  "query": "\n            WITH upserted_pr AS (\n                INSERT INTO pull_request (repository, number, base_branch, mergeable_state, status)\n                VALUES ($1, $2, $3, $4, $5)\n                ON CONFLICT (repository, number)\n                DO UPDATE SET\n                    base_branch = $3,\n                    mergeable_state = $4\n                RETURNING *\n            )\n            SELECT\n                pr.id,\n                pr.repository as \"repository: GithubRepoName\",\n                pr.number as \"number!: i64\",\n                (\n                    pr.approved_by,\n                    pr.approved_sha\n                ) AS \"approval_status!: ApprovalStatus\",\n                pr.status as \"pr_status: PullRequestStatus\", \n                pr.priority,\n                pr.rollup as \"rollup: RollupMode\",\n                pr.delegated,\n                pr.base_branch,\n                pr.mergeable_state as \"mergeable_state: MergeableState\",\n                pr.created_at as \"created_at: DateTime<Utc>\",\n                build AS \"try_build: BuildModel\"\n            FROM upserted_pr as pr\n            LEFT JOIN build ON pr.build_id = build.id\n            ",
   "describe": {
     "columns": [
       {
@@ -25,8 +25,8 @@
       },
       {
         "ordinal": 4,
-        "name": "delegated",
-        "type_info": "Bool"
+        "name": "pr_status: PullRequestStatus",
+        "type_info": "Text"
       },
       {
         "ordinal": 5,
@@ -35,26 +35,31 @@
       },
       {
         "ordinal": 6,
-        "name": "base_branch",
-        "type_info": "Text"
-      },
-      {
-        "ordinal": 7,
-        "name": "mergeable_state: MergeableState",
-        "type_info": "Text"
-      },
-      {
-        "ordinal": 8,
         "name": "rollup: RollupMode",
         "type_info": "Text"
       },
       {
+        "ordinal": 7,
+        "name": "delegated",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 8,
+        "name": "base_branch",
+        "type_info": "Text"
+      },
+      {
         "ordinal": 9,
+        "name": "mergeable_state: MergeableState",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
         "name": "created_at: DateTime<Utc>",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 10,
+        "ordinal": 11,
         "name": "try_build: BuildModel",
         "type_info": {
           "Custom": {
@@ -97,7 +102,11 @@
     ],
     "parameters": {
       "Left": [
-        "Int4"
+        "Text",
+        "Int8",
+        "Text",
+        "Text",
+        "Text"
       ]
     },
     "nullable": [
@@ -107,12 +116,13 @@
       null,
       false,
       true,
-      false,
-      false,
       true,
       false,
-      null
+      false,
+      false,
+      false,
+      true
     ]
   },
-  "hash": "66b7cb451d49e670d814d89d2a66ba3dd5df162984ca29dfdb1e893b1afca7ce"
+  "hash": "b442044623f3fddd437ef8aa5750d0cb222493180c665e1d6223438a653939ef"
 }

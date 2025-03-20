@@ -1,6 +1,6 @@
 use sqlx::PgPool;
 
-use crate::bors::RollupMode;
+use crate::bors::{PullRequestStatus, RollupMode};
 use crate::database::{
     BuildModel, BuildStatus, PullRequestModel, RepoModel, TreeState, WorkflowModel, WorkflowStatus,
     WorkflowType,
@@ -12,9 +12,9 @@ use super::operations::{
     approve_pull_request, create_build, create_pull_request, create_workflow,
     delegate_pull_request, find_build, find_pr_by_build, get_pull_request, get_repository,
     get_running_builds, get_workflow_urls_for_build, get_workflows_for_build, set_pr_priority,
-    set_pr_rollup, unapprove_pull_request, undelegate_pull_request, update_build_status,
-    update_mergeable_states_by_base_branch, update_pr_build_id, update_workflow_status,
-    upsert_pull_request, upsert_repository,
+    set_pr_rollup, set_pr_status, unapprove_pull_request, undelegate_pull_request,
+    update_build_status, update_mergeable_states_by_base_branch, update_pr_build_id,
+    update_workflow_status, upsert_pull_request, upsert_repository,
 };
 use super::{ApprovalInfo, MergeableState, RunId};
 
@@ -86,9 +86,17 @@ impl PgDbClient {
         pr_number: PullRequestNumber,
         base_branch: &str,
         mergeable_state: MergeableState,
+        pr_status: &PullRequestStatus,
     ) -> anyhow::Result<PullRequestModel> {
-        let pr =
-            upsert_pull_request(&self.pool, repo, pr_number, base_branch, mergeable_state).await?;
+        let pr = upsert_pull_request(
+            &self.pool,
+            repo,
+            pr_number,
+            base_branch,
+            mergeable_state,
+            pr_status,
+        )
+        .await?;
         Ok(pr)
     }
 
@@ -97,8 +105,18 @@ impl PgDbClient {
         repo: &GithubRepoName,
         pr_number: PullRequestNumber,
         base_branch: &str,
+        pr_status: PullRequestStatus,
     ) -> anyhow::Result<()> {
-        create_pull_request(&self.pool, repo, pr_number, base_branch).await
+        create_pull_request(&self.pool, repo, pr_number, base_branch, pr_status).await
+    }
+
+    pub async fn set_pr_status(
+        &self,
+        repo: &GithubRepoName,
+        pr_number: PullRequestNumber,
+        pr_status: PullRequestStatus,
+    ) -> anyhow::Result<()> {
+        set_pr_status(&self.pool, repo, pr_number, pr_status).await
     }
 
     pub async fn find_pr_by_build(

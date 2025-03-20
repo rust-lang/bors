@@ -2,6 +2,7 @@ use chrono::DateTime;
 use chrono::Utc;
 use sqlx::postgres::PgExecutor;
 
+use crate::bors::PullRequestStatus;
 use crate::bors::RollupMode;
 use crate::database::BuildStatus;
 use crate::database::RepoModel;
@@ -38,6 +39,7 @@ pub(crate) async fn get_pull_request(
             pr.approved_by,
             pr.approved_sha
         ) AS "approval_status!: ApprovalStatus",
+        pr.status as "pr_status: PullRequestStatus", 
         pr.priority,
         pr.rollup as "rollup: RollupMode",
         pr.delegated,
@@ -66,16 +68,38 @@ pub(crate) async fn create_pull_request(
     repo: &GithubRepoName,
     pr_number: PullRequestNumber,
     base_branch: &str,
+    pr_status: PullRequestStatus,
 ) -> anyhow::Result<()> {
     measure_db_query("create_pull_request", || async {
         sqlx::query!(
             r#"
-INSERT INTO pull_request (repository, number, base_branch)
-VALUES ($1, $2, $3) ON CONFLICT DO NOTHING
+INSERT INTO pull_request (repository, number, base_branch, status)
+VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING
 "#,
             repo as &GithubRepoName,
             pr_number.0 as i32,
-            base_branch
+            base_branch,
+            pr_status as PullRequestStatus,
+        )
+        .execute(executor)
+        .await?;
+        Ok(())
+    })
+    .await
+}
+
+pub(crate) async fn set_pr_status(
+    executor: impl PgExecutor<'_>,
+    repo: &GithubRepoName,
+    pr_number: PullRequestNumber,
+    pr_status: PullRequestStatus,
+) -> anyhow::Result<()> {
+    measure_db_query("set_pr_status", || async {
+        sqlx::query!(
+            "UPDATE pull_request SET status = $3 WHERE repository = $1 AND number = $2",
+            repo as &GithubRepoName,
+            pr_number.0 as i32,
+            pr_status as PullRequestStatus,
         )
         .execute(executor)
         .await?;
@@ -90,14 +114,15 @@ pub(crate) async fn upsert_pull_request(
     pr_number: PullRequestNumber,
     base_branch: &str,
     mergeable_state: MergeableState,
+    pr_status: &PullRequestStatus,
 ) -> anyhow::Result<PullRequestModel> {
     measure_db_query("upsert_pull_request", || async {
         let record = sqlx::query_as!(
             PullRequestModel,
             r#"
             WITH upserted_pr AS (
-                INSERT INTO pull_request (repository, number, base_branch, mergeable_state)
-                VALUES ($1, $2, $3, $4)
+                INSERT INTO pull_request (repository, number, base_branch, mergeable_state, status)
+                VALUES ($1, $2, $3, $4, $5)
                 ON CONFLICT (repository, number)
                 DO UPDATE SET
                     base_branch = $3,
@@ -112,6 +137,7 @@ pub(crate) async fn upsert_pull_request(
                     pr.approved_by,
                     pr.approved_sha
                 ) AS "approval_status!: ApprovalStatus",
+                pr.status as "pr_status: PullRequestStatus", 
                 pr.priority,
                 pr.rollup as "rollup: RollupMode",
                 pr.delegated,
@@ -125,7 +151,8 @@ pub(crate) async fn upsert_pull_request(
             repo as &GithubRepoName,
             pr_number.0 as i32,
             base_branch,
-            mergeable_state as _
+            mergeable_state as _,
+            pr_status as &PullRequestStatus,
         )
         .fetch_one(executor)
         .await?;
@@ -184,7 +211,7 @@ WHERE id = $5
             approval_info.approver,
             approval_info.sha,
             priority_i32,
-            rollup.map(|r| r.to_string()),
+            rollup as Option<RollupMode>,
             pr_id,
         )
         .execute(executor)
@@ -258,6 +285,7 @@ SELECT
         pr.approved_by,
         pr.approved_sha
     ) AS "approval_status!: ApprovalStatus",
+    pr.status as "pr_status: PullRequestStatus",  
     pr.delegated,
     pr.priority,
     pr.base_branch,
@@ -479,7 +507,7 @@ pub(crate) async fn set_pr_rollup(
     measure_db_query("set_pr_rollup", || async {
         sqlx::query!(
             "UPDATE pull_request SET rollup = $1 WHERE id = $2",
-            rollup.to_string(),
+            rollup as RollupMode,
             pr_id,
         )
         .execute(executor)

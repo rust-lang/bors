@@ -5,8 +5,9 @@ use super::{
     repository::GitHubRepository,
     user::GitHubUser,
 };
-use crate::github::GithubRepoName;
 use crate::tests::mocks::repository::PullRequest;
+use crate::{bors::PullRequestStatus, github::GithubRepoName};
+use chrono::{DateTime, Utc};
 use octocrab::models::LabelId;
 use octocrab::models::pulls::MergeableState as OctocrabMergeableState;
 use parking_lot::Mutex;
@@ -157,6 +158,9 @@ pub struct GitHubPullRequest {
     title: String,
     body: String,
     mergeable_state: OctocrabMergeableState,
+    draft: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    merged_at: Option<DateTime<Utc>>,
 
     /// The pull request number.  Note that GitHub's REST API
     /// considers every pull-request an issue with the same number.
@@ -178,6 +182,7 @@ impl From<PullRequest> for GitHubPullRequest {
             title: format!("PR #{number}"),
             body: format!("Description of PR #{number}"),
             mergeable_state: pr.mergeable_state,
+            draft: pr.status == PullRequestStatus::Draft,
             number,
             head: Box::new(GitHubHead {
                 label: format!("pr-{number}"),
@@ -188,6 +193,7 @@ impl From<PullRequest> for GitHubPullRequest {
                 ref_field: pr.base_branch.get_name().to_string(),
                 sha: pr.base_branch.get_sha().to_string(),
             }),
+            merged_at: pr.merged_at,
         }
     }
 }

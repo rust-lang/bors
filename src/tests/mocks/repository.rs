@@ -1,8 +1,9 @@
-use std::collections::HashMap;
 use std::sync::Arc;
+use std::{collections::HashMap, time::SystemTime};
 
-use crate::bors::CheckSuiteStatus;
+use crate::bors::{CheckSuiteStatus, PullRequestStatus};
 use base64::Engine;
+use chrono::{DateTime, Utc};
 use octocrab::models::pulls::MergeableState;
 use octocrab::models::repos::Object;
 use octocrab::models::repos::Object::Commit;
@@ -35,10 +36,12 @@ pub struct PullRequest {
     pub author: User,
     pub base_branch: Branch,
     pub mergeable_state: MergeableState,
+    pub status: PullRequestStatus,
+    pub merged_at: Option<DateTime<Utc>>,
 }
 
 impl PullRequest {
-    pub fn new(repo: GithubRepoName, number: u64, author: User) -> Self {
+    pub fn new(repo: GithubRepoName, number: u64, author: User, is_draft: bool) -> Self {
         Self {
             number: PullRequestNumber(number),
             repo,
@@ -49,6 +52,12 @@ impl PullRequest {
             author,
             base_branch: Branch::default(),
             mergeable_state: MergeableState::Clean,
+            status: if is_draft {
+                PullRequestStatus::Draft
+            } else {
+                PullRequestStatus::Open
+            },
+            merged_at: None,
         }
     }
 }
@@ -61,6 +70,7 @@ impl Default for PullRequest {
             default_repo_name(),
             default_pr_number(),
             User::default_pr_author(),
+            false,
         )
     }
 }
@@ -87,6 +97,10 @@ impl PullRequest {
     pub fn next_comment_id(&mut self) -> u64 {
         self.comment_counter += 1;
         self.comment_counter
+    }
+
+    pub fn merge_pr(&mut self) {
+        self.merged_at = Some(SystemTime::now().into());
     }
 }
 

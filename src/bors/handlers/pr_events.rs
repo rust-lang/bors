@@ -1,7 +1,11 @@
 use crate::PgDbClient;
-use crate::bors::event::{PullRequestEdited, PullRequestOpened, PullRequestPushed, PushToBranch};
+use crate::bors::event::{
+    PullRequestClosed, PullRequestConvertedToDraft, PullRequestEdited, PullRequestMerged,
+    PullRequestOpened, PullRequestPushed, PullRequestReadyForReview, PullRequestReopened,
+    PushToBranch,
+};
 use crate::bors::handlers::labels::handle_label_trigger;
-use crate::bors::{Comment, RepositoryState};
+use crate::bors::{Comment, PullRequestStatus, RepositoryState};
 use crate::database::MergeableState;
 use crate::github::{CommitSha, LabelTrigger, PullRequestNumber};
 use std::sync::Arc;
@@ -19,6 +23,7 @@ pub(super) async fn handle_pull_request_edited(
             pr_number,
             &pr.base.name,
             pr.mergeable_state.clone().into(),
+            &pr.status,
         )
         .await?;
 
@@ -49,6 +54,7 @@ pub(super) async fn handle_push_to_pull_request(
             pr_number,
             &pr.base.name,
             pr.mergeable_state.clone().into(),
+            &pr.status,
         )
         .await?;
 
@@ -66,10 +72,81 @@ pub(super) async fn handle_pull_request_opened(
     db: Arc<PgDbClient>,
     payload: PullRequestOpened,
 ) -> anyhow::Result<()> {
+    let pr_status = if payload.draft {
+        PullRequestStatus::Draft
+    } else {
+        PullRequestStatus::Open
+    };
     db.create_pull_request(
         repo_state.repository(),
         payload.pull_request.number,
         &payload.pull_request.base.name,
+        pr_status,
+    )
+    .await
+}
+
+pub(super) async fn handle_pull_request_closed(
+    repo_state: Arc<RepositoryState>,
+    db: Arc<PgDbClient>,
+    payload: PullRequestClosed,
+) -> anyhow::Result<()> {
+    db.set_pr_status(
+        repo_state.repository(),
+        payload.pull_request.number,
+        PullRequestStatus::Closed,
+    )
+    .await
+}
+
+pub(super) async fn handle_pull_request_merged(
+    repo_state: Arc<RepositoryState>,
+    db: Arc<PgDbClient>,
+    payload: PullRequestMerged,
+) -> anyhow::Result<()> {
+    db.set_pr_status(
+        repo_state.repository(),
+        payload.pull_request.number,
+        PullRequestStatus::Merged,
+    )
+    .await
+}
+
+pub(super) async fn handle_pull_request_reopened(
+    repo_state: Arc<RepositoryState>,
+    db: Arc<PgDbClient>,
+    payload: PullRequestReopened,
+) -> anyhow::Result<()> {
+    db.set_pr_status(
+        repo_state.repository(),
+        payload.pull_request.number,
+        PullRequestStatus::Open,
+    )
+    .await
+}
+
+pub(super) async fn handle_pull_request_converted_to_draft(
+    repo_state: Arc<RepositoryState>,
+    db: Arc<PgDbClient>,
+    payload: PullRequestConvertedToDraft,
+) -> anyhow::Result<()> {
+    db.set_pr_status(
+        repo_state.repository(),
+        payload.pull_request.number,
+        PullRequestStatus::Draft,
+    )
+    .await
+}
+
+pub(super) async fn handle_pull_request_ready_for_review(
+    repo_state: Arc<RepositoryState>,
+    db: Arc<PgDbClient>,
+    payload: PullRequestReadyForReview,
+) -> anyhow::Result<()> {
+    db.set_pr_status(
+        repo_state.repository(),
+        payload.pull_request.number,
+        PullRequestStatus::Open,
     )
     .await
 }
@@ -127,6 +204,7 @@ PR will need to be re-approved."#,
 
 #[cfg(test)]
 mod tests {
+    use crate::bors::PullRequestStatus;
     use crate::tests::mocks::default_pr_number;
     use crate::{
         database::MergeableState,
@@ -230,13 +308,14 @@ mod tests {
     #[sqlx::test]
     async fn store_base_branch_on_pr_opened(pool: sqlx::PgPool) {
         run_test(pool, |mut tester| async {
-            let pr = tester.open_pr(default_repo_name()).await?;
+            let pr = tester.open_pr(default_repo_name(), false).await?;
             tester
                 .wait_for(|| async {
                     let Some(pr) = tester.pr_db(default_repo_name(), pr.number.0).await? else {
                         return Ok(false);
                     };
-                    Ok(pr.base_branch == *default_branch_name())
+                    Ok(pr.base_branch == *default_branch_name()
+                        && pr.pr_status == PullRequestStatus::Open)
                 })
                 .await?;
             Ok(tester)
@@ -280,6 +359,123 @@ mod tests {
                         return Ok(false);
                     };
                     Ok(pr.mergeable_state == MergeableState::HasConflicts)
+                })
+                .await?;
+            Ok(tester)
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn open_close_and_reopen_pr(pool: sqlx::PgPool) {
+        run_test(pool, |mut tester| async {
+            let pr = tester.open_pr(default_repo_name(), false).await?;
+            tester
+                .wait_for(|| async {
+                    let Some(pr) = tester.pr_db(default_repo_name(), pr.number.0).await? else {
+                        return Ok(false);
+                    };
+                    Ok(pr.pr_status == PullRequestStatus::Open)
+                })
+                .await?;
+            tester.close_pr(default_repo_name(), pr.number.0).await?;
+            tester
+                .wait_for(|| async {
+                    let Some(pr) = tester.pr_db(default_repo_name(), pr.number.0).await? else {
+                        return Ok(false);
+                    };
+                    Ok(pr.pr_status == PullRequestStatus::Closed)
+                })
+                .await?;
+            tester.reopen_pr(default_repo_name(), pr.number.0).await?;
+            tester
+                .wait_for(|| async {
+                    let Some(pr) = tester.pr_db(default_repo_name(), pr.number.0).await? else {
+                        return Ok(false);
+                    };
+                    Ok(pr.pr_status == PullRequestStatus::Open)
+                })
+                .await?;
+            Ok(tester)
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn open_draft_pr_and_convert_to_ready_for_review(pool: sqlx::PgPool) {
+        run_test(pool, |mut tester| async {
+            let pr = tester.open_pr(default_repo_name(), true).await?;
+            tester
+                .wait_for(|| async {
+                    let Some(pr) = tester.pr_db(default_repo_name(), pr.number.0).await? else {
+                        return Ok(false);
+                    };
+                    Ok(pr.pr_status == PullRequestStatus::Draft)
+                })
+                .await?;
+            tester
+                .ready_for_review(default_repo_name(), pr.number.0)
+                .await?;
+            tester
+                .wait_for(|| async {
+                    let Some(pr) = tester.pr_db(default_repo_name(), pr.number.0).await? else {
+                        return Ok(false);
+                    };
+                    Ok(pr.pr_status == PullRequestStatus::Open)
+                })
+                .await?;
+            Ok(tester)
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn open_pr_and_convert_to_draft(pool: sqlx::PgPool) {
+        run_test(pool, |mut tester| async {
+            let pr = tester.open_pr(default_repo_name(), false).await?;
+            tester
+                .wait_for(|| async {
+                    let Some(pr) = tester.pr_db(default_repo_name(), pr.number.0).await? else {
+                        return Ok(false);
+                    };
+                    Ok(pr.pr_status == PullRequestStatus::Open)
+                })
+                .await?;
+            tester
+                .convert_to_draft(default_repo_name(), pr.number.0)
+                .await?;
+            tester
+                .wait_for(|| async {
+                    let Some(pr) = tester.pr_db(default_repo_name(), pr.number.0).await? else {
+                        return Ok(false);
+                    };
+                    Ok(pr.pr_status == PullRequestStatus::Draft)
+                })
+                .await?;
+            Ok(tester)
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn open_and_merge_pr(pool: sqlx::PgPool) {
+        run_test(pool, |mut tester| async {
+            let pr = tester.open_pr(default_repo_name(), false).await?;
+            tester
+                .wait_for(|| async {
+                    let Some(pr) = tester.pr_db(default_repo_name(), pr.number.0).await? else {
+                        return Ok(false);
+                    };
+                    Ok(pr.pr_status == PullRequestStatus::Open)
+                })
+                .await?;
+            tester.merge_pr(default_repo_name(), pr.number.0).await?;
+            tester
+                .wait_for(|| async {
+                    let Some(pr) = tester.pr_db(default_repo_name(), pr.number.0).await? else {
+                        return Ok(false);
+                    };
+                    Ok(pr.pr_status == PullRequestStatus::Merged)
                 })
                 .await?;
             Ok(tester)
