@@ -65,7 +65,7 @@ impl TeamApiClient {
     ) -> anyhow::Result<UserPermissions> {
         tracing::info!("Reloading permissions for repository {repo}");
 
-        let review_users = self
+        let review_users: HashSet<UserId> = self
             .load_users(repo.name(), PermissionType::Review)
             .await
             .map_err(|error| anyhow::anyhow!("Cannot load review users: {error:?}"))?;

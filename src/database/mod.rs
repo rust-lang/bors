@@ -1,11 +1,8 @@
 //! Provides access to the database.
-use std::{
-    fmt::{Display, Formatter},
-    str::FromStr,
-};
+use std::fmt::{Display, Formatter};
 
 use crate::{
-    bors::RollupMode,
+    bors::{PullRequestStatus, RollupMode},
     github::{GithubRepoName, PullRequestNumber},
 };
 use chrono::{DateTime, Utc};
@@ -109,7 +106,30 @@ impl sqlx::Decode<'_, sqlx::Postgres> for RollupMode {
     fn decode(value: sqlx::postgres::PgValueRef<'_>) -> Result<Self, BoxDynError> {
         let value = <String as sqlx::Decode<sqlx::Postgres>>::decode(value)?;
 
-        Self::from_str(&value).map_err(|_| panic!("Invalid RollupMode value: {}", value))
+        Ok(value.parse()?)
+    }
+}
+
+impl sqlx::Type<sqlx::Postgres> for PullRequestStatus {
+    fn type_info() -> sqlx::postgres::PgTypeInfo {
+        <String as sqlx::Type<sqlx::Postgres>>::type_info()
+    }
+}
+
+impl sqlx::Encode<'_, sqlx::Postgres> for PullRequestStatus {
+    fn encode_by_ref(
+        &self,
+        buf: &mut sqlx::postgres::PgArgumentBuffer,
+    ) -> Result<sqlx::encode::IsNull, BoxDynError> {
+        <String as sqlx::Encode<sqlx::Postgres>>::encode(self.to_string(), buf)
+    }
+}
+
+impl sqlx::Decode<'_, sqlx::Postgres> for PullRequestStatus {
+    fn decode(value: sqlx::postgres::PgValueRef<'_>) -> Result<Self, BoxDynError> {
+        let value = <String as sqlx::Decode<sqlx::Postgres>>::decode(value)?;
+
+        Ok(value.parse()?)
     }
 }
 
@@ -214,6 +234,7 @@ pub struct PullRequestModel {
     pub id: PrimaryKey,
     pub repository: GithubRepoName,
     pub number: PullRequestNumber,
+    pub pr_status: PullRequestStatus,
     pub base_branch: String,
     pub mergeable_state: MergeableState,
     pub approval_status: ApprovalStatus,

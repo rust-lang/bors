@@ -13,6 +13,16 @@ pub enum BorsRepositoryEvent {
     PullRequestEdited(PullRequestEdited),
     /// When a pull request is opened.
     PullRequestOpened(PullRequestOpened),
+    /// When a pull request is closed.
+    PullRequestClosed(PullRequestClosed),
+    // When a pull request is merged
+    PullRequestMerged(PullRequestMerged),
+    // When a pull request is reopened
+    PullRequestReopened(PullRequestReopened),
+    // When a pull request is converted to draft
+    PullRequestConvertedToDraft(PullRequestConvertedToDraft),
+    // When a pull request is ready for review
+    PullRequestReadyForReview(PullRequestReadyForReview),
     /// When there is a push to a branch. This includes when a commit is pushed, when a commit tag is pushed,
     /// when a branch is deleted or when a tag is deleted.
     PushToBranch(PushToBranch),
@@ -32,6 +42,11 @@ impl BorsRepositoryEvent {
             BorsRepositoryEvent::PullRequestCommitPushed(payload) => &payload.repository,
             BorsRepositoryEvent::PullRequestEdited(payload) => &payload.repository,
             BorsRepositoryEvent::PullRequestOpened(payload) => &payload.repository,
+            BorsRepositoryEvent::PullRequestClosed(payload) => &payload.repository,
+            BorsRepositoryEvent::PullRequestMerged(payload) => &payload.repository,
+            BorsRepositoryEvent::PullRequestReopened(payload) => &payload.repository,
+            BorsRepositoryEvent::PullRequestConvertedToDraft(payload) => &payload.repository,
+            BorsRepositoryEvent::PullRequestReadyForReview(payload) => &payload.repository,
             BorsRepositoryEvent::PushToBranch(payload) => &payload.repository,
             BorsRepositoryEvent::WorkflowStarted(workflow) => &workflow.repository,
             BorsRepositoryEvent::WorkflowCompleted(workflow) => &workflow.repository,
@@ -81,6 +96,37 @@ pub struct PullRequestEdited {
 
 #[derive(Debug)]
 pub struct PullRequestOpened {
+    pub repository: GithubRepoName,
+    pub pull_request: PullRequest,
+    pub draft: bool,
+}
+
+#[derive(Debug)]
+pub struct PullRequestClosed {
+    pub repository: GithubRepoName,
+    pub pull_request: PullRequest,
+}
+
+#[derive(Debug)]
+pub struct PullRequestMerged {
+    pub repository: GithubRepoName,
+    pub pull_request: PullRequest,
+}
+
+#[derive(Debug)]
+pub struct PullRequestReopened {
+    pub repository: GithubRepoName,
+    pub pull_request: PullRequest,
+}
+
+#[derive(Debug)]
+pub struct PullRequestConvertedToDraft {
+    pub repository: GithubRepoName,
+    pub pull_request: PullRequest,
+}
+
+#[derive(Debug)]
+pub struct PullRequestReadyForReview {
     pub repository: GithubRepoName,
     pub pull_request: PullRequest,
 }

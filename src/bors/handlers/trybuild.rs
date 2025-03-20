@@ -60,6 +60,7 @@ pub(super) async fn command_try_build(
             pr.number,
             &pr.base.name,
             pr.mergeable_state.clone().into(),
+            &pr.status,
         )
         .await
         .context("Cannot find or create PR")?;
@@ -211,6 +212,7 @@ pub(super) async fn command_try_cancel(
             pr_number,
             &pr.base.name,
             pr.mergeable_state.clone().into(),
+            &pr.status,
         )
         .await?;
 

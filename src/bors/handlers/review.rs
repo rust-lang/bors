@@ -45,6 +45,7 @@ pub(super) async fn command_approve(
             pr.number,
             &pr.base.name,
             pr.mergeable_state.clone().into(),
+            &pr.status,
         )
         .await?;
 
@@ -73,6 +74,7 @@ pub(super) async fn command_unapprove(
             pr.number,
             &pr.base.name,
             pr.mergeable_state.clone().into(),
+            &pr.status,
         )
         .await?;
 
@@ -100,6 +102,7 @@ pub(super) async fn command_set_priority(
             pr.number,
             &pr.base.name,
             pr.mergeable_state.clone().into(),
+            &pr.status,
         )
         .await?;
 
@@ -125,6 +128,7 @@ pub(super) async fn command_delegate(
             pr.number,
             &pr.base.name,
             pr.mergeable_state.clone().into(),
+            &pr.status,
         )
         .await?;
 
@@ -150,6 +154,7 @@ pub(super) async fn command_undelegate(
             pr.number,
             &pr.base.name,
             pr.mergeable_state.clone().into(),
+            &pr.status,
         )
         .await?;
 
@@ -175,6 +180,7 @@ pub(super) async fn command_set_rollup(
             pr.number,
             &pr.base.name,
             pr.mergeable_state.clone().into(),
+            &pr.status,
         )
         .await?;
 

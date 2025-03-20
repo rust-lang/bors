@@ -20,8 +20,9 @@ use crate::{PgDbClient, TeamApiClient, load_repositories};
 use anyhow::Context;
 use octocrab::Octocrab;
 use pr_events::{
-    handle_pull_request_edited, handle_pull_request_opened, handle_push_to_branch,
-    handle_push_to_pull_request,
+    handle_pull_request_closed, handle_pull_request_converted_to_draft, handle_pull_request_edited,
+    handle_pull_request_merged, handle_pull_request_opened, handle_pull_request_ready_for_review,
+    handle_pull_request_reopened, handle_push_to_branch, handle_push_to_pull_request,
 };
 use review::{command_delegate, command_set_priority, command_set_rollup, command_undelegate};
 use tracing::Instrument;
@@ -144,6 +145,52 @@ pub async fn handle_bors_repository_event(
                 tracing::info_span!("Pull request opened", repo = payload.repository.to_string());
 
             handle_pull_request_opened(repo, db, payload)
+                .instrument(span.clone())
+                .await?;
+        }
+        BorsRepositoryEvent::PullRequestClosed(payload) => {
+            let span =
+                tracing::info_span!("Pull request closed", repo = payload.repository.to_string());
+
+            handle_pull_request_closed(repo, db, payload)
+                .instrument(span.clone())
+                .await?;
+        }
+        BorsRepositoryEvent::PullRequestMerged(payload) => {
+            let span =
+                tracing::info_span!("Pull request merged", repo = payload.repository.to_string());
+
+            handle_pull_request_merged(repo, db, payload)
+                .instrument(span.clone())
+                .await?;
+        }
+        BorsRepositoryEvent::PullRequestReopened(payload) => {
+            let span = tracing::info_span!(
+                "Pull request reopened",
+                repo = payload.repository.to_string()
+            );
+
+            handle_pull_request_reopened(repo, db, payload)
+                .instrument(span.clone())
+                .await?;
+        }
+        BorsRepositoryEvent::PullRequestConvertedToDraft(payload) => {
+            let span = tracing::info_span!(
+                "Pull request converted to draft",
+                repo = payload.repository.to_string()
+            );
+
+            handle_pull_request_converted_to_draft(repo, db, payload)
+                .instrument(span.clone())
+                .await?;
+        }
+        BorsRepositoryEvent::PullRequestReadyForReview(payload) => {
+            let span = tracing::info_span!(
+                "Pull request ready for review",
+                repo = payload.repository.to_string()
+            );
+
+            handle_pull_request_ready_for_review(repo, db, payload)
                 .instrument(span.clone())
                 .await?;
         }
@@ -449,6 +496,7 @@ async fn has_permission(
             pr.number,
             &pr.base.name,
             pr.mergeable_state.clone().into(),
+            &pr.status,
         )
         .await?;
     let is_delegated = pr_model.delegated && author.id == pr.author.id;

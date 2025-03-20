@@ -290,20 +290,135 @@ impl BorsTester {
         self.webhook_check_suite(check_suite.into()).await
     }
 
-    pub async fn open_pr(&mut self, repo_name: GithubRepoName) -> anyhow::Result<PullRequest> {
+    pub async fn open_pr(
+        &mut self,
+        repo_name: GithubRepoName,
+        is_draft: bool,
+    ) -> anyhow::Result<PullRequest> {
         let number = {
             let repo = self.github.get_repo(&repo_name);
             let repo = repo.lock();
             repo.pull_requests.keys().max().copied().unwrap_or(1)
         };
 
-        let pr = PullRequest::new(repo_name, number, User::default_pr_author());
+        let pr = PullRequest::new(repo_name, number, User::default_pr_author(), is_draft);
         self.send_webhook(
             "pull_request",
             GitHubPullRequestEventPayload::new(pr.clone(), "opened", None),
         )
         .await?;
         Ok(pr)
+    }
+
+    pub async fn close_pr(
+        &mut self,
+        repo_name: GithubRepoName,
+        pr_number: u64,
+    ) -> anyhow::Result<()> {
+        let pr = {
+            let repo = self.github.get_repo(&repo_name);
+            let repo = repo.lock();
+            let pr = repo
+                .pull_requests
+                .get(&pr_number)
+                .expect("PR must be opened before closing it");
+            pr.clone()
+        };
+        self.send_webhook(
+            "pull_request",
+            GitHubPullRequestEventPayload::new(pr.clone(), "closed", None),
+        )
+        .await?;
+        Ok(())
+    }
+
+    pub async fn reopen_pr(
+        &mut self,
+        repo_name: GithubRepoName,
+        pr_number: u64,
+    ) -> anyhow::Result<()> {
+        let pr = {
+            let repo = self.github.get_repo(&repo_name);
+            let repo = repo.lock();
+            let pr = repo
+                .pull_requests
+                .get(&pr_number)
+                .expect("PR must exist before being reopened");
+            pr.clone()
+        };
+        self.send_webhook(
+            "pull_request",
+            GitHubPullRequestEventPayload::new(pr.clone(), "reopened", None),
+        )
+        .await?;
+        Ok(())
+    }
+
+    pub async fn convert_to_draft(
+        &mut self,
+        repo_name: GithubRepoName,
+        pr_number: u64,
+    ) -> anyhow::Result<()> {
+        let pr = {
+            let repo = self.github.get_repo(&repo_name);
+            let repo = repo.lock();
+            let pr = repo
+                .pull_requests
+                .get(&pr_number)
+                .expect("PR must exist before being converted to draft");
+            pr.clone()
+        };
+        self.send_webhook(
+            "pull_request",
+            GitHubPullRequestEventPayload::new(pr.clone(), "converted_to_draft", None),
+        )
+        .await?;
+        Ok(())
+    }
+
+    pub async fn ready_for_review(
+        &mut self,
+        repo_name: GithubRepoName,
+        pr_number: u64,
+    ) -> anyhow::Result<()> {
+        let pr = {
+            let repo = self.github.get_repo(&repo_name);
+            let repo = repo.lock();
+            let pr = repo
+                .pull_requests
+                .get(&pr_number)
+                .expect("PR must exist before being ready for review");
+            pr.clone()
+        };
+        self.send_webhook(
+            "pull_request",
+            GitHubPullRequestEventPayload::new(pr.clone(), "ready_for_review", None),
+        )
+        .await?;
+        Ok(())
+    }
+
+    pub async fn merge_pr(
+        &mut self,
+        repo_name: GithubRepoName,
+        pr_number: u64,
+    ) -> anyhow::Result<()> {
+        let mut pr = {
+            let repo = self.github.get_repo(&repo_name);
+            let repo = repo.lock();
+            let pr = repo
+                .pull_requests
+                .get(&pr_number)
+                .expect("PR must be opened before being merged");
+            pr.clone()
+        };
+        pr.merge_pr();
+        self.send_webhook(
+            "pull_request",
+            GitHubPullRequestEventPayload::new(pr.clone(), "closed", None),
+        )
+        .await?;
+        Ok(())
     }
 
     /// Perform an arbitrary modification of the given PR, and then send the "edited" PR webhook

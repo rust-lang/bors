@@ -8,19 +8,20 @@ use axum::http::request::Parts;
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use hmac::{Hmac, Mac};
 use octocrab::models::events::payload::{
-    IssueCommentEventAction, IssueCommentEventPayload, PullRequestEventAction,
-    PullRequestEventChangesFrom, PullRequestReviewCommentEventAction,
-    PullRequestReviewCommentEventPayload,
+    IssueCommentEventAction, IssueCommentEventPayload, PullRequestEventChangesFrom,
+    PullRequestReviewCommentEventAction, PullRequestReviewCommentEventPayload,
 };
 use octocrab::models::pulls::{PullRequest, Review};
+use octocrab::models::webhook_events::payload::PullRequestWebhookEventAction;
 use octocrab::models::{App, Author, CheckRun, Repository, RunId, workflows};
 use secrecy::{ExposeSecret, SecretString};
 use sha2::Sha256;
 
 use crate::bors::event::{
-    BorsEvent, BorsGlobalEvent, BorsRepositoryEvent, CheckSuiteCompleted, PullRequestComment,
-    PullRequestEdited, PullRequestOpened, PullRequestPushed, PushToBranch, WorkflowCompleted,
-    WorkflowStarted,
+    BorsEvent, BorsGlobalEvent, BorsRepositoryEvent, CheckSuiteCompleted, PullRequestClosed,
+    PullRequestComment, PullRequestConvertedToDraft, PullRequestEdited, PullRequestMerged,
+    PullRequestOpened, PullRequestPushed, PullRequestReadyForReview, PullRequestReopened,
+    PushToBranch, WorkflowCompleted, WorkflowStarted,
 };
 use crate::database::{WorkflowStatus, WorkflowType};
 use crate::github::server::ServerStateRef;
@@ -103,7 +104,7 @@ pub struct WebhookPullRequestReviewEvent<'a> {
 /// https://docs.github.com/en/webhooks/webhook-events-and-payloads#pull_request
 #[derive(Debug, serde::Deserialize)]
 struct WebhookPullRequestEvent {
-    action: PullRequestEventAction,
+    action: PullRequestWebhookEventAction,
     pull_request: PullRequest,
     changes: Option<WebhookPullRequestChanges>,
     repository: Repository,
@@ -228,7 +229,7 @@ fn parse_pull_request_events(body: &[u8]) -> anyhow::Result<Option<BorsEvent>> {
     let payload: WebhookPullRequestEvent = serde_json::from_slice(body)?;
     let repository_name = parse_repository_name(&payload.repository)?;
     match payload.action {
-        PullRequestEventAction::Edited => {
+        PullRequestWebhookEventAction::Edited => {
             let Some(changes) = payload.changes else {
                 return Err(anyhow::anyhow!(
                     "Edited pull request event should have `changes` field"
@@ -245,14 +246,46 @@ fn parse_pull_request_events(body: &[u8]) -> anyhow::Result<Option<BorsEvent>> {
                 }),
             )))
         }
-        PullRequestEventAction::Synchronize => Ok(Some(BorsEvent::Repository(
+        PullRequestWebhookEventAction::Synchronize => Ok(Some(BorsEvent::Repository(
             BorsRepositoryEvent::PullRequestCommitPushed(PullRequestPushed {
                 pull_request: payload.pull_request.into(),
                 repository: repository_name,
             }),
         ))),
-        PullRequestEventAction::Opened => Ok(Some(BorsEvent::Repository(
+        PullRequestWebhookEventAction::Opened => Ok(Some(BorsEvent::Repository(
             BorsRepositoryEvent::PullRequestOpened(PullRequestOpened {
+                repository: repository_name,
+                draft: payload.pull_request.draft.unwrap_or(false),
+                pull_request: payload.pull_request.into(),
+            }),
+        ))),
+        PullRequestWebhookEventAction::Closed => Ok(Some(BorsEvent::Repository({
+            if payload.pull_request.merged_at.is_some() {
+                BorsRepositoryEvent::PullRequestMerged(PullRequestMerged {
+                    repository: repository_name,
+                    pull_request: payload.pull_request.into(),
+                })
+            } else {
+                BorsRepositoryEvent::PullRequestClosed(PullRequestClosed {
+                    repository: repository_name,
+                    pull_request: payload.pull_request.into(),
+                })
+            }
+        }))),
+        PullRequestWebhookEventAction::Reopened => Ok(Some(BorsEvent::Repository(
+            BorsRepositoryEvent::PullRequestReopened(PullRequestReopened {
+                repository: repository_name,
+                pull_request: payload.pull_request.into(),
+            }),
+        ))),
+        PullRequestWebhookEventAction::ConvertedToDraft => Ok(Some(BorsEvent::Repository(
+            BorsRepositoryEvent::PullRequestConvertedToDraft(PullRequestConvertedToDraft {
+                repository: repository_name,
+                pull_request: payload.pull_request.into(),
+            }),
+        ))),
+        PullRequestWebhookEventAction::ReadyForReview => Ok(Some(BorsEvent::Repository(
+            BorsRepositoryEvent::PullRequestReadyForReview(PullRequestReadyForReview {
                 repository: repository_name,
                 pull_request: payload.pull_request.into(),
             }),
@@ -613,6 +646,7 @@ mod tests {
                                         fragment: None,
                                     },
                                 },
+                                status: Open,
                             },
                             from_base_sha: Some(
                                 CommitSha(
@@ -683,6 +717,7 @@ mod tests {
                                         fragment: None,
                                     },
                                 },
+                                status: Open,
                             },
                         },
                     ),
@@ -797,6 +832,405 @@ mod tests {
                                         fragment: None,
                                     },
                                 },
+                                status: Open,
+                            },
+                            draft: false,
+                        },
+                    ),
+                ),
+            ),
+        )
+        "#
+        );
+    }
+
+    #[tokio::test]
+    async fn pull_request_closed() {
+        insta::assert_debug_snapshot!(
+            check_webhook("webhook/pull-request-closed.json", "pull_request").await,
+            @r#"
+        Ok(
+            GitHubWebhook(
+                Repository(
+                    PullRequestClosed(
+                        PullRequestClosed {
+                            repository: GithubRepoName {
+                                owner: "geetanshjuneja",
+                                name: "test-bors",
+                            },
+                            pull_request: PullRequest {
+                                number: PullRequestNumber(
+                                    3,
+                                ),
+                                head_label: "geetanshjuneja:readme",
+                                head: Branch {
+                                    name: "readme",
+                                    sha: CommitSha(
+                                        "cf36029b6811f9e73e0c2dd2d8e41e3168c0a21a",
+                                    ),
+                                },
+                                base: Branch {
+                                    name: "main",
+                                    sha: CommitSha(
+                                        "ce5d683e04482608564a117910940fa2b563afde",
+                                    ),
+                                },
+                                title: "bors test",
+                                mergeable_state: Clean,
+                                message: "",
+                                author: GithubUser {
+                                    id: UserId(
+                                        72911296,
+                                    ),
+                                    username: "geetanshjuneja",
+                                    html_url: Url {
+                                        scheme: "https",
+                                        cannot_be_a_base: false,
+                                        username: "",
+                                        password: None,
+                                        host: Some(
+                                            Domain(
+                                                "github.com",
+                                            ),
+                                        ),
+                                        port: None,
+                                        path: "/geetanshjuneja",
+                                        query: None,
+                                        fragment: None,
+                                    },
+                                },
+                                status: Closed,
+                            },
+                        },
+                    ),
+                ),
+            ),
+        )
+        "#
+        );
+    }
+
+    #[tokio::test]
+    async fn pull_request_merged() {
+        insta::assert_debug_snapshot!(
+            check_webhook("webhook/pull-request-merged.json", "pull_request").await,
+            @r#"
+        Ok(
+            GitHubWebhook(
+                Repository(
+                    PullRequestMerged(
+                        PullRequestMerged {
+                            repository: GithubRepoName {
+                                owner: "geetanshjuneja",
+                                name: "test-bors",
+                            },
+                            pull_request: PullRequest {
+                                number: PullRequestNumber(
+                                    5,
+                                ),
+                                head_label: "geetanshjuneja:test",
+                                head: Branch {
+                                    name: "test",
+                                    sha: CommitSha(
+                                        "4964158cdea899629716b4f0c0e2f5ab72e3cb4a",
+                                    ),
+                                },
+                                base: Branch {
+                                    name: "main",
+                                    sha: CommitSha(
+                                        "07eb9b80644df5476cb7d9bb23918d9e64b2dc35",
+                                    ),
+                                },
+                                title: "test",
+                                mergeable_state: Unknown,
+                                message: "Creating draft pr",
+                                author: GithubUser {
+                                    id: UserId(
+                                        72911296,
+                                    ),
+                                    username: "geetanshjuneja",
+                                    html_url: Url {
+                                        scheme: "https",
+                                        cannot_be_a_base: false,
+                                        username: "",
+                                        password: None,
+                                        host: Some(
+                                            Domain(
+                                                "github.com",
+                                            ),
+                                        ),
+                                        port: None,
+                                        path: "/geetanshjuneja",
+                                        query: None,
+                                        fragment: None,
+                                    },
+                                },
+                                status: Merged,
+                            },
+                        },
+                    ),
+                ),
+            ),
+        )
+        "#
+        );
+    }
+
+    #[tokio::test]
+    async fn pull_request_reopened() {
+        insta::assert_debug_snapshot!(
+            check_webhook("webhook/pull-request-reopened.json", "pull_request").await,
+            @r#"
+        Ok(
+            GitHubWebhook(
+                Repository(
+                    PullRequestReopened(
+                        PullRequestReopened {
+                            repository: GithubRepoName {
+                                owner: "geetanshjuneja",
+                                name: "test-bors",
+                            },
+                            pull_request: PullRequest {
+                                number: PullRequestNumber(
+                                    3,
+                                ),
+                                head_label: "geetanshjuneja:readme",
+                                head: Branch {
+                                    name: "readme",
+                                    sha: CommitSha(
+                                        "cf36029b6811f9e73e0c2dd2d8e41e3168c0a21a",
+                                    ),
+                                },
+                                base: Branch {
+                                    name: "main",
+                                    sha: CommitSha(
+                                        "ce5d683e04482608564a117910940fa2b563afde",
+                                    ),
+                                },
+                                title: "bors test",
+                                mergeable_state: Unknown,
+                                message: "",
+                                author: GithubUser {
+                                    id: UserId(
+                                        72911296,
+                                    ),
+                                    username: "geetanshjuneja",
+                                    html_url: Url {
+                                        scheme: "https",
+                                        cannot_be_a_base: false,
+                                        username: "",
+                                        password: None,
+                                        host: Some(
+                                            Domain(
+                                                "github.com",
+                                            ),
+                                        ),
+                                        port: None,
+                                        path: "/geetanshjuneja",
+                                        query: None,
+                                        fragment: None,
+                                    },
+                                },
+                                status: Open,
+                            },
+                        },
+                    ),
+                ),
+            ),
+        )
+        "#
+        );
+    }
+
+    #[tokio::test]
+    async fn pull_request_draft_opened() {
+        insta::assert_debug_snapshot!(
+            check_webhook("webhook/pull-request-draft-opened.json", "pull_request").await,
+            @r#"
+        Ok(
+            GitHubWebhook(
+                Repository(
+                    PullRequestOpened(
+                        PullRequestOpened {
+                            repository: GithubRepoName {
+                                owner: "geetanshjuneja",
+                                name: "test-bors",
+                            },
+                            pull_request: PullRequest {
+                                number: PullRequestNumber(
+                                    5,
+                                ),
+                                head_label: "geetanshjuneja:test",
+                                head: Branch {
+                                    name: "test",
+                                    sha: CommitSha(
+                                        "4964158cdea899629716b4f0c0e2f5ab72e3cb4a",
+                                    ),
+                                },
+                                base: Branch {
+                                    name: "main",
+                                    sha: CommitSha(
+                                        "07eb9b80644df5476cb7d9bb23918d9e64b2dc35",
+                                    ),
+                                },
+                                title: "test",
+                                mergeable_state: Unknown,
+                                message: "Creating draft pr",
+                                author: GithubUser {
+                                    id: UserId(
+                                        72911296,
+                                    ),
+                                    username: "geetanshjuneja",
+                                    html_url: Url {
+                                        scheme: "https",
+                                        cannot_be_a_base: false,
+                                        username: "",
+                                        password: None,
+                                        host: Some(
+                                            Domain(
+                                                "github.com",
+                                            ),
+                                        ),
+                                        port: None,
+                                        path: "/geetanshjuneja",
+                                        query: None,
+                                        fragment: None,
+                                    },
+                                },
+                                status: Draft,
+                            },
+                            draft: true,
+                        },
+                    ),
+                ),
+            ),
+        )
+        "#
+        );
+    }
+
+    #[tokio::test]
+    async fn pull_request_converted_to_draft() {
+        insta::assert_debug_snapshot!(
+            check_webhook("webhook/pull-request-converted-to-draft.json", "pull_request").await,
+            @r#"
+        Ok(
+            GitHubWebhook(
+                Repository(
+                    PullRequestConvertedToDraft(
+                        PullRequestConvertedToDraft {
+                            repository: GithubRepoName {
+                                owner: "geetanshjuneja",
+                                name: "test-bors",
+                            },
+                            pull_request: PullRequest {
+                                number: PullRequestNumber(
+                                    5,
+                                ),
+                                head_label: "geetanshjuneja:test",
+                                head: Branch {
+                                    name: "test",
+                                    sha: CommitSha(
+                                        "4964158cdea899629716b4f0c0e2f5ab72e3cb4a",
+                                    ),
+                                },
+                                base: Branch {
+                                    name: "main",
+                                    sha: CommitSha(
+                                        "07eb9b80644df5476cb7d9bb23918d9e64b2dc35",
+                                    ),
+                                },
+                                title: "test",
+                                mergeable_state: Clean,
+                                message: "Creating draft pr",
+                                author: GithubUser {
+                                    id: UserId(
+                                        72911296,
+                                    ),
+                                    username: "geetanshjuneja",
+                                    html_url: Url {
+                                        scheme: "https",
+                                        cannot_be_a_base: false,
+                                        username: "",
+                                        password: None,
+                                        host: Some(
+                                            Domain(
+                                                "github.com",
+                                            ),
+                                        ),
+                                        port: None,
+                                        path: "/geetanshjuneja",
+                                        query: None,
+                                        fragment: None,
+                                    },
+                                },
+                                status: Draft,
+                            },
+                        },
+                    ),
+                ),
+            ),
+        )
+        "#
+        );
+    }
+
+    #[tokio::test]
+    async fn pull_request_ready_for_review() {
+        insta::assert_debug_snapshot!(
+            check_webhook("webhook/pull-request-ready-for-review.json", "pull_request").await,
+            @r#"
+        Ok(
+            GitHubWebhook(
+                Repository(
+                    PullRequestReadyForReview(
+                        PullRequestReadyForReview {
+                            repository: GithubRepoName {
+                                owner: "geetanshjuneja",
+                                name: "test-bors",
+                            },
+                            pull_request: PullRequest {
+                                number: PullRequestNumber(
+                                    5,
+                                ),
+                                head_label: "geetanshjuneja:test",
+                                head: Branch {
+                                    name: "test",
+                                    sha: CommitSha(
+                                        "4964158cdea899629716b4f0c0e2f5ab72e3cb4a",
+                                    ),
+                                },
+                                base: Branch {
+                                    name: "main",
+                                    sha: CommitSha(
+                                        "07eb9b80644df5476cb7d9bb23918d9e64b2dc35",
+                                    ),
+                                },
+                                title: "test",
+                                mergeable_state: Clean,
+                                message: "Creating draft pr",
+                                author: GithubUser {
+                                    id: UserId(
+                                        72911296,
+                                    ),
+                                    username: "geetanshjuneja",
+                                    html_url: Url {
+                                        scheme: "https",
+                                        cannot_be_a_base: false,
+                                        username: "",
+                                        password: None,
+                                        host: Some(
+                                            Domain(
+                                                "github.com",
+                                            ),
+                                        ),
+                                        port: None,
+                                        path: "/geetanshjuneja",
+                                        query: None,
+                                        fragment: None,
+                                    },
+                                },
+                                status: Open,
                             },
                         },
                     ),

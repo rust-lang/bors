@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n    SELECT\n        pr.id,\n        pr.repository as \"repository: GithubRepoName\",\n        pr.number as \"number!: i64\",\n        (\n            pr.approved_by,\n            pr.approved_sha\n        ) AS \"approval_status!: ApprovalStatus\",\n        pr.priority,\n        pr.rollup as \"rollup: RollupMode\",\n        pr.delegated,\n        pr.base_branch,\n        pr.mergeable_state as \"mergeable_state: MergeableState\",\n        pr.created_at as \"created_at: DateTime<Utc>\",\n        build AS \"try_build: BuildModel\"\n    FROM pull_request as pr\n    LEFT JOIN build ON pr.build_id = build.id\n    WHERE pr.repository = $1 AND\n          pr.number = $2\n    ",
+  "query": "\nSELECT\n    pr.id,\n    pr.repository as \"repository: GithubRepoName\",\n    pr.number as \"number!: i64\",\n    (\n        pr.approved_by,\n        pr.approved_sha\n    ) AS \"approval_status!: ApprovalStatus\",\n    pr.status as \"pr_status: PullRequestStatus\",  \n    pr.delegated,\n    pr.priority,\n    pr.base_branch,\n    pr.mergeable_state as \"mergeable_state: MergeableState\",\n    pr.rollup as \"rollup: RollupMode\",\n    pr.created_at as \"created_at: DateTime<Utc>\",\n    build AS \"try_build: BuildModel\"\nFROM pull_request as pr\nLEFT JOIN build ON pr.build_id = build.id\nWHERE build.id = $1\n",
   "describe": {
     "columns": [
       {
@@ -25,18 +25,18 @@
       },
       {
         "ordinal": 4,
-        "name": "priority",
-        "type_info": "Int4"
-      },
-      {
-        "ordinal": 5,
-        "name": "rollup: RollupMode",
+        "name": "pr_status: PullRequestStatus",
         "type_info": "Text"
       },
       {
-        "ordinal": 6,
+        "ordinal": 5,
         "name": "delegated",
         "type_info": "Bool"
+      },
+      {
+        "ordinal": 6,
+        "name": "priority",
+        "type_info": "Int4"
       },
       {
         "ordinal": 7,
@@ -50,11 +50,16 @@
       },
       {
         "ordinal": 9,
+        "name": "rollup: RollupMode",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
         "name": "created_at: DateTime<Utc>",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 10,
+        "ordinal": 11,
         "name": "try_build: BuildModel",
         "type_info": {
           "Custom": {
@@ -97,8 +102,7 @@
     ],
     "parameters": {
       "Left": [
-        "Text",
-        "Int8"
+        "Int4"
       ]
     },
     "nullable": [
@@ -106,14 +110,15 @@
       false,
       false,
       null,
+      false,
+      false,
       true,
+      false,
+      false,
       true,
-      false,
-      false,
-      false,
       false,
       null
     ]
   },
-  "hash": "44415582f7be15fa152e086db4e664a82180544d4152e616a77f5e50f9d75145"
+  "hash": "1e5d97de9e3b8c34ac2cfa4c00a6dd191dc70a3db77def03371d8bdfde2ae5e6"
 }
