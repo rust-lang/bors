@@ -38,7 +38,8 @@ pub(crate) async fn get_pull_request(
         (
             pr.approved_by,
             pr.approved_sha,
-            pr.approved_at
+            pr.approved_at,
+            pr.approval_pending
         ) AS "approval_status!: ApprovalStatus",
         pr.status as "pr_status: PullRequestStatus",
         pr.priority,
@@ -137,7 +138,8 @@ pub(crate) async fn upsert_pull_request(
                 (
                     pr.approved_by,
                     pr.approved_sha,
-                    pr.approved_at
+                    pr.approved_at,
+                    pr.approval_pending
                 ) AS "approval_status!: ApprovalStatus",
                 pr.status as "pr_status: PullRequestStatus",
                 pr.priority,
@@ -207,6 +209,7 @@ UPDATE pull_request
 SET approved_by = $1,
     approved_sha = $2,
     approved_at = NOW(),
+    approval_pending = false,
     priority = COALESCE($3, priority),
     rollup = COALESCE($4, rollup)
 WHERE id = $5
@@ -230,7 +233,7 @@ pub(crate) async fn unapprove_pull_request(
 ) -> anyhow::Result<()> {
     measure_db_query("unapprove_pull_request", || async {
         sqlx::query!(
-            "UPDATE pull_request SET approved_by = NULL, approved_sha = NULL, approved_at = NULL WHERE id = $1",
+            "UPDATE pull_request SET approved_by = NULL, approved_sha = NULL, approved_at = NULL, approval_pending = false  WHERE id = $1",
             pr_id
         )
         .execute(executor)
@@ -287,7 +290,8 @@ SELECT
     (
         pr.approved_by,
         pr.approved_sha,
-        pr.approved_at
+        pr.approved_at,
+        pr.approval_pending
     ) AS "approval_status!: ApprovalStatus",
     pr.status as "pr_status: PullRequestStatus",
     pr.delegated,
