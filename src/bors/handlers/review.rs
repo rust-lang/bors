@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use chrono::Utc;
+
 use crate::PgDbClient;
 use crate::bors::Comment;
 use crate::bors::RepositoryState;
@@ -38,6 +40,7 @@ pub(super) async fn command_approve(
     let approval_info = ApprovalInfo {
         approver: approver.clone(),
         sha: pr.head.sha.to_string(),
+        approved_at: Utc::now(),
     };
     let pr_model = db
         .get_or_create_pull_request(

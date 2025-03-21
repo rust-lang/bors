@@ -139,34 +139,53 @@ pub struct ApprovalInfo {
     pub approver: String,
     /// The SHA of the commit that was approved.
     pub sha: String,
+    /// When the pull request was approved.
+    pub approved_at: DateTime<Utc>,
 }
 
 /// Represents the approval status of a pull request.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ApprovalStatus {
     NotApproved,
+    ApprovalPending(ApprovalInfo),
     Approved(ApprovalInfo),
 }
 
 impl sqlx::Type<sqlx::Postgres> for ApprovalStatus {
     fn type_info() -> sqlx::postgres::PgTypeInfo {
-        <(Option<String>, Option<String>) as sqlx::Type<sqlx::Postgres>>::type_info()
+        <(Option<String>, Option<String>, Option<DateTime<Utc>>) as sqlx::Type<sqlx::Postgres>>::type_info()
     }
 }
 
 impl<'r> sqlx::Decode<'r, sqlx::Postgres> for ApprovalStatus {
     fn decode(value: sqlx::postgres::PgValueRef<'r>) -> Result<Self, BoxDynError> {
-        let (approver, sha) =
-            <(Option<String>, Option<String>) as sqlx::Decode<sqlx::Postgres>>::decode(value)?;
+        let (approver, sha, approved_at, is_pending) =
+            <(
+                Option<String>,
+                Option<String>,
+                Option<DateTime<Utc>>,
+                Option<bool>,
+            ) as sqlx::Decode<sqlx::Postgres>>::decode(value)?;
 
-        match (approver, sha) {
-            (Some(approver), Some(sha)) => {
-                Ok(ApprovalStatus::Approved(ApprovalInfo { approver, sha }))
+        match (approver, sha, approved_at, is_pending) {
+            (Some(approver), Some(sha), Some(approved_at), Some(true)) => {
+                Ok(ApprovalStatus::ApprovalPending(ApprovalInfo {
+                    approver,
+                    sha,
+                    approved_at,
+                }))
             }
-            (None, None) => Ok(ApprovalStatus::NotApproved),
-            (approver, sha) => Err(format!(
-                "Inconsistent approval state: approver={:?}, sha={:?}",
-                approver, sha
+            (Some(approver), Some(sha), Some(approved_at), Some(false) | None) => {
+                Ok(ApprovalStatus::Approved(ApprovalInfo {
+                    approver,
+                    sha,
+                    approved_at,
+                }))
+            }
+            (None, None, None, _) => Ok(ApprovalStatus::NotApproved),
+            (approver, sha, approved_at, is_pending) => Err(format!(
+                "Inconsistent approval state: approver={:?}, sha={:?}, approved_at={:?}, is_pending={:?}",
+                approver, sha, approved_at, is_pending
             )
             .into()),
         }
@@ -250,16 +269,24 @@ impl PullRequestModel {
         matches!(self.approval_status, ApprovalStatus::Approved(_))
     }
 
+    pub fn is_pending_approval(&self) -> bool {
+        matches!(self.approval_status, ApprovalStatus::ApprovalPending(_))
+    }
+
     pub fn approver(&self) -> Option<&str> {
         match &self.approval_status {
-            ApprovalStatus::Approved(info) => Some(info.approver.as_str()),
+            ApprovalStatus::Approved(info) | ApprovalStatus::ApprovalPending(info) => {
+                Some(info.approver.as_str())
+            }
             ApprovalStatus::NotApproved => None,
         }
     }
 
     pub fn approved_sha(&self) -> Option<&str> {
         match &self.approval_status {
-            ApprovalStatus::Approved(info) => Some(info.sha.as_str()),
+            ApprovalStatus::Approved(info) | ApprovalStatus::ApprovalPending(info) => {
+                Some(info.sha.as_str())
+            }
             ApprovalStatus::NotApproved => None,
         }
     }
