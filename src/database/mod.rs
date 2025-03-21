@@ -139,6 +139,8 @@ pub struct ApprovalInfo {
     pub approver: String,
     /// The SHA of the commit that was approved.
     pub sha: String,
+    /// When the pull request was approved.
+    pub approved_at: DateTime<Utc>,
 }
 
 /// Represents the approval status of a pull request.
@@ -150,23 +152,29 @@ pub enum ApprovalStatus {
 
 impl sqlx::Type<sqlx::Postgres> for ApprovalStatus {
     fn type_info() -> sqlx::postgres::PgTypeInfo {
-        <(Option<String>, Option<String>) as sqlx::Type<sqlx::Postgres>>::type_info()
+        <(Option<String>, Option<String>, Option<DateTime<Utc>>) as sqlx::Type<sqlx::Postgres>>::type_info()
     }
 }
 
 impl<'r> sqlx::Decode<'r, sqlx::Postgres> for ApprovalStatus {
     fn decode(value: sqlx::postgres::PgValueRef<'r>) -> Result<Self, BoxDynError> {
-        let (approver, sha) =
-            <(Option<String>, Option<String>) as sqlx::Decode<sqlx::Postgres>>::decode(value)?;
+        let (approver, sha, approved_at) =
+            <(Option<String>, Option<String>, Option<DateTime<Utc>>) as sqlx::Decode<
+                sqlx::Postgres,
+            >>::decode(value)?;
 
-        match (approver, sha) {
-            (Some(approver), Some(sha)) => {
-                Ok(ApprovalStatus::Approved(ApprovalInfo { approver, sha }))
+        match (approver, sha, approved_at) {
+            (Some(approver), Some(sha), Some(approved_at)) => {
+                Ok(ApprovalStatus::Approved(ApprovalInfo {
+                    approver,
+                    sha,
+                    approved_at,
+                }))
             }
-            (None, None) => Ok(ApprovalStatus::NotApproved),
-            (approver, sha) => Err(format!(
-                "Inconsistent approval state: approver={:?}, sha={:?}",
-                approver, sha
+            (None, None, None) => Ok(ApprovalStatus::NotApproved),
+            (approver, sha, approved_at) => Err(format!(
+                "Inconsistent approval state: approver={:?}, sha={:?}, approved_at={:?}",
+                approver, sha, approved_at
             )
             .into()),
         }

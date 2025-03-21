@@ -37,9 +37,10 @@ pub(crate) async fn get_pull_request(
         pr.number as "number!: i64",
         (
             pr.approved_by,
-            pr.approved_sha
+            pr.approved_sha,
+            pr.approved_at
         ) AS "approval_status!: ApprovalStatus",
-        pr.status as "pr_status: PullRequestStatus", 
+        pr.status as "pr_status: PullRequestStatus",
         pr.priority,
         pr.rollup as "rollup: RollupMode",
         pr.delegated,
@@ -135,9 +136,10 @@ pub(crate) async fn upsert_pull_request(
                 pr.number as "number!: i64",
                 (
                     pr.approved_by,
-                    pr.approved_sha
+                    pr.approved_sha,
+                    pr.approved_at
                 ) AS "approval_status!: ApprovalStatus",
-                pr.status as "pr_status: PullRequestStatus", 
+                pr.status as "pr_status: PullRequestStatus",
                 pr.priority,
                 pr.rollup as "rollup: RollupMode",
                 pr.delegated,
@@ -204,6 +206,7 @@ pub(crate) async fn approve_pull_request(
 UPDATE pull_request
 SET approved_by = $1,
     approved_sha = $2,
+    approved_at = NOW(),
     priority = COALESCE($3, priority),
     rollup = COALESCE($4, rollup)
 WHERE id = $5
@@ -227,7 +230,7 @@ pub(crate) async fn unapprove_pull_request(
 ) -> anyhow::Result<()> {
     measure_db_query("unapprove_pull_request", || async {
         sqlx::query!(
-            "UPDATE pull_request SET approved_by = NULL, approved_sha = NULL WHERE id = $1",
+            "UPDATE pull_request SET approved_by = NULL, approved_sha = NULL, approved_at = NULL WHERE id = $1",
             pr_id
         )
         .execute(executor)
@@ -283,9 +286,10 @@ SELECT
     pr.number as "number!: i64",
     (
         pr.approved_by,
-        pr.approved_sha
+        pr.approved_sha,
+        pr.approved_at
     ) AS "approval_status!: ApprovalStatus",
-    pr.status as "pr_status: PullRequestStatus",  
+    pr.status as "pr_status: PullRequestStatus",
     pr.delegated,
     pr.priority,
     pr.base_branch,
