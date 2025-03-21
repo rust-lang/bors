@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            WITH upserted_pr AS (\n                INSERT INTO pull_request (repository, number, base_branch, mergeable_state, status)\n                VALUES ($1, $2, $3, $4, $5)\n                ON CONFLICT (repository, number)\n                DO UPDATE SET\n                    base_branch = $3,\n                    mergeable_state = $4\n                RETURNING *\n            )\n            SELECT\n                pr.id,\n                pr.repository as \"repository: GithubRepoName\",\n                pr.number as \"number!: i64\",\n                (\n                    pr.approved_by,\n                    pr.approved_sha\n                ) AS \"approval_status!: ApprovalStatus\",\n                pr.status as \"pr_status: PullRequestStatus\", \n                pr.priority,\n                pr.rollup as \"rollup: RollupMode\",\n                pr.delegated,\n                pr.base_branch,\n                pr.mergeable_state as \"mergeable_state: MergeableState\",\n                pr.created_at as \"created_at: DateTime<Utc>\",\n                build AS \"try_build: BuildModel\"\n            FROM upserted_pr as pr\n            LEFT JOIN build ON pr.build_id = build.id\n            ",
+  "query": "\nSELECT\n    pr.id,\n    pr.repository as \"repository: GithubRepoName\",\n    pr.number as \"number!: i64\",\n    (\n        pr.approved_by,\n        pr.approved_sha,\n        pr.approved_at,\n        pr.approval_pending\n    ) AS \"approval_status!: ApprovalStatus\",\n    pr.status as \"pr_status: PullRequestStatus\",\n    pr.delegated,\n    pr.priority,\n    pr.base_branch,\n    pr.mergeable_state as \"mergeable_state: MergeableState\",\n    pr.rollup as \"rollup: RollupMode\",\n    pr.created_at as \"created_at: DateTime<Utc>\",\n    build AS \"try_build: BuildModel\"\nFROM pull_request as pr\nLEFT JOIN build ON pr.build_id = build.id\nWHERE build.id = $1\n",
   "describe": {
     "columns": [
       {
@@ -30,27 +30,27 @@
       },
       {
         "ordinal": 5,
-        "name": "priority",
-        "type_info": "Int4"
-      },
-      {
-        "ordinal": 6,
-        "name": "rollup: RollupMode",
-        "type_info": "Text"
-      },
-      {
-        "ordinal": 7,
         "name": "delegated",
         "type_info": "Bool"
       },
       {
-        "ordinal": 8,
+        "ordinal": 6,
+        "name": "priority",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 7,
         "name": "base_branch",
         "type_info": "Text"
       },
       {
-        "ordinal": 9,
+        "ordinal": 8,
         "name": "mergeable_state: MergeableState",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "rollup: RollupMode",
         "type_info": "Text"
       },
       {
@@ -102,11 +102,7 @@
     ],
     "parameters": {
       "Left": [
-        "Text",
-        "Int8",
-        "Text",
-        "Text",
-        "Text"
+        "Int4"
       ]
     },
     "nullable": [
@@ -115,14 +111,14 @@
       false,
       null,
       false,
+      false,
       true,
+      false,
+      false,
       true,
       false,
-      false,
-      false,
-      false,
-      true
+      null
     ]
   },
-  "hash": "b442044623f3fddd437ef8aa5750d0cb222493180c665e1d6223438a653939ef"
+  "hash": "a835822627d3f241c95b21ef055c6cc2a6d525530f3282e3b452ba830828d60c"
 }

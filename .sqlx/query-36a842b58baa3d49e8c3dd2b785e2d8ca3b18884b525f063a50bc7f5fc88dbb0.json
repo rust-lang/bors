@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\nSELECT\n    pr.id,\n    pr.repository as \"repository: GithubRepoName\",\n    pr.number as \"number!: i64\",\n    (\n        pr.approved_by,\n        pr.approved_sha\n    ) AS \"approval_status!: ApprovalStatus\",\n    pr.status as \"pr_status: PullRequestStatus\",  \n    pr.delegated,\n    pr.priority,\n    pr.base_branch,\n    pr.mergeable_state as \"mergeable_state: MergeableState\",\n    pr.rollup as \"rollup: RollupMode\",\n    pr.created_at as \"created_at: DateTime<Utc>\",\n    build AS \"try_build: BuildModel\"\nFROM pull_request as pr\nLEFT JOIN build ON pr.build_id = build.id\nWHERE build.id = $1\n",
+  "query": "\n    SELECT\n        pr.id,\n        pr.repository as \"repository: GithubRepoName\",\n        pr.number as \"number!: i64\",\n        (\n            pr.approved_by,\n            pr.approved_sha,\n            pr.approved_at,\n            pr.approval_pending\n        ) AS \"approval_status!: ApprovalStatus\",\n        pr.status as \"pr_status: PullRequestStatus\",\n        pr.priority,\n        pr.rollup as \"rollup: RollupMode\",\n        pr.delegated,\n        pr.base_branch,\n        pr.mergeable_state as \"mergeable_state: MergeableState\",\n        pr.created_at as \"created_at: DateTime<Utc>\",\n        build AS \"try_build: BuildModel\"\n    FROM pull_request as pr\n    LEFT JOIN build ON pr.build_id = build.id\n    WHERE pr.repository = $1 AND\n          pr.number = $2\n    ",
   "describe": {
     "columns": [
       {
@@ -30,27 +30,27 @@
       },
       {
         "ordinal": 5,
-        "name": "delegated",
-        "type_info": "Bool"
-      },
-      {
-        "ordinal": 6,
         "name": "priority",
         "type_info": "Int4"
       },
       {
+        "ordinal": 6,
+        "name": "rollup: RollupMode",
+        "type_info": "Text"
+      },
+      {
         "ordinal": 7,
+        "name": "delegated",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 8,
         "name": "base_branch",
         "type_info": "Text"
       },
       {
-        "ordinal": 8,
-        "name": "mergeable_state: MergeableState",
-        "type_info": "Text"
-      },
-      {
         "ordinal": 9,
-        "name": "rollup: RollupMode",
+        "name": "mergeable_state: MergeableState",
         "type_info": "Text"
       },
       {
@@ -102,7 +102,8 @@
     ],
     "parameters": {
       "Left": [
-        "Int4"
+        "Text",
+        "Int8"
       ]
     },
     "nullable": [
@@ -111,14 +112,14 @@
       false,
       null,
       false,
-      false,
+      true,
       true,
       false,
       false,
-      true,
+      false,
       false,
       null
     ]
   },
-  "hash": "1e5d97de9e3b8c34ac2cfa4c00a6dd191dc70a3db77def03371d8bdfde2ae5e6"
+  "hash": "36a842b58baa3d49e8c3dd2b785e2d8ca3b18884b525f063a50bc7f5fc88dbb0"
 }
