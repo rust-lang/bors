@@ -33,7 +33,16 @@ pub(super) async fn command_approve(
     };
     let approver = match approver {
         Approver::Myself => author.username.clone(),
-        Approver::Specified(approver) => approver.clone(),
+        Approver::Specified(approver) => {
+            if let Some(error_comment) = repo_state.client.validate_reviewers(approver).await? {
+                repo_state
+                    .client
+                    .post_comment(pr.number, error_comment)
+                    .await?;
+                return Ok(());
+            }
+            approver.clone()
+        }
     };
     let approval_info = ApprovalInfo {
         approver: approver.clone(),
@@ -350,6 +359,21 @@ mod tests {
             Ok(tester)
         })
         .await;
+    }
+
+    #[sqlx::test]
+    async fn approve_empty_reviewer_in_list(pool: sqlx::PgPool) {
+        BorsBuilder::new(pool)
+            .world(create_world_with_approve_config())
+            .run_test(|mut tester| async {
+                tester.post_comment("@bors r=user1,,user2").await?;
+                assert_eq!(
+                    tester.get_comment().await?,
+                    "Error: Empty reviewer name provided. Use r=username to specify a reviewer."
+                );
+                Ok(tester)
+            })
+            .await;
     }
 
     #[sqlx::test]

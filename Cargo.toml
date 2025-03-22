@@ -54,6 +54,8 @@ chrono = "0.4"
 
 itertools = "0.14.0"
 
+strsim = "0.10.0"
+
 [dev-dependencies]
 insta = "1.26"
 derive_builder = "0.20.0"
