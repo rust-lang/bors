@@ -17,7 +17,7 @@ which is by default set to `@bors`.
 | `try parent=last`                     | `try`           | Start a try build based on the parent commit of the last try build.                |
 | `try jobs=<job1,job2,...>`            | `try`           | Start a try build with specific CI jobs (up to 10).                                |
 | `try cancel`                          | `try`           | Cancel a running try build.                                                        |
-| `p=<priority>`                        | `review`        | Set the priority of a PR. Alias for `priority=`                                    |
+| `p=<priority>`                        | `review`        | Set the priority of a PR. Alias for `r+ p=<priority>`                              |
 | `delegate+`                           | `review`        | Delegate approval authority to the PR author.                                      |
 | `delegate-`                           | `review`        | Remove any previously granted delegation.                                          |
 | `rollup=<never/iffy/maybe/always>`    | `review`        | Set the rollup mode of a PR.                                                       |
