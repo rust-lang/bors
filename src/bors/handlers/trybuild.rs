@@ -65,6 +65,16 @@ pub(super) async fn command_try_build(
         .await
         .context("Cannot find or create PR")?;
 
+    if let Some(build) = &pr_model.try_build {
+        if build.status == BuildStatus::Pending {
+            tracing::warn!("Try build already in progress");
+            repo.client
+                .post_comment(pr.number, try_build_in_progress_comment())
+                .await?;
+            return Ok(());
+        }
+    }
+
     let base_sha = match get_base_sha(&pr_model, parent) {
         Ok(Some(base_sha)) => base_sha,
         Ok(None) => repo
@@ -171,12 +181,7 @@ fn get_base_sha(
     parent: Option<Parent>,
 ) -> Result<Option<CommitSha>, Comment> {
     let last_parent = if let Some(ref build) = pr_model.try_build {
-        if build.status == BuildStatus::Pending {
-            tracing::warn!("Try build already in progress");
-            return Err(try_build_in_progress_comment());
-        } else {
-            Some(CommitSha(build.parent.clone()))
-        }
+        Some(CommitSha(build.parent.clone()))
     } else {
         None
     };
