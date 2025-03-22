@@ -73,19 +73,21 @@ pub(super) async fn command_try_build(
                 .await?;
             return Ok(());
         }
+    } else if Some(Parent::Last) == parent {
+        tracing::warn!("try build was requested with parent=last but no previous build was found");
+        repo.client
+            .post_comment(pr.number, cant_find_last_parent_comment())
+            .await?;
+        return Ok(());
     }
 
     let base_sha = match get_base_sha(&pr_model, parent) {
-        Ok(Some(base_sha)) => base_sha,
-        Ok(None) => repo
+        Some(base_sha) => base_sha,
+        None => repo
             .client
             .get_branch_sha(&pr.base.name)
             .await
             .context(format!("Cannot get SHA for branch {}", pr.base.name))?,
-        Err(comment) => {
-            repo.client.post_comment(pr.number, comment).await?;
-            return Ok(());
-        }
     };
 
     match attempt_merge(
@@ -176,25 +178,18 @@ enum MergeResult {
     Conflict,
 }
 
-fn get_base_sha(
-    pr_model: &PullRequestModel,
-    parent: Option<Parent>,
-) -> Result<Option<CommitSha>, Comment> {
-    let last_parent = if let Some(ref build) = pr_model.try_build {
-        Some(CommitSha(build.parent.clone()))
-    } else {
-        None
-    };
+fn get_base_sha(pr_model: &PullRequestModel, parent: Option<Parent>) -> Option<CommitSha> {
+    let last_parent = pr_model
+        .try_build
+        .as_ref()
+        .map(|build| CommitSha(build.parent.clone()));
 
     match parent.clone() {
         Some(parent) => match parent {
-            Parent::Last => match last_parent {
-                None => Err(cant_find_last_parent_comment()),
-                Some(last_parent) => Ok(Some(last_parent)),
-            },
-            Parent::CommitSha(parent) => Ok(Some(parent)),
+            Parent::Last => last_parent,
+            Parent::CommitSha(parent) => Some(parent),
         },
-        None => Ok(None),
+        None => None,
     }
 }
 
