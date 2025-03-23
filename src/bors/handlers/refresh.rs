@@ -278,13 +278,13 @@ timeout = 3600
     #[sqlx::test]
     async fn approve_finalized_on_success(pool: sqlx::PgPool) {
         run_test(pool, |mut tester| async {
-            tester.get_branch_mut("pr-1").expect_suites(1);
+            tester.default_pr_head_branch_mut().expect_suites(1);
             tester.post_comment("@bors r+").await?;
             tester.expect_comments(1).await;
 
             tester.default_pr().await.expect_approval_pending();
 
-            let branch = tester.get_branch("pr-1");
+            let branch = tester.default_pr_head_branch();
             tester.workflow_success(branch.clone()).await?;
             tester.check_suite(CheckSuite::completed(branch)).await?;
 
@@ -305,7 +305,7 @@ timeout = 3600
     #[sqlx::test]
     async fn pending_approval_times_out(pool: sqlx::PgPool) {
         run_test(pool, |mut tester| async move {
-            tester.get_branch_mut("pr-1").expect_suites(1);
+            tester.default_pr_head_branch_mut().expect_suites(1);
             tester.post_comment("@bors r+").await?;
             tester.expect_comments(1).await;
 
@@ -333,7 +333,7 @@ timeout = 3600
     #[sqlx::test]
     async fn pending_approval_not_timed_out_before_timeout(pool: sqlx::PgPool) {
         run_test(pool, |mut tester| async move {
-            tester.get_branch_mut("pr-1").expect_suites(1);
+            tester.default_pr_head_branch_mut().expect_suites(1);
             tester.post_comment("@bors r+").await?;
             tester.expect_comments(1).await;
 

@@ -165,6 +165,14 @@ impl BorsTester {
             .await
     }
 
+    pub fn default_pr_head_branch_mut(&mut self) -> MappedMutexGuard<RawMutex, Branch> {
+        self.get_branch_mut(&format!("pr-{}", default_pr_number()))
+    }
+
+    pub fn default_pr_head_branch(&self) -> Branch {
+        self.get_branch(&format!("pr-{}", default_pr_number()))
+    }
+
     pub async fn default_pr_db(&self) -> anyhow::Result<Option<PullRequestModel>> {
         self.pr_db(default_repo_name(), default_pr_number()).await
     }

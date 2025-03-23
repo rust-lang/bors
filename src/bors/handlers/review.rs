@@ -1104,7 +1104,7 @@ mod tests {
     #[sqlx::test]
     async fn approve_with_pending_ci(pool: sqlx::PgPool) {
         run_test(pool, |mut tester| async {
-            tester.get_branch_mut("pr-1").expect_suites(1);
+            tester.default_pr_head_branch_mut().expect_suites(1);
             tester.post_comment("@bors r+").await?;
             insta::assert_snapshot!(
                 tester.get_comment().await?,
@@ -1123,7 +1123,7 @@ mod tests {
     async fn approve_with_failed_ci(pool: sqlx::PgPool) {
         run_test(pool, |mut tester| async {
             {
-                let mut branch = tester.get_branch_mut("pr-1");
+                let mut branch = tester.default_pr_head_branch_mut();
                 branch.expect_suites(1);
                 branch.suite_finished(TestWorkflowStatus::Failure);
             }
@@ -1146,7 +1146,7 @@ mod tests {
     #[sqlx::test]
     async fn approve_with_priority_ignores_ci(pool: sqlx::PgPool) {
         run_test(pool, |mut tester| async {
-            tester.get_branch_mut("pr-1").expect_suites(1);
+            tester.default_pr_head_branch().expect_suites(1);
             tester.post_comment("@bors r+ p=10").await?;
             insta::assert_snapshot!(
                 tester.get_comment().await?,
@@ -1166,7 +1166,7 @@ mod tests {
     async fn approve_with_existing_priority_ignores_ci(pool: sqlx::PgPool) {
         run_test(pool, |mut tester| async {
             tester.post_comment("@bors p=5").await?;
-            tester.get_branch_mut("pr-1").expect_suites(1);
+            tester.default_pr_head_branch().expect_suites(1);
             tester.post_comment("@bors r+").await?;
             insta::assert_snapshot!(
                 tester.get_comment().await?,
@@ -1186,7 +1186,7 @@ mod tests {
     async fn reapprove_after_ci_success(pool: sqlx::PgPool) {
         run_test(pool, |mut tester| async {
             {
-                let mut branch = tester.get_branch_mut("pr-1");
+                let mut branch = tester.default_pr_head_branch_mut();
                 branch.expect_suites(1);
                 branch.suite_finished(TestWorkflowStatus::Failure);
             }
@@ -1198,7 +1198,7 @@ mod tests {
             assert!(!pr.is_approved());
 
             {
-                let mut branch = tester.get_branch_mut("pr-1");
+                let mut branch = tester.default_pr_head_branch_mut();
                 branch.expect_suites(1);
                 branch.suite_finished(TestWorkflowStatus::Success);
             }
