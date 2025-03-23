@@ -337,8 +337,7 @@ timeout = 3600
             tester.post_comment("@bors r+").await?;
             tester.expect_comments(1).await;
 
-            let pr = tester.default_pr_db().await?.unwrap();
-            assert!(pr.is_pending_approval());
+            tester.default_pr().await.expect_approval_pending();
 
             with_mocked_time(Duration::from_secs(1800), async {
                 tester.refresh().await;

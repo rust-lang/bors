@@ -1111,9 +1111,7 @@ mod tests {
                 @":hourglass_flowing_sand: Commit pr-1-sha has received approval from `default-user`, but is waiting for CI to pass"
             );
 
-            let pr = tester.default_pr_db().await?.unwrap();
-            assert!(pr.is_pending_approval());
-
+            tester.default_pr().await.expect_approval_pending();
             Ok(tester)
         })
         .await;
