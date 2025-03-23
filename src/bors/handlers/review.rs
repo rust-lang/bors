@@ -1151,9 +1151,11 @@ mod tests {
                 @"Commit pr-1-sha has been approved by `default-user`"
             );
 
-            let pr = tester.default_pr_db().await?.unwrap();
-            assert!(pr.is_approved());
-            assert_eq!(pr.priority, Some(10));
+            tester
+                .default_pr()
+                .await
+                .expect_approved_by("default-user")
+                .expect_priority(Some(10));
 
             Ok(tester)
         })
@@ -1170,11 +1172,11 @@ mod tests {
                 tester.get_comment().await?,
                 @"Commit pr-1-sha has been approved by `default-user`"
             );
-
-            let pr = tester.default_pr_db().await?.unwrap();
-            assert!(pr.is_approved());
-            assert_eq!(pr.priority, Some(5));
-
+            tester
+                .default_pr()
+                .await
+                .expect_approved_by("default-user")
+                .expect_priority(Some(5));
             Ok(tester)
         })
         .await;
@@ -1188,13 +1190,11 @@ mod tests {
                 branch.expect_suites(1);
                 branch.suite_finished(TestWorkflowStatus::Failure);
             }
-
             tester.post_comment("@bors r+").await?;
             tester.expect_comments(1).await;
 
             let pr = tester.default_pr_db().await?.unwrap();
             assert!(!pr.is_approved());
-
             {
                 let mut branch = tester.default_pr_head_branch_mut();
                 branch.expect_suites(1);
@@ -1205,7 +1205,6 @@ mod tests {
             tester.expect_comments(1).await;
 
             tester.default_pr().await.expect_approved_by("default-user");
-
             Ok(tester)
         })
         .await;
