@@ -193,6 +193,100 @@ pub(crate) async fn update_mergeable_states_by_base_branch(
     .await
 }
 
+pub(crate) async fn set_approval_pending(
+    executor: impl PgExecutor<'_>,
+    pr_id: i32,
+    approval_info: ApprovalInfo,
+    priority: Option<u32>,
+    rollup: Option<RollupMode>,
+) -> anyhow::Result<()> {
+    let priority_i32 = priority.map(|p| p as i32);
+
+    measure_db_query("set_approval_pending", || async {
+        sqlx::query!(
+            r#"
+UPDATE pull_request
+SET approved_by = $1,
+    approved_sha = $2,
+    approved_at = NOW(),
+    approval_pending = true,
+    priority = COALESCE($3, priority),
+    rollup = COALESCE($4, rollup)
+WHERE id = $5
+"#,
+            approval_info.approver,
+            approval_info.sha,
+            priority_i32,
+            rollup as Option<RollupMode>,
+            pr_id,
+        )
+        .execute(executor)
+        .await?;
+        Ok(())
+    })
+    .await
+}
+
+pub(crate) async fn find_pending_approval_prs(
+    executor: impl PgExecutor<'_>,
+    repo: &GithubRepoName,
+    commit_sha: &CommitSha,
+) -> anyhow::Result<Vec<PullRequestModel>> {
+    measure_db_query("find_pending_approval_prs", || async {
+        let records = sqlx::query_as!(
+            PullRequestModel,
+            r#"
+    SELECT
+        pr.id,
+        pr.repository as "repository: GithubRepoName",
+        pr.number as "number!: i64",
+        (
+            pr.approved_by,
+            pr.approved_sha,
+            pr.approved_at,
+            pr.approval_pending
+        ) AS "approval_status!: ApprovalStatus",
+        pr.status as "pr_status: PullRequestStatus",
+        pr.priority,
+        pr.rollup as "rollup: RollupMode",
+        pr.delegated,
+        pr.base_branch,
+        pr.mergeable_state as "mergeable_state: MergeableState",
+        pr.created_at as "created_at: DateTime<Utc>",
+        build AS "try_build: BuildModel"
+    FROM pull_request as pr
+    LEFT JOIN build ON pr.build_id = build.id
+    WHERE pr.repository = $1 AND
+          pr.approved_sha = $2 AND
+          pr.approval_pending = true
+    "#,
+            repo as &GithubRepoName,
+            commit_sha.0
+        )
+        .fetch_all(executor)
+        .await?;
+
+        Ok(records)
+    })
+    .await
+}
+
+pub(crate) async fn finalize_approval(
+    executor: impl PgExecutor<'_>,
+    pr_id: i32,
+) -> anyhow::Result<()> {
+    measure_db_query("finalize_approval", || async {
+        sqlx::query!(
+            "UPDATE pull_request SET approval_pending = false WHERE id = $1",
+            pr_id
+        )
+        .execute(executor)
+        .await?;
+        Ok(())
+    })
+    .await
+}
+
 pub(crate) async fn approve_pull_request(
     executor: impl PgExecutor<'_>,
     pr_id: i32,

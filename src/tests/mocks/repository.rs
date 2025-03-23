@@ -35,6 +35,7 @@ pub struct PullRequest {
     pub head_sha: String,
     pub author: User,
     pub base_branch: Branch,
+    pub head_branch: Branch,
     pub mergeable_state: MergeableState,
     pub status: PullRequestStatus,
     pub merged_at: Option<DateTime<Utc>>,
@@ -42,6 +43,8 @@ pub struct PullRequest {
 
 impl PullRequest {
     pub fn new(repo: GithubRepoName, number: u64, author: User, is_draft: bool) -> Self {
+        let head_branch = Branch::new(&format!("pr-{number}"), &format!("pr-{number}-sha"));
+
         Self {
             number: PullRequestNumber(number),
             repo,
@@ -49,6 +52,7 @@ impl PullRequest {
             removed_labels: Vec::new(),
             comment_counter: 0,
             head_sha: format!("pr-{number}-sha"),
+            head_branch,
             author,
             base_branch: Branch::default(),
             mergeable_state: MergeableState::Clean,
@@ -139,6 +143,7 @@ impl Repo {
     }
 
     pub fn with_pr(mut self, pull_request: PullRequest) -> Self {
+        self.branches.push(pull_request.head_branch.clone());
         self.pull_requests
             .insert(pull_request.number.0, pull_request);
         self
@@ -224,7 +229,7 @@ impl Branch {
             sha: sha.to_string(),
             commit_message: format!("Commit {sha}"),
             sha_history: vec![],
-            suite_statuses: vec![CheckSuiteStatus::Pending],
+            suite_statuses: vec![CheckSuiteStatus::Success],
             merge_counter: 0,
             merge_conflict: false,
         }

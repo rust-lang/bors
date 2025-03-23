@@ -3,6 +3,7 @@ use std::sync::Arc;
 use chrono::Utc;
 
 use crate::PgDbClient;
+use crate::bors::CheckSuiteStatus;
 use crate::bors::Comment;
 use crate::bors::RepositoryState;
 use crate::bors::command::Approver;
@@ -29,10 +30,12 @@ pub(super) async fn command_approve(
     rollup: Option<RollupMode>,
 ) -> anyhow::Result<()> {
     tracing::info!("Approving PR {}", pr.number);
+
     if !has_permission(&repo_state, author, pr, &db, PermissionType::Review).await? {
         deny_request(&repo_state, pr, author, PermissionType::Review).await?;
         return Ok(());
     };
+
     let approver = match approver {
         Approver::Myself => author.username.clone(),
         Approver::Specified(approver) => approver.clone(),
@@ -52,10 +55,38 @@ pub(super) async fn command_approve(
         )
         .await?;
 
-    db.approve(&pr_model, approval_info, priority, rollup)
-        .await?;
-    handle_label_trigger(&repo_state, pr.number, LabelTrigger::Approved).await?;
-    notify_of_approval(&repo_state, pr, approver.as_str()).await
+    let should_approve_immediately = if priority.is_some() || pr_model.priority.is_some() {
+        true
+    } else {
+        let check_suites = repo_state
+            .client
+            .get_check_suites_for_commit(&pr.head.name, &pr.head.sha)
+            .await?;
+
+        if check_suites
+            .iter()
+            .any(|check| matches!(check.status, CheckSuiteStatus::Failure))
+        {
+            return notify_of_failed_approval(&repo_state, pr).await;
+        }
+
+        check_suites.is_empty()
+            || check_suites
+                .iter()
+                .all(|check| matches!(check.status, CheckSuiteStatus::Success))
+    };
+
+    if should_approve_immediately {
+        db.approve(&pr_model, approval_info, priority, rollup)
+            .await?;
+        handle_label_trigger(&repo_state, pr.number, LabelTrigger::Approved).await?;
+        notify_of_approval(&repo_state, pr, approver.as_str()).await
+    } else {
+        db.set_approval_pending(&pr_model, approval_info, priority, rollup)
+            .await?;
+        handle_label_trigger(&repo_state, pr.number, LabelTrigger::ApprovalPending).await?;
+        notify_of_pending_approval(&repo_state, pr, &approver).await
+    }
 }
 
 /// Unapprove a pull request.
@@ -275,6 +306,34 @@ async fn notify_of_unapproval(repo: &RepositoryState, pr: &PullRequest) -> anyho
         .await
 }
 
+async fn notify_of_pending_approval(
+    repo: &RepositoryState,
+    pr: &PullRequest,
+    approver: &str,
+) -> anyhow::Result<()> {
+    repo.client
+        .post_comment(
+            pr.number,
+            Comment::new(format!(
+                ":hourglass_flowing_sand: Commit {} has received approval from `{}`, but is waiting for CI to pass",
+                pr.head.sha, approver
+            )),
+        )
+        .await
+}
+
+async fn notify_of_failed_approval(repo: &RepositoryState, pr: &PullRequest) -> anyhow::Result<()> {
+    repo.client
+        .post_comment(
+            pr.number,
+            Comment::new(format!(
+                "CI checks for commit {} have previously failed. Please push fixes or retry the build.",
+                pr.head.sha
+            )),
+        )
+        .await
+}
+
 async fn notify_of_approval(
     repo: &RepositoryState,
     pr: &PullRequest,
@@ -307,6 +366,7 @@ async fn notify_of_delegation(
 #[cfg(test)]
 mod tests {
     use crate::database::TreeState;
+    use crate::tests::mocks::TestWorkflowStatus;
     use crate::{
         bors::{
             RollupMode,
@@ -1032,6 +1092,118 @@ mod tests {
             tester.expect_comments(1).await;
 
             tester.default_pr().await.expect_approved_sha(&pr2.head_sha);
+
+            Ok(tester)
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn approve_with_pending_ci(pool: sqlx::PgPool) {
+        run_test(pool, |mut tester| async {
+            tester.get_branch_mut("pr-1").expect_suites(1);
+            tester.post_comment("@bors r+").await?;
+            insta::assert_snapshot!(
+                tester.get_comment().await?,
+                @":hourglass_flowing_sand: Commit pr-1-sha has received approval from `default-user`, but is waiting for CI to pass"
+            );
+
+            let pr = tester.default_pr_db().await?.unwrap();
+            assert!(pr.is_pending_approval());
+
+            Ok(tester)
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn approve_with_failed_ci(pool: sqlx::PgPool) {
+        run_test(pool, |mut tester| async {
+            {
+                let mut branch = tester.get_branch_mut("pr-1");
+                branch.expect_suites(1);
+                branch.suite_finished(TestWorkflowStatus::Failure);
+            }
+
+            tester.post_comment("@bors r+").await?;
+
+            insta::assert_snapshot!(
+                tester.get_comment().await?,
+                @"CI checks for commit pr-1-sha have previously failed. Please push fixes or retry the build."
+            );
+
+            let pr = tester.default_pr_db().await?.unwrap();
+            assert!(!pr.is_approved());
+
+            Ok(tester)
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn approve_with_priority_ignores_ci(pool: sqlx::PgPool) {
+        run_test(pool, |mut tester| async {
+            tester.get_branch_mut("pr-1").expect_suites(1);
+            tester.post_comment("@bors r+ p=10").await?;
+            insta::assert_snapshot!(
+                tester.get_comment().await?,
+                @"Commit pr-1-sha has been approved by `default-user`"
+            );
+
+            let pr = tester.default_pr_db().await?.unwrap();
+            assert!(pr.is_approved());
+            assert_eq!(pr.priority, Some(10));
+
+            Ok(tester)
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn approve_with_existing_priority_ignores_ci(pool: sqlx::PgPool) {
+        run_test(pool, |mut tester| async {
+            tester.post_comment("@bors p=5").await?;
+            tester.get_branch_mut("pr-1").expect_suites(1);
+            tester.post_comment("@bors r+").await?;
+            insta::assert_snapshot!(
+                tester.get_comment().await?,
+                @"Commit pr-1-sha has been approved by `default-user`"
+            );
+
+            let pr = tester.default_pr_db().await?.unwrap();
+            assert!(pr.is_approved());
+            assert_eq!(pr.priority, Some(5));
+
+            Ok(tester)
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn reapprove_after_ci_success(pool: sqlx::PgPool) {
+        run_test(pool, |mut tester| async {
+            {
+                let mut branch = tester.get_branch_mut("pr-1");
+                branch.expect_suites(1);
+                branch.suite_finished(TestWorkflowStatus::Failure);
+            }
+
+            tester.post_comment("@bors r+").await?;
+            tester.expect_comments(1).await;
+
+            let pr = tester.default_pr_db().await?.unwrap();
+            assert!(!pr.is_approved());
+
+            {
+                let mut branch = tester.get_branch_mut("pr-1");
+                branch.expect_suites(1);
+                branch.suite_finished(TestWorkflowStatus::Success);
+            }
+
+            tester.post_comment("@bors r+").await?;
+            tester.expect_comments(1).await;
+
+            tester.default_pr().await.expect_approved_by("default-user");
 
             Ok(tester)
         })

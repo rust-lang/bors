@@ -479,7 +479,9 @@ mod tests {
                 .post_comment("@bors try parent=ea9c1b050cc8b420c2c211d2177811e564a4dc60")
                 .await?;
             tester.expect_comments(1).await;
-            tester.workflow_success(tester.try_branch()).await?;
+            let try_branch = tester.try_branch();
+            tester.get_branch_mut(&try_branch.get_name()).expect_suites(1);
+            tester.workflow_success(try_branch).await?;
             tester.expect_comments(1).await;
             tester.post_comment("@bors try parent=last").await?;
             insta::assert_snapshot!(tester.get_comment().await?, @":hourglass: Trying commit pr-1-sha with merge merge-ea9c1b050cc8b420c2c211d2177811e564a4dc60-pr-1-sha-1…");
@@ -589,6 +591,7 @@ mod tests {
     #[sqlx::test]
     async fn try_again_after_checks_finish(pool: sqlx::PgPool) {
         run_test(pool, |mut tester| async {
+            tester.create_branch(TRY_BRANCH_NAME).expect_suites(1);
             tester.post_comment("@bors try").await?;
             tester.expect_comments(1).await;
             tester
@@ -772,6 +775,7 @@ try = ["+foo", "+bar", "-baz"]
 try_succeed = ["+foo", "+bar", "-baz"]
 "#))
             .run_test(|mut tester| async {
+                tester.create_branch(TRY_BRANCH_NAME).expect_suites(1);
                 tester.post_comment("@bors try").await?;
                 insta::assert_snapshot!(tester.get_comment().await?, @":hourglass: Trying commit pr-1-sha with merge merge-main-sha1-pr-1-sha-0…");
                 let repo = tester.default_repo();

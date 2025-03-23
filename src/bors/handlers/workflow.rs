@@ -103,6 +103,8 @@ pub(super) async fn handle_check_suite_completed(
     db: Arc<PgDbClient>,
     payload: CheckSuiteCompleted,
 ) -> anyhow::Result<()> {
+    finalize_pending_approvals(&repo, &db, &payload).await?;
+
     if !is_bors_observed_branch(&payload.branch) {
         return Ok(());
     }
@@ -112,6 +114,7 @@ pub(super) async fn handle_check_suite_completed(
         payload.branch,
         payload.commit_sha
     );
+
     try_complete_build(repo.as_ref(), db.as_ref(), payload).await
 }
 
@@ -201,6 +204,39 @@ async fn try_complete_build(
         workflow_failed_comment(&workflows)
     };
     repo.client.post_comment(pr.number, message).await?;
+
+    Ok(())
+}
+
+async fn finalize_pending_approvals(
+    repo: &RepositoryState,
+    db: &PgDbClient,
+    payload: &CheckSuiteCompleted,
+) -> anyhow::Result<()> {
+    let pending_prs = db
+        .find_pending_approval_prs(repo.repository(), &payload.commit_sha)
+        .await?;
+
+    tracing::info!("Found {} PR(s) with pending approval", pending_prs.len());
+
+    if pending_prs.is_empty() {
+        return Ok(());
+    }
+
+    let check_suites = repo
+        .client
+        .get_check_suites_for_commit(&payload.branch, &payload.commit_sha)
+        .await?;
+
+    if check_suites
+        .iter()
+        .all(|check| matches!(check.status, CheckSuiteStatus::Success))
+    {
+        for pr in pending_prs {
+            db.finalize_approval(&pr).await?;
+            handle_label_trigger(repo, pr.number, LabelTrigger::Approved).await?;
+        }
+    }
 
     Ok(())
 }
@@ -386,6 +422,31 @@ mod tests {
                 .check_suite(CheckSuite::completed(tester.try_branch()))
                 .await?;
             tester.expect_comments(1).await;
+            Ok(tester)
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn pending_approval_finalized_on_ci_pass(pool: sqlx::PgPool) {
+        run_test(pool, |mut tester| async {
+            tester.get_branch_mut("pr-1").expect_suites(1);
+            tester.post_comment("@bors r+").await?;
+            tester.expect_comments(1).await;
+
+            let branch = tester.get_branch("pr-1");
+            tester.workflow_success(branch.clone()).await?;
+            tester.check_suite(CheckSuite::completed(branch)).await?;
+
+            tester
+                .wait_for(|| async {
+                    Ok(tester
+                        .default_pr_db()
+                        .await?
+                        .map_or(false, |pr| pr.is_approved()))
+                })
+                .await?;
+
             Ok(tester)
         })
         .await;

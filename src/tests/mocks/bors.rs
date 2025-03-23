@@ -459,6 +459,11 @@ impl BorsTester {
             let mut repo = repo.lock();
 
             let counter = repo.get_next_pr_push_counter();
+            let new_sha = format!("pr-{pr_number}-commit-{counter}");
+
+            if let Some(branch) = repo.get_branch_by_name(&format!("pr-{pr_number}")) {
+                branch.set_to_sha(&new_sha);
+            }
 
             let pr = repo
                 .pull_requests

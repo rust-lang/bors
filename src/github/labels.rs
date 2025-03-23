@@ -2,6 +2,7 @@
 #[derive(Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
 pub enum LabelTrigger {
     Approved,
+    ApprovalPending,
     Unapproved,
     TryBuildStarted,
     TryBuildSucceeded,
