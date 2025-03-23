@@ -290,6 +290,15 @@ impl PullRequestModel {
             ApprovalStatus::NotApproved => None,
         }
     }
+
+    pub fn approved_at(&self) -> Option<DateTime<Utc>> {
+        match &self.approval_status {
+            ApprovalStatus::Approved(info) | ApprovalStatus::ApprovalPending(info) => {
+                Some(info.approved_at)
+            }
+            ApprovalStatus::NotApproved => None,
+        }
+    }
 }
 
 /// Describes whether a workflow is a Github Actions workflow or if it's a job from some external

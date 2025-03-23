@@ -214,7 +214,7 @@ async fn finalize_pending_approvals(
     payload: &CheckSuiteCompleted,
 ) -> anyhow::Result<()> {
     let pending_prs = db
-        .find_pending_approval_prs(repo.repository(), &payload.commit_sha)
+        .find_prs_pending_approval_with_sha(repo.repository(), &payload.commit_sha)
         .await?;
 
     tracing::info!("Found {} PR(s) with pending approval", pending_prs.len());

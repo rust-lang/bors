@@ -322,7 +322,10 @@ async fn notify_of_pending_approval(
         .await
 }
 
-async fn notify_of_failed_approval(repo: &RepositoryState, pr: &PullRequest) -> anyhow::Result<()> {
+pub async fn notify_of_failed_approval(
+    repo: &RepositoryState,
+    pr: &PullRequest,
+) -> anyhow::Result<()> {
     repo.client
         .post_comment(
             pr.number,

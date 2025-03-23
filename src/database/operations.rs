@@ -227,7 +227,7 @@ WHERE id = $5
     .await
 }
 
-pub(crate) async fn find_pending_approval_prs(
+pub(crate) async fn find_prs_pending_approval_with_sha(
     executor: impl PgExecutor<'_>,
     repo: &GithubRepoName,
     commit_sha: &CommitSha,
@@ -267,6 +267,63 @@ pub(crate) async fn find_pending_approval_prs(
         .await?;
 
         Ok(records)
+    })
+    .await
+}
+
+pub(crate) async fn find_prs_pending_approval(
+    executor: impl PgExecutor<'_>,
+    repo: &GithubRepoName,
+) -> anyhow::Result<Vec<PullRequestModel>> {
+    measure_db_query("get_pending_approval_prs", || async {
+        let records = sqlx::query_as!(
+            PullRequestModel,
+            r#"
+    SELECT
+        pr.id,
+        pr.repository as "repository: GithubRepoName",
+        pr.number as "number!: i64",
+        (
+            pr.approved_by,
+            pr.approved_sha,
+            pr.approved_at,
+            pr.approval_pending
+        ) AS "approval_status!: ApprovalStatus",
+        pr.status as "pr_status: PullRequestStatus",
+        pr.priority,
+        pr.rollup as "rollup: RollupMode",
+        pr.delegated,
+        pr.base_branch,
+        pr.mergeable_state as "mergeable_state: MergeableState",
+        pr.created_at as "created_at: DateTime<Utc>",
+        build AS "try_build: BuildModel"
+    FROM pull_request as pr
+    LEFT JOIN build ON pr.build_id = build.id
+    WHERE pr.repository = $1 AND
+          pr.approval_pending = true
+    "#,
+            repo as &GithubRepoName,
+        )
+        .fetch_all(executor)
+        .await?;
+
+        Ok(records)
+    })
+    .await
+}
+
+pub(crate) async fn remove_pending_approval(
+    executor: impl PgExecutor<'_>,
+    pr_id: i32,
+) -> anyhow::Result<()> {
+    measure_db_query("remove_pending_approval", || async {
+        sqlx::query!(
+            "UPDATE pull_request SET approved_by = NULL, approved_sha = NULL, approved_at = NULL, approval_pending = false WHERE id = $1",
+            pr_id
+        )
+        .execute(executor)
+        .await?;
+        Ok(())
     })
     .await
 }

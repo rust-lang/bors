@@ -628,6 +628,13 @@ impl PullRequestProxy {
     }
 
     #[track_caller]
+    pub fn expect_approval_pending(&self) -> &Self {
+        assert!(self.require_db_pr().is_pending_approval());
+        self.gh_pr.check_added_labels(&["approval_pending"]);
+        self
+    }
+
+    #[track_caller]
     pub fn expect_approved_by(&self, approved_by: &str) -> &Self {
         assert_eq!(self.require_db_pr().approver(), Some(approved_by));
         self.gh_pr.check_added_labels(&["approved"]);

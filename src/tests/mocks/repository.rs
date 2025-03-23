@@ -188,6 +188,7 @@ timeout = 3600
 # Set labels on PR approvals
 [labels]
 approve = ["+approved"]
+approval_pending = ["+approval_pending"]
 "#
         .to_string();
 

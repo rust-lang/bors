@@ -4,10 +4,14 @@ use std::time::Duration;
 use anyhow::Context;
 use chrono::{DateTime, Utc};
 
+use crate::bors::CheckSuiteStatus;
 use crate::bors::Comment;
 use crate::bors::RepositoryState;
+use crate::bors::handlers::labels::handle_label_trigger;
+use crate::bors::handlers::review::notify_of_failed_approval;
 use crate::bors::handlers::trybuild::cancel_build_workflows;
 use crate::database::BuildStatus;
+use crate::github::LabelTrigger;
 use crate::{PgDbClient, TeamApiClient};
 
 pub async fn refresh_repository(
@@ -16,10 +20,11 @@ pub async fn refresh_repository(
     team_api_client: &TeamApiClient,
 ) -> anyhow::Result<()> {
     let repo = repo.as_ref();
-    if let (Ok(_), _, Ok(_)) = tokio::join!(
+    if let (Ok(_), _, Ok(_), Ok(_)) = tokio::join!(
         cancel_timed_out_builds(repo, db.as_ref()),
         reload_permission(repo, team_api_client),
-        reload_config(repo)
+        reload_config(repo),
+        check_pending_approvals(repo, db.as_ref())
     ) {
         Ok(())
     } else {
@@ -85,6 +90,69 @@ async fn reload_config(repo: &RepositoryState) -> anyhow::Result<()> {
     Ok(())
 }
 
+async fn check_pending_approvals(repo: &RepositoryState, db: &PgDbClient) -> anyhow::Result<()> {
+    let pending_prs = db.find_prs_pending_approval(repo.repository()).await?;
+
+    tracing::info!("Found {} PR(s) with pending approval", pending_prs.len());
+
+    if pending_prs.is_empty() {
+        return Ok(());
+    }
+
+    for pr_model in pending_prs {
+        let timeout = repo.config.load().timeout;
+        let approved_at = pr_model.approved_at();
+
+        if approved_at.is_none() {
+            tracing::error!("PR with pending approval has no `approved_at` timestamp");
+            continue;
+        }
+
+        let pr = repo.client.get_pull_request(pr_model.number).await?;
+
+        let check_suites = repo
+            .client
+            .get_check_suites_for_commit(&pr.head.name, &pr.head.sha)
+            .await?;
+
+        if check_suites
+            .iter()
+            .any(|check| matches!(check.status, CheckSuiteStatus::Failure))
+        {
+            db.remove_pending_approval(&pr_model).await?;
+            handle_label_trigger(repo, pr.number, LabelTrigger::ApprovalPending).await?;
+            notify_of_failed_approval(repo, &pr).await?;
+            continue;
+        }
+
+        if check_suites
+            .iter()
+            .all(|check| matches!(check.status, CheckSuiteStatus::Success))
+        {
+            db.finalize_approval(&pr_model).await?;
+            handle_label_trigger(repo, pr.number, LabelTrigger::Approved).await?;
+            continue;
+        }
+
+        if elapsed_time(approved_at.unwrap()) >= timeout {
+            tracing::info!("Cancelling PR approval: {}", pr.number);
+
+            db.remove_pending_approval(&pr_model).await?;
+            repo.client
+                .post_comment(
+                    pr.number,
+                    Comment::new(format!(
+                        ":boom: CI checks for commit {} timed out. Removing pending approval.",
+                        pr.head.sha
+                    )),
+                )
+                .await?;
+        }
+    }
+
+    Ok(())
+}
+
 #[cfg(not(test))]
 fn now() -> DateTime<Utc> {
     Utc::now()
@@ -110,7 +178,7 @@ mod tests {
     use crate::bors::handlers::WAIT_FOR_WORKFLOW_STARTED;
     use crate::bors::handlers::refresh::MOCK_TIME;
     use crate::tests::mocks::{
-        BorsBuilder, GitHubState, WorkflowEvent, default_repo_name, run_test,
+        BorsBuilder, CheckSuite, GitHubState, WorkflowEvent, default_repo_name, run_test,
     };
     use chrono::Utc;
     use std::future::Future;
@@ -205,6 +273,83 @@ timeout = 3600
             })
             .await;
         gh.check_cancelled_workflows(default_repo_name(), &[1]);
+    }
+
+    #[sqlx::test]
+    async fn approve_finalized_on_success(pool: sqlx::PgPool) {
+        run_test(pool, |mut tester| async {
+            tester.get_branch_mut("pr-1").expect_suites(1);
+            tester.post_comment("@bors r+").await?;
+            tester.expect_comments(1).await;
+
+            tester.default_pr().await.expect_approval_pending();
+
+            let branch = tester.get_branch("pr-1");
+            tester.workflow_success(branch.clone()).await?;
+            tester.check_suite(CheckSuite::completed(branch)).await?;
+
+            tester
+                .wait_for(|| async {
+                    Ok(tester
+                        .default_pr_db()
+                        .await?
+                        .map_or(false, |pr| pr.is_approved()))
+                })
+                .await?;
+
+            Ok(tester)
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn pending_approval_times_out(pool: sqlx::PgPool) {
+        run_test(pool, |mut tester| async move {
+            tester.get_branch_mut("pr-1").expect_suites(1);
+            tester.post_comment("@bors r+").await?;
+            tester.expect_comments(1).await;
+
+            tester.default_pr().await.expect_approval_pending();
+
+            with_mocked_time(Duration::from_secs(4000), async {
+                tester.refresh().await;
+            })
+            .await;
+
+            insta::assert_snapshot!(
+                tester.get_comment().await?,
+                @r###":boom: CI checks for commit pr-1-sha timed out. Removing pending approval."###
+            );
+
+            let pr = tester.default_pr_db().await?.unwrap();
+            assert!(!pr.is_approved());
+            assert!(!pr.is_pending_approval());
+
+            Ok(tester)
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn pending_approval_not_timed_out_before_timeout(pool: sqlx::PgPool) {
+        run_test(pool, |mut tester| async move {
+            tester.get_branch_mut("pr-1").expect_suites(1);
+            tester.post_comment("@bors r+").await?;
+            tester.expect_comments(1).await;
+
+            let pr = tester.default_pr_db().await?.unwrap();
+            assert!(pr.is_pending_approval());
+
+            with_mocked_time(Duration::from_secs(1800), async {
+                tester.refresh().await;
+            })
+            .await;
+
+            tester.default_pr().await.expect_approval_pending();
+
+            Ok(tester)
+        })
+        .await;
     }
 
     async fn with_mocked_time<Fut: Future<Output = ()>>(in_future: Duration, future: Fut) {

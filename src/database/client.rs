@@ -10,12 +10,13 @@ use crate::github::{CommitSha, GithubRepoName};
 
 use super::operations::{
     approve_pull_request, create_build, create_pull_request, create_workflow,
-    delegate_pull_request, finalize_approval, find_build, find_pending_approval_prs,
-    find_pr_by_build, get_pull_request, get_repository, get_running_builds,
-    get_workflow_urls_for_build, get_workflows_for_build, set_approval_pending, set_pr_priority,
-    set_pr_rollup, set_pr_status, unapprove_pull_request, undelegate_pull_request,
-    update_build_status, update_mergeable_states_by_base_branch, update_pr_build_id,
-    update_workflow_status, upsert_pull_request, upsert_repository,
+    delegate_pull_request, finalize_approval, find_build, find_pr_by_build,
+    find_prs_pending_approval, find_prs_pending_approval_with_sha, get_pull_request,
+    get_repository, get_running_builds, get_workflow_urls_for_build, get_workflows_for_build,
+    remove_pending_approval, set_approval_pending, set_pr_priority, set_pr_rollup, set_pr_status,
+    unapprove_pull_request, undelegate_pull_request, update_build_status,
+    update_mergeable_states_by_base_branch, update_pr_build_id, update_workflow_status,
+    upsert_pull_request, upsert_repository,
 };
 use super::{ApprovalInfo, MergeableState, RunId};
 
@@ -130,12 +131,23 @@ impl PgDbClient {
         set_approval_pending(&self.pool, pr.id, approval_info, priority, rollup).await
     }
 
-    pub async fn find_pending_approval_prs(
+    pub async fn remove_pending_approval(&self, pr: &PullRequestModel) -> anyhow::Result<()> {
+        remove_pending_approval(&self.pool, pr.id).await
+    }
+
+    pub async fn find_prs_pending_approval_with_sha(
         &self,
         repo: &GithubRepoName,
         commit_sha: &CommitSha,
     ) -> anyhow::Result<Vec<PullRequestModel>> {
-        find_pending_approval_prs(&self.pool, repo, commit_sha).await
+        find_prs_pending_approval_with_sha(&self.pool, repo, commit_sha).await
+    }
+
+    pub async fn find_prs_pending_approval(
+        &self,
+        repo: &GithubRepoName,
+    ) -> anyhow::Result<Vec<PullRequestModel>> {
+        find_prs_pending_approval(&self.pool, repo).await
     }
 
     pub async fn finalize_approval(&self, pr: &PullRequestModel) -> anyhow::Result<()> {
