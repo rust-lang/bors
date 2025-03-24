@@ -126,7 +126,8 @@ pub(crate) async fn upsert_pull_request(
                 ON CONFLICT (repository, number)
                 DO UPDATE SET
                     base_branch = $3,
-                    mergeable_state = $4
+                    mergeable_state = $4,
+                    status = $5
                 RETURNING *
             )
             SELECT

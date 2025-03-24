@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            WITH upserted_pr AS (\n                INSERT INTO pull_request (repository, number, base_branch, mergeable_state, status)\n                VALUES ($1, $2, $3, $4, $5)\n                ON CONFLICT (repository, number)\n                DO UPDATE SET\n                    base_branch = $3,\n                    mergeable_state = $4\n                RETURNING *\n            )\n            SELECT\n                pr.id,\n                pr.repository as \"repository: GithubRepoName\",\n                pr.number as \"number!: i64\",\n                (\n                    pr.approved_by,\n                    pr.approved_sha\n                ) AS \"approval_status!: ApprovalStatus\",\n                pr.status as \"pr_status: PullRequestStatus\", \n                pr.priority,\n                pr.rollup as \"rollup: RollupMode\",\n                pr.delegated,\n                pr.base_branch,\n                pr.mergeable_state as \"mergeable_state: MergeableState\",\n                pr.created_at as \"created_at: DateTime<Utc>\",\n                build AS \"try_build: BuildModel\"\n            FROM upserted_pr as pr\n            LEFT JOIN build ON pr.build_id = build.id\n            ",
+  "query": "\n            WITH upserted_pr AS (\n                INSERT INTO pull_request (repository, number, base_branch, mergeable_state, status)\n                VALUES ($1, $2, $3, $4, $5)\n                ON CONFLICT (repository, number)\n                DO UPDATE SET\n                    base_branch = $3,\n                    mergeable_state = $4,\n                    status = $5\n                RETURNING *\n            )\n            SELECT\n                pr.id,\n                pr.repository as \"repository: GithubRepoName\",\n                pr.number as \"number!: i64\",\n                (\n                    pr.approved_by,\n                    pr.approved_sha\n                ) AS \"approval_status!: ApprovalStatus\",\n                pr.status as \"pr_status: PullRequestStatus\", \n                pr.priority,\n                pr.rollup as \"rollup: RollupMode\",\n                pr.delegated,\n                pr.base_branch,\n                pr.mergeable_state as \"mergeable_state: MergeableState\",\n                pr.created_at as \"created_at: DateTime<Utc>\",\n                build AS \"try_build: BuildModel\"\n            FROM upserted_pr as pr\n            LEFT JOIN build ON pr.build_id = build.id\n            ",
   "describe": {
     "columns": [
       {
@@ -124,5 +124,5 @@
       true
     ]
   },
-  "hash": "b442044623f3fddd437ef8aa5750d0cb222493180c665e1d6223438a653939ef"
+  "hash": "c167f66a34b486f57451b2fe2b56818a7eecc35e2746ad6b8d02046ccc11d2d1"
 }
