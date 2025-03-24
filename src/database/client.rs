@@ -10,11 +10,11 @@ use crate::github::{CommitSha, GithubRepoName};
 
 use super::operations::{
     approve_pull_request, create_build, create_pull_request, create_workflow,
-    delegate_pull_request, find_build, find_pr_by_build, get_pull_request, get_repository,
-    get_running_builds, get_workflow_urls_for_build, get_workflows_for_build, set_pr_priority,
-    set_pr_rollup, set_pr_status, unapprove_pull_request, undelegate_pull_request,
-    update_build_status, update_mergeable_states_by_base_branch, update_pr_build_id,
-    update_workflow_status, upsert_pull_request, upsert_repository,
+    delegate_pull_request, find_build, find_pr_by_build, get_prs_with_unknown_mergeable_state,
+    get_pull_request, get_repository, get_running_builds, get_workflow_urls_for_build,
+    get_workflows_for_build, set_pr_priority, set_pr_rollup, set_pr_status, unapprove_pull_request,
+    undelegate_pull_request, update_build_status, update_mergeable_states_by_base_branch,
+    update_pr_build_id, update_workflow_status, upsert_pull_request, upsert_repository,
 };
 use super::{ApprovalInfo, MergeableState, RunId};
 
@@ -62,6 +62,13 @@ impl PgDbClient {
         mergeable_state: MergeableState,
     ) -> anyhow::Result<u64> {
         update_mergeable_states_by_base_branch(&self.pool, repo, base_branch, mergeable_state).await
+    }
+
+    pub async fn get_prs_with_unknown_mergeable_state(
+        &self,
+        repo: &GithubRepoName,
+    ) -> anyhow::Result<Vec<PullRequestModel>> {
+        get_prs_with_unknown_mergeable_state(&self.pool, repo).await
     }
 
     pub async fn set_rollup(

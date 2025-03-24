@@ -39,7 +39,7 @@ pub(crate) async fn get_pull_request(
             pr.approved_by,
             pr.approved_sha
         ) AS "approval_status!: ApprovalStatus",
-        pr.status as "pr_status: PullRequestStatus", 
+        pr.status as "pr_status: PullRequestStatus",
         pr.priority,
         pr.rollup as "rollup: RollupMode",
         pr.delegated,
@@ -138,7 +138,7 @@ pub(crate) async fn upsert_pull_request(
                     pr.approved_by,
                     pr.approved_sha
                 ) AS "approval_status!: ApprovalStatus",
-                pr.status as "pr_status: PullRequestStatus", 
+                pr.status as "pr_status: PullRequestStatus",
                 pr.priority,
                 pr.rollup as "rollup: RollupMode",
                 pr.delegated,
@@ -186,6 +186,45 @@ pub(crate) async fn update_mergeable_states_by_base_branch(
         .await?;
 
         Ok(result.rows_affected())
+    })
+    .await
+}
+
+pub(crate) async fn get_prs_with_unknown_mergeable_state(
+    executor: impl PgExecutor<'_>,
+    repo: &GithubRepoName,
+) -> anyhow::Result<Vec<PullRequestModel>> {
+    measure_db_query("get_prs_with_unknown_mergeable_state", || async {
+        let prs = sqlx::query_as!(
+            PullRequestModel,
+            r#"
+SELECT
+    pr.id,
+    pr.repository as "repository: GithubRepoName",
+    pr.number as "number!: i64",
+    (
+        pr.approved_by,
+        pr.approved_sha
+    ) AS "approval_status!: ApprovalStatus",
+    pr.status as "pr_status: PullRequestStatus",
+    pr.priority,
+    pr.rollup as "rollup: RollupMode",
+    pr.delegated,
+    pr.base_branch,
+    pr.mergeable_state as "mergeable_state: MergeableState",
+    pr.created_at as "created_at: DateTime<Utc>",
+    build AS "try_build: BuildModel"
+FROM pull_request as pr
+LEFT JOIN build ON pr.build_id = build.id
+WHERE pr.repository = $1
+    AND pr.mergeable_state = 'unknown'
+    AND pr.status = 'open'
+"#,
+            repo as &GithubRepoName,
+        )
+        .fetch_all(executor)
+        .await?;
+        Ok(prs)
     })
     .await
 }
@@ -286,7 +325,7 @@ SELECT
         pr.approved_by,
         pr.approved_sha
     ) AS "approval_status!: ApprovalStatus",
-    pr.status as "pr_status: PullRequestStatus",  
+    pr.status as "pr_status: PullRequestStatus",
     pr.delegated,
     pr.priority,
     pr.base_branch,

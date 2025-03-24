@@ -16,10 +16,11 @@ pub async fn refresh_repository(
     team_api_client: &TeamApiClient,
 ) -> anyhow::Result<()> {
     let repo = repo.as_ref();
-    if let (Ok(_), _, Ok(_)) = tokio::join!(
+    if let (Ok(_), _, Ok(_), Ok(_)) = tokio::join!(
         cancel_timed_out_builds(repo, db.as_ref()),
         reload_permission(repo, team_api_client),
-        reload_config(repo)
+        reload_config(repo),
+        reload_unknown_mergeable_prs(repo, db.as_ref())
     ) {
         Ok(())
     } else {
@@ -76,6 +77,31 @@ async fn reload_permission(
             )
         })?;
     repo.permissions.store(Arc::new(permissions));
+    Ok(())
+}
+
+async fn reload_unknown_mergeable_prs(
+    repo: &RepositoryState,
+    db: &PgDbClient,
+) -> anyhow::Result<()> {
+    let prs = db
+        .get_prs_with_unknown_mergeable_state(repo.repository())
+        .await?;
+
+    tracing::info!(
+        "Refreshing {} PR(s) with unknown mergeable state",
+        prs.len()
+    );
+
+    if prs.is_empty() {
+        return Ok(());
+    }
+
+    for pr in prs {
+        tracing::info!("PR #{} has unknown mergeable state", pr.number);
+        // Add to 'queue'
+    }
+
     Ok(())
 }
 
