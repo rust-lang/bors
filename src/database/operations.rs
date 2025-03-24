@@ -175,7 +175,7 @@ pub(crate) async fn update_mergeable_states_by_base_branch(
             SET mergeable_state = $1
             WHERE repository = $2
             AND base_branch = $3
-            AND status NOT IN ('closed', 'merged')
+            AND status IN ('open', 'draft')
             "#,
             mergeable_state as _,
             repo as &GithubRepoName,
