@@ -104,6 +104,11 @@ Having the database up and running, with the `DATABASE_URL` set, is required to 
 Make sure to also run `cargo sqlx migrate run` to apply the migrations to the database.
 
 ### Updating the DB schema
+
+> [!CAUTION]
+> When adding a new `NOT NULL` column, always specify the `DEFAULT` value that will be backfilled
+> during the migration! Otherwise, the migration might break the deployed bors service.
+
 1) Generate a new migration
     ```console
     $ cargo sqlx migrate add <new-migration>
