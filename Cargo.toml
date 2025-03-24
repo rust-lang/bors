@@ -56,7 +56,6 @@ itertools = "0.14"
 
 [dev-dependencies]
 insta = "1.26"
-derive_builder = "0.20"
 wiremock = "0.6"
 base64 = "0.22"
 tracing-test = "0.2"
