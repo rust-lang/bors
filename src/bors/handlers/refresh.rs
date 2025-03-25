@@ -1,3 +1,4 @@
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -15,12 +16,17 @@ pub async fn refresh_repository(
     db: Arc<PgDbClient>,
     team_api_client: &TeamApiClient,
 ) -> anyhow::Result<()> {
-    let repo = repo.as_ref();
-    if let (Ok(_), _, Ok(_)) = tokio::join!(
-        cancel_timed_out_builds(repo, db.as_ref()),
-        reload_permission(repo, team_api_client),
-        reload_config(repo)
-    ) {
+    let repo_ref = repo.as_ref();
+    let db_ref = db.as_ref();
+    let tasks: Vec<Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>>> = vec![
+        Box::pin(cancel_timed_out_builds(repo_ref, db_ref)),
+        Box::pin(reload_permission(repo_ref, team_api_client)),
+        Box::pin(reload_config(repo_ref)),
+        Box::pin(reload_unknown_mergeable_prs(repo_ref, db_ref)),
+    ];
+    let results = futures::future::join_all(tasks).await;
+
+    if results.into_iter().all(|res| res.is_ok()) {
         Ok(())
     } else {
         tracing::error!("Failed to refresh repository");
@@ -76,6 +82,31 @@ async fn reload_permission(
             )
         })?;
     repo.permissions.store(Arc::new(permissions));
+    Ok(())
+}
+
+async fn reload_unknown_mergeable_prs(
+    repo: &RepositoryState,
+    db: &PgDbClient,
+) -> anyhow::Result<()> {
+    let prs = db
+        .get_prs_with_unknown_mergeable_state(repo.repository())
+        .await?;
+
+    tracing::info!(
+        "Refreshing {} PR(s) with unknown mergeable state",
+        prs.len()
+    );
+
+    if prs.is_empty() {
+        return Ok(());
+    }
+
+    for pr in prs {
+        tracing::info!("PR #{} has unknown mergeable state", pr.number);
+        // Add to 'queue'
+    }
+
     Ok(())
 }
 
