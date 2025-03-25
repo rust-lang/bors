@@ -77,7 +77,7 @@ fn get_command_help(command: BorsCommand) -> String {
         BorsCommand::Info => {
             "`info`: Get information about the current PR including delegation, priority, merge status, and try build status"
         }
-        BorsCommand::OpenTree => "`treeclosed-`: Open the repository tree for merging",
+        BorsCommand::OpenTree => "`treeclosed-`, `treeopen`: Open the repository tree for merging",
         BorsCommand::TreeClosed(_) => {
             "`treeclosed=<priority>`: Close the tree for PRs with priority less than `<priority>`"
         }
@@ -106,7 +106,7 @@ mod tests {
             - `info`: Get information about the current PR including delegation, priority, merge status, and try build status
             - `ping`: Check if the bot is alive
             - `help`: Print this help message
-            - `treeclosed-`: Open the repository tree for merging
+            - `treeclosed-`, `treeopen`: Open the repository tree for merging
             - `treeclosed=<priority>`: Close the tree for PRs with priority less than `<priority>`
             ");
             Ok(tester)

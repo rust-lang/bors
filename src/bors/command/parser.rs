@@ -314,10 +314,12 @@ fn parser_info<'a>(command: &CommandPart<'a>, _parts: &[CommandPart<'a>]) -> Par
     }
 }
 
-/// Parses `@bors treeclosed-` and `@bors treeclosed=<priority>`
+/// Parses `@bors treeclosed-`, `@bors treeopen` and `@bors treeclosed=<priority>`
 fn parser_tree_ops<'a>(command: &CommandPart<'a>, _parts: &[CommandPart<'a>]) -> ParseResult<'a> {
     match command {
-        CommandPart::Bare("treeclosed-") => Some(Ok(BorsCommand::OpenTree)),
+        CommandPart::Bare("treeclosed-") | CommandPart::Bare("treeopen") => {
+            Some(Ok(BorsCommand::OpenTree))
+        }
         CommandPart::KeyValue {
             key: "treeclosed",
             value,
@@ -1059,6 +1061,13 @@ line two
     #[test]
     fn parse_tree_closed_minus() {
         let cmds = parse_commands("@bors treeclosed-");
+        assert_eq!(cmds.len(), 1);
+        assert_eq!(cmds[0], Ok(BorsCommand::OpenTree));
+    }
+
+    #[test]
+    fn parse_tree_closed_minus_alias() {
+        let cmds = parse_commands("@bors treeopen");
         assert_eq!(cmds.len(), 1);
         assert_eq!(cmds[0], Ok(BorsCommand::OpenTree));
     }
