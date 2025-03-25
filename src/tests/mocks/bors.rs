@@ -165,6 +165,14 @@ impl BorsTester {
             .await
     }
 
+    pub fn default_pr_head_branch_mut(&mut self) -> MappedMutexGuard<RawMutex, Branch> {
+        self.get_branch_mut(&format!("pr-{}", default_pr_number()))
+    }
+
+    pub fn default_pr_head_branch(&self) -> Branch {
+        self.get_branch(&format!("pr-{}", default_pr_number()))
+    }
+
     pub async fn default_pr_db(&self) -> anyhow::Result<Option<PullRequestModel>> {
         self.pr_db(default_repo_name(), default_pr_number()).await
     }
@@ -459,6 +467,11 @@ impl BorsTester {
             let mut repo = repo.lock();
 
             let counter = repo.get_next_pr_push_counter();
+            let new_sha = format!("pr-{pr_number}-commit-{counter}");
+
+            if let Some(branch) = repo.get_branch_by_name(&format!("pr-{pr_number}")) {
+                branch.set_to_sha(&new_sha);
+            }
 
             let pr = repo
                 .pull_requests
@@ -619,6 +632,13 @@ impl PullRequestProxy {
     #[track_caller]
     pub fn expect_rollup(&self, rollup: Option<RollupMode>) -> &Self {
         assert_eq!(self.require_db_pr().rollup, rollup);
+        self
+    }
+
+    #[track_caller]
+    pub fn expect_approval_pending(&self) -> &Self {
+        assert!(self.require_db_pr().is_pending_approval());
+        self.gh_pr.check_added_labels(&["approval_pending"]);
         self
     }
 

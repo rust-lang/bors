@@ -55,6 +55,7 @@ where
     enum Trigger {
         Approve,
         Unapprove,
+        ApprovalPending,
         Try,
         TrySucceed,
         TryFailed,
@@ -65,6 +66,7 @@ where
             match value {
                 Trigger::Approve => LabelTrigger::Approved,
                 Trigger::Unapprove => LabelTrigger::Unapproved,
+                Trigger::ApprovalPending => LabelTrigger::ApprovalPending,
                 Trigger::Try => LabelTrigger::TryBuildStarted,
                 Trigger::TrySucceed => LabelTrigger::TryBuildSucceeded,
                 Trigger::TryFailed => LabelTrigger::TryBuildFailed,
