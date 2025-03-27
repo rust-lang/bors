@@ -13,7 +13,7 @@ use tokio::task::JoinHandle;
 use tower::Service;
 
 use crate::bors::{RollupMode, WAIT_FOR_REFRESH};
-use crate::database::{BuildStatus, PullRequestModel};
+use crate::database::{BuildStatus, DelegatedPermission, PullRequestModel};
 use crate::github::api::load_repositories;
 use crate::github::{GithubRepoName, PullRequestNumber};
 use crate::tests::mocks::comment::{Comment, GitHubIssueCommentEventPayload};
@@ -642,8 +642,11 @@ impl PullRequestProxy {
     }
 
     #[track_caller]
-    pub fn expect_delegated(&self) -> &Self {
-        assert!(self.require_db_pr().delegated);
+    pub fn expect_delegated(&self, delegation_type: DelegatedPermission) -> &Self {
+        assert_eq!(
+            self.require_db_pr().delegated_permission.as_ref().unwrap(),
+            &delegation_type
+        );
         self
     }
 

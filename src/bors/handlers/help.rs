@@ -1,6 +1,7 @@
 use crate::bors::Comment;
 use crate::bors::RepositoryState;
 use crate::bors::command::{Approver, BorsCommand, RollupMode};
+use crate::database::DelegatedPermission;
 use crate::github::PullRequest;
 use std::sync::Arc;
 
@@ -21,7 +22,7 @@ pub(super) async fn command_help(
         },
         BorsCommand::Unapprove,
         BorsCommand::SetPriority(0),
-        BorsCommand::Delegate,
+        BorsCommand::SetDelegate(DelegatedPermission::Review),
         BorsCommand::Undelegate,
         BorsCommand::Try {
             parent: None,
@@ -53,7 +54,7 @@ fn get_command_help(command: BorsCommand) -> String {
             approver: Approver::Myself,
             ..
         } => {
-            "`r+ [p=<priority>] [rollup=<never/iffy/maybe/always>]`: Approve this PR. Optionally, you can specify `<priority>`, `<rollup>`."
+            "`r+ [p=<priority>] [rollup=<never|iffy|maybe|always>]`: Approve this PR. Optionally, you can specify `<priority>`, `<rollup>`."
         }
         BorsCommand::Approve {
             approver: Approver::Specified(_),
@@ -63,7 +64,9 @@ fn get_command_help(command: BorsCommand) -> String {
         }
         BorsCommand::Unapprove => "`r-`: Unapprove this PR",
         BorsCommand::SetPriority(_) => "`p=<priority>`: Set the priority of this PR",
-        BorsCommand::Delegate => "`delegate+`: Delegate approval authority to the PR author",
+        BorsCommand::SetDelegate(_) => {
+            "`delegate=<try|review>`: Delegate permissions to the PR author\n- `delegate+`: Delegate review permissions to the PR author"
+        }
         BorsCommand::Undelegate => "`delegate-`: Remove any previously granted delegation",
         BorsCommand::Help => "`help`: Print this help message",
         BorsCommand::Ping => "`ping`: Check if the bot is alive",
@@ -72,7 +75,7 @@ fn get_command_help(command: BorsCommand) -> String {
         }
         BorsCommand::TryCancel => "`try cancel`: Cancel a running try build",
         BorsCommand::SetRollupMode(_) => {
-            "`rollup=<never/iffy/maybe/always>`: Mark the rollup status of the PR"
+            "`rollup=<never|iffy|maybe|always>`: Mark the rollup status of the PR"
         }
         BorsCommand::Info => {
             "`info`: Get information about the current PR including delegation, priority, merge status, and try build status"
@@ -94,15 +97,16 @@ mod tests {
         run_test(pool, |mut tester| async {
             tester.post_comment("@bors help").await?;
             insta::assert_snapshot!(tester.get_comment().await?, @r"
-            - `r+ [p=<priority>] [rollup=<never/iffy/maybe/always>]`: Approve this PR. Optionally, you can specify `<priority>`, `<rollup>`.
+            - `r+ [p=<priority>] [rollup=<never|iffy|maybe|always>]`: Approve this PR. Optionally, you can specify `<priority>`, `<rollup>`.
             - `r=<user> [p=<priority>]`: Approve this PR on behalf of `<user>`. Optionally, you can specify a `<priority>`.
             - `r-`: Unapprove this PR
             - `p=<priority>`: Set the priority of this PR
-            - `delegate+`: Delegate approval authority to the PR author
+            - `delegate=<try|review>`: Delegate permissions to the PR author
+            - `delegate+`: Delegate review permissions to the PR author
             - `delegate-`: Remove any previously granted delegation
             - `try [parent=<parent>] [jobs=<jobs>]`: Start a try build. Optionally, you can specify a `<parent>` SHA or a list of `<jobs>` to run
             - `try cancel`: Cancel a running try build
-            - `rollup=<never/iffy/maybe/always>`: Mark the rollup status of the PR
+            - `rollup=<never|iffy|maybe|always>`: Mark the rollup status of the PR
             - `info`: Get information about the current PR including delegation, priority, merge status, and try build status
             - `ping`: Check if the bot is alive
             - `help`: Print this help message

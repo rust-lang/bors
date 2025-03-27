@@ -16,7 +16,7 @@ use super::operations::{
     update_build_status, update_mergeable_states_by_base_branch, update_pr_build_id,
     update_workflow_status, upsert_pull_request, upsert_repository,
 };
-use super::{ApprovalInfo, MergeableState, RunId};
+use super::{ApprovalInfo, DelegatedPermission, MergeableState, RunId};
 
 /// Provides access to a database using sqlx operations.
 #[derive(Clone)]
@@ -47,8 +47,12 @@ impl PgDbClient {
         set_pr_priority(&self.pool, pr.id, priority).await
     }
 
-    pub async fn delegate(&self, pr: &PullRequestModel) -> anyhow::Result<()> {
-        delegate_pull_request(&self.pool, pr.id).await
+    pub async fn delegate(
+        &self,
+        pr: &PullRequestModel,
+        delegated_permission: DelegatedPermission,
+    ) -> anyhow::Result<()> {
+        delegate_pull_request(&self.pool, pr.id, delegated_permission).await
     }
 
     pub async fn undelegate(&self, pr: &PullRequestModel) -> anyhow::Result<()> {

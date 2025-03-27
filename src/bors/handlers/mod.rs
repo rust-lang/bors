@@ -14,6 +14,7 @@ use crate::bors::handlers::workflow::{
     handle_check_suite_completed, handle_workflow_completed, handle_workflow_started,
 };
 use crate::bors::{BorsContext, Comment, RepositoryState};
+use crate::database::DelegatedPermission;
 use crate::github::{GithubUser, PullRequest};
 use crate::permissions::PermissionType;
 use crate::{PgDbClient, TeamApiClient, load_repositories};
@@ -331,11 +332,17 @@ async fn handle_comment(
                         .instrument(span)
                         .await
                     }
-                    BorsCommand::Delegate => {
+                    BorsCommand::SetDelegate(delegate_type) => {
                         let span = tracing::info_span!("Delegate");
-                        command_delegate(repo, database, &pull_request, &comment.author)
-                            .instrument(span)
-                            .await
+                        command_delegate(
+                            repo,
+                            database,
+                            &pull_request,
+                            &comment.author,
+                            delegate_type,
+                        )
+                        .instrument(span)
+                        .await
                     }
                     BorsCommand::Undelegate => {
                         let span = tracing::info_span!("Undelegate");
@@ -499,7 +506,19 @@ async fn has_permission(
             &pr.status,
         )
         .await?;
-    let is_delegated = pr_model.delegated && author.id == pr.author.id;
+
+    if author.id != pr.author.id {
+        return Ok(false);
+    }
+
+    let is_delegated = pr_model
+        .delegated_permission
+        .is_some_and(|perm| match permission {
+            PermissionType::Review => matches!(perm, DelegatedPermission::Review),
+            PermissionType::Try => {
+                matches!(perm, DelegatedPermission::Try | DelegatedPermission::Review)
+            }
+        });
 
     Ok(is_delegated)
 }

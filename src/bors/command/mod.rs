@@ -2,7 +2,7 @@ mod parser;
 use std::fmt;
 use std::str::FromStr;
 
-use crate::github::CommitSha;
+use crate::{database::DelegatedPermission, github::CommitSha};
 pub use parser::{CommandParseError, CommandParser};
 
 /// Priority of a commit.
@@ -94,7 +94,7 @@ pub enum BorsCommand {
     /// Get information about the current PR.
     Info,
     /// Delegate approval authority to the pull request author.
-    Delegate,
+    SetDelegate(DelegatedPermission),
     /// Revoke any previously granted delegation.
     Undelegate,
     /// Set the rollup mode of a PRstatus.

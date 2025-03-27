@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n    SELECT\n        pr.id,\n        pr.repository as \"repository: GithubRepoName\",\n        pr.number as \"number!: i64\",\n        (\n            pr.approved_by,\n            pr.approved_sha\n        ) AS \"approval_status!: ApprovalStatus\",\n        pr.status as \"pr_status: PullRequestStatus\", \n        pr.priority,\n        pr.rollup as \"rollup: RollupMode\",\n        pr.delegated,\n        pr.base_branch,\n        pr.mergeable_state as \"mergeable_state: MergeableState\",\n        pr.created_at as \"created_at: DateTime<Utc>\",\n        build AS \"try_build: BuildModel\"\n    FROM pull_request as pr\n    LEFT JOIN build ON pr.build_id = build.id\n    WHERE pr.repository = $1 AND\n          pr.number = $2\n    ",
+  "query": "\n            WITH upserted_pr AS (\n                INSERT INTO pull_request (repository, number, base_branch, mergeable_state, status)\n                VALUES ($1, $2, $3, $4, $5)\n                ON CONFLICT (repository, number)\n                DO UPDATE SET\n                    base_branch = $3,\n                    mergeable_state = $4,\n                    status = $5\n                RETURNING *\n            )\n            SELECT\n                pr.id,\n                pr.repository as \"repository: GithubRepoName\",\n                pr.number as \"number!: i64\",\n                (\n                    pr.approved_by,\n                    pr.approved_sha\n                ) AS \"approval_status!: ApprovalStatus\",\n                pr.status as \"pr_status: PullRequestStatus\",\n                pr.priority,\n                pr.rollup as \"rollup: RollupMode\",\n                pr.delegated_permission as \"delegated_permission: DelegatedPermission\",\n                pr.base_branch,\n                pr.mergeable_state as \"mergeable_state: MergeableState\",\n                pr.created_at as \"created_at: DateTime<Utc>\",\n                build AS \"try_build: BuildModel\"\n            FROM upserted_pr as pr\n            LEFT JOIN build ON pr.build_id = build.id\n            ",
   "describe": {
     "columns": [
       {
@@ -40,8 +40,8 @@
       },
       {
         "ordinal": 7,
-        "name": "delegated",
-        "type_info": "Bool"
+        "name": "delegated_permission: DelegatedPermission",
+        "type_info": "Text"
       },
       {
         "ordinal": 8,
@@ -103,7 +103,10 @@
     "parameters": {
       "Left": [
         "Text",
-        "Int8"
+        "Int8",
+        "Text",
+        "Text",
+        "Text"
       ]
     },
     "nullable": [
@@ -114,12 +117,12 @@
       false,
       true,
       true,
+      true,
       false,
       false,
       false,
-      false,
-      null
+      true
     ]
   },
-  "hash": "9e8a84ab79912f65d2e2db8060bd5a0f2b98c91675d42fa0c767c13f9338b4ff"
+  "hash": "39dfcf0ddecf2f8289e73f2d89aa390c91fb8f792a8f52eb2a4431bb1a64693d"
 }

@@ -1,5 +1,8 @@
 //! Provides access to the database.
-use std::fmt::{Display, Formatter};
+use std::{
+    fmt::{self, Display, Formatter},
+    str::FromStr,
+};
 
 use crate::{
     bors::{PullRequestStatus, RollupMode},
@@ -198,6 +201,39 @@ impl From<OctocrabMergeableState> for MergeableState {
     }
 }
 
+#[derive(Debug, PartialEq, Clone, Copy, sqlx::Type)]
+#[sqlx(type_name = "TEXT")]
+#[sqlx(rename_all = "lowercase")]
+pub enum DelegatedPermission {
+    Try,
+    Review,
+}
+
+impl fmt::Display for DelegatedPermission {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            DelegatedPermission::Try => "try",
+            DelegatedPermission::Review => "review",
+        };
+        write!(f, "{}", s)
+    }
+}
+
+// Has to be kept in sync with the `Display` implementation above.
+impl FromStr for DelegatedPermission {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "try" => Ok(DelegatedPermission::Try),
+            "review" => Ok(DelegatedPermission::Review),
+            _ => Err(format!(
+                "Invalid delegation type `{s}`. Possible values are try/review"
+            )),
+        }
+    }
+}
+
 /// Status of a GitHub build.
 #[derive(Debug, PartialEq, sqlx::Type)]
 #[sqlx(type_name = "TEXT")]
@@ -238,7 +274,7 @@ pub struct PullRequestModel {
     pub base_branch: String,
     pub mergeable_state: MergeableState,
     pub approval_status: ApprovalStatus,
-    pub delegated: bool,
+    pub delegated_permission: Option<DelegatedPermission>,
     pub priority: Option<i32>,
     pub rollup: Option<RollupMode>,
     pub try_build: Option<BuildModel>,
