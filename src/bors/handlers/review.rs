@@ -9,6 +9,7 @@ use crate::bors::handlers::deny_request;
 use crate::bors::handlers::has_permission;
 use crate::bors::handlers::labels::handle_label_trigger;
 use crate::database::ApprovalInfo;
+use crate::database::DelegatedPermission;
 use crate::database::TreeState;
 use crate::github::GithubUser;
 use crate::github::LabelTrigger;
@@ -109,14 +110,19 @@ pub(super) async fn command_set_priority(
     db.set_priority(&pr_model, priority).await
 }
 
-/// Delegate approval authority of a pull request to its author.
+/// Delegate permissions of a pull request to its author.
 pub(super) async fn command_delegate(
     repo_state: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
     pr: &PullRequest,
     author: &GithubUser,
+    delegated_permission: DelegatedPermission,
 ) -> anyhow::Result<()> {
-    tracing::info!("Delegating PR {} approval", pr.number);
+    tracing::info!(
+        "Delegating PR {} {} permissions",
+        pr.number,
+        delegated_permission
+    );
     if !sufficient_delegate_permission(repo_state.clone(), author) {
         deny_request(&repo_state, pr, author, PermissionType::Review).await?;
         return Ok(());
@@ -132,8 +138,8 @@ pub(super) async fn command_delegate(
         )
         .await?;
 
-    db.delegate(&pr_model).await?;
-    notify_of_delegation(&repo_state, pr, &pr.author.username).await
+    db.delegate(&pr_model, delegated_permission).await?;
+    notify_of_delegation(&repo_state, pr, &pr.author.username, delegated_permission).await
 }
 
 /// Revoke any previously granted delegation.
@@ -292,18 +298,24 @@ async fn notify_of_delegation(
     repo: &RepositoryState,
     pr: &PullRequest,
     delegatee: &str,
+    delegated_permission: DelegatedPermission,
 ) -> anyhow::Result<()> {
+    let message = match delegated_permission {
+        DelegatedPermission::Try => format!(
+            "@{} can now perform try builds on this pull request",
+            delegatee
+        ),
+        DelegatedPermission::Review => format!("@{} can now approve this pull request", delegatee),
+    };
+
     repo.client
-        .post_comment(
-            pr.number,
-            Comment::new(format!("@{} can now approve this pull request", delegatee)),
-        )
+        .post_comment(pr.number, Comment::new(message))
         .await
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::database::TreeState;
+    use crate::database::{DelegatedPermission, TreeState};
     use crate::{
         bors::{
             RollupMode,
@@ -578,7 +590,10 @@ mod tests {
                     @"@default-user can now approve this pull request"
                 );
 
-                tester.default_pr().await.expect_delegated();
+                tester
+                    .default_pr()
+                    .await
+                    .expect_delegated(DelegatedPermission::Review);
                 Ok(tester)
             })
             .await;
@@ -684,7 +699,10 @@ mod tests {
                     .post_comment(review_comment("@bors delegate+"))
                     .await?;
                 tester.expect_comments(1).await;
-                tester.default_pr().await.expect_delegated();
+                tester
+                    .default_pr()
+                    .await
+                    .expect_delegated(DelegatedPermission::Review);
 
                 tester
                     .post_comment(review_comment("@bors delegate-"))
@@ -694,7 +712,7 @@ mod tests {
                         let Some(pr) = tester.default_pr_db().await? else {
                             return Ok(false);
                         };
-                        Ok(!pr.delegated)
+                        Ok(pr.delegated_permission.is_none())
                     })
                     .await?;
 
@@ -719,7 +737,7 @@ mod tests {
                         let Some(pr) = tester.default_pr_db().await? else {
                             return Ok(false);
                         };
-                        Ok(!pr.delegated)
+                        Ok(pr.delegated_permission.is_none())
                     })
                     .await?;
 
@@ -1033,5 +1051,70 @@ mod tests {
             Ok(tester)
         })
         .await;
+    }
+
+    #[sqlx::test]
+    async fn delegate_try(pool: sqlx::PgPool) {
+        BorsBuilder::new(pool)
+            .github(GitHubState::unauthorized_pr_author())
+            .run_test(|mut tester| async {
+                tester
+                    .post_comment(review_comment("@bors delegate=try"))
+                    .await?;
+                insta::assert_snapshot!(
+                    tester.get_comment().await?,
+                    @"@default-user can now perform try builds on this pull request"
+                );
+                tester
+                    .default_pr()
+                    .await
+                    .expect_delegated(DelegatedPermission::Try);
+                Ok(tester)
+            })
+            .await;
+    }
+
+    #[sqlx::test]
+    async fn delegated_try_can_build(pool: sqlx::PgPool) {
+        BorsBuilder::new(pool)
+            .github(GitHubState::unauthorized_pr_author())
+            .run_test(|mut tester| async {
+                tester
+                    .post_comment(review_comment("@bors delegate=try"))
+                    .await?;
+                tester.expect_comments(1).await;
+
+                tester.post_comment("@bors try").await?;
+                insta::assert_snapshot!(tester.get_comment().await?, @":hourglass: Trying commit pr-1-sha with merge merge-main-sha1-pr-1-sha-0…");
+
+                Ok(tester)
+            })
+            .await;
+    }
+
+    #[sqlx::test]
+    async fn delegated_try_can_not_approve(pool: sqlx::PgPool) {
+        BorsBuilder::new(pool)
+            .github(GitHubState::unauthorized_pr_author())
+            .run_test(|mut tester| async {
+                tester
+                    .post_comment(review_comment("@bors delegate=try"))
+                    .await?;
+                tester.expect_comments(1).await;
+                tester
+                    .default_pr()
+                    .await
+                    .expect_delegated(DelegatedPermission::Try);
+
+                tester.post_comment("@bors r+").await?;
+                insta::assert_snapshot!(
+                    tester.get_comment().await?,
+                    @"@default-user: :key: Insufficient privileges: not in review users"
+                );
+                tester.default_pr().await.expect_unapproved();
+
+                Ok(tester)
+            })
+            .await;
     }
 }

@@ -15,6 +15,7 @@ use crate::utils::timing::measure_db_query;
 use super::ApprovalInfo;
 use super::ApprovalStatus;
 use super::BuildModel;
+use super::DelegatedPermission;
 use super::MergeableState;
 use super::PullRequestModel;
 use super::RunId;
@@ -39,10 +40,10 @@ pub(crate) async fn get_pull_request(
             pr.approved_by,
             pr.approved_sha
         ) AS "approval_status!: ApprovalStatus",
-        pr.status as "pr_status: PullRequestStatus", 
+        pr.status as "pr_status: PullRequestStatus",
         pr.priority,
         pr.rollup as "rollup: RollupMode",
-        pr.delegated,
+        pr.delegated_permission as "delegated_permission: DelegatedPermission",
         pr.base_branch,
         pr.mergeable_state as "mergeable_state: MergeableState",
         pr.created_at as "created_at: DateTime<Utc>",
@@ -138,10 +139,10 @@ pub(crate) async fn upsert_pull_request(
                     pr.approved_by,
                     pr.approved_sha
                 ) AS "approval_status!: ApprovalStatus",
-                pr.status as "pr_status: PullRequestStatus", 
+                pr.status as "pr_status: PullRequestStatus",
                 pr.priority,
                 pr.rollup as "rollup: RollupMode",
-                pr.delegated,
+                pr.delegated_permission as "delegated_permission: DelegatedPermission",
                 pr.base_branch,
                 pr.mergeable_state as "mergeable_state: MergeableState",
                 pr.created_at as "created_at: DateTime<Utc>",
@@ -241,11 +242,13 @@ pub(crate) async fn unapprove_pull_request(
 pub(crate) async fn delegate_pull_request(
     executor: impl PgExecutor<'_>,
     pr_id: i32,
+    delegated_permission: DelegatedPermission,
 ) -> anyhow::Result<()> {
     measure_db_query("delegate_pull_request", || async {
         sqlx::query!(
-            "UPDATE pull_request SET delegated = TRUE WHERE id = $1",
-            pr_id,
+            "UPDATE pull_request SET delegated_permission = $1 WHERE id = $2",
+            delegated_permission as _,
+            pr_id
         )
         .execute(executor)
         .await?;
@@ -260,7 +263,7 @@ pub(crate) async fn undelegate_pull_request(
 ) -> anyhow::Result<()> {
     measure_db_query("undelegate_pull_request", || async {
         sqlx::query!(
-            "UPDATE pull_request SET delegated = FALSE WHERE id = $1",
+            "UPDATE pull_request SET delegated_permission = NULL WHERE id = $1",
             pr_id
         )
         .execute(executor)
@@ -286,8 +289,8 @@ SELECT
         pr.approved_by,
         pr.approved_sha
     ) AS "approval_status!: ApprovalStatus",
-    pr.status as "pr_status: PullRequestStatus",  
-    pr.delegated,
+    pr.status as "pr_status: PullRequestStatus",
+    pr.delegated_permission as "delegated_permission: DelegatedPermission",
     pr.priority,
     pr.base_branch,
     pr.mergeable_state as "mergeable_state: MergeableState",

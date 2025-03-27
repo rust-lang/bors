@@ -4,6 +4,7 @@ use std::collections::HashSet;
 use std::str::FromStr;
 
 use crate::bors::command::{Approver, BorsCommand, Parent};
+use crate::database::DelegatedPermission;
 use crate::github::CommitSha;
 
 use super::{Priority, RollupMode};
@@ -64,7 +65,8 @@ const PARSERS: &[for<'b> fn(&CommandPart<'b>, &[CommandPart<'b>]) -> ParseResult
     parser_priority,
     parser_try_cancel,
     parser_try,
-    parser_delegation,
+    parser_delegate,
+    parser_undelegate,
     parser_info,
     parser_help,
     parser_ping,
@@ -244,12 +246,29 @@ fn parser_try_cancel<'a>(command: &CommandPart<'a>, parts: &[CommandPart<'a>]) -
     }
 }
 
-/// Parses "@bors delegate+" and "@bors delegate-".
-fn parser_delegation<'a>(command: &CommandPart<'a>, _parts: &[CommandPart<'a>]) -> ParseResult<'a> {
+/// Parses `@bors delegate=<try|review>` or `@bors delegate+`.
+fn parser_delegate<'a>(command: &CommandPart<'a>, _parts: &[CommandPart<'a>]) -> ParseResult<'a> {
     match command {
-        CommandPart::Bare("delegate+") => Some(Ok(BorsCommand::Delegate)),
-        CommandPart::Bare("delegate-") => Some(Ok(BorsCommand::Undelegate)),
+        CommandPart::Bare("delegate+") => {
+            Some(Ok(BorsCommand::SetDelegate(DelegatedPermission::Review)))
+        }
+        CommandPart::KeyValue {
+            key: "delegate",
+            value,
+        } => match DelegatedPermission::from_str(value) {
+            Ok(permission) => Some(Ok(BorsCommand::SetDelegate(permission))),
+            Err(error) => Some(Err(CommandParseError::ValidationError(error))),
+        },
         _ => None,
+    }
+}
+
+/// Parses "@bors delegate-"
+fn parser_undelegate<'a>(command: &CommandPart<'a>, _parts: &[CommandPart<'a>]) -> ParseResult<'a> {
+    if let CommandPart::Bare("delegate-") = command {
+        Some(Ok(BorsCommand::Undelegate))
+    } else {
+        None
     }
 }
 
@@ -338,6 +357,7 @@ fn parser_tree_ops<'a>(command: &CommandPart<'a>, _parts: &[CommandPart<'a>]) ->
 mod tests {
     use crate::bors::command::parser::{CommandParseError, CommandParser};
     use crate::bors::command::{Approver, BorsCommand, Parent, RollupMode};
+    use crate::database::DelegatedPermission;
     use crate::github::CommitSha;
 
     #[test]
@@ -1014,7 +1034,30 @@ line two
     fn parse_delegate_author() {
         let cmds = parse_commands("@bors delegate+");
         assert_eq!(cmds.len(), 1);
-        assert!(matches!(cmds[0], Ok(BorsCommand::Delegate)));
+        assert!(matches!(
+            cmds[0],
+            Ok(BorsCommand::SetDelegate(DelegatedPermission::Review))
+        ));
+    }
+
+    #[test]
+    fn parse_delegate_review_author() {
+        let cmds = parse_commands("@bors delegate=review");
+        assert_eq!(cmds.len(), 1);
+        assert!(matches!(
+            cmds[0],
+            Ok(BorsCommand::SetDelegate(DelegatedPermission::Review))
+        ));
+    }
+
+    #[test]
+    fn parse_delegate_try_author() {
+        let cmds = parse_commands("@bors delegate=try");
+        assert_eq!(cmds.len(), 1);
+        assert!(matches!(
+            cmds[0],
+            Ok(BorsCommand::SetDelegate(DelegatedPermission::Try))
+        ));
     }
 
     #[test]
@@ -1028,7 +1071,23 @@ line two
     fn parse_delegate_author_unknown_arg() {
         let cmds = parse_commands("@bors delegate+ a");
         assert_eq!(cmds.len(), 1);
-        assert_eq!(cmds[0], Ok(BorsCommand::Delegate));
+        assert_eq!(
+            cmds[0],
+            Ok(BorsCommand::SetDelegate(DelegatedPermission::Review))
+        );
+    }
+
+    #[test]
+    fn parse_delegate_invalid_value() {
+        let cmds = parse_commands("@bors delegate=invalid");
+        assert_eq!(cmds.len(), 1);
+        insta::assert_debug_snapshot!(cmds[0], @r###"
+        Err(
+            ValidationError(
+                "Invalid delegation type `invalid`. Possible values are try/review",
+            ),
+        )
+        "###);
     }
 
     #[test]
