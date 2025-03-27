@@ -56,7 +56,7 @@ mod tests {
             42
         }
 
-        let result = measure_operation("test_op", || sample_operation()).await;
+        let result = measure_operation("test_op", sample_operation).await;
         assert_eq!(result, 42);
     }
 
@@ -69,7 +69,7 @@ mod tests {
             Err("test error".to_string())
         }
 
-        let result = measure_operation("error_test", || failing_operation()).await;
+        let result = measure_operation("error_test", failing_operation).await;
         assert!(result.is_err());
         assert_eq!(result.unwrap_err(), "test error");
     }
