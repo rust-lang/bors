@@ -54,6 +54,9 @@ chrono = "0.4"
 
 itertools = "0.14"
 
+# Text processing
+regex = "1"
+
 [dev-dependencies]
 insta = "1.26"
 wiremock = "0.6"
