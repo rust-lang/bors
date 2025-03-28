@@ -456,12 +456,7 @@ mod tests {
         run_test(pool, |mut tester| async {
             tester.post_comment("@bors p=5").await?;
             tester
-                .wait_for(|| async {
-                    let Some(pr) = tester.default_pr_db().await? else {
-                        return Ok(false);
-                    };
-                    Ok(pr.priority == Some(5))
-                })
+                .wait_for_default_pr(|pr| pr.priority == Some(5))
                 .await?;
             Ok(tester)
         })
@@ -473,12 +468,7 @@ mod tests {
         run_test(pool, |mut tester| async {
             tester.post_comment("@bors p=5").await?;
             tester
-                .wait_for(|| async {
-                    let Some(pr) = tester.default_pr_db().await? else {
-                        return Ok(false);
-                    };
-                    Ok(pr.priority == Some(5))
-                })
+                .wait_for_default_pr(|pr| pr.priority == Some(5))
                 .await?;
 
             tester.post_comment("@bors r+").await?;
@@ -496,12 +486,7 @@ mod tests {
         run_test(pool, |mut tester| async {
             tester.post_comment("@bors p=5").await?;
             tester
-                .wait_for(|| async {
-                    let Some(pr) = tester.default_pr_db().await? else {
-                        return Ok(false);
-                    };
-                    Ok(pr.priority == Some(5))
-                })
+                .wait_for_default_pr(|pr| pr.priority == Some(5))
                 .await?;
 
             tester.post_comment("@bors r+ p=10").await?;
@@ -660,12 +645,7 @@ mod tests {
 
                 tester.post_comment("@bors p=7").await?;
                 tester
-                    .wait_for(|| async {
-                        let Some(pr) = tester.default_pr_db().await? else {
-                            return Ok(false);
-                        };
-                        Ok(pr.priority == Some(7))
-                    })
+                    .wait_for_default_pr(|pr| pr.priority == Some(7))
                     .await?;
 
                 Ok(tester)
@@ -708,12 +688,7 @@ mod tests {
                     .post_comment(review_comment("@bors delegate-"))
                     .await?;
                 tester
-                    .wait_for(|| async {
-                        let Some(pr) = tester.default_pr_db().await? else {
-                            return Ok(false);
-                        };
-                        Ok(pr.delegated_permission.is_none())
-                    })
+                    .wait_for_default_pr(|pr| pr.delegated_permission.is_none())
                     .await?;
 
                 Ok(tester)
@@ -733,12 +708,7 @@ mod tests {
 
                 tester.post_comment("@bors delegate-").await?;
                 tester
-                    .wait_for(|| async {
-                        let Some(pr) = tester.default_pr_db().await? else {
-                            return Ok(false);
-                        };
-                        Ok(pr.delegated_permission.is_none())
-                    })
+                    .wait_for_default_pr(|pr| pr.delegated_permission.is_none())
                     .await?;
 
                 Ok(tester)
@@ -929,12 +899,7 @@ mod tests {
         run_test(pool, |mut tester| async {
             tester.post_comment("@bors rollup").await?;
             tester
-                .wait_for(|| async {
-                    let Some(pr) = tester.default_pr_db().await? else {
-                        return Ok(false);
-                    };
-                    Ok(pr.rollup == Some(RollupMode::Always))
-                })
+                .wait_for_default_pr(|pr| pr.rollup == Some(RollupMode::Always))
                 .await?;
             Ok(tester)
         })
@@ -946,12 +911,7 @@ mod tests {
         run_test(pool, |mut tester| async {
             tester.post_comment("@bors rollup=maybe").await?;
             tester
-                .wait_for(|| async {
-                    let Some(pr) = tester.default_pr_db().await? else {
-                        return Ok(false);
-                    };
-                    Ok(pr.rollup == Some(RollupMode::Maybe))
-                })
+                .wait_for_default_pr(|pr| pr.rollup == Some(RollupMode::Maybe))
                 .await?;
             Ok(tester)
         })
@@ -963,12 +923,7 @@ mod tests {
         run_test(pool, |mut tester| async {
             tester.post_comment("@bors rollup").await?;
             tester
-                .wait_for(|| async {
-                    let Some(pr) = tester.default_pr_db().await? else {
-                        return Ok(false);
-                    };
-                    Ok(pr.rollup == Some(RollupMode::Always))
-                })
+                .wait_for_default_pr(|pr| pr.rollup == Some(RollupMode::Always))
                 .await?;
 
             tester.post_comment("@bors r+").await?;
@@ -990,12 +945,7 @@ mod tests {
         run_test(pool, |mut tester| async {
             tester.post_comment("@bors rollup=never").await?;
             tester
-                .wait_for(|| async {
-                    let Some(pr) = tester.default_pr_db().await? else {
-                        return Ok(false);
-                    };
-                    Ok(pr.rollup == Some(RollupMode::Never))
-                })
+                .wait_for_default_pr(|pr| pr.rollup == Some(RollupMode::Never))
                 .await?;
 
             tester.post_comment("@bors r+ rollup").await?;

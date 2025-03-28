@@ -310,12 +310,9 @@ mod tests {
         run_test(pool, |mut tester| async {
             let pr = tester.open_pr(default_repo_name(), false).await?;
             tester
-                .wait_for(|| async {
-                    let Some(pr) = tester.pr_db(default_repo_name(), pr.number.0).await? else {
-                        return Ok(false);
-                    };
-                    Ok(pr.base_branch == *default_branch_name()
-                        && pr.pr_status == PullRequestStatus::Open)
+                .wait_for_pr(default_repo_name(), pr.number.0, |pr| {
+                    pr.base_branch == *default_branch_name()
+                        && pr.pr_status == PullRequestStatus::Open
                 })
                 .await?;
             Ok(tester)
@@ -333,11 +330,8 @@ mod tests {
                 })
                 .await?;
             tester
-                .wait_for(|| async {
-                    let Some(pr) = tester.default_pr_db().await? else {
-                        return Ok(false);
-                    };
-                    Ok(pr.base_branch == "foo")
+                .wait_for_pr(default_repo_name(), default_pr_number(), |pr| {
+                    pr.base_branch == "foo"
                 })
                 .await?;
             Ok(tester)
@@ -354,12 +348,7 @@ mod tests {
                 })
                 .await?;
             tester
-                .wait_for(|| async {
-                    let Some(pr) = tester.default_pr_db().await? else {
-                        return Ok(false);
-                    };
-                    Ok(pr.mergeable_state == MergeableState::HasConflicts)
-                })
+                .wait_for_default_pr(|pr| pr.mergeable_state == MergeableState::HasConflicts)
                 .await?;
             Ok(tester)
         })
@@ -371,29 +360,20 @@ mod tests {
         run_test(pool, |mut tester| async {
             let pr = tester.open_pr(default_repo_name(), false).await?;
             tester
-                .wait_for(|| async {
-                    let Some(pr) = tester.pr_db(default_repo_name(), pr.number.0).await? else {
-                        return Ok(false);
-                    };
-                    Ok(pr.pr_status == PullRequestStatus::Open)
+                .wait_for_pr(default_repo_name(), pr.number.0, |pr| {
+                    pr.pr_status == PullRequestStatus::Open
                 })
                 .await?;
             tester.close_pr(default_repo_name(), pr.number.0).await?;
             tester
-                .wait_for(|| async {
-                    let Some(pr) = tester.pr_db(default_repo_name(), pr.number.0).await? else {
-                        return Ok(false);
-                    };
-                    Ok(pr.pr_status == PullRequestStatus::Closed)
+                .wait_for_pr(default_repo_name(), pr.number.0, |pr| {
+                    pr.pr_status == PullRequestStatus::Closed
                 })
                 .await?;
             tester.reopen_pr(default_repo_name(), pr.number.0).await?;
             tester
-                .wait_for(|| async {
-                    let Some(pr) = tester.pr_db(default_repo_name(), pr.number.0).await? else {
-                        return Ok(false);
-                    };
-                    Ok(pr.pr_status == PullRequestStatus::Open)
+                .wait_for_pr(default_repo_name(), pr.number.0, |pr| {
+                    pr.pr_status == PullRequestStatus::Open
                 })
                 .await?;
             Ok(tester)
@@ -406,22 +386,16 @@ mod tests {
         run_test(pool, |mut tester| async {
             let pr = tester.open_pr(default_repo_name(), true).await?;
             tester
-                .wait_for(|| async {
-                    let Some(pr) = tester.pr_db(default_repo_name(), pr.number.0).await? else {
-                        return Ok(false);
-                    };
-                    Ok(pr.pr_status == PullRequestStatus::Draft)
+                .wait_for_pr(default_repo_name(), pr.number.0, |pr| {
+                    pr.pr_status == PullRequestStatus::Draft
                 })
                 .await?;
             tester
                 .ready_for_review(default_repo_name(), pr.number.0)
                 .await?;
             tester
-                .wait_for(|| async {
-                    let Some(pr) = tester.pr_db(default_repo_name(), pr.number.0).await? else {
-                        return Ok(false);
-                    };
-                    Ok(pr.pr_status == PullRequestStatus::Open)
+                .wait_for_pr(default_repo_name(), pr.number.0, |pr| {
+                    pr.pr_status == PullRequestStatus::Open
                 })
                 .await?;
             Ok(tester)
@@ -434,22 +408,16 @@ mod tests {
         run_test(pool, |mut tester| async {
             let pr = tester.open_pr(default_repo_name(), false).await?;
             tester
-                .wait_for(|| async {
-                    let Some(pr) = tester.pr_db(default_repo_name(), pr.number.0).await? else {
-                        return Ok(false);
-                    };
-                    Ok(pr.pr_status == PullRequestStatus::Open)
+                .wait_for_pr(default_repo_name(), pr.number.0, |pr| {
+                    pr.pr_status == PullRequestStatus::Open
                 })
                 .await?;
             tester
                 .convert_to_draft(default_repo_name(), pr.number.0)
                 .await?;
             tester
-                .wait_for(|| async {
-                    let Some(pr) = tester.pr_db(default_repo_name(), pr.number.0).await? else {
-                        return Ok(false);
-                    };
-                    Ok(pr.pr_status == PullRequestStatus::Draft)
+                .wait_for_pr(default_repo_name(), pr.number.0, |pr| {
+                    pr.pr_status == PullRequestStatus::Draft
                 })
                 .await?;
             Ok(tester)
@@ -462,20 +430,14 @@ mod tests {
         run_test(pool, |mut tester| async {
             let pr = tester.open_pr(default_repo_name(), false).await?;
             tester
-                .wait_for(|| async {
-                    let Some(pr) = tester.pr_db(default_repo_name(), pr.number.0).await? else {
-                        return Ok(false);
-                    };
-                    Ok(pr.pr_status == PullRequestStatus::Open)
+                .wait_for_pr(default_repo_name(), pr.number.0, |pr| {
+                    pr.pr_status == PullRequestStatus::Open
                 })
                 .await?;
             tester.merge_pr(default_repo_name(), pr.number.0).await?;
             tester
-                .wait_for(|| async {
-                    let Some(pr) = tester.pr_db(default_repo_name(), pr.number.0).await? else {
-                        return Ok(false);
-                    };
-                    Ok(pr.pr_status == PullRequestStatus::Merged)
+                .wait_for_pr(default_repo_name(), pr.number.0, |pr| {
+                    pr.pr_status == PullRequestStatus::Merged
                 })
                 .await?;
             Ok(tester)

@@ -105,12 +105,7 @@ mod tests {
         run_test(pool, |mut tester| async {
             tester.post_comment("@bors p=5").await?;
             tester
-                .wait_for(|| async {
-                    let Some(pr) = tester.default_pr_db().await? else {
-                        return Ok(false);
-                    };
-                    Ok(pr.priority == Some(5))
-                })
+                .wait_for_default_pr(|pr| pr.priority == Some(5))
                 .await?;
 
             tester.post_comment("@bors info").await?;
