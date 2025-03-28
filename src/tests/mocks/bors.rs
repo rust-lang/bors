@@ -169,6 +169,36 @@ impl BorsTester {
         self.pr_db(default_repo_name(), default_pr_number()).await
     }
 
+    /// Wait until a pull request is in the database and satisfies a given condition.
+    ///
+    /// This is a convenience wrapper around `wait_for` that simplifies checking for PR conditions.
+    pub async fn wait_for_pr<F>(
+        &self,
+        repo: GithubRepoName,
+        pr_number: u64,
+        condition: F,
+    ) -> anyhow::Result<()>
+    where
+        F: Fn(&PullRequestModel) -> bool,
+    {
+        self.wait_for(|| async {
+            let Some(pr) = self.pr_db(repo.clone(), pr_number).await? else {
+                return Ok(false);
+            };
+            Ok(condition(&pr))
+        })
+        .await
+    }
+
+    /// Wait until the default pull request is in the database and satisfies a given condition.
+    pub async fn wait_for_default_pr<F>(&self, condition: F) -> anyhow::Result<()>
+    where
+        F: Fn(&PullRequestModel) -> bool,
+    {
+        self.wait_for_pr(default_repo_name(), default_pr_number(), condition)
+            .await
+    }
+
     pub fn create_branch(&mut self, name: &str) -> MappedMutexGuard<RawMutex, Branch> {
         // We cannot clone the Arc, otherwise it won't work
         let repo = self.github.repos.get(&default_repo_name()).unwrap();
