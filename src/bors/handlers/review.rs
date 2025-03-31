@@ -52,6 +52,7 @@ pub(super) async fn command_approve(
 
     db.approve(&pr_model, approval_info, priority, rollup)
         .await?;
+    repo_state.client.approve_pull_request(pr.number).await?;
     handle_label_trigger(&repo_state, pr.number, LabelTrigger::Approved).await?;
     notify_of_approval(&repo_state, pr, approver.as_str()).await
 }
@@ -80,6 +81,10 @@ pub(super) async fn command_unapprove(
         .await?;
 
     db.unapprove(&pr_model).await?;
+    repo_state
+        .client
+        .unapprove_pull_request(pr.number, "Unapproved by bors".to_string())
+        .await?;
     handle_label_trigger(&repo_state, pr.number, LabelTrigger::Unapproved).await?;
     notify_of_unapproval(&repo_state, pr).await
 }

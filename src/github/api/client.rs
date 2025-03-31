@@ -119,6 +119,70 @@ impl GithubRepositoryClient {
         .await
     }
 
+    /// Submit a pull request approval review.
+    pub async fn approve_pull_request(&self, pr: PullRequestNumber) -> anyhow::Result<()> {
+        measure_network_request("approve_pull_request", || async {
+            #[derive(serde::Serialize)]
+            struct ReviewRequest {
+                event: &'static str,
+            }
+
+            let request = ReviewRequest { event: "APPROVE" };
+
+            self.client
+                ._post(
+                    format!(
+                        "/repos/{}/{}/pulls/{}/reviews",
+                        self.repo_name.owner(),
+                        self.repo_name.name(),
+                        pr.0
+                    )
+                    .as_str(),
+                    Some(&request),
+                )
+                .await?;
+
+            Ok(())
+        })
+        .await
+    }
+
+    /// Submit a review that removes approval.
+    pub async fn unapprove_pull_request(
+        &self,
+        pr: PullRequestNumber,
+        message: String,
+    ) -> anyhow::Result<()> {
+        measure_network_request("submit_unapproval", || async {
+            #[derive(serde::Serialize)]
+            struct ReviewRequest {
+                event: &'static str,
+                body: String,
+            }
+
+            let request = ReviewRequest {
+                event: "COMMENT",
+                body: message,
+            };
+
+            self.client
+                ._post(
+                    format!(
+                        "/repos/{}/{}/pulls/{}/reviews",
+                        self.repo_name.owner(),
+                        self.repo_name.name(),
+                        pr.0
+                    )
+                    .as_str(),
+                    Some(&request),
+                )
+                .await?;
+
+            Ok(())
+        })
+        .await
+    }
+
     /// Post a comment to the pull request with the given number.
     /// The comment will be posted as the Github App user of the bot.
     pub async fn post_comment(

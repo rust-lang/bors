@@ -1,0 +1,98 @@
+diff --git a/src/bors/handlers/review.rs b/src/bors/handlers/review.rs
+index 1c30550..6ee3308 100644
+--- a/src/bors/handlers/review.rs
++++ b/src/bors/handlers/review.rs
+@@ -52,6 +52,7 @@ pub(super) async fn command_approve(
+ 
+     db.approve(&pr_model, approval_info, priority, rollup)
+         .await?;
++    repo_state.client.approve_pull_request(pr.number).await?;
+     handle_label_trigger(&repo_state, pr.number, LabelTrigger::Approved).await?;
+     notify_of_approval(&repo_state, pr, approver.as_str()).await
+ }
+@@ -80,6 +81,10 @@ pub(super) async fn command_unapprove(
+         .await?;
+ 
+     db.unapprove(&pr_model).await?;
++    repo_state
++        .client
++        .unapprove_pull_request(pr.number, "Unapproved by bors".to_string())
++        .await?;
+     handle_label_trigger(&repo_state, pr.number, LabelTrigger::Unapproved).await?;
+     notify_of_unapproval(&repo_state, pr).await
+ }
+diff --git a/src/github/api/client.rs b/src/github/api/client.rs
+index 00d3172..2b6f2aa 100644
+--- a/src/github/api/client.rs
++++ b/src/github/api/client.rs
+@@ -119,6 +119,70 @@ impl GithubRepositoryClient {
+         .await
+     }
+ 
++    /// Submit a pull request approval review.
++    pub async fn approve_pull_request(&self, pr: PullRequestNumber) -> anyhow::Result<()> {
++        measure_network_request("approve_pull_request", || async {
++            #[derive(serde::Serialize)]
++            struct ReviewRequest {
++                event: &'static str,
++            }
++
++            let request = ReviewRequest { event: "APPROVE" };
++
++            self.client
++                ._post(
++                    format!(
++                        "/repos/{}/{}/pulls/{}/reviews",
++                        self.repo_name.owner(),
++                        self.repo_name.name(),
++                        pr.0
++                    )
++                    .as_str(),
++                    Some(&request),
++                )
++                .await?;
++
++            Ok(())
++        })
++        .await
++    }
++
++    /// Submit a review that removes approval.
++    pub async fn unapprove_pull_request(
++        &self,
++        pr: PullRequestNumber,
++        message: String,
++    ) -> anyhow::Result<()> {
++        measure_network_request("submit_unapproval", || async {
++            #[derive(serde::Serialize)]
++            struct ReviewRequest {
++                event: &'static str,
++                body: String,
++            }
++
++            let request = ReviewRequest {
++                event: "COMMENT",
++                body: message,
++            };
++
++            self.client
++                ._post(
++                    format!(
++                        "/repos/{}/{}/pulls/{}/reviews",
++                        self.repo_name.owner(),
++                        self.repo_name.name(),
++                        pr.0
++                    )
++                    .as_str(),
++                    Some(&request),
++                )
++                .await?;
++
++            Ok(())
++        })
++        .await
++    }
++
+     /// Post a comment to the pull request with the given number.
+     /// The comment will be posted as the Github App user of the bot.
+     pub async fn post_comment(
