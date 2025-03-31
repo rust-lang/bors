@@ -163,9 +163,6 @@ pub(crate) async fn upsert_pull_request(
     .await
 }
 
-// FIXME:
-// 1) Add a database index on (repository, base_branch)
-// 2) Filter PRs by state (only update open PRs, once we have PR state tracking)
 pub(crate) async fn update_mergeable_states_by_base_branch(
     executor: impl PgExecutor<'_>,
     repo: &GithubRepoName,
@@ -177,7 +174,9 @@ pub(crate) async fn update_mergeable_states_by_base_branch(
             r#"
             UPDATE pull_request
             SET mergeable_state = $1
-            WHERE repository = $2 AND base_branch = $3
+            WHERE repository = $2
+            AND base_branch = $3
+            AND status IN ('open', 'draft')
             "#,
             mergeable_state as _,
             repo as &GithubRepoName,
