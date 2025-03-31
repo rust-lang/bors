@@ -5,6 +5,7 @@ use crate::bors::event::{
     PushToBranch,
 };
 use crate::bors::handlers::labels::handle_label_trigger;
+use crate::bors::mergeable_queue::MergeableQueue;
 use crate::bors::{Comment, PullRequestStatus, RepositoryState};
 use crate::database::MergeableState;
 use crate::github::{CommitSha, LabelTrigger, PullRequestNumber};
@@ -154,6 +155,7 @@ pub(super) async fn handle_pull_request_ready_for_review(
 pub(super) async fn handle_push_to_branch(
     repo_state: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
+    mergeable_queue: Arc<MergeableQueue>,
     payload: PushToBranch,
 ) -> anyhow::Result<()> {
     let rows = db
@@ -165,6 +167,13 @@ pub(super) async fn handle_push_to_branch(
         .await?;
 
     tracing::info!("Updated mergeable_state to `unknown` for {} PR(s)", rows);
+
+    let prs = db
+        .get_prs_by_base_branch(repo_state.repository(), &payload.branch)
+        .await?;
+    for pr in prs {
+        mergeable_queue.enqueue(pr.repository, pr.number);
+    }
 
     Ok(())
 }
@@ -236,6 +245,7 @@ mod tests {
         .await;
     }
 
+    #[tracing_test::traced_test]
     #[sqlx::test]
     async fn edit_pr_do_nothing_when_base_not_edited(pool: sqlx::PgPool) {
         run_test(pool, |mut tester| async {

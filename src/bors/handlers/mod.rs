@@ -30,6 +30,8 @@ use tracing::Instrument;
 #[cfg(test)]
 use crate::tests::util::TestSyncMarker;
 
+use super::mergeable_queue::MergeableQueueItem;
+
 mod help;
 mod info;
 mod labels;
@@ -49,6 +51,7 @@ pub async fn handle_bors_repository_event(
     ctx: Arc<BorsContext>,
 ) -> anyhow::Result<()> {
     let db = Arc::clone(&ctx.db);
+    let mergeable_queue = Arc::clone(&ctx.mergeable_queue);
     let Some(repo) = ctx
         .repositories
         .read()
@@ -198,7 +201,7 @@ pub async fn handle_bors_repository_event(
             let span =
                 tracing::info_span!("Pushed to branch", repo = payload.repository.to_string());
 
-            handle_push_to_branch(repo, db, payload)
+            handle_push_to_branch(repo, db, mergeable_queue, payload)
                 .instrument(span.clone())
                 .await?;
         }
@@ -230,9 +233,10 @@ pub async fn handle_bors_global_event(
                 ctx.repositories.read().unwrap().values().cloned().collect();
             futures::future::join_all(repos.into_iter().map(|repo| {
                 let repo = Arc::clone(&repo);
+                let mergeable_queue = Arc::clone(&ctx.mergeable_queue);
                 async {
                     let subspan = tracing::info_span!("Repo", repo = repo.repository().to_string());
-                    refresh_repository(repo, Arc::clone(&db), team_api_client)
+                    refresh_repository(repo, Arc::clone(&db), team_api_client, mergeable_queue)
                         .instrument(subspan)
                         .await
                 }
@@ -244,6 +248,33 @@ pub async fn handle_bors_global_event(
             WAIT_FOR_REFRESH.mark();
         }
     }
+    Ok(())
+}
+
+pub async fn handle_mergeable_queue_item(
+    ctx: Arc<BorsContext>,
+    queue_item: MergeableQueueItem,
+) -> anyhow::Result<()> {
+    let pr_model = ctx
+        .db
+        .get_pull_request(&queue_item.repository, queue_item.pr_number)
+        .await?
+        .unwrap();
+    let repo_state = ctx
+        .repositories
+        .read()
+        .unwrap()
+        .get(&queue_item.repository)
+        .cloned()
+        .unwrap();
+    let fetched_pr = repo_state
+        .client
+        .get_pull_request(queue_item.pr_number)
+        .await?;
+
+    ctx.db
+        .update_pr_mergeable_state(&pr_model, fetched_pr.mergeable_state.into())
+        .await?;
     Ok(())
 }
 

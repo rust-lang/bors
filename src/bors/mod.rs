@@ -9,7 +9,9 @@ pub use comment::Comment;
 pub use context::BorsContext;
 #[cfg(test)]
 pub use handlers::WAIT_FOR_REFRESH;
-pub use handlers::{handle_bors_global_event, handle_bors_repository_event};
+pub use handlers::{
+    handle_bors_global_event, handle_bors_repository_event, handle_mergeable_queue_item,
+};
 use serde::Serialize;
 
 use crate::config::RepositoryConfig;
@@ -22,6 +24,7 @@ pub mod comment;
 mod context;
 pub mod event;
 mod handlers;
+pub mod mergeable_queue;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CheckSuiteStatus {

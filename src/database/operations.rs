@@ -88,6 +88,65 @@ VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING
     .await
 }
 
+pub(crate) async fn update_pr_mergeable_state(
+    exeuctor: impl PgExecutor<'_>,
+    pr_id: i32,
+    mergeable_state: MergeableState,
+) -> anyhow::Result<()> {
+    measure_db_query("update_pr_mergeable_state", || async {
+        sqlx::query!(
+            "UPDATE pull_request SET mergeable_state = $1 WHERE id = $2",
+            mergeable_state as _,
+            pr_id
+        )
+        .execute(exeuctor)
+        .await?;
+        Ok(())
+    })
+    .await
+}
+
+pub(crate) async fn get_prs_by_base_branch(
+    executor: impl PgExecutor<'_>,
+    repo: &GithubRepoName,
+    base_branch: &str,
+) -> anyhow::Result<Vec<PullRequestModel>> {
+    measure_db_query("get_prs_by_base_branch", || async {
+        let prs = sqlx::query_as!(
+            PullRequestModel,
+            r#"
+SELECT
+    pr.id,
+    pr.repository as "repository: GithubRepoName",
+    pr.number as "number!: i64",
+    (
+        pr.approved_by,
+        pr.approved_sha
+    ) AS "approval_status!: ApprovalStatus",
+    pr.status as "pr_status: PullRequestStatus",
+    pr.priority,
+    pr.rollup as "rollup: RollupMode",
+    pr.delegated,
+    pr.base_branch,
+    pr.mergeable_state as "mergeable_state: MergeableState",
+    pr.created_at as "created_at: DateTime<Utc>",
+    build AS "try_build: BuildModel"
+FROM pull_request as pr
+LEFT JOIN build ON pr.build_id = build.id
+WHERE pr.repository = $1
+    AND pr.base_branch = $2
+    AND pr.status = 'open'
+"#,
+            repo as &GithubRepoName,
+            base_branch
+        )
+        .fetch_all(executor)
+        .await?;
+        Ok(prs)
+    })
+    .await
+}
+
 pub(crate) async fn set_pr_status(
     executor: impl PgExecutor<'_>,
     repo: &GithubRepoName,

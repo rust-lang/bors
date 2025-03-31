@@ -1,5 +1,8 @@
 use crate::bors::event::BorsEvent;
-use crate::bors::{BorsContext, handle_bors_global_event, handle_bors_repository_event};
+use crate::bors::{
+    BorsContext, handle_bors_global_event, handle_bors_repository_event,
+    handle_mergeable_queue_item,
+};
 use crate::github::webhook::GitHubWebhook;
 use crate::github::webhook::WebhookSecret;
 use crate::{BorsGlobalEvent, BorsRepositoryEvent, TeamApiClient};
@@ -104,7 +107,8 @@ pub fn create_bors_process(
         {
             tokio::join!(
                 consume_repository_events(ctx.clone(), repository_rx),
-                consume_global_events(ctx.clone(), global_rx, gh_client, team_api)
+                consume_global_events(ctx.clone(), global_rx, gh_client, team_api),
+                consume_mergeable_queue(ctx.clone())
             );
         }
         // In real execution, the bot runs forever. If there is something that finishes
@@ -118,6 +122,9 @@ pub fn create_bors_process(
                 }
                 _ = consume_global_events(ctx.clone(), global_rx, gh_client, team_api) => {
                     tracing::error!("Global event handling process has ended");
+                }
+                _ = consume_mergeable_queue(ctx.clone()) => {
+                    tracing::error!("Mergeable queue handling process has ended");
                 }
             }
         }
@@ -159,6 +166,25 @@ async fn consume_global_events(
             .await
         {
             handle_root_error(span, error);
+        }
+    }
+}
+
+async fn consume_mergeable_queue(ctx: Arc<BorsContext>) {
+    loop {
+        if let Some(queue_item) = ctx.mergeable_queue.dequeue() {
+            let ctx = ctx.clone();
+
+            let span = tracing::info_span!("MergeableQueue");
+            tracing::debug!("Processing PR #{}", queue_item.pr_number);
+            if let Err(error) = handle_mergeable_queue_item(ctx, queue_item)
+                .instrument(span.clone())
+                .await
+            {
+                handle_root_error(span, error);
+            }
+        } else {
+            tokio::time::sleep(tokio::time::Duration::from_secs(10)).await
         }
     }
 }

@@ -1,0 +1,405 @@
+diff --git a/src/bors/context.rs b/src/bors/context.rs
+index 90eb3dc..dadd3ec 100644
+--- a/src/bors/context.rs
++++ b/src/bors/context.rs
+@@ -5,12 +5,13 @@ use std::{
+ 
+ use crate::{PgDbClient, bors::command::CommandParser, github::GithubRepoName};
+ 
+-use super::RepositoryState;
++use super::{RepositoryState, mergeable_queue::MergeableQueue};
+ 
+ pub struct BorsContext {
+     pub parser: CommandParser,
+     pub db: Arc<PgDbClient>,
+     pub repositories: RwLock<HashMap<GithubRepoName, Arc<RepositoryState>>>,
++    pub mergeable_queue: Arc<MergeableQueue>,
+ }
+ 
+ impl BorsContext {
+@@ -20,10 +21,12 @@ impl BorsContext {
+         repositories: HashMap<GithubRepoName, Arc<RepositoryState>>,
+     ) -> Self {
+         let repositories = RwLock::new(repositories);
++        let mergeable_queue = Arc::new(MergeableQueue::new());
+         Self {
+             parser,
+             db,
+             repositories,
++            mergeable_queue,
+         }
+     }
+ }
+diff --git a/src/bors/handlers/mod.rs b/src/bors/handlers/mod.rs
+index 34fb0a0..565ec43 100644
+--- a/src/bors/handlers/mod.rs
++++ b/src/bors/handlers/mod.rs
+@@ -30,6 +30,8 @@ use tracing::Instrument;
+ #[cfg(test)]
+ use crate::tests::util::TestSyncMarker;
+ 
++use super::mergeable_queue::MergeableQueueItem;
++
+ mod help;
+ mod info;
+ mod labels;
+@@ -49,6 +51,7 @@ pub async fn handle_bors_repository_event(
+     ctx: Arc<BorsContext>,
+ ) -> anyhow::Result<()> {
+     let db = Arc::clone(&ctx.db);
++    let mergeable_queue = Arc::clone(&ctx.mergeable_queue);
+     let Some(repo) = ctx
+         .repositories
+         .read()
+@@ -198,7 +201,7 @@ pub async fn handle_bors_repository_event(
+             let span =
+                 tracing::info_span!("Pushed to branch", repo = payload.repository.to_string());
+ 
+-            handle_push_to_branch(repo, db, payload)
++            handle_push_to_branch(repo, db, mergeable_queue, payload)
+                 .instrument(span.clone())
+                 .await?;
+         }
+@@ -230,9 +233,10 @@ pub async fn handle_bors_global_event(
+                 ctx.repositories.read().unwrap().values().cloned().collect();
+             futures::future::join_all(repos.into_iter().map(|repo| {
+                 let repo = Arc::clone(&repo);
++                let mergeable_queue = Arc::clone(&ctx.mergeable_queue);
+                 async {
+                     let subspan = tracing::info_span!("Repo", repo = repo.repository().to_string());
+-                    refresh_repository(repo, Arc::clone(&db), team_api_client)
++                    refresh_repository(repo, Arc::clone(&db), team_api_client, mergeable_queue)
+                         .instrument(subspan)
+                         .await
+                 }
+@@ -247,6 +251,33 @@ pub async fn handle_bors_global_event(
+     Ok(())
+ }
+ 
++pub async fn handle_mergeable_queue_item(
++    ctx: Arc<BorsContext>,
++    queue_item: MergeableQueueItem,
++) -> anyhow::Result<()> {
++    let pr_model = ctx
++        .db
++        .get_pull_request(&queue_item.repository, queue_item.pr_number)
++        .await?
++        .unwrap();
++    let repo_state = ctx
++        .repositories
++        .read()
++        .unwrap()
++        .get(&queue_item.repository)
++        .cloned()
++        .unwrap();
++    let fetched_pr = repo_state
++        .client
++        .get_pull_request(queue_item.pr_number)
++        .await?;
++
++    ctx.db
++        .update_pr_mergeable_state(&pr_model, fetched_pr.mergeable_state.into())
++        .await?;
++    Ok(())
++}
++
+ async fn handle_comment(
+     repo: Arc<RepositoryState>,
+     database: Arc<PgDbClient>,
+diff --git a/src/bors/handlers/pr_events.rs b/src/bors/handlers/pr_events.rs
+index 5274630..55cf9eb 100644
+--- a/src/bors/handlers/pr_events.rs
++++ b/src/bors/handlers/pr_events.rs
+@@ -5,6 +5,7 @@ use crate::bors::event::{
+     PushToBranch,
+ };
+ use crate::bors::handlers::labels::handle_label_trigger;
++use crate::bors::mergeable_queue::MergeableQueue;
+ use crate::bors::{Comment, PullRequestStatus, RepositoryState};
+ use crate::database::MergeableState;
+ use crate::github::{CommitSha, LabelTrigger, PullRequestNumber};
+@@ -154,6 +155,7 @@ pub(super) async fn handle_pull_request_ready_for_review(
+ pub(super) async fn handle_push_to_branch(
+     repo_state: Arc<RepositoryState>,
+     db: Arc<PgDbClient>,
++    mergeable_queue: Arc<MergeableQueue>,
+     payload: PushToBranch,
+ ) -> anyhow::Result<()> {
+     let rows = db
+@@ -166,6 +168,13 @@ pub(super) async fn handle_push_to_branch(
+ 
+     tracing::info!("Updated mergeable_state to `unknown` for {} PR(s)", rows);
+ 
++    let prs = db
++        .get_prs_by_base_branch(repo_state.repository(), &payload.branch)
++        .await?;
++    for pr in prs {
++        mergeable_queue.enqueue(pr.repository, pr.number);
++    }
++
+     Ok(())
+ }
+ 
+@@ -236,6 +245,7 @@ mod tests {
+         .await;
+     }
+ 
++    #[tracing_test::traced_test]
+     #[sqlx::test]
+     async fn edit_pr_do_nothing_when_base_not_edited(pool: sqlx::PgPool) {
+         run_test(pool, |mut tester| async {
+diff --git a/src/bors/handlers/refresh.rs b/src/bors/handlers/refresh.rs
+index 87f8da6..02f9312 100644
+--- a/src/bors/handlers/refresh.rs
++++ b/src/bors/handlers/refresh.rs
+@@ -8,6 +8,7 @@ use chrono::{DateTime, Utc};
+ use crate::bors::Comment;
+ use crate::bors::RepositoryState;
+ use crate::bors::handlers::trybuild::cancel_build_workflows;
++use crate::bors::mergeable_queue::MergeableQueue;
+ use crate::database::BuildStatus;
+ use crate::{PgDbClient, TeamApiClient};
+ 
+@@ -15,6 +16,7 @@ pub async fn refresh_repository(
+     repo: Arc<RepositoryState>,
+     db: Arc<PgDbClient>,
+     team_api_client: &TeamApiClient,
++    mergeable_queue: Arc<MergeableQueue>,
+ ) -> anyhow::Result<()> {
+     let repo_ref = repo.as_ref();
+     let db_ref = db.as_ref();
+@@ -22,7 +24,11 @@ pub async fn refresh_repository(
+         Box::pin(cancel_timed_out_builds(repo_ref, db_ref)),
+         Box::pin(reload_permission(repo_ref, team_api_client)),
+         Box::pin(reload_config(repo_ref)),
+-        Box::pin(reload_unknown_mergeable_prs(repo_ref, db_ref)),
++        Box::pin(reload_unknown_mergeable_prs(
++            repo_ref,
++            db_ref,
++            mergeable_queue.as_ref(),
++        )),
+     ];
+     let results = futures::future::join_all(tasks).await;
+ 
+@@ -88,6 +94,7 @@ async fn reload_permission(
+ async fn reload_unknown_mergeable_prs(
+     repo: &RepositoryState,
+     db: &PgDbClient,
++    mergeable_queue: &MergeableQueue,
+ ) -> anyhow::Result<()> {
+     let prs = db
+         .get_prs_with_unknown_mergeable_state(repo.repository())
+@@ -104,7 +111,7 @@ async fn reload_unknown_mergeable_prs(
+ 
+     for pr in prs {
+         tracing::info!("PR #{} has unknown mergeable state", pr.number);
+-        // Add to 'queue'
++        mergeable_queue.enqueue(repo.repository().clone(), pr.number);
+     }
+ 
+     Ok(())
+diff --git a/src/bors/mod.rs b/src/bors/mod.rs
+index a527419..85e5100 100644
+--- a/src/bors/mod.rs
++++ b/src/bors/mod.rs
+@@ -9,7 +9,9 @@ pub use comment::Comment;
+ pub use context::BorsContext;
+ #[cfg(test)]
+ pub use handlers::WAIT_FOR_REFRESH;
+-pub use handlers::{handle_bors_global_event, handle_bors_repository_event};
++pub use handlers::{
++    handle_bors_global_event, handle_bors_repository_event, handle_mergeable_queue_item,
++};
+ use serde::Serialize;
+ 
+ use crate::config::RepositoryConfig;
+@@ -22,6 +24,7 @@ pub mod comment;
+ mod context;
+ pub mod event;
+ mod handlers;
++pub mod mergeable_queue;
+ 
+ #[derive(Clone, Debug, PartialEq, Eq)]
+ pub enum CheckSuiteStatus {
+diff --git a/src/database/client.rs b/src/database/client.rs
+index b88b280..a7ead57 100644
+--- a/src/database/client.rs
++++ b/src/database/client.rs
+@@ -10,11 +10,12 @@ use crate::github::{CommitSha, GithubRepoName};
+ 
+ use super::operations::{
+     approve_pull_request, create_build, create_pull_request, create_workflow,
+-    delegate_pull_request, find_build, find_pr_by_build, get_prs_with_unknown_mergeable_state,
+-    get_pull_request, get_repository, get_running_builds, get_workflow_urls_for_build,
+-    get_workflows_for_build, set_pr_priority, set_pr_rollup, set_pr_status, unapprove_pull_request,
+-    undelegate_pull_request, update_build_status, update_mergeable_states_by_base_branch,
+-    update_pr_build_id, update_workflow_status, upsert_pull_request, upsert_repository,
++    delegate_pull_request, find_build, find_pr_by_build, get_prs_by_base_branch,
++    get_prs_with_unknown_mergeable_state, get_pull_request, get_repository, get_running_builds,
++    get_workflow_urls_for_build, get_workflows_for_build, set_pr_priority, set_pr_rollup,
++    set_pr_status, unapprove_pull_request, undelegate_pull_request, update_build_status,
++    update_mergeable_states_by_base_branch, update_pr_build_id, update_pr_mergeable_state,
++    update_workflow_status, upsert_pull_request, upsert_repository,
+ };
+ use super::{ApprovalInfo, MergeableState, RunId};
+ 
+@@ -47,6 +48,14 @@ impl PgDbClient {
+         set_pr_priority(&self.pool, pr.id, priority).await
+     }
+ 
++    pub async fn update_pr_mergeable_state(
++        &self,
++        pr: &PullRequestModel,
++        mergeable_state: MergeableState,
++    ) -> anyhow::Result<()> {
++        update_pr_mergeable_state(&self.pool, pr.id, mergeable_state).await
++    }
++
+     pub async fn delegate(&self, pr: &PullRequestModel) -> anyhow::Result<()> {
+         delegate_pull_request(&self.pool, pr.id).await
+     }
+@@ -71,6 +80,14 @@ impl PgDbClient {
+         get_prs_with_unknown_mergeable_state(&self.pool, repo).await
+     }
+ 
++    pub async fn get_prs_by_base_branch(
++        &self,
++        repo: &GithubRepoName,
++        base_branch: &str,
++    ) -> anyhow::Result<Vec<PullRequestModel>> {
++        get_prs_by_base_branch(&self.pool, repo, base_branch).await
++    }
++
+     pub async fn set_rollup(
+         &self,
+         pr: &PullRequestModel,
+diff --git a/src/database/operations.rs b/src/database/operations.rs
+index 4959a6c..92ac993 100644
+--- a/src/database/operations.rs
++++ b/src/database/operations.rs
+@@ -88,6 +88,65 @@ VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING
+     .await
+ }
+ 
++pub(crate) async fn update_pr_mergeable_state(
++    exeuctor: impl PgExecutor<'_>,
++    pr_id: i32,
++    mergeable_state: MergeableState,
++) -> anyhow::Result<()> {
++    measure_db_query("update_pr_mergeable_state", || async {
++        sqlx::query!(
++            "UPDATE pull_request SET mergeable_state = $1 WHERE id = $2",
++            mergeable_state as _,
++            pr_id
++        )
++        .execute(exeuctor)
++        .await?;
++        Ok(())
++    })
++    .await
++}
++
++pub(crate) async fn get_prs_by_base_branch(
++    executor: impl PgExecutor<'_>,
++    repo: &GithubRepoName,
++    base_branch: &str,
++) -> anyhow::Result<Vec<PullRequestModel>> {
++    measure_db_query("get_prs_by_base_branch", || async {
++        let prs = sqlx::query_as!(
++            PullRequestModel,
++            r#"
++SELECT
++    pr.id,
++    pr.repository as "repository: GithubRepoName",
++    pr.number as "number!: i64",
++    (
++        pr.approved_by,
++        pr.approved_sha
++    ) AS "approval_status!: ApprovalStatus",
++    pr.status as "pr_status: PullRequestStatus",
++    pr.priority,
++    pr.rollup as "rollup: RollupMode",
++    pr.delegated,
++    pr.base_branch,
++    pr.mergeable_state as "mergeable_state: MergeableState",
++    pr.created_at as "created_at: DateTime<Utc>",
++    build AS "try_build: BuildModel"
++FROM pull_request as pr
++LEFT JOIN build ON pr.build_id = build.id
++WHERE pr.repository = $1
++    AND pr.base_branch = $2
++    AND pr.status = 'open'
++"#,
++            repo as &GithubRepoName,
++            base_branch
++        )
++        .fetch_all(executor)
++        .await?;
++        Ok(prs)
++    })
++    .await
++}
++
+ pub(crate) async fn set_pr_status(
+     executor: impl PgExecutor<'_>,
+     repo: &GithubRepoName,
+diff --git a/src/github/server.rs b/src/github/server.rs
+index d38e808..1d2481b 100644
+--- a/src/github/server.rs
++++ b/src/github/server.rs
+@@ -1,5 +1,8 @@
+ use crate::bors::event::BorsEvent;
+-use crate::bors::{BorsContext, handle_bors_global_event, handle_bors_repository_event};
++use crate::bors::{
++    BorsContext, handle_bors_global_event, handle_bors_repository_event,
++    handle_mergeable_queue_item,
++};
+ use crate::github::webhook::GitHubWebhook;
+ use crate::github::webhook::WebhookSecret;
+ use crate::{BorsGlobalEvent, BorsRepositoryEvent, TeamApiClient};
+@@ -104,7 +107,8 @@ pub fn create_bors_process(
+         {
+             tokio::join!(
+                 consume_repository_events(ctx.clone(), repository_rx),
+-                consume_global_events(ctx.clone(), global_rx, gh_client, team_api)
++                consume_global_events(ctx.clone(), global_rx, gh_client, team_api),
++                consume_mergeable_queue(ctx.clone())
+             );
+         }
+         // In real execution, the bot runs forever. If there is something that finishes
+@@ -119,6 +123,9 @@ pub fn create_bors_process(
+                 _ = consume_global_events(ctx.clone(), global_rx, gh_client, team_api) => {
+                     tracing::error!("Global event handling process has ended");
+                 }
++                _ = consume_mergeable_queue(ctx.clone()) => {
++                    tracing::error!("Mergeable queue handling process has ended");
++                }
+             }
+         }
+     };
+@@ -163,6 +170,25 @@ async fn consume_global_events(
+     }
+ }
+ 
++async fn consume_mergeable_queue(ctx: Arc<BorsContext>) {
++    loop {
++        if let Some(queue_item) = ctx.mergeable_queue.dequeue() {
++            let ctx = ctx.clone();
++
++            let span = tracing::info_span!("MergeableQueue");
++            tracing::debug!("Processing PR #{}", queue_item.pr_number);
++            if let Err(error) = handle_mergeable_queue_item(ctx, queue_item)
++                .instrument(span.clone())
++                .await
++            {
++                handle_root_error(span, error);
++            }
++        } else {
++            tokio::time::sleep(tokio::time::Duration::from_secs(10)).await
++        }
++    }
++}
++
+ #[allow(unused_variables)]
+ fn handle_root_error(span: Span, error: Error) {
+     // In tests, we want to panic on all errors.

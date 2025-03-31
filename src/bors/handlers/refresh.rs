@@ -8,6 +8,7 @@ use chrono::{DateTime, Utc};
 use crate::bors::Comment;
 use crate::bors::RepositoryState;
 use crate::bors::handlers::trybuild::cancel_build_workflows;
+use crate::bors::mergeable_queue::MergeableQueue;
 use crate::database::BuildStatus;
 use crate::{PgDbClient, TeamApiClient};
 
@@ -15,6 +16,7 @@ pub async fn refresh_repository(
     repo: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
     team_api_client: &TeamApiClient,
+    mergeable_queue: Arc<MergeableQueue>,
 ) -> anyhow::Result<()> {
     let repo_ref = repo.as_ref();
     let db_ref = db.as_ref();
@@ -22,7 +24,11 @@ pub async fn refresh_repository(
         Box::pin(cancel_timed_out_builds(repo_ref, db_ref)),
         Box::pin(reload_permission(repo_ref, team_api_client)),
         Box::pin(reload_config(repo_ref)),
-        Box::pin(reload_unknown_mergeable_prs(repo_ref, db_ref)),
+        Box::pin(reload_unknown_mergeable_prs(
+            repo_ref,
+            db_ref,
+            mergeable_queue.as_ref(),
+        )),
     ];
     let results = futures::future::join_all(tasks).await;
 
@@ -88,6 +94,7 @@ async fn reload_permission(
 async fn reload_unknown_mergeable_prs(
     repo: &RepositoryState,
     db: &PgDbClient,
+    mergeable_queue: &MergeableQueue,
 ) -> anyhow::Result<()> {
     let prs = db
         .get_prs_with_unknown_mergeable_state(repo.repository())
@@ -104,7 +111,7 @@ async fn reload_unknown_mergeable_prs(
 
     for pr in prs {
         tracing::info!("PR #{} has unknown mergeable state", pr.number);
-        // Add to 'queue'
+        mergeable_queue.enqueue(repo.repository().clone(), pr.number);
     }
 
     Ok(())
