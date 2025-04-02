@@ -109,7 +109,7 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
     }
 
     let ctx = BorsContext::new(CommandParser::new(opts.cmd_prefix), Arc::new(db), repos);
-    let (repository_tx, global_tx, bors_process) = create_bors_process(ctx, client, team_api);
+    let (repository_tx, global_tx, _, bors_process) = create_bors_process(ctx, client, team_api);
 
     let refresh_tx = global_tx.clone();
     let refresh_process = async move {

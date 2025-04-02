@@ -190,6 +190,24 @@ pub(crate) async fn update_mergeable_states_by_base_branch(
     .await
 }
 
+pub(crate) async fn update_pr_mergeable_state(
+    exeuctor: impl PgExecutor<'_>,
+    pr_id: i32,
+    mergeable_state: MergeableState,
+) -> anyhow::Result<()> {
+    measure_db_query("update_pr_mergeable_state", || async {
+        sqlx::query!(
+            "UPDATE pull_request SET mergeable_state = $1 WHERE id = $2",
+            mergeable_state as _,
+            pr_id
+        )
+        .execute(exeuctor)
+        .await?;
+        Ok(())
+    })
+    .await
+}
+
 pub(crate) async fn approve_pull_request(
     executor: impl PgExecutor<'_>,
     pr_id: i32,

@@ -5,6 +5,7 @@ use crate::bors::event::{
     PushToBranch,
 };
 use crate::bors::handlers::labels::handle_label_trigger;
+use crate::bors::mergeable_queue::MergeableQueue;
 use crate::bors::{Comment, PullRequestStatus, RepositoryState};
 use crate::database::MergeableState;
 use crate::github::{CommitSha, LabelTrigger, PullRequestNumber};
@@ -154,6 +155,7 @@ pub(super) async fn handle_pull_request_ready_for_review(
 pub(super) async fn handle_push_to_branch(
     repo_state: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
+    _mergeable_queue: Arc<MergeableQueue>,
     payload: PushToBranch,
 ) -> anyhow::Result<()> {
     let rows = db
@@ -163,6 +165,8 @@ pub(super) async fn handle_push_to_branch(
             MergeableState::Unknown,
         )
         .await?;
+
+    // Push PRs to mergeable_queue
 
     tracing::info!("Updated mergeable_state to `unknown` for {} PR(s)", rows);
 

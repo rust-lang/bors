@@ -3,14 +3,14 @@ use std::{
     sync::{Arc, RwLock},
 };
 
+use super::{RepositoryState, mergeable_queue::MergeableQueue};
 use crate::{PgDbClient, bors::command::CommandParser, github::GithubRepoName};
-
-use super::RepositoryState;
 
 pub struct BorsContext {
     pub parser: CommandParser,
     pub db: Arc<PgDbClient>,
     pub repositories: RwLock<HashMap<GithubRepoName, Arc<RepositoryState>>>,
+    pub mergeable_queue: Arc<MergeableQueue>,
 }
 
 impl BorsContext {
@@ -24,6 +24,7 @@ impl BorsContext {
             parser,
             db,
             repositories,
+            mergeable_queue: Arc::new(MergeableQueue::new()),
         }
     }
 }
