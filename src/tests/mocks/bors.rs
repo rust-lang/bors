@@ -115,7 +115,7 @@ impl BorsTester {
 
         let ctx = BorsContext::new(CommandParser::new("@bors".to_string()), db.clone(), repos);
 
-        let (repository_tx, global_tx, _, bors_process) =
+        let (repository_tx, global_tx, bors_process) =
             create_bors_process(ctx, mock.github_client(), mock.team_api_client());
 
         let state = ServerState::new(

@@ -92,12 +92,11 @@ pub fn create_bors_process(
 ) -> (
     mpsc::Sender<BorsRepositoryEvent>,
     mpsc::Sender<BorsGlobalEvent>,
-    mpsc::Sender<MergeableQueueItem>,
     impl Future<Output = ()>,
 ) {
     let (repository_tx, repository_rx) = mpsc::channel::<BorsRepositoryEvent>(1024);
     let (global_tx, global_rx) = mpsc::channel::<BorsGlobalEvent>(1024);
-    let (mergeable_queue_tx, mergeable_queue_rx) = mpsc::channel::<MergeableQueueItem>(1024);
+    let (_, mergeable_queue_rx) = mpsc::channel::<MergeableQueueItem>(1024);
 
     let service = async move {
         let ctx = Arc::new(ctx);
@@ -132,7 +131,7 @@ pub fn create_bors_process(
             }
         }
     };
-    (repository_tx, global_tx, mergeable_queue_tx, service)
+    (repository_tx, global_tx, service)
 }
 
 async fn consume_repository_events(
