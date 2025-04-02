@@ -24,7 +24,7 @@ impl BorsContext {
             parser,
             db,
             repositories,
-            mergeable_queue: Arc::new(MergeableQueue::new()),
+            mergeable_queue: Arc::new(MergeableQueue::default()),
         }
     }
 }

@@ -33,3 +33,9 @@ impl MergeableQueue {
         }
     }
 }
+
+impl Default for MergeableQueue {
+    fn default() -> Self {
+        Self::new()
+    }
+}
