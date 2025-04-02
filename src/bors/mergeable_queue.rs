@@ -21,7 +21,7 @@ impl MergeableQueue {
         Self { tx: Some(tx) }
     }
 
-    pub async fn push(&self, repository: GithubRepoName, pr_number: PullRequestNumber) {
+    pub async fn enqueue(&self, repository: GithubRepoName, pr_number: PullRequestNumber) {
         if let Some(tx) = &self.tx {
             let item = MergeableQueueItem {
                 repository,

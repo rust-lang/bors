@@ -132,7 +132,7 @@ pub async fn handle_bors_repository_event(
             let span =
                 tracing::info_span!("Pull request edited", repo = payload.repository.to_string());
 
-            handle_pull_request_edited(repo, db, payload)
+            handle_pull_request_edited(repo, db, mergeable_queue, payload)
                 .instrument(span.clone())
                 .await?;
         }
