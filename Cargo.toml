@@ -24,7 +24,7 @@ serde_json = "1"
 toml = "0.8"
 
 # GitHub
-octocrab = "0.43"
+octocrab = { version = "0.43", features = ["timeout"] }
 
 # Async
 futures = "0.3"
@@ -53,6 +53,7 @@ sqlx = { version = "0.8", features = ["runtime-tokio", "tls-rustls", "postgres",
 chrono = "0.4"
 
 itertools = "0.14"
+hyper-util = "0.1.11"
 
 [dev-dependencies]
 insta = "1.26"

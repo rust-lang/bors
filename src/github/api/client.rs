@@ -1,6 +1,9 @@
+use std::error::Error;
+use std::io;
+
 use anyhow::Context;
+use octocrab::Octocrab;
 use octocrab::models::{App, Repository};
-use octocrab::{Error, Octocrab};
 use tracing::log;
 
 use crate::bors::event::PullRequestComment;
@@ -11,6 +14,31 @@ use crate::github::api::base_github_html_url;
 use crate::github::api::operations::{MergeError, merge_branches, set_branch_to_commit};
 use crate::github::{CommitSha, GithubRepoName, PullRequest, PullRequestNumber};
 use crate::utils::timing::measure_network_request;
+
+pub async fn auto_retry_github_request<T, F, Fut>(
+    request_name: &str,
+    f: F,
+) -> Result<T, octocrab::Error>
+where
+    F: Fn() -> Fut + Copy,
+    Fut: std::future::Future<Output = Result<T, octocrab::Error>>,
+{
+    let mut res = measure_network_request(request_name, f).await;
+    if let Err(octocrab::Error::Service { source, .. }) = &res {
+        if source
+            .downcast_ref::<hyper_util::client::legacy::Error>()
+            .and_then(|hyper_err| hyper_err.source())
+            .and_then(|hyper_e| hyper_e.source())
+            .and_then(|io_err| io_err.downcast_ref::<io::Error>())
+            .map(|io_e| io_e.kind() == io::ErrorKind::TimedOut)
+            .unwrap_or(false)
+        {
+            // Retry request here
+            res = measure_network_request(request_name, f).await;
+        }
+    }
+    res
+}
 
 /// Provides access to a single app installation (repository) using the GitHub API.
 pub struct GithubRepositoryClient {
@@ -88,7 +116,7 @@ impl GithubRepositoryClient {
 
     /// Return the current SHA of the given branch.
     pub async fn get_branch_sha(&self, name: &str) -> anyhow::Result<CommitSha> {
-        measure_network_request("get_branch_sha", || async {
+        auto_retry_github_request("get_branch_sha", || async {
             // https://docs.github.com/en/rest/branches/branches?apiVersion=2022-11-28#get-a-branch
             let branch: octocrab::models::repos::Branch = self
                 .client
@@ -96,11 +124,11 @@ impl GithubRepositoryClient {
                     format!("/repos/{}/branches/{name}", self.repository()).as_str(),
                     None::<&()>,
                 )
-                .await
-                .context("Cannot deserialize branch")?;
+                .await?;
             Ok(CommitSha(branch.commit.sha))
         })
         .await
+        .context("Cannot deserialize branch")
     }
 
     /// Resolve a pull request from this repository by it's number.
@@ -283,7 +311,7 @@ impl GithubRepositoryClient {
                     Err(error) => match error {
                         // This error is returned if we try to remove a label that does not exist on the issue.
                         // This should be a no-op, rather than an error, therefore we swallow this error.
-                        Error::GitHub { source, .. }
+                        octocrab::Error::GitHub { source, .. }
                             if source.message.contains("Label does not exist") =>
                         {
                             log::trace!("Trying to remove label which does not exist on PR {pr}");

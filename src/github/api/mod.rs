@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::Context;
 use arc_swap::ArcSwap;
@@ -17,6 +18,9 @@ use crate::permissions::TeamApiClient;
 pub mod client;
 pub(crate) mod operations;
 
+// timeout in seconds
+const TIMEOUT: u64 = 10;
+
 fn base_github_html_url() -> &'static str {
     "https://github.com"
 }
@@ -32,6 +36,9 @@ pub fn create_github_client(
     Octocrab::builder()
         .base_uri(github_url)?
         .app(app_id, key)
+        .set_read_timeout(Some(Duration::from_secs(TIMEOUT)))
+        .set_write_timeout(Some(Duration::from_secs(TIMEOUT)))
+        .set_connect_timeout(Some(Duration::from_secs(TIMEOUT)))
         .build()
         .context("Could not create octocrab builder")
 }
