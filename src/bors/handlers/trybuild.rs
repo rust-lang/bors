@@ -20,6 +20,7 @@ use crate::github::{
     CommitSha, GithubUser, LabelTrigger, MergeError, PullRequest, PullRequestNumber,
 };
 use crate::permissions::PermissionType;
+use crate::utils::text::suppress_github_mentions;
 
 use super::deny_request;
 use super::has_permission;
@@ -286,7 +287,7 @@ fn auto_merge_commit_message(
 {pr_message}"#,
         pr_label = pr.head_label,
         pr_title = pr.title,
-        pr_message = pr.message,
+        pr_message = suppress_github_mentions(&pr.message),
         repo_owner = name.owner(),
         repo_name = name.name()
     );
