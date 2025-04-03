@@ -202,7 +202,7 @@ pub async fn handle_bors_repository_event(
             let span =
                 tracing::info_span!("Pushed to branch", repo = payload.repository.to_string());
 
-            handle_push_to_branch(repo, db, payload)
+            handle_push_to_branch(repo, db, mergeable_queue, payload)
                 .instrument(span.clone())
                 .await?;
         }

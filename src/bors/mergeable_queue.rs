@@ -12,7 +12,7 @@ use tokio::{
 use tokio_util::time::DelayQueue;
 
 use crate::{
-    database::{MergeableState, OctocrabMergeableState},
+    database::OctocrabMergeableState,
     github::{GithubRepoName, PullRequestNumber},
 };
 
@@ -143,7 +143,7 @@ impl MergeableQueue {
 
         if let Some(expire_time) = tracked_prs.get(&key) {
             if *expire_time > now {
-                tracing::debug!("PR {key} alreaady in mergeable queue. Skipping.");
+                tracing::debug!("Ignoring PR {key} as already in mergeable queue");
                 return;
             }
         }
@@ -218,17 +218,8 @@ impl MergeableQueue {
             }
         };
 
-        if pr_model.mergeable_state != MergeableState::Unknown {
-            tracing::info!(
-                "PR {key} mergeable state already known: {:?}. Removing from queue.",
-                pr_model.mergeable_state
-            );
-            tracked_prs.lock().unwrap().remove(&key);
-            return;
-        }
-
         if retry_count >= MAX_RETRIES {
-            tracing::warn!("Exceeded max retries ({MAX_RETRIES}) for PR {key}. Skipping.",);
+            tracing::warn!("Exceeded max retries ({MAX_RETRIES}) for PR {key}. Giving up.",);
             tracked_prs.lock().unwrap().remove(&key);
             return;
         }

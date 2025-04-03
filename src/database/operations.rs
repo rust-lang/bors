@@ -163,6 +163,48 @@ pub(crate) async fn upsert_pull_request(
     .await
 }
 
+pub(crate) async fn get_pull_requests_by_base_branch(
+    executor: impl PgExecutor<'_>,
+    repo: &GithubRepoName,
+    base_branch: &str,
+) -> anyhow::Result<Vec<PullRequestModel>> {
+    measure_db_query("get_pull_requests_by_base_branch", || async {
+        let records = sqlx::query_as!(
+            PullRequestModel,
+            r#"
+            SELECT
+                pr.id,
+                pr.repository as "repository: GithubRepoName",
+                pr.number as "number!: i64",
+                (
+                    pr.approved_by,
+                    pr.approved_sha
+                ) AS "approval_status!: ApprovalStatus",
+                pr.status as "pr_status: PullRequestStatus",
+                pr.priority,
+                pr.rollup as "rollup: RollupMode",
+                pr.delegated_permission as "delegated_permission: DelegatedPermission",
+                pr.base_branch,
+                pr.mergeable_state as "mergeable_state: MergeableState",
+                pr.created_at as "created_at: DateTime<Utc>",
+                build AS "try_build: BuildModel"
+            FROM pull_request as pr
+            LEFT JOIN build ON pr.build_id = build.id
+            WHERE pr.repository = $1
+              AND pr.base_branch = $2
+              AND pr.status IN ('open', 'draft')
+            "#,
+            repo as &GithubRepoName,
+            base_branch
+        )
+        .fetch_all(executor)
+        .await?;
+
+        Ok(records)
+    })
+    .await
+}
+
 pub(crate) async fn update_mergeable_states_by_base_branch(
     executor: impl PgExecutor<'_>,
     repo: &GithubRepoName,

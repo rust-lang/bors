@@ -291,7 +291,6 @@ pub struct GitHubPushEventPayload {
 }
 
 impl GitHubPushEventPayload {
-    #[allow(unused)]
     pub fn new(branch_name: &str) -> Self {
         GitHubPushEventPayload {
             repository: default_repo_name().into(),
