@@ -95,7 +95,7 @@ impl MergeableQueue {
                     if let Some(key) = queue.peek() {
                         let now = Instant::now();
                         let deadline = queue.deadline(&key);
-                        if deadline <= now.into() {
+                        if deadline <= now {
                             // Ready for immediate processing.
                             Duration::from_millis(0)
                         } else {
