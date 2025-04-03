@@ -191,7 +191,7 @@ pub(crate) async fn update_mergeable_states_by_base_branch(
 }
 
 pub(crate) async fn update_pr_mergeable_state(
-    exeuctor: impl PgExecutor<'_>,
+    executor: impl PgExecutor<'_>,
     pr_id: i32,
     mergeable_state: MergeableState,
 ) -> anyhow::Result<()> {
@@ -201,7 +201,7 @@ pub(crate) async fn update_pr_mergeable_state(
             mergeable_state as _,
             pr_id
         )
-        .execute(exeuctor)
+        .execute(executor)
         .await?;
         Ok(())
     })

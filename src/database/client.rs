@@ -47,6 +47,14 @@ impl PgDbClient {
         set_pr_priority(&self.pool, pr.id, priority).await
     }
 
+    pub async fn update_pr_mergeable_state(
+        &self,
+        pr: &PullRequestModel,
+        mergeable_state: MergeableState,
+    ) -> anyhow::Result<()> {
+        update_pr_mergeable_state(&self.pool, pr.id, mergeable_state).await
+    }
+
     pub async fn delegate(
         &self,
         pr: &PullRequestModel,
@@ -57,14 +65,6 @@ impl PgDbClient {
 
     pub async fn undelegate(&self, pr: &PullRequestModel) -> anyhow::Result<()> {
         undelegate_pull_request(&self.pool, pr.id).await
-    }
-
-    pub async fn update_pr_mergeable_state(
-        &self,
-        pr: &PullRequestModel,
-        mergeable_state: MergeableState,
-    ) -> anyhow::Result<()> {
-        update_pr_mergeable_state(&self.pool, pr.id, mergeable_state).await
     }
 
     pub async fn update_mergeable_states_by_base_branch(

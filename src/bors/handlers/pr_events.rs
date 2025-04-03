@@ -14,7 +14,7 @@ use std::sync::Arc;
 pub(super) async fn handle_pull_request_edited(
     repo_state: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
-    mergeable_queue: Arc<MergeableQueue>,
+    mergeable_queue: &MergeableQueue,
     payload: PullRequestEdited,
 ) -> anyhow::Result<()> {
     let pr = &payload.pull_request;
@@ -34,9 +34,9 @@ pub(super) async fn handle_pull_request_edited(
         return Ok(());
     };
 
-    mergeable_queue
-        .enqueue(repo_state.repository().clone(), pr_number)
-        .await;
+    db.update_pr_mergeable_state(&pr_model, MergeableState::Unknown)
+        .await?;
+    mergeable_queue.enqueue(repo_state.repository().clone(), pr_number);
 
     if !pr_model.is_approved() {
         return Ok(());
@@ -160,7 +160,6 @@ pub(super) async fn handle_pull_request_ready_for_review(
 pub(super) async fn handle_push_to_branch(
     repo_state: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
-    _mergeable_queue: Arc<MergeableQueue>,
     payload: PushToBranch,
 ) -> anyhow::Result<()> {
     let rows = db
@@ -170,8 +169,6 @@ pub(super) async fn handle_push_to_branch(
             MergeableState::Unknown,
         )
         .await?;
-
-    // Push PRs to mergeable_queue
 
     tracing::info!("Updated mergeable_state to `unknown` for {} PR(s)", rows);
 
@@ -216,10 +213,9 @@ mod tests {
     use crate::bors::PullRequestStatus;
     use crate::tests::mocks::default_pr_number;
     use crate::{
-        database::MergeableState,
+        database::{MergeableState, OctocrabMergeableState},
         tests::mocks::{User, default_branch_name, default_repo_name, run_test},
     };
-    use octocrab::models::pulls::MergeableState as OctocrabMergeableState;
 
     #[sqlx::test]
     async fn unapprove_on_base_edited(pool: sqlx::PgPool) {
@@ -471,12 +467,16 @@ mod tests {
             tester
                 .edit_pr(default_repo_name(), default_pr_number(), |pr| {
                     pr.base_branch = branch;
-                    pr.mergeable_state = OctocrabMergeableState::Unknown;
                 })
                 .await?;
             tester
+                .default_repo()
+                .lock()
+                .get_pr_mut(default_pr_number())
+                .mergeable_state = OctocrabMergeableState::Dirty;
+            tester
                 .wait_for_default_pr(|pr| {
-                    pr.base_branch == "beta" && pr.mergeable_state == MergeableState::Unknown
+                    pr.base_branch == "beta" && pr.mergeable_state == MergeableState::HasConflicts
                 })
                 .await?;
             Ok(tester)

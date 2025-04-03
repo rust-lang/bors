@@ -1,9 +1,6 @@
 use crate::bors::event::BorsEvent;
-use crate::bors::mergeable_queue::MergeableQueueItem;
-use crate::bors::{
-    BorsContext, handle_bors_global_event, handle_bors_repository_event,
-    handle_mergeable_queue_item,
-};
+use crate::bors::mergeable_queue::MergeableQueue;
+use crate::bors::{BorsContext, handle_bors_global_event, handle_bors_repository_event};
 use crate::github::webhook::GitHubWebhook;
 use crate::github::webhook::WebhookSecret;
 use crate::{BorsGlobalEvent, BorsRepositoryEvent, TeamApiClient};
@@ -96,10 +93,13 @@ pub fn create_bors_process(
 ) {
     let (repository_tx, repository_rx) = mpsc::channel::<BorsRepositoryEvent>(1024);
     let (global_tx, global_rx) = mpsc::channel::<BorsGlobalEvent>(1024);
-    let (_, mergeable_queue_rx) = mpsc::channel::<MergeableQueueItem>(1024);
+
+    let ctx = Arc::new(ctx);
+
+    let mut mergeable_queue = MergeableQueue::new(ctx.clone());
 
     let service = async move {
-        let ctx = Arc::new(ctx);
+        mergeable_queue.start();
 
         // In tests, we shutdown these futures by dropping the channel sender,
         // In that case, we need to wait until both of these futures resolve,
@@ -108,9 +108,8 @@ pub fn create_bors_process(
         #[cfg(test)]
         {
             tokio::join!(
-                consume_repository_events(ctx.clone(), repository_rx),
-                consume_global_events(ctx.clone(), global_rx, gh_client, team_api),
-                consume_mergeable_queue(ctx.clone(), mergeable_queue_rx)
+                consume_repository_events(ctx.clone(), repository_rx, &mergeable_queue),
+                consume_global_events(ctx.clone(), global_rx, gh_client, team_api)
             );
         }
         // In real execution, the bot runs forever. If there is something that finishes
@@ -119,17 +118,16 @@ pub fn create_bors_process(
         #[cfg(not(test))]
         {
             tokio::select! {
-                _ = consume_repository_events(ctx.clone(), repository_rx) => {
+                _ = consume_repository_events(ctx.clone(), repository_rx, &mergeable_queue) => {
                     tracing::error!("Repository event handling process has ended");
                 }
                 _ = consume_global_events(ctx.clone(), global_rx, gh_client, team_api) => {
                     tracing::error!("Global event handling process has ended");
                 }
-                _ = consume_mergeable_queue(ctx.clone(), mergeable_queue_rx) => {
-                    tracing::error!("Mergeable queue handling process has ended");
-                }
             }
         }
+
+        mergeable_queue.stop();
     };
     (repository_tx, global_tx, service)
 }
@@ -137,13 +135,14 @@ pub fn create_bors_process(
 async fn consume_repository_events(
     ctx: Arc<BorsContext>,
     mut repository_rx: mpsc::Receiver<BorsRepositoryEvent>,
+    mergeable_queue: &MergeableQueue,
 ) {
     while let Some(event) = repository_rx.recv().await {
         let ctx = ctx.clone();
 
         let span = tracing::info_span!("RepositoryEvent");
         tracing::debug!("Received repository event: {event:#?}");
-        if let Err(error) = handle_bors_repository_event(event, ctx)
+        if let Err(error) = handle_bors_repository_event(event, ctx, mergeable_queue)
             .instrument(span.clone())
             .await
         {
@@ -164,24 +163,6 @@ async fn consume_global_events(
         let span = tracing::info_span!("GlobalEvent");
         tracing::debug!("Received global event: {event:#?}");
         if let Err(error) = handle_bors_global_event(event, ctx, &gh_client, &team_api)
-            .instrument(span.clone())
-            .await
-        {
-            handle_root_error(span, error);
-        }
-    }
-}
-
-async fn consume_mergeable_queue(
-    ctx: Arc<BorsContext>,
-    mut mergeable_queue_rx: mpsc::Receiver<MergeableQueueItem>,
-) {
-    while let Some(mergeable_queue_item) = mergeable_queue_rx.recv().await {
-        let ctx = ctx.clone();
-
-        let span = tracing::info_span!("MergeableQueue");
-        tracing::debug!("Processing PR #{}", mergeable_queue_item.pr_number);
-        if let Err(error) = handle_mergeable_queue_item(mergeable_queue_item, ctx)
             .instrument(span.clone())
             .await
         {

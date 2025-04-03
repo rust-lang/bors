@@ -31,7 +31,7 @@ use tracing::Instrument;
 #[cfg(test)]
 use crate::tests::util::TestSyncMarker;
 
-use super::mergeable_queue::MergeableQueueItem;
+use super::mergeable_queue::MergeableQueue;
 
 mod help;
 mod info;
@@ -50,9 +50,9 @@ pub static WAIT_FOR_WORKFLOW_STARTED: TestSyncMarker = TestSyncMarker::new();
 pub async fn handle_bors_repository_event(
     event: BorsRepositoryEvent,
     ctx: Arc<BorsContext>,
+    mergeable_queue: &MergeableQueue,
 ) -> anyhow::Result<()> {
     let db = Arc::clone(&ctx.db);
-    let mergeable_queue = Arc::clone(&ctx.mergeable_queue);
     let Some(repo) = ctx
         .repositories
         .read()
@@ -202,7 +202,7 @@ pub async fn handle_bors_repository_event(
             let span =
                 tracing::info_span!("Pushed to branch", repo = payload.repository.to_string());
 
-            handle_push_to_branch(repo, db, mergeable_queue, payload)
+            handle_push_to_branch(repo, db, payload)
                 .instrument(span.clone())
                 .await?;
         }
@@ -454,36 +454,6 @@ async fn reload_repos(
             tracing::info!("Repository {name} was added");
         }
     }
-    Ok(())
-}
-
-pub async fn handle_mergeable_queue_item(
-    mergeable_queue_item: MergeableQueueItem,
-    ctx: Arc<BorsContext>,
-) -> anyhow::Result<()> {
-    let pr_model = ctx
-        .db
-        .get_pull_request(
-            &mergeable_queue_item.repository,
-            mergeable_queue_item.pr_number,
-        )
-        .await?
-        .unwrap();
-    let repo_state = ctx
-        .repositories
-        .read()
-        .unwrap()
-        .get(&mergeable_queue_item.repository)
-        .cloned()
-        .unwrap();
-    let fetched_pr = repo_state
-        .client
-        .get_pull_request(mergeable_queue_item.pr_number)
-        .await?;
-
-    ctx.db
-        .update_pr_mergeable_state(&pr_model, fetched_pr.mergeable_state.into())
-        .await?;
     Ok(())
 }
 
