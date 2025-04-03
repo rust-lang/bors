@@ -59,7 +59,7 @@ impl MergeableCheckEntry {
 ///
 /// This queue allows for PRs to be scheduled for a mergeable_state recheck after a delay.
 /// - PRs are initially checked after a short delay
-/// - If still unknown, check will be retried with delays up until a max
+/// - If still unknown, check will be retried with delays
 pub struct MergeableQueue {
     scheduled_prs: ScheduledPullRequests,
     tracked_prs: TrackedPullRequests,
@@ -198,7 +198,7 @@ impl MergeableQueue {
         entry: MergeableCheckEntry,
     ) {
         let MergeableCheckEntry { key, retry_count } = entry;
-        tracing::info!("Processing `mergeable_state` for PR {key}, retry: {retry_count}",);
+        tracing::info!("Processing mergeable state for PR {key}, retry: {retry_count}",);
 
         let pr_model = match ctx
             .db
@@ -264,7 +264,7 @@ impl MergeableQueue {
             .unwrap();
 
         tracked_prs.lock().unwrap().remove(&key);
-        tracing::info!(
+        tracing::debug!(
             "PR {key} mergeable state updated to {:?}",
             fetched_pr.mergeable_state
         );

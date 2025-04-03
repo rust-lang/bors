@@ -91,11 +91,10 @@ pub fn create_bors_process(
     mpsc::Sender<BorsGlobalEvent>,
     impl Future<Output = ()>,
 ) {
-    let (repository_tx, repository_rx) = mpsc::channel::<BorsRepositoryEvent>(1024);
-    let (global_tx, global_rx) = mpsc::channel::<BorsGlobalEvent>(1024);
-
     let ctx = Arc::new(ctx);
 
+    let (repository_tx, repository_rx) = mpsc::channel::<BorsRepositoryEvent>(1024);
+    let (global_tx, global_rx) = mpsc::channel::<BorsGlobalEvent>(1024);
     let mut mergeable_queue = MergeableQueue::new(ctx.clone());
 
     let service = async move {
