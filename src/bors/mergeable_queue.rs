@@ -1,9 +1,8 @@
-use futures::task::noop_waker;
 use std::{
     collections::HashMap,
     fmt,
     sync::{Arc, Mutex},
-    task::{Context, Poll},
+    task::Poll,
 };
 use tokio::{
     sync::mpsc,
@@ -164,30 +163,26 @@ impl MergeableQueue {
         tracked_prs: Arc<Mutex<HashMap<MergeableCheckKey, Instant>>>,
         ctx: Arc<BorsContext>,
     ) {
-        loop {
-            let maybe_entry = {
-                let mut queue = scheduled_prs.lock().unwrap();
+        let mut expired_entries = Vec::new();
 
-                let waker = noop_waker();
-                let mut cx = Context::from_waker(&waker);
+        {
+            let mut queue = scheduled_prs.lock().unwrap();
+            let waker = futures::task::noop_waker();
+            let mut cx = std::task::Context::from_waker(&waker);
 
-                match queue.poll_expired(&mut cx) {
-                    Poll::Ready(Some(expired)) => Some(expired.into_inner()),
-                    _ => None,
-                }
-            };
-
-            if let Some(entry) = maybe_entry {
-                Self::process_pr(
-                    Arc::clone(&scheduled_prs),
-                    Arc::clone(&tracked_prs),
-                    Arc::clone(&ctx),
-                    entry,
-                )
-                .await;
-            } else {
-                break;
+            while let Poll::Ready(Some(expired)) = queue.poll_expired(&mut cx) {
+                expired_entries.push(expired.into_inner());
             }
+        }
+
+        for entry in expired_entries {
+            Self::process_pr(
+                Arc::clone(&scheduled_prs),
+                Arc::clone(&tracked_prs),
+                Arc::clone(&ctx),
+                entry,
+            )
+            .await;
         }
     }
 
