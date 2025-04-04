@@ -18,7 +18,6 @@ use crate::permissions::TeamApiClient;
 pub mod client;
 pub(crate) mod operations;
 
-// timeout in seconds
 pub const TIMEOUT: Duration = Duration::from_secs(10);
 
 pub const NUM_RETRY: u32 = 5;
