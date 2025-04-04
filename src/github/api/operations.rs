@@ -17,6 +17,8 @@ pub enum MergeError {
     Unknown { status: StatusCode, text: String },
     #[error("Network error: {0}")]
     NetworkError(#[from] octocrab::Error),
+    #[error("Request timed out")]
+    Timeout,
 }
 
 #[derive(serde::Serialize)]
