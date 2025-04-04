@@ -98,7 +98,7 @@ pub async fn perform_network_request<T, F, Fut>(
     num_retry: u32,
 ) -> anyhow::Result<T>
 where
-    F: Fn() -> Fut + Copy,
+    F: Fn() -> Fut,
     Fut: std::future::Future<Output = T>,
 {
     measure_operation_with_retry(
