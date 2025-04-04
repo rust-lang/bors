@@ -5,6 +5,7 @@ use crate::bors::event::{
     PushToBranch,
 };
 use crate::bors::handlers::labels::handle_label_trigger;
+use crate::bors::mergeable_queue::MergeableQueue;
 use crate::bors::{Comment, PullRequestStatus, RepositoryState};
 use crate::database::MergeableState;
 use crate::github::{CommitSha, LabelTrigger, PullRequestNumber};
@@ -13,6 +14,7 @@ use std::sync::Arc;
 pub(super) async fn handle_pull_request_edited(
     repo_state: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
+    mergeable_queue: &MergeableQueue,
     payload: PullRequestEdited,
 ) -> anyhow::Result<()> {
     let pr = &payload.pull_request;
@@ -31,6 +33,8 @@ pub(super) async fn handle_pull_request_edited(
     let Some(_) = payload.from_base_sha else {
         return Ok(());
     };
+
+    mergeable_queue.enqueue(repo_state.repository().clone(), pr_number);
 
     if !pr_model.is_approved() {
         return Ok(());
@@ -154,8 +158,10 @@ pub(super) async fn handle_pull_request_ready_for_review(
 pub(super) async fn handle_push_to_branch(
     repo_state: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
+    mergeable_queue: &MergeableQueue,
     payload: PushToBranch,
 ) -> anyhow::Result<()> {
+    tracing::info!("Processing push to branch {}", payload.branch);
     let rows = db
         .update_mergeable_states_by_base_branch(
             repo_state.repository(),
@@ -163,8 +169,18 @@ pub(super) async fn handle_push_to_branch(
             MergeableState::Unknown,
         )
         .await?;
+    let affected_prs = db
+        .get_pull_requests_by_base_branch(repo_state.repository(), &payload.branch)
+        .await?;
 
-    tracing::info!("Updated mergeable_state to `unknown` for {} PR(s)", rows);
+    tracing::info!(
+        "Adding {} PR(s) to the mergeable queue due to base branch change",
+        rows
+    );
+
+    for pr in affected_prs {
+        mergeable_queue.enqueue(repo_state.repository().clone(), pr.number);
+    }
 
     Ok(())
 }
@@ -207,7 +223,7 @@ mod tests {
     use crate::bors::PullRequestStatus;
     use crate::tests::mocks::default_pr_number;
     use crate::{
-        database::MergeableState,
+        database::{MergeableState, OctocrabMergeableState},
         tests::mocks::{User, default_branch_name, default_repo_name, run_test},
     };
 
@@ -344,7 +360,7 @@ mod tests {
         run_test(pool.clone(), |mut tester| async {
             tester
                 .edit_pr(default_repo_name(), default_pr_number(), |pr| {
-                    pr.mergeable_state = octocrab::models::pulls::MergeableState::Dirty;
+                    pr.mergeable_state = OctocrabMergeableState::Dirty;
                 })
                 .await?;
             tester
@@ -439,6 +455,60 @@ mod tests {
                 .wait_for_pr(default_repo_name(), pr.number.0, |pr| {
                     pr.pr_status == PullRequestStatus::Merged
                 })
+                .await?;
+            Ok(tester)
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn mergeable_queue_processes_pr_base_change(pool: sqlx::PgPool) {
+        run_test(pool, |mut tester| async {
+            tester
+                .edit_pr(default_repo_name(), default_pr_number(), |pr| {
+                    pr.mergeable_state = OctocrabMergeableState::Clean;
+                })
+                .await?;
+            tester
+                .wait_for_default_pr(|pr| pr.mergeable_state == MergeableState::Mergeable)
+                .await?;
+
+            let branch = tester.create_branch("beta").clone();
+            tester
+                .edit_pr(default_repo_name(), default_pr_number(), |pr| {
+                    pr.base_branch = branch;
+                })
+                .await?;
+            tester
+                .default_repo()
+                .lock()
+                .get_pr_mut(default_pr_number())
+                .mergeable_state = OctocrabMergeableState::Dirty;
+            tester
+                .wait_for_default_pr(|pr| {
+                    pr.base_branch == "beta" && pr.mergeable_state == MergeableState::HasConflicts
+                })
+                .await?;
+            Ok(tester)
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn enqueue_prs_on_push_to_branch(pool: sqlx::PgPool) {
+        run_test(pool, |mut tester| async {
+            tester.open_pr(default_repo_name(), false).await?;
+            tester.push_to_branch(default_branch_name()).await?;
+            tester
+                .wait_for_default_pr(|pr| pr.mergeable_state == MergeableState::Unknown)
+                .await?;
+            tester
+                .default_repo()
+                .lock()
+                .get_pr_mut(default_pr_number())
+                .mergeable_state = OctocrabMergeableState::Dirty;
+            tester
+                .wait_for_default_pr(|pr| pr.mergeable_state == MergeableState::HasConflicts)
                 .await?;
             Ok(tester)
         })

@@ -21,6 +21,7 @@ use crate::tests::mocks::workflow::{
     CheckSuite, GitHubCheckRunEventPayload, GitHubCheckSuiteEventPayload,
     GitHubWorkflowEventPayload, TestWorkflowStatus, Workflow, WorkflowEvent, WorkflowEventKind,
 };
+
 use crate::tests::mocks::{
     Branch, ExternalHttpMock, GitHubState, Repo, User, default_pr_number, default_repo_name,
 };
@@ -30,7 +31,9 @@ use crate::{
     create_app, create_bors_process,
 };
 
-use super::pull_request::{GitHubPullRequestEventPayload, PullRequestChangeEvent};
+use super::pull_request::{
+    GitHubPullRequestEventPayload, GitHubPushEventPayload, PullRequestChangeEvent,
+};
 use super::repository::PullRequest;
 
 pub struct BorsBuilder {
@@ -318,6 +321,11 @@ impl BorsTester {
 
     pub async fn check_suite<C: Into<CheckSuite>>(&mut self, check_suite: C) -> anyhow::Result<()> {
         self.webhook_check_suite(check_suite.into()).await
+    }
+
+    pub async fn push_to_branch(&mut self, branch: &str) -> anyhow::Result<()> {
+        self.send_webhook("push", GitHubPushEventPayload::new(branch))
+            .await
     }
 
     pub async fn open_pr(

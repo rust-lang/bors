@@ -1,4 +1,5 @@
 use crate::bors::event::BorsEvent;
+use crate::bors::mergeable_queue::MergeableQueue;
 use crate::bors::{BorsContext, handle_bors_global_event, handle_bors_repository_event};
 use crate::github::webhook::GitHubWebhook;
 use crate::github::webhook::WebhookSecret;
@@ -90,11 +91,14 @@ pub fn create_bors_process(
     mpsc::Sender<BorsGlobalEvent>,
     impl Future<Output = ()>,
 ) {
+    let ctx = Arc::new(ctx);
+
     let (repository_tx, repository_rx) = mpsc::channel::<BorsRepositoryEvent>(1024);
     let (global_tx, global_rx) = mpsc::channel::<BorsGlobalEvent>(1024);
+    let mut mergeable_queue = MergeableQueue::new(ctx.clone());
 
     let service = async move {
-        let ctx = Arc::new(ctx);
+        mergeable_queue.start();
 
         // In tests, we shutdown these futures by dropping the channel sender,
         // In that case, we need to wait until both of these futures resolve,
@@ -103,7 +107,7 @@ pub fn create_bors_process(
         #[cfg(test)]
         {
             tokio::join!(
-                consume_repository_events(ctx.clone(), repository_rx),
+                consume_repository_events(ctx.clone(), repository_rx, &mergeable_queue),
                 consume_global_events(ctx.clone(), global_rx, gh_client, team_api)
             );
         }
@@ -113,7 +117,7 @@ pub fn create_bors_process(
         #[cfg(not(test))]
         {
             tokio::select! {
-                _ = consume_repository_events(ctx.clone(), repository_rx) => {
+                _ = consume_repository_events(ctx.clone(), repository_rx, &mergeable_queue) => {
                     tracing::error!("Repository event handling process has ended");
                 }
                 _ = consume_global_events(ctx.clone(), global_rx, gh_client, team_api) => {
@@ -121,6 +125,8 @@ pub fn create_bors_process(
                 }
             }
         }
+
+        mergeable_queue.stop();
     };
     (repository_tx, global_tx, service)
 }
@@ -128,13 +134,14 @@ pub fn create_bors_process(
 async fn consume_repository_events(
     ctx: Arc<BorsContext>,
     mut repository_rx: mpsc::Receiver<BorsRepositoryEvent>,
+    mergeable_queue: &MergeableQueue,
 ) {
     while let Some(event) = repository_rx.recv().await {
         let ctx = ctx.clone();
 
         let span = tracing::info_span!("RepositoryEvent");
         tracing::debug!("Received repository event: {event:#?}");
-        if let Err(error) = handle_bors_repository_event(event, ctx)
+        if let Err(error) = handle_bors_repository_event(event, ctx, mergeable_queue)
             .instrument(span.clone())
             .await
         {
