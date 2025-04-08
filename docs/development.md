@@ -118,6 +118,10 @@ Make sure to also run `cargo sqlx migrate run` to apply the migrations to the da
     ```console
     $ cargo sqlx migrate run
     ```
+4) Add a test data file to `tests/data/migrations/<timestamp>-<new-migration>.sql`.
+    - The file should contain SQL that inserts some reasonable data into a test database after the migration is applied.
+    The goal is to check that we have a test database with production-like data, so that we can test that applying migrations will not produce errors on a non-empty database.
+    - If it doesn't make sense to add any data to the migration (e.g. if the migration only adds an index), put `-- Empty to satisfy migration tests` into the file.
 
 ### Generate `.sqlx` directory
 ```console

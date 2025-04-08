@@ -5,10 +5,11 @@ use sqlparser::ast::{
 };
 use sqlparser::dialect::PostgreSqlDialect;
 use sqlparser::parser::Parser;
+use sqlx::{Executor, PgPool};
 use std::collections::{BTreeSet, HashSet};
 use std::ffi::OsStr;
 use std::ops::ControlFlow;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 struct CheckNotNullWithoutDefault {
     error: Option<String>,
@@ -113,4 +114,81 @@ fn check_non_null_column_without_default() {
             }
         }
     }
+}
+
+fn get_up_migrations() -> Vec<PathBuf> {
+    let root = env!("CARGO_MANIFEST_DIR");
+    let migrations_dir = PathBuf::from(root).join("migrations");
+
+    let mut migrations = Vec::new();
+    for entry in std::fs::read_dir(migrations_dir).unwrap() {
+        let path = entry.unwrap().path();
+
+        if path.is_file() && path.to_string_lossy().ends_with(".up.sql") {
+            migrations.push(path);
+        }
+    }
+
+    // Sort by timestamp to enforce migration order
+    migrations.sort_by(|a, b| a.file_name().unwrap().cmp(b.file_name().unwrap()));
+    migrations
+}
+
+fn get_test_data_path(migration_path: &Path) -> PathBuf {
+    let filename = migration_path.file_name().unwrap().to_str().unwrap();
+    // e.g. "20240517094752_create_build.up.sql" -> "20240517094752_create_build"
+    let migration_name = filename.split('.').next().unwrap();
+
+    let root = env!("CARGO_MANIFEST_DIR");
+    PathBuf::from(root)
+        .join("tests/data/migrations")
+        .join(format!("{}.sql", migration_name))
+}
+
+#[test]
+fn check_migrations_have_sample_data() {
+    let migrations = get_up_migrations();
+    assert!(!migrations.is_empty());
+    for migration_path in migrations {
+        let test_data_path = get_test_data_path(&migration_path);
+
+        assert!(
+            test_data_path.exists(),
+            "Migration {:?} does not have an associated test data file at {:?}.
+            Add a test data file there that fills some test data into the database after that migration is applied.",
+            migration_path,
+            test_data_path
+        );
+    }
+}
+
+/// Apply all migrations incrementally in sequence and load their corresponding test data
+/// after each migration is applied.
+#[sqlx::test(migrations = false)]
+async fn apply_migrations_with_test_data(pool: PgPool) -> sqlx::Result<()> {
+    let migrations = get_up_migrations();
+
+    for migration_path in migrations {
+        let migration_sql = std::fs::read_to_string(&migration_path)
+            .unwrap_or_else(|_| panic!("Failed to read migration file: {:?}", migration_path));
+
+        pool.execute(&*migration_sql)
+            .await
+            .unwrap_or_else(|e| panic!("Failed to apply migration {:?}: {}", migration_path, e));
+
+        let test_data_path = get_test_data_path(&migration_path);
+        let test_data = std::fs::read_to_string(&test_data_path).expect(&format!(
+            "Failed to read test data file: {}",
+            test_data_path.display()
+        ));
+
+        pool.execute(&*test_data).await.unwrap_or_else(|e| {
+            panic!(
+                "Failed to apply migration test data {:?}: {}",
+                test_data_path, e
+            )
+        });
+    }
+
+    Ok(())
 }
