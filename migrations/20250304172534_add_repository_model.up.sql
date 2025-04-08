@@ -1,5 +1,5 @@
 -- Add up migration script here
-CREATE TABLE repository
+CREATE TABLE IF NOT EXISTS repository
 (
     id             SERIAL PRIMARY KEY,
     name           TEXT        NOT NULL UNIQUE,
