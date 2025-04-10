@@ -1,6 +1,6 @@
 use anyhow::Context;
+use octocrab::Octocrab;
 use octocrab::models::{App, Repository};
-use octocrab::{Error, Octocrab};
 use tracing::log;
 
 use crate::bors::event::PullRequestComment;
@@ -10,7 +10,7 @@ use crate::database::RunId;
 use crate::github::api::base_github_html_url;
 use crate::github::api::operations::{MergeError, merge_branches, set_branch_to_commit};
 use crate::github::{CommitSha, GithubRepoName, PullRequest, PullRequestNumber};
-use crate::utils::timing::measure_network_request;
+use crate::utils::timing::{measure_network_request, perform_network_request_with_retry};
 
 /// Provides access to a single app installation (repository) using the GitHub API.
 pub struct GithubRepositoryClient {
@@ -55,7 +55,7 @@ impl GithubRepositoryClient {
     /// Loads repository configuration from a file located at `[CONFIG_FILE_PATH]` in the main
     /// branch.
     pub async fn load_config(&self) -> anyhow::Result<RepositoryConfig> {
-        measure_network_request("load_config", || async {
+        perform_network_request_with_retry("load_config", || async {
             let mut response = self
                 .client
                 .repos(&self.repo_name.owner, &self.repo_name.name)
@@ -83,12 +83,12 @@ impl GithubRepositoryClient {
                     Ok(config)
                 })
         })
-        .await
+        .await?
     }
 
     /// Return the current SHA of the given branch.
     pub async fn get_branch_sha(&self, name: &str) -> anyhow::Result<CommitSha> {
-        measure_network_request("get_branch_sha", || async {
+        perform_network_request_with_retry("get_branch_sha", || async {
             // https://docs.github.com/en/rest/branches/branches?apiVersion=2022-11-28#get-a-branch
             let branch: octocrab::models::repos::Branch = self
                 .client
@@ -100,12 +100,12 @@ impl GithubRepositoryClient {
                 .context("Cannot deserialize branch")?;
             Ok(CommitSha(branch.commit.sha))
         })
-        .await
+        .await?
     }
 
     /// Resolve a pull request from this repository by it's number.
     pub async fn get_pull_request(&self, pr: PullRequestNumber) -> anyhow::Result<PullRequest> {
-        measure_network_request("get_pull_request", || async {
+        perform_network_request_with_retry("get_pull_request", || async {
             let pr = self
                 .client
                 .pulls(self.repository().owner(), self.repository().name())
@@ -116,7 +116,7 @@ impl GithubRepositoryClient {
                 })?;
             Ok(pr.into())
         })
-        .await
+        .await?
     }
 
     /// Post a comment to the pull request with the given number.
@@ -126,7 +126,7 @@ impl GithubRepositoryClient {
         pr: PullRequestNumber,
         comment: Comment,
     ) -> anyhow::Result<()> {
-        measure_network_request("post_comment", || async {
+        perform_network_request_with_retry("post_comment", || async {
             self.client
                 .issues(&self.repository().owner, &self.repository().name)
                 .create_comment(pr.0, comment.render())
@@ -134,15 +134,15 @@ impl GithubRepositoryClient {
                 .with_context(|| format!("Cannot post comment to {}", self.format_pr(pr)))?;
             Ok(())
         })
-        .await
+        .await?
     }
 
     /// Set the given branch to a commit with the given `sha`.
     pub async fn set_branch_to_sha(&self, branch: &str, sha: &CommitSha) -> anyhow::Result<()> {
-        measure_network_request("set_branch_to_sha", || async {
+        perform_network_request_with_retry("set_branch_to_sha", || async {
             Ok(set_branch_to_commit(self, branch.to_string(), sha).await?)
         })
-        .await
+        .await?
     }
 
     /// Merge `head` into `base`. Returns the SHA of the merge commit.
@@ -152,10 +152,11 @@ impl GithubRepositoryClient {
         head: &CommitSha,
         commit_message: &str,
     ) -> Result<CommitSha, MergeError> {
-        measure_network_request("merge_branches", || async {
+        perform_network_request_with_retry("merge_branches", || async {
             merge_branches(self, base, head, commit_message).await
         })
         .await
+        .map_err(|_| MergeError::Timeout)?
     }
 
     /// Find all check suites attached to the given commit and branch.
@@ -164,18 +165,18 @@ impl GithubRepositoryClient {
         branch: &str,
         sha: &CommitSha,
     ) -> anyhow::Result<Vec<CheckSuite>> {
-        measure_network_request("get_check_suites_for_commit", || async {
-            #[derive(serde::Deserialize, Debug)]
-            struct CheckSuitePayload {
-                conclusion: Option<String>,
-                head_branch: String,
-            }
+        #[derive(serde::Deserialize, Debug)]
+        struct CheckSuitePayload {
+            conclusion: Option<String>,
+            head_branch: String,
+        }
 
-            #[derive(serde::Deserialize, Debug)]
-            struct CheckSuiteResponse {
-                check_suites: Vec<CheckSuitePayload>,
-            }
+        #[derive(serde::Deserialize, Debug)]
+        struct CheckSuiteResponse {
+            check_suites: Vec<CheckSuitePayload>,
+        }
 
+        perform_network_request_with_retry("get_check_suites_for_commit", || async {
             let response: CheckSuiteResponse = self
                 .client
                 .get(
@@ -218,7 +219,7 @@ impl GithubRepositoryClient {
                 .collect();
             Ok(suites)
         })
-        .await
+        .await?
     }
 
     /// Cancels Github Actions workflows.
@@ -245,7 +246,7 @@ impl GithubRepositoryClient {
 
     /// Add a set of labels to a PR.
     pub async fn add_labels(&self, pr: PullRequestNumber, labels: &[String]) -> anyhow::Result<()> {
-        measure_network_request("add_labels", || async {
+        perform_network_request_with_retry("add_labels", || async {
             let client = self
                 .client
                 .issues(self.repository().owner(), self.repository().name());
@@ -258,7 +259,7 @@ impl GithubRepositoryClient {
 
             Ok(())
         })
-        .await
+        .await?
     }
 
     /// Remove a set of labels from a PR.
@@ -267,7 +268,7 @@ impl GithubRepositoryClient {
         pr: PullRequestNumber,
         labels: &[String],
     ) -> anyhow::Result<()> {
-        measure_network_request("remove_labels", || async {
+        perform_network_request_with_retry("remove_labels", || async {
             let client = self
                 .client
                 .issues(self.repository().owner(), self.repository().name());
@@ -283,7 +284,7 @@ impl GithubRepositoryClient {
                     Err(error) => match error {
                         // This error is returned if we try to remove a label that does not exist on the issue.
                         // This should be a no-op, rather than an error, therefore we swallow this error.
-                        Error::GitHub { source, .. }
+                        octocrab::Error::GitHub { source, .. }
                             if source.message.contains("Label does not exist") =>
                         {
                             log::trace!("Trying to remove label which does not exist on PR {pr}");
@@ -296,7 +297,7 @@ impl GithubRepositoryClient {
                 .context("Cannot remove label(s) from PR")?;
             Ok(())
         })
-        .await
+        .await?
     }
 
     /// Get a workflow url.
