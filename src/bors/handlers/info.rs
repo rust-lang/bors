@@ -28,7 +28,7 @@ pub(super) async fn command_info(
     if let ApprovalStatus::Approved(info) = pr_model.approval_status {
         info_lines.push(format!("- **Approved by:** @{}", info.approver));
     } else {
-        info_lines.push("- **Not Approved:**".to_string());
+        info_lines.push("- **Not Approved**".to_string());
     }
 
     // Priority info
@@ -72,9 +72,9 @@ mod tests {
             insta::assert_snapshot!(
                 tester.get_comment().await?,
                 @r"
-                - **Not Approved:**
-                - **Priority:** Not set
-                "
+            - **Not Approved**
+            - **Priority:** Not set
+            "
             );
             Ok(tester)
         })
@@ -112,9 +112,9 @@ mod tests {
             insta::assert_snapshot!(
                 tester.get_comment().await?,
                 @r"
-                - **Not Approved:**
-                - **Priority:** 5
-                "
+            - **Not Approved**
+            - **Priority:** 5
+            "
             );
             Ok(tester)
         })
@@ -131,10 +131,10 @@ mod tests {
             insta::assert_snapshot!(
                 tester.get_comment().await?,
                 @r"
-                - **Not Approved:**
-                - **Priority:** Not set
-                - **Try build branch:** automation/bors/try
-                "
+            - **Not Approved**
+            - **Priority:** Not set
+            - **Try build branch:** automation/bors/try
+            "
             );
             Ok(tester)
         })
