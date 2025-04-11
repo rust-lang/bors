@@ -92,10 +92,13 @@ impl GitHubState {
     }
 
     pub fn check_cancelled_workflows(&self, repo: GithubRepoName, expected_run_ids: &[u64]) {
-        assert_eq!(
-            &self.get_repo(&repo).lock().cancelled_workflows,
-            expected_run_ids
-        );
+        let mut workflows = self.get_repo(&repo).lock().cancelled_workflows.clone();
+        workflows.sort();
+
+        let mut expected = expected_run_ids.to_vec();
+        expected.sort();
+
+        assert_eq!(workflows, expected);
     }
 }
 
