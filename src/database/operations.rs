@@ -163,7 +163,7 @@ pub(crate) async fn upsert_pull_request(
     .await
 }
 
-pub(crate) async fn get_pull_requests_by_base_branch(
+pub(crate) async fn get_nonclosed_pull_requests_by_base_branch(
     executor: impl PgExecutor<'_>,
     repo: &GithubRepoName,
     base_branch: &str,

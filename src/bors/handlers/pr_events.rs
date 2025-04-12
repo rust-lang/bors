@@ -169,7 +169,7 @@ pub(super) async fn handle_push_to_branch(
         )
         .await?;
     let affected_prs = db
-        .get_pull_requests_by_base_branch(repo_state.repository(), &payload.branch)
+        .get_nonclosed_pull_requests_by_base_branch(repo_state.repository(), &payload.branch)
         .await?;
 
     tracing::info!(
