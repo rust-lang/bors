@@ -205,7 +205,7 @@ impl MergeableQueueReceiver {
 
     pub async fn dequeue(&self) -> Option<MergeableQueueItem> {
         loop {
-            // Closed and the empty queue, we're done.
+            // Closed and empty queue, we're done.
             if self.inner.closed.load(Ordering::Relaxed)
                 && self.inner.queue.lock().unwrap().is_empty()
             {
@@ -221,11 +221,11 @@ impl MergeableQueueReceiver {
                 }
                 // Queue is empty, wait until notified of a new item.
                 Err(None) => {
-                    // If closed, we're done.
+                    // If closed, we're done
                     if self.inner.closed.load(Ordering::Relaxed) {
                         return None;
                     }
-                    // Else, wait until next item.
+                    // else, wait until next item.
                     self.inner.notify.notified().await;
                 }
             }
