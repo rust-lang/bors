@@ -6,8 +6,9 @@ use std::time::Duration;
 
 use anyhow::Context;
 use bors::{
-    BorsContext, BorsGlobalEvent, CommandParser, PgDbClient, ServerState, TeamApiClient,
-    WebhookSecret, create_app, create_bors_process, create_github_client, load_repositories,
+    BorsContext, BorsGlobalEvent, BorsProcess, CommandParser, PgDbClient, ServerState,
+    TeamApiClient, WebhookSecret, create_app, create_bors_process, create_github_client,
+    load_repositories,
 };
 use clap::Parser;
 use sqlx::postgres::PgConnectOptions;
@@ -109,7 +110,12 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
     }
 
     let ctx = BorsContext::new(CommandParser::new(opts.cmd_prefix), Arc::new(db), repos);
-    let (repository_tx, global_tx, bors_process) = create_bors_process(ctx, client, team_api);
+    let BorsProcess {
+        repository_tx,
+        global_tx,
+        bors_process,
+        ..
+    } = create_bors_process(ctx, client, team_api);
 
     let refresh_tx = global_tx.clone();
     let refresh_process = async move {
