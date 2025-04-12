@@ -262,23 +262,40 @@ pub async fn handle_mergeable_queue_item(
         return Ok(());
     }
 
-    let pr_model = ctx
+    let pr_model = match ctx
         .db
         .get_pull_request(&pull_request.repo, pull_request.pr_number)
         .await?
-        .unwrap();
-    let repo_state = ctx
-        .repositories
-        .read()
-        .unwrap()
-        .get(&pull_request.repo)
-        .cloned()
-        .unwrap();
+    {
+        Some(model) => model,
+        None => {
+            tracing::error!("PR not found in database: {}", pull_request);
+            return Ok(());
+        }
+    };
+
+    let repo_state = match ctx.repositories.read() {
+        Ok(guard) => match guard.get(&pull_request.repo) {
+            Some(state) => state.clone(),
+            None => {
+                return Err(anyhow::anyhow!(
+                    "Repository not found: {}",
+                    pull_request.repo
+                ));
+            }
+        },
+        Err(err) => {
+            return Err(anyhow::anyhow!(
+                "Failed to acquire read lock on repositories: {}",
+                err
+            ));
+        }
+    };
+
     let fetched_pr = repo_state
         .client
         .get_pull_request(pull_request.pr_number)
-        .await
-        .unwrap();
+        .await?;
     let new_mergeable_state = fetched_pr.mergeable_state;
 
     if new_mergeable_state == OctocrabMergeableState::Unknown {
@@ -291,8 +308,8 @@ pub async fn handle_mergeable_queue_item(
 
     ctx.db
         .update_pr_mergeable_state(&pr_model, new_mergeable_state.clone().into())
-        .await
-        .unwrap();
+        .await?;
+
     tracing::debug!("PR {pull_request} `mergeable_state` updated to `{new_mergeable_state:?}`");
 
     Ok(())
