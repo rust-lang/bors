@@ -31,7 +31,9 @@ use crate::{
     create_app, create_bors_process,
 };
 
-use super::pull_request::{GitHubPullRequestEventPayload, PullRequestChangeEvent};
+use super::pull_request::{
+    GitHubPullRequestEventPayload, GitHubPushEventPayload, PullRequestChangeEvent,
+};
 use super::repository::PullRequest;
 
 pub struct BorsBuilder {
@@ -233,6 +235,11 @@ impl BorsTester {
             .get_branch_by_name(name)
             .unwrap()
             .clone()
+    }
+
+    pub async fn push_to_branch(&mut self, branch: &str) -> anyhow::Result<()> {
+        self.send_webhook("push", GitHubPushEventPayload::new(branch))
+            .await
     }
 
     pub fn try_branch(&self) -> Branch {

@@ -1,5 +1,5 @@
+use crate::database::OctocrabMergeableState;
 use crate::github::{GithubRepoName, PullRequestNumber};
-use octocrab::models::pulls::MergeableState as OctocrabMergeableState;
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -101,7 +101,7 @@ impl MergeableQueueSender {
         self.inner.notify.notify_waiters();
     }
 
-    pub fn enqueue(&self, pr_number: PullRequestNumber, repo: GithubRepoName) {
+    pub fn enqueue(&self, repo: GithubRepoName, pr_number: PullRequestNumber) {
         let expiration = Some(Instant::now() + BASE_DELAY);
 
         self.insert_item(
