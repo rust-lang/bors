@@ -149,7 +149,7 @@ impl MergeableQueueSender {
         let has_earlier_expiration =
             queue
                 .peek()
-                .map_or(false, |head| match (expiration, head.expiration) {
+                .is_some_and(|head| match (expiration, head.expiration) {
                     (Some(new_exp), Reverse(Some(head_exp))) => new_exp < head_exp,
                     _ => false,
                 });
