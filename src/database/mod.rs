@@ -10,7 +10,7 @@ use crate::{
 };
 use chrono::{DateTime, Utc};
 pub use client::PgDbClient;
-use octocrab::models::pulls::MergeableState as OctocrabMergeableState;
+pub use octocrab::models::pulls::MergeableState as OctocrabMergeableState;
 use sqlx::error::BoxDynError;
 use sqlx::{Database, Postgres};
 

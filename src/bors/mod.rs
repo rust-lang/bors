@@ -22,6 +22,7 @@ pub mod comment;
 mod context;
 pub mod event;
 mod handlers;
+pub mod mergeable_queue;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CheckSuiteStatus {

@@ -1,4 +1,8 @@
 use crate::bors::event::BorsEvent;
+use crate::bors::mergeable_queue::{
+    MergeableQueueReceiver, MergeableQueueSender, create_mergeable_queue,
+    handle_mergeable_queue_item,
+};
 use crate::bors::{BorsContext, handle_bors_global_event, handle_bors_repository_event};
 use crate::github::webhook::GitHubWebhook;
 use crate::github::webhook::WebhookSecret;
@@ -88,10 +92,14 @@ pub fn create_bors_process(
 ) -> (
     mpsc::Sender<BorsRepositoryEvent>,
     mpsc::Sender<BorsGlobalEvent>,
+    MergeableQueueSender,
     impl Future<Output = ()>,
 ) {
     let (repository_tx, repository_rx) = mpsc::channel::<BorsRepositoryEvent>(1024);
     let (global_tx, global_rx) = mpsc::channel::<BorsGlobalEvent>(1024);
+    let (mergeable_queue_tx, mergeable_queue_rx) = create_mergeable_queue();
+
+    let mq_tx = mergeable_queue_tx.clone();
 
     let service = async move {
         let ctx = Arc::new(ctx);
@@ -103,8 +111,9 @@ pub fn create_bors_process(
         #[cfg(test)]
         {
             tokio::join!(
-                consume_repository_events(ctx.clone(), repository_rx),
-                consume_global_events(ctx.clone(), global_rx, gh_client, team_api)
+                consume_repository_events(ctx.clone(), repository_rx, mq_tx.clone()),
+                consume_global_events(ctx.clone(), global_rx, gh_client, team_api),
+                consume_mergeable_queue(ctx, mq_tx, mergeable_queue_rx)
             );
         }
         // In real execution, the bot runs forever. If there is something that finishes
@@ -113,28 +122,33 @@ pub fn create_bors_process(
         #[cfg(not(test))]
         {
             tokio::select! {
-                _ = consume_repository_events(ctx.clone(), repository_rx) => {
+                _ = consume_repository_events(ctx.clone(), repository_rx, mq_tx.clone()) => {
                     tracing::error!("Repository event handling process has ended");
                 }
                 _ = consume_global_events(ctx.clone(), global_rx, gh_client, team_api) => {
                     tracing::error!("Global event handling process has ended");
                 }
+                _ = consume_mergeable_queue(ctx, mq_tx, mergeable_queue_rx) => {
+                    tracing::error!("Mergeable queue handling process has ended")
+                }
             }
         }
     };
-    (repository_tx, global_tx, service)
+    (repository_tx, global_tx, mergeable_queue_tx, service)
 }
 
 async fn consume_repository_events(
     ctx: Arc<BorsContext>,
     mut repository_rx: mpsc::Receiver<BorsRepositoryEvent>,
+    mergeable_queue_tx: MergeableQueueSender,
 ) {
     while let Some(event) = repository_rx.recv().await {
         let ctx = ctx.clone();
+        let mergeable_queue_tx = mergeable_queue_tx.clone();
 
         let span = tracing::info_span!("RepositoryEvent");
         tracing::debug!("Received repository event: {event:#?}");
-        if let Err(error) = handle_bors_repository_event(event, ctx)
+        if let Err(error) = handle_bors_repository_event(event, ctx, mergeable_queue_tx)
             .instrument(span.clone())
             .await
         {
@@ -155,6 +169,26 @@ async fn consume_global_events(
         let span = tracing::info_span!("GlobalEvent");
         tracing::debug!("Received global event: {event:#?}");
         if let Err(error) = handle_bors_global_event(event, ctx, &gh_client, &team_api)
+            .instrument(span.clone())
+            .await
+        {
+            handle_root_error(span, error);
+        }
+    }
+}
+
+async fn consume_mergeable_queue(
+    ctx: Arc<BorsContext>,
+    mergeable_queue_tx: MergeableQueueSender,
+    mergeable_queue_rx: MergeableQueueReceiver,
+) {
+    while let Some(mq_item) = mergeable_queue_rx.dequeue().await {
+        let ctx = ctx.clone();
+        let mergeable_queue_tx = mergeable_queue_tx.clone();
+
+        let span = tracing::info_span!("MergeableQueue");
+        tracing::debug!("Received mergeable queue item: {}", mq_item.pull_request);
+        if let Err(error) = handle_mergeable_queue_item(ctx, mergeable_queue_tx, mq_item)
             .instrument(span.clone())
             .await
         {
