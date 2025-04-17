@@ -152,7 +152,7 @@ impl MergeableQueueSender {
                     (Some(new_exp), Reverse(Some(head_exp))) => new_exp < head_exp,
                     _ => false,
                 });
-        // 2. The queue was empty before insertion (reader is waiting)
+        // 2. The queue was empty before insertion (reader might be waiting)
         // 3. The current item is an immediate item
         let should_notify = queue.is_empty() || expiration.is_none() || has_earlier_expiration;
 
