@@ -75,7 +75,6 @@ pub struct MergeableQueueSender {
     inner: Arc<SharedInner>,
 }
 
-#[derive(Clone)]
 pub struct MergeableQueueReceiver {
     inner: Arc<SharedInner>,
 }
