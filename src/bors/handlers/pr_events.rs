@@ -463,15 +463,6 @@ mod tests {
     #[sqlx::test]
     async fn mergeable_queue_processes_pr_base_change(pool: sqlx::PgPool) {
         run_test(pool, |mut tester| async {
-            tester
-                .edit_pr(default_repo_name(), default_pr_number(), |pr| {
-                    pr.mergeable_state = OctocrabMergeableState::Clean;
-                })
-                .await?;
-            tester
-                .wait_for_default_pr(|pr| pr.mergeable_state == MergeableState::Mergeable)
-                .await?;
-
             let branch = tester.create_branch("beta").clone();
             tester
                 .edit_pr(default_repo_name(), default_pr_number(), |pr| {
