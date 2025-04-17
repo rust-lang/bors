@@ -16,6 +16,7 @@ use crate::bors::mergeable_queue::MergeableQueueSender;
 use crate::bors::{RollupMode, WAIT_FOR_REFRESH};
 use crate::database::{BuildStatus, DelegatedPermission, PullRequestModel};
 use crate::github::api::load_repositories;
+use crate::github::server::BorsProcess;
 use crate::github::{GithubRepoName, PullRequestNumber};
 use crate::tests::mocks::comment::{Comment, GitHubIssueCommentEventPayload};
 use crate::tests::mocks::workflow::{
@@ -119,8 +120,12 @@ impl BorsTester {
 
         let ctx = BorsContext::new(CommandParser::new("@bors".to_string()), db.clone(), repos);
 
-        let (repository_tx, global_tx, mergeable_queue_tx, bors_process) =
-            create_bors_process(ctx, mock.github_client(), mock.team_api_client());
+        let BorsProcess {
+            repository_tx,
+            global_tx,
+            mergeable_queue_tx,
+            bors_process,
+        } = create_bors_process(ctx, mock.github_client(), mock.team_api_client());
 
         let state = ServerState::new(
             repository_tx,

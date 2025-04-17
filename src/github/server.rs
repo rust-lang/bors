@@ -16,6 +16,7 @@ use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use octocrab::Octocrab;
 use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tower::limit::ConcurrencyLimitLayer;
@@ -83,18 +84,20 @@ pub async fn github_webhook_handler(
     }
 }
 
+pub struct BorsProcess {
+    pub repository_tx: mpsc::Sender<BorsRepositoryEvent>,
+    pub global_tx: mpsc::Sender<BorsGlobalEvent>,
+    pub mergeable_queue_tx: MergeableQueueSender,
+    pub bors_process: Pin<Box<dyn Future<Output = ()> + Send>>,
+}
+
 /// Creates a future with a Bors process that continuously receives webhook events and reacts to
 /// them.
 pub fn create_bors_process(
     ctx: BorsContext,
     gh_client: Octocrab,
     team_api: TeamApiClient,
-) -> (
-    mpsc::Sender<BorsRepositoryEvent>,
-    mpsc::Sender<BorsGlobalEvent>,
-    MergeableQueueSender,
-    impl Future<Output = ()>,
-) {
+) -> BorsProcess {
     let (repository_tx, repository_rx) = mpsc::channel::<BorsRepositoryEvent>(1024);
     let (global_tx, global_rx) = mpsc::channel::<BorsGlobalEvent>(1024);
     let (mergeable_queue_tx, mergeable_queue_rx) = create_mergeable_queue();
@@ -134,7 +137,13 @@ pub fn create_bors_process(
             }
         }
     };
-    (repository_tx, global_tx, mergeable_queue_tx, service)
+
+    BorsProcess {
+        repository_tx,
+        global_tx,
+        mergeable_queue_tx,
+        bors_process: Box::pin(service),
+    }
 }
 
 async fn consume_repository_events(
