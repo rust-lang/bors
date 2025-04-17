@@ -163,6 +163,8 @@ pub(crate) async fn upsert_pull_request(
     .await
 }
 
+/// Uses inclusion rather than negation, which would cause a full table scan,
+/// to leverage the index from PR #246 (https://github.com/rust-lang/bors/pull/246).
 pub(crate) async fn get_nonclosed_pull_requests_by_base_branch(
     executor: impl PgExecutor<'_>,
     repo: &GithubRepoName,
