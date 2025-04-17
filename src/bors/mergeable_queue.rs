@@ -33,7 +33,6 @@ impl std::fmt::Display for QueuedPullRequest {
 pub struct MergeableQueueItem {
     pub pull_request: QueuedPullRequest,
     pub attempt: u32,
-    pub immediate: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -107,7 +106,6 @@ impl MergeableQueueSender {
             MergeableQueueItem {
                 pull_request: QueuedPullRequest { pr_number, repo },
                 attempt: 1,
-                immediate: false,
             },
             expiration,
         );
@@ -119,7 +117,6 @@ impl MergeableQueueSender {
             MergeableQueueItem {
                 pull_request: QueuedPullRequest { pr_number, repo },
                 attempt: 1,
-                immediate: true,
             },
             None,
         );
@@ -134,7 +131,6 @@ impl MergeableQueueSender {
             MergeableQueueItem {
                 pull_request: queue_item.pull_request,
                 attempt: next_attempt,
-                immediate: queue_item.immediate,
             },
             expiration,
         );
@@ -153,7 +149,6 @@ impl MergeableQueueSender {
                     _ => false,
                 });
         // 2. The queue was empty before insertion (reader might be waiting)
-        // 3. The current item is an immediate item
         let should_notify = queue.is_empty() || expiration.is_none() || has_earlier_expiration;
 
         queue.push(Item {
