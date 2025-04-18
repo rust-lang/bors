@@ -14,7 +14,7 @@ pub use github::{
     WebhookSecret,
     api::create_github_client,
     api::load_repositories,
-    server::{ServerState, create_app, create_bors_process},
+    server::{BorsProcess, ServerState, create_app, create_bors_process},
 };
 pub use permissions::TeamApiClient;
 

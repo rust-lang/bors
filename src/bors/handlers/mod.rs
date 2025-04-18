@@ -31,6 +31,8 @@ use tracing::Instrument;
 #[cfg(test)]
 use crate::tests::util::TestSyncMarker;
 
+use super::mergeable_queue::MergeableQueueSender;
+
 mod help;
 mod info;
 mod labels;
@@ -48,6 +50,7 @@ pub static WAIT_FOR_WORKFLOW_STARTED: TestSyncMarker = TestSyncMarker::new();
 pub async fn handle_bors_repository_event(
     event: BorsRepositoryEvent,
     ctx: Arc<BorsContext>,
+    mergeable_queue_tx: MergeableQueueSender,
 ) -> anyhow::Result<()> {
     let db = Arc::clone(&ctx.db);
     let Some(repo) = ctx
@@ -129,7 +132,7 @@ pub async fn handle_bors_repository_event(
             let span =
                 tracing::info_span!("Pull request edited", repo = payload.repository.to_string());
 
-            handle_pull_request_edited(repo, db, payload)
+            handle_pull_request_edited(repo, db, mergeable_queue_tx, payload)
                 .instrument(span.clone())
                 .await?;
         }
@@ -199,7 +202,7 @@ pub async fn handle_bors_repository_event(
             let span =
                 tracing::info_span!("Pushed to branch", repo = payload.repository.to_string());
 
-            handle_push_to_branch(repo, db, payload)
+            handle_push_to_branch(repo, db, mergeable_queue_tx, payload)
                 .instrument(span.clone())
                 .await?;
         }

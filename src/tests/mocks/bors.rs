@@ -15,6 +15,7 @@ use tower::Service;
 use crate::bors::{RollupMode, WAIT_FOR_REFRESH};
 use crate::database::{BuildStatus, DelegatedPermission, PullRequestModel};
 use crate::github::api::load_repositories;
+use crate::github::server::BorsProcess;
 use crate::github::{GithubRepoName, PullRequestNumber};
 use crate::tests::mocks::comment::{Comment, GitHubIssueCommentEventPayload};
 use crate::tests::mocks::workflow::{
@@ -30,7 +31,9 @@ use crate::{
     create_app, create_bors_process,
 };
 
-use super::pull_request::{GitHubPullRequestEventPayload, PullRequestChangeEvent};
+use super::pull_request::{
+    GitHubPullRequestEventPayload, GitHubPushEventPayload, PullRequestChangeEvent,
+};
 use super::repository::PullRequest;
 
 pub struct BorsBuilder {
@@ -115,8 +118,11 @@ impl BorsTester {
 
         let ctx = BorsContext::new(CommandParser::new("@bors".to_string()), db.clone(), repos);
 
-        let (repository_tx, global_tx, bors_process) =
-            create_bors_process(ctx, mock.github_client(), mock.team_api_client());
+        let BorsProcess {
+            repository_tx,
+            global_tx,
+            bors_process,
+        } = create_bors_process(ctx, mock.github_client(), mock.team_api_client());
 
         let state = ServerState::new(
             repository_tx,
@@ -230,6 +236,11 @@ impl BorsTester {
             .get_branch_by_name(name)
             .unwrap()
             .clone()
+    }
+
+    pub async fn push_to_branch(&mut self, branch: &str) -> anyhow::Result<()> {
+        self.send_webhook("push", GitHubPushEventPayload::new(branch))
+            .await
     }
 
     pub fn try_branch(&self) -> Branch {
