@@ -94,11 +94,6 @@ pub fn create_mergeable_queue() -> (MergeableQueueSender, MergeableQueueReceiver
 }
 
 impl MergeableQueueSender {
-    pub fn close(&self) {
-        self.inner.closed.store(true, Ordering::Relaxed);
-        self.inner.notify.notify_waiters();
-    }
-
     pub fn enqueue(&self, repo: GithubRepoName, pr_number: PullRequestNumber) {
         let expiration = Some(Instant::now() + BASE_DELAY);
 
@@ -162,6 +157,17 @@ impl MergeableQueueSender {
     }
 }
 
+impl Drop for MergeableQueueSender {
+    fn drop(&mut self) {
+        // Count is 2 if this is the last sender (this sender + receiver)
+        if Arc::strong_count(&self.inner) == 2 {
+            self.inner.closed.store(true, Ordering::Relaxed);
+            // Notify the receiver in case it's waiting.
+            self.inner.notify.notify_one();
+        }
+    }
+}
+
 impl MergeableQueueReceiver {
     fn peek_inner(&self) -> Result<MergeableQueueItem, Option<Duration>> {
         let now = Instant::now();
@@ -197,7 +203,7 @@ impl MergeableQueueReceiver {
         }
     }
 
-    pub async fn dequeue(&self) -> Option<MergeableQueueItem> {
+    pub async fn dequeue(&self) -> Option<(MergeableQueueItem, MergeableQueueSender)> {
         loop {
             // Closed and empty queue, we're done.
             if self.inner.closed.load(Ordering::Relaxed)
@@ -208,7 +214,14 @@ impl MergeableQueueReceiver {
 
             match self.peek_inner() {
                 // Item is ready.
-                Ok(item) => break Some(item),
+                Ok(item) => {
+                    break Some((
+                        item,
+                        MergeableQueueSender {
+                            inner: self.inner.clone(),
+                        },
+                    ));
+                }
                 // Item exists but not ready, wait until then or until notified of a higher priority item.
                 Err(Some(duration)) => {
                     let _ = timeout(duration, self.inner.notify.notified()).await;

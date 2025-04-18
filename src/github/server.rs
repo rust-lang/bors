@@ -87,7 +87,6 @@ pub async fn github_webhook_handler(
 pub struct BorsProcess {
     pub repository_tx: mpsc::Sender<BorsRepositoryEvent>,
     pub global_tx: mpsc::Sender<BorsGlobalEvent>,
-    pub mergeable_queue_tx: MergeableQueueSender,
     pub bors_process: Pin<Box<dyn Future<Output = ()> + Send>>,
 }
 
@@ -102,8 +101,6 @@ pub fn create_bors_process(
     let (global_tx, global_rx) = mpsc::channel::<BorsGlobalEvent>(1024);
     let (mergeable_queue_tx, mergeable_queue_rx) = create_mergeable_queue();
 
-    let mq_tx = mergeable_queue_tx.clone();
-
     let service = async move {
         let ctx = Arc::new(ctx);
 
@@ -114,9 +111,9 @@ pub fn create_bors_process(
         #[cfg(test)]
         {
             tokio::join!(
-                consume_repository_events(ctx.clone(), repository_rx, mq_tx.clone()),
+                consume_repository_events(ctx.clone(), repository_rx, mergeable_queue_tx),
                 consume_global_events(ctx.clone(), global_rx, gh_client, team_api),
-                consume_mergeable_queue(ctx, mq_tx, mergeable_queue_rx)
+                consume_mergeable_queue(ctx, mergeable_queue_rx)
             );
         }
         // In real execution, the bot runs forever. If there is something that finishes
@@ -125,13 +122,13 @@ pub fn create_bors_process(
         #[cfg(not(test))]
         {
             tokio::select! {
-                _ = consume_repository_events(ctx.clone(), repository_rx, mq_tx.clone()) => {
+                _ = consume_repository_events(ctx.clone(), repository_rx, mergeable_queue_tx) => {
                     tracing::error!("Repository event handling process has ended");
                 }
                 _ = consume_global_events(ctx.clone(), global_rx, gh_client, team_api) => {
                     tracing::error!("Global event handling process has ended");
                 }
-                _ = consume_mergeable_queue(ctx, mq_tx, mergeable_queue_rx) => {
+                _ = consume_mergeable_queue(ctx, mergeable_queue_rx) => {
                     tracing::error!("Mergeable queue handling process has ended")
                 }
             }
@@ -141,7 +138,6 @@ pub fn create_bors_process(
     BorsProcess {
         repository_tx,
         global_tx,
-        mergeable_queue_tx,
         bors_process: Box::pin(service),
     }
 }
@@ -188,16 +184,14 @@ async fn consume_global_events(
 
 async fn consume_mergeable_queue(
     ctx: Arc<BorsContext>,
-    mergeable_queue_tx: MergeableQueueSender,
     mergeable_queue_rx: MergeableQueueReceiver,
 ) {
-    while let Some(mq_item) = mergeable_queue_rx.dequeue().await {
+    while let Some((mq_item, mq_tx)) = mergeable_queue_rx.dequeue().await {
         let ctx = ctx.clone();
-        let mergeable_queue_tx = mergeable_queue_tx.clone();
 
         let span = tracing::info_span!("MergeableQueue");
         tracing::debug!("Received mergeable queue item: {}", mq_item.pull_request);
-        if let Err(error) = handle_mergeable_queue_item(ctx, mergeable_queue_tx, mq_item)
+        if let Err(error) = handle_mergeable_queue_item(ctx, mq_tx, mq_item)
             .instrument(span.clone())
             .await
         {

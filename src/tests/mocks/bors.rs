@@ -12,7 +12,6 @@ use tokio::sync::mpsc::Sender;
 use tokio::task::JoinHandle;
 use tower::Service;
 
-use crate::bors::mergeable_queue::MergeableQueueSender;
 use crate::bors::{RollupMode, WAIT_FOR_REFRESH};
 use crate::database::{BuildStatus, DelegatedPermission, PullRequestModel};
 use crate::github::api::load_repositories;
@@ -99,7 +98,6 @@ pub struct BorsTester {
     http_mock: ExternalHttpMock,
     github: GitHubState,
     db: Arc<PgDbClient>,
-    mergeable_queue_tx: MergeableQueueSender,
     // Sender for bors global events
     global_tx: Sender<BorsGlobalEvent>,
 }
@@ -123,7 +121,6 @@ impl BorsTester {
         let BorsProcess {
             repository_tx,
             global_tx,
-            mergeable_queue_tx,
             bors_process,
         } = create_bors_process(ctx, mock.github_client(), mock.team_api_client());
 
@@ -140,7 +137,6 @@ impl BorsTester {
                 http_mock: mock,
                 github,
                 db,
-                mergeable_queue_tx,
                 global_tx,
             },
             bors,
@@ -631,7 +627,6 @@ impl BorsTester {
     async fn finish(self, bors: JoinHandle<()>) -> GitHubState {
         // Make sure that the event channel senders are closed
         drop(self.app);
-        self.mergeable_queue_tx.close();
         drop(self.global_tx);
         // Wait until all events are handled in the bors service
         bors.await.unwrap();
