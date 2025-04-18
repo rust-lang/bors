@@ -468,7 +468,11 @@ mod tests {
             tester
                 .edit_pr(default_repo_name(), default_pr_number(), |pr| {
                     pr.base_branch = branch;
+                    pr.mergeable_state = OctocrabMergeableState::Unknown;
                 })
+                .await?;
+            tester
+                .wait_for_default_pr(|pr| pr.mergeable_state == MergeableState::Unknown)
                 .await?;
             tester
                 .default_repo()
@@ -476,9 +480,7 @@ mod tests {
                 .get_pr_mut(default_pr_number())
                 .mergeable_state = OctocrabMergeableState::Dirty;
             tester
-                .wait_for_default_pr(|pr| {
-                    pr.base_branch == "beta" && pr.mergeable_state == MergeableState::HasConflicts
-                })
+                .wait_for_default_pr(|pr| pr.mergeable_state == MergeableState::HasConflicts)
                 .await?;
             Ok(tester)
         })
