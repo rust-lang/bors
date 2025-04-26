@@ -440,7 +440,6 @@ mod tests {
         .await;
     }
 
-    #[tracing_test::traced_test]
     #[sqlx::test]
     async fn open_and_merge_pr(pool: sqlx::PgPool) {
         run_test(pool, |mut tester| async {

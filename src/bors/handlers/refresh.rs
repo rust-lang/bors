@@ -20,7 +20,6 @@ pub async fn refresh_repository(
     mergeable_queue_tx: MergeableQueueSender,
 ) -> anyhow::Result<()> {
     let repo = repo.as_ref();
-
     let results = join_all([
         cancel_timed_out_builds(repo, db.as_ref()).boxed(),
         reload_permission(repo, team_api_client).boxed(),
