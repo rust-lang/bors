@@ -225,6 +225,46 @@ pub(crate) async fn update_pr_mergeable_state(
     .await
 }
 
+pub(crate) async fn get_prs_with_unknown_mergeable_state(
+    executor: impl PgExecutor<'_>,
+    repo: &GithubRepoName,
+) -> anyhow::Result<Vec<PullRequestModel>> {
+    measure_db_query("get_prs_with_unknown_mergeable_state", || async {
+        let records = sqlx::query_as!(
+            PullRequestModel,
+            r#"
+            SELECT
+                pr.id,
+                pr.repository as "repository: GithubRepoName",
+                pr.number as "number!: i64",
+                (
+                    pr.approved_by,
+                    pr.approved_sha
+                ) AS "approval_status!: ApprovalStatus",
+                pr.status as "pr_status: PullRequestStatus",
+                pr.priority,
+                pr.rollup as "rollup: RollupMode",
+                pr.delegated_permission as "delegated_permission: DelegatedPermission",
+                pr.base_branch,
+                pr.mergeable_state as "mergeable_state: MergeableState",
+                pr.created_at as "created_at: DateTime<Utc>",
+                build AS "try_build: BuildModel"
+            FROM pull_request as pr
+            LEFT JOIN build ON pr.build_id = build.id
+            WHERE pr.repository = $1
+              AND pr.mergeable_state = 'unknown'
+              AND pr.status IN ('open', 'draft')
+            "#,
+            repo as &GithubRepoName
+        )
+        .fetch_all(executor)
+        .await?;
+
+        Ok(records)
+    })
+    .await
+}
+
 pub(crate) async fn update_mergeable_states_by_base_branch(
     executor: impl PgExecutor<'_>,
     repo: &GithubRepoName,

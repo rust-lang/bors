@@ -219,6 +219,7 @@ pub async fn handle_bors_global_event(
     ctx: Arc<BorsContext>,
     gh_client: &Octocrab,
     team_api_client: &TeamApiClient,
+    mergeable_queue_tx: MergeableQueueSender,
 ) -> anyhow::Result<()> {
     let db = Arc::clone(&ctx.db);
     match event {
@@ -234,9 +235,10 @@ pub async fn handle_bors_global_event(
                 ctx.repositories.read().unwrap().values().cloned().collect();
             futures::future::join_all(repos.into_iter().map(|repo| {
                 let repo = Arc::clone(&repo);
+                let mergeable_queue_tx = mergeable_queue_tx.clone();
                 async {
                     let subspan = tracing::info_span!("Repo", repo = repo.repository().to_string());
-                    refresh_repository(repo, Arc::clone(&db), team_api_client)
+                    refresh_repository(repo, Arc::clone(&db), team_api_client, mergeable_queue_tx)
                         .instrument(subspan)
                         .await
                 }
