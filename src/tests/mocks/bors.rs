@@ -14,7 +14,7 @@ use tower::Service;
 
 use crate::bors::mergeable_queue::MergeableQueueSender;
 use crate::bors::{RollupMode, WAIT_FOR_REFRESH};
-use crate::database::{BuildStatus, DelegatedPermission, PullRequestModel};
+use crate::database::{BuildStatus, DelegatedPermission, OctocrabMergeableState, PullRequestModel};
 use crate::github::api::load_repositories;
 use crate::github::server::BorsProcess;
 use crate::github::{GithubRepoName, PullRequestNumber};
@@ -510,6 +510,7 @@ impl BorsTester {
                 .get_mut(&pr_number)
                 .expect("PR must be initialized before pushing to it");
             pr.head_sha = format!("pr-{pr_number}-commit-{counter}");
+            pr.mergeable_state = OctocrabMergeableState::Unknown;
             pr.clone()
         };
 

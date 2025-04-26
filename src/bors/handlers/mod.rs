@@ -140,7 +140,7 @@ pub async fn handle_bors_repository_event(
             let span =
                 tracing::info_span!("Pull request pushed", repo = payload.repository.to_string());
 
-            handle_push_to_pull_request(repo, db, payload)
+            handle_push_to_pull_request(repo, db, mergeable_queue_tx, payload)
                 .instrument(span.clone())
                 .await?;
         }
@@ -148,7 +148,7 @@ pub async fn handle_bors_repository_event(
             let span =
                 tracing::info_span!("Pull request opened", repo = payload.repository.to_string());
 
-            handle_pull_request_opened(repo, db, payload)
+            handle_pull_request_opened(repo, db, mergeable_queue_tx, payload)
                 .instrument(span.clone())
                 .await?;
         }
@@ -174,7 +174,7 @@ pub async fn handle_bors_repository_event(
                 repo = payload.repository.to_string()
             );
 
-            handle_pull_request_reopened(repo, db, payload)
+            handle_pull_request_reopened(repo, db, mergeable_queue_tx, payload)
                 .instrument(span.clone())
                 .await?;
         }
@@ -503,7 +503,7 @@ async fn has_permission(
     }
 
     let pr_model = db
-        .get_or_create_pull_request(
+        .upsert_pull_request(
             repo_state.repository(),
             pr.number,
             &pr.base.name,
