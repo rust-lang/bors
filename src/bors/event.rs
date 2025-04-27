@@ -67,6 +67,8 @@ pub enum BorsGlobalEvent {
     CancelTimedOutBuilds,
     /// Refresh mergeability status of PRs that have unknown mergeability status.
     RefreshPullRequestMergeability,
+    /// Periodic event that serves for synchronizing PR state.
+    RefreshPullRequestState,
 }
 
 #[derive(Debug)]

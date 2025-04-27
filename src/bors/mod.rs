@@ -30,6 +30,9 @@ pub static WAIT_FOR_CANCEL_TIMED_OUT_BUILDS_REFRESH: TestSyncMarker = TestSyncMa
 #[cfg(test)]
 pub static WAIT_FOR_MERGEABILITY_STATUS_REFRESH: TestSyncMarker = TestSyncMarker::new();
 
+#[cfg(test)]
+pub static WAIT_FOR_PR_STATUS_REFRESH: TestSyncMarker = TestSyncMarker::new();
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CheckSuiteStatus {
     Pending,
@@ -59,7 +62,7 @@ impl RepositoryState {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
 pub enum PullRequestStatus {
     Closed,
     Draft,

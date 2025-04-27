@@ -25,7 +25,7 @@ use crate::tests::mocks::{GitHubState, TestWorkflowStatus, default_pr_number, dy
 
 use super::user::{GitHubUser, User};
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct PullRequest {
     pub number: PullRequestNumber,
     pub repo: GithubRepoName,
@@ -38,6 +38,7 @@ pub struct PullRequest {
     pub mergeable_state: MergeableState,
     pub status: PullRequestStatus,
     pub merged_at: Option<DateTime<Utc>>,
+    pub closed_at: Option<DateTime<Utc>>,
 }
 
 impl PullRequest {
@@ -58,6 +59,7 @@ impl PullRequest {
                 PullRequestStatus::Open
             },
             merged_at: None,
+            closed_at: None,
         }
     }
 }
@@ -101,6 +103,25 @@ impl PullRequest {
 
     pub fn merge_pr(&mut self) {
         self.merged_at = Some(SystemTime::now().into());
+        self.status = PullRequestStatus::Merged;
+    }
+
+    pub fn close_pr(&mut self) {
+        self.closed_at = Some(SystemTime::now().into());
+        self.status = PullRequestStatus::Closed;
+    }
+
+    pub fn reopen_pr(&mut self) {
+        self.closed_at = None;
+        self.status = PullRequestStatus::Open;
+    }
+
+    pub fn ready_for_review(&mut self) {
+        self.status = PullRequestStatus::Open;
+    }
+
+    pub fn convert_to_draft(&mut self) {
+        self.status = PullRequestStatus::Draft;
     }
 }
 
@@ -206,7 +227,7 @@ pub fn default_repo_name() -> GithubRepoName {
     GithubRepoName::new("rust-lang", "borstest")
 }
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Branch {
     name: String,
     sha: String,

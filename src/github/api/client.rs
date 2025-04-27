@@ -11,6 +11,7 @@ use crate::github::api::base_github_html_url;
 use crate::github::api::operations::{MergeError, merge_branches, set_branch_to_commit};
 use crate::github::{CommitSha, GithubRepoName, PullRequest, PullRequestNumber};
 use crate::utils::timing::{measure_network_request, perform_network_request_with_retry};
+use futures::TryStreamExt;
 
 /// Provides access to a single app installation (repository) using the GitHub API.
 pub struct GithubRepositoryClient {
@@ -317,6 +318,28 @@ impl GithubRepositoryClient {
         run_ids: impl Iterator<Item = RunId> + 'a,
     ) -> impl Iterator<Item = String> + 'a {
         run_ids.map(|workflow_id| self.get_workflow_url(workflow_id))
+    }
+
+    pub async fn fetch_nonclosed_pull_requests(&self) -> anyhow::Result<Vec<PullRequest>> {
+        let stream = self
+            .client
+            .pulls(self.repo_name.owner(), self.repo_name.name())
+            .list()
+            .state(octocrab::params::State::Open)
+            .per_page(100)
+            .send()
+            .await
+            .map_err(|error| {
+                anyhow::anyhow!("Could not fetch PRs from {}: {error:?}", self.repo_name)
+            })?
+            .into_stream(&self.client);
+
+        let mut stream = std::pin::pin!(stream);
+        let mut prs = Vec::new();
+        while let Some(pr) = stream.try_next().await? {
+            prs.push(pr.into());
+        }
+        Ok(prs)
     }
 
     fn format_pr(&self, pr: PullRequestNumber) -> String {
