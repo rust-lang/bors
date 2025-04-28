@@ -94,7 +94,7 @@ impl PgDbClient {
         get_pull_request(&self.pool, repo, pr_number).await
     }
 
-    pub async fn get_or_create_pull_request(
+    pub async fn upsert_pull_request(
         &self,
         repo: &GithubRepoName,
         pr_number: PullRequestNumber,

@@ -41,7 +41,7 @@ pub(super) async fn command_approve(
         sha: pr.head.sha.to_string(),
     };
     let pr_model = db
-        .get_or_create_pull_request(
+        .upsert_pull_request(
             repo_state.repository(),
             pr.number,
             &pr.base.name,
@@ -70,7 +70,7 @@ pub(super) async fn command_unapprove(
         return Ok(());
     };
     let pr_model = db
-        .get_or_create_pull_request(
+        .upsert_pull_request(
             repo_state.repository(),
             pr.number,
             &pr.base.name,
@@ -98,7 +98,7 @@ pub(super) async fn command_set_priority(
         return Ok(());
     };
     let pr_model = db
-        .get_or_create_pull_request(
+        .upsert_pull_request(
             repo_state.repository(),
             pr.number,
             &pr.base.name,
@@ -129,7 +129,7 @@ pub(super) async fn command_delegate(
     }
 
     let pr_model = db
-        .get_or_create_pull_request(
+        .upsert_pull_request(
             repo_state.repository(),
             pr.number,
             &pr.base.name,
@@ -155,7 +155,7 @@ pub(super) async fn command_undelegate(
         return Ok(());
     }
     let pr_model = db
-        .get_or_create_pull_request(
+        .upsert_pull_request(
             repo_state.repository(),
             pr.number,
             &pr.base.name,
@@ -181,7 +181,7 @@ pub(super) async fn command_set_rollup(
         return Ok(());
     }
     let pr_model = db
-        .get_or_create_pull_request(
+        .upsert_pull_request(
             repo_state.repository(),
             pr.number,
             &pr.base.name,

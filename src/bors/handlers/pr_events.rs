@@ -20,7 +20,7 @@ pub(super) async fn handle_pull_request_edited(
     let pr = &payload.pull_request;
     let pr_number = pr.number;
     let pr_model = db
-        .get_or_create_pull_request(
+        .upsert_pull_request(
             repo_state.repository(),
             pr_number,
             &pr.base.name,
@@ -48,12 +48,13 @@ pub(super) async fn handle_pull_request_edited(
 pub(super) async fn handle_push_to_pull_request(
     repo_state: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
+    mergeable_queue: MergeableQueueSender,
     payload: PullRequestPushed,
 ) -> anyhow::Result<()> {
     let pr = &payload.pull_request;
     let pr_number = pr.number;
     let pr_model = db
-        .get_or_create_pull_request(
+        .upsert_pull_request(
             repo_state.repository(),
             pr_number,
             &pr.base.name,
@@ -61,6 +62,8 @@ pub(super) async fn handle_push_to_pull_request(
             &pr.status,
         )
         .await?;
+
+    mergeable_queue.enqueue(repo_state.repository().clone(), pr_number);
 
     if !pr_model.is_approved() {
         return Ok(());
@@ -74,6 +77,7 @@ pub(super) async fn handle_push_to_pull_request(
 pub(super) async fn handle_pull_request_opened(
     repo_state: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
+    mergeable_queue: MergeableQueueSender,
     payload: PullRequestOpened,
 ) -> anyhow::Result<()> {
     let pr_status = if payload.draft {
@@ -87,7 +91,11 @@ pub(super) async fn handle_pull_request_opened(
         &payload.pull_request.base.name,
         pr_status,
     )
-    .await
+    .await?;
+
+    mergeable_queue.enqueue(repo_state.repository().clone(), payload.pull_request.number);
+
+    Ok(())
 }
 
 pub(super) async fn handle_pull_request_closed(
@@ -119,14 +127,23 @@ pub(super) async fn handle_pull_request_merged(
 pub(super) async fn handle_pull_request_reopened(
     repo_state: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
+    mergeable_queue: MergeableQueueSender,
     payload: PullRequestReopened,
 ) -> anyhow::Result<()> {
-    db.set_pr_status(
+    let pr = &payload.pull_request;
+    let pr_number = pr.number;
+    db.upsert_pull_request(
         repo_state.repository(),
-        payload.pull_request.number,
-        PullRequestStatus::Open,
+        pr_number,
+        &pr.base.name,
+        pr.mergeable_state.clone().into(),
+        &pr.status,
     )
-    .await
+    .await?;
+
+    mergeable_queue.enqueue(repo_state.repository().clone(), pr_number);
+
+    Ok(())
 }
 
 pub(super) async fn handle_pull_request_converted_to_draft(
@@ -491,6 +508,75 @@ mod tests {
         run_test(pool, |mut tester| async {
             tester.open_pr(default_repo_name(), false).await?;
             tester.push_to_branch(default_branch_name()).await?;
+            tester
+                .wait_for_default_pr(|pr| pr.mergeable_state == MergeableState::Unknown)
+                .await?;
+            tester
+                .default_repo()
+                .lock()
+                .get_pr_mut(default_pr_number())
+                .mergeable_state = OctocrabMergeableState::Dirty;
+            tester
+                .wait_for_default_pr(|pr| pr.mergeable_state == MergeableState::HasConflicts)
+                .await?;
+            Ok(tester)
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn enqueue_prs_on_pr_opened(pool: sqlx::PgPool) {
+        run_test(pool, |mut tester| async {
+            tester.open_pr(default_repo_name(), false).await?;
+            tester
+                .wait_for_default_pr(|pr| pr.mergeable_state == MergeableState::Unknown)
+                .await?;
+            tester
+                .default_repo()
+                .lock()
+                .get_pr_mut(default_pr_number())
+                .mergeable_state = OctocrabMergeableState::Dirty;
+            tester
+                .wait_for_default_pr(|pr| pr.mergeable_state == MergeableState::HasConflicts)
+                .await?;
+            Ok(tester)
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn enqueue_prs_on_pr_reopened(pool: sqlx::PgPool) {
+        run_test(pool, |mut tester| async {
+            tester
+                .default_repo()
+                .lock()
+                .get_pr_mut(default_pr_number())
+                .mergeable_state = OctocrabMergeableState::Unknown;
+            tester
+                .reopen_pr(default_repo_name(), default_pr_number())
+                .await?;
+            tester
+                .wait_for_default_pr(|pr| pr.mergeable_state == MergeableState::Unknown)
+                .await?;
+            tester
+                .default_repo()
+                .lock()
+                .get_pr_mut(default_pr_number())
+                .mergeable_state = OctocrabMergeableState::Dirty;
+            tester
+                .wait_for_default_pr(|pr| pr.mergeable_state == MergeableState::HasConflicts)
+                .await?;
+            Ok(tester)
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn enqueue_prs_on_push_to_pr(pool: sqlx::PgPool) {
+        run_test(pool, |mut tester| async {
+            tester
+                .push_to_pr(default_repo_name(), default_pr_number())
+                .await?;
             tester
                 .wait_for_default_pr(|pr| pr.mergeable_state == MergeableState::Unknown)
                 .await?;

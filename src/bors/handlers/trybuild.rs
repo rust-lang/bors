@@ -56,7 +56,7 @@ pub(super) async fn command_try_build(
     // Create pr model based on CI repo, so we can retrieve the pr later when
     // the CI repo emits events
     let pr_model = db
-        .get_or_create_pull_request(
+        .upsert_pull_request(
             repo.client.repository(),
             pr.number,
             &pr.base.name,
@@ -208,7 +208,7 @@ pub(super) async fn command_try_cancel(
 
     let pr_number: PullRequestNumber = pr.number;
     let pr = db
-        .get_or_create_pull_request(
+        .upsert_pull_request(
             repo.client.repository(),
             pr_number,
             &pr.base.name,
