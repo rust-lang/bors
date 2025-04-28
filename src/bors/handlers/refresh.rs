@@ -3,10 +3,13 @@ use std::time::Duration;
 
 use anyhow::Context;
 use chrono::{DateTime, Utc};
+use futures::FutureExt;
+use futures::future::join_all;
 
 use crate::bors::Comment;
 use crate::bors::RepositoryState;
 use crate::bors::handlers::trybuild::cancel_build_workflows;
+use crate::bors::mergeable_queue::MergeableQueueSender;
 use crate::database::BuildStatus;
 use crate::{PgDbClient, TeamApiClient};
 
@@ -14,13 +17,18 @@ pub async fn refresh_repository(
     repo: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
     team_api_client: &TeamApiClient,
+    mergeable_queue_tx: MergeableQueueSender,
 ) -> anyhow::Result<()> {
     let repo = repo.as_ref();
-    if let (Ok(_), _, Ok(_)) = tokio::join!(
-        cancel_timed_out_builds(repo, db.as_ref()),
-        reload_permission(repo, team_api_client),
-        reload_config(repo)
-    ) {
+    let results = join_all([
+        cancel_timed_out_builds(repo, db.as_ref()).boxed(),
+        reload_permission(repo, team_api_client).boxed(),
+        reload_config(repo).boxed(),
+        reload_unknown_mergeable_prs(repo, db.as_ref(), mergeable_queue_tx).boxed(),
+    ])
+    .await;
+
+    if results.iter().all(|result| result.is_ok()) {
         Ok(())
     } else {
         tracing::error!("Failed to refresh repository");
@@ -79,6 +87,27 @@ async fn reload_permission(
     Ok(())
 }
 
+async fn reload_unknown_mergeable_prs(
+    repo: &RepositoryState,
+    db: &PgDbClient,
+    mergeable_queue: MergeableQueueSender,
+) -> anyhow::Result<()> {
+    let prs = db
+        .get_prs_with_unknown_mergeable_state(repo.repository())
+        .await?;
+
+    tracing::info!(
+        "Refreshing {} PR(s) with unknown mergeable state",
+        prs.len()
+    );
+
+    for pr in prs {
+        mergeable_queue.enqueue(repo.repository().clone(), pr.number);
+    }
+
+    Ok(())
+}
+
 async fn reload_config(repo: &RepositoryState) -> anyhow::Result<()> {
     let config = repo.client.load_config().await?;
     repo.config.store(Arc::new(config));
@@ -109,8 +138,9 @@ fn elapsed_time(date: DateTime<Utc>) -> Duration {
 mod tests {
     use crate::bors::handlers::WAIT_FOR_WORKFLOW_STARTED;
     use crate::bors::handlers::refresh::MOCK_TIME;
+    use crate::database::{MergeableState, OctocrabMergeableState};
     use crate::tests::mocks::{
-        BorsBuilder, GitHubState, WorkflowEvent, default_repo_name, run_test,
+        BorsBuilder, GitHubState, WorkflowEvent, default_pr_number, default_repo_name, run_test,
     };
     use chrono::Utc;
     use std::future::Future;
@@ -133,6 +163,7 @@ timeout = 3600
 "#,
         )
     }
+
     #[sqlx::test]
     async fn refresh_do_nothing_before_timeout(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
@@ -205,6 +236,51 @@ timeout = 3600
             })
             .await;
         gh.check_cancelled_workflows(default_repo_name(), &[1]);
+    }
+
+    #[sqlx::test]
+    async fn refresh_enqueues_unknown_mergeable_prs(pool: sqlx::PgPool) {
+        run_test(pool, |mut tester| async {
+            tester
+                .edit_pr(default_repo_name(), default_pr_number(), |pr| {
+                    pr.mergeable_state = OctocrabMergeableState::Unknown
+                })
+                .await?;
+            tester
+                .wait_for_default_pr(|pr| pr.mergeable_state == MergeableState::Unknown)
+                .await?;
+            tester
+                .default_repo()
+                .lock()
+                .get_pr_mut(default_pr_number())
+                .mergeable_state = OctocrabMergeableState::Dirty;
+            tester.refresh().await;
+            tester
+                .wait_for_default_pr(|pr| pr.mergeable_state == MergeableState::HasConflicts)
+                .await?;
+            Ok(tester)
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn refresh_enqueues_no_known_mergeable_prs(pool: sqlx::PgPool) {
+        run_test(pool, |mut tester| async {
+            tester
+                .edit_pr(default_repo_name(), default_pr_number(), |pr| {
+                    pr.mergeable_state = OctocrabMergeableState::Clean
+                })
+                .await?;
+            tester
+                .wait_for_default_pr(|pr| pr.mergeable_state == MergeableState::Mergeable)
+                .await?;
+            tester.refresh().await;
+            tester
+                .wait_for_default_pr(|pr| pr.mergeable_state == MergeableState::Mergeable)
+                .await?;
+            Ok(tester)
+        })
+        .await;
     }
 
     async fn with_mocked_time<Fut: Future<Output = ()>>(in_future: Duration, future: Fut) {
