@@ -249,12 +249,12 @@ timeout = 3600
             tester
                 .wait_for_default_pr(|pr| pr.mergeable_state == MergeableState::Unknown)
                 .await?;
-            tester.refresh().await;
             tester
                 .default_repo()
                 .lock()
                 .get_pr_mut(default_pr_number())
                 .mergeable_state = OctocrabMergeableState::Dirty;
+            tester.refresh().await;
             tester
                 .wait_for_default_pr(|pr| pr.mergeable_state == MergeableState::HasConflicts)
                 .await?;
