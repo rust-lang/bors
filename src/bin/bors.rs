@@ -23,6 +23,9 @@ const CONFIG_REFRESH_INTERVAL: Duration = Duration::from_secs(120);
 /// How often should the bot refresh repository permissions from the team DB.
 const PERMISSIONS_REFRESH_INTERVAL: Duration = Duration::from_secs(120);
 
+/// How often should the bot attempt to time out CI builds that ran for too long.
+const CANCEL_TIMED_OUT_BUILDS_INTERVAL: Duration = Duration::from_secs(60 * 5);
+
 #[derive(clap::Parser)]
 struct Opts {
     /// Github App ID.
@@ -133,6 +136,7 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
     let refresh_process = async move {
         let mut config_refresh = make_interval(CONFIG_REFRESH_INTERVAL);
         let mut permissions_refresh = make_interval(PERMISSIONS_REFRESH_INTERVAL);
+        let mut cancel_builds_refresh = make_interval(CANCEL_TIMED_OUT_BUILDS_INTERVAL);
         loop {
             tokio::select! {
                 _ = config_refresh.tick() => {
@@ -140,6 +144,9 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
                 }
                 _ = permissions_refresh.tick() => {
                     refresh_tx.send(BorsGlobalEvent::RefreshPermissions).await?;
+                }
+                _ = cancel_builds_refresh.tick() => {
+                    refresh_tx.send(BorsGlobalEvent::CancelTimedOutBuilds).await?;
                 }
             }
         }

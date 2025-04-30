@@ -20,11 +20,9 @@ pub async fn refresh_repository(
     mergeable_queue_tx: MergeableQueueSender,
 ) -> anyhow::Result<()> {
     let repo = repo.as_ref();
-    let results = join_all([
-        cancel_timed_out_builds(repo, db.as_ref()).boxed(),
-        reload_unknown_mergeable_prs(repo, db.as_ref(), mergeable_queue_tx).boxed(),
-    ])
-    .await;
+    let results =
+        join_all([reload_unknown_mergeable_prs(repo, db.as_ref(), mergeable_queue_tx).boxed()])
+            .await;
 
     if results.iter().all(|result| result.is_ok()) {
         Ok(())
@@ -34,7 +32,11 @@ pub async fn refresh_repository(
     }
 }
 
-async fn cancel_timed_out_builds(repo: &RepositoryState, db: &PgDbClient) -> anyhow::Result<()> {
+/// Cancel CI builds that have been running for too long
+pub async fn cancel_timed_out_builds(
+    repo: Arc<RepositoryState>,
+    db: &PgDbClient,
+) -> anyhow::Result<()> {
     let running_builds = db.get_running_builds(repo.repository()).await?;
     tracing::info!("Found {} running build(s)", running_builds.len());
 

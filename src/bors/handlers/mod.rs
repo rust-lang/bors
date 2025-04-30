@@ -5,7 +5,9 @@ use crate::bors::event::{BorsGlobalEvent, BorsRepositoryEvent, PullRequestCommen
 use crate::bors::handlers::help::command_help;
 use crate::bors::handlers::info::command_info;
 use crate::bors::handlers::ping::command_ping;
-use crate::bors::handlers::refresh::{reload_repository_config, reload_repository_permissions};
+use crate::bors::handlers::refresh::{
+    cancel_timed_out_builds, reload_repository_config, reload_repository_permissions,
+};
 use crate::bors::handlers::review::{
     command_approve, command_close_tree, command_open_tree, command_unapprove,
 };
@@ -258,7 +260,22 @@ pub async fn handle_bors_global_event(
             .into_iter()
             .collect::<anyhow::Result<Vec<_>>>()?;
         }
-        BorsGlobalEvent::CancelTimedOutBuilds => {}
+        BorsGlobalEvent::CancelTimedOutBuilds => {
+            let span = tracing::info_span!("Cancel timed out builds of repositories");
+            let repos: Vec<Arc<RepositoryState>> =
+                ctx.repositories.read().unwrap().values().cloned().collect();
+            futures::future::join_all(repos.into_iter().map(|repo| {
+                let span = tracing::info_span!(
+                    "Cancel timed out builds",
+                    repo = repo.repository().to_string()
+                );
+                cancel_timed_out_builds(repo, &db).instrument(span)
+            }))
+            .instrument(span)
+            .await
+            .into_iter()
+            .collect::<anyhow::Result<Vec<_>>>()?;
+        }
     }
     Ok(())
 }
