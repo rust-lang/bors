@@ -238,7 +238,9 @@ pub async fn handle_bors_global_event(
                 reload_repository_config(repo).instrument(span)
             }))
             .instrument(span)
-            .await;
+            .await
+            .into_iter()
+            .collect::<anyhow::Result<Vec<_>>>()?;
         }
         BorsGlobalEvent::RefreshPermissions => {
             let span = tracing::info_span!("Refresh permissions of repositories");
@@ -252,7 +254,9 @@ pub async fn handle_bors_global_event(
                 reload_repository_permissions(repo, team_api_client).instrument(span)
             }))
             .instrument(span)
-            .await;
+            .await
+            .into_iter()
+            .collect::<anyhow::Result<Vec<_>>>()?;
         }
         BorsGlobalEvent::CancelTimedOutBuilds => {}
     }
