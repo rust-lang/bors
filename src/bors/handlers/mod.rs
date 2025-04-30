@@ -5,7 +5,10 @@ use crate::bors::event::{BorsGlobalEvent, BorsRepositoryEvent, PullRequestCommen
 use crate::bors::handlers::help::command_help;
 use crate::bors::handlers::info::command_info;
 use crate::bors::handlers::ping::command_ping;
-use crate::bors::handlers::refresh::refresh_repository;
+use crate::bors::handlers::refresh::{
+    cancel_timed_out_builds, reload_repository_config, reload_repository_permissions,
+    reload_unknown_mergeable_prs,
+};
 use crate::bors::handlers::review::{
     command_approve, command_close_tree, command_open_tree, command_unapprove,
 };
@@ -210,9 +213,6 @@ pub async fn handle_bors_repository_event(
     Ok(())
 }
 
-#[cfg(test)]
-pub static WAIT_FOR_REFRESH: TestSyncMarker = TestSyncMarker::new();
-
 /// This function executes a single BORS global event
 pub async fn handle_bors_global_event(
     event: BorsGlobalEvent,
@@ -229,27 +229,76 @@ pub async fn handle_bors_global_event(
                 .instrument(span)
                 .await?;
         }
-        BorsGlobalEvent::Refresh => {
-            let span = tracing::info_span!("Refresh");
-            let repos: Vec<Arc<RepositoryState>> =
-                ctx.repositories.read().unwrap().values().cloned().collect();
-            futures::future::join_all(repos.into_iter().map(|repo| {
-                let repo = Arc::clone(&repo);
-                let mergeable_queue_tx = mergeable_queue_tx.clone();
-                async {
-                    let subspan = tracing::info_span!("Repo", repo = repo.repository().to_string());
-                    refresh_repository(repo, Arc::clone(&db), team_api_client, mergeable_queue_tx)
-                        .instrument(subspan)
-                        .await
-                }
-            }))
+        BorsGlobalEvent::RefreshConfig => {
+            let span = tracing::info_span!("Refresh configuration of repositories");
+            for_each_repo(&ctx, |repo| {
+                let span = tracing::info_span!(
+                    "Refresh configuration",
+                    repo = repo.repository().to_string()
+                );
+                reload_repository_config(repo).instrument(span)
+            })
             .instrument(span)
-            .await;
+            .await?;
+        }
+        BorsGlobalEvent::RefreshPermissions => {
+            let span = tracing::info_span!("Refresh permissions of repositories");
+            for_each_repo(&ctx, |repo| {
+                let span = tracing::info_span!(
+                    "Refresh permissions",
+                    repo = repo.repository().to_string()
+                );
+                reload_repository_permissions(repo, team_api_client).instrument(span)
+            })
+            .instrument(span)
+            .await?;
+        }
+        BorsGlobalEvent::CancelTimedOutBuilds => {
+            let span = tracing::info_span!("Cancel timed out builds of repositories");
+            for_each_repo(&ctx, |repo| {
+                let span = tracing::info_span!(
+                    "Cancel timed out builds",
+                    repo = repo.repository().to_string()
+                );
+                cancel_timed_out_builds(repo, &db).instrument(span)
+            })
+            .instrument(span)
+            .await?;
 
             #[cfg(test)]
-            WAIT_FOR_REFRESH.mark();
+            crate::bors::WAIT_FOR_CANCEL_TIMED_OUT_BUILDS_REFRESH.mark();
+        }
+        BorsGlobalEvent::RefreshPullRequestMergeability => {
+            let span = tracing::info_span!("Refresh PR mergeability status of repositories");
+            for_each_repo(&ctx, |repo| {
+                let span = tracing::info_span!(
+                    "Refresh PR mergeability status",
+                    repo = repo.repository().to_string()
+                );
+                reload_unknown_mergeable_prs(repo, &db, mergeable_queue_tx.clone()).instrument(span)
+            })
+            .instrument(span)
+            .await?;
+
+            #[cfg(test)]
+            crate::bors::WAIT_FOR_MERGEABILITY_STATUS_REFRESH.mark();
         }
     }
+    Ok(())
+}
+
+/// Perform an asynchronous operation created by `make_fut` for each repository in parallel.
+async fn for_each_repo<MakeFut, Fut>(ctx: &BorsContext, make_fut: MakeFut) -> anyhow::Result<()>
+where
+    MakeFut: Fn(Arc<RepositoryState>) -> Fut,
+    Fut: Future<Output = anyhow::Result<()>>,
+{
+    let repos: Vec<Arc<RepositoryState>> =
+        ctx.repositories.read().unwrap().values().cloned().collect();
+    futures::future::join_all(repos.into_iter().map(make_fut))
+        .await
+        .into_iter()
+        .collect::<anyhow::Result<Vec<_>>>()?;
     Ok(())
 }
 

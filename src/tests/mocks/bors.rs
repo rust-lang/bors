@@ -13,7 +13,9 @@ use tokio::task::JoinHandle;
 use tower::Service;
 
 use crate::bors::mergeable_queue::MergeableQueueSender;
-use crate::bors::{RollupMode, WAIT_FOR_REFRESH};
+use crate::bors::{
+    RollupMode, WAIT_FOR_CANCEL_TIMED_OUT_BUILDS_REFRESH, WAIT_FOR_MERGEABILITY_STATUS_REFRESH,
+};
 use crate::database::{BuildStatus, DelegatedPermission, OctocrabMergeableState, PullRequestModel};
 use crate::github::api::load_repositories;
 use crate::github::server::BorsProcess;
@@ -266,10 +268,22 @@ impl BorsTester {
         self.webhook_comment(comment.into()).await
     }
 
-    pub async fn refresh(&self) {
-        self.global_tx.send(BorsGlobalEvent::Refresh).await.unwrap();
+    pub async fn cancel_timed_out_builds(&self) {
+        self.global_tx
+            .send(BorsGlobalEvent::CancelTimedOutBuilds)
+            .await
+            .unwrap();
         // Wait until the refresh is fully handled
-        WAIT_FOR_REFRESH.sync().await;
+        WAIT_FOR_CANCEL_TIMED_OUT_BUILDS_REFRESH.sync().await;
+    }
+
+    pub async fn update_mergeability_status(&self) {
+        self.global_tx
+            .send(BorsGlobalEvent::RefreshPullRequestMergeability)
+            .await
+            .unwrap();
+        // Wait until the refresh is fully handled
+        WAIT_FOR_MERGEABILITY_STATUS_REFRESH.sync().await;
     }
 
     /// Performs a single started/success/failure workflow event.

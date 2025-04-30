@@ -13,11 +13,21 @@ use bors::{
 use clap::Parser;
 use sqlx::postgres::PgConnectOptions;
 use sqlx::{ConnectOptions, PgPool};
+use tokio::time::Interval;
 use tracing::log::LevelFilter;
 use tracing_subscriber::filter::EnvFilter;
 
-/// How often should the bot check DB state, e.g. for handling timeouts.
-const PERIODIC_REFRESH: Duration = Duration::from_secs(120);
+/// How often should the bot refresh repository configurations from GitHub.
+const CONFIG_REFRESH_INTERVAL: Duration = Duration::from_secs(120);
+
+/// How often should the bot refresh repository permissions from the team DB.
+const PERMISSIONS_REFRESH_INTERVAL: Duration = Duration::from_secs(120);
+
+/// How often should the bot attempt to time out CI builds that ran for too long.
+const CANCEL_TIMED_OUT_BUILDS_INTERVAL: Duration = Duration::from_secs(60 * 5);
+
+/// How often should the bot reload the mergeability status of PRs?
+const MERGEABILITY_STATUS_INTERVAL: Duration = Duration::from_secs(60 * 10);
 
 #[derive(clap::Parser)]
 struct Opts {
@@ -118,10 +128,34 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
     } = create_bors_process(ctx, client, team_api);
 
     let refresh_tx = global_tx.clone();
+
+    fn make_interval(interval: Duration) -> Interval {
+        let mut interval = tokio::time::interval(interval);
+        // Do not immediately trigger the interval
+        interval.reset();
+        interval
+    }
+
     let refresh_process = async move {
+        let mut config_refresh = make_interval(CONFIG_REFRESH_INTERVAL);
+        let mut permissions_refresh = make_interval(PERMISSIONS_REFRESH_INTERVAL);
+        let mut cancel_builds_refresh = make_interval(CANCEL_TIMED_OUT_BUILDS_INTERVAL);
+        let mut mergeability_status_refresh = make_interval(MERGEABILITY_STATUS_INTERVAL);
         loop {
-            tokio::time::sleep(PERIODIC_REFRESH).await;
-            refresh_tx.send(BorsGlobalEvent::Refresh).await?;
+            tokio::select! {
+                _ = config_refresh.tick() => {
+                    refresh_tx.send(BorsGlobalEvent::RefreshConfig).await?;
+                }
+                _ = permissions_refresh.tick() => {
+                    refresh_tx.send(BorsGlobalEvent::RefreshPermissions).await?;
+                }
+                _ = cancel_builds_refresh.tick() => {
+                    refresh_tx.send(BorsGlobalEvent::CancelTimedOutBuilds).await?;
+                }
+                _ = mergeability_status_refresh.tick() => {
+                    refresh_tx.send(BorsGlobalEvent::RefreshPullRequestMergeability).await?;
+                }
+            }
         }
     };
 

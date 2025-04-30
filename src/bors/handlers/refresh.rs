@@ -3,8 +3,6 @@ use std::time::Duration;
 
 use anyhow::Context;
 use chrono::{DateTime, Utc};
-use futures::FutureExt;
-use futures::future::join_all;
 
 use crate::bors::Comment;
 use crate::bors::RepositoryState;
@@ -13,30 +11,11 @@ use crate::bors::mergeable_queue::MergeableQueueSender;
 use crate::database::BuildStatus;
 use crate::{PgDbClient, TeamApiClient};
 
-pub async fn refresh_repository(
+/// Cancel CI builds that have been running for too long
+pub async fn cancel_timed_out_builds(
     repo: Arc<RepositoryState>,
-    db: Arc<PgDbClient>,
-    team_api_client: &TeamApiClient,
-    mergeable_queue_tx: MergeableQueueSender,
+    db: &PgDbClient,
 ) -> anyhow::Result<()> {
-    let repo = repo.as_ref();
-    let results = join_all([
-        cancel_timed_out_builds(repo, db.as_ref()).boxed(),
-        reload_permission(repo, team_api_client).boxed(),
-        reload_config(repo).boxed(),
-        reload_unknown_mergeable_prs(repo, db.as_ref(), mergeable_queue_tx).boxed(),
-    ])
-    .await;
-
-    if results.iter().all(|result| result.is_ok()) {
-        Ok(())
-    } else {
-        tracing::error!("Failed to refresh repository");
-        anyhow::bail!("Failed to refresh repository")
-    }
-}
-
-async fn cancel_timed_out_builds(repo: &RepositoryState, db: &PgDbClient) -> anyhow::Result<()> {
     let running_builds = db.get_running_builds(repo.repository()).await?;
     tracing::info!("Found {} running build(s)", running_builds.len());
 
@@ -70,8 +49,9 @@ async fn cancel_timed_out_builds(repo: &RepositoryState, db: &PgDbClient) -> any
     Ok(())
 }
 
-async fn reload_permission(
-    repo: &RepositoryState,
+/// Reload the team DB bors permissions for the given repository.
+pub async fn reload_repository_permissions(
+    repo: Arc<RepositoryState>,
     team_api_client: &TeamApiClient,
 ) -> anyhow::Result<()> {
     let permissions = team_api_client
@@ -87,8 +67,10 @@ async fn reload_permission(
     Ok(())
 }
 
-async fn reload_unknown_mergeable_prs(
-    repo: &RepositoryState,
+/// Reloads the mergeability status from GitHub for PRs that have an unknown
+/// mergeability status in the DB.
+pub async fn reload_unknown_mergeable_prs(
+    repo: Arc<RepositoryState>,
     db: &PgDbClient,
     mergeable_queue: MergeableQueueSender,
 ) -> anyhow::Result<()> {
@@ -108,7 +90,8 @@ async fn reload_unknown_mergeable_prs(
     Ok(())
 }
 
-async fn reload_config(repo: &RepositoryState) -> anyhow::Result<()> {
+/// Reloads the bors configuration for the given repository from GitHub.
+pub async fn reload_repository_config(repo: Arc<RepositoryState>) -> anyhow::Result<()> {
     let config = repo.client.load_config().await?;
     repo.config.store(Arc::new(config));
     Ok(())
@@ -150,7 +133,7 @@ mod tests {
     #[sqlx::test]
     async fn refresh_no_builds(pool: sqlx::PgPool) {
         run_test(pool, |tester| async move {
-            tester.refresh().await;
+            tester.cancel_timed_out_builds().await;
             Ok(tester)
         })
         .await;
@@ -172,7 +155,7 @@ timeout = 3600
                 tester.post_comment("@bors try").await?;
                 tester.expect_comments(1).await;
                 with_mocked_time(Duration::from_secs(10), async {
-                    tester.refresh().await;
+                    tester.cancel_timed_out_builds().await;
                 })
                 .await;
                 Ok(tester)
@@ -197,7 +180,7 @@ timeout = 3600
                             .len(),
                         1
                     );
-                    tester.refresh().await;
+                    tester.cancel_timed_out_builds().await;
                 })
                 .await;
                 insta::assert_snapshot!(tester.get_comment().await?, @":boom: Test timed out");
@@ -228,7 +211,7 @@ timeout = 3600
                 WAIT_FOR_WORKFLOW_STARTED.sync().await;
 
                 with_mocked_time(Duration::from_secs(4000), async {
-                    tester.refresh().await;
+                    tester.cancel_timed_out_builds().await;
                 })
                 .await;
                 tester.expect_comments(1).await;
@@ -254,29 +237,9 @@ timeout = 3600
                 .lock()
                 .get_pr_mut(default_pr_number())
                 .mergeable_state = OctocrabMergeableState::Dirty;
-            tester.refresh().await;
+            tester.update_mergeability_status().await;
             tester
                 .wait_for_default_pr(|pr| pr.mergeable_state == MergeableState::HasConflicts)
-                .await?;
-            Ok(tester)
-        })
-        .await;
-    }
-
-    #[sqlx::test]
-    async fn refresh_enqueues_no_known_mergeable_prs(pool: sqlx::PgPool) {
-        run_test(pool, |mut tester| async {
-            tester
-                .edit_pr(default_repo_name(), default_pr_number(), |pr| {
-                    pr.mergeable_state = OctocrabMergeableState::Clean
-                })
-                .await?;
-            tester
-                .wait_for_default_pr(|pr| pr.mergeable_state == MergeableState::Mergeable)
-                .await?;
-            tester.refresh().await;
-            tester
-                .wait_for_default_pr(|pr| pr.mergeable_state == MergeableState::Mergeable)
                 .await?;
             Ok(tester)
         })
