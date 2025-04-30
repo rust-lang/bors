@@ -7,6 +7,7 @@ use crate::bors::handlers::info::command_info;
 use crate::bors::handlers::ping::command_ping;
 use crate::bors::handlers::refresh::{
     cancel_timed_out_builds, reload_repository_config, reload_repository_permissions,
+    reload_unknown_mergeable_prs,
 };
 use crate::bors::handlers::review::{
     command_approve, command_close_tree, command_open_tree, command_unapprove,
@@ -270,6 +271,22 @@ pub async fn handle_bors_global_event(
                     repo = repo.repository().to_string()
                 );
                 cancel_timed_out_builds(repo, &db).instrument(span)
+            }))
+            .instrument(span)
+            .await
+            .into_iter()
+            .collect::<anyhow::Result<Vec<_>>>()?;
+        }
+        BorsGlobalEvent::RefreshPullRequestMergeability => {
+            let span = tracing::info_span!("Refresh PR mergeability status of repositories");
+            let repos: Vec<Arc<RepositoryState>> =
+                ctx.repositories.read().unwrap().values().cloned().collect();
+            futures::future::join_all(repos.into_iter().map(|repo| {
+                let span = tracing::info_span!(
+                    "Refresh PR mergeability status",
+                    repo = repo.repository().to_string()
+                );
+                reload_unknown_mergeable_prs(repo, &db, mergeable_queue_tx.clone()).instrument(span)
             }))
             .instrument(span)
             .await

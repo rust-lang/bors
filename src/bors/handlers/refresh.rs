@@ -3,8 +3,6 @@ use std::time::Duration;
 
 use anyhow::Context;
 use chrono::{DateTime, Utc};
-use futures::FutureExt;
-use futures::future::join_all;
 
 use crate::bors::Comment;
 use crate::bors::RepositoryState;
@@ -12,25 +10,6 @@ use crate::bors::handlers::trybuild::cancel_build_workflows;
 use crate::bors::mergeable_queue::MergeableQueueSender;
 use crate::database::BuildStatus;
 use crate::{PgDbClient, TeamApiClient};
-
-pub async fn refresh_repository(
-    repo: Arc<RepositoryState>,
-    db: Arc<PgDbClient>,
-    team_api_client: &TeamApiClient,
-    mergeable_queue_tx: MergeableQueueSender,
-) -> anyhow::Result<()> {
-    let repo = repo.as_ref();
-    let results =
-        join_all([reload_unknown_mergeable_prs(repo, db.as_ref(), mergeable_queue_tx).boxed()])
-            .await;
-
-    if results.iter().all(|result| result.is_ok()) {
-        Ok(())
-    } else {
-        tracing::error!("Failed to refresh repository");
-        anyhow::bail!("Failed to refresh repository")
-    }
-}
 
 /// Cancel CI builds that have been running for too long
 pub async fn cancel_timed_out_builds(
@@ -88,8 +67,10 @@ pub async fn reload_repository_permissions(
     Ok(())
 }
 
-async fn reload_unknown_mergeable_prs(
-    repo: &RepositoryState,
+/// Reloads the mergeability status from GitHub for PRs that have an unknown
+/// mergeability status in the DB.
+pub async fn reload_unknown_mergeable_prs(
+    repo: Arc<RepositoryState>,
     db: &PgDbClient,
     mergeable_queue: MergeableQueueSender,
 ) -> anyhow::Result<()> {

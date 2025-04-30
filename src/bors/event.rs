@@ -65,6 +65,8 @@ pub enum BorsGlobalEvent {
     RefreshPermissions,
     /// Cancel builds that have been running for a long time.
     CancelTimedOutBuilds,
+    /// Refresh mergeability status of PRs that have unknown mergeability status.
+    RefreshPullRequestMergeability,
 }
 
 #[derive(Debug)]
