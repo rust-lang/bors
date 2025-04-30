@@ -7,8 +7,6 @@ pub use command::CommandParser;
 pub use command::RollupMode;
 pub use comment::Comment;
 pub use context::BorsContext;
-#[cfg(test)]
-pub use handlers::WAIT_FOR_REPO_CONFIG_REFRESH;
 pub use handlers::{handle_bors_global_event, handle_bors_repository_event};
 use serde::Serialize;
 
@@ -16,6 +14,8 @@ use crate::config::RepositoryConfig;
 use crate::github::GithubRepoName;
 use crate::github::api::client::GithubRepositoryClient;
 use crate::permissions::UserPermissions;
+#[cfg(test)]
+use crate::tests::util::TestSyncMarker;
 
 mod command;
 pub mod comment;
@@ -23,6 +23,12 @@ mod context;
 pub mod event;
 mod handlers;
 pub mod mergeable_queue;
+
+#[cfg(test)]
+pub static WAIT_FOR_CANCEL_TIMED_OUT_BUILDS_REFRESH: TestSyncMarker = TestSyncMarker::new();
+
+#[cfg(test)]
+pub static WAIT_FOR_MERGEABILITY_STATUS_REFRESH: TestSyncMarker = TestSyncMarker::new();
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CheckSuiteStatus {

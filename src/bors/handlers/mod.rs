@@ -264,6 +264,9 @@ pub async fn handle_bors_global_event(
             })
             .instrument(span)
             .await?;
+
+            #[cfg(test)]
+            crate::bors::WAIT_FOR_CANCEL_TIMED_OUT_BUILDS_REFRESH.mark();
         }
         BorsGlobalEvent::RefreshPullRequestMergeability => {
             let span = tracing::info_span!("Refresh PR mergeability status of repositories");
@@ -276,6 +279,9 @@ pub async fn handle_bors_global_event(
             })
             .instrument(span)
             .await?;
+
+            #[cfg(test)]
+            crate::bors::WAIT_FOR_MERGEABILITY_STATUS_REFRESH.mark();
         }
     }
     Ok(())

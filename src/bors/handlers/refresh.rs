@@ -133,7 +133,7 @@ mod tests {
     #[sqlx::test]
     async fn refresh_no_builds(pool: sqlx::PgPool) {
         run_test(pool, |tester| async move {
-            tester.refresh().await;
+            tester.cancel_timed_out_builds().await;
             Ok(tester)
         })
         .await;
@@ -155,7 +155,7 @@ timeout = 3600
                 tester.post_comment("@bors try").await?;
                 tester.expect_comments(1).await;
                 with_mocked_time(Duration::from_secs(10), async {
-                    tester.refresh().await;
+                    tester.cancel_timed_out_builds().await;
                 })
                 .await;
                 Ok(tester)
@@ -180,7 +180,7 @@ timeout = 3600
                             .len(),
                         1
                     );
-                    tester.refresh().await;
+                    tester.cancel_timed_out_builds().await;
                 })
                 .await;
                 insta::assert_snapshot!(tester.get_comment().await?, @":boom: Test timed out");
@@ -211,7 +211,7 @@ timeout = 3600
                 WAIT_FOR_WORKFLOW_STARTED.sync().await;
 
                 with_mocked_time(Duration::from_secs(4000), async {
-                    tester.refresh().await;
+                    tester.cancel_timed_out_builds().await;
                 })
                 .await;
                 tester.expect_comments(1).await;
@@ -237,29 +237,9 @@ timeout = 3600
                 .lock()
                 .get_pr_mut(default_pr_number())
                 .mergeable_state = OctocrabMergeableState::Dirty;
-            tester.refresh().await;
+            tester.update_mergeability_status().await;
             tester
                 .wait_for_default_pr(|pr| pr.mergeable_state == MergeableState::HasConflicts)
-                .await?;
-            Ok(tester)
-        })
-        .await;
-    }
-
-    #[sqlx::test]
-    async fn refresh_enqueues_no_known_mergeable_prs(pool: sqlx::PgPool) {
-        run_test(pool, |mut tester| async {
-            tester
-                .edit_pr(default_repo_name(), default_pr_number(), |pr| {
-                    pr.mergeable_state = OctocrabMergeableState::Clean
-                })
-                .await?;
-            tester
-                .wait_for_default_pr(|pr| pr.mergeable_state == MergeableState::Mergeable)
-                .await?;
-            tester.refresh().await;
-            tester
-                .wait_for_default_pr(|pr| pr.mergeable_state == MergeableState::Mergeable)
                 .await?;
             Ok(tester)
         })
