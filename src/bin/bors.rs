@@ -17,8 +17,11 @@ use tokio::time::Interval;
 use tracing::log::LevelFilter;
 use tracing_subscriber::filter::EnvFilter;
 
-/// How often should the bot refresh repository configurations.
+/// How often should the bot refresh repository configurations from GitHub.
 const CONFIG_REFRESH_INTERVAL: Duration = Duration::from_secs(120);
+
+/// How often should the bot refresh repository permissions from the team DB.
+const PERMISSIONS_REFRESH_INTERVAL: Duration = Duration::from_secs(120);
 
 #[derive(clap::Parser)]
 struct Opts {
@@ -129,10 +132,14 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
 
     let refresh_process = async move {
         let mut config_refresh = make_interval(CONFIG_REFRESH_INTERVAL);
+        let mut permissions_refresh = make_interval(PERMISSIONS_REFRESH_INTERVAL);
         loop {
             tokio::select! {
                 _ = config_refresh.tick() => {
                     refresh_tx.send(BorsGlobalEvent::RefreshConfig).await?;
+                }
+                _ = permissions_refresh.tick() => {
+                    refresh_tx.send(BorsGlobalEvent::RefreshPermissions).await?;
                 }
             }
         }

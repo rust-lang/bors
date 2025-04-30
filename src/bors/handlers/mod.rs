@@ -5,7 +5,7 @@ use crate::bors::event::{BorsGlobalEvent, BorsRepositoryEvent, PullRequestCommen
 use crate::bors::handlers::help::command_help;
 use crate::bors::handlers::info::command_info;
 use crate::bors::handlers::ping::command_ping;
-use crate::bors::handlers::refresh::reload_repository_config;
+use crate::bors::handlers::refresh::{reload_repository_config, reload_repository_permissions};
 use crate::bors::handlers::review::{
     command_approve, command_close_tree, command_open_tree, command_unapprove,
 };
@@ -210,9 +210,6 @@ pub async fn handle_bors_repository_event(
     Ok(())
 }
 
-#[cfg(test)]
-pub static WAIT_FOR_REPO_CONFIG_REFRESH: TestSyncMarker = TestSyncMarker::new();
-
 /// This function executes a single BORS global event
 pub async fn handle_bors_global_event(
     event: BorsGlobalEvent,
@@ -242,11 +239,21 @@ pub async fn handle_bors_global_event(
             }))
             .instrument(span)
             .await;
-
-            #[cfg(test)]
-            WAIT_FOR_REPO_CONFIG_REFRESH.mark();
         }
-        BorsGlobalEvent::RefreshPermissions => {}
+        BorsGlobalEvent::RefreshPermissions => {
+            let span = tracing::info_span!("Refresh permissions of repositories");
+            let repos: Vec<Arc<RepositoryState>> =
+                ctx.repositories.read().unwrap().values().cloned().collect();
+            futures::future::join_all(repos.into_iter().map(|repo| {
+                let span = tracing::info_span!(
+                    "Refresh permissions",
+                    repo = repo.repository().to_string()
+                );
+                reload_repository_permissions(repo, team_api_client).instrument(span)
+            }))
+            .instrument(span)
+            .await;
+        }
         BorsGlobalEvent::CancelTimedOutBuilds => {}
     }
     Ok(())

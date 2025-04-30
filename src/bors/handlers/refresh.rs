@@ -22,7 +22,6 @@ pub async fn refresh_repository(
     let repo = repo.as_ref();
     let results = join_all([
         cancel_timed_out_builds(repo, db.as_ref()).boxed(),
-        reload_permission(repo, team_api_client).boxed(),
         reload_unknown_mergeable_prs(repo, db.as_ref(), mergeable_queue_tx).boxed(),
     ])
     .await;
@@ -69,8 +68,9 @@ async fn cancel_timed_out_builds(repo: &RepositoryState, db: &PgDbClient) -> any
     Ok(())
 }
 
-async fn reload_permission(
-    repo: &RepositoryState,
+/// Reload the team DB bors permissions for the given repository.
+pub async fn reload_repository_permissions(
+    repo: Arc<RepositoryState>,
     team_api_client: &TeamApiClient,
 ) -> anyhow::Result<()> {
     let permissions = team_api_client
