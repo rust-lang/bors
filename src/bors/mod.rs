@@ -8,7 +8,7 @@ pub use command::RollupMode;
 pub use comment::Comment;
 pub use context::BorsContext;
 #[cfg(test)]
-pub use handlers::WAIT_FOR_REFRESH;
+pub use handlers::WAIT_FOR_REPO_CONFIG_REFRESH;
 pub use handlers::{handle_bors_global_event, handle_bors_repository_event};
 use serde::Serialize;
 

@@ -5,7 +5,7 @@ use crate::bors::event::{BorsGlobalEvent, BorsRepositoryEvent, PullRequestCommen
 use crate::bors::handlers::help::command_help;
 use crate::bors::handlers::info::command_info;
 use crate::bors::handlers::ping::command_ping;
-use crate::bors::handlers::refresh::refresh_repository;
+use crate::bors::handlers::refresh::reload_repository_config;
 use crate::bors::handlers::review::{
     command_approve, command_close_tree, command_open_tree, command_unapprove,
 };
@@ -211,7 +211,7 @@ pub async fn handle_bors_repository_event(
 }
 
 #[cfg(test)]
-pub static WAIT_FOR_REFRESH: TestSyncMarker = TestSyncMarker::new();
+pub static WAIT_FOR_REPO_CONFIG_REFRESH: TestSyncMarker = TestSyncMarker::new();
 
 /// This function executes a single BORS global event
 pub async fn handle_bors_global_event(
@@ -229,26 +229,25 @@ pub async fn handle_bors_global_event(
                 .instrument(span)
                 .await?;
         }
-        BorsGlobalEvent::Refresh => {
-            let span = tracing::info_span!("Refresh");
+        BorsGlobalEvent::RefreshConfig => {
+            let span = tracing::info_span!("Refresh configuration of repositories");
             let repos: Vec<Arc<RepositoryState>> =
                 ctx.repositories.read().unwrap().values().cloned().collect();
             futures::future::join_all(repos.into_iter().map(|repo| {
-                let repo = Arc::clone(&repo);
-                let mergeable_queue_tx = mergeable_queue_tx.clone();
-                async {
-                    let subspan = tracing::info_span!("Repo", repo = repo.repository().to_string());
-                    refresh_repository(repo, Arc::clone(&db), team_api_client, mergeable_queue_tx)
-                        .instrument(subspan)
-                        .await
-                }
+                let span = tracing::info_span!(
+                    "Refresh configuration",
+                    repo = repo.repository().to_string()
+                );
+                reload_repository_config(repo).instrument(span)
             }))
             .instrument(span)
             .await;
 
             #[cfg(test)]
-            WAIT_FOR_REFRESH.mark();
+            WAIT_FOR_REPO_CONFIG_REFRESH.mark();
         }
+        BorsGlobalEvent::RefreshPermissions => {}
+        BorsGlobalEvent::CancelTimedOutBuilds => {}
     }
     Ok(())
 }

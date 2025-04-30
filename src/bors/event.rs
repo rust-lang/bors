@@ -59,8 +59,12 @@ impl BorsRepositoryEvent {
 pub enum BorsGlobalEvent {
     /// The configuration of some repository has been changed for the bot's Github App.
     InstallationsChanged,
-    /// Periodic event that serves for checking e.g. timeouts.
-    Refresh,
+    /// Refresh the configuration of each tracked repository.
+    RefreshConfig,
+    /// Refresh the team permissions.
+    RefreshPermissions,
+    /// Cancel builds that have been running for a long time.
+    CancelTimedOutBuilds,
 }
 
 #[derive(Debug)]

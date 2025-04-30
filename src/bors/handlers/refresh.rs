@@ -23,7 +23,6 @@ pub async fn refresh_repository(
     let results = join_all([
         cancel_timed_out_builds(repo, db.as_ref()).boxed(),
         reload_permission(repo, team_api_client).boxed(),
-        reload_config(repo).boxed(),
         reload_unknown_mergeable_prs(repo, db.as_ref(), mergeable_queue_tx).boxed(),
     ])
     .await;
@@ -108,7 +107,8 @@ async fn reload_unknown_mergeable_prs(
     Ok(())
 }
 
-async fn reload_config(repo: &RepositoryState) -> anyhow::Result<()> {
+/// Reloads the bors configuration for the given repository from GitHub.
+pub async fn reload_repository_config(repo: Arc<RepositoryState>) -> anyhow::Result<()> {
     let config = repo.client.load_config().await?;
     repo.config.store(Arc::new(config));
     Ok(())

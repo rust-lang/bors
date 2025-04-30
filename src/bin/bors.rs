@@ -13,11 +13,12 @@ use bors::{
 use clap::Parser;
 use sqlx::postgres::PgConnectOptions;
 use sqlx::{ConnectOptions, PgPool};
+use tokio::time::Interval;
 use tracing::log::LevelFilter;
 use tracing_subscriber::filter::EnvFilter;
 
-/// How often should the bot check DB state, e.g. for handling timeouts.
-const PERIODIC_REFRESH: Duration = Duration::from_secs(120);
+/// How often should the bot refresh repository configurations.
+const CONFIG_REFRESH_INTERVAL: Duration = Duration::from_secs(120);
 
 #[derive(clap::Parser)]
 struct Opts {
@@ -118,10 +119,22 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
     } = create_bors_process(ctx, client, team_api);
 
     let refresh_tx = global_tx.clone();
+
+    fn make_interval(interval: Duration) -> Interval {
+        let mut interval = tokio::time::interval(interval);
+        // Do not immediately trigger the interval
+        interval.reset();
+        interval
+    }
+
     let refresh_process = async move {
+        let mut config_refresh = make_interval(CONFIG_REFRESH_INTERVAL);
         loop {
-            tokio::time::sleep(PERIODIC_REFRESH).await;
-            refresh_tx.send(BorsGlobalEvent::Refresh).await?;
+            tokio::select! {
+                _ = config_refresh.tick() => {
+                    refresh_tx.send(BorsGlobalEvent::RefreshConfig).await?;
+                }
+            }
         }
     };
 
