@@ -65,7 +65,7 @@ tracing-test = "0.2"
 regex = "1"
 parking_lot = "0.12"
 thread_local = "1"
-sqlparser = { version = "0.55", features = ["visitor"] }
+sqlparser = { version = "0.56", features = ["visitor"] }
 
 [profile.release]
 debug = 1
