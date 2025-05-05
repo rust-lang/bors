@@ -28,6 +28,7 @@ use pr_events::{
     handle_pull_request_merged, handle_pull_request_opened, handle_pull_request_ready_for_review,
     handle_pull_request_reopened, handle_push_to_branch, handle_push_to_pull_request,
 };
+use refresh::sync_pull_requests_state;
 use review::{command_delegate, command_set_priority, command_set_rollup, command_undelegate};
 use tracing::Instrument;
 
@@ -282,6 +283,18 @@ pub async fn handle_bors_global_event(
 
             #[cfg(test)]
             crate::bors::WAIT_FOR_MERGEABILITY_STATUS_REFRESH.mark();
+        }
+        BorsGlobalEvent::RefreshPullRequestState => {
+            let span = tracing::info_span!("Refresh");
+            for_each_repo(&ctx, |repo| {
+                let subspan = tracing::info_span!("Repo", repo = repo.repository().to_string());
+                sync_pull_requests_state(repo, Arc::clone(&db)).instrument(subspan)
+            })
+            .instrument(span)
+            .await?;
+
+            #[cfg(test)]
+            crate::bors::WAIT_FOR_PR_STATUS_REFRESH.mark();
         }
     }
     Ok(())

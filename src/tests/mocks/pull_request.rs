@@ -30,6 +30,28 @@ pub async fn mock_pull_requests(
     mock_server: &MockServer,
 ) {
     let repo_name = repo.lock().name.clone();
+    let repo_clone = repo.clone();
+
+    Mock::given(method("GET"))
+        .and(path(format!("/repos/{repo_name}/pulls")))
+        .respond_with(move |_: &Request| {
+            let pull_request_error = repo_clone.lock().pull_request_error;
+            if pull_request_error {
+                ResponseTemplate::new(500)
+            } else {
+                let prs = repo_clone.lock().pull_requests.clone();
+                ResponseTemplate::new(200).set_body_json(
+                    prs.values()
+                        .into_iter()
+                        .map(|pr| GitHubPullRequest::from(pr.clone()))
+                        .filter(|pr| pr.closed_at.is_none())
+                        .collect::<Vec<_>>(),
+                )
+            }
+        })
+        .mount(mock_server)
+        .await;
+
     let prs = repo.lock().pull_requests.clone();
     for &pr_number in prs.keys() {
         let repo_clone = repo.clone();
@@ -161,6 +183,8 @@ pub struct GitHubPullRequest {
     draft: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     merged_at: Option<DateTime<Utc>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    closed_at: Option<DateTime<Utc>>,
 
     /// The pull request number.  Note that GitHub's REST API
     /// considers every pull-request an issue with the same number.
@@ -194,6 +218,7 @@ impl From<PullRequest> for GitHubPullRequest {
                 sha: pr.base_branch.get_sha().to_string(),
             }),
             merged_at: pr.merged_at,
+            closed_at: pr.closed_at,
         }
     }
 }

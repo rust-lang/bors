@@ -10,7 +10,7 @@ use crate::github::{CommitSha, GithubRepoName};
 
 use super::operations::{
     approve_pull_request, create_build, create_pull_request, create_workflow,
-    delegate_pull_request, find_build, find_pr_by_build,
+    delegate_pull_request, find_build, find_pr_by_build, get_nonclosed_pull_requests,
     get_nonclosed_pull_requests_by_base_branch, get_prs_with_unknown_mergeable_state,
     get_pull_request, get_repository, get_running_builds, get_workflow_urls_for_build,
     get_workflows_for_build, set_pr_priority, set_pr_rollup, set_pr_status, unapprove_pull_request,
@@ -127,6 +127,13 @@ impl PgDbClient {
         repo: &GithubRepoName,
     ) -> anyhow::Result<Vec<PullRequestModel>> {
         get_prs_with_unknown_mergeable_state(&self.pool, repo).await
+    }
+
+    pub async fn get_nonclosed_pull_requests(
+        &self,
+        repo: &GithubRepoName,
+    ) -> anyhow::Result<Vec<PullRequestModel>> {
+        get_nonclosed_pull_requests(&self.pool, repo).await
     }
 
     pub async fn create_pull_request(

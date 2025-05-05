@@ -152,7 +152,7 @@ impl From<octocrab::models::pulls::PullRequest> for PullRequest {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct PullRequestNumber(pub u64);
 
 impl From<u64> for PullRequestNumber {

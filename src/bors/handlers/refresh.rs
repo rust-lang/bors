@@ -3,8 +3,10 @@ use std::time::Duration;
 
 use anyhow::Context;
 use chrono::{DateTime, Utc};
+use std::collections::BTreeMap;
 
 use crate::bors::Comment;
+use crate::bors::PullRequestStatus;
 use crate::bors::RepositoryState;
 use crate::bors::handlers::trybuild::cancel_build_workflows;
 use crate::bors::mergeable_queue::MergeableQueueSender;
@@ -97,6 +99,70 @@ pub async fn reload_repository_config(repo: Arc<RepositoryState>) -> anyhow::Res
     Ok(())
 }
 
+pub async fn sync_pull_requests_state(
+    repo: Arc<RepositoryState>,
+    db: Arc<PgDbClient>,
+) -> anyhow::Result<()> {
+    let repo = repo.as_ref();
+    let db = db.as_ref();
+    let repo_name = repo.repository();
+    // load open/draft prs from github
+    let nonclosed_gh_prs = repo.client.fetch_nonclosed_pull_requests().await?;
+    // load open/draft prs from db
+    let nonclosed_db_prs = db.get_nonclosed_pull_requests(repo_name).await?;
+
+    let nonclosed_gh_prs_num = nonclosed_gh_prs
+        .into_iter()
+        .map(|pr| (pr.number, pr))
+        .collect::<BTreeMap<_, _>>();
+
+    let nonclosed_db_prs_num = nonclosed_db_prs
+        .into_iter()
+        .map(|pr| (pr.number, pr))
+        .collect::<BTreeMap<_, _>>();
+
+    for (pr_num, gh_pr) in &nonclosed_gh_prs_num {
+        let db_pr = nonclosed_db_prs_num.get(pr_num);
+        if let Some(db_pr) = db_pr {
+            if db_pr.pr_status != gh_pr.status {
+                // PR status changed in GitHub
+                tracing::debug!(
+                    "PR {} status changed from {:?} to {:?}",
+                    pr_num,
+                    db_pr.pr_status,
+                    gh_pr.status
+                );
+                db.set_pr_status(repo_name, *pr_num, gh_pr.status).await?;
+            }
+        } else {
+            // Nonclosed PRs in GitHub that are either not in the DB or marked as closed
+            tracing::debug!("PR {} not found in open PRs in DB, upserting it", pr_num);
+            db.upsert_pull_request(
+                repo_name,
+                gh_pr.number,
+                &gh_pr.base.name,
+                gh_pr.mergeable_state.clone().into(),
+                &gh_pr.status,
+            )
+            .await?;
+        }
+    }
+    // PRs that are closed in GitHub but not in the DB. In theory PR could also be merged
+    // but bors does the merging so it should not happen.
+    for pr_num in nonclosed_db_prs_num.keys() {
+        if !nonclosed_gh_prs_num.contains_key(pr_num) {
+            tracing::debug!(
+                "PR {} not found in open/draft prs in GitHub, closing it in DB",
+                pr_num
+            );
+            db.set_pr_status(repo_name, *pr_num, PullRequestStatus::Closed)
+                .await?;
+        }
+    }
+
+    Ok(())
+}
+
 #[cfg(not(test))]
 fn now() -> DateTime<Utc> {
     Utc::now()
@@ -119,6 +185,7 @@ fn elapsed_time(date: DateTime<Utc>) -> Duration {
 
 #[cfg(test)]
 mod tests {
+    use crate::bors::PullRequestStatus;
     use crate::bors::handlers::WAIT_FOR_WORKFLOW_STARTED;
     use crate::bors::handlers::refresh::MOCK_TIME;
     use crate::database::{MergeableState, OctocrabMergeableState};
@@ -134,6 +201,15 @@ mod tests {
     async fn refresh_no_builds(pool: sqlx::PgPool) {
         run_test(pool, |tester| async move {
             tester.cancel_timed_out_builds().await;
+            Ok(tester)
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn refresh_pr_state(pool: sqlx::PgPool) {
+        run_test(pool, |tester| async move {
+            tester.refresh_prs().await;
             Ok(tester)
         })
         .await;
@@ -241,6 +317,80 @@ timeout = 3600
             tester
                 .wait_for_default_pr(|pr| pr.mergeable_state == MergeableState::HasConflicts)
                 .await?;
+            Ok(tester)
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn refresh_new_pr(pool: sqlx::PgPool) {
+        run_test(pool, |mut tester| async move {
+            let pr = tester
+                .with_blocked_webhooks(async |tester| {
+                    tester.open_pr(default_repo_name(), false).await
+                })
+                .await?;
+            tester.refresh_prs().await;
+            assert_eq!(
+                tester
+                    .db()
+                    .get_pull_request(&default_repo_name(), pr.number)
+                    .await?
+                    .unwrap()
+                    .pr_status,
+                PullRequestStatus::Open
+            );
+            Ok(tester)
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn refresh_pr_with_status_closed(pool: sqlx::PgPool) {
+        run_test(pool, |mut tester| async move {
+            let pr = tester.open_pr(default_repo_name(), false).await?;
+            tester
+                .with_blocked_webhooks(async |tester| {
+                    tester.close_pr(default_repo_name(), pr.number.0).await
+                })
+                .await?;
+            tester.refresh_prs().await;
+            assert_eq!(
+                tester
+                    .db()
+                    .get_pull_request(&default_repo_name(), pr.number)
+                    .await?
+                    .unwrap()
+                    .pr_status,
+                PullRequestStatus::Closed
+            );
+            Ok(tester)
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn refresh_pr_with_status_draft(pool: sqlx::PgPool) {
+        run_test(pool, |mut tester| async move {
+            let pr = tester.open_pr(default_repo_name(), false).await?;
+            tester
+                .with_blocked_webhooks(async |tester| {
+                    tester
+                        .convert_to_draft(default_repo_name(), pr.number.0)
+                        .await
+                })
+                .await?;
+
+            tester.refresh_prs().await;
+            assert_eq!(
+                tester
+                    .db()
+                    .get_pull_request(&default_repo_name(), pr.number)
+                    .await?
+                    .unwrap()
+                    .pr_status,
+                PullRequestStatus::Draft
+            );
             Ok(tester)
         })
         .await;

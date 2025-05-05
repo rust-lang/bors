@@ -15,6 +15,7 @@ use tower::Service;
 use crate::bors::mergeable_queue::MergeableQueueSender;
 use crate::bors::{
     RollupMode, WAIT_FOR_CANCEL_TIMED_OUT_BUILDS_REFRESH, WAIT_FOR_MERGEABILITY_STATUS_REFRESH,
+    WAIT_FOR_PR_STATUS_REFRESH,
 };
 use crate::database::{BuildStatus, DelegatedPermission, OctocrabMergeableState, PullRequestModel};
 use crate::github::api::load_repositories;
@@ -104,6 +105,8 @@ pub struct BorsTester {
     mergeable_queue_tx: MergeableQueueSender,
     // Sender for bors global events
     global_tx: Sender<BorsGlobalEvent>,
+    // When this field is false, no webhooks should be generated from BorsTester methods
+    webhooks_active: bool,
 }
 
 impl BorsTester {
@@ -144,6 +147,7 @@ impl BorsTester {
                 db,
                 mergeable_queue_tx,
                 global_tx,
+                webhooks_active: true,
             },
             bors,
         )
@@ -286,6 +290,15 @@ impl BorsTester {
         WAIT_FOR_MERGEABILITY_STATUS_REFRESH.sync().await;
     }
 
+    pub async fn refresh_prs(&self) {
+        self.global_tx
+            .send(BorsGlobalEvent::RefreshPullRequestState)
+            .await
+            .unwrap();
+        // Wait until the refresh is fully handled
+        WAIT_FOR_PR_STATUS_REFRESH.sync().await;
+    }
+
     /// Performs a single started/success/failure workflow event.
     pub async fn workflow_event(&mut self, event: WorkflowEvent) -> anyhow::Result<()> {
         if let Some(branch) = self
@@ -376,11 +389,12 @@ impl BorsTester {
     ) -> anyhow::Result<()> {
         let pr = {
             let repo = self.github.get_repo(&repo_name);
-            let repo = repo.lock();
+            let mut repo = repo.lock();
             let pr = repo
                 .pull_requests
-                .get(&pr_number)
+                .get_mut(&pr_number)
                 .expect("PR must be opened before closing it");
+            pr.close_pr();
             pr.clone()
         };
         self.send_webhook(
@@ -398,11 +412,12 @@ impl BorsTester {
     ) -> anyhow::Result<()> {
         let pr = {
             let repo = self.github.get_repo(&repo_name);
-            let repo = repo.lock();
+            let mut repo = repo.lock();
             let pr = repo
                 .pull_requests
-                .get(&pr_number)
+                .get_mut(&pr_number)
                 .expect("PR must exist before being reopened");
+            pr.reopen_pr();
             pr.clone()
         };
         self.send_webhook(
@@ -420,11 +435,12 @@ impl BorsTester {
     ) -> anyhow::Result<()> {
         let pr = {
             let repo = self.github.get_repo(&repo_name);
-            let repo = repo.lock();
+            let mut repo = repo.lock();
             let pr = repo
                 .pull_requests
-                .get(&pr_number)
+                .get_mut(&pr_number)
                 .expect("PR must exist before being converted to draft");
+            pr.convert_to_draft();
             pr.clone()
         };
         self.send_webhook(
@@ -442,11 +458,12 @@ impl BorsTester {
     ) -> anyhow::Result<()> {
         let pr = {
             let repo = self.github.get_repo(&repo_name);
-            let repo = repo.lock();
+            let mut repo = repo.lock();
             let pr = repo
                 .pull_requests
-                .get(&pr_number)
+                .get_mut(&pr_number)
                 .expect("PR must exist before being ready for review");
+            pr.ready_for_review();
             pr.clone()
         };
         self.send_webhook(
@@ -462,16 +479,16 @@ impl BorsTester {
         repo_name: GithubRepoName,
         pr_number: u64,
     ) -> anyhow::Result<()> {
-        let mut pr = {
+        let pr = {
             let repo = self.github.get_repo(&repo_name);
-            let repo = repo.lock();
+            let mut repo = repo.lock();
             let pr = repo
                 .pull_requests
-                .get(&pr_number)
+                .get_mut(&pr_number)
                 .expect("PR must be opened before being merged");
+            pr.merge_pr();
             pr.clone()
         };
-        pr.merge_pr();
         self.send_webhook(
             "pull_request",
             GitHubPullRequestEventPayload::new(pr.clone(), "closed", None),
@@ -580,6 +597,19 @@ impl BorsTester {
             .unwrap_or_else(|_| Err(anyhow::anyhow!("Timed out waiting for condition")))
     }
 
+    /// Temporarily block sent webhooks, to emulate situation where webhooks could be lost,
+    /// while `func` is executing.
+    pub async fn with_blocked_webhooks<T, F>(&mut self, func: F) -> T
+    where
+        F: AsyncFnOnce(&mut BorsTester) -> T,
+    {
+        let orig_webhooks = self.webhooks_active;
+        self.webhooks_active = false;
+        let result = func(self).await;
+        self.webhooks_active = orig_webhooks;
+        result
+    }
+
     //-- Internal helper functions --/
     async fn webhook_comment(&mut self, comment: Comment) -> anyhow::Result<()> {
         self.send_webhook(
@@ -621,6 +651,10 @@ impl BorsTester {
     }
 
     async fn send_webhook<S: Serialize>(&mut self, event: &str, content: S) -> anyhow::Result<()> {
+        if !self.webhooks_active {
+            return Ok(());
+        }
+
         let serialized = serde_json::to_string(&content)?;
         let webhook = create_webhook_request(event, &serialized);
         let response = self

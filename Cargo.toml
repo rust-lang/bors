@@ -24,7 +24,7 @@ serde_json = "1"
 toml = "0.8"
 
 # GitHub
-octocrab = { version = "0.44", features = ["timeout"] }
+octocrab = { version = "0.44", features = ["timeout", "stream"] }
 
 # Async
 futures = "0.3"

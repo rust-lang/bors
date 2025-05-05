@@ -22,6 +22,7 @@ use super::RunId;
 use super::TreeState;
 use super::WorkflowStatus;
 use super::WorkflowType;
+use futures::TryStreamExt;
 
 pub(crate) async fn get_pull_request(
     executor: impl PgExecutor<'_>,
@@ -203,6 +204,47 @@ pub(crate) async fn get_nonclosed_pull_requests_by_base_branch(
         .await?;
 
         Ok(records)
+    })
+    .await
+}
+
+pub(crate) async fn get_nonclosed_pull_requests(
+    executor: impl PgExecutor<'_>,
+    repo: &GithubRepoName,
+) -> anyhow::Result<Vec<PullRequestModel>> {
+    measure_db_query("fetch_pull_requests", || async {
+        let mut stream = sqlx::query_as!(
+            PullRequestModel,
+            r#"
+            SELECT
+                pr.id,
+                pr.repository as "repository: GithubRepoName",
+                pr.number as "number!: i64",
+                (
+                    pr.approved_by,
+                    pr.approved_sha
+                ) AS "approval_status!: ApprovalStatus",
+                pr.status as "pr_status: PullRequestStatus",
+                pr.priority,
+                pr.rollup as "rollup: RollupMode",
+                pr.delegated_permission as "delegated_permission: DelegatedPermission",
+                pr.base_branch,
+                pr.mergeable_state as "mergeable_state: MergeableState",
+                pr.created_at as "created_at: DateTime<Utc>",
+                build AS "try_build: BuildModel"
+            FROM pull_request as pr
+            LEFT JOIN build ON pr.build_id = build.id
+            WHERE pr.repository = $1
+                AND pr.status IN ('open', 'draft')
+            "#,
+            repo as &GithubRepoName
+        )
+        .fetch(executor);
+        let mut prs = Vec::new();
+        while let Some(pr) = stream.try_next().await? {
+            prs.push(pr);
+        }
+        Ok(prs)
     })
     .await
 }
