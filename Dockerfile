@@ -22,6 +22,7 @@ COPY Cargo.lock .
 COPY migrations migrations
 COPY .sqlx .sqlx
 COPY src src
+COPY templates templates
 
 RUN cargo build --release
 
@@ -37,6 +38,6 @@ COPY --from=build /app/target/release/bors .
 EXPOSE 80
 
 HEALTHCHECK --timeout=10s --start-period=10s \
-  CMD curl -f http://localhost/health || exit 1
+    CMD curl -f http://localhost/health || exit 1
 
 ENTRYPOINT ["./bors"]

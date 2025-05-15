@@ -487,10 +487,15 @@ fn verify_gh_signature(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+    use std::sync::Arc;
+
     use axum::extract::FromRequest;
     use hyper::StatusCode;
+    use sqlx::PgPool;
     use tokio::sync::mpsc;
 
+    use crate::PgDbClient;
     use crate::bors::event::{BorsEvent, BorsGlobalEvent};
     use crate::github::server::{ServerState, ServerStateRef};
     use crate::github::webhook::GitHubWebhook;
@@ -1420,10 +1425,17 @@ mod tests {
 
         let (repository_tx, _) = mpsc::channel(1024);
         let (global_tx, _) = mpsc::channel(1024);
+        let repos = HashMap::new();
+        // We do not need an actual database;
+        let db = Arc::new(PgDbClient::new(
+            PgPool::connect_lazy("postgres://").unwrap(),
+        ));
         let server_ref = ServerStateRef::new(ServerState::new(
             repository_tx,
             global_tx,
             WebhookSecret::new(TEST_WEBHOOK_SECRET.to_string()),
+            repos,
+            db,
         ));
         GitHubWebhook::from_request(request, &server_ref).await
     }

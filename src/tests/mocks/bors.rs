@@ -123,7 +123,11 @@ impl BorsTester {
             repos.insert(name, Arc::new(repo));
         }
 
-        let ctx = BorsContext::new(CommandParser::new("@bors".to_string()), db.clone(), repos);
+        let ctx = BorsContext::new(
+            CommandParser::new("@bors".to_string()),
+            db.clone(),
+            repos.clone(),
+        );
 
         let BorsProcess {
             repository_tx,
@@ -136,6 +140,8 @@ impl BorsTester {
             repository_tx,
             global_tx.clone(),
             WebhookSecret::new(TEST_WEBHOOK_SECRET.to_string()),
+            repos.clone(),
+            db.clone(),
         );
         let app = create_app(state);
         let bors = tokio::spawn(bors_process);

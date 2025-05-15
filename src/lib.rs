@@ -6,6 +6,7 @@ mod config;
 mod database;
 mod github;
 mod permissions;
+mod templates;
 mod utils;
 
 pub use bors::{BorsContext, CommandParser, event::BorsGlobalEvent, event::BorsRepositoryEvent};
