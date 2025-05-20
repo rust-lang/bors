@@ -13,13 +13,13 @@ stream on Rust Zulip.
 There are several parameters that can be configured when launching the bot. Parameters without a default value are
 required.
 
-| **CLI flag**       | **Environment var.** | **Default** | **Description**                                                  |
-|--------------------|----------------------|-------------|------------------------------------------------------------------|
-| `--app-id`         | `APP_ID`             |             | GitHub app ID of the bors bot.                                   |
-| `--private-key`    | `PRIVATE_KEY`        |             | Private key of the GitHub app.                                   |
-| `--webhook-secret` | `WEBHOOK_SECRET`     |             | Key used to authenticate GitHub webhooks.                        |
-| `--db`             | `DB`                 |             | Database connection string. PostgreSQL and SQLite are supported. |
-| `--cmd-prefix`     | `CMD_PREFIX`         | @bors       | Prefix used to invoke bors commands in PR comments.              |
+| **CLI flag**       | **Environment var.** | **Default** | **Description**                                           |
+|--------------------|----------------------|-------------|-----------------------------------------------------------|
+| `--app-id`         | `APP_ID`             |             | GitHub app ID of the bors bot.                            |
+| `--private-key`    | `PRIVATE_KEY`        |             | Private key of the GitHub app.                            |
+| `--webhook-secret` | `WEBHOOK_SECRET`     |             | Key used to authenticate GitHub webhooks.                 |
+| `--db`             | `DATABASE_URL`       |             | Database connection string. Only PostgreSQL is supported. |
+| `--cmd-prefix`     | `CMD_PREFIX`         | @bors       | Prefix used to invoke bors commands in PR comments.       |
 
 ### Special branches
 The bot uses the following two branch names for its operations.
