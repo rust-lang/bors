@@ -350,6 +350,12 @@ pub enum TreeState {
     },
 }
 
+impl TreeState {
+    pub fn is_closed(&self) -> bool {
+        matches!(self, TreeState::Closed { .. })
+    }
+}
+
 impl sqlx::Type<sqlx::Postgres> for TreeState {
     fn type_info() -> sqlx::postgres::PgTypeInfo {
         <(Option<i32>, Option<String>) as sqlx::Type<sqlx::Postgres>>::type_info()

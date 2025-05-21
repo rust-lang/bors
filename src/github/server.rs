@@ -3,30 +3,40 @@ use crate::bors::mergeable_queue::{
     MergeableQueueReceiver, MergeableQueueSender, create_mergeable_queue,
     handle_mergeable_queue_item,
 };
-use crate::bors::{BorsContext, handle_bors_global_event, handle_bors_repository_event};
+use crate::bors::{
+    BorsContext, RepositoryState, handle_bors_global_event, handle_bors_repository_event,
+};
 use crate::github::webhook::GitHubWebhook;
 use crate::github::webhook::WebhookSecret;
-use crate::{BorsGlobalEvent, BorsRepositoryEvent, TeamApiClient};
+use crate::templates::{HtmlTemplate, IndexTemplate, RepositoryView};
+use crate::{BorsGlobalEvent, BorsRepositoryEvent, PgDbClient, TeamApiClient};
 
 use anyhow::Error;
 use axum::Router;
 use axum::extract::State;
 use axum::http::StatusCode;
-use axum::response::IntoResponse;
+use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use octocrab::Octocrab;
+use std::any::Any;
+use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tower::limit::ConcurrencyLimitLayer;
+use tower_http::catch_panic::CatchPanicLayer;
 use tracing::{Instrument, Span};
+
+use super::GithubRepoName;
 
 /// Shared server state for all axum handlers.
 pub struct ServerState {
     repository_event_queue: mpsc::Sender<BorsRepositoryEvent>,
     global_event_queue: mpsc::Sender<BorsGlobalEvent>,
     webhook_secret: WebhookSecret,
+    repositories: HashMap<GithubRepoName, Arc<RepositoryState>>,
+    db: Arc<PgDbClient>,
 }
 
 impl ServerState {
@@ -34,11 +44,15 @@ impl ServerState {
         repository_event_queue: mpsc::Sender<BorsRepositoryEvent>,
         global_event_queue: mpsc::Sender<BorsGlobalEvent>,
         webhook_secret: WebhookSecret,
+        repositories: HashMap<GithubRepoName, Arc<RepositoryState>>,
+        db: Arc<PgDbClient>,
     ) -> Self {
         Self {
             repository_event_queue,
             global_event_queue,
             webhook_secret,
+            repositories,
+            db,
         }
     }
 
@@ -51,14 +65,40 @@ pub type ServerStateRef = Arc<ServerState>;
 
 pub fn create_app(state: ServerState) -> Router {
     Router::new()
+        .route("/", get(index_handler))
         .route("/github", post(github_webhook_handler))
         .route("/health", get(health_handler))
         .layer(ConcurrencyLimitLayer::new(100))
+        .layer(CatchPanicLayer::custom(handle_panic))
         .with_state(Arc::new(state))
+}
+
+fn handle_panic(err: Box<dyn Any + Send + 'static>) -> Response {
+    tracing::error!("Router panicked: {err:?}");
+    (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error").into_response()
 }
 
 async fn health_handler() -> impl IntoResponse {
     (StatusCode::OK, "")
+}
+
+async fn index_handler(State(state): State<ServerStateRef>) -> impl IntoResponse {
+    let mut repos = Vec::with_capacity(state.repositories.len());
+    for repo in state.repositories.keys() {
+        let treeclosed = state
+            .db
+            .repo_db(repo)
+            .await
+            .ok()
+            .flatten()
+            .is_some_and(|repo| repo.tree_state.is_closed());
+        repos.push(RepositoryView {
+            name: repo.name().to_string(),
+            treeclosed,
+        });
+    }
+
+    HtmlTemplate(IndexTemplate { repos })
 }
 
 /// Axum handler that receives a webhook and sends it to a webhook channel.

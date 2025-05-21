@@ -122,7 +122,12 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
         repos.insert(name, Arc::new(repo));
     }
 
-    let ctx = BorsContext::new(CommandParser::new(opts.cmd_prefix), Arc::new(db), repos);
+    let db = Arc::new(db);
+    let ctx = BorsContext::new(
+        CommandParser::new(opts.cmd_prefix),
+        db.clone(),
+        repos.clone(),
+    );
     let BorsProcess {
         repository_tx,
         global_tx,
@@ -170,6 +175,8 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
         repository_tx,
         global_tx,
         WebhookSecret::new(opts.webhook_secret),
+        repos,
+        db,
     );
     let server_process = webhook_server(state);
 
