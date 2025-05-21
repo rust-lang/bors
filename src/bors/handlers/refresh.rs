@@ -350,6 +350,9 @@ timeout = 3600
         run_test(pool, |mut tester| async move {
             let pr = tester.open_pr(default_repo_name(), false).await?;
             tester
+                .wait_for_pr(default_repo_name(), pr.number.0, |_| true)
+                .await?;
+            tester
                 .with_blocked_webhooks(async |tester| {
                     tester.close_pr(default_repo_name(), pr.number.0).await
                 })
