@@ -8,7 +8,7 @@ use crate::bors::{
 };
 use crate::github::webhook::GitHubWebhook;
 use crate::github::webhook::WebhookSecret;
-use crate::templates::{HtmlTemplate, IndexTemplate, RepositoryView};
+use crate::templates::{HtmlTemplate, IndexTemplate, NotFoundTemplate, RepositoryView};
 use crate::{BorsGlobalEvent, BorsRepositoryEvent, PgDbClient, TeamApiClient};
 
 use anyhow::Error;
@@ -71,11 +71,16 @@ pub fn create_app(state: ServerState) -> Router {
         .layer(ConcurrencyLimitLayer::new(100))
         .layer(CatchPanicLayer::custom(handle_panic))
         .with_state(Arc::new(state))
+        .fallback(not_found_handler)
 }
 
 fn handle_panic(err: Box<dyn Any + Send + 'static>) -> Response {
     tracing::error!("Router panicked: {err:?}");
     (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error").into_response()
+}
+
+async fn not_found_handler() -> impl IntoResponse {
+    HtmlTemplate(NotFoundTemplate {})
 }
 
 async fn health_handler() -> impl IntoResponse {
