@@ -9,24 +9,14 @@ jobs:
     name: Test
     runs-on: ubuntu-latest
     env:
-      DATABASE_URL: postgres://postgres:password@localhost:5432/test
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: password
-          POSTGRES_DB: test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
+      # Matches docker-compose.yaml
+      DATABASE_URL: postgres://bors:bors@localhost:5432/bors
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
+
+      - name: Start containers
+        run: docker compose up -d --wait
 
       - name: Install stable toolchain
         uses: actions-rust-lang/setup-rust-toolchain@v1
