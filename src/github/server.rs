@@ -134,6 +134,7 @@ async fn queue_handler(
             number: pr.number.0,
             try_build: pr.try_build,
             approval_status: pr.approval_status,
+            mergeable_state: pr.mergeable_state,
         })
         .collect();
 

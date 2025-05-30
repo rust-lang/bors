@@ -22,6 +22,7 @@
         <thead>
             <th>#</th>
             <th>status</th>
+            <th>Mergeable</th>
         </thead>
 
         <tbody>
@@ -38,6 +39,15 @@
                             approved
                         {% endif %}
                     {% endif %}
+                </td>
+                <td>
+                    {% match pr.mergeable_state %}
+                        {% when Mergeable %}
+                        yes
+                        {% when HasConflicts %}
+                        no
+                        {% when Unknown %}
+                    {% endmatch %}
                 </td>
             </tr>
             {% endfor %}
