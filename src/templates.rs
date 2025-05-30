@@ -1,3 +1,4 @@
+use crate::database::operations::PullRequestStats;
 use askama::Template;
 use axum::response::{Html, IntoResponse, Response};
 use http::StatusCode;
@@ -36,6 +37,7 @@ pub struct RepositoryView {
 pub struct QueueTemplate {
     pub repo_name: String,
     pub repo_url: String,
+    pub stats: PullRequestStats,
 }
 
 #[derive(Template)]

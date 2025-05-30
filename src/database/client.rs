@@ -9,14 +9,14 @@ use crate::github::PullRequestNumber;
 use crate::github::{CommitSha, GithubRepoName};
 
 use super::operations::{
-    approve_pull_request, create_build, create_pull_request, create_workflow,
+    PullRequestStats, approve_pull_request, create_build, create_pull_request, create_workflow,
     delegate_pull_request, find_build, find_pr_by_build, get_nonclosed_pull_requests,
-    get_nonclosed_pull_requests_by_base_branch, get_prs_with_unknown_mergeable_state,
-    get_pull_request, get_repository, get_repository_by_name, get_running_builds,
-    get_workflow_urls_for_build, get_workflows_for_build, set_pr_priority, set_pr_rollup,
-    set_pr_status, unapprove_pull_request, undelegate_pull_request, update_build_status,
-    update_mergeable_states_by_base_branch, update_pr_build_id, update_pr_mergeable_state,
-    update_workflow_status, upsert_pull_request, upsert_repository,
+    get_nonclosed_pull_requests_by_base_branch, get_pr_statistics,
+    get_prs_with_unknown_mergeable_state, get_pull_request, get_repository, get_repository_by_name,
+    get_running_builds, get_workflow_urls_for_build, get_workflows_for_build, set_pr_priority,
+    set_pr_rollup, set_pr_status, unapprove_pull_request, undelegate_pull_request,
+    update_build_status, update_mergeable_states_by_base_branch, update_pr_build_id,
+    update_pr_mergeable_state, update_workflow_status, upsert_pull_request, upsert_repository,
 };
 use super::{ApprovalInfo, DelegatedPermission, MergeableState, RunId};
 
@@ -274,5 +274,12 @@ impl PgDbClient {
         tree_state: TreeState,
     ) -> anyhow::Result<()> {
         upsert_repository(&self.pool, repo, tree_state).await
+    }
+
+    pub async fn get_pr_statistics(
+        &self,
+        repo: &GithubRepoName,
+    ) -> anyhow::Result<PullRequestStats> {
+        get_pr_statistics(&self.pool, repo).await
     }
 }

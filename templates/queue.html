@@ -7,5 +7,10 @@
   </head>
   <body>
     <h1>Bors queue - <a href="{{ repo_url }}" target="_blank">{{ repo_name }}</a></h1>
+
+    <p>
+        {{ stats.total_count }} total, {{ stats.approved_count }} approved,
+        {{ stats.rolled_up_count }} rolled up, {{ stats.failed_count }} failed
+    </p>
   </body>
 </html>

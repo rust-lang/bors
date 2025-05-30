@@ -852,3 +852,42 @@ pub(crate) async fn upsert_repository(
     })
     .await
 }
+
+pub struct PullRequestStats {
+    pub total_count: usize,
+    pub approved_count: usize,
+    pub rolled_up_count: usize,
+    pub failed_count: usize,
+}
+
+pub(crate) async fn get_pr_statistics(
+    executor: impl PgExecutor<'_>,
+    repo: &GithubRepoName,
+) -> anyhow::Result<PullRequestStats> {
+    measure_db_query("get_pr_statistics", || async {
+        let stats = sqlx::query!(
+            r#"
+            SELECT
+                COUNT(*) as total_count,
+                COUNT(CASE WHEN pr.approved_by IS NOT NULL AND pr.approved_sha IS NOT NULL THEN 1 END) as approved_count,
+                COUNT(CASE WHEN pr.rollup IS NOT NULL THEN 1 END) as rolled_up_count,
+                COUNT(CASE WHEN build.status = 'failure' THEN 1 END) as failed_count
+            FROM pull_request as pr
+            LEFT JOIN build ON pr.build_id = build.id
+            WHERE pr.repository = $1
+              AND pr.status IN ('open', 'draft')
+            "#,
+            repo as &GithubRepoName
+        )
+        .fetch_one(executor)
+        .await?;
+
+        Ok(PullRequestStats {
+            total_count: stats.total_count.unwrap_or(0) as usize,
+            approved_count: stats.approved_count.unwrap_or(0) as usize,
+            rolled_up_count: stats.rolled_up_count.unwrap_or(0) as usize,
+            failed_count: stats.failed_count.unwrap_or(0) as usize,
+        })
+    })
+    .await
+}

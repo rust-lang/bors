@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                COUNT(*) as total_count,\n                COUNT(CASE WHEN pr.approved_by IS NOT NULL AND pr.approved_sha IS NOT NULL THEN 1 END) as approved_count,\n                COUNT(CASE WHEN pr.rollup IS NOT NULL THEN 1 END) as rolled_up_count,\n                COUNT(CASE WHEN build.status = 'failure' THEN 1 END) as failed_count\n            FROM pull_request as pr\n            LEFT JOIN build ON pr.build_id = build.id\n            WHERE pr.repository = $1\n              AND pr.status IN ('open', 'draft')\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "total_count",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "approved_count",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "rolled_up_count",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "failed_count",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "3923b58c4e8355806b9b580e5c094af989209c067593c9b35505c733bfb88bc3"
+}
