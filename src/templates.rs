@@ -21,8 +21,8 @@ where
 }
 
 #[derive(Template)]
-#[template(path = "index.html")]
-pub struct IndexTemplate {
+#[template(path = "help.html")]
+pub struct HelpTemplate {
     pub repos: Vec<RepositoryView>,
 }
 

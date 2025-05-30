@@ -9,7 +9,7 @@ use crate::bors::{
 use crate::github::webhook::GitHubWebhook;
 use crate::github::webhook::WebhookSecret;
 use crate::templates::{
-    HtmlTemplate, IndexTemplate, NotFoundTemplate, QueueTemplate, RepositoryView,
+    HtmlTemplate, HelpTemplate, NotFoundTemplate, QueueTemplate, RepositoryView,
 };
 use crate::{BorsGlobalEvent, BorsRepositoryEvent, PgDbClient, TeamApiClient};
 
@@ -18,7 +18,7 @@ use super::AppError;
 use axum::Router;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use axum::response::{IntoResponse, Response};
+use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use octocrab::Octocrab;
 use std::any::Any;
@@ -69,6 +69,7 @@ pub type ServerStateRef = Arc<ServerState>;
 pub fn create_app(state: ServerState) -> Router {
     Router::new()
         .route("/", get(index_handler))
+        .route("/help", get(help_handler))
         .route("/queue/{repo_name}", get(queue_handler))
         .route("/github", post(github_webhook_handler))
         .route("/health", get(health_handler))
@@ -91,7 +92,11 @@ async fn health_handler() -> impl IntoResponse {
     (StatusCode::OK, "")
 }
 
-async fn index_handler(State(state): State<ServerStateRef>) -> impl IntoResponse {
+async fn index_handler() -> impl IntoResponse {
+    Redirect::permanent("/queue/rust")
+}
+
+async fn help_handler(State(state): State<ServerStateRef>) -> impl IntoResponse {
     let mut repos = Vec::with_capacity(state.repositories.len());
     for repo in state.repositories.keys() {
         let treeclosed = state
@@ -107,7 +112,7 @@ async fn index_handler(State(state): State<ServerStateRef>) -> impl IntoResponse
         });
     }
 
-    HtmlTemplate(IndexTemplate { repos })
+    HtmlTemplate(HelpTemplate { repos })
 }
 
 async fn queue_handler(
