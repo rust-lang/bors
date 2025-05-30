@@ -30,3 +30,7 @@ pub struct RepositoryView {
     pub name: String,
     pub treeclosed: bool,
 }
+
+#[derive(Template)]
+#[template(path = "not_found.html")]
+pub struct NotFoundTemplate {}
