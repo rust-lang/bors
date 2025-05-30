@@ -12,5 +12,21 @@
         {{ stats.total_count }} total, {{ stats.approved_count }} approved,
         {{ stats.rolled_up_count }} rolled up, {{ stats.failed_count }} failed
     </p>
+
+    <table>
+        <thead>
+            <th>#</th>
+        </thead>
+
+        <tbody>
+            {% for pr in prs %}
+            <tr>
+                <td>
+                    <a href="{{ repo_url }}/pull/{{ pr.number.0 }}">{{ pr.number.0 }}</a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
   </body>
 </html>

@@ -126,11 +126,13 @@ async fn queue_handler(
         }
     };
     let stats = state.db.get_pr_statistics(&repo.name).await?;
+    let prs = state.db.get_nonclosed_pull_requests(&repo.name).await?;
 
     Ok(HtmlTemplate(QueueTemplate {
         repo_name: repo.name.name().to_string(),
         repo_url: format!("https://github.com/{}", repo.name),
         stats,
+        prs,
     })
     .into_response())
 }
