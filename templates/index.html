@@ -47,7 +47,7 @@
       <ul class="repos">
         {% for repo in repos %}
         <li>
-          <a href="queue/{{repo.name}}">{{repo.name}}</a>
+          <a href="queue/{{ repo.name }}">{{ repo.name }}</a>
           {% if repo.treeclosed %} [TREECLOSED] {% endif %}
         </li>
         {% endfor %}

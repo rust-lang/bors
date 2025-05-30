@@ -32,5 +32,12 @@ pub struct RepositoryView {
 }
 
 #[derive(Template)]
+#[template(path = "queue.html")]
+pub struct QueueTemplate {
+    pub repo_name: String,
+    pub repo_url: String,
+}
+
+#[derive(Template)]
 #[template(path = "not_found.html")]
 pub struct NotFoundTemplate {}

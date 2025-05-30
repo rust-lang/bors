@@ -8,12 +8,15 @@ use crate::bors::{
 };
 use crate::github::webhook::GitHubWebhook;
 use crate::github::webhook::WebhookSecret;
-use crate::templates::{HtmlTemplate, IndexTemplate, NotFoundTemplate, RepositoryView};
+use crate::templates::{
+    HtmlTemplate, IndexTemplate, NotFoundTemplate, QueueTemplate, RepositoryView,
+};
 use crate::{BorsGlobalEvent, BorsRepositoryEvent, PgDbClient, TeamApiClient};
 
 use anyhow::Error;
+use super::AppError;
 use axum::Router;
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -66,6 +69,7 @@ pub type ServerStateRef = Arc<ServerState>;
 pub fn create_app(state: ServerState) -> Router {
     Router::new()
         .route("/", get(index_handler))
+        .route("/queue/{repo_name}", get(queue_handler))
         .route("/github", post(github_webhook_handler))
         .route("/health", get(health_handler))
         .layer(ConcurrencyLimitLayer::new(100))
@@ -105,6 +109,24 @@ async fn index_handler(State(state): State<ServerStateRef>) -> impl IntoResponse
 
     HtmlTemplate(IndexTemplate { repos })
 }
+
+async fn queue_handler(
+    Path(repo_name): Path<String>,
+    State(state): State<ServerStateRef>,
+) -> Result<impl IntoResponse, AppError> {
+    let repo = match state.db.repo_by_name(&repo_name).await? {
+        Some(repo) => repo,
+        None => return Ok((StatusCode::NOT_FOUND, "Repository not found").into_response()),
+    };
+
+    Ok(HtmlTemplate(QueueTemplate {
+        repo_name: repo.name.name().to_string(),
+        repo_url: format!("https://github.com/{}", repo.name),
+    })
+    .into_response())
+}
+
+
 
 /// Axum handler that receives a webhook and sends it to a webhook channel.
 pub async fn github_webhook_handler(
