@@ -12,7 +12,7 @@ mod utils;
 pub use bors::{BorsContext, CommandParser, event::BorsGlobalEvent, event::BorsRepositoryEvent};
 pub use database::{PgDbClient, TreeState};
 pub use github::{
-    WebhookSecret,
+    AppError, WebhookSecret,
     api::create_github_client,
     api::load_repositories,
     server::{BorsProcess, ServerState, create_app, create_bors_process},

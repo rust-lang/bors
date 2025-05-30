@@ -251,6 +251,18 @@ pub enum BuildStatus {
     Timeouted,
 }
 
+impl Display for BuildStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BuildStatus::Pending => write!(f, "pending"),
+            BuildStatus::Success => write!(f, "success"),
+            BuildStatus::Failure => write!(f, "failure"),
+            BuildStatus::Cancelled => write!(f, "cancelled"),
+            BuildStatus::Timeouted => write!(f, "timeouted"),
+        }
+    }
+}
+
 /// Represents a single (merged) commit.
 #[derive(Debug, sqlx::Type)]
 #[sqlx(type_name = "build")]
@@ -353,6 +365,20 @@ pub enum TreeState {
 impl TreeState {
     pub fn is_closed(&self) -> bool {
         matches!(self, TreeState::Closed { .. })
+    }
+
+    pub fn priority(&self) -> Option<u32> {
+        match self {
+            TreeState::Closed { priority, .. } => Some(*priority),
+            TreeState::Open => None,
+        }
+    }
+
+    pub fn comment_source(&self) -> Option<&str> {
+        match self {
+            TreeState::Closed { source, .. } => Some(source),
+            TreeState::Open => None,
+        }
     }
 }
 

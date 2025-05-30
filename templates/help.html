@@ -1,0 +1,135 @@
+{% extends "base.html" %}
+
+{% block title %}Bors{% endblock %}
+
+{% block head %}
+<style>
+  * {
+    font-family: sans-serif;
+  }
+  code {
+    font-family: monospace;
+  }
+  h1 {
+    font-size: 22px;
+  }
+  h2 {
+    font-size: 18px;
+  }
+  h3 {
+    font-size: 16px;
+  }
+  h4 {
+    font-size: 14px;
+  }
+  p,
+  ul {
+    font-size: 15px;
+    line-height: 150%;
+  }
+  code {
+    background-color: #efefef;
+  }
+  div.wrapper {
+    max-width: 60em;
+    margin-left: auto;
+    margin-right: auto;
+  }
+</style>
+{% endblock %}
+
+{% block body %}
+<div class="wrapper">
+  <h1>Bors</h1>
+
+  <h2>Repositories</h2>
+
+  <ul class="repos">
+    {% for repo in repos %}
+    <li>
+      <a href="queue/{{ repo.name }}">{{ repo.name }}</a>
+      {% if repo.treeclosed %} [TREECLOSED] {% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+
+  <hr />
+
+  <h2>Bors Cheatsheet</h2>
+
+  <h3>Commands</h3>
+
+  <p>
+    Here's a quick reference for the commands bors accepts. Commands must be
+    posted as comments on the PR they refer to. Comments may include
+    multiple commands. Bors will only listen to official reviewers that it
+    is configured to listen to. A comment must mention the GitHub account
+    bors is configured to use (e.g. for the Rust project this is
+    <code>@bors</code>).
+  </p>
+
+  <ul>
+    <li><code>info</code>: Get information about the current PR.</li>
+    <li>
+      <code>ping</code>: Send a ping to bors to check that it responds.
+    </li>
+    <li><code>help</code>: Print help message with available commands.</li>
+    <li>
+      <code>rollup=&lt;never|iffy|maybe|always&gt;</code>: Mark the PR as
+      "always", "maybe", "iffy", or "never" rollup-able.
+    </li>
+    <li><code>rollup</code>: Short for <code>rollup=always</code>.</li>
+    <li><code>rollup-</code>: Short for <code>rollup=maybe</code>.</li>
+    <li>
+      <code>p=&lt;priority&gt;</code>: Set the priority of the approved PR
+      (defaults to 0).
+    </li>
+    <li>
+      <code>r=&lt;user&gt;</code>: Approve a PR on behalf of specified user.
+    </li>
+    <li><code>r+</code>: Approve a PR.</li>
+    <li><code>r-</code>: Unapprove a PR.</li>
+    <li>
+      <code>try</code>: Start a try build based on the most recent commit
+      from the main branch.
+    </li>
+    <li>
+      <code>try parent=&lt;sha&gt;</code>: Start a try build based on the
+      specified parent commit.
+    </li>
+    <li>
+      <code>try parent=last</code>: Start a try build based on the parent
+      commit of the last try build.
+    </li>
+    <li>
+      <code>try jobs=&lt;job1,job2,...&gt;</code>: Start a try build with
+      specific CI jobs (up to 10).
+    </li>
+    <li><code>try cancel</code>: Cancel a running try build.</li>
+    <li>
+      <code>delegate=&lt;try|review&gt;</code>: Delegate try or review
+      permissions to the PR author.
+    </li>
+    <li>
+      <code>delegate+</code>: Delegate review permissions to the PR author.
+    </li>
+    <li>
+      <code>delegate-</code>: Remove any previously granted delegation.
+    </li>
+  </ul>
+
+  <h4>Examples</h4>
+
+  <ul>
+    <li><code>@bors r+ p=1</code></li>
+    <li><code>@bors try parent=abcd123</code></li>
+    <li><code>@bors rollup=always</code></li>
+    <li><code>@bors delegate=review</code></li>
+    <li><code>@bors delegate=try</code></li>
+    <li>
+      <code>@bors try @rust-timer queue</code>: Short-hand for compile-perf
+      benchmarking of PRs.
+    </li>
+  </ul>
+</div>
+{% endblock %}

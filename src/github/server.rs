@@ -4,18 +4,22 @@ use crate::bors::mergeable_queue::{
     handle_mergeable_queue_item,
 };
 use crate::bors::{
-    BorsContext, RepositoryState, handle_bors_global_event, handle_bors_repository_event,
+    BorsContext, RepositoryState, RollupMode, handle_bors_global_event,
+    handle_bors_repository_event,
 };
 use crate::github::webhook::GitHubWebhook;
 use crate::github::webhook::WebhookSecret;
-use crate::templates::{HtmlTemplate, IndexTemplate, NotFoundTemplate, RepositoryView};
+use crate::templates::{
+    HelpTemplate, HtmlTemplate, NotFoundTemplate, PullRequestStats, QueueTemplate, RepositoryView,
+};
 use crate::{BorsGlobalEvent, BorsRepositoryEvent, PgDbClient, TeamApiClient};
 
+use super::AppError;
 use anyhow::Error;
 use axum::Router;
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use axum::response::{IntoResponse, Response};
+use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use octocrab::Octocrab;
 use std::any::Any;
@@ -66,6 +70,8 @@ pub type ServerStateRef = Arc<ServerState>;
 pub fn create_app(state: ServerState) -> Router {
     Router::new()
         .route("/", get(index_handler))
+        .route("/help", get(help_handler))
+        .route("/queue/{repo_name}", get(queue_handler))
         .route("/github", post(github_webhook_handler))
         .route("/health", get(health_handler))
         .layer(ConcurrencyLimitLayer::new(100))
@@ -87,7 +93,11 @@ async fn health_handler() -> impl IntoResponse {
     (StatusCode::OK, "")
 }
 
-async fn index_handler(State(state): State<ServerStateRef>) -> impl IntoResponse {
+async fn index_handler() -> impl IntoResponse {
+    Redirect::permanent("/queue/rust")
+}
+
+async fn help_handler(State(state): State<ServerStateRef>) -> impl IntoResponse {
     let mut repos = Vec::with_capacity(state.repositories.len());
     for repo in state.repositories.keys() {
         let treeclosed = state
@@ -103,7 +113,49 @@ async fn index_handler(State(state): State<ServerStateRef>) -> impl IntoResponse
         });
     }
 
-    HtmlTemplate(IndexTemplate { repos })
+    HtmlTemplate(HelpTemplate { repos })
+}
+
+async fn queue_handler(
+    Path(repo_name): Path<String>,
+    State(state): State<ServerStateRef>,
+) -> Result<impl IntoResponse, AppError> {
+    let repo = match state.db.repo_by_name(&repo_name).await? {
+        Some(repo) => repo,
+        None => {
+            return Ok((
+                StatusCode::NOT_FOUND,
+                format!("Repository {repo_name} not found"),
+            )
+                .into_response());
+        }
+    };
+
+    let prs = state.db.get_nonclosed_pull_requests(&repo.name).await?;
+
+    // TODO: add failed count
+    let (approved_count, rolled_up_count) = prs.iter().fold((0, 0), |(approved, rolled_up), pr| {
+        let is_approved = if pr.is_approved() { 1 } else { 0 };
+        let is_rolled_up = if matches!(pr.rollup, Some(RollupMode::Always)) {
+            1
+        } else {
+            0
+        };
+        (approved + is_approved, rolled_up + is_rolled_up)
+    });
+
+    Ok(HtmlTemplate(QueueTemplate {
+        repo_name: repo.name.name().to_string(),
+        repo_url: format!("https://github.com/{}", repo.name),
+        tree_state: repo.tree_state,
+        stats: PullRequestStats {
+            total_count: prs.len(),
+            approved_count,
+            rolled_up_count,
+        },
+        prs,
+    })
+    .into_response())
 }
 
 /// Axum handler that receives a webhook and sends it to a webhook channel.
