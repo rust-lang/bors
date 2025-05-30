@@ -80,7 +80,7 @@ fn handle_panic(err: Box<dyn Any + Send + 'static>) -> Response {
 }
 
 async fn not_found_handler() -> impl IntoResponse {
-    HtmlTemplate(NotFoundTemplate {})
+    (StatusCode::NOT_FOUND, HtmlTemplate(NotFoundTemplate {}))
 }
 
 async fn health_handler() -> impl IntoResponse {
