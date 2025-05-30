@@ -27,7 +27,7 @@
             {% for pr in prs %}
             <tr>
                 <td>
-                    <a href="{{ repo_url }}/pull/{{ pr.number.0 }}">{{ pr.number.0 }}</a>
+                    <a href="{{ repo_url }}/pull/{{ pr.number }}">{{ pr.number }}</a>
                 </td>
             </tr>
             {% endfor %}
