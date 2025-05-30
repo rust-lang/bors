@@ -354,6 +354,20 @@ impl TreeState {
     pub fn is_closed(&self) -> bool {
         matches!(self, TreeState::Closed { .. })
     }
+
+    pub fn priority(&self) -> Option<u32> {
+        match self {
+            TreeState::Closed { priority, .. } => Some(*priority),
+            TreeState::Open => None,
+        }
+    }
+
+    pub fn src(&self) -> Option<&str> {
+        match self {
+            TreeState::Closed { source, .. } => Some(source),
+            TreeState::Open => None,
+        }
+    }
 }
 
 impl sqlx::Type<sqlx::Postgres> for TreeState {

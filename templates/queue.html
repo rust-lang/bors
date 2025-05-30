@@ -3,10 +3,15 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Bors queue - {{ repo_name }}</title>
+    <title>Bors queue - {{ repo_name }} {% if tree_state.is_closed() %} [TREECLOSED] {% endif %}</title>
   </head>
   <body>
-    <h1>Bors queue - <a href="{{ repo_url }}" target="_blank">{{ repo_name }}</a></h1>
+    <h1>
+        Bors queue - <a href="{{ repo_url }}" target="_blank">{{ repo_name }}</a>
+        {% if tree_state.is_closed() %}
+            [<a href="{{ tree_state.src().unwrap() }}">TREECLOSED</a> below priority {{ tree_state.priority().unwrap() }}]
+        {% endif %}
+    </h1>
 
     <p>
         {{ stats.total_count }} total, {{ stats.approved_count }} approved,

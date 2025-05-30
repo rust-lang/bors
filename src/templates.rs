@@ -1,5 +1,5 @@
 use crate::database::operations::PullRequestStats;
-use crate::database::PullRequestModel;
+use crate::database::{PullRequestModel, TreeState};
 use askama::Template;
 use axum::response::{Html, IntoResponse, Response};
 use http::StatusCode;
@@ -40,6 +40,7 @@ pub struct QueueTemplate {
     pub repo_url: String,
     pub stats: PullRequestStats,
     pub prs: Vec<PullRequestModel>,
+    pub tree_state: TreeState,
 }
 
 #[derive(Template)]

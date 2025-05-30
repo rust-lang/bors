@@ -131,6 +131,7 @@ async fn queue_handler(
     Ok(HtmlTemplate(QueueTemplate {
         repo_name: repo.name.name().to_string(),
         repo_url: format!("https://github.com/{}", repo.name),
+        tree_state: repo.tree_state,
         stats,
         prs,
     })
