@@ -1,5 +1,5 @@
-use crate::database::TreeState;
 use crate::database::operations::PullRequestStats;
+use crate::database::{ApprovalStatus, ApprovalStatus::Approved, BuildModel, TreeState};
 use askama::Template;
 use axum::response::{Html, IntoResponse, Response};
 use http::StatusCode;
@@ -45,6 +45,8 @@ pub struct QueueTemplate {
 
 pub struct PullRequestView {
     pub number: u64,
+    pub try_build: Option<BuildModel>,
+    pub approval_status: ApprovalStatus,
 }
 
 #[derive(Template)]

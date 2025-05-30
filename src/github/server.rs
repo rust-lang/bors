@@ -129,9 +129,11 @@ async fn queue_handler(
 
     let prs = state.db.get_nonclosed_pull_requests(&repo.name).await?;
     let prs = prs
-        .iter()
+        .into_iter()
         .map(|pr| PullRequestView {
             number: pr.number.0,
+            try_build: pr.try_build,
+            approval_status: pr.approval_status,
         })
         .collect();
 

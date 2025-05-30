@@ -21,6 +21,7 @@
     <table>
         <thead>
             <th>#</th>
+            <th>status</th>
         </thead>
 
         <tbody>
@@ -28,6 +29,15 @@
             <tr>
                 <td>
                     <a href="{{ repo_url }}/pull/{{ pr.number }}">{{ pr.number }}</a>
+                </td>
+                <td>
+                    {% if let Some(try_build) = pr.try_build %}
+                        <a href="../results/{{ repo_name }}/{{ pr.number }}">{{ try_build.status }}</a> (try)
+                    {% else %}
+                        {% if let Approved with (_) = pr.approval_status %}
+                            approved
+                        {% endif %}
+                    {% endif %}
                 </td>
             </tr>
             {% endfor %}
