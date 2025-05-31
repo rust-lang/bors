@@ -1,7 +1,5 @@
 use crate::database::operations::PullRequestStats;
-use crate::database::{
-    ApprovalStatus, ApprovalStatus::*, BuildModel, MergeableState, MergeableState::*, TreeState,
-};
+use crate::database::{MergeableState::*, PullRequestModel, TreeState};
 use askama::Template;
 use axum::response::{Html, IntoResponse, Response};
 use http::StatusCode;
@@ -41,15 +39,8 @@ pub struct QueueTemplate {
     pub repo_name: String,
     pub repo_url: String,
     pub stats: PullRequestStats,
-    pub prs: Vec<PullRequestView>,
+    pub prs: Vec<PullRequestModel>,
     pub tree_state: TreeState,
-}
-
-pub struct PullRequestView {
-    pub number: u64,
-    pub try_build: Option<BuildModel>,
-    pub approval_status: ApprovalStatus,
-    pub mergeable_state: MergeableState,
 }
 
 #[derive(Template)]

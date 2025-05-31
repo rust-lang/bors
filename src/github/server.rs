@@ -9,7 +9,7 @@ use crate::bors::{
 use crate::github::webhook::GitHubWebhook;
 use crate::github::webhook::WebhookSecret;
 use crate::templates::{
-    HelpTemplate, HtmlTemplate, NotFoundTemplate, PullRequestView, QueueTemplate, RepositoryView,
+    HelpTemplate, HtmlTemplate, NotFoundTemplate, QueueTemplate, RepositoryView,
 };
 use crate::{BorsGlobalEvent, BorsRepositoryEvent, PgDbClient, TeamApiClient};
 
@@ -128,15 +128,6 @@ async fn queue_handler(
     let stats = state.db.get_pr_statistics(&repo.name).await?;
 
     let prs = state.db.get_nonclosed_pull_requests(&repo.name).await?;
-    let prs = prs
-        .into_iter()
-        .map(|pr| PullRequestView {
-            number: pr.number.0,
-            try_build: pr.try_build,
-            approval_status: pr.approval_status,
-            mergeable_state: pr.mergeable_state,
-        })
-        .collect();
 
     Ok(HtmlTemplate(QueueTemplate {
         repo_name: repo.name.name().to_string(),
