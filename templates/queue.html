@@ -25,6 +25,7 @@
             <th>Mergeable</th>
             <th>Approved by</th>
             <th>Priority</th>
+            <th>Rollup</th>
         </thead>
 
         <tbody>
@@ -57,6 +58,11 @@
                     {% endif %}
                 </td>
                 <td>{{ pr.priority.unwrap_or(0) }}</td>
+                <td>
+                    {% if let Some(rollup) = pr.rollup %}
+                        {{ rollup }}
+                    {% endif %}
+                </td>
             </tr>
             {% endfor %}
         </tbody>
