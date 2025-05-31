@@ -38,14 +38,22 @@ impl Comment {
 }
 
 pub fn try_build_succeeded_comment(workflows: &[WorkflowModel], commit_sha: CommitSha) -> Comment {
-    let workflows_status = list_workflows_status(workflows);
+    use std::fmt::Write;
+
+    let mut text = String::from(":sunny: Try build successful");
+
+    // If there is only a single workflow (the common case), compress the output
+    // so that it doesn't take so much space
+    if workflows.len() == 1 {
+        writeln!(text, " ([{}]({}))", workflows[0].name, workflows[0].url).unwrap();
+    } else {
+        let workflows_status = list_workflows_status(workflows);
+        writeln!(text, "\n{workflows_status}").unwrap();
+    }
+    writeln!(text, "Build commit: {commit_sha} (`{commit_sha}`)").unwrap();
+
     Comment {
-        text: format!(
-            r#":sunny: Try build successful
-{}
-Build commit: {} (`{}`)"#,
-            workflows_status, commit_sha, commit_sha
-        ),
+        text,
         metadata: Some(CommentMetadata::TryBuildCompleted {
             merge_sha: commit_sha.to_string(),
         }),

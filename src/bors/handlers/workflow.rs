@@ -309,6 +309,7 @@ mod tests {
             - [Workflow1](https://github.com/workflows/Workflow1/1) :white_check_mark:
             - [Workflow1](https://github.com/workflows/Workflow1/2) :white_check_mark:
             Build commit: merge-main-sha1-pr-1-sha-0 (`merge-main-sha1-pr-1-sha-0`)
+
             <!-- homu: {"type":"TryBuildCompleted","merge_sha":"merge-main-sha1-pr-1-sha-0"} -->
             "###
             );
@@ -364,9 +365,9 @@ mod tests {
             insta::assert_snapshot!(
                 tester.get_comment().await?,
                 @r###"
-            :sunny: Try build successful
-            - [Workflow1](https://github.com/workflows/Workflow1/1) :white_check_mark:
+            :sunny: Try build successful ([Workflow1](https://github.com/workflows/Workflow1/1))
             Build commit: merge-main-sha1-pr-1-sha-0 (`merge-main-sha1-pr-1-sha-0`)
+
             <!-- homu: {"type":"TryBuildCompleted","merge_sha":"merge-main-sha1-pr-1-sha-0"} -->
             "###
             );
