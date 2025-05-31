@@ -71,9 +71,8 @@ pub fn unclean_try_build_cancelled_comment() -> Comment {
 }
 
 pub fn try_build_cancelled_comment(workflow_urls: impl Iterator<Item = String>) -> Comment {
-    let mut try_build_cancelled_comment = r#"Try build cancelled.
-Cancelled workflows:"#
-        .to_string();
+    let mut try_build_cancelled_comment =
+        r#"Try build cancelled. Cancelled workflows:"#.to_string();
     for url in workflow_urls {
         try_build_cancelled_comment += format!("\n- {}", url).as_str();
     }

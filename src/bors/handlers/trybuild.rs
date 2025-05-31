@@ -643,8 +643,7 @@ mod tests {
                 .await?;
             tester.post_comment("@bors try cancel").await?;
             insta::assert_snapshot!(tester.get_comment().await?, @r###"
-            Try build cancelled.
-            Cancelled workflows:
+            Try build cancelled. Cancelled workflows:
             - https://github.com/rust-lang/borstest/actions/runs/123
             - https://github.com/rust-lang/borstest/actions/runs/124
             "###);
