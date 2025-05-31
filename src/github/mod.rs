@@ -7,11 +7,13 @@ use std::str::FromStr;
 use url::Url;
 
 pub mod api;
+mod error;
 mod labels;
 pub mod server;
 mod webhook;
 
 pub use api::operations::MergeError;
+pub use error::AppError;
 pub use labels::{LabelModification, LabelTrigger};
 pub use webhook::WebhookSecret;
 

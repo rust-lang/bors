@@ -1,7 +1,8 @@
 <!doctype html>
 <html>
   <head>
-    <meta charset="utf-8" />
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Bors</title>
     <style>
       * {
@@ -46,7 +47,7 @@
       <ul class="repos">
         {% for repo in repos %}
         <li>
-          <a href="queue/{{repo.name}}">{{repo.name}}</a>
+          <a href="queue/{{ repo.name }}">{{ repo.name }}</a>
           {% if repo.treeclosed %} [TREECLOSED] {% endif %}
         </li>
         {% endfor %}
@@ -63,8 +64,9 @@
         posted as comments on the PR they refer to. Comments may include
         multiple commands. Bors will only listen to official reviewers that it
         is configured to listen to. A comment must mention the GitHub account
-        bors is configured to use. (e.g. for the Rust project this is <code>@bors</code>)
-        Note that bors will only recognize comments in <i>open</i> PRs.
+        bors is configured to use. (e.g. for the Rust project this is
+        <code>@bors</code>) Note that bors will only recognize comments in
+        <i>open</i> PRs.
       </p>
 
       <ul>

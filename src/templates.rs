@@ -1,3 +1,5 @@
+use crate::database::operations::PullRequestStats;
+use crate::database::{MergeableState::*, PullRequestModel, TreeState};
 use askama::Template;
 use axum::response::{Html, IntoResponse, Response};
 use http::StatusCode;
@@ -21,14 +23,24 @@ where
 }
 
 #[derive(Template)]
-#[template(path = "index.html")]
-pub struct IndexTemplate {
+#[template(path = "help.html")]
+pub struct HelpTemplate {
     pub repos: Vec<RepositoryView>,
 }
 
 pub struct RepositoryView {
     pub name: String,
     pub treeclosed: bool,
+}
+
+#[derive(Template)]
+#[template(path = "queue.html")]
+pub struct QueueTemplate {
+    pub repo_name: String,
+    pub repo_url: String,
+    pub stats: PullRequestStats,
+    pub prs: Vec<PullRequestModel>,
+    pub tree_state: TreeState,
 }
 
 #[derive(Template)]
