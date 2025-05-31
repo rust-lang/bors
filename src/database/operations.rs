@@ -789,9 +789,7 @@ pub(crate) async fn get_repository(
     .await
 }
 
-/// Retrieves a repository by its name (without owner) from the database.
-/// This searches for repositories where the name field ends with "/{repo_name}".
-/// Returns the first match found.
+/// Returns the first match found for a repository by name without owner (via `/{repo_name}`).
 pub(crate) async fn get_repository_by_name(
     executor: impl PgExecutor<'_>,
     repo_name: &str,
