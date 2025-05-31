@@ -24,6 +24,7 @@
             <th>Status</th>
             <th>Mergeable</th>
             <th>Approved by</th>
+            <th>Priority</th>
         </thead>
 
         <tbody>
@@ -55,6 +56,7 @@
                         {{ approver }}
                     {% endif %}
                 </td>
+                <td>{{ pr.priority.unwrap_or(0) }}</td>
             </tr>
             {% endfor %}
         </tbody>
