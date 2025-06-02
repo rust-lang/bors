@@ -71,7 +71,7 @@ pub enum BorsCommand {
         approver: Approver,
         /// Priority of the commit.
         priority: Option<Priority>,
-        // Rollup status of the commit.
+        /// Rollup status of the commit.
         rollup: Option<RollupMode>,
     },
     /// Unapprove a commit.

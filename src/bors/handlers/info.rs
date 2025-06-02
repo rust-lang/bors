@@ -1,7 +1,7 @@
 use crate::bors::Comment;
 use crate::bors::RepositoryState;
-use crate::database::ApprovalStatus;
 use crate::database::PgDbClient;
+use crate::database::{ApprovalStatus, MergeableState};
 use crate::github::PullRequest;
 use std::sync::Arc;
 
@@ -10,7 +10,8 @@ pub(super) async fn command_info(
     pr: &PullRequest,
     db: Arc<PgDbClient>,
 ) -> anyhow::Result<()> {
-    // Geting PR info from database
+    use std::fmt::Write;
+
     let pr_model = db
         .upsert_pull_request(
             repo.client.repository(),
@@ -21,41 +22,47 @@ pub(super) async fn command_info(
         )
         .await?;
 
-    // Building the info message
-    let mut info_lines = Vec::new();
+    let mut message = format!("## Status of PR `{}`\n", pr.number);
 
     // Approval info
     if let ApprovalStatus::Approved(info) = pr_model.approval_status {
-        info_lines.push(format!("- **Approved by:** @{}", info.approver));
+        writeln!(message, "- Approved by: `{}`", info.approver)?;
     } else {
-        info_lines.push("- **Not Approved**".to_string());
+        writeln!(message, "- Not Approved")?;
     }
 
     // Priority info
     if let Some(priority) = pr_model.priority {
-        info_lines.push(format!("- **Priority:** {}", priority));
+        writeln!(message, "- Priority: {priority}")?;
     } else {
-        info_lines.push("- **Priority:** Not set".to_string());
+        writeln!(message, "- Priority: unset")?;
     }
 
-    // Build status
+    // Mergeability state
+    writeln!(
+        message,
+        "- Mergeable: {}",
+        match pr_model.mergeable_state {
+            MergeableState::Mergeable => "yes",
+            MergeableState::HasConflicts => "no",
+            MergeableState::Unknown => "unknown",
+        }
+    )?;
+
+    // Try build status
     if let Some(try_build) = pr_model.try_build {
-        info_lines.push(format!("- **Try build branch:** {}", try_build.branch));
+        writeln!(message, "- Try build is in progress")?;
 
         if let Ok(urls) = db.get_workflow_urls_for_build(&try_build).await {
-            info_lines.extend(
+            message.extend(
                 urls.into_iter()
-                    .map(|url| format!("- **Workflow URL:** {}", url)),
+                    .map(|url| format!("\t- Workflow URL: {url}")),
             );
         }
     }
 
-    // Joining all lines
-    let info = info_lines.join("\n");
-
-    // Post the comment
     repo.client
-        .post_comment(pr.number, Comment::new(info))
+        .post_comment(pr.number, Comment::new(message))
         .await?;
 
     Ok(())
@@ -63,7 +70,7 @@ pub(super) async fn command_info(
 
 #[cfg(test)]
 mod tests {
-    use crate::tests::mocks::run_test;
+    use crate::tests::mocks::{Workflow, WorkflowEvent, run_test};
 
     #[sqlx::test]
     async fn info_for_unapproved_pr(pool: sqlx::PgPool) {
@@ -72,8 +79,10 @@ mod tests {
             insta::assert_snapshot!(
                 tester.get_comment().await?,
                 @r"
-            - **Not Approved**
-            - **Priority:** Not set
+            ## Status of PR `1`
+            - Not Approved
+            - Priority: unset
+            - Mergeable: yes
             "
             );
             Ok(tester)
@@ -91,9 +100,11 @@ mod tests {
             insta::assert_snapshot!(
                 tester.get_comment().await?,
                 @r"
-                - **Approved by:** @default-user
-                - **Priority:** Not set
-                "
+            ## Status of PR `1`
+            - Approved by: `default-user`
+            - Priority: unset
+            - Mergeable: yes
+            "
             );
             Ok(tester)
         })
@@ -112,8 +123,10 @@ mod tests {
             insta::assert_snapshot!(
                 tester.get_comment().await?,
                 @r"
-            - **Not Approved**
-            - **Priority:** 5
+            ## Status of PR `1`
+            - Not Approved
+            - Priority: 5
+            - Mergeable: yes
             "
             );
             Ok(tester)
@@ -131,9 +144,11 @@ mod tests {
             insta::assert_snapshot!(
                 tester.get_comment().await?,
                 @r"
-            - **Not Approved**
-            - **Priority:** Not set
-            - **Try build branch:** automation/bors/try
+            ## Status of PR `1`
+            - Not Approved
+            - Priority: unset
+            - Mergeable: yes
+            - Try build is in progress
             "
             );
             Ok(tester)
@@ -150,14 +165,21 @@ mod tests {
             tester.post_comment("@bors try").await?;
             tester.expect_comments(1).await;
 
+            tester
+                .workflow_event(WorkflowEvent::started(Workflow::from(tester.try_branch())))
+                .await?;
+
             tester.post_comment("@bors info").await?;
             insta::assert_snapshot!(
                 tester.get_comment().await?,
                 @r"
-                - **Approved by:** @default-user
-                - **Priority:** 10
-                - **Try build branch:** automation/bors/try
-                "
+            ## Status of PR `1`
+            - Approved by: `default-user`
+            - Priority: 10
+            - Mergeable: yes
+            - Try build is in progress
+            	- Workflow URL: https://github.com/workflows/Workflow1/1
+            "
             );
             Ok(tester)
         })
