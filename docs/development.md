@@ -69,16 +69,6 @@ Everytime you want to run bors:
   - Configure the webhook URL for your app to point to `<address>/github`. You can use [gh webhook](https://docs.github.com/en/webhooks/testing-and-troubleshooting-webhooks/using-the-github-cli-to-forward-webhooks-for-testing) for that.
 - Try `@bors ping` on some PR on the test repository :)
 
-## Faster compilation
-Bors has a lot of dependencies and can be fairly slow to compile. If you want to improve compilation speed, you could use a faster linker, e.g. LLD.
-
-To do that, install it (e.g. using `sudo apt install lld`) and then put this:
-```toml
-[build]
-rustflags = ["-C", "link-arg=-fuse-ld=lld"]
-```
-into `.cargo/config.toml`.
-
 ## Database
 You must have `sqlx-cli` installed for the following commands to work.
 ```console
@@ -134,3 +124,13 @@ After that, you should commit the changes to the `.sqlx` directory.
 ## Logs in tests
 By default, logs are disabled in tests. To enable them, add `#[traced_test]`
 on top of the test function.
+
+## Faster compilation
+Bors has a lot of dependencies and can be fairly slow to compile. If you want to improve compilation speed, you could use a faster linker, e.g. LLD.
+
+To do that, install it (e.g. using `sudo apt install lld`) and then put this:
+```toml
+[build]
+rustflags = ["-C", "link-arg=-fuse-ld=lld"]
+```
+into `.cargo/config.toml`.
