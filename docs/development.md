@@ -43,10 +43,11 @@ flowchart
 
 ## How to test bors on live repositories
 Bors has a `cargo` test suite that you can run locally, but sometimes nothing beats an actual test on live, GitHub
-repositories. Sadly, the process is currently quite involved, but it can still be done if needed.
+repositories. The bot has a staging deployment at the https://github.com/rust-lang/bors-kindergarten repository,
+where you can try it however you want.
 
-> Note: we will eventually configure bors to have a staging environment e.g. at
-> https://github.com/rust-lang/bors-kindergarten, however this is not configured yet.
+Nevertheless, sometimes it might be easier to test it on your own repository. The process is a bit involved, but it
+can still be done if needed.
 
 One-time setup:
 - Create your own GitHub app.
@@ -57,7 +58,7 @@ One-time setup:
   - Subscribe it to webhook events `Check suite`, `Check run`, `Issue comment`, `Issues`, `Pull request`,
     `Pull request review`, `Pull request review comment` and `Workflow run`.
 - Install your GitHub app on some test repository where you want to test bors.
-  - Don't forget to configure `rust-bors.toml` in the root of the repository, and also some CI checks.
+  - Don't forget to configure `rust-bors.toml` in the root of the repository, and also add some example CI workflows.
 
 Everytime you want to run bors:
 - Run bors locally.
@@ -65,7 +66,7 @@ Everytime you want to run bors:
   - Set `WEBHOOK_SECRET` to the webhook secret of the app.
   - Set `PRIVATE_KEY` to the private key of the app.
 - Set up some globally reachable URL/IP address for your computer, e.g. using [ngrok](https://ngrok.com/).
-  - Configure the webhook URL for your app to point to `<address>/github`.
+  - Configure the webhook URL for your app to point to `<address>/github`. You can use [gh webhook](https://docs.github.com/en/webhooks/testing-and-troubleshooting-webhooks/using-the-github-cli-to-forward-webhooks-for-testing) for that.
 - Try `@bors ping` on some PR on the test repository :)
 
 ## Faster compilation
