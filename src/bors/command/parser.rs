@@ -35,6 +35,10 @@ impl CommandParser {
         Self { prefix }
     }
 
+    pub fn prefix(&self) -> &str {
+        &self.prefix
+    }
+
     /// Parses bors commands from the given string.
     ///
     /// Assumes that each command spands at most one line and that there are not more commands on

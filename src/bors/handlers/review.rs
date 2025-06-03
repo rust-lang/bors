@@ -1035,7 +1035,11 @@ mod tests {
                 tester.expect_comments(1).await;
 
                 tester.post_comment("@bors try").await?;
-                insta::assert_snapshot!(tester.get_comment().await?, @":hourglass: Trying commit pr-1-sha with merge merge-main-sha1-pr-1-sha-0…");
+                insta::assert_snapshot!(tester.get_comment().await?, @r"
+                :hourglass: Trying commit pr-1-sha with merge merge-main-sha1-pr-1-sha-0…
+
+                To cancel the try build, run the command `@bors try cancel`.
+                ");
 
                 Ok(tester)
             })

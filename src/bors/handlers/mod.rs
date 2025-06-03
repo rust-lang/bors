@@ -434,6 +434,7 @@ async fn handle_comment(
                             &comment.author,
                             parent,
                             jobs,
+                            ctx.parser.prefix(),
                         )
                         .instrument(span)
                         .await

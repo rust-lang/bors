@@ -46,6 +46,7 @@ pub(super) async fn command_try_build(
     author: &GithubUser,
     parent: Option<Parent>,
     jobs: Vec<String>,
+    command_prefix: &str,
 ) -> anyhow::Result<()> {
     let repo = repo.as_ref();
     if !has_permission(repo, author, pr, &db, PermissionType::Try).await? {
@@ -106,7 +107,10 @@ pub(super) async fn command_try_build(
             handle_label_trigger(repo, pr.number, LabelTrigger::TryBuildStarted).await?;
 
             repo.client
-                .post_comment(pr.number, trying_build_comment(&pr.head.sha, &merge_sha))
+                .post_comment(
+                    pr.number,
+                    trying_build_comment(&pr.head.sha, &merge_sha, command_prefix),
+                )
                 .await
         }
         MergeResult::Conflict => {
@@ -299,9 +303,15 @@ fn auto_merge_commit_message(
     message
 }
 
-fn trying_build_comment(head_sha: &CommitSha, merge_sha: &CommitSha) -> Comment {
+fn trying_build_comment(
+    head_sha: &CommitSha,
+    merge_sha: &CommitSha,
+    command_prefix: &str,
+) -> Comment {
     Comment::new(format!(
-        ":hourglass: Trying commit {head_sha} with merge {merge_sha}…"
+        ":hourglass: Trying commit {head_sha} with merge {merge_sha}…
+
+To cancel the try build, run the command `{command_prefix} try cancel`."
     ))
 }
 
@@ -413,7 +423,11 @@ mod tests {
                 .await?;
             insta::assert_snapshot!(
                 tester.get_comment().await?,
-                @":hourglass: Trying commit pr-1-sha with merge merge-main-sha1-pr-1-sha-0…"
+                @r"
+            :hourglass: Trying commit pr-1-sha with merge merge-main-sha1-pr-1-sha-0…
+
+            To cancel the try build, run the command `@bors try cancel`.
+            "
             );
             Ok(tester)
         })
@@ -426,7 +440,11 @@ mod tests {
             tester.post_comment("@bors try").await?;
             insta::assert_snapshot!(
                 tester.get_comment().await?,
-                @":hourglass: Trying commit pr-1-sha with merge merge-main-sha1-pr-1-sha-0…"
+                @r"
+            :hourglass: Trying commit pr-1-sha with merge merge-main-sha1-pr-1-sha-0…
+
+            To cancel the try build, run the command `@bors try cancel`.
+            "
             );
             Ok(tester)
         })
@@ -483,7 +501,11 @@ mod tests {
             tester.workflow_success(tester.try_branch()).await?;
             tester.expect_comments(1).await;
             tester.post_comment("@bors try parent=last").await?;
-            insta::assert_snapshot!(tester.get_comment().await?, @":hourglass: Trying commit pr-1-sha with merge merge-ea9c1b050cc8b420c2c211d2177811e564a4dc60-pr-1-sha-1…");
+            insta::assert_snapshot!(tester.get_comment().await?, @r"
+            :hourglass: Trying commit pr-1-sha with merge merge-ea9c1b050cc8b420c2c211d2177811e564a4dc60-pr-1-sha-1…
+
+            To cancel the try build, run the command `@bors try cancel`.
+            ");
             Ok(tester)
         })
         .await;
@@ -599,7 +621,11 @@ mod tests {
 
             tester.get_branch_mut(TRY_BRANCH_NAME).reset_suites();
             tester.post_comment("@bors try").await?;
-            insta::assert_snapshot!(tester.get_comment().await?, @":hourglass: Trying commit pr-1-sha with merge merge-main-sha1-pr-1-sha-1…");
+            insta::assert_snapshot!(tester.get_comment().await?, @r"
+            :hourglass: Trying commit pr-1-sha with merge merge-main-sha1-pr-1-sha-1…
+
+            To cancel the try build, run the command `@bors try cancel`.
+            ");
             tester
                 .workflow_success(Workflow::from(tester.try_branch()).with_run_id(2))
                 .await?;
@@ -748,13 +774,19 @@ mod tests {
     #[sqlx::test]
     async fn try_build_start_modify_labels(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
-            .github(GitHubState::default().with_default_config(r#"
+            .github(GitHubState::default().with_default_config(
+                r#"
 [labels]
 try = ["+foo", "+bar", "-baz"]
-"#))
+"#,
+            ))
             .run_test(|mut tester| async {
                 tester.post_comment("@bors try").await?;
-                insta::assert_snapshot!(tester.get_comment().await?, @":hourglass: Trying commit pr-1-sha with merge merge-main-sha1-pr-1-sha-0…");
+                insta::assert_snapshot!(tester.get_comment().await?, @r"
+                :hourglass: Trying commit pr-1-sha with merge merge-main-sha1-pr-1-sha-0…
+
+                To cancel the try build, run the command `@bors try cancel`.
+                ");
                 let repo = tester.default_repo();
                 let pr = repo.lock().get_pr(default_pr_number()).clone();
                 pr.check_added_labels(&["foo", "bar"]);
@@ -767,13 +799,19 @@ try = ["+foo", "+bar", "-baz"]
     #[sqlx::test]
     async fn try_build_succeeded_modify_labels(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
-            .github(GitHubState::default().with_default_config(r#"
+            .github(GitHubState::default().with_default_config(
+                r#"
 [labels]
 try_succeed = ["+foo", "+bar", "-baz"]
-"#))
+"#,
+            ))
             .run_test(|mut tester| async {
                 tester.post_comment("@bors try").await?;
-                insta::assert_snapshot!(tester.get_comment().await?, @":hourglass: Trying commit pr-1-sha with merge merge-main-sha1-pr-1-sha-0…");
+                insta::assert_snapshot!(tester.get_comment().await?, @r"
+                :hourglass: Trying commit pr-1-sha with merge merge-main-sha1-pr-1-sha-0…
+
+                To cancel the try build, run the command `@bors try cancel`.
+                ");
                 let repo = tester.default_repo();
                 repo.lock()
                     .get_pr(default_pr_number())
@@ -791,14 +829,20 @@ try_succeed = ["+foo", "+bar", "-baz"]
     #[sqlx::test]
     async fn try_build_failed_modify_labels(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
-            .github(GitHubState::default().with_default_config(r#"
+            .github(GitHubState::default().with_default_config(
+                r#"
 [labels]
 try_failed = ["+foo", "+bar", "-baz"]
-"#))
+"#,
+            ))
             .run_test(|mut tester| async {
                 tester.create_branch(TRY_BRANCH_NAME).expect_suites(1);
                 tester.post_comment("@bors try").await?;
-                insta::assert_snapshot!(tester.get_comment().await?, @":hourglass: Trying commit pr-1-sha with merge merge-main-sha1-pr-1-sha-0…");
+                insta::assert_snapshot!(tester.get_comment().await?, @r"
+                :hourglass: Trying commit pr-1-sha with merge merge-main-sha1-pr-1-sha-0…
+
+                To cancel the try build, run the command `@bors try cancel`.
+                ");
                 let repo = tester.default_repo();
                 repo.lock()
                     .get_pr(default_pr_number())
