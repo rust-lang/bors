@@ -7,7 +7,7 @@ use std::time::Duration;
 use anyhow::Context;
 use bors::{
     BorsContext, BorsGlobalEvent, BorsProcess, CommandParser, PgDbClient, ServerState,
-    TeamApiClient, WebhookSecret, create_app, create_bors_process, create_github_client,
+    TeamApiClient, TreeState, WebhookSecret, create_app, create_bors_process, create_github_client,
     load_repositories,
 };
 use clap::Parser;
@@ -119,6 +119,15 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
                 ));
             }
         };
+
+        runtime.block_on(async {
+            if let Err(error) = db.upsert_repository(&name, TreeState::Open).await {
+                tracing::warn!("Failed to upsert repository {name}: {error:?}");
+            } else {
+                tracing::debug!("Repository {name} inserted into database");
+            }
+        });
+
         repos.insert(name, Arc::new(repo));
     }
 
