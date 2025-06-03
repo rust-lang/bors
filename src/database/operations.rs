@@ -817,6 +817,38 @@ pub(crate) async fn insert_repo_if_not_exists(
     .await
 }
 
+/// Returns the first match found for a repository by name without owner (via `/{repo_name}`).
+pub(crate) async fn get_repository_by_name(
+    executor: impl PgExecutor<'_>,
+    repo_name: &str,
+) -> anyhow::Result<Option<RepoModel>> {
+    measure_db_query("get_repository_by_name", || async {
+        let search_pattern = format!("%/{repo_name}");
+        let repo = sqlx::query_as!(
+            RepoModel,
+            r#"
+        SELECT
+            id,
+            name as "name: GithubRepoName",
+            (
+                tree_state,
+                treeclosed_src
+            ) AS "tree_state!: TreeState",
+            created_at
+        FROM repository
+        WHERE name LIKE $1
+        LIMIT 1
+        "#,
+            search_pattern
+        )
+        .fetch_optional(executor)
+        .await?;
+
+        Ok(repo)
+    })
+    .await
+}
+
 /// Updates the tree state of a repository.
 pub(crate) async fn upsert_repository(
     executor: impl PgExecutor<'_>,
