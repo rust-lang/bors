@@ -121,8 +121,8 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
         };
 
         runtime.block_on(async {
-            if let Err(error) = db.upsert_repository(&name, TreeState::Open).await {
-                tracing::warn!("Failed to upsert repository {name}: {error:?}");
+            if let Err(error) = db.insert_repo_if_not_exists(&name, TreeState::Open).await {
+                tracing::warn!("Failed to insert repository {name}: {error:?}");
             } else {
                 tracing::debug!("Repository {name} inserted into database");
             }

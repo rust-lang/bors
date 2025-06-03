@@ -789,6 +789,34 @@ pub(crate) async fn get_repository(
     .await
 }
 
+pub(crate) async fn insert_repo_if_not_exists(
+    executor: impl PgExecutor<'_>,
+    repo: &GithubRepoName,
+    tree_state: TreeState,
+) -> anyhow::Result<()> {
+    let (priority, src) = match tree_state {
+        TreeState::Open => (None, None),
+        TreeState::Closed { priority, source } => (Some(priority as i32), Some(source)),
+    };
+    measure_db_query("insert_repository_if_not_exists", || async {
+        sqlx::query!(
+            r#"
+        INSERT INTO repository (name, tree_state, treeclosed_src)
+        VALUES ($1, $2, $3)
+        ON CONFLICT (name) DO NOTHING
+        "#,
+            repo as &GithubRepoName,
+            priority,
+            src
+        )
+        .execute(executor)
+        .await?;
+
+        Ok(())
+    })
+    .await
+}
+
 /// Updates the tree state of a repository.
 pub(crate) async fn upsert_repository(
     executor: impl PgExecutor<'_>,
