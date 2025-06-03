@@ -7,7 +7,7 @@ use std::time::Duration;
 use anyhow::Context;
 use bors::{
     BorsContext, BorsGlobalEvent, BorsProcess, CommandParser, PgDbClient, ServerState,
-    TeamApiClient, WebhookSecret, create_app, create_bors_process, create_github_client,
+    TeamApiClient, TreeState, WebhookSecret, create_app, create_bors_process, create_github_client,
     load_repositories,
 };
 use clap::Parser;
@@ -119,6 +119,13 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
                 ));
             }
         };
+
+        runtime.block_on(async {
+            if let Err(error) = db.insert_repo_if_not_exists(&name, TreeState::Open).await {
+                tracing::warn!("Failed to insert repository {name}: {error:?}");
+            }
+        });
+
         repos.insert(name, Arc::new(repo));
     }
 

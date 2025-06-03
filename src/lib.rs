@@ -10,7 +10,7 @@ mod templates;
 mod utils;
 
 pub use bors::{BorsContext, CommandParser, event::BorsGlobalEvent, event::BorsRepositoryEvent};
-pub use database::PgDbClient;
+pub use database::{PgDbClient, TreeState};
 pub use github::{
     WebhookSecret,
     api::create_github_client,
