@@ -3,14 +3,15 @@ use std::sync::Arc;
 use anyhow::{Context, anyhow};
 
 use crate::PgDbClient;
-use crate::bors::Comment;
 use crate::bors::RepositoryState;
 use crate::bors::command::Parent;
-use crate::bors::comment::cant_find_last_parent_comment;
 use crate::bors::comment::no_try_build_in_progress_comment;
 use crate::bors::comment::try_build_cancelled_comment;
 use crate::bors::comment::try_build_in_progress_comment;
 use crate::bors::comment::unclean_try_build_cancelled_comment;
+use crate::bors::comment::{
+    cant_find_last_parent_comment, merge_conflict_comment, try_build_started_comment,
+};
 use crate::bors::handlers::labels::handle_label_trigger;
 use crate::database::RunId;
 use crate::database::{BuildModel, BuildStatus, PullRequestModel};
@@ -46,7 +47,7 @@ pub(super) async fn command_try_build(
     author: &GithubUser,
     parent: Option<Parent>,
     jobs: Vec<String>,
-    command_prefix: &str,
+    bot_prefix: &str,
 ) -> anyhow::Result<()> {
     let repo = repo.as_ref();
     if !has_permission(repo, author, pr, &db, PermissionType::Try).await? {
@@ -71,7 +72,7 @@ pub(super) async fn command_try_build(
         if build.status == BuildStatus::Pending {
             tracing::warn!("Try build already in progress");
             repo.client
-                .post_comment(pr.number, try_build_in_progress_comment())
+                .post_comment(pr.number, try_build_in_progress_comment(bot_prefix))
                 .await?;
             return Ok(());
         }
@@ -109,7 +110,7 @@ pub(super) async fn command_try_build(
             repo.client
                 .post_comment(
                     pr.number,
-                    trying_build_comment(&pr.head.sha, &merge_sha, command_prefix),
+                    try_build_started_comment(&pr.head.sha, &merge_sha, bot_prefix),
                 )
                 .await
         }
@@ -301,53 +302,6 @@ fn auto_merge_commit_message(
         message.push_str(&format!("\ntry-job: {}", job));
     }
     message
-}
-
-fn trying_build_comment(
-    head_sha: &CommitSha,
-    merge_sha: &CommitSha,
-    command_prefix: &str,
-) -> Comment {
-    Comment::new(format!(
-        ":hourglass: Trying commit {head_sha} with merge {merge_sha}…
-
-To cancel the try build, run the command `{command_prefix} try cancel`."
-    ))
-}
-
-fn merge_conflict_comment(branch: &str) -> Comment {
-    let message = format!(
-        r#":lock: Merge conflict
-
-This pull request and the master branch diverged in a way that cannot
- be automatically merged. Please rebase on top of the latest master
- branch, and let the reviewer approve again.
-
-<details><summary>How do I rebase?</summary>
-
-Assuming `self` is your fork and `upstream` is this repository,
- you can resolve the conflict following these steps:
-
-1. `git checkout {branch}` *(switch to your branch)*
-2. `git fetch upstream master` *(retrieve the latest master)*
-3. `git rebase upstream/master -p` *(rebase on top of it)*
-4. Follow the on-screen instruction to resolve conflicts (check `git status` if you got lost).
-5. `git push self {branch} --force-with-lease` *(update this PR)*
-
-You may also read
- [*Git Rebasing to Resolve Conflicts* by Drew Blessing](http://blessing.io/git/git-rebase/open-source/2015/08/23/git-rebasing-to-resolve-conflicts.html)
- for a short tutorial.
-
-Please avoid the ["**Resolve conflicts**" button](https://help.github.com/articles/resolving-a-merge-conflict-on-github/) on GitHub.
- It uses `git merge` instead of `git rebase` which makes the PR commit history more difficult to read.
-
-Sometimes step 4 will complete without asking for resolution. This is usually due to difference between how `Cargo.lock` conflict is
-handled during merge and rebase. This is normal, and you should still perform step 5 to update this PR.
-
-</details>
-"#
-    );
-    Comment::new(message)
 }
 
 #[cfg(test)]
@@ -603,7 +557,7 @@ mod tests {
             tester.post_comment("@bors try").await?;
             tester.expect_comments(1).await;
             tester.post_comment("@bors try").await?;
-            insta::assert_snapshot!(tester.get_comment().await?, @":exclamation: A try build is currently in progress. You can cancel it using @bors try cancel.");
+            insta::assert_snapshot!(tester.get_comment().await?, @":exclamation: A try build is currently in progress. You can cancel it using `@bors try cancel`.");
             Ok(tester)
         })
         .await;

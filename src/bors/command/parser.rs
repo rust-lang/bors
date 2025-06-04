@@ -35,6 +35,8 @@ impl CommandParser {
         Self { prefix }
     }
 
+    /// Prefix of the bot, used to invoke commands from PR comments.
+    /// For example `@bors`.
     pub fn prefix(&self) -> &str {
         &self.prefix
     }
