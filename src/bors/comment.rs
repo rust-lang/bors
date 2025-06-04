@@ -60,8 +60,10 @@ pub fn try_build_succeeded_comment(workflows: &[WorkflowModel], commit_sha: Comm
     }
 }
 
-pub fn try_build_in_progress_comment() -> Comment {
-    Comment::new(":exclamation: A try build is currently in progress. You can cancel it using @bors try cancel.".to_string())
+pub fn try_build_in_progress_comment(bot_prefix: &str) -> Comment {
+    Comment::new(format!(
+        ":exclamation: A try build is currently in progress. You can cancel it using `{bot_prefix} try cancel`."
+    ))
 }
 
 pub fn cant_find_last_parent_comment() -> Comment {

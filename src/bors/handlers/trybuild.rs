@@ -47,7 +47,7 @@ pub(super) async fn command_try_build(
     author: &GithubUser,
     parent: Option<Parent>,
     jobs: Vec<String>,
-    command_prefix: &str,
+    bot_prefix: &str,
 ) -> anyhow::Result<()> {
     let repo = repo.as_ref();
     if !has_permission(repo, author, pr, &db, PermissionType::Try).await? {
@@ -72,7 +72,7 @@ pub(super) async fn command_try_build(
         if build.status == BuildStatus::Pending {
             tracing::warn!("Try build already in progress");
             repo.client
-                .post_comment(pr.number, try_build_in_progress_comment())
+                .post_comment(pr.number, try_build_in_progress_comment(bot_prefix))
                 .await?;
             return Ok(());
         }
@@ -110,7 +110,7 @@ pub(super) async fn command_try_build(
             repo.client
                 .post_comment(
                     pr.number,
-                    try_build_started_comment(&pr.head.sha, &merge_sha, command_prefix),
+                    try_build_started_comment(&pr.head.sha, &merge_sha, bot_prefix),
                 )
                 .await
         }
@@ -557,7 +557,7 @@ mod tests {
             tester.post_comment("@bors try").await?;
             tester.expect_comments(1).await;
             tester.post_comment("@bors try").await?;
-            insta::assert_snapshot!(tester.get_comment().await?, @":exclamation: A try build is currently in progress. You can cancel it using @bors try cancel.");
+            insta::assert_snapshot!(tester.get_comment().await?, @":exclamation: A try build is currently in progress. You can cancel it using `@bors try cancel`.");
             Ok(tester)
         })
         .await;
