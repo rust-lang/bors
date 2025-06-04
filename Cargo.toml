@@ -58,6 +58,7 @@ chrono = "0.4"
 itertools = "0.14"
 
 # Text processing
+pulldown-cmark = "0.13"
 regex = "1"
 
 [dev-dependencies]

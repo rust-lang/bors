@@ -1,11 +1,11 @@
 //! Defines parsers for bors commands.
 
-use std::collections::HashSet;
-use std::str::FromStr;
-
 use crate::bors::command::{Approver, BorsCommand, Parent};
 use crate::database::DelegatedPermission;
 use crate::github::CommitSha;
+use pulldown_cmark::{CowStr, Event, Parser, Tag, TagEnd, TextMergeStream};
+use std::collections::HashSet;
+use std::str::FromStr;
 
 use super::{Priority, RollupMode};
 
@@ -45,11 +45,11 @@ impl CommandParser {
     ///
     /// Assumes that each command spands at most one line and that there are not more commands on
     /// each line.
-    pub fn parse_commands<'a>(
-        &self,
-        text: &'a str,
-    ) -> Vec<Result<BorsCommand, CommandParseError<'a>>> {
-        text.lines()
+    pub fn parse_commands(&self, text: &str) -> Vec<Result<BorsCommand, CommandParseError>> {
+        let segments = extract_text_segments(text);
+        segments
+            .iter()
+            .flat_map(|segment| segment.lines())
             .filter_map(|line| match line.find(&self.prefix) {
                 Some(index) => {
                     let input = &line[index + self.prefix.len()..];
@@ -61,7 +61,54 @@ impl CommandParser {
     }
 }
 
-type ParseResult<'a, T = BorsCommand> = Option<Result<T, CommandParseError<'a>>>;
+/// Extract text segments from a Markdown `text`.
+fn extract_text_segments(text: &str) -> Vec<CowStr> {
+    let md_parser = TextMergeStream::new(Parser::new(text));
+    let mut stack = vec![];
+    let mut segments = vec![];
+
+    for event in md_parser.into_iter() {
+        match event {
+            Event::Text(text) => {
+                // Only consider commands in raw text outside of wrapping elements
+                if stack.is_empty() {
+                    segments.push(text);
+                }
+            }
+            Event::Start(tag) => match tag {
+                // Ignore content in the following wrapping elements
+                Tag::BlockQuote(_)
+                | Tag::CodeBlock(_)
+                | Tag::HtmlBlock
+                | Tag::Link { .. }
+                | Tag::Heading { .. }
+                | Tag::Image { .. } => {
+                    stack.push(tag);
+                }
+                _ => {}
+            },
+            Event::End(tag) => {
+                if let Some(start_tag) = stack.last() {
+                    match (start_tag, tag) {
+                        (Tag::BlockQuote(_), TagEnd::BlockQuote(_))
+                        | (Tag::CodeBlock(_), TagEnd::CodeBlock)
+                        | (Tag::HtmlBlock, TagEnd::HtmlBlock)
+                        | (Tag::Link { .. }, TagEnd::Link)
+                        | (Tag::Heading { .. }, TagEnd::Heading(_))
+                        | (Tag::Image { .. }, TagEnd::Image) => {
+                            stack.pop();
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    segments
+}
+
+type ParseResult<T = BorsCommand> = Option<Result<T, CommandParseError>>;
 
 // The order of the parsers in the vector is important
 const PARSERS: &[fn(&CommandPart<'_>, &[CommandPart<'_>]) -> ParseResult] = &[
@@ -495,8 +542,8 @@ mod tests {
     fn parse_multiple_priority_commands() {
         let cmds = parse_commands(
             r#"
-            @bors r+ p=1
-            @bors r=user2 p=2
+@bors r+ p=1
+@bors r=user2 p=2
         "#,
         );
         assert_eq!(cmds.len(), 2);
@@ -714,8 +761,8 @@ mod tests {
     fn parse_multiple_rollup_commands() {
         let cmds = parse_commands(
             r#"
-            @bors r+ rollup
-            @bors r=user2 rollup=iffy
+@bors r+ rollup
+@bors r=user2 rollup=iffy
         "#,
         );
         assert_eq!(cmds.len(), 2);
@@ -1159,6 +1206,36 @@ line two
             cmds[0],
             Err(CommandParseError::UnknownCommand("tree".to_string()))
         );
+    }
+
+    #[test]
+    fn ignore_markdown_codeblock() {
+        let cmds = parse_commands(
+            r#"
+```rust
+@bors try
+```
+"#,
+        );
+        assert_eq!(cmds.len(), 0);
+    }
+
+    #[test]
+    fn ignore_markdown_backtikcs() {
+        let cmds = parse_commands("Don't do `@bors try`!");
+        assert_eq!(cmds.len(), 0);
+    }
+
+    #[test]
+    fn ignore_markdown_link() {
+        let cmds = parse_commands("Ignore [me](@bors-try).");
+        assert_eq!(cmds.len(), 0);
+    }
+
+    #[test]
+    fn ignore_markdown_html() {
+        let cmds = parse_commands("<div>@bors try</div>");
+        assert_eq!(cmds.len(), 0);
     }
 
     fn parse_commands(text: &str) -> Vec<Result<BorsCommand, CommandParseError>> {
