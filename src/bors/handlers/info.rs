@@ -43,7 +43,7 @@ pub(super) async fn command_info(
     if let Some(try_build) = &pr.db.try_build {
         writeln!(message, "- Try build is in progress")?;
 
-        if let Ok(urls) = db.get_workflow_urls_for_build(&try_build).await {
+        if let Ok(urls) = db.get_workflow_urls_for_build(try_build).await {
             message.extend(
                 urls.into_iter()
                     .map(|url| format!("\t- Workflow URL: {url}")),

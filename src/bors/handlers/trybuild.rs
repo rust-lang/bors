@@ -200,20 +200,20 @@ pub(super) async fn command_try_cancel(
         return Ok(());
     };
 
-    match cancel_build_workflows(&repo.client, db.as_ref(), &build).await {
+    match cancel_build_workflows(&repo.client, db.as_ref(), build).await {
         Err(error) => {
             tracing::error!(
                 "Could not cancel workflows for SHA {}: {error:?}",
                 build.commit_sha
             );
-            db.update_build_status(&build, BuildStatus::Cancelled)
+            db.update_build_status(build, BuildStatus::Cancelled)
                 .await?;
             repo.client
                 .post_comment(pr_number, unclean_try_build_cancelled_comment())
                 .await?
         }
         Ok(workflow_ids) => {
-            db.update_build_status(&build, BuildStatus::Cancelled)
+            db.update_build_status(build, BuildStatus::Cancelled)
                 .await?;
             tracing::info!("Try build cancelled");
 
