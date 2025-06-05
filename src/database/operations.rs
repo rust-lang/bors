@@ -116,6 +116,7 @@ pub(crate) async fn set_pr_status(
     .await
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn upsert_pull_request(
     executor: impl PgExecutor<'_>,
     repo: &GithubRepoName,

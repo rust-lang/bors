@@ -94,6 +94,7 @@ impl PgDbClient {
         get_pull_request(&self.pool, repo, pr_number).await
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn upsert_pull_request(
         &self,
         repo: &GithubRepoName,
