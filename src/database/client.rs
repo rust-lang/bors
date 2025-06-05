@@ -18,7 +18,7 @@ use super::operations::{
     update_build_status, update_mergeable_states_by_base_branch, update_pr_build_id,
     update_pr_mergeable_state, update_workflow_status, upsert_pull_request, upsert_repository,
 };
-use super::{ApprovalInfo, DelegatedPermission, MergeableState, RunId};
+use super::{ApprovalInfo, DelegatedPermission, MergeableState, RunId, UpsertPullRequestParams};
 
 /// Provides access to a database using sqlx operations.
 #[derive(Clone)]
@@ -97,22 +97,9 @@ impl PgDbClient {
     pub async fn upsert_pull_request(
         &self,
         repo: &GithubRepoName,
-        pr_number: PullRequestNumber,
-        title: &str,
-        base_branch: &str,
-        mergeable_state: MergeableState,
-        pr_status: &PullRequestStatus,
+        params: UpsertPullRequestParams,
     ) -> anyhow::Result<PullRequestModel> {
-        let pr = upsert_pull_request(
-            &self.pool,
-            repo,
-            pr_number,
-            title,
-            base_branch,
-            mergeable_state,
-            pr_status,
-        )
-        .await?;
+        let pr = upsert_pull_request(&self.pool, repo, &params).await?;
         Ok(pr)
     }
 
@@ -143,10 +130,20 @@ impl PgDbClient {
         repo: &GithubRepoName,
         pr_number: PullRequestNumber,
         title: &str,
+        author: &str,
         base_branch: &str,
         pr_status: PullRequestStatus,
     ) -> anyhow::Result<()> {
-        create_pull_request(&self.pool, repo, pr_number, title, base_branch, pr_status).await
+        create_pull_request(
+            &self.pool,
+            repo,
+            pr_number,
+            title,
+            author,
+            base_branch,
+            pr_status,
+        )
+        .await
     }
 
     pub async fn set_pr_status(

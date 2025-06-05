@@ -6,7 +6,7 @@ use std::{
 
 use crate::{
     bors::{PullRequestStatus, RollupMode},
-    github::{GithubRepoName, PullRequestNumber},
+    github::{GithubRepoName, PullRequest, PullRequestNumber},
 };
 use chrono::{DateTime, Utc};
 pub use client::PgDbClient;
@@ -177,7 +177,7 @@ impl<'r> sqlx::Decode<'r, sqlx::Postgres> for ApprovalStatus {
 }
 
 /// Describes if a pull request can be merged or not.
-#[derive(Debug, PartialEq, sqlx::Type)]
+#[derive(Debug, PartialEq, Clone, sqlx::Type)]
 #[sqlx(type_name = "TEXT")]
 #[sqlx(rename_all = "snake_case")]
 pub enum MergeableState {
@@ -283,6 +283,7 @@ pub struct PullRequestModel {
     pub repository: GithubRepoName,
     pub number: PullRequestNumber,
     pub title: String,
+    pub author: String,
     pub pr_status: PullRequestStatus,
     pub base_branch: String,
     pub mergeable_state: MergeableState,
@@ -403,6 +404,29 @@ impl sqlx::Decode<'_, sqlx::Postgres> for TreeState {
                     .to_string()
                     .into(),
             ),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct UpsertPullRequestParams {
+    pub pr_number: PullRequestNumber,
+    pub title: String,
+    pub author: String,
+    pub base_branch: String,
+    pub mergeable_state: MergeableState,
+    pub pr_status: PullRequestStatus,
+}
+
+impl From<PullRequest> for UpsertPullRequestParams {
+    fn from(pr: PullRequest) -> Self {
+        Self {
+            pr_number: pr.number,
+            title: pr.title,
+            author: pr.author.username,
+            base_branch: pr.base.name,
+            mergeable_state: pr.mergeable_state.into(),
+            pr_status: pr.status,
         }
     }
 }

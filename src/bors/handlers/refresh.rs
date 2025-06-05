@@ -137,15 +137,8 @@ pub async fn sync_pull_requests_state(
         } else {
             // Nonclosed PRs in GitHub that are either not in the DB or marked as closed
             tracing::debug!("PR {} not found in open PRs in DB, upserting it", pr_num);
-            db.upsert_pull_request(
-                repo_name,
-                gh_pr.number,
-                &gh_pr.title,
-                &gh_pr.base.name,
-                gh_pr.mergeable_state.clone().into(),
-                &gh_pr.status,
-            )
-            .await?;
+            db.upsert_pull_request(repo_name, gh_pr.clone().into())
+                .await?;
         }
     }
     // PRs that are closed in GitHub but not in the DB. In theory PR could also be merged
