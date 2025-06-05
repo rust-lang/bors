@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            WITH upserted_pr AS (\n                INSERT INTO pull_request (repository, number, base_branch, mergeable_state, status)\n                VALUES ($1, $2, $3, $4, $5)\n                ON CONFLICT (repository, number)\n                DO UPDATE SET\n                    base_branch = $3,\n                    mergeable_state = $4,\n                    status = $5\n                RETURNING *\n            )\n            SELECT\n                pr.id,\n                pr.repository as \"repository: GithubRepoName\",\n                pr.number as \"number!: i64\",\n                (\n                    pr.approved_by,\n                    pr.approved_sha\n                ) AS \"approval_status!: ApprovalStatus\",\n                pr.status as \"pr_status: PullRequestStatus\",\n                pr.priority,\n                pr.rollup as \"rollup: RollupMode\",\n                pr.delegated_permission as \"delegated_permission: DelegatedPermission\",\n                pr.base_branch,\n                pr.mergeable_state as \"mergeable_state: MergeableState\",\n                pr.created_at as \"created_at: DateTime<Utc>\",\n                build AS \"try_build: BuildModel\"\n            FROM upserted_pr as pr\n            LEFT JOIN build ON pr.build_id = build.id\n            ",
+  "query": "\n            WITH upserted_pr AS (\n                INSERT INTO pull_request (repository, number, title, base_branch, mergeable_state, status)\n                VALUES ($1, $2, $3, $4, $5, $6)\n                ON CONFLICT (repository, number)\n                DO UPDATE SET\n                    title = $3,\n                    base_branch = $4,\n                    mergeable_state = $5,\n                    status = $6\n                RETURNING *\n            )\n            SELECT\n                pr.id,\n                pr.repository as \"repository: GithubRepoName\",\n                pr.number as \"number!: i64\",\n                pr.title,\n                (\n                    pr.approved_by,\n                    pr.approved_sha\n                ) AS \"approval_status!: ApprovalStatus\",\n                pr.status as \"pr_status: PullRequestStatus\",\n                pr.priority,\n                pr.rollup as \"rollup: RollupMode\",\n                pr.delegated_permission as \"delegated_permission: DelegatedPermission\",\n                pr.base_branch,\n                pr.mergeable_state as \"mergeable_state: MergeableState\",\n                pr.created_at as \"created_at: DateTime<Utc>\",\n                build AS \"try_build: BuildModel\"\n            FROM upserted_pr as pr\n            LEFT JOIN build ON pr.build_id = build.id\n            ",
   "describe": {
     "columns": [
       {
@@ -20,46 +20,51 @@
       },
       {
         "ordinal": 3,
+        "name": "title",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
         "name": "approval_status!: ApprovalStatus",
         "type_info": "Record"
       },
       {
-        "ordinal": 4,
+        "ordinal": 5,
         "name": "pr_status: PullRequestStatus",
         "type_info": "Text"
       },
       {
-        "ordinal": 5,
+        "ordinal": 6,
         "name": "priority",
         "type_info": "Int4"
       },
       {
-        "ordinal": 6,
+        "ordinal": 7,
         "name": "rollup: RollupMode",
         "type_info": "Text"
       },
       {
-        "ordinal": 7,
+        "ordinal": 8,
         "name": "delegated_permission: DelegatedPermission",
         "type_info": "Text"
       },
       {
-        "ordinal": 8,
+        "ordinal": 9,
         "name": "base_branch",
         "type_info": "Text"
       },
       {
-        "ordinal": 9,
+        "ordinal": 10,
         "name": "mergeable_state: MergeableState",
         "type_info": "Text"
       },
       {
-        "ordinal": 10,
+        "ordinal": 11,
         "name": "created_at: DateTime<Utc>",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 11,
+        "ordinal": 12,
         "name": "try_build: BuildModel",
         "type_info": {
           "Custom": {
@@ -106,10 +111,12 @@
         "Int8",
         "Text",
         "Text",
+        "Text",
         "Text"
       ]
     },
     "nullable": [
+      false,
       false,
       false,
       false,
@@ -124,5 +131,5 @@
       true
     ]
   },
-  "hash": "39dfcf0ddecf2f8289e73f2d89aa390c91fb8f792a8f52eb2a4431bb1a64693d"
+  "hash": "5f2567664fd2c0a794fe149f3d688caee77b0d90d9dee7977cdabb4ad8457de1"
 }

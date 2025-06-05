@@ -61,6 +61,7 @@ pub(super) async fn command_try_build(
         .upsert_pull_request(
             repo.client.repository(),
             pr.number,
+            &pr.title,
             &pr.base.name,
             pr.mergeable_state.clone().into(),
             &pr.status,
@@ -216,6 +217,7 @@ pub(super) async fn command_try_cancel(
         .upsert_pull_request(
             repo.client.repository(),
             pr_number,
+            &pr.title,
             &pr.base.name,
             pr.mergeable_state.clone().into(),
             &pr.status,

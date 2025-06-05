@@ -23,6 +23,7 @@ pub(super) async fn handle_pull_request_edited(
         .upsert_pull_request(
             repo_state.repository(),
             pr_number,
+            &pr.title,
             &pr.base.name,
             pr.mergeable_state.clone().into(),
             &pr.status,
@@ -57,6 +58,7 @@ pub(super) async fn handle_push_to_pull_request(
         .upsert_pull_request(
             repo_state.repository(),
             pr_number,
+            &pr.title,
             &pr.base.name,
             pr.mergeable_state.clone().into(),
             &pr.status,
@@ -88,6 +90,7 @@ pub(super) async fn handle_pull_request_opened(
     db.create_pull_request(
         repo_state.repository(),
         payload.pull_request.number,
+        &payload.pull_request.title,
         &payload.pull_request.base.name,
         pr_status,
     )
@@ -135,6 +138,7 @@ pub(super) async fn handle_pull_request_reopened(
     db.upsert_pull_request(
         repo_state.repository(),
         pr_number,
+        &pr.title,
         &pr.base.name,
         pr.mergeable_state.clone().into(),
         &pr.status,
