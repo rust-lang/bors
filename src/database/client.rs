@@ -150,7 +150,16 @@ impl PgDbClient {
         base_branch: &str,
         pr_status: PullRequestStatus,
     ) -> anyhow::Result<()> {
-        create_pull_request(&self.pool, repo, pr_number, title, author, base_branch, pr_status).await
+        create_pull_request(
+            &self.pool,
+            repo,
+            pr_number,
+            title,
+            author,
+            base_branch,
+            pr_status,
+        )
+        .await
     }
 
     pub async fn set_pr_status(
