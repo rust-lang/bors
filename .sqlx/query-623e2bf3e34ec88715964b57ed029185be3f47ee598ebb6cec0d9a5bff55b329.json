@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n                pr.id,\n                pr.repository as \"repository: GithubRepoName\",\n                pr.number as \"number!: i64\",\n                (\n                    pr.approved_by,\n                    pr.approved_sha\n                ) AS \"approval_status!: ApprovalStatus\",\n                pr.status as \"pr_status: PullRequestStatus\",\n                pr.priority,\n                pr.rollup as \"rollup: RollupMode\",\n                pr.delegated_permission as \"delegated_permission: DelegatedPermission\",\n                pr.base_branch,\n                pr.mergeable_state as \"mergeable_state: MergeableState\",\n                pr.created_at as \"created_at: DateTime<Utc>\",\n                build AS \"try_build: BuildModel\"\n            FROM pull_request as pr\n            LEFT JOIN build ON pr.build_id = build.id\n            WHERE pr.repository = $1\n                AND pr.status IN ('open', 'draft')\n            ",
+  "query": "\nSELECT\n    pr.id,\n    pr.repository as \"repository: GithubRepoName\",\n    pr.number as \"number!: i64\",\n    pr.title,\n    (\n        pr.approved_by,\n        pr.approved_sha\n    ) AS \"approval_status!: ApprovalStatus\",\n    pr.status as \"pr_status: PullRequestStatus\",\n    pr.delegated_permission as \"delegated_permission: DelegatedPermission\",\n    pr.priority,\n    pr.base_branch,\n    pr.mergeable_state as \"mergeable_state: MergeableState\",\n    pr.rollup as \"rollup: RollupMode\",\n    pr.created_at as \"created_at: DateTime<Utc>\",\n    build AS \"try_build: BuildModel\"\nFROM pull_request as pr\nLEFT JOIN build ON pr.build_id = build.id\nWHERE build.id = $1\n",
   "describe": {
     "columns": [
       {
@@ -20,28 +20,28 @@
       },
       {
         "ordinal": 3,
+        "name": "title",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
         "name": "approval_status!: ApprovalStatus",
         "type_info": "Record"
       },
       {
-        "ordinal": 4,
+        "ordinal": 5,
         "name": "pr_status: PullRequestStatus",
         "type_info": "Text"
       },
       {
-        "ordinal": 5,
-        "name": "priority",
-        "type_info": "Int4"
-      },
-      {
         "ordinal": 6,
-        "name": "rollup: RollupMode",
+        "name": "delegated_permission: DelegatedPermission",
         "type_info": "Text"
       },
       {
         "ordinal": 7,
-        "name": "delegated_permission: DelegatedPermission",
-        "type_info": "Text"
+        "name": "priority",
+        "type_info": "Int4"
       },
       {
         "ordinal": 8,
@@ -55,11 +55,16 @@
       },
       {
         "ordinal": 10,
+        "name": "rollup: RollupMode",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
         "name": "created_at: DateTime<Utc>",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 11,
+        "ordinal": 12,
         "name": "try_build: BuildModel",
         "type_info": {
           "Custom": {
@@ -102,10 +107,11 @@
     ],
     "parameters": {
       "Left": [
-        "Text"
+        "Int4"
       ]
     },
     "nullable": [
+      false,
       false,
       false,
       false,
@@ -113,12 +119,12 @@
       false,
       true,
       true,
+      false,
+      false,
       true,
-      false,
-      false,
       false,
       null
     ]
   },
-  "hash": "711316962e9434e549af5de738de2b415d0ccdfd4f134a21e69a42adbc6c8aae"
+  "hash": "623e2bf3e34ec88715964b57ed029185be3f47ee598ebb6cec0d9a5bff55b329"
 }

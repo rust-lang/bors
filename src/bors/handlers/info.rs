@@ -16,6 +16,7 @@ pub(super) async fn command_info(
         .upsert_pull_request(
             repo.client.repository(),
             pr.number,
+            &pr.title,
             &pr.base.name,
             pr.mergeable_state.clone().into(),
             &pr.status,

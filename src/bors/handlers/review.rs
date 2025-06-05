@@ -44,6 +44,7 @@ pub(super) async fn command_approve(
         .upsert_pull_request(
             repo_state.repository(),
             pr.number,
+            &pr.title,
             &pr.base.name,
             pr.mergeable_state.clone().into(),
             &pr.status,
@@ -73,6 +74,7 @@ pub(super) async fn command_unapprove(
         .upsert_pull_request(
             repo_state.repository(),
             pr.number,
+            &pr.title,
             &pr.base.name,
             pr.mergeable_state.clone().into(),
             &pr.status,
@@ -101,6 +103,7 @@ pub(super) async fn command_set_priority(
         .upsert_pull_request(
             repo_state.repository(),
             pr.number,
+            &pr.title,
             &pr.base.name,
             pr.mergeable_state.clone().into(),
             &pr.status,
@@ -132,6 +135,7 @@ pub(super) async fn command_delegate(
         .upsert_pull_request(
             repo_state.repository(),
             pr.number,
+            &pr.title,
             &pr.base.name,
             pr.mergeable_state.clone().into(),
             &pr.status,
@@ -158,6 +162,7 @@ pub(super) async fn command_undelegate(
         .upsert_pull_request(
             repo_state.repository(),
             pr.number,
+            &pr.title,
             &pr.base.name,
             pr.mergeable_state.clone().into(),
             &pr.status,
@@ -184,6 +189,7 @@ pub(super) async fn command_set_rollup(
         .upsert_pull_request(
             repo_state.repository(),
             pr.number,
+            &pr.title,
             &pr.base.name,
             pr.mergeable_state.clone().into(),
             &pr.status,

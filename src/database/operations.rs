@@ -37,6 +37,7 @@ pub(crate) async fn get_pull_request(
         pr.id,
         pr.repository as "repository: GithubRepoName",
         pr.number as "number!: i64",
+        pr.title,
         (
             pr.approved_by,
             pr.approved_sha
@@ -69,17 +70,19 @@ pub(crate) async fn create_pull_request(
     executor: impl PgExecutor<'_>,
     repo: &GithubRepoName,
     pr_number: PullRequestNumber,
+    title: &str,
     base_branch: &str,
     pr_status: PullRequestStatus,
 ) -> anyhow::Result<()> {
     measure_db_query("create_pull_request", || async {
         sqlx::query!(
             r#"
-INSERT INTO pull_request (repository, number, base_branch, status)
-VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING
+INSERT INTO pull_request (repository, number, title, base_branch, status)
+VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING
 "#,
             repo as &GithubRepoName,
             pr_number.0 as i32,
+            title,
             base_branch,
             pr_status as PullRequestStatus,
         )
@@ -114,6 +117,7 @@ pub(crate) async fn upsert_pull_request(
     executor: impl PgExecutor<'_>,
     repo: &GithubRepoName,
     pr_number: PullRequestNumber,
+    title: &str,
     base_branch: &str,
     mergeable_state: MergeableState,
     pr_status: &PullRequestStatus,
@@ -123,19 +127,21 @@ pub(crate) async fn upsert_pull_request(
             PullRequestModel,
             r#"
             WITH upserted_pr AS (
-                INSERT INTO pull_request (repository, number, base_branch, mergeable_state, status)
-                VALUES ($1, $2, $3, $4, $5)
+                INSERT INTO pull_request (repository, number, title, base_branch, mergeable_state, status)
+                VALUES ($1, $2, $3, $4, $5, $6)
                 ON CONFLICT (repository, number)
                 DO UPDATE SET
-                    base_branch = $3,
-                    mergeable_state = $4,
-                    status = $5
+                    title = $3,
+                    base_branch = $4,
+                    mergeable_state = $5,
+                    status = $6
                 RETURNING *
             )
             SELECT
                 pr.id,
                 pr.repository as "repository: GithubRepoName",
                 pr.number as "number!: i64",
+                pr.title,
                 (
                     pr.approved_by,
                     pr.approved_sha
@@ -153,6 +159,7 @@ pub(crate) async fn upsert_pull_request(
             "#,
             repo as &GithubRepoName,
             pr_number.0 as i32,
+            title,
             base_branch,
             mergeable_state as _,
             pr_status as &PullRequestStatus,
@@ -179,6 +186,7 @@ pub(crate) async fn get_nonclosed_pull_requests_by_base_branch(
                 pr.id,
                 pr.repository as "repository: GithubRepoName",
                 pr.number as "number!: i64",
+                pr.title,
                 (
                     pr.approved_by,
                     pr.approved_sha
@@ -220,6 +228,7 @@ pub(crate) async fn get_nonclosed_pull_requests(
                 pr.id,
                 pr.repository as "repository: GithubRepoName",
                 pr.number as "number!: i64",
+                pr.title,
                 (
                     pr.approved_by,
                     pr.approved_sha
@@ -279,6 +288,7 @@ pub(crate) async fn get_prs_with_unknown_mergeable_state(
                 pr.id,
                 pr.repository as "repository: GithubRepoName",
                 pr.number as "number!: i64",
+                pr.title,
                 (
                     pr.approved_by,
                     pr.approved_sha
@@ -428,6 +438,7 @@ SELECT
     pr.id,
     pr.repository as "repository: GithubRepoName",
     pr.number as "number!: i64",
+    pr.title,
     (
         pr.approved_by,
         pr.approved_sha

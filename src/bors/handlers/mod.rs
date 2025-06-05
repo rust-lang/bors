@@ -569,6 +569,7 @@ async fn has_permission(
         .upsert_pull_request(
             repo_state.repository(),
             pr.number,
+            &pr.title,
             &pr.base.name,
             pr.mergeable_state.clone().into(),
             &pr.status,
