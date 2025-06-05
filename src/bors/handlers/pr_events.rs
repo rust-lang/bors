@@ -20,15 +20,7 @@ pub(super) async fn handle_pull_request_edited(
     let pr = &payload.pull_request;
     let pr_number = pr.number;
     let pr_model = db
-        .upsert_pull_request(
-            repo_state.repository(),
-            pr_number,
-            &pr.title,
-            &pr.author.username,
-            &pr.base.name,
-            pr.mergeable_state.clone().into(),
-            &pr.status,
-        )
+        .upsert_pull_request(repo_state.repository(), pr.clone().into())
         .await?;
 
     // If the base branch has changed, unapprove the PR
@@ -56,15 +48,7 @@ pub(super) async fn handle_push_to_pull_request(
     let pr = &payload.pull_request;
     let pr_number = pr.number;
     let pr_model = db
-        .upsert_pull_request(
-            repo_state.repository(),
-            pr_number,
-            &pr.title,
-            &pr.author.username,
-            &pr.base.name,
-            pr.mergeable_state.clone().into(),
-            &pr.status,
-        )
+        .upsert_pull_request(repo_state.repository(), pr.clone().into())
         .await?;
 
     mergeable_queue.enqueue(repo_state.repository().clone(), pr_number);
@@ -138,16 +122,8 @@ pub(super) async fn handle_pull_request_reopened(
 ) -> anyhow::Result<()> {
     let pr = &payload.pull_request;
     let pr_number = pr.number;
-    db.upsert_pull_request(
-        repo_state.repository(),
-        pr_number,
-        &pr.title,
-        &pr.author.username,
-        &pr.base.name,
-        pr.mergeable_state.clone().into(),
-        &pr.status,
-    )
-    .await?;
+    db.upsert_pull_request(repo_state.repository(), pr.clone().into())
+        .await?;
 
     mergeable_queue.enqueue(repo_state.repository().clone(), pr_number);
 

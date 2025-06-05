@@ -139,12 +139,7 @@ pub async fn sync_pull_requests_state(
             tracing::debug!("PR {} not found in open PRs in DB, upserting it", pr_num);
             db.upsert_pull_request(
                 repo_name,
-                gh_pr.number,
-                &gh_pr.title,
-                &gh_pr.author.username,
-                &gh_pr.base.name,
-                gh_pr.mergeable_state.clone().into(),
-                &gh_pr.status,
+                gh_pr.clone().into(),
             )
             .await?;
         }

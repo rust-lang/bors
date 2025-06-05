@@ -20,6 +20,7 @@ use super::MergeableState;
 use super::PullRequestModel;
 use super::RunId;
 use super::TreeState;
+use super::UpsertPullRequestParams;
 use super::WorkflowStatus;
 use super::WorkflowType;
 use futures::TryStreamExt;
@@ -120,12 +121,7 @@ pub(crate) async fn set_pr_status(
 pub(crate) async fn upsert_pull_request(
     executor: impl PgExecutor<'_>,
     repo: &GithubRepoName,
-    pr_number: PullRequestNumber,
-    title: &str,
-    author: &str,
-    base_branch: &str,
-    mergeable_state: MergeableState,
-    pr_status: &PullRequestStatus,
+    params: &UpsertPullRequestParams,
 ) -> anyhow::Result<PullRequestModel> {
     measure_db_query("upsert_pull_request", || async {
         let record = sqlx::query_as!(
@@ -165,12 +161,12 @@ pub(crate) async fn upsert_pull_request(
             LEFT JOIN build ON pr.build_id = build.id
             "#,
             repo as &GithubRepoName,
-            pr_number.0 as i32,
-            title,
-            author,
-            base_branch,
-            mergeable_state as _,
-            pr_status as &PullRequestStatus,
+            params.pr_number.0 as i32,
+            &params.title,
+            &params.author,
+            &params.base_branch,
+            params.mergeable_state as _,
+            params.pr_status as _,
         )
         .fetch_one(executor)
         .await?;

@@ -350,15 +350,7 @@ async fn handle_comment(
         .with_context(|| format!("Cannot get information about PR {pr_number}"))?;
 
     let pr_db = database
-        .upsert_pull_request(
-            repo.repository(),
-            pr_number,
-            &pr_github.title,
-            &pr_github.author.username,
-            &pr_github.base.name,
-            pr_github.mergeable_state.clone().into(),
-            &pr_github.status,
-        )
+        .upsert_pull_request(repo.repository(), pr_github.clone().into())
         .await
         .with_context(|| format!("Cannot upsert PR {pr_number} into the database"))?;
 
