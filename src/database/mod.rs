@@ -283,6 +283,7 @@ pub struct PullRequestModel {
     pub repository: GithubRepoName,
     pub number: PullRequestNumber,
     pub title: String,
+    pub author: String,
     pub pr_status: PullRequestStatus,
     pub base_branch: String,
     pub mergeable_state: MergeableState,

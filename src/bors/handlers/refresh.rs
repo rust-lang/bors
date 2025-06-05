@@ -141,6 +141,7 @@ pub async fn sync_pull_requests_state(
                 repo_name,
                 gh_pr.number,
                 &gh_pr.title,
+                &gh_pr.author.username,
                 &gh_pr.base.name,
                 gh_pr.mergeable_state.clone().into(),
                 &gh_pr.status,

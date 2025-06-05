@@ -99,6 +99,7 @@ impl PgDbClient {
         repo: &GithubRepoName,
         pr_number: PullRequestNumber,
         title: &str,
+        author: &str,
         base_branch: &str,
         mergeable_state: MergeableState,
         pr_status: &PullRequestStatus,
@@ -108,6 +109,7 @@ impl PgDbClient {
             repo,
             pr_number,
             title,
+            author,
             base_branch,
             mergeable_state,
             pr_status,
@@ -143,10 +145,11 @@ impl PgDbClient {
         repo: &GithubRepoName,
         pr_number: PullRequestNumber,
         title: &str,
+        author: &str,
         base_branch: &str,
         pr_status: PullRequestStatus,
     ) -> anyhow::Result<()> {
-        create_pull_request(&self.pool, repo, pr_number, title, base_branch, pr_status).await
+        create_pull_request(&self.pool, repo, pr_number, title, author, base_branch, pr_status).await
     }
 
     pub async fn set_pr_status(

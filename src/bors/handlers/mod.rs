@@ -354,6 +354,7 @@ async fn handle_comment(
             repo.repository(),
             pr_number,
             &pr_github.title,
+            &pr_github.author.username,
             &pr_github.base.name,
             pr_github.mergeable_state.clone().into(),
             &pr_github.status,
