@@ -99,12 +99,7 @@ impl PgDbClient {
         repo: &GithubRepoName,
         params: UpsertPullRequestParams,
     ) -> anyhow::Result<PullRequestModel> {
-        let pr = upsert_pull_request(
-            &self.pool,
-            repo,
-            &params,
-        )
-        .await?;
+        let pr = upsert_pull_request(&self.pool, repo, &params).await?;
         Ok(pr)
     }
 
