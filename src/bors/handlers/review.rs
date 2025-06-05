@@ -5,15 +5,14 @@ use crate::bors::Comment;
 use crate::bors::RepositoryState;
 use crate::bors::command::Approver;
 use crate::bors::command::RollupMode;
-use crate::bors::handlers::deny_request;
 use crate::bors::handlers::has_permission;
 use crate::bors::handlers::labels::handle_label_trigger;
+use crate::bors::handlers::{PullRequestData, deny_request};
 use crate::database::ApprovalInfo;
 use crate::database::DelegatedPermission;
 use crate::database::TreeState;
-use crate::github::GithubUser;
 use crate::github::LabelTrigger;
-use crate::github::PullRequest;
+use crate::github::{GithubUser, PullRequestNumber};
 use crate::permissions::PermissionType;
 
 /// Approve a pull request.
@@ -21,15 +20,15 @@ use crate::permissions::PermissionType;
 pub(super) async fn command_approve(
     repo_state: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
-    pr: &PullRequest,
+    pr: &PullRequestData,
     author: &GithubUser,
     approver: &Approver,
     priority: Option<u32>,
     rollup: Option<RollupMode>,
 ) -> anyhow::Result<()> {
-    tracing::info!("Approving PR {}", pr.number);
-    if !has_permission(&repo_state, author, pr, &db, PermissionType::Review).await? {
-        deny_request(&repo_state, pr, author, PermissionType::Review).await?;
+    tracing::info!("Approving PR {}", pr.number());
+    if !has_permission(&repo_state, author, pr, PermissionType::Review).await? {
+        deny_request(&repo_state, pr.number(), author, PermissionType::Review).await?;
         return Ok(());
     };
     let approver = match approver {
@@ -38,22 +37,11 @@ pub(super) async fn command_approve(
     };
     let approval_info = ApprovalInfo {
         approver: approver.clone(),
-        sha: pr.head.sha.to_string(),
+        sha: pr.github.head.sha.to_string(),
     };
-    let pr_model = db
-        .upsert_pull_request(
-            repo_state.repository(),
-            pr.number,
-            &pr.title,
-            &pr.base.name,
-            pr.mergeable_state.clone().into(),
-            &pr.status,
-        )
-        .await?;
 
-    db.approve(&pr_model, approval_info, priority, rollup)
-        .await?;
-    handle_label_trigger(&repo_state, pr.number, LabelTrigger::Approved).await?;
+    db.approve(&pr.db, approval_info, priority, rollup).await?;
+    handle_label_trigger(&repo_state, pr.number(), LabelTrigger::Approved).await?;
     notify_of_approval(&repo_state, pr, approver.as_str()).await
 }
 
@@ -62,27 +50,17 @@ pub(super) async fn command_approve(
 pub(super) async fn command_unapprove(
     repo_state: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
-    pr: &PullRequest,
+    pr: &PullRequestData,
     author: &GithubUser,
 ) -> anyhow::Result<()> {
-    tracing::info!("Unapproving PR {}", pr.number);
-    if !has_permission(&repo_state, author, pr, &db, PermissionType::Review).await? {
-        deny_request(&repo_state, pr, author, PermissionType::Review).await?;
+    tracing::info!("Unapproving PR {}", pr.number());
+    if !has_permission(&repo_state, author, pr, PermissionType::Review).await? {
+        deny_request(&repo_state, pr.number(), author, PermissionType::Review).await?;
         return Ok(());
     };
-    let pr_model = db
-        .upsert_pull_request(
-            repo_state.repository(),
-            pr.number,
-            &pr.title,
-            &pr.base.name,
-            pr.mergeable_state.clone().into(),
-            &pr.status,
-        )
-        .await?;
 
-    db.unapprove(&pr_model).await?;
-    handle_label_trigger(&repo_state, pr.number, LabelTrigger::Unapproved).await?;
+    db.unapprove(&pr.db).await?;
+    handle_label_trigger(&repo_state, pr.number(), LabelTrigger::Unapproved).await?;
     notify_of_unapproval(&repo_state, pr).await
 }
 
@@ -91,85 +69,58 @@ pub(super) async fn command_unapprove(
 pub(super) async fn command_set_priority(
     repo_state: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
-    pr: &PullRequest,
+    pr: &PullRequestData,
     author: &GithubUser,
     priority: u32,
 ) -> anyhow::Result<()> {
-    if !has_permission(&repo_state, author, pr, &db, PermissionType::Review).await? {
-        deny_request(&repo_state, pr, author, PermissionType::Review).await?;
+    if !has_permission(&repo_state, author, pr, PermissionType::Review).await? {
+        deny_request(&repo_state, pr.number(), author, PermissionType::Review).await?;
         return Ok(());
     };
-    let pr_model = db
-        .upsert_pull_request(
-            repo_state.repository(),
-            pr.number,
-            &pr.title,
-            &pr.base.name,
-            pr.mergeable_state.clone().into(),
-            &pr.status,
-        )
-        .await?;
-
-    db.set_priority(&pr_model, priority).await
+    db.set_priority(&pr.db, priority).await
 }
 
 /// Delegate permissions of a pull request to its author.
 pub(super) async fn command_delegate(
     repo_state: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
-    pr: &PullRequest,
+    pr: &PullRequestData,
     author: &GithubUser,
     delegated_permission: DelegatedPermission,
 ) -> anyhow::Result<()> {
     tracing::info!(
         "Delegating PR {} {} permissions",
-        pr.number,
+        pr.number(),
         delegated_permission
     );
     if !sufficient_delegate_permission(repo_state.clone(), author) {
-        deny_request(&repo_state, pr, author, PermissionType::Review).await?;
+        deny_request(&repo_state, pr.number(), author, PermissionType::Review).await?;
         return Ok(());
     }
 
-    let pr_model = db
-        .upsert_pull_request(
-            repo_state.repository(),
-            pr.number,
-            &pr.title,
-            &pr.base.name,
-            pr.mergeable_state.clone().into(),
-            &pr.status,
-        )
-        .await?;
-
-    db.delegate(&pr_model, delegated_permission).await?;
-    notify_of_delegation(&repo_state, pr, &pr.author.username, delegated_permission).await
+    db.delegate(&pr.db, delegated_permission).await?;
+    notify_of_delegation(
+        &repo_state,
+        pr.number(),
+        &pr.github.author.username,
+        delegated_permission,
+    )
+    .await
 }
 
 /// Revoke any previously granted delegation.
 pub(super) async fn command_undelegate(
     repo_state: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
-    pr: &PullRequest,
+    pr: &PullRequestData,
     author: &GithubUser,
 ) -> anyhow::Result<()> {
-    tracing::info!("Undelegating PR {} approval", pr.number);
-    if !has_permission(&repo_state, author, pr, &db, PermissionType::Review).await? {
-        deny_request(&repo_state, pr, author, PermissionType::Review).await?;
+    tracing::info!("Undelegating PR {} approval", pr.number());
+    if !has_permission(&repo_state, author, pr, PermissionType::Review).await? {
+        deny_request(&repo_state, pr.number(), author, PermissionType::Review).await?;
         return Ok(());
     }
-    let pr_model = db
-        .upsert_pull_request(
-            repo_state.repository(),
-            pr.number,
-            &pr.title,
-            &pr.base.name,
-            pr.mergeable_state.clone().into(),
-            &pr.status,
-        )
-        .await?;
-
-    db.undelegate(&pr_model).await
+    db.undelegate(&pr.db).await
 }
 
 /// Set the rollup of a pull request.
@@ -177,38 +128,27 @@ pub(super) async fn command_undelegate(
 pub(super) async fn command_set_rollup(
     repo_state: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
-    pr: &PullRequest,
+    pr: &PullRequestData,
     author: &GithubUser,
     rollup: RollupMode,
 ) -> anyhow::Result<()> {
-    if !has_permission(&repo_state, author, pr, &db, PermissionType::Review).await? {
-        deny_request(&repo_state, pr, author, PermissionType::Review).await?;
+    if !has_permission(&repo_state, author, pr, PermissionType::Review).await? {
+        deny_request(&repo_state, pr.number(), author, PermissionType::Review).await?;
         return Ok(());
     }
-    let pr_model = db
-        .upsert_pull_request(
-            repo_state.repository(),
-            pr.number,
-            &pr.title,
-            &pr.base.name,
-            pr.mergeable_state.clone().into(),
-            &pr.status,
-        )
-        .await?;
-
-    db.set_rollup(&pr_model, rollup).await
+    db.set_rollup(&pr.db, rollup).await
 }
 
 pub(super) async fn command_close_tree(
     repo_state: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
-    pr: &PullRequest,
+    pr: &PullRequestData,
     author: &GithubUser,
     priority: u32,
     comment_url: &str,
 ) -> anyhow::Result<()> {
     if !sufficient_approve_permission(repo_state.clone(), author) {
-        deny_request(&repo_state, pr, author, PermissionType::Review).await?;
+        deny_request(&repo_state, pr.number(), author, PermissionType::Review).await?;
         return Ok(());
     };
     db.upsert_repository(
@@ -219,23 +159,23 @@ pub(super) async fn command_close_tree(
         },
     )
     .await?;
-    notify_of_tree_closed(&repo_state, pr, priority).await
+    notify_of_tree_closed(&repo_state, pr.number(), priority).await
 }
 
 pub(super) async fn command_open_tree(
     repo_state: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
-    pr: &PullRequest,
+    pr: &PullRequestData,
     author: &GithubUser,
 ) -> anyhow::Result<()> {
     if !sufficient_delegate_permission(repo_state.clone(), author) {
-        deny_request(&repo_state, pr, author, PermissionType::Review).await?;
+        deny_request(&repo_state, pr.number(), author, PermissionType::Review).await?;
         return Ok(());
     }
 
     db.upsert_repository(repo_state.repository(), TreeState::Open)
         .await?;
-    notify_of_tree_open(&repo_state, pr).await
+    notify_of_tree_open(&repo_state, pr.number()).await
 }
 
 fn sufficient_approve_permission(repo: Arc<RepositoryState>, author: &GithubUser) -> bool {
@@ -252,12 +192,12 @@ fn sufficient_delegate_permission(repo: Arc<RepositoryState>, author: &GithubUse
 
 async fn notify_of_tree_closed(
     repo: &RepositoryState,
-    pr: &PullRequest,
+    pr_number: PullRequestNumber,
     priority: u32,
 ) -> anyhow::Result<()> {
     repo.client
         .post_comment(
-            pr.number,
+            pr_number,
             Comment::new(format!(
                 "Tree closed for PRs with priority less than {}",
                 priority
@@ -266,35 +206,38 @@ async fn notify_of_tree_closed(
         .await
 }
 
-async fn notify_of_tree_open(repo: &RepositoryState, pr: &PullRequest) -> anyhow::Result<()> {
+async fn notify_of_tree_open(
+    repo: &RepositoryState,
+    pr_number: PullRequestNumber,
+) -> anyhow::Result<()> {
     repo.client
         .post_comment(
-            pr.number,
+            pr_number,
             Comment::new("Tree is now open for merging".to_string()),
         )
         .await
 }
 
-async fn notify_of_unapproval(repo: &RepositoryState, pr: &PullRequest) -> anyhow::Result<()> {
+async fn notify_of_unapproval(repo: &RepositoryState, pr: &PullRequestData) -> anyhow::Result<()> {
     repo.client
         .post_comment(
-            pr.number,
-            Comment::new(format!("Commit {} has been unapproved", pr.head.sha)),
+            pr.number(),
+            Comment::new(format!("Commit {} has been unapproved", pr.github.head.sha)),
         )
         .await
 }
 
 async fn notify_of_approval(
     repo: &RepositoryState,
-    pr: &PullRequest,
+    pr: &PullRequestData,
     approver: &str,
 ) -> anyhow::Result<()> {
     repo.client
         .post_comment(
-            pr.number,
+            pr.db.number,
             Comment::new(format!(
                 "Commit {} has been approved by `{}`",
-                pr.head.sha, approver
+                pr.github.head.sha, approver
             )),
         )
         .await
@@ -302,7 +245,7 @@ async fn notify_of_approval(
 
 async fn notify_of_delegation(
     repo: &RepositoryState,
-    pr: &PullRequest,
+    pr_number: PullRequestNumber,
     delegatee: &str,
     delegated_permission: DelegatedPermission,
 ) -> anyhow::Result<()> {
@@ -315,7 +258,7 @@ async fn notify_of_delegation(
     };
 
     repo.client
-        .post_comment(pr.number, Comment::new(message))
+        .post_comment(pr_number, Comment::new(message))
         .await
 }
 
@@ -669,8 +612,6 @@ mod tests {
                     tester.get_comment().await?,
                     @"@default-user: :key: Insufficient privileges: not in review users"
                 );
-
-                assert!(tester.default_pr_db().await?.is_none());
                 Ok(tester)
             })
             .await;
@@ -782,7 +723,6 @@ mod tests {
                     tester.get_comment().await?,
                     @"@user-with-try-privileges: :key: Insufficient privileges: not in review users"
                 );
-                assert!(tester.default_pr_db().await?.is_none());
                 Ok(tester)
             })
             .await;

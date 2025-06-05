@@ -17,14 +17,12 @@ use crate::database::RunId;
 use crate::database::{BuildModel, BuildStatus, PullRequestModel};
 use crate::github::GithubRepoName;
 use crate::github::api::client::GithubRepositoryClient;
-use crate::github::{
-    CommitSha, GithubUser, LabelTrigger, MergeError, PullRequest, PullRequestNumber,
-};
+use crate::github::{CommitSha, GithubUser, LabelTrigger, MergeError, PullRequestNumber};
 use crate::permissions::PermissionType;
 use crate::utils::text::suppress_github_mentions;
 
-use super::deny_request;
 use super::has_permission;
+use super::{PullRequestData, deny_request};
 
 // This branch serves for preparing the final commit.
 // It will be reset to master and merged with the branch that should be tested.
@@ -43,60 +41,46 @@ pub(super) const TRY_BRANCH_NAME: &str = "automation/bors/try";
 pub(super) async fn command_try_build(
     repo: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
-    pr: &PullRequest,
+    pr: &PullRequestData,
     author: &GithubUser,
     parent: Option<Parent>,
     jobs: Vec<String>,
     bot_prefix: &str,
 ) -> anyhow::Result<()> {
     let repo = repo.as_ref();
-    if !has_permission(repo, author, pr, &db, PermissionType::Try).await? {
-        deny_request(repo, pr, author, PermissionType::Try).await?;
+    if !has_permission(repo, author, pr, PermissionType::Try).await? {
+        deny_request(repo, pr.number(), author, PermissionType::Try).await?;
         return Ok(());
     }
 
-    // Create pr model based on CI repo, so we can retrieve the pr later when
-    // the CI repo emits events
-    let pr_model = db
-        .upsert_pull_request(
-            repo.client.repository(),
-            pr.number,
-            &pr.title,
-            &pr.base.name,
-            pr.mergeable_state.clone().into(),
-            &pr.status,
-        )
-        .await
-        .context("Cannot find or create PR")?;
-
-    if let Some(build) = &pr_model.try_build {
+    if let Some(build) = &pr.db.try_build {
         if build.status == BuildStatus::Pending {
             tracing::warn!("Try build already in progress");
             repo.client
-                .post_comment(pr.number, try_build_in_progress_comment(bot_prefix))
+                .post_comment(pr.number(), try_build_in_progress_comment(bot_prefix))
                 .await?;
             return Ok(());
         }
     } else if Some(Parent::Last) == parent {
         tracing::warn!("try build was requested with parent=last but no previous build was found");
         repo.client
-            .post_comment(pr.number, cant_find_last_parent_comment())
+            .post_comment(pr.number(), cant_find_last_parent_comment())
             .await?;
         return Ok(());
     }
 
-    let base_sha = match get_base_sha(&pr_model, parent) {
+    let base_sha = match get_base_sha(&pr.db, parent) {
         Some(base_sha) => base_sha,
         None => repo
             .client
-            .get_branch_sha(&pr.base.name)
+            .get_branch_sha(&pr.github.base.name)
             .await
-            .context(format!("Cannot get SHA for branch {}", pr.base.name))?,
+            .context(format!("Cannot get SHA for branch {}", pr.github.base.name))?,
     };
 
     match attempt_merge(
         &repo.client,
-        &pr.head.sha,
+        &pr.github.head.sha,
         &base_sha,
         &auto_merge_commit_message(pr, repo.client.repository(), "<try>", jobs),
     )
@@ -104,20 +88,20 @@ pub(super) async fn command_try_build(
     {
         MergeResult::Success(merge_sha) => {
             // If the merge was succesful, run CI with merged commit
-            run_try_build(&repo.client, &db, pr_model, merge_sha.clone(), base_sha).await?;
+            run_try_build(&repo.client, &db, &pr.db, merge_sha.clone(), base_sha).await?;
 
-            handle_label_trigger(repo, pr.number, LabelTrigger::TryBuildStarted).await?;
+            handle_label_trigger(repo, pr.number(), LabelTrigger::TryBuildStarted).await?;
 
             repo.client
                 .post_comment(
-                    pr.number,
-                    try_build_started_comment(&pr.head.sha, &merge_sha, bot_prefix),
+                    pr.number(),
+                    try_build_started_comment(&pr.github.head.sha, &merge_sha, bot_prefix),
                 )
                 .await
         }
         MergeResult::Conflict => {
             repo.client
-                .post_comment(pr.number, merge_conflict_comment(&pr.head.name))
+                .post_comment(pr.number(), merge_conflict_comment(&pr.github.head.name))
                 .await
         }
     }
@@ -159,7 +143,7 @@ async fn attempt_merge(
 async fn run_try_build(
     client: &GithubRepositoryClient,
     db: &PgDbClient,
-    pr_model: PullRequestModel,
+    pr: &PullRequestModel,
     commit_sha: CommitSha,
     parent_sha: CommitSha,
 ) -> anyhow::Result<()> {
@@ -168,13 +152,8 @@ async fn run_try_build(
         .await
         .map_err(|error| anyhow!("Cannot set try branch to main branch: {error:?}"))?;
 
-    db.attach_try_build(
-        pr_model,
-        TRY_BRANCH_NAME.to_string(),
-        commit_sha,
-        parent_sha,
-    )
-    .await?;
+    db.attach_try_build(pr, TRY_BRANCH_NAME.to_string(), commit_sha, parent_sha)
+        .await?;
 
     tracing::info!("Try build started");
     Ok(())
@@ -203,28 +182,17 @@ fn get_base_sha(pr_model: &PullRequestModel, parent: Option<Parent>) -> Option<C
 pub(super) async fn command_try_cancel(
     repo: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
-    pr: &PullRequest,
+    pr: &PullRequestData,
     author: &GithubUser,
 ) -> anyhow::Result<()> {
     let repo = repo.as_ref();
-    if !has_permission(repo, author, pr, &db, PermissionType::Try).await? {
-        deny_request(repo, pr, author, PermissionType::Try).await?;
+    if !has_permission(repo, author, pr, PermissionType::Try).await? {
+        deny_request(repo, pr.number(), author, PermissionType::Try).await?;
         return Ok(());
     }
 
-    let pr_number: PullRequestNumber = pr.number;
-    let pr = db
-        .upsert_pull_request(
-            repo.client.repository(),
-            pr_number,
-            &pr.title,
-            &pr.base.name,
-            pr.mergeable_state.clone().into(),
-            &pr.status,
-        )
-        .await?;
-
-    let Some(build) = get_pending_build(pr) else {
+    let pr_number: PullRequestNumber = pr.number();
+    let Some(build) = get_pending_build(&pr.db) else {
         tracing::warn!("No build found");
         repo.client
             .post_comment(pr_number, no_try_build_in_progress_comment())
@@ -232,20 +200,20 @@ pub(super) async fn command_try_cancel(
         return Ok(());
     };
 
-    match cancel_build_workflows(&repo.client, db.as_ref(), &build).await {
+    match cancel_build_workflows(&repo.client, db.as_ref(), build).await {
         Err(error) => {
             tracing::error!(
                 "Could not cancel workflows for SHA {}: {error:?}",
                 build.commit_sha
             );
-            db.update_build_status(&build, BuildStatus::Cancelled)
+            db.update_build_status(build, BuildStatus::Cancelled)
                 .await?;
             repo.client
                 .post_comment(pr_number, unclean_try_build_cancelled_comment())
                 .await?
         }
         Ok(workflow_ids) => {
-            db.update_build_status(&build, BuildStatus::Cancelled)
+            db.update_build_status(build, BuildStatus::Cancelled)
                 .await?;
             tracing::info!("Try build cancelled");
 
@@ -275,26 +243,27 @@ pub async fn cancel_build_workflows(
     Ok(pending_workflows)
 }
 
-fn get_pending_build(pr: PullRequestModel) -> Option<BuildModel> {
+fn get_pending_build(pr: &PullRequestModel) -> Option<&BuildModel> {
     pr.try_build
+        .as_ref()
         .and_then(|b| (b.status == BuildStatus::Pending).then_some(b))
 }
 
 fn auto_merge_commit_message(
-    pr: &PullRequest,
+    pr: &PullRequestData,
     name: &GithubRepoName,
     reviewer: &str,
     jobs: Vec<String>,
 ) -> String {
-    let pr_number = pr.number;
+    let pr_number = pr.number();
     let mut message = format!(
         r#"Auto merge of {repo_owner}/{repo_name}#{pr_number} - {pr_label}, r={reviewer}
 {pr_title}
 
 {pr_message}"#,
-        pr_label = pr.head_label,
-        pr_title = pr.title,
-        pr_message = suppress_github_mentions(&pr.message),
+        pr_label = pr.github.head_label,
+        pr_title = pr.github.title,
+        pr_message = suppress_github_mentions(&pr.github.message),
         repo_owner = name.owner(),
         repo_name = name.name()
     );

@@ -1,39 +1,28 @@
 use crate::bors::Comment;
 use crate::bors::RepositoryState;
+use crate::bors::handlers::PullRequestData;
 use crate::database::PgDbClient;
 use crate::database::{ApprovalStatus, MergeableState};
-use crate::github::PullRequest;
 use std::sync::Arc;
 
 pub(super) async fn command_info(
     repo: Arc<RepositoryState>,
-    pr: &PullRequest,
+    pr: &PullRequestData,
     db: Arc<PgDbClient>,
 ) -> anyhow::Result<()> {
     use std::fmt::Write;
 
-    let pr_model = db
-        .upsert_pull_request(
-            repo.client.repository(),
-            pr.number,
-            &pr.title,
-            &pr.base.name,
-            pr.mergeable_state.clone().into(),
-            &pr.status,
-        )
-        .await?;
-
-    let mut message = format!("## Status of PR `{}`\n", pr.number);
+    let mut message = format!("## Status of PR `{}`\n", pr.number());
 
     // Approval info
-    if let ApprovalStatus::Approved(info) = pr_model.approval_status {
+    if let ApprovalStatus::Approved(info) = &pr.db.approval_status {
         writeln!(message, "- Approved by: `{}`", info.approver)?;
     } else {
         writeln!(message, "- Not Approved")?;
     }
 
     // Priority info
-    if let Some(priority) = pr_model.priority {
+    if let Some(priority) = pr.db.priority {
         writeln!(message, "- Priority: {priority}")?;
     } else {
         writeln!(message, "- Priority: unset")?;
@@ -43,7 +32,7 @@ pub(super) async fn command_info(
     writeln!(
         message,
         "- Mergeable: {}",
-        match pr_model.mergeable_state {
+        match pr.db.mergeable_state {
             MergeableState::Mergeable => "yes",
             MergeableState::HasConflicts => "no",
             MergeableState::Unknown => "unknown",
@@ -51,10 +40,10 @@ pub(super) async fn command_info(
     )?;
 
     // Try build status
-    if let Some(try_build) = pr_model.try_build {
+    if let Some(try_build) = &pr.db.try_build {
         writeln!(message, "- Try build is in progress")?;
 
-        if let Ok(urls) = db.get_workflow_urls_for_build(&try_build).await {
+        if let Ok(urls) = db.get_workflow_urls_for_build(try_build).await {
             message.extend(
                 urls.into_iter()
                     .map(|url| format!("\t- Workflow URL: {url}")),
@@ -63,7 +52,7 @@ pub(super) async fn command_info(
     }
 
     repo.client
-        .post_comment(pr.number, Comment::new(message))
+        .post_comment(pr.number(), Comment::new(message))
         .await?;
 
     Ok(())

@@ -187,10 +187,6 @@ impl BorsTester {
             .await
     }
 
-    pub async fn default_pr_db(&self) -> anyhow::Result<Option<PullRequestModel>> {
-        self.pr_db(default_repo_name(), default_pr_number()).await
-    }
-
     /// Wait until a pull request is in the database and satisfies a given condition.
     ///
     /// This is a convenience wrapper around `wait_for` that simplifies checking for PR conditions.

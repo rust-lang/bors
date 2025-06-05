@@ -17,8 +17,8 @@ use crate::bors::handlers::workflow::{
     handle_check_suite_completed, handle_workflow_completed, handle_workflow_started,
 };
 use crate::bors::{BorsContext, Comment, RepositoryState};
-use crate::database::DelegatedPermission;
-use crate::github::{GithubUser, PullRequest};
+use crate::database::{DelegatedPermission, PullRequestModel};
+use crate::github::{GithubUser, PullRequest, PullRequestNumber};
 use crate::permissions::PermissionType;
 use crate::{PgDbClient, TeamApiClient, load_repositories};
 use anyhow::Context;
@@ -315,6 +315,17 @@ where
     Ok(())
 }
 
+struct PullRequestData {
+    github: PullRequest,
+    db: PullRequestModel,
+}
+
+impl PullRequestData {
+    fn number(&self) -> PullRequestNumber {
+        self.db.number
+    }
+}
+
 async fn handle_comment(
     repo: Arc<RepositoryState>,
     database: Arc<PgDbClient>,
@@ -332,11 +343,28 @@ async fn handle_comment(
     tracing::debug!("Commands: {commands:?}");
     tracing::trace!("Text: {}", comment.text);
 
-    let pull_request = repo
+    let pr_github = repo
         .client
         .get_pull_request(pr_number)
         .await
         .with_context(|| format!("Cannot get information about PR {pr_number}"))?;
+
+    let pr_db = database
+        .upsert_pull_request(
+            repo.repository(),
+            pr_number,
+            &pr_github.title,
+            &pr_github.base.name,
+            pr_github.mergeable_state.clone().into(),
+            &pr_github.status,
+        )
+        .await
+        .with_context(|| format!("Cannot upsert PR {pr_number} into the database"))?;
+
+    let pr = PullRequestData {
+        github: pr_github,
+        db: pr_db,
+    };
 
     for command in commands {
         match command {
@@ -353,7 +381,7 @@ async fn handle_comment(
                         command_approve(
                             repo,
                             database,
-                            &pull_request,
+                            &pr,
                             &comment.author,
                             &approver,
                             priority,
@@ -364,7 +392,7 @@ async fn handle_comment(
                     }
                     BorsCommand::OpenTree => {
                         let span = tracing::info_span!("TreeOpen");
-                        command_open_tree(repo, database, &pull_request, &comment.author)
+                        command_open_tree(repo, database, &pr, &comment.author)
                             .instrument(span)
                             .await
                     }
@@ -373,7 +401,7 @@ async fn handle_comment(
                         command_close_tree(
                             repo,
                             database,
-                            &pull_request,
+                            &pr,
                             &comment.author,
                             priority,
                             &comment.html_url,
@@ -383,54 +411,42 @@ async fn handle_comment(
                     }
                     BorsCommand::Unapprove => {
                         let span = tracing::info_span!("Unapprove");
-                        command_unapprove(repo, database, &pull_request, &comment.author)
+                        command_unapprove(repo, database, &pr, &comment.author)
                             .instrument(span)
                             .await
                     }
                     BorsCommand::SetPriority(priority) => {
                         let span = tracing::info_span!("Priority");
-                        command_set_priority(
-                            repo,
-                            database,
-                            &pull_request,
-                            &comment.author,
-                            priority,
-                        )
-                        .instrument(span)
-                        .await
+                        command_set_priority(repo, database, &pr, &comment.author, priority)
+                            .instrument(span)
+                            .await
                     }
                     BorsCommand::SetDelegate(delegate_type) => {
                         let span = tracing::info_span!("Delegate");
-                        command_delegate(
-                            repo,
-                            database,
-                            &pull_request,
-                            &comment.author,
-                            delegate_type,
-                        )
-                        .instrument(span)
-                        .await
+                        command_delegate(repo, database, &pr, &comment.author, delegate_type)
+                            .instrument(span)
+                            .await
                     }
                     BorsCommand::Undelegate => {
                         let span = tracing::info_span!("Undelegate");
-                        command_undelegate(repo, database, &pull_request, &comment.author)
+                        command_undelegate(repo, database, &pr, &comment.author)
                             .instrument(span)
                             .await
                     }
                     BorsCommand::Help => {
                         let span = tracing::info_span!("Help");
-                        command_help(repo, &pull_request).instrument(span).await
+                        command_help(repo, pr.number()).instrument(span).await
                     }
                     BorsCommand::Ping => {
                         let span = tracing::info_span!("Ping");
-                        command_ping(repo, &pull_request).instrument(span).await
+                        command_ping(repo, pr.number()).instrument(span).await
                     }
                     BorsCommand::Try { parent, jobs } => {
                         let span = tracing::info_span!("Try");
                         command_try_build(
                             repo,
                             database,
-                            &pull_request,
+                            &pr,
                             &comment.author,
                             parent,
                             jobs,
@@ -441,19 +457,17 @@ async fn handle_comment(
                     }
                     BorsCommand::TryCancel => {
                         let span = tracing::info_span!("Cancel try");
-                        command_try_cancel(repo, database, &pull_request, &comment.author)
+                        command_try_cancel(repo, database, &pr, &comment.author)
                             .instrument(span)
                             .await
                     }
                     BorsCommand::Info => {
                         let span = tracing::info_span!("Info");
-                        command_info(repo, &pull_request, database)
-                            .instrument(span)
-                            .await
+                        command_info(repo, &pr, database).instrument(span).await
                     }
                     BorsCommand::SetRollupMode(rollup) => {
                         let span = tracing::info_span!("Rollup");
-                        command_set_rollup(repo, database, &pull_request, &comment.author, rollup)
+                        command_set_rollup(repo, database, &pr, &comment.author, rollup)
                             .instrument(span)
                             .await
                     }
@@ -483,7 +497,7 @@ async fn handle_comment(
                 };
                 tracing::warn!("{}", message);
                 repo.client
-                    .post_comment(pull_request.number, Comment::new(message))
+                    .post_comment(pr.number(), Comment::new(message))
                     .await
                     .context("Could not reply to PR comment")?;
             }
@@ -530,7 +544,7 @@ fn is_bors_observed_branch(branch: &str) -> bool {
 /// Deny permission for a request.
 async fn deny_request(
     repo: &RepositoryState,
-    pr: &PullRequest,
+    pr_number: PullRequestNumber,
     author: &GithubUser,
     permission_type: PermissionType,
 ) -> anyhow::Result<()> {
@@ -540,7 +554,7 @@ async fn deny_request(
     );
     repo.client
         .post_comment(
-            pr.number,
+            pr_number,
             Comment::new(format!(
                 "@{}: :key: Insufficient privileges: not in {} users",
                 author.username, permission_type
@@ -552,35 +566,24 @@ async fn deny_request(
 /// Check if a user has specified permission or has been delegated.
 async fn has_permission(
     repo_state: &RepositoryState,
-    author: &GithubUser,
-    pr: &PullRequest,
-    db: &PgDbClient,
+    user: &GithubUser,
+    pr: &PullRequestData,
     permission: PermissionType,
 ) -> anyhow::Result<bool> {
     if repo_state
         .permissions
         .load()
-        .has_permission(author.id, permission.clone())
+        .has_permission(user.id, permission.clone())
     {
         return Ok(true);
     }
 
-    let pr_model = db
-        .upsert_pull_request(
-            repo_state.repository(),
-            pr.number,
-            &pr.title,
-            &pr.base.name,
-            pr.mergeable_state.clone().into(),
-            &pr.status,
-        )
-        .await?;
-
-    if author.id != pr.author.id {
+    if user.id != pr.github.author.id {
         return Ok(false);
     }
 
-    let is_delegated = pr_model
+    let is_delegated = pr
+        .db
         .delegated_permission
         .is_some_and(|perm| match permission {
             PermissionType::Review => matches!(perm, DelegatedPermission::Review),

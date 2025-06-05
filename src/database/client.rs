@@ -167,7 +167,7 @@ impl PgDbClient {
 
     pub async fn attach_try_build(
         &self,
-        pr: PullRequestModel,
+        pr: &PullRequestModel,
         branch: String,
         commit_sha: CommitSha,
         parent: CommitSha,

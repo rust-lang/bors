@@ -1,17 +1,17 @@
 use crate::bors::Comment;
 use crate::bors::RepositoryState;
 use crate::bors::command::BorsCommand;
-use crate::github::PullRequest;
+use crate::github::PullRequestNumber;
 use std::sync::Arc;
 
 pub(super) async fn command_help(
     repo: Arc<RepositoryState>,
-    pr: &PullRequest,
+    pr_number: PullRequestNumber,
 ) -> anyhow::Result<()> {
     let help = format_help();
 
     repo.client
-        .post_comment(pr.number, Comment::new(help.to_string()))
+        .post_comment(pr_number, Comment::new(help.to_string()))
         .await?;
     Ok(())
 }
