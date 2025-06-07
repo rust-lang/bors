@@ -131,6 +131,7 @@ impl PgDbClient {
         pr_number: PullRequestNumber,
         title: &str,
         author: &str,
+        assignees: &[String],
         base_branch: &str,
         pr_status: PullRequestStatus,
     ) -> anyhow::Result<()> {
@@ -140,6 +141,7 @@ impl PgDbClient {
             pr_number,
             title,
             author,
+            assignees,
             base_branch,
             pr_status,
         )

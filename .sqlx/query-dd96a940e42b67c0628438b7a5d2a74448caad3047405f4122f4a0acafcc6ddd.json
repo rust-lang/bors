@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            WITH upserted_pr AS (\n                INSERT INTO pull_request (repository, number, title, author, base_branch, mergeable_state, status)\n                VALUES ($1, $2, $3, $4, $5, $6, $7)\n                ON CONFLICT (repository, number)\n                DO UPDATE SET\n                    title = $3,\n                    author = $4,\n                    base_branch = $5,\n                    mergeable_state = $6,\n                    status = $7\n                RETURNING *\n            )\n            SELECT\n                pr.id,\n                pr.repository as \"repository: GithubRepoName\",\n                pr.number as \"number!: i64\",\n                pr.title,\n                pr.author,\n                (\n                    pr.approved_by,\n                    pr.approved_sha\n                ) AS \"approval_status!: ApprovalStatus\",\n                pr.status as \"pr_status: PullRequestStatus\",\n                pr.priority,\n                pr.rollup as \"rollup: RollupMode\",\n                pr.delegated_permission as \"delegated_permission: DelegatedPermission\",\n                pr.base_branch,\n                pr.mergeable_state as \"mergeable_state: MergeableState\",\n                pr.created_at as \"created_at: DateTime<Utc>\",\n                build AS \"try_build: BuildModel\"\n            FROM upserted_pr as pr\n            LEFT JOIN build ON pr.build_id = build.id\n            ",
+  "query": "\n            SELECT\n                pr.id,\n                pr.repository as \"repository: GithubRepoName\",\n                pr.number as \"number!: i64\",\n                pr.title,\n                pr.author,\n                pr.assignees,\n                (\n                    pr.approved_by,\n                    pr.approved_sha\n                ) AS \"approval_status!: ApprovalStatus\",\n                pr.status as \"pr_status: PullRequestStatus\",\n                pr.priority,\n                pr.rollup as \"rollup: RollupMode\",\n                pr.delegated_permission as \"delegated_permission: DelegatedPermission\",\n                pr.base_branch,\n                pr.mergeable_state as \"mergeable_state: MergeableState\",\n                pr.created_at as \"created_at: DateTime<Utc>\",\n                build AS \"try_build: BuildModel\"\n            FROM pull_request as pr\n            LEFT JOIN build ON pr.build_id = build.id\n            WHERE pr.repository = $1\n              AND pr.mergeable_state = 'unknown'\n              AND pr.status IN ('open', 'draft')\n            ",
   "describe": {
     "columns": [
       {
@@ -30,46 +30,51 @@
       },
       {
         "ordinal": 5,
+        "name": "assignees",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 6,
         "name": "approval_status!: ApprovalStatus",
         "type_info": "Record"
       },
       {
-        "ordinal": 6,
+        "ordinal": 7,
         "name": "pr_status: PullRequestStatus",
         "type_info": "Text"
       },
       {
-        "ordinal": 7,
+        "ordinal": 8,
         "name": "priority",
         "type_info": "Int4"
       },
       {
-        "ordinal": 8,
+        "ordinal": 9,
         "name": "rollup: RollupMode",
         "type_info": "Text"
       },
       {
-        "ordinal": 9,
+        "ordinal": 10,
         "name": "delegated_permission: DelegatedPermission",
         "type_info": "Text"
       },
       {
-        "ordinal": 10,
+        "ordinal": 11,
         "name": "base_branch",
         "type_info": "Text"
       },
       {
-        "ordinal": 11,
+        "ordinal": 12,
         "name": "mergeable_state: MergeableState",
         "type_info": "Text"
       },
       {
-        "ordinal": 12,
+        "ordinal": 13,
         "name": "created_at: DateTime<Utc>",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 13,
+        "ordinal": 14,
         "name": "try_build: BuildModel",
         "type_info": {
           "Custom": {
@@ -112,16 +117,11 @@
     ],
     "parameters": {
       "Left": [
-        "Text",
-        "Int8",
-        "Text",
-        "Text",
-        "Text",
-        "Text",
         "Text"
       ]
     },
     "nullable": [
+      false,
       false,
       false,
       false,
@@ -135,8 +135,8 @@
       false,
       false,
       false,
-      true
+      null
     ]
   },
-  "hash": "134ee8ca69438c645184fe61bf36efd19c7782d05976f9d2d1ee77a06b3f59f9"
+  "hash": "dd96a940e42b67c0628438b7a5d2a74448caad3047405f4122f4a0acafcc6ddd"
 }

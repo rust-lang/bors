@@ -40,6 +40,7 @@ pub(crate) async fn get_pull_request(
         pr.number as "number!: i64",
         pr.title,
         pr.author,
+        pr.assignees,
         (
             pr.approved_by,
             pr.approved_sha
@@ -74,19 +75,21 @@ pub(crate) async fn create_pull_request(
     pr_number: PullRequestNumber,
     title: &str,
     author: &str,
+    assignees: &[String],
     base_branch: &str,
     pr_status: PullRequestStatus,
 ) -> anyhow::Result<()> {
     measure_db_query("create_pull_request", || async {
         sqlx::query!(
             r#"
-INSERT INTO pull_request (repository, number, title, author, base_branch, status)
-VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT DO NOTHING
+INSERT INTO pull_request (repository, number, title, author, assignees, base_branch, status)
+VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT DO NOTHING
 "#,
             repo as &GithubRepoName,
             pr_number.0 as i32,
             title,
             author,
+            assignees,
             base_branch,
             pr_status as PullRequestStatus,
         )
@@ -128,15 +131,16 @@ pub(crate) async fn upsert_pull_request(
             PullRequestModel,
             r#"
             WITH upserted_pr AS (
-                INSERT INTO pull_request (repository, number, title, author, base_branch, mergeable_state, status)
-                VALUES ($1, $2, $3, $4, $5, $6, $7)
+                INSERT INTO pull_request (repository, number, title, author, assignees, base_branch, mergeable_state, status)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                 ON CONFLICT (repository, number)
                 DO UPDATE SET
                     title = $3,
                     author = $4,
-                    base_branch = $5,
-                    mergeable_state = $6,
-                    status = $7
+                    assignees = $5,
+                    base_branch = $6,
+                    mergeable_state = $7,
+                    status = $8
                 RETURNING *
             )
             SELECT
@@ -145,6 +149,7 @@ pub(crate) async fn upsert_pull_request(
                 pr.number as "number!: i64",
                 pr.title,
                 pr.author,
+                pr.assignees,
                 (
                     pr.approved_by,
                     pr.approved_sha
@@ -164,6 +169,7 @@ pub(crate) async fn upsert_pull_request(
             params.pr_number.0 as i32,
             &params.title,
             &params.author,
+            &params.assignees,
             &params.base_branch,
             params.mergeable_state as _,
             params.pr_status as _,
@@ -192,6 +198,7 @@ pub(crate) async fn get_nonclosed_pull_requests_by_base_branch(
                 pr.number as "number!: i64",
                 pr.title,
                 pr.author,
+                pr.assignees,
                 (
                     pr.approved_by,
                     pr.approved_sha
@@ -235,6 +242,7 @@ pub(crate) async fn get_nonclosed_pull_requests(
                 pr.number as "number!: i64",
                 pr.title,
                 pr.author,
+                pr.assignees,
                 (
                     pr.approved_by,
                     pr.approved_sha
@@ -296,6 +304,7 @@ pub(crate) async fn get_prs_with_unknown_mergeable_state(
                 pr.number as "number!: i64",
                 pr.title,
                 pr.author,
+                pr.assignees,
                 (
                     pr.approved_by,
                     pr.approved_sha
@@ -447,6 +456,7 @@ SELECT
     pr.number as "number!: i64",
     pr.title,
     pr.author,
+    pr.assignees,
     (
         pr.approved_by,
         pr.approved_sha

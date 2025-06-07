@@ -73,11 +73,15 @@ pub(super) async fn handle_pull_request_opened(
     } else {
         PullRequestStatus::Open
     };
+    let assignees: Vec<String> = payload.pull_request.assignees.iter()
+        .map(|a| a.username.clone())
+        .collect();
     db.create_pull_request(
         repo_state.repository(),
         payload.pull_request.number,
         &payload.pull_request.title,
         &payload.pull_request.author.username,
+        &assignees,
         &payload.pull_request.base.name,
         pr_status,
     )
