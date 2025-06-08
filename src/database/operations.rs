@@ -693,6 +693,26 @@ pub(crate) async fn set_pr_rollup(
     .await
 }
 
+pub(crate) async fn set_pr_assignees(
+    executor: impl PgExecutor<'_>,
+    repo: &GithubRepoName,
+    pr_number: PullRequestNumber,
+    assignees: &[String],
+) -> anyhow::Result<()> {
+    measure_db_query("set_pr_assignees", || async {
+        sqlx::query!(
+            "UPDATE pull_request SET assignees = $1 WHERE repository = $2 AND number = $3",
+            assignees,
+            repo as &GithubRepoName,
+            pr_number.0 as i32,
+        )
+        .execute(executor)
+        .await?;
+        Ok(())
+    })
+    .await
+}
+
 pub(crate) async fn get_workflows_for_build(
     executor: impl PgExecutor<'_>,
     build_id: i32,

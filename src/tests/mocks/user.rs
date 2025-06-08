@@ -27,7 +27,7 @@ impl User {
         Self::new(104, "user-with-try-privileges")
     }
 
-    /// User that should have `try` and review privileges.
+    /// User that should have `try` and `review` privileges.
     pub fn reviewer() -> Self {
         Self::new(105, "reviewer")
     }

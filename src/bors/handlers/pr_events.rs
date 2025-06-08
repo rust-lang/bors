@@ -1,8 +1,8 @@
 use crate::PgDbClient;
 use crate::bors::event::{
-    PullRequestClosed, PullRequestConvertedToDraft, PullRequestEdited, PullRequestMerged,
-    PullRequestOpened, PullRequestPushed, PullRequestReadyForReview, PullRequestReopened,
-    PushToBranch,
+    PullRequestAssigned, PullRequestClosed, PullRequestConvertedToDraft, PullRequestEdited,
+    PullRequestMerged, PullRequestOpened, PullRequestPushed, PullRequestReadyForReview,
+    PullRequestReopened, PushToBranch,
 };
 use crate::bors::handlers::labels::handle_label_trigger;
 use crate::bors::mergeable_queue::MergeableQueueSender;
@@ -73,8 +73,11 @@ pub(super) async fn handle_pull_request_opened(
     } else {
         PullRequestStatus::Open
     };
-    let assignees: Vec<String> = payload.pull_request.assignees.iter()
-        .map(|a| a.username.clone())
+    let assignees: Vec<String> = payload
+        .pull_request
+        .assignees
+        .into_iter()
+        .map(|user| user.username)
         .collect();
     db.create_pull_request(
         repo_state.repository(),
@@ -143,6 +146,24 @@ pub(super) async fn handle_pull_request_converted_to_draft(
         repo_state.repository(),
         payload.pull_request.number,
         PullRequestStatus::Draft,
+    )
+    .await
+}
+
+pub(super) async fn handle_pull_request_assigned(
+    repo_state: Arc<RepositoryState>,
+    db: Arc<PgDbClient>,
+    payload: PullRequestAssigned,
+) -> anyhow::Result<()> {
+    db.set_pr_assignees(
+        repo_state.repository(),
+        payload.pull_request.number,
+        &payload
+            .pull_request
+            .assignees
+            .into_iter()
+            .map(|user| user.username)
+            .collect::<Vec<String>>(),
     )
     .await
 }
@@ -438,6 +459,28 @@ mod tests {
             tester
                 .wait_for_pr(default_repo_name(), pr.number.0, |pr| {
                     pr.pr_status == PullRequestStatus::Draft
+                })
+                .await?;
+            Ok(tester)
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn assign_pr_updates_assignees(pool: sqlx::PgPool) {
+        run_test(pool, |mut tester| async {
+            let pr = tester.open_pr(default_repo_name(), false).await?;
+            tester
+                .wait_for_pr(default_repo_name(), pr.number.0, |pr| {
+                    pr.assignees.is_empty()
+                })
+                .await?;
+            tester
+                .assign_pr(default_repo_name(), pr.number.0, User::reviewer())
+                .await?;
+            tester
+                .wait_for_pr(default_repo_name(), pr.number.0, |pr| {
+                    pr.assignees == vec!["reviewer"]
                 })
                 .await?;
             Ok(tester)
