@@ -325,15 +325,11 @@ timeout = 3600
                 })
                 .await?;
             tester.refresh_prs().await;
-            assert_eq!(
-                tester
-                    .db()
-                    .get_pull_request(&default_repo_name(), pr.number)
-                    .await?
-                    .unwrap()
-                    .pr_status,
-                PullRequestStatus::Open
-            );
+            tester
+                .wait_for_pr(default_repo_name(), pr.number.0, |pr| {
+                    pr.pr_status == PullRequestStatus::Open
+                })
+                .await?;
             Ok(tester)
         })
         .await;
@@ -352,15 +348,11 @@ timeout = 3600
                 })
                 .await?;
             tester.refresh_prs().await;
-            assert_eq!(
-                tester
-                    .db()
-                    .get_pull_request(&default_repo_name(), pr.number)
-                    .await?
-                    .unwrap()
-                    .pr_status,
-                PullRequestStatus::Closed
-            );
+            tester
+                .wait_for_pr(default_repo_name(), pr.number.0, |pr| {
+                    pr.pr_status == PullRequestStatus::Closed
+                })
+                .await?;
             Ok(tester)
         })
         .await;
@@ -379,15 +371,11 @@ timeout = 3600
                 .await?;
 
             tester.refresh_prs().await;
-            assert_eq!(
-                tester
-                    .db()
-                    .get_pull_request(&default_repo_name(), pr.number)
-                    .await?
-                    .unwrap()
-                    .pr_status,
-                PullRequestStatus::Draft
-            );
+            tester
+                .wait_for_pr(default_repo_name(), pr.number.0, |pr| {
+                    pr.pr_status == PullRequestStatus::Draft
+                })
+                .await?;
             Ok(tester)
         })
         .await;
