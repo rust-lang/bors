@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE pull_request SET assignees = $1 WHERE repository = $2 AND number = $3",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "TextArray",
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a23e71d4cf48f7138fc72a7d502006c1b6b73d1567a16bddde9b4007beff2500"
+}
