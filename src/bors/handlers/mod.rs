@@ -5,7 +5,9 @@ use crate::bors::event::{BorsGlobalEvent, BorsRepositoryEvent, PullRequestCommen
 use crate::bors::handlers::help::command_help;
 use crate::bors::handlers::info::command_info;
 use crate::bors::handlers::ping::command_ping;
-use crate::bors::handlers::pr_events::{handle_pull_request_assigned, handle_pull_request_unassigned};
+use crate::bors::handlers::pr_events::{
+    handle_pull_request_assigned, handle_pull_request_unassigned,
+};
 use crate::bors::handlers::refresh::{
     cancel_timed_out_builds, reload_repository_config, reload_repository_permissions,
     reload_unknown_mergeable_prs,
