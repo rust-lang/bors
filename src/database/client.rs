@@ -135,6 +135,7 @@ impl PgDbClient {
         get_nonclosed_pull_requests(&self.pool, repo).await
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_pull_request(
         &self,
         repo: &GithubRepoName,

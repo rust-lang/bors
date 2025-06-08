@@ -69,6 +69,7 @@ pub(crate) async fn get_pull_request(
     .await
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn create_pull_request(
     executor: impl PgExecutor<'_>,
     repo: &GithubRepoName,
