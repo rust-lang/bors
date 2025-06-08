@@ -23,6 +23,8 @@ pub enum BorsRepositoryEvent {
     PullRequestConvertedToDraft(PullRequestConvertedToDraft),
     // When a pull request is assigned to a user
     PullRequestAssigned(PullRequestAssigned),
+    // When a pull request is unassigned from a user
+    PullRequestUnassigned(PullRequestUnassigned),
     // When a pull request is ready for review
     PullRequestReadyForReview(PullRequestReadyForReview),
     /// When there is a push to a branch. This includes when a commit is pushed, when a commit tag is pushed,
@@ -49,6 +51,7 @@ impl BorsRepositoryEvent {
             BorsRepositoryEvent::PullRequestReopened(payload) => &payload.repository,
             BorsRepositoryEvent::PullRequestConvertedToDraft(payload) => &payload.repository,
             BorsRepositoryEvent::PullRequestAssigned(payload) => &payload.repository,
+            BorsRepositoryEvent::PullRequestUnassigned(payload) => &payload.repository,
             BorsRepositoryEvent::PullRequestReadyForReview(payload) => &payload.repository,
             BorsRepositoryEvent::PushToBranch(payload) => &payload.repository,
             BorsRepositoryEvent::WorkflowStarted(workflow) => &workflow.repository,
@@ -144,6 +147,12 @@ pub struct PullRequestReadyForReview {
 
 #[derive(Debug)]
 pub struct PullRequestAssigned {
+    pub repository: GithubRepoName,
+    pub pull_request: PullRequest,
+}
+
+#[derive(Debug)]
+pub struct PullRequestUnassigned {
     pub repository: GithubRepoName,
     pub pull_request: PullRequest,
 }

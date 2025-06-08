@@ -2,7 +2,7 @@ use crate::PgDbClient;
 use crate::bors::event::{
     PullRequestAssigned, PullRequestClosed, PullRequestConvertedToDraft, PullRequestEdited,
     PullRequestMerged, PullRequestOpened, PullRequestPushed, PullRequestReadyForReview,
-    PullRequestReopened, PushToBranch,
+    PullRequestReopened, PullRequestUnassigned, PushToBranch,
 };
 use crate::bors::handlers::labels::handle_label_trigger;
 use crate::bors::mergeable_queue::MergeableQueueSender;
@@ -154,6 +154,24 @@ pub(super) async fn handle_pull_request_assigned(
     repo_state: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
     payload: PullRequestAssigned,
+) -> anyhow::Result<()> {
+    db.set_pr_assignees(
+        repo_state.repository(),
+        payload.pull_request.number,
+        &payload
+            .pull_request
+            .assignees
+            .into_iter()
+            .map(|user| user.username)
+            .collect::<Vec<String>>(),
+    )
+    .await
+}
+
+pub(super) async fn handle_pull_request_unassigned(
+    repo_state: Arc<RepositoryState>,
+    db: Arc<PgDbClient>,
+    payload: PullRequestUnassigned,
 ) -> anyhow::Result<()> {
     db.set_pr_assignees(
         repo_state.repository(),
@@ -481,6 +499,31 @@ mod tests {
             tester
                 .wait_for_pr(default_repo_name(), pr.number.0, |pr| {
                     pr.assignees == vec!["reviewer"]
+                })
+                .await?;
+            Ok(tester)
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn unassign_pr_updates_assignees(pool: sqlx::PgPool) {
+        run_test(pool, |mut tester| async {
+            let pr = tester.open_pr(default_repo_name(), false).await?;
+            tester
+                .assign_pr(default_repo_name(), pr.number.0, User::reviewer())
+                .await?;
+            tester
+                .wait_for_pr(default_repo_name(), pr.number.0, |pr| {
+                    pr.assignees == vec!["reviewer"]
+                })
+                .await?;
+            tester
+                .unassign_pr(default_repo_name(), pr.number.0, User::reviewer())
+                .await?;
+            tester
+                .wait_for_pr(default_repo_name(), pr.number.0, |pr| {
+                    pr.assignees.is_empty()
                 })
                 .await?;
             Ok(tester)
