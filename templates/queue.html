@@ -26,6 +26,7 @@
         <th>Mergeable</th>
         <th>Title</th>
         <th>Author</th>
+        <th>Assignees</th>
         <th>Approved by</th>
         <th>Priority</th>
         <th>Rollup</th>
@@ -57,6 +58,7 @@
             </td>
             <td>{{ pr.title }}</td>
             <td>{{ pr.author }}</td>
+            <td>{{ pr.assignees|join(", ") }}</td>
             <td>
                 {% if let Some(approver) = pr.approver() %}
                     {{ approver }}
