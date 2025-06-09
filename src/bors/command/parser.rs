@@ -69,7 +69,7 @@ fn extract_text_segments(text: &str) -> Vec<CowStr> {
 
     for event in md_parser.into_iter() {
         match event {
-            Event::Text(text) => {
+            Event::Text(text) | Event::Html(text) => {
                 // Only consider commands in raw text outside of wrapping elements
                 if stack.is_empty() {
                     segments.push(text);
@@ -79,7 +79,6 @@ fn extract_text_segments(text: &str) -> Vec<CowStr> {
                 // Ignore content in the following wrapping elements
                 Tag::BlockQuote(_)
                 | Tag::CodeBlock(_)
-                | Tag::HtmlBlock
                 | Tag::Link { .. }
                 | Tag::Heading { .. }
                 | Tag::Image { .. } => {
@@ -92,7 +91,6 @@ fn extract_text_segments(text: &str) -> Vec<CowStr> {
                     match (start_tag, tag) {
                         (Tag::BlockQuote(_), TagEnd::BlockQuote(_))
                         | (Tag::CodeBlock(_), TagEnd::CodeBlock)
-                        | (Tag::HtmlBlock, TagEnd::HtmlBlock)
                         | (Tag::Link { .. }, TagEnd::Link)
                         | (Tag::Heading { .. }, TagEnd::Heading(_))
                         | (Tag::Image { .. }, TagEnd::Image) => {
@@ -1209,6 +1207,26 @@ line two
     }
 
     #[test]
+    fn parse_in_html_command() {
+        let cmds = parse_commands(
+            r#"
+<!--
+I am markdown HTML comment
+@bors try
+-->
+"#,
+        );
+        assert_eq!(cmds.len(), 1);
+        assert_eq!(
+            cmds[0],
+            Ok(BorsCommand::Try {
+                parent: None,
+                jobs: vec![]
+            })
+        );
+    }
+
+    #[test]
     fn ignore_markdown_codeblock() {
         let cmds = parse_commands(
             r#"
@@ -1229,12 +1247,6 @@ line two
     #[test]
     fn ignore_markdown_link() {
         let cmds = parse_commands("Ignore [me](@bors-try).");
-        assert_eq!(cmds.len(), 0);
-    }
-
-    #[test]
-    fn ignore_markdown_html() {
-        let cmds = parse_commands("<div>@bors try</div>");
         assert_eq!(cmds.len(), 0);
     }
 
