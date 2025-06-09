@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n    SELECT\n        pr.id,\n        pr.repository as \"repository: GithubRepoName\",\n        pr.number as \"number!: i64\",\n        pr.title,\n        pr.author,\n        (\n            pr.approved_by,\n            pr.approved_sha\n        ) AS \"approval_status!: ApprovalStatus\",\n        pr.status as \"pr_status: PullRequestStatus\",\n        pr.priority,\n        pr.rollup as \"rollup: RollupMode\",\n        pr.delegated_permission as \"delegated_permission: DelegatedPermission\",\n        pr.base_branch,\n        pr.mergeable_state as \"mergeable_state: MergeableState\",\n        pr.created_at as \"created_at: DateTime<Utc>\",\n        build AS \"try_build: BuildModel\"\n    FROM pull_request as pr\n    LEFT JOIN build ON pr.build_id = build.id\n    WHERE pr.repository = $1 AND\n          pr.number = $2\n    ",
+  "query": "\n            WITH upserted_pr AS (\n                INSERT INTO pull_request (repository, number, title, author, assignees, base_branch, mergeable_state, status)\n                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)\n                ON CONFLICT (repository, number)\n                DO UPDATE SET\n                    title = $3,\n                    author = $4,\n                    assignees = $5,\n                    base_branch = $6,\n                    mergeable_state = $7,\n                    status = $8\n                RETURNING *\n            )\n            SELECT\n                pr.id,\n                pr.repository as \"repository: GithubRepoName\",\n                pr.number as \"number!: i64\",\n                pr.title,\n                pr.author,\n                pr.assignees as \"assignees: Assignees\",\n                (\n                    pr.approved_by,\n                    pr.approved_sha\n                ) AS \"approval_status!: ApprovalStatus\",\n                pr.status as \"pr_status: PullRequestStatus\",\n                pr.priority,\n                pr.rollup as \"rollup: RollupMode\",\n                pr.delegated_permission as \"delegated_permission: DelegatedPermission\",\n                pr.base_branch,\n                pr.mergeable_state as \"mergeable_state: MergeableState\",\n                pr.created_at as \"created_at: DateTime<Utc>\",\n                build AS \"try_build: BuildModel\"\n            FROM upserted_pr as pr\n            LEFT JOIN build ON pr.build_id = build.id\n            ",
   "describe": {
     "columns": [
       {
@@ -30,46 +30,51 @@
       },
       {
         "ordinal": 5,
+        "name": "assignees: Assignees",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
         "name": "approval_status!: ApprovalStatus",
         "type_info": "Record"
       },
       {
-        "ordinal": 6,
+        "ordinal": 7,
         "name": "pr_status: PullRequestStatus",
         "type_info": "Text"
       },
       {
-        "ordinal": 7,
+        "ordinal": 8,
         "name": "priority",
         "type_info": "Int4"
       },
       {
-        "ordinal": 8,
+        "ordinal": 9,
         "name": "rollup: RollupMode",
         "type_info": "Text"
       },
       {
-        "ordinal": 9,
+        "ordinal": 10,
         "name": "delegated_permission: DelegatedPermission",
         "type_info": "Text"
       },
       {
-        "ordinal": 10,
+        "ordinal": 11,
         "name": "base_branch",
         "type_info": "Text"
       },
       {
-        "ordinal": 11,
+        "ordinal": 12,
         "name": "mergeable_state: MergeableState",
         "type_info": "Text"
       },
       {
-        "ordinal": 12,
+        "ordinal": 13,
         "name": "created_at: DateTime<Utc>",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 13,
+        "ordinal": 14,
         "name": "try_build: BuildModel",
         "type_info": {
           "Custom": {
@@ -113,10 +118,17 @@
     "parameters": {
       "Left": [
         "Text",
-        "Int8"
+        "Int8",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text"
       ]
     },
     "nullable": [
+      false,
       false,
       false,
       false,
@@ -130,8 +142,8 @@
       false,
       false,
       false,
-      null
+      true
     ]
   },
-  "hash": "e21b930ff230a2a61da8f98cfd9e50fa07380b759a8ff2a7f07d55195d1b4b84"
+  "hash": "5dfd742dce68994fa90e7311ce0fa745fdd075768b9b2ef672ea36dafbcab620"
 }

@@ -18,10 +18,10 @@ use secrecy::{ExposeSecret, SecretString};
 use sha2::Sha256;
 
 use crate::bors::event::{
-    BorsEvent, BorsGlobalEvent, BorsRepositoryEvent, CheckSuiteCompleted, PullRequestClosed,
-    PullRequestComment, PullRequestConvertedToDraft, PullRequestEdited, PullRequestMerged,
-    PullRequestOpened, PullRequestPushed, PullRequestReadyForReview, PullRequestReopened,
-    PushToBranch, WorkflowCompleted, WorkflowStarted,
+    BorsEvent, BorsGlobalEvent, BorsRepositoryEvent, CheckSuiteCompleted, PullRequestAssigned,
+    PullRequestClosed, PullRequestComment, PullRequestConvertedToDraft, PullRequestEdited,
+    PullRequestMerged, PullRequestOpened, PullRequestPushed, PullRequestReadyForReview,
+    PullRequestReopened, PullRequestUnassigned, PushToBranch, WorkflowCompleted, WorkflowStarted,
 };
 use crate::database::{WorkflowStatus, WorkflowType};
 use crate::github::server::ServerStateRef;
@@ -286,6 +286,18 @@ fn parse_pull_request_events(body: &[u8]) -> anyhow::Result<Option<BorsEvent>> {
         ))),
         PullRequestWebhookEventAction::ReadyForReview => Ok(Some(BorsEvent::Repository(
             BorsRepositoryEvent::PullRequestReadyForReview(PullRequestReadyForReview {
+                repository: repository_name,
+                pull_request: payload.pull_request.into(),
+            }),
+        ))),
+        PullRequestWebhookEventAction::Assigned => Ok(Some(BorsEvent::Repository(
+            BorsRepositoryEvent::PullRequestAssigned(PullRequestAssigned {
+                repository: repository_name,
+                pull_request: payload.pull_request.into(),
+            }),
+        ))),
+        PullRequestWebhookEventAction::Unassigned => Ok(Some(BorsEvent::Repository(
+            BorsRepositoryEvent::PullRequestUnassigned(PullRequestUnassigned {
                 repository: repository_name,
                 pull_request: payload.pull_request.into(),
             }),
@@ -651,6 +663,7 @@ mod tests {
                                         fragment: None,
                                     },
                                 },
+                                assignees: [],
                                 status: Open,
                             },
                             from_base_sha: Some(
@@ -722,6 +735,7 @@ mod tests {
                                         fragment: None,
                                     },
                                 },
+                                assignees: [],
                                 status: Open,
                             },
                         },
@@ -837,6 +851,7 @@ mod tests {
                                         fragment: None,
                                     },
                                 },
+                                assignees: [],
                                 status: Open,
                             },
                             draft: false,
@@ -904,6 +919,7 @@ mod tests {
                                         fragment: None,
                                     },
                                 },
+                                assignees: [],
                                 status: Closed,
                             },
                         },
@@ -970,6 +986,7 @@ mod tests {
                                         fragment: None,
                                     },
                                 },
+                                assignees: [],
                                 status: Merged,
                             },
                         },
@@ -1036,6 +1053,7 @@ mod tests {
                                         fragment: None,
                                     },
                                 },
+                                assignees: [],
                                 status: Open,
                             },
                         },
@@ -1102,6 +1120,7 @@ mod tests {
                                         fragment: None,
                                     },
                                 },
+                                assignees: [],
                                 status: Draft,
                             },
                             draft: true,
@@ -1169,6 +1188,7 @@ mod tests {
                                         fragment: None,
                                     },
                                 },
+                                assignees: [],
                                 status: Draft,
                             },
                         },
@@ -1235,6 +1255,7 @@ mod tests {
                                         fragment: None,
                                     },
                                 },
+                                assignees: [],
                                 status: Open,
                             },
                         },
@@ -1286,6 +1307,162 @@ mod tests {
                             ),
                             text: "Foo",
                             html_url: "https://github.com/Kobzol/bors-kindergarten/pull/6#discussion_r1227824551",
+                        },
+                    ),
+                ),
+            ),
+        )
+        "#
+        );
+    }
+
+    #[tokio::test]
+    async fn pull_request_assigned() {
+        insta::assert_debug_snapshot!(
+            check_webhook("webhook/pull-request-assigned.json", "pull_request").await,
+            @r#"
+        Ok(
+            GitHubWebhook(
+                Repository(
+                    PullRequestAssigned(
+                        PullRequestAssigned {
+                            repository: GithubRepoName {
+                                owner: "sakib25800",
+                                name: "bors-test-2",
+                            },
+                            pull_request: PullRequest {
+                                number: PullRequestNumber(
+                                    3,
+                                ),
+                                head_label: "Sakib25800:branch-2",
+                                head: Branch {
+                                    name: "branch-2",
+                                    sha: CommitSha(
+                                        "3824fd9a567e3c27dff0cd51427e7562a0eda8da",
+                                    ),
+                                },
+                                base: Branch {
+                                    name: "main",
+                                    sha: CommitSha(
+                                        "10636c870153028c034f7823ef8c3ad686e855f9",
+                                    ),
+                                },
+                                title: "Branch 2",
+                                mergeable_state: Clean,
+                                message: "",
+                                author: GithubUser {
+                                    id: UserId(
+                                        66968718,
+                                    ),
+                                    username: "Sakib25800",
+                                    html_url: Url {
+                                        scheme: "https",
+                                        cannot_be_a_base: false,
+                                        username: "",
+                                        password: None,
+                                        host: Some(
+                                            Domain(
+                                                "github.com",
+                                            ),
+                                        ),
+                                        port: None,
+                                        path: "/Sakib25800",
+                                        query: None,
+                                        fragment: None,
+                                    },
+                                },
+                                assignees: [
+                                    GithubUser {
+                                        id: UserId(
+                                            66968718,
+                                        ),
+                                        username: "Sakib25800",
+                                        html_url: Url {
+                                            scheme: "https",
+                                            cannot_be_a_base: false,
+                                            username: "",
+                                            password: None,
+                                            host: Some(
+                                                Domain(
+                                                    "github.com",
+                                                ),
+                                            ),
+                                            port: None,
+                                            path: "/Sakib25800",
+                                            query: None,
+                                            fragment: None,
+                                        },
+                                    },
+                                ],
+                                status: Open,
+                            },
+                        },
+                    ),
+                ),
+            ),
+        )
+        "#
+        );
+    }
+
+    #[tokio::test]
+    async fn pull_request_unassigned() {
+        insta::assert_debug_snapshot!(
+            check_webhook("webhook/pull-request-unassigned.json", "pull_request").await,
+            @r#"
+        Ok(
+            GitHubWebhook(
+                Repository(
+                    PullRequestUnassigned(
+                        PullRequestUnassigned {
+                            repository: GithubRepoName {
+                                owner: "sakib25800",
+                                name: "bors-test-2",
+                            },
+                            pull_request: PullRequest {
+                                number: PullRequestNumber(
+                                    3,
+                                ),
+                                head_label: "Sakib25800:branch-2",
+                                head: Branch {
+                                    name: "branch-2",
+                                    sha: CommitSha(
+                                        "3824fd9a567e3c27dff0cd51427e7562a0eda8da",
+                                    ),
+                                },
+                                base: Branch {
+                                    name: "main",
+                                    sha: CommitSha(
+                                        "10636c870153028c034f7823ef8c3ad686e855f9",
+                                    ),
+                                },
+                                title: "Branch 2",
+                                mergeable_state: Clean,
+                                message: "",
+                                author: GithubUser {
+                                    id: UserId(
+                                        66968718,
+                                    ),
+                                    username: "Sakib25800",
+                                    html_url: Url {
+                                        scheme: "https",
+                                        cannot_be_a_base: false,
+                                        username: "",
+                                        password: None,
+                                        host: Some(
+                                            Domain(
+                                                "github.com",
+                                            ),
+                                        ),
+                                        port: None,
+                                        path: "/Sakib25800",
+                                        query: None,
+                                        fragment: None,
+                                    },
+                                },
+                                assignees: [],
+                                status: Open,
+                            },
                         },
                     ),
                 ),

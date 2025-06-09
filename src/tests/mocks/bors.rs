@@ -562,6 +562,56 @@ impl BorsTester {
         .await
     }
 
+    pub async fn assign_pr(
+        &mut self,
+        repo: GithubRepoName,
+        pr_number: u64,
+        assignee: User,
+    ) -> anyhow::Result<()> {
+        let pr = {
+            let repo = self.github.get_repo(&repo);
+            let mut repo = repo.lock();
+
+            let pr = repo
+                .pull_requests
+                .get_mut(&pr_number)
+                .expect("PR must be initialized before assigning to it");
+            pr.assignees.push(assignee.clone());
+            pr.clone()
+        };
+
+        self.send_webhook(
+            "pull_request",
+            GitHubPullRequestEventPayload::new(pr, "assigned", None),
+        )
+        .await
+    }
+
+    pub async fn unassign_pr(
+        &mut self,
+        repo: GithubRepoName,
+        pr_number: u64,
+        assignee: User,
+    ) -> anyhow::Result<()> {
+        let pr = {
+            let repo = self.github.get_repo(&repo);
+            let mut repo = repo.lock();
+
+            let pr = repo
+                .pull_requests
+                .get_mut(&pr_number)
+                .expect("PR must be initialized before unassigning from it");
+            pr.assignees.retain(|a| a != &assignee);
+            pr.clone()
+        };
+
+        self.send_webhook(
+            "pull_request",
+            GitHubPullRequestEventPayload::new(pr, "unassigned", None),
+        )
+        .await
+    }
+
     //-- Test assertions --//
     /// Expect that `count` comments will be received, without checking their contents.
     pub async fn expect_comments(&mut self, count: u64) {

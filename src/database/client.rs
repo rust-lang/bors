@@ -14,9 +14,10 @@ use super::operations::{
     get_nonclosed_pull_requests_by_base_branch, get_prs_with_unknown_mergeable_state,
     get_pull_request, get_repository, get_repository_by_name, get_running_builds,
     get_workflow_urls_for_build, get_workflows_for_build, insert_repo_if_not_exists,
-    set_pr_priority, set_pr_rollup, set_pr_status, unapprove_pull_request, undelegate_pull_request,
-    update_build_status, update_mergeable_states_by_base_branch, update_pr_build_id,
-    update_pr_mergeable_state, update_workflow_status, upsert_pull_request, upsert_repository,
+    set_pr_assignees, set_pr_priority, set_pr_rollup, set_pr_status, unapprove_pull_request,
+    undelegate_pull_request, update_build_status, update_mergeable_states_by_base_branch,
+    update_pr_build_id, update_pr_mergeable_state, update_workflow_status, upsert_pull_request,
+    upsert_repository,
 };
 use super::{ApprovalInfo, DelegatedPermission, MergeableState, RunId, UpsertPullRequestParams};
 
@@ -67,6 +68,15 @@ impl PgDbClient {
         mergeable_state: MergeableState,
     ) -> anyhow::Result<()> {
         update_pr_mergeable_state(&self.pool, pr.id, mergeable_state).await
+    }
+
+    pub async fn set_pr_assignees(
+        &self,
+        repo: &GithubRepoName,
+        pr_number: PullRequestNumber,
+        assignees: &[String],
+    ) -> anyhow::Result<()> {
+        set_pr_assignees(&self.pool, repo, pr_number, assignees).await
     }
 
     pub async fn update_mergeable_states_by_base_branch(
@@ -125,12 +135,14 @@ impl PgDbClient {
         get_nonclosed_pull_requests(&self.pool, repo).await
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_pull_request(
         &self,
         repo: &GithubRepoName,
         pr_number: PullRequestNumber,
         title: &str,
         author: &str,
+        assignees: &[String],
         base_branch: &str,
         pr_status: PullRequestStatus,
     ) -> anyhow::Result<()> {
@@ -140,6 +152,7 @@ impl PgDbClient {
             pr_number,
             title,
             author,
+            assignees,
             base_branch,
             pr_status,
         )

@@ -39,6 +39,7 @@ pub struct PullRequest {
     pub status: PullRequestStatus,
     pub merged_at: Option<DateTime<Utc>>,
     pub closed_at: Option<DateTime<Utc>>,
+    pub assignees: Vec<User>,
 }
 
 impl PullRequest {
@@ -60,6 +61,7 @@ impl PullRequest {
             },
             merged_at: None,
             closed_at: None,
+            assignees: Vec::new(),
         }
     }
 }

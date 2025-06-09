@@ -113,6 +113,42 @@ impl sqlx::Decode<'_, sqlx::Postgres> for RollupMode {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct Assignees(pub Vec<String>);
+
+impl From<Vec<String>> for Assignees {
+    fn from(vec: Vec<String>) -> Self {
+        Assignees(vec)
+    }
+}
+
+impl From<Assignees> for Vec<String> {
+    fn from(assignees: Assignees) -> Self {
+        assignees.0
+    }
+}
+
+impl sqlx::Encode<'_, sqlx::Postgres> for Assignees {
+    fn encode_by_ref(
+        &self,
+        buf: &mut sqlx::postgres::PgArgumentBuffer,
+    ) -> Result<sqlx::encode::IsNull, BoxDynError> {
+        let comma_separated = self.0.join(",");
+        <String as sqlx::Encode<sqlx::Postgres>>::encode(comma_separated, buf)
+    }
+}
+
+impl sqlx::Decode<'_, sqlx::Postgres> for Assignees {
+    fn decode(value: sqlx::postgres::PgValueRef<'_>) -> Result<Self, BoxDynError> {
+        let value = <String as sqlx::Decode<sqlx::Postgres>>::decode(value)?;
+        if value.is_empty() {
+            Ok(Assignees(Vec::new()))
+        } else {
+            Ok(Assignees(value.split(',').map(|s| s.to_string()).collect()))
+        }
+    }
+}
+
 impl sqlx::Type<sqlx::Postgres> for PullRequestStatus {
     fn type_info() -> sqlx::postgres::PgTypeInfo {
         <String as sqlx::Type<sqlx::Postgres>>::type_info()
@@ -284,6 +320,7 @@ pub struct PullRequestModel {
     pub number: PullRequestNumber,
     pub title: String,
     pub author: String,
+    pub assignees: Vec<String>,
     pub pr_status: PullRequestStatus,
     pub base_branch: String,
     pub mergeable_state: MergeableState,
@@ -413,6 +450,7 @@ pub struct UpsertPullRequestParams {
     pub pr_number: PullRequestNumber,
     pub title: String,
     pub author: String,
+    pub assignees: Vec<String>,
     pub base_branch: String,
     pub mergeable_state: MergeableState,
     pub pr_status: PullRequestStatus,
@@ -424,6 +462,7 @@ impl From<PullRequest> for UpsertPullRequestParams {
             pr_number: pr.number,
             title: pr.title,
             author: pr.author.username,
+            assignees: pr.assignees.into_iter().map(|a| a.username).collect(),
             base_branch: pr.base.name,
             mergeable_state: pr.mergeable_state.into(),
             pr_status: pr.status,

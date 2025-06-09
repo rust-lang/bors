@@ -5,6 +5,9 @@ use crate::bors::event::{BorsGlobalEvent, BorsRepositoryEvent, PullRequestCommen
 use crate::bors::handlers::help::command_help;
 use crate::bors::handlers::info::command_info;
 use crate::bors::handlers::ping::command_ping;
+use crate::bors::handlers::pr_events::{
+    handle_pull_request_assigned, handle_pull_request_unassigned,
+};
 use crate::bors::handlers::refresh::{
     cancel_timed_out_builds, reload_repository_config, reload_repository_permissions,
     reload_unknown_mergeable_prs,
@@ -189,6 +192,26 @@ pub async fn handle_bors_repository_event(
             );
 
             handle_pull_request_converted_to_draft(repo, db, payload)
+                .instrument(span.clone())
+                .await?;
+        }
+        BorsRepositoryEvent::PullRequestAssigned(payload) => {
+            let span = tracing::info_span!(
+                "Pull request assigned",
+                repo = payload.repository.to_string()
+            );
+
+            handle_pull_request_assigned(repo, db, payload)
+                .instrument(span.clone())
+                .await?;
+        }
+        BorsRepositoryEvent::PullRequestUnassigned(payload) => {
+            let span = tracing::info_span!(
+                "Pull request unassigned",
+                repo = payload.repository.to_string()
+            );
+
+            handle_pull_request_unassigned(repo, db, payload)
                 .instrument(span.clone())
                 .await?;
         }

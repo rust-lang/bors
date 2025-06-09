@@ -194,6 +194,7 @@ pub struct GitHubPullRequest {
     base: Box<GitHubBase>,
 
     user: GitHubUser,
+    assignees: Vec<GitHubUser>,
 }
 
 impl From<PullRequest> for GitHubPullRequest {
@@ -219,6 +220,7 @@ impl From<PullRequest> for GitHubPullRequest {
             }),
             merged_at: pr.merged_at,
             closed_at: pr.closed_at,
+            assignees: pr.assignees.into_iter().map(Into::into).collect(),
         }
     }
 }

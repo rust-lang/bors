@@ -119,6 +119,7 @@ pub struct PullRequest {
     pub mergeable_state: MergeableState,
     pub message: String,
     pub author: GithubUser,
+    pub assignees: Vec<GithubUser>,
     pub status: PullRequestStatus,
 }
 
@@ -138,6 +139,12 @@ impl From<octocrab::models::pulls::PullRequest> for PullRequest {
             // For some reason, author field is optional in Octocrab, but
             // they actually are not optional in Github API schema.
             author: (*pr.user.unwrap()).into(),
+            assignees: pr
+                .assignees
+                .unwrap_or_default()
+                .into_iter()
+                .map(|a| a.into())
+                .collect(),
             title: pr.title.unwrap_or_default(),
             message: pr.body.unwrap_or_default(),
             mergeable_state: pr.mergeable_state.unwrap_or(MergeableState::Unknown),
