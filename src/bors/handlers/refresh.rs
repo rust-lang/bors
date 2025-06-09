@@ -326,12 +326,7 @@ timeout = 3600
                 .await?;
             tester.refresh_prs().await;
             assert_eq!(
-                tester
-                    .db()
-                    .get_pull_request(&default_repo_name(), pr.number)
-                    .await?
-                    .unwrap()
-                    .pr_status,
+                tester.get_pr_from_db(pr.number.0).await.pr_status,
                 PullRequestStatus::Open
             );
             Ok(tester)
@@ -353,12 +348,7 @@ timeout = 3600
                 .await?;
             tester.refresh_prs().await;
             assert_eq!(
-                tester
-                    .db()
-                    .get_pull_request(&default_repo_name(), pr.number)
-                    .await?
-                    .unwrap()
-                    .pr_status,
+                tester.get_pr_from_db(pr.number.0).await.pr_status,
                 PullRequestStatus::Closed
             );
             Ok(tester)
@@ -380,12 +370,7 @@ timeout = 3600
 
             tester.refresh_prs().await;
             assert_eq!(
-                tester
-                    .db()
-                    .get_pull_request(&default_repo_name(), pr.number)
-                    .await?
-                    .unwrap()
-                    .pr_status,
+                tester.get_pr_from_db(pr.number.0).await.pr_status,
                 PullRequestStatus::Draft
             );
             Ok(tester)
