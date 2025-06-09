@@ -25,6 +25,7 @@
         <th>Status</th>
         <th>Mergeable</th>
         <th>Title</th>
+        <th>Author</th>
         <th>Approved by</th>
         <th>Priority</th>
         <th>Rollup</th>
@@ -55,6 +56,7 @@
                 {% endmatch %}
             </td>
             <td>{{ pr.title }}</td>
+            <td>{{ pr.author }}</td>
             <td>
                 {% if let Some(approver) = pr.approver() %}
                     {{ approver }}
