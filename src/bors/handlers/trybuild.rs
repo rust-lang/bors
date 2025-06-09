@@ -534,6 +534,29 @@ mod tests {
         .await;
     }
 
+    // Make sure that the second try command knows about the result of the first one.
+    #[sqlx::test]
+    async fn multiple_commands_in_one_comment(pool: sqlx::PgPool) {
+        run_test(pool, |mut tester| async {
+            tester
+                .post_comment(
+                    r#"
+@bors try
+@bors try cancel
+"#,
+                )
+                .await?;
+            insta::assert_snapshot!(tester.get_comment().await?, @r"
+            :hourglass: Trying commit pr-1-sha with merge merge-main-sha1-pr-1-sha-0…
+
+            To cancel the try build, run the command `@bors try cancel`.
+            ");
+            insta::assert_snapshot!(tester.get_comment().await?, @"Try build cancelled. Cancelled workflows:");
+            Ok(tester)
+        })
+        .await;
+    }
+
     #[sqlx::test]
     async fn try_again_after_checks_finish(pool: sqlx::PgPool) {
         run_test(pool, |mut tester| async {

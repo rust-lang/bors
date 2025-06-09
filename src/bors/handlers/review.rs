@@ -1017,4 +1017,27 @@ mod tests {
             })
             .await;
     }
+
+    #[sqlx::test]
+    async fn multiple_commands_in_one_comment(pool: sqlx::PgPool) {
+        run_test(pool, |mut tester| async {
+            tester
+                .post_comment(
+                    r#"
+@bors r+ rollup=never
+@bors p=10
+"#,
+                )
+                .await?;
+            tester.expect_comments(1).await;
+
+            tester
+                .wait_for_default_pr(|pr| {
+                    pr.rollup == Some(RollupMode::Never) && pr.priority == Some(10)
+                })
+                .await?;
+            Ok(tester)
+        })
+        .await;
+    }
 }

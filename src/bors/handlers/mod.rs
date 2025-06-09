@@ -349,19 +349,20 @@ async fn handle_comment(
         .await
         .with_context(|| format!("Cannot get information about PR {pr_number}"))?;
 
-    let pr_db = database
-        .upsert_pull_request(repo.repository(), pr_github.clone().into())
-        .await
-        .with_context(|| format!("Cannot upsert PR {pr_number} into the database"))?;
-
-    let pr = PullRequestData {
-        github: pr_github,
-        db: pr_db,
-    };
-
     for command in commands {
         match command {
             Ok(command) => {
+                // Reload the PR state from DB, because a previous command might have changed it.
+                let pr_db = database
+                    .upsert_pull_request(repo.repository(), pr_github.clone().into())
+                    .await
+                    .with_context(|| format!("Cannot upsert PR {pr_number} into the database"))?;
+
+                let pr = PullRequestData {
+                    github: pr_github.clone(),
+                    db: pr_db,
+                };
+
                 let repo = Arc::clone(&repo);
                 let database = Arc::clone(&database);
                 let result = match command {
@@ -490,7 +491,7 @@ async fn handle_comment(
                 };
                 tracing::warn!("{}", message);
                 repo.client
-                    .post_comment(pr.number(), Comment::new(message))
+                    .post_comment(pr_github.number, Comment::new(message))
                     .await
                     .context("Could not reply to PR comment")?;
             }
