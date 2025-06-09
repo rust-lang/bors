@@ -1,15 +1,15 @@
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use thread_local::ThreadLocal;
 use tokio::sync;
 
 pub struct TestSyncMarker {
-    inner: ThreadLocal<TestSyncMarkerInner>,
+    inner: OnceLock<TestSyncMarkerInner>,
 }
 
 impl TestSyncMarker {
     pub const fn new() -> Self {
         Self {
-            inner: ThreadLocal::new(),
+            inner: OnceLock::new(),
         }
     }
 
@@ -21,9 +21,7 @@ impl TestSyncMarker {
     }
 
     fn get(&self) -> &TestSyncMarkerInner {
-        self.inner
-            .get_or_try(|| Ok::<TestSyncMarkerInner, ()>(TestSyncMarkerInner::new()))
-            .unwrap()
+        self.inner.get_or_init(|| TestSyncMarkerInner::new())
     }
 }
 

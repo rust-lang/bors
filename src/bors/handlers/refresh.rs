@@ -280,28 +280,6 @@ timeout = 3600
                     .await?;
                 WAIT_FOR_WORKFLOW_STARTED.sync().await;
 
-                // Wait for workflow to be created before timing out builds
-                tester
-                    .wait_for(|| async {
-                        let builds = tester
-                            .db()
-                            .get_running_builds(&default_repo_name())
-                            .await
-                            .unwrap();
-                        if builds.is_empty() {
-                            return Ok(false);
-                        }
-
-                        let workflows = tester
-                            .db()
-                            .get_workflows_for_build(&builds[0])
-                            .await
-                            .unwrap();
-                        Ok(!workflows.is_empty())
-                    })
-                    .await
-                    .unwrap();
-
                 with_mocked_time(Duration::from_secs(4000), async {
                     tester.cancel_timed_out_builds().await;
                 })
