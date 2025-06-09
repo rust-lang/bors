@@ -187,6 +187,14 @@ impl BorsTester {
             .await
     }
 
+    /// Get a PR from the database for the default repo.
+    pub async fn get_pr_from_db(&self, pr_number: u64) -> PullRequestModel {
+        self.pr_db(default_repo_name(), pr_number)
+            .await
+            .unwrap()
+            .expect("PR should exist in database")
+    }
+
     /// Wait until a pull request is in the database and satisfies a given condition.
     ///
     /// This is a convenience wrapper around `wait_for` that simplifies checking for PR conditions.
