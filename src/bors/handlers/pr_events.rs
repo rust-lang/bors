@@ -498,7 +498,7 @@ mod tests {
                 .await?;
             tester
                 .wait_for_pr(default_repo_name(), pr.number.0, |pr| {
-                    pr.assignees == vec!["reviewer"]
+                    pr.assignees == vec![User::reviewer().name]
                 })
                 .await?;
             Ok(tester)
