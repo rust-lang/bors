@@ -60,12 +60,6 @@ pub fn try_build_succeeded_comment(workflows: &[WorkflowModel], commit_sha: Comm
     }
 }
 
-pub fn try_build_in_progress_comment(bot_prefix: &str) -> Comment {
-    Comment::new(format!(
-        ":exclamation: A try build is currently in progress. You can cancel it using `{bot_prefix} try cancel`."
-    ))
-}
-
 pub fn cant_find_last_parent_comment() -> Comment {
     Comment::new(":exclamation: There was no previous build. Please set an explicit parent or remove the `parent=last` argument to use the default parent.".to_string())
 }
@@ -102,12 +96,26 @@ pub fn try_build_started_comment(
     head_sha: &CommitSha,
     merge_sha: &CommitSha,
     bot_prefix: &str,
+    cancelled_workflow_urls: Vec<String>,
 ) -> Comment {
-    Comment::new(format!(
-        ":hourglass: Trying commit {head_sha} with merge {merge_sha}…
+    use std::fmt::Write;
+    let mut msg = format!(":hourglass: Trying commit {head_sha} with merge {merge_sha}…\n\n");
 
-To cancel the try build, run the command `{bot_prefix} try cancel`."
-    ))
+    if !cancelled_workflow_urls.is_empty() {
+        writeln!(
+            msg,
+            "(The previously running try build was automatically cancelled.)\n"
+        )
+        .unwrap();
+    }
+
+    writeln!(
+        msg,
+        "To cancel the try build, run the command `{bot_prefix} try cancel`."
+    )
+    .unwrap();
+
+    Comment::new(msg)
 }
 
 pub fn merge_conflict_comment(branch: &str) -> Comment {
