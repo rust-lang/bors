@@ -7,7 +7,6 @@ use crate::bors::RepositoryState;
 use crate::bors::command::Parent;
 use crate::bors::comment::no_try_build_in_progress_comment;
 use crate::bors::comment::try_build_cancelled_comment;
-use crate::bors::comment::try_build_in_progress_comment;
 use crate::bors::comment::unclean_try_build_cancelled_comment;
 use crate::bors::comment::{
     cant_find_last_parent_comment, merge_conflict_comment, try_build_started_comment,
@@ -53,21 +52,13 @@ pub(super) async fn command_try_build(
         return Ok(());
     }
 
-    if let Some(build) = &pr.db.try_build {
-        if build.status == BuildStatus::Pending {
-            tracing::warn!("Try build already in progress");
-            repo.client
-                .post_comment(pr.number(), try_build_in_progress_comment(bot_prefix))
-                .await?;
-            return Ok(());
-        }
-    } else if Some(Parent::Last) == parent {
+    if Some(Parent::Last) == parent && pr.db.try_build.is_none() {
         tracing::warn!("try build was requested with parent=last but no previous build was found");
         repo.client
             .post_comment(pr.number(), cant_find_last_parent_comment())
             .await?;
         return Ok(());
-    }
+    };
 
     let base_sha = match get_base_sha(&pr.db, parent) {
         Some(base_sha) => base_sha,
@@ -76,6 +67,13 @@ pub(super) async fn command_try_build(
             .get_branch_sha(&pr.github.base.name)
             .await
             .context(format!("Cannot get SHA for branch {}", pr.github.base.name))?,
+    };
+
+    // Try to cancel any previously running try build workflows
+    let cancelled_workflow_urls = if let Some(build) = get_pending_build(&pr.db) {
+        cancel_previous_try_build(repo, &db, build).await?
+    } else {
+        vec![]
     };
 
     match attempt_merge(
@@ -95,7 +93,12 @@ pub(super) async fn command_try_build(
             repo.client
                 .post_comment(
                     pr.number(),
-                    try_build_started_comment(&pr.github.head.sha, &merge_sha, bot_prefix),
+                    try_build_started_comment(
+                        &pr.github.head.sha,
+                        &merge_sha,
+                        bot_prefix,
+                        cancelled_workflow_urls,
+                    ),
                 )
                 .await
         }
@@ -103,6 +106,32 @@ pub(super) async fn command_try_build(
             repo.client
                 .post_comment(pr.number(), merge_conflict_comment(&pr.github.head.name))
                 .await
+        }
+    }
+}
+
+/// Cancels a previously running try build and returns a list of cancelled workflow URLs.
+async fn cancel_previous_try_build(
+    repo: &RepositoryState,
+    db: &PgDbClient,
+    build: &BuildModel,
+) -> anyhow::Result<Vec<String>> {
+    assert_eq!(build.status, BuildStatus::Pending);
+
+    match cancel_build_workflows(&repo.client, db, build).await {
+        Ok(workflow_ids) => {
+            tracing::info!("Try build cancelled");
+            Ok(repo
+                .client
+                .get_workflow_urls(workflow_ids.into_iter())
+                .collect())
+        }
+        Err(error) => {
+            tracing::error!(
+                "Could not cancel workflows for SHA {}: {error:?}",
+                build.commit_sha
+            );
+            Ok(vec![])
         }
     }
 }
@@ -206,15 +235,11 @@ pub(super) async fn command_try_cancel(
                 "Could not cancel workflows for SHA {}: {error:?}",
                 build.commit_sha
             );
-            db.update_build_status(build, BuildStatus::Cancelled)
-                .await?;
             repo.client
                 .post_comment(pr_number, unclean_try_build_cancelled_comment())
                 .await?
         }
         Ok(workflow_ids) => {
-            db.update_build_status(build, BuildStatus::Cancelled)
-                .await?;
             tracing::info!("Try build cancelled");
 
             repo.client
@@ -240,6 +265,10 @@ pub async fn cancel_build_workflows(
 
     tracing::info!("Cancelling workflows {:?}", pending_workflows);
     client.cancel_workflows(&pending_workflows).await?;
+
+    db.update_build_status(build, BuildStatus::Cancelled)
+        .await?;
+
     Ok(pending_workflows)
 }
 
@@ -277,6 +306,7 @@ fn auto_merge_commit_message(
 
 #[cfg(test)]
 mod tests {
+    use crate::bors::handlers::WAIT_FOR_WORKFLOW_STARTED;
     use crate::bors::handlers::trybuild::{TRY_BRANCH_NAME, TRY_MERGE_BRANCH_NAME};
     use crate::database::operations::get_all_workflows;
     use crate::github::CommitSha;
@@ -523,12 +553,16 @@ mod tests {
     }
 
     #[sqlx::test]
-    async fn try_merge_active_build(pool: sqlx::PgPool) {
+    async fn try_cancel_previous_build_no_workflows(pool: sqlx::PgPool) {
         run_test(pool, |mut tester| async {
             tester.post_comment("@bors try").await?;
             tester.expect_comments(1).await;
             tester.post_comment("@bors try").await?;
-            insta::assert_snapshot!(tester.get_comment().await?, @":exclamation: A try build is currently in progress. You can cancel it using `@bors try cancel`.");
+            insta::assert_snapshot!(tester.get_comment().await?, @r"
+            :hourglass: Trying commit pr-1-sha with merge merge-main-sha1-pr-1-sha-1…
+
+            To cancel the try build, run the command `@bors try cancel`.
+            ");
             Ok(tester)
         })
         .await;
@@ -555,6 +589,32 @@ mod tests {
             Ok(tester)
         })
         .await;
+    }
+
+    #[sqlx::test]
+    async fn try_cancel_previous_build_running_workflows(pool: sqlx::PgPool) {
+        let gh = run_test(pool, |mut tester| async {
+            tester.post_comment("@bors try").await?;
+            tester.expect_comments(1).await;
+            tester
+                .workflow_event(WorkflowEvent::started(
+                    Workflow::from(tester.try_branch()).with_run_id(123),
+                ))
+                .await?;
+            WAIT_FOR_WORKFLOW_STARTED.sync().await;
+
+            tester.post_comment("@bors try").await?;
+            insta::assert_snapshot!(tester.get_comment().await?, @r"
+            :hourglass: Trying commit pr-1-sha with merge merge-main-sha1-pr-1-sha-1…
+
+            (The previously running try build was automatically cancelled.)
+
+            To cancel the try build, run the command `@bors try cancel`.
+            ");
+            Ok(tester)
+        })
+        .await;
+        gh.check_cancelled_workflows(default_repo_name(), &[123]);
     }
 
     #[sqlx::test]
