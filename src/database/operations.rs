@@ -14,6 +14,7 @@ use crate::utils::timing::measure_db_query;
 
 use super::ApprovalInfo;
 use super::ApprovalStatus;
+use super::Assignees;
 use super::BuildModel;
 use super::DelegatedPermission;
 use super::MergeableState;
@@ -40,7 +41,7 @@ pub(crate) async fn get_pull_request(
         pr.number as "number!: i64",
         pr.title,
         pr.author,
-        pr.assignees,
+        pr.assignees as "assignees: Assignees",
         (
             pr.approved_by,
             pr.approved_sha
@@ -90,7 +91,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT DO NOTHING
             pr_number.0 as i32,
             title,
             author,
-            assignees,
+            assignees.join(","),
             base_branch,
             pr_status as PullRequestStatus,
         )
@@ -150,7 +151,7 @@ pub(crate) async fn upsert_pull_request(
                 pr.number as "number!: i64",
                 pr.title,
                 pr.author,
-                pr.assignees,
+                pr.assignees as "assignees: Assignees",
                 (
                     pr.approved_by,
                     pr.approved_sha
@@ -170,7 +171,7 @@ pub(crate) async fn upsert_pull_request(
             params.pr_number.0 as i32,
             &params.title,
             &params.author,
-            &params.assignees,
+            params.assignees.join(","),
             &params.base_branch,
             params.mergeable_state as _,
             params.pr_status as _,
@@ -199,7 +200,7 @@ pub(crate) async fn get_nonclosed_pull_requests_by_base_branch(
                 pr.number as "number!: i64",
                 pr.title,
                 pr.author,
-                pr.assignees,
+                pr.assignees as "assignees: Assignees",
                 (
                     pr.approved_by,
                     pr.approved_sha
@@ -243,7 +244,7 @@ pub(crate) async fn get_nonclosed_pull_requests(
                 pr.number as "number!: i64",
                 pr.title,
                 pr.author,
-                pr.assignees,
+                pr.assignees as "assignees: Assignees",
                 (
                     pr.approved_by,
                     pr.approved_sha
@@ -305,7 +306,7 @@ pub(crate) async fn get_prs_with_unknown_mergeable_state(
                 pr.number as "number!: i64",
                 pr.title,
                 pr.author,
-                pr.assignees,
+                pr.assignees as "assignees: Assignees",
                 (
                     pr.approved_by,
                     pr.approved_sha
@@ -457,7 +458,7 @@ SELECT
     pr.number as "number!: i64",
     pr.title,
     pr.author,
-    pr.assignees,
+    pr.assignees as "assignees: Assignees",
     (
         pr.approved_by,
         pr.approved_sha
@@ -703,7 +704,7 @@ pub(crate) async fn set_pr_assignees(
     measure_db_query("set_pr_assignees", || async {
         sqlx::query!(
             "UPDATE pull_request SET assignees = $1 WHERE repository = $2 AND number = $3",
-            assignees,
+            assignees.join(","),
             repo as &GithubRepoName,
             pr_number.0 as i32,
         )

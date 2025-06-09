@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n                pr.id,\n                pr.repository as \"repository: GithubRepoName\",\n                pr.number as \"number!: i64\",\n                pr.title,\n                pr.author,\n                pr.assignees,\n                (\n                    pr.approved_by,\n                    pr.approved_sha\n                ) AS \"approval_status!: ApprovalStatus\",\n                pr.status as \"pr_status: PullRequestStatus\",\n                pr.priority,\n                pr.rollup as \"rollup: RollupMode\",\n                pr.delegated_permission as \"delegated_permission: DelegatedPermission\",\n                pr.base_branch,\n                pr.mergeable_state as \"mergeable_state: MergeableState\",\n                pr.created_at as \"created_at: DateTime<Utc>\",\n                build AS \"try_build: BuildModel\"\n            FROM pull_request as pr\n            LEFT JOIN build ON pr.build_id = build.id\n            WHERE pr.repository = $1\n              AND pr.base_branch = $2\n              AND pr.status IN ('open', 'draft')\n            ",
+  "query": "\n            SELECT\n                pr.id,\n                pr.repository as \"repository: GithubRepoName\",\n                pr.number as \"number!: i64\",\n                pr.title,\n                pr.author,\n                pr.assignees as \"assignees: Assignees\",\n                (\n                    pr.approved_by,\n                    pr.approved_sha\n                ) AS \"approval_status!: ApprovalStatus\",\n                pr.status as \"pr_status: PullRequestStatus\",\n                pr.priority,\n                pr.rollup as \"rollup: RollupMode\",\n                pr.delegated_permission as \"delegated_permission: DelegatedPermission\",\n                pr.base_branch,\n                pr.mergeable_state as \"mergeable_state: MergeableState\",\n                pr.created_at as \"created_at: DateTime<Utc>\",\n                build AS \"try_build: BuildModel\"\n            FROM pull_request as pr\n            LEFT JOIN build ON pr.build_id = build.id\n            WHERE pr.repository = $1\n              AND pr.mergeable_state = 'unknown'\n              AND pr.status IN ('open', 'draft')\n            ",
   "describe": {
     "columns": [
       {
@@ -30,8 +30,8 @@
       },
       {
         "ordinal": 5,
-        "name": "assignees",
-        "type_info": "TextArray"
+        "name": "assignees: Assignees",
+        "type_info": "Text"
       },
       {
         "ordinal": 6,
@@ -117,7 +117,6 @@
     ],
     "parameters": {
       "Left": [
-        "Text",
         "Text"
       ]
     },
@@ -139,5 +138,5 @@
       null
     ]
   },
-  "hash": "3dc4a70c0504975b8c37db8e157709d8f9b3e946895ae1884c6e3cc6848d7373"
+  "hash": "460e193af9b13cc12ec9146505df3e151700fcc5ec23e54aee5e8cbe530789b2"
 }

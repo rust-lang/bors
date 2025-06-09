@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n                pr.id,\n                pr.repository as \"repository: GithubRepoName\",\n                pr.number as \"number!: i64\",\n                pr.title,\n                pr.author,\n                pr.assignees,\n                (\n                    pr.approved_by,\n                    pr.approved_sha\n                ) AS \"approval_status!: ApprovalStatus\",\n                pr.status as \"pr_status: PullRequestStatus\",\n                pr.priority,\n                pr.rollup as \"rollup: RollupMode\",\n                pr.delegated_permission as \"delegated_permission: DelegatedPermission\",\n                pr.base_branch,\n                pr.mergeable_state as \"mergeable_state: MergeableState\",\n                pr.created_at as \"created_at: DateTime<Utc>\",\n                build AS \"try_build: BuildModel\"\n            FROM pull_request as pr\n            LEFT JOIN build ON pr.build_id = build.id\n            WHERE pr.repository = $1\n              AND pr.mergeable_state = 'unknown'\n              AND pr.status IN ('open', 'draft')\n            ",
+  "query": "\nSELECT\n    pr.id,\n    pr.repository as \"repository: GithubRepoName\",\n    pr.number as \"number!: i64\",\n    pr.title,\n    pr.author,\n    pr.assignees as \"assignees: Assignees\",\n    (\n        pr.approved_by,\n        pr.approved_sha\n    ) AS \"approval_status!: ApprovalStatus\",\n    pr.status as \"pr_status: PullRequestStatus\",\n    pr.delegated_permission as \"delegated_permission: DelegatedPermission\",\n    pr.priority,\n    pr.base_branch,\n    pr.mergeable_state as \"mergeable_state: MergeableState\",\n    pr.rollup as \"rollup: RollupMode\",\n    pr.created_at as \"created_at: DateTime<Utc>\",\n    build AS \"try_build: BuildModel\"\nFROM pull_request as pr\nLEFT JOIN build ON pr.build_id = build.id\nWHERE build.id = $1\n",
   "describe": {
     "columns": [
       {
@@ -30,8 +30,8 @@
       },
       {
         "ordinal": 5,
-        "name": "assignees",
-        "type_info": "TextArray"
+        "name": "assignees: Assignees",
+        "type_info": "Text"
       },
       {
         "ordinal": 6,
@@ -45,27 +45,27 @@
       },
       {
         "ordinal": 8,
-        "name": "priority",
-        "type_info": "Int4"
-      },
-      {
-        "ordinal": 9,
-        "name": "rollup: RollupMode",
-        "type_info": "Text"
-      },
-      {
-        "ordinal": 10,
         "name": "delegated_permission: DelegatedPermission",
         "type_info": "Text"
       },
       {
-        "ordinal": 11,
+        "ordinal": 9,
+        "name": "priority",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 10,
         "name": "base_branch",
         "type_info": "Text"
       },
       {
-        "ordinal": 12,
+        "ordinal": 11,
         "name": "mergeable_state: MergeableState",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 12,
+        "name": "rollup: RollupMode",
         "type_info": "Text"
       },
       {
@@ -117,7 +117,7 @@
     ],
     "parameters": {
       "Left": [
-        "Text"
+        "Int4"
       ]
     },
     "nullable": [
@@ -131,12 +131,12 @@
       false,
       true,
       true,
+      false,
+      false,
       true,
-      false,
-      false,
       false,
       null
     ]
   },
-  "hash": "dd96a940e42b67c0628438b7a5d2a74448caad3047405f4122f4a0acafcc6ddd"
+  "hash": "6cbee85c41cbecc631748d10ac63fc1ea310e39edb0e93456c30f914b1d07445"
 }

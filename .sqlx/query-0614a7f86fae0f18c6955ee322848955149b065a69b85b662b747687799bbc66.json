@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            WITH upserted_pr AS (\n                INSERT INTO pull_request (repository, number, title, author, assignees, base_branch, mergeable_state, status)\n                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)\n                ON CONFLICT (repository, number)\n                DO UPDATE SET\n                    title = $3,\n                    author = $4,\n                    assignees = $5,\n                    base_branch = $6,\n                    mergeable_state = $7,\n                    status = $8\n                RETURNING *\n            )\n            SELECT\n                pr.id,\n                pr.repository as \"repository: GithubRepoName\",\n                pr.number as \"number!: i64\",\n                pr.title,\n                pr.author,\n                pr.assignees,\n                (\n                    pr.approved_by,\n                    pr.approved_sha\n                ) AS \"approval_status!: ApprovalStatus\",\n                pr.status as \"pr_status: PullRequestStatus\",\n                pr.priority,\n                pr.rollup as \"rollup: RollupMode\",\n                pr.delegated_permission as \"delegated_permission: DelegatedPermission\",\n                pr.base_branch,\n                pr.mergeable_state as \"mergeable_state: MergeableState\",\n                pr.created_at as \"created_at: DateTime<Utc>\",\n                build AS \"try_build: BuildModel\"\n            FROM upserted_pr as pr\n            LEFT JOIN build ON pr.build_id = build.id\n            ",
+  "query": "\n    SELECT\n        pr.id,\n        pr.repository as \"repository: GithubRepoName\",\n        pr.number as \"number!: i64\",\n        pr.title,\n        pr.author,\n        pr.assignees as \"assignees: Assignees\",\n        (\n            pr.approved_by,\n            pr.approved_sha\n        ) AS \"approval_status!: ApprovalStatus\",\n        pr.status as \"pr_status: PullRequestStatus\",\n        pr.priority,\n        pr.rollup as \"rollup: RollupMode\",\n        pr.delegated_permission as \"delegated_permission: DelegatedPermission\",\n        pr.base_branch,\n        pr.mergeable_state as \"mergeable_state: MergeableState\",\n        pr.created_at as \"created_at: DateTime<Utc>\",\n        build AS \"try_build: BuildModel\"\n    FROM pull_request as pr\n    LEFT JOIN build ON pr.build_id = build.id\n    WHERE pr.repository = $1 AND\n          pr.number = $2\n    ",
   "describe": {
     "columns": [
       {
@@ -30,8 +30,8 @@
       },
       {
         "ordinal": 5,
-        "name": "assignees",
-        "type_info": "TextArray"
+        "name": "assignees: Assignees",
+        "type_info": "Text"
       },
       {
         "ordinal": 6,
@@ -118,13 +118,7 @@
     "parameters": {
       "Left": [
         "Text",
-        "Int8",
-        "Text",
-        "Text",
-        "TextArray",
-        "Text",
-        "Text",
-        "Text"
+        "Int8"
       ]
     },
     "nullable": [
@@ -142,8 +136,8 @@
       false,
       false,
       false,
-      true
+      null
     ]
   },
-  "hash": "c42a10def40311731cddf68a0d1b7dec5475be274c8d98ade266d23b6e61cc4a"
+  "hash": "0614a7f86fae0f18c6955ee322848955149b065a69b85b662b747687799bbc66"
 }
