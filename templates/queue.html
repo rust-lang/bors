@@ -2,6 +2,14 @@
 
 {% block title %}Bors queue - {{ repo_name }} {% if tree_state.is_closed() %} [TREECLOSED] {% endif %}{% endblock %}
 
+{% block head %}
+<style>
+  table {
+    border-spacing: 30px 0;
+  }
+</style>
+{% endblock %}
+
 {% block body %}
 <h1>
     Bors queue - <a href="{{ repo_url }}" target="_blank">{{ repo_name }}</a>
