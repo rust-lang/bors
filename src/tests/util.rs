@@ -52,6 +52,10 @@ impl TestSyncMarkerInner {
 
     /// Wait until code has encountered this location.
     pub async fn sync(&self) {
-        self.rx.lock().await.recv().await.unwrap();
+        let mut rx = self.rx.lock().await;
+        // Drain any stale messages from previous tests
+        while rx.try_recv().is_ok() {}
+        // then wait for the fresh mark.
+        rx.recv().await.unwrap();
     }
 }
