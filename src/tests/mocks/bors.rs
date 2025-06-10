@@ -863,7 +863,9 @@ where
 {
     let res = func().await;
     if res.is_ok() {
-        marker.sync().await;
+        tokio::time::timeout(Duration::from_secs(5), marker.sync())
+            .await
+            .map_err(|_| anyhow::anyhow!("Timed out waiting for a test marker to be marked"))?;
     }
     res
 }
