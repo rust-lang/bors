@@ -35,9 +35,6 @@ use refresh::sync_pull_requests_state;
 use review::{command_delegate, command_set_priority, command_set_rollup, command_undelegate};
 use tracing::Instrument;
 
-#[cfg(test)]
-use crate::tests::util::TestSyncMarker;
-
 use super::mergeable_queue::MergeableQueueSender;
 
 mod help;
@@ -49,9 +46,6 @@ mod refresh;
 mod review;
 mod trybuild;
 mod workflow;
-
-#[cfg(test)]
-pub static WAIT_FOR_WORKFLOW_STARTED: TestSyncMarker = TestSyncMarker::new();
 
 /// This function executes a single BORS repository event
 pub async fn handle_bors_repository_event(
@@ -114,7 +108,7 @@ pub async fn handle_bors_repository_event(
                 .await?;
 
             #[cfg(test)]
-            WAIT_FOR_WORKFLOW_STARTED.mark();
+            super::WAIT_FOR_WORKFLOW_STARTED.mark();
         }
         BorsRepositoryEvent::WorkflowCompleted(payload) => {
             let span = tracing::info_span!(

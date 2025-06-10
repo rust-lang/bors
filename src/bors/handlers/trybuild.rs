@@ -306,7 +306,6 @@ fn auto_merge_commit_message(
 
 #[cfg(test)]
 mod tests {
-    use crate::bors::handlers::WAIT_FOR_WORKFLOW_STARTED;
     use crate::bors::handlers::trybuild::{TRY_BRANCH_NAME, TRY_MERGE_BRANCH_NAME};
     use crate::database::operations::get_all_workflows;
     use crate::github::CommitSha;
@@ -597,11 +596,8 @@ mod tests {
             tester.post_comment("@bors try").await?;
             tester.expect_comments(1).await;
             tester
-                .workflow_event(WorkflowEvent::started(
-                    Workflow::from(tester.try_branch()).with_run_id(123),
-                ))
+                .start_workflow(Workflow::from(tester.try_branch()).with_run_id(123))
                 .await?;
-            WAIT_FOR_WORKFLOW_STARTED.sync().await;
 
             tester.post_comment("@bors try").await?;
             insta::assert_snapshot!(tester.get_comment().await?, @r"
