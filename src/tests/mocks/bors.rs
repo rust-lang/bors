@@ -861,6 +861,12 @@ async fn wait_for_marker<Func>(func: Func, marker: &TestSyncMarker) -> anyhow::R
 where
     Func: AsyncFnOnce() -> anyhow::Result<()>,
 {
+    // Since the `TestSyncMarker` contains a thread-local variable, it could contain some previously
+    // marked notifications from previously executed tests that ran on the same thread.
+    // Drain those BEFORE starting the current asynchronous operation, so that we can make sure that
+    // there are no leftovers.
+    marker.drain().await;
+
     let res = func().await;
     if res.is_ok() {
         tokio::time::timeout(Duration::from_secs(5), marker.sync())

@@ -16,11 +16,19 @@ impl TestSyncMarker {
         }
     }
 
+    /// Mark that code has encountered this location.
     pub fn mark(&self) {
         self.get().mark();
     }
+
+    /// Wait until code has encountered this location.
     pub async fn sync(&self) {
         self.get().sync().await;
+    }
+
+    /// Remove any previously marked notifications.
+    pub async fn drain(&self) {
+        self.get().drain().await;
     }
 
     fn get(&self) -> &TestSyncMarkerInner {
@@ -44,14 +52,19 @@ impl TestSyncMarkerInner {
         }
     }
 
-    /// Mark that code has encountered this location.
-    pub fn mark(&self) {
+    fn mark(&self) {
         // If we cannot send, don't block the program.
         let _ = self.tx.try_send(());
     }
 
-    /// Wait until code has encountered this location.
-    pub async fn sync(&self) {
+    async fn sync(&self) {
         self.rx.lock().await.recv().await.unwrap();
+    }
+
+    async fn drain(&self) {
+        let mut queue = self.rx.lock().await;
+
+        // Remove all currently present messages
+        while let Ok(_) = queue.try_recv() {}
     }
 }
