@@ -2,6 +2,14 @@
 
 {% block title %}Bors queue - {{ repo_name }} {% if tree_state.is_closed() %} [TREECLOSED] {% endif %}{% endblock %}
 
+{% block head %}
+<style>
+  table {
+    border-spacing: 30px 0;
+  }
+</style>
+{% endblock %}
+
 {% block body %}
 <h1>
     Bors queue - <a href="{{ repo_url }}" target="_blank">{{ repo_name }}</a>
@@ -24,6 +32,9 @@
         <th>#</th>
         <th>Status</th>
         <th>Mergeable</th>
+        <th>Title</th>
+        <th>Author</th>
+        <th>Assignees</th>
         <th>Approved by</th>
         <th>Priority</th>
         <th>Rollup</th>
@@ -53,6 +64,9 @@
                     {% when Unknown %}
                 {% endmatch %}
             </td>
+            <td>{{ pr.title }}</td>
+            <td>{{ pr.author }}</td>
+            <td>{{ pr.assignees|join(", ") }}</td>
             <td>
                 {% if let Some(approver) = pr.approver() %}
                     {{ approver }}
