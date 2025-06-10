@@ -1,21 +1,21 @@
 //! Defines parsers for bors commands.
 
-use std::collections::HashSet;
-use std::str::FromStr;
-
 use crate::bors::command::{Approver, BorsCommand, Parent};
 use crate::database::DelegatedPermission;
 use crate::github::CommitSha;
+use pulldown_cmark::{CowStr, Event, Parser, Tag, TagEnd, TextMergeStream};
+use std::collections::HashSet;
+use std::str::FromStr;
 
 use super::{Priority, RollupMode};
 
 #[derive(Debug, PartialEq)]
-pub enum CommandParseError<'a> {
+pub enum CommandParseError {
     MissingCommand,
-    UnknownCommand(&'a str),
-    MissingArgValue { arg: &'a str },
-    UnknownArg(&'a str),
-    DuplicateArg(&'a str),
+    UnknownCommand(String),
+    MissingArgValue { arg: String },
+    UnknownArg(String),
+    DuplicateArg(String),
     ValidationError(String),
 }
 
@@ -45,11 +45,11 @@ impl CommandParser {
     ///
     /// Assumes that each command spands at most one line and that there are not more commands on
     /// each line.
-    pub fn parse_commands<'a>(
-        &self,
-        text: &'a str,
-    ) -> Vec<Result<BorsCommand, CommandParseError<'a>>> {
-        text.lines()
+    pub fn parse_commands(&self, text: &str) -> Vec<Result<BorsCommand, CommandParseError>> {
+        let segments = extract_text_segments(text);
+        segments
+            .iter()
+            .flat_map(|segment| segment.lines())
             .filter_map(|line| match line.find(&self.prefix) {
                 Some(index) => {
                     let input = &line[index + self.prefix.len()..];
@@ -61,10 +61,55 @@ impl CommandParser {
     }
 }
 
-type ParseResult<'a, T = BorsCommand> = Option<Result<T, CommandParseError<'a>>>;
+/// Extract text segments from a Markdown `text`.
+fn extract_text_segments(text: &str) -> Vec<CowStr> {
+    let md_parser = TextMergeStream::new(Parser::new(text));
+    let mut stack = vec![];
+    let mut segments = vec![];
+
+    for event in md_parser.into_iter() {
+        match event {
+            Event::Text(text) | Event::Html(text) => {
+                // Only consider commands in raw text outside of wrapping elements
+                if stack.is_empty() {
+                    segments.push(text);
+                }
+            }
+            Event::Start(tag) => match tag {
+                // Ignore content in the following wrapping elements
+                Tag::BlockQuote(_)
+                | Tag::CodeBlock(_)
+                | Tag::Link { .. }
+                | Tag::Heading { .. }
+                | Tag::Image { .. } => {
+                    stack.push(tag);
+                }
+                _ => {}
+            },
+            Event::End(tag) => {
+                if let Some(start_tag) = stack.last() {
+                    match (start_tag, tag) {
+                        (Tag::BlockQuote(_), TagEnd::BlockQuote(_))
+                        | (Tag::CodeBlock(_), TagEnd::CodeBlock)
+                        | (Tag::Link { .. }, TagEnd::Link)
+                        | (Tag::Heading { .. }, TagEnd::Heading(_))
+                        | (Tag::Image { .. }, TagEnd::Image) => {
+                            stack.pop();
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    segments
+}
+
+type ParseResult<T = BorsCommand> = Option<Result<T, CommandParseError>>;
 
 // The order of the parsers in the vector is important
-const PARSERS: &[for<'b> fn(&CommandPart<'b>, &[CommandPart<'b>]) -> ParseResult<'b>] = &[
+const PARSERS: &[fn(&CommandPart<'_>, &[CommandPart<'_>]) -> ParseResult] = &[
     parser_approval,
     parser_unapprove,
     parser_rollup,
@@ -93,7 +138,7 @@ fn parse_command(input: &str) -> ParseResult {
                     CommandPart::Bare(c) => c,
                     CommandPart::KeyValue { key, .. } => key,
                 };
-                Some(Err(CommandParseError::UnknownCommand(unknown)))
+                Some(Err(CommandParseError::UnknownCommand(unknown.to_string())))
             }
         },
         Err(error) => Some(Err(error)),
@@ -113,10 +158,12 @@ fn parse_parts(input: &str) -> Result<Vec<CommandPart>, CommandParseError> {
         match item.split_once('=') {
             Some((key, value)) => {
                 if value.is_empty() {
-                    return Err(CommandParseError::MissingArgValue { arg: key });
+                    return Err(CommandParseError::MissingArgValue {
+                        arg: key.to_string(),
+                    });
                 }
                 if seen_keys.contains(key) {
-                    return Err(CommandParseError::DuplicateArg(key));
+                    return Err(CommandParseError::DuplicateArg(key.to_string()));
                 }
                 seen_keys.insert(key);
                 parts.push(CommandPart::KeyValue { key, value });
@@ -130,12 +177,14 @@ fn parse_parts(input: &str) -> Result<Vec<CommandPart>, CommandParseError> {
 /// Parses:
 /// - "@bors r+ [p=<priority>] [rollup=<never|iffy|maybe|always>]"
 /// - "@bors r=<user> [p=<priority>] [rollup=<never|iffy|maybe|always>]"
-fn parser_approval<'a>(command: &CommandPart<'a>, parts: &[CommandPart<'a>]) -> ParseResult<'a> {
+fn parser_approval(command: &CommandPart<'_>, parts: &[CommandPart<'_>]) -> ParseResult {
     let approver = match command {
         CommandPart::Bare("r+") => Approver::Myself,
         CommandPart::KeyValue { key: "r", value } => {
             if value.is_empty() {
-                return Some(Err(CommandParseError::MissingArgValue { arg: "r" }));
+                return Some(Err(CommandParseError::MissingArgValue {
+                    arg: "r".to_string(),
+                }));
             }
             Approver::Specified(value.to_string())
         }
@@ -160,7 +209,7 @@ fn parser_approval<'a>(command: &CommandPart<'a>, parts: &[CommandPart<'a>]) -> 
 }
 
 /// Parses "@bors r-"
-fn parser_unapprove<'a>(command: &CommandPart<'a>, _parts: &[CommandPart<'a>]) -> ParseResult<'a> {
+fn parser_unapprove(command: &CommandPart<'_>, _parts: &[CommandPart<'_>]) -> ParseResult {
     if let CommandPart::Bare("r-") = command {
         Some(Ok(BorsCommand::Unapprove))
     } else {
@@ -169,7 +218,7 @@ fn parser_unapprove<'a>(command: &CommandPart<'a>, _parts: &[CommandPart<'a>]) -
 }
 
 /// Parses "@bors help".
-fn parser_help<'a>(command: &CommandPart<'a>, _parts: &[CommandPart<'a>]) -> ParseResult<'a> {
+fn parser_help(command: &CommandPart<'_>, _parts: &[CommandPart<'_>]) -> ParseResult {
     if let CommandPart::Bare("help") = command {
         Some(Ok(BorsCommand::Help))
     } else {
@@ -178,7 +227,7 @@ fn parser_help<'a>(command: &CommandPart<'a>, _parts: &[CommandPart<'a>]) -> Par
 }
 
 /// Parses "@bors ping".
-fn parser_ping<'a>(command: &CommandPart<'a>, _parts: &[CommandPart<'a>]) -> ParseResult<'a> {
+fn parser_ping(command: &CommandPart<'_>, _parts: &[CommandPart<'_>]) -> ParseResult {
     if let CommandPart::Bare("ping") = command {
         Some(Ok(BorsCommand::Ping))
     } else {
@@ -194,7 +243,7 @@ fn parse_sha(input: &str) -> Result<CommitSha, String> {
 }
 
 /// Parses "@bors try <parent=sha>".
-fn parser_try<'a>(command: &CommandPart<'a>, parts: &[CommandPart<'a>]) -> ParseResult<'a> {
+fn parser_try(command: &CommandPart<'_>, parts: &[CommandPart<'_>]) -> ParseResult {
     if *command != CommandPart::Bare("try") {
         return None;
     }
@@ -205,7 +254,7 @@ fn parser_try<'a>(command: &CommandPart<'a>, parts: &[CommandPart<'a>]) -> Parse
     for part in parts {
         match part {
             CommandPart::Bare(key) => {
-                return Some(Err(CommandParseError::UnknownArg(key)));
+                return Some(Err(CommandParseError::UnknownArg(key.to_string())));
             }
             CommandPart::KeyValue { key, value } => match (*key, *value) {
                 ("parent", "last") => parent = Some(Parent::Last),
@@ -234,7 +283,7 @@ fn parser_try<'a>(command: &CommandPart<'a>, parts: &[CommandPart<'a>]) -> Parse
                     jobs = raw_jobs;
                 }
                 _ => {
-                    return Some(Err(CommandParseError::UnknownArg(key)));
+                    return Some(Err(CommandParseError::UnknownArg(key.to_string())));
                 }
             },
         }
@@ -243,7 +292,7 @@ fn parser_try<'a>(command: &CommandPart<'a>, parts: &[CommandPart<'a>]) -> Parse
 }
 
 /// Parses "@bors try cancel".
-fn parser_try_cancel<'a>(command: &CommandPart<'a>, parts: &[CommandPart<'a>]) -> ParseResult<'a> {
+fn parser_try_cancel(command: &CommandPart<'_>, parts: &[CommandPart<'_>]) -> ParseResult {
     match (command, parts) {
         (CommandPart::Bare("try"), [CommandPart::Bare("cancel"), ..]) => {
             Some(Ok(BorsCommand::TryCancel))
@@ -253,7 +302,7 @@ fn parser_try_cancel<'a>(command: &CommandPart<'a>, parts: &[CommandPart<'a>]) -
 }
 
 /// Parses `@bors delegate=<try|review>` or `@bors delegate+`.
-fn parser_delegate<'a>(command: &CommandPart<'a>, _parts: &[CommandPart<'a>]) -> ParseResult<'a> {
+fn parser_delegate(command: &CommandPart<'_>, _parts: &[CommandPart<'_>]) -> ParseResult {
     match command {
         CommandPart::Bare("delegate+") => {
             Some(Ok(BorsCommand::SetDelegate(DelegatedPermission::Review)))
@@ -270,7 +319,7 @@ fn parser_delegate<'a>(command: &CommandPart<'a>, _parts: &[CommandPart<'a>]) ->
 }
 
 /// Parses "@bors delegate-"
-fn parser_undelegate<'a>(command: &CommandPart<'a>, _parts: &[CommandPart<'a>]) -> ParseResult<'a> {
+fn parser_undelegate(command: &CommandPart<'_>, _parts: &[CommandPart<'_>]) -> ParseResult {
     if let CommandPart::Bare("delegate-") = command {
         Some(Ok(BorsCommand::Undelegate))
     } else {
@@ -288,7 +337,7 @@ fn parse_priority_value(value: &str) -> Result<Priority, CommandParseError> {
 }
 
 /// Parses the first occurrence of `p|priority=<priority>` in `parts`.
-fn parse_priority<'a>(parts: &[CommandPart<'a>]) -> ParseResult<'a, Priority> {
+fn parse_priority(parts: &[CommandPart<'_>]) -> ParseResult<Priority> {
     parts
         .iter()
         .filter_map(|part| match part {
@@ -302,12 +351,12 @@ fn parse_priority<'a>(parts: &[CommandPart<'a>]) -> ParseResult<'a, Priority> {
 }
 
 /// Parses "@bors p=<priority>"
-fn parser_priority<'a>(command: &CommandPart<'a>, _parts: &[CommandPart<'a>]) -> ParseResult<'a> {
+fn parser_priority(command: &CommandPart<'_>, _parts: &[CommandPart<'_>]) -> ParseResult {
     parse_priority(std::slice::from_ref(command)).map(|res| res.map(BorsCommand::SetPriority))
 }
 
 /// Parses the first occurrence of `rollup=<never/iffy/maybe/always>` in `parts`.
-fn parse_rollup<'a>(parts: &[CommandPart<'a>]) -> ParseResult<'a, RollupMode> {
+fn parse_rollup(parts: &[CommandPart<'_>]) -> ParseResult<RollupMode> {
     parts
         .iter()
         .filter_map(|part| match part {
@@ -326,12 +375,12 @@ fn parse_rollup<'a>(parts: &[CommandPart<'a>]) -> ParseResult<'a, RollupMode> {
 }
 
 /// Parses "rollup=<never/iffy/maybe/always>"
-fn parser_rollup<'a>(command: &CommandPart<'a>, _parts: &[CommandPart<'a>]) -> ParseResult<'a> {
+fn parser_rollup(command: &CommandPart<'_>, _parts: &[CommandPart<'_>]) -> ParseResult {
     parse_rollup(std::slice::from_ref(command)).map(|res| res.map(BorsCommand::SetRollupMode))
 }
 
 /// Parses "@bors info"
-fn parser_info<'a>(command: &CommandPart<'a>, _parts: &[CommandPart<'a>]) -> ParseResult<'a> {
+fn parser_info(command: &CommandPart<'_>, _parts: &[CommandPart<'_>]) -> ParseResult {
     if *command == CommandPart::Bare("info") {
         Some(Ok(BorsCommand::Info))
     } else {
@@ -340,7 +389,7 @@ fn parser_info<'a>(command: &CommandPart<'a>, _parts: &[CommandPart<'a>]) -> Par
 }
 
 /// Parses `@bors treeclosed-`, `@bors treeopen` and `@bors treeclosed=<priority>`
-fn parser_tree_ops<'a>(command: &CommandPart<'a>, _parts: &[CommandPart<'a>]) -> ParseResult<'a> {
+fn parser_tree_ops(command: &CommandPart<'_>, _parts: &[CommandPart<'_>]) -> ParseResult {
     match command {
         CommandPart::Bare("treeclosed-") | CommandPart::Bare("treeopen") => {
             Some(Ok(BorsCommand::OpenTree))
@@ -383,27 +432,32 @@ mod tests {
     fn unknown_command() {
         let cmds = parse_commands("@bors foo");
         assert_eq!(cmds.len(), 1);
-        assert!(matches!(
+        assert_eq!(
             cmds[0],
-            Err(CommandParseError::UnknownCommand("foo"))
-        ));
+            Err(CommandParseError::UnknownCommand("foo".to_string()))
+        );
     }
 
     #[test]
     fn parse_arg_no_value() {
         let cmds = parse_commands("@bors ping a=");
         assert_eq!(cmds.len(), 1);
-        assert!(matches!(
+        assert_eq!(
             cmds[0],
-            Err(CommandParseError::MissingArgValue { arg: "a" })
-        ));
+            Err(CommandParseError::MissingArgValue {
+                arg: "a".to_string()
+            })
+        );
     }
 
     #[test]
     fn parse_duplicate_key() {
         let cmds = parse_commands("@bors ping a=b a=c");
         assert_eq!(cmds.len(), 1);
-        assert!(matches!(cmds[0], Err(CommandParseError::DuplicateArg("a"))));
+        assert_eq!(
+            cmds[0],
+            Err(CommandParseError::DuplicateArg("a".to_string()))
+        );
     }
 
     #[test]
@@ -486,8 +540,8 @@ mod tests {
     fn parse_multiple_priority_commands() {
         let cmds = parse_commands(
             r#"
-            @bors r+ p=1
-            @bors r=user2 p=2
+@bors r+ p=1
+@bors r=user2 p=2
         "#,
         );
         assert_eq!(cmds.len(), 2);
@@ -632,7 +686,10 @@ mod tests {
     fn parse_duplicate_priority() {
         let cmds = parse_commands("@bors p=1 p=2");
         assert_eq!(cmds.len(), 1);
-        assert!(matches!(cmds[0], Err(CommandParseError::DuplicateArg("p"))));
+        assert_eq!(
+            cmds[0],
+            Err(CommandParseError::DuplicateArg("p".to_string()))
+        );
     }
 
     #[test]
@@ -702,8 +759,8 @@ mod tests {
     fn parse_multiple_rollup_commands() {
         let cmds = parse_commands(
             r#"
-            @bors r+ rollup
-            @bors r=user2 rollup=iffy
+@bors r+ rollup
+@bors r=user2 rollup=iffy
         "#,
         );
         assert_eq!(cmds.len(), 2);
@@ -987,14 +1044,14 @@ line two
     fn parse_try_unknown_arg() {
         let cmds = parse_commands("@bors try a");
         assert_eq!(cmds.len(), 1);
-        assert!(matches!(cmds[0], Err(CommandParseError::UnknownArg("a"))));
+        assert_eq!(cmds[0], Err(CommandParseError::UnknownArg("a".to_string())));
     }
 
     #[test]
     fn parse_try_unknown_kv_arg() {
         let cmds = parse_commands("@bors try a=b");
         assert_eq!(cmds.len(), 1);
-        assert!(matches!(cmds[0], Err(CommandParseError::UnknownArg("a"))));
+        assert_eq!(cmds[0], Err(CommandParseError::UnknownArg("a".to_string())));
     }
 
     #[test]
@@ -1117,10 +1174,12 @@ line two
     fn parse_tree_closed_empty() {
         let cmds = parse_commands("@bors treeclosed=");
         assert_eq!(cmds.len(), 1);
-        assert!(matches!(
+        assert_eq!(
             cmds[0],
-            Err(CommandParseError::MissingArgValue { arg: "treeclosed" })
-        ));
+            Err(CommandParseError::MissingArgValue {
+                arg: "treeclosed".to_string()
+            })
+        );
     }
 
     #[test]
@@ -1141,10 +1200,54 @@ line two
     fn parse_tree_closed_unknown_command() {
         let cmds = parse_commands("@bors tree closed 5");
         assert_eq!(cmds.len(), 1);
-        assert!(matches!(
+        assert_eq!(
             cmds[0],
-            Err(CommandParseError::UnknownCommand("tree"))
-        ));
+            Err(CommandParseError::UnknownCommand("tree".to_string()))
+        );
+    }
+
+    #[test]
+    fn parse_in_html_command() {
+        let cmds = parse_commands(
+            r#"
+<!--
+I am markdown HTML comment
+@bors try
+-->
+"#,
+        );
+        assert_eq!(cmds.len(), 1);
+        assert_eq!(
+            cmds[0],
+            Ok(BorsCommand::Try {
+                parent: None,
+                jobs: vec![]
+            })
+        );
+    }
+
+    #[test]
+    fn ignore_markdown_codeblock() {
+        let cmds = parse_commands(
+            r#"
+```rust
+@bors try
+```
+"#,
+        );
+        assert_eq!(cmds.len(), 0);
+    }
+
+    #[test]
+    fn ignore_markdown_backtikcs() {
+        let cmds = parse_commands("Don't do `@bors try`!");
+        assert_eq!(cmds.len(), 0);
+    }
+
+    #[test]
+    fn ignore_markdown_link() {
+        let cmds = parse_commands("Ignore [me](@bors-try).");
+        assert_eq!(cmds.len(), 0);
     }
 
     fn parse_commands(text: &str) -> Vec<Result<BorsCommand, CommandParseError>> {
