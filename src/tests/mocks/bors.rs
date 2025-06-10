@@ -12,10 +12,14 @@ use tokio::sync::mpsc::Sender;
 use tokio::task::JoinHandle;
 use tower::Service;
 
+use super::pull_request::{
+    GitHubPullRequestEventPayload, GitHubPushEventPayload, PullRequestChangeEvent,
+};
+use super::repository::PullRequest;
 use crate::bors::mergeable_queue::MergeableQueueSender;
 use crate::bors::{
     RollupMode, WAIT_FOR_CANCEL_TIMED_OUT_BUILDS_REFRESH, WAIT_FOR_MERGEABILITY_STATUS_REFRESH,
-    WAIT_FOR_PR_STATUS_REFRESH,
+    WAIT_FOR_PR_STATUS_REFRESH, WAIT_FOR_WORKFLOW_STARTED,
 };
 use crate::database::{BuildStatus, DelegatedPermission, OctocrabMergeableState, PullRequestModel};
 use crate::github::api::load_repositories;
@@ -29,16 +33,12 @@ use crate::tests::mocks::workflow::{
 use crate::tests::mocks::{
     Branch, ExternalHttpMock, GitHubState, Repo, User, default_pr_number, default_repo_name,
 };
+use crate::tests::util::TestSyncMarker;
 use crate::tests::webhook::{TEST_WEBHOOK_SECRET, create_webhook_request};
 use crate::{
     BorsContext, BorsGlobalEvent, CommandParser, PgDbClient, ServerState, WebhookSecret,
     create_app, create_bors_process,
 };
-
-use super::pull_request::{
-    GitHubPullRequestEventPayload, GitHubPushEventPayload, PullRequestChangeEvent,
-};
-use super::repository::PullRequest;
 
 pub struct BorsBuilder {
     github: GitHubState,
@@ -283,30 +283,51 @@ impl BorsTester {
     }
 
     pub async fn cancel_timed_out_builds(&self) {
-        self.global_tx
-            .send(BorsGlobalEvent::CancelTimedOutBuilds)
-            .await
-            .unwrap();
         // Wait until the refresh is fully handled
-        WAIT_FOR_CANCEL_TIMED_OUT_BUILDS_REFRESH.sync().await;
+        wait_for_marker(
+            async || {
+                self.global_tx
+                    .send(BorsGlobalEvent::CancelTimedOutBuilds)
+                    .await
+                    .unwrap();
+                Ok(())
+            },
+            &WAIT_FOR_CANCEL_TIMED_OUT_BUILDS_REFRESH,
+        )
+        .await
+        .unwrap();
     }
 
     pub async fn update_mergeability_status(&self) {
-        self.global_tx
-            .send(BorsGlobalEvent::RefreshPullRequestMergeability)
-            .await
-            .unwrap();
         // Wait until the refresh is fully handled
-        WAIT_FOR_MERGEABILITY_STATUS_REFRESH.sync().await;
+        wait_for_marker(
+            async || {
+                self.global_tx
+                    .send(BorsGlobalEvent::RefreshPullRequestMergeability)
+                    .await
+                    .unwrap();
+                Ok(())
+            },
+            &WAIT_FOR_MERGEABILITY_STATUS_REFRESH,
+        )
+        .await
+        .unwrap();
     }
 
     pub async fn refresh_prs(&self) {
-        self.global_tx
-            .send(BorsGlobalEvent::RefreshPullRequestState)
-            .await
-            .unwrap();
         // Wait until the refresh is fully handled
-        WAIT_FOR_PR_STATUS_REFRESH.sync().await;
+        wait_for_marker(
+            async || {
+                self.global_tx
+                    .send(BorsGlobalEvent::RefreshPullRequestState)
+                    .await
+                    .unwrap();
+                Ok(())
+            },
+            &WAIT_FOR_PR_STATUS_REFRESH,
+        )
+        .await
+        .unwrap();
     }
 
     /// Performs a single started/success/failure workflow event.
@@ -330,6 +351,15 @@ impl BorsTester {
             }
         }
         self.webhook_workflow(event).await
+    }
+
+    /// Start a workflow and wait until the workflow has been handled by bors.
+    pub async fn start_workflow<W: Into<Workflow>>(&mut self, workflow: W) -> anyhow::Result<()> {
+        wait_for_marker(
+            async || self.workflow_event(WorkflowEvent::started(workflow)).await,
+            &WAIT_FOR_WORKFLOW_STARTED,
+        )
+        .await
     }
 
     /// Performs all necessary events to complete a single workflow (start, success/fail,
@@ -823,4 +853,17 @@ impl PullRequestProxy {
     fn require_db_pr(&self) -> &PullRequestModel {
         self.db_pr.as_ref().unwrap()
     }
+}
+
+/// Start an async operation and wait until a specific [`TestSyncMarker`]
+/// is marked.
+async fn wait_for_marker<Func>(func: Func, marker: &TestSyncMarker) -> anyhow::Result<()>
+where
+    Func: AsyncFnOnce() -> anyhow::Result<()>,
+{
+    let res = func().await;
+    if res.is_ok() {
+        marker.sync().await;
+    }
+    res
 }

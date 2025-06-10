@@ -180,11 +180,10 @@ fn elapsed_time(date: DateTime<Utc>) -> Duration {
 #[cfg(test)]
 mod tests {
     use crate::bors::PullRequestStatus;
-    use crate::bors::handlers::WAIT_FOR_WORKFLOW_STARTED;
     use crate::bors::handlers::refresh::MOCK_TIME;
     use crate::database::{MergeableState, OctocrabMergeableState};
     use crate::tests::mocks::{
-        BorsBuilder, GitHubState, WorkflowEvent, default_pr_number, default_repo_name, run_test,
+        BorsBuilder, GitHubState, default_pr_number, default_repo_name, run_test,
     };
     use chrono::Utc;
     use std::future::Future;
@@ -275,10 +274,7 @@ timeout = 3600
             .run_test(|mut tester| async move {
                 tester.post_comment("@bors try").await?;
                 tester.expect_comments(1).await;
-                tester
-                    .workflow_event(WorkflowEvent::started(tester.try_branch()))
-                    .await?;
-                WAIT_FOR_WORKFLOW_STARTED.sync().await;
+                tester.start_workflow(tester.try_branch()).await?;
 
                 with_mocked_time(Duration::from_secs(4000), async {
                     tester.cancel_timed_out_builds().await;
