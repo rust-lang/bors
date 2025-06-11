@@ -195,7 +195,7 @@ async fn try_complete_build(
 
     let message = if !has_failure {
         tracing::info!("Workflow succeeded");
-        try_build_succeeded_comment(&workflows, payload.commit_sha)
+        try_build_succeeded_comment(&workflows, payload.commit_sha, &build)
     } else {
         tracing::info!("Workflow failed");
         workflow_failed_comment(&workflows)
@@ -304,14 +304,14 @@ mod tests {
                 .await?;
             insta::assert_snapshot!(
                 tester.get_comment().await?,
-                @r###"
+                @r#"
             :sunny: Try build successful
             - [Workflow1](https://github.com/workflows/Workflow1/1) :white_check_mark:
             - [Workflow1](https://github.com/workflows/Workflow1/2) :white_check_mark:
-            Build commit: merge-main-sha1-pr-1-sha-0 (`merge-main-sha1-pr-1-sha-0`)
+            Build commit: merge-main-sha1-pr-1-sha-0 (`merge-main-sha1-pr-1-sha-0`, parent: `main-sha1`)
 
             <!-- homu: {"type":"TryBuildCompleted","merge_sha":"merge-main-sha1-pr-1-sha-0"} -->
-            "###
+            "#
             );
             Ok(tester)
         })
@@ -364,12 +364,12 @@ mod tests {
                 .await?;
             insta::assert_snapshot!(
                 tester.get_comment().await?,
-                @r###"
+                @r#"
             :sunny: Try build successful ([Workflow1](https://github.com/workflows/Workflow1/1))
-            Build commit: merge-main-sha1-pr-1-sha-0 (`merge-main-sha1-pr-1-sha-0`)
+            Build commit: merge-main-sha1-pr-1-sha-0 (`merge-main-sha1-pr-1-sha-0`, parent: `main-sha1`)
 
             <!-- homu: {"type":"TryBuildCompleted","merge_sha":"merge-main-sha1-pr-1-sha-0"} -->
-            "###
+            "#
             );
             Ok(tester)
         })
