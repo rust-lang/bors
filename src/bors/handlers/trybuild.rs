@@ -323,12 +323,12 @@ mod tests {
             tester.workflow_success(tester.try_branch()).await?;
             insta::assert_snapshot!(
                 tester.get_comment().await?,
-                @r###"
+                @r#"
             :sunny: Try build successful ([Workflow1](https://github.com/workflows/Workflow1/1))
-            Build commit: merge-main-sha1-pr-1-sha-0 (`merge-main-sha1-pr-1-sha-0`)
+            Build commit: merge-main-sha1-pr-1-sha-0 (`merge-main-sha1-pr-1-sha-0`, parent: `main-sha1`)
 
             <!-- homu: {"type":"TryBuildCompleted","merge_sha":"merge-main-sha1-pr-1-sha-0"} -->
-            "###
+            "#
             );
             Ok(tester)
         })
@@ -633,12 +633,12 @@ mod tests {
             tester
                 .workflow_success(Workflow::from(tester.try_branch()).with_run_id(2))
                 .await?;
-            insta::assert_snapshot!(tester.get_comment().await?, @r###"
+            insta::assert_snapshot!(tester.get_comment().await?, @r#"
             :sunny: Try build successful ([Workflow1](https://github.com/workflows/Workflow1/2))
-            Build commit: merge-main-sha1-pr-1-sha-1 (`merge-main-sha1-pr-1-sha-1`)
+            Build commit: merge-main-sha1-pr-1-sha-1 (`merge-main-sha1-pr-1-sha-1`, parent: `main-sha1`)
 
             <!-- homu: {"type":"TryBuildCompleted","merge_sha":"merge-main-sha1-pr-1-sha-1"} -->
-            "###);
+            "#);
             Ok(tester)
         })
         .await;

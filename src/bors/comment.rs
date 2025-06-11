@@ -1,5 +1,6 @@
 use serde::Serialize;
 
+use crate::database::BuildModel;
 use crate::{
     database::{WorkflowModel, WorkflowStatus},
     github::CommitSha,
@@ -37,7 +38,11 @@ impl Comment {
     }
 }
 
-pub fn try_build_succeeded_comment(workflows: &[WorkflowModel], commit_sha: CommitSha) -> Comment {
+pub fn try_build_succeeded_comment(
+    workflows: &[WorkflowModel],
+    commit_sha: CommitSha,
+    build: &BuildModel,
+) -> Comment {
     use std::fmt::Write;
 
     let mut text = String::from(":sunny: Try build successful");
@@ -50,7 +55,12 @@ pub fn try_build_succeeded_comment(workflows: &[WorkflowModel], commit_sha: Comm
         let workflows_status = list_workflows_status(workflows);
         writeln!(text, "\n{workflows_status}").unwrap();
     }
-    writeln!(text, "Build commit: {commit_sha} (`{commit_sha}`)").unwrap();
+    writeln!(
+        text,
+        "Build commit: {commit_sha} (`{commit_sha}`, parent: `{}`)",
+        build.parent
+    )
+    .unwrap();
 
     Comment {
         text,
