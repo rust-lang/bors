@@ -30,6 +30,10 @@ use crate::tests::mocks::workflow::{
     CheckSuite, GitHubCheckRunEventPayload, GitHubCheckSuiteEventPayload,
     GitHubWorkflowEventPayload, TestWorkflowStatus, Workflow, WorkflowEvent, WorkflowEventKind,
 };
+
+pub fn default_cmd_prefix() -> String {
+    "@bors".to_string()
+}
 use crate::tests::mocks::{
     Branch, ExternalHttpMock, GitHubState, Repo, User, default_pr_number, default_repo_name,
 };
@@ -142,6 +146,7 @@ impl BorsTester {
             WebhookSecret::new(TEST_WEBHOOK_SECRET.to_string()),
             repos.clone(),
             db.clone(),
+            default_cmd_prefix(),
         );
         let app = create_app(state);
         let bors = tokio::spawn(bors_process);

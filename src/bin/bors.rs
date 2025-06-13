@@ -131,7 +131,7 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
 
     let db = Arc::new(db);
     let ctx = BorsContext::new(
-        CommandParser::new(opts.cmd_prefix),
+        CommandParser::new(opts.cmd_prefix.clone()),
         db.clone(),
         repos.clone(),
     );
@@ -184,6 +184,7 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
         WebhookSecret::new(opts.webhook_secret),
         repos,
         db,
+        opts.cmd_prefix.clone(),
     );
     let server_process = webhook_server(state);
 

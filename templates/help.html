@@ -54,7 +54,7 @@
     </ul>
 
     <h2>Commands</h2>
-    <p>Commands must be posted as comments on the PR and mention the bot account (e.g. <code>@bors</code>).</p>
+    <p>Commands must be posted as comments on the PR and mention the bot account (<code>{{ cmd_prefix }}</code>).</p>
 
      <table>
          <thead>
@@ -141,9 +141,9 @@
 
     <h2>Examples</h2>
     <ul>
-        <li><code>@bors r+ p=1</code></li>
-        <li><code>@bors try parent=abc123</code></li>
-        <li><code>@bors try @rust-timer queue</code>: Short-hand for compile-perf benchmarking of PRs.</li>
+        <li><code>{{ cmd_prefix }} r+ p=1</code></li>
+        <li><code>{{ cmd_prefix }} try parent=abc123</code></li>
+        <li><code>{{ cmd_prefix }} try @rust-timer queue</code>: Short-hand for compile-perf benchmarking of PRs.</li>
     </ul>
 </main>
 {% endblock %}

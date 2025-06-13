@@ -513,6 +513,7 @@ mod tests {
     use crate::github::webhook::GitHubWebhook;
     use crate::github::webhook::WebhookSecret;
     use crate::tests::io::load_test_file;
+    use crate::tests::mocks::default_cmd_prefix;
     use crate::tests::webhook::{TEST_WEBHOOK_SECRET, create_webhook_request};
 
     #[tokio::test]
@@ -1613,6 +1614,7 @@ mod tests {
             WebhookSecret::new(TEST_WEBHOOK_SECRET.to_string()),
             repos,
             db,
+            default_cmd_prefix(),
         ));
         GitHubWebhook::from_request(request, &server_ref).await
     }
