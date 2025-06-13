@@ -126,6 +126,7 @@ When modifying commands, make sure to update both:
 
 1. The `BorsCommand` enum in `src/bors/command/mod.rs`
 2. The help page in `templates/help.html`
+3. The `@bors help` command output in `src/bors/handlers/help.rs`
 
 ## Logs in tests
 By default, logs are disabled in tests. To enable them, add `#[traced_test]`
