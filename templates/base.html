@@ -67,6 +67,7 @@
 
             /* Neutral colors */
             --color-border-muted: #e1e4e8;
+            --color-text-muted: #a8b2bb;
             --color-bg-higlight: #fafafa;
 
             /* Typography */
@@ -154,6 +155,11 @@
         th {
             font-weight: 600;
             text-align: start;
+        }
+
+        .empty::before {
+            content: "-";
+            color: var(--color-text-muted);
         }
     </style>
     {% block head %}{% endblock %}

@@ -13,6 +13,11 @@
         margin-block: var(--space-m);
     }
 
+    .table-wrapper {
+        overflow-x: auto;
+        margin-block: var(--space-m);
+    }
+
 	tbody tr:last-child td {
 	    border-bottom: none;
 	}
@@ -21,8 +26,7 @@
     td {
         padding: var(--space-xs) var(--space-s);
         border-bottom: 1px solid var(--color-border-muted);
-        word-break: break-all;
-        overflow-wrap: break-word;
+        white-space: nowrap;
     }
 
     th {
@@ -57,88 +61,109 @@
     <h2>Commands</h2>
     <p>Commands must be posted as comments on the PR and mention the bot account (<code>{{ cmd_prefix }}</code>).</p>
 
-     <table>
-         <thead>
-             <tr>
-                 <th>Command</th>
-                 <th>Description</th>
-             </tr>
-         </thead>
-         <tbody>
-             <tr>
-                 <td><code>info</code></td>
-                 <td>Get information about the current PR</td>
-             </tr>
-             <tr>
-                 <td><code>ping</code></td>
-                 <td>Send a ping to bors to check responsiveness</td>
-             </tr>
-             <tr>
-                 <td><code>help</code></td>
-                 <td>Print help message with available commands</td>
-             </tr>
-             <tr>
-                 <td><code>rollup=&lt;never|iffy|maybe|always&gt;</code></td>
-                 <td>Mark the PR as "always", "maybe", "iffy", or "never" rollup-able</td>
-             </tr>
-             <tr>
-                 <td><code>rollup</code></td>
-                 <td>Short for <code>rollup=always</code></td>
-             </tr>
-             <tr>
-                 <td><code>rollup-</code></td>
-                 <td>Short for <code>rollup=maybe</code></td>
-             </tr>
-             <tr>
-                 <td><code>p=&lt;priority&gt;</code></td>
-                 <td>Set the priority of the approved PR (defaults to 0)</td>
-             </tr>
-             <tr>
-                 <td><code>r=&lt;user&gt;</code></td>
-                 <td>Approve the PR on behalf of the specified user</td>
-             </tr>
-             <tr>
-                 <td><code>r+</code></td>
-                 <td>Approve the PR and add it to the merge queue</td>
-             </tr>
-             <tr>
-                 <td><code>r-</code></td>
-                 <td>Reject the PR and remove it from the merge queue</td>
-             </tr>
-             <tr>
-                 <td><code>retry</code></td>
-                 <td>Retry the failed build</td>
-             </tr>
-             <tr>
-                 <td><code>retry-</code></td>
-                 <td>Cancel the retry</td>
-             </tr>
-             <tr>
-                 <td><code>try</code></td>
-                 <td>Run the build without merging</td>
-             </tr>
-             <tr>
-                 <td><code>try-</code></td>
-                 <td>Cancel the try build</td>
-             </tr>
-             <tr>
-                 <td><code>delegate+</code></td>
-                 <td>Delegate approval authority to another user</td>
-             </tr>
-             <tr>
-                 <td><code>delegate-</code></td>
-                 <td>Remove delegated approval authority</td>
-             </tr>
-             <tr>
-                 <td><code>treeclosed=</code></td>
-                 <td>Close the tree to new PRs</td>
-             </tr>
-             <tr>
-                 <td><code>treeclosed-</code></td>
-                 <td>Reopen the tree to new PRs</td>
-             </tr>
-         </tbody>
-     </table>
+    <div class="table-wrapper">
+        <table>
+            <thead>
+                <tr>
+                    <th>Command</th>
+                    <th>Permissions</th>
+                    <th>Description</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><code>info</code></td>
+                    <td class="empty"></td>
+                    <td>Get information about the current PR</td>
+                </tr>
+                <tr>
+                    <td><code>ping</code></td>
+                    <td class="empty"></td>
+                    <td>Send a ping to bors to check responsiveness</td>
+                </tr>
+                <tr>
+                    <td><code>help</code></td>
+                    <td class="empty"></td>
+                    <td>Print help message with available commands</td>
+                </tr>
+                <tr>
+                    <td><code>rollup=&lt;never|iffy|maybe|always&gt;</code></td>
+                    <td>review</td>
+                    <td>Mark the PR as "always", "maybe", "iffy", or "never" rollup-able</td>
+                </tr>
+                <tr>
+                    <td><code>rollup</code></td>
+                    <td>review</td>
+                    <td>Short for <code>rollup=always</code></td>
+                </tr>
+                <tr>
+                    <td><code>rollup-</code></td>
+                    <td>review</td>
+                    <td>Short for <code>rollup=maybe</code></td>
+                </tr>
+                <tr>
+                    <td><code>p=&lt;priority&gt;</code></td>
+                    <td>review</td>
+                    <td>Set the priority of the approved PR (defaults to 0)</td>
+                </tr>
+                <tr>
+                    <td><code>r=&lt;user&gt;</code></td>
+                    <td>review</td>
+                    <td>Approve the PR on behalf of the specified user</td>
+                </tr>
+                <tr>
+                    <td><code>r+</code></td>
+                    <td>review</td>
+                    <td>Approve the PR and add it to the merge queue</td>
+                </tr>
+                <tr>
+                    <td><code>r-</code></td>
+                    <td>review</td>
+                    <td>Reject the PR and remove it from the merge queue</td>
+                </tr>
+                <tr>
+                    <td><code>retry</code></td>
+                    <td>review</td>
+                    <td>Retry the failed build</td>
+                </tr>
+                <tr>
+                    <td><code>retry-</code></td>
+                    <td>review</td>
+                    <td>Cancel the retry</td>
+                </tr>
+                <tr>
+                    <td><code>try</code></td>
+                    <td>try</td>
+                    <td>Run the build without merging</td>
+                </tr>
+                <tr>
+                    <td><code>try-</code></td>
+                    <td>try</td>
+                    <td>Cancel the try build</td>
+                </tr>
+                <tr>
+                    <td><code>delegate+</code></td>
+                    <td>review</td>
+                    <td>Delegate approval authority to another user</td>
+                </tr>
+                <tr>
+                    <td><code>delegate-</code></td>
+                    <td>review</td>
+                    <td>Remove delegated approval authority</td>
+                </tr>
+                <tr>
+                    <td><code>treeclosed=</code></td>
+                    <td>review</td>
+                    <td>Close the tree to new PRs</td>
+                </tr>
+                <tr>
+                    <td><code>treeclosed-</code></td>
+                    <td>review</td>
+                    <td>Reopen the tree to new PRs</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
 
     <h2>Examples</h2>
     <ul>
