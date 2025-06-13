@@ -184,7 +184,7 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
         WebhookSecret::new(opts.webhook_secret),
         repos,
         db,
-        opts.cmd_prefix.clone(),
+        opts.cmd_prefix,
     );
     let server_process = webhook_server(state);
 
