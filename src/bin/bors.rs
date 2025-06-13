@@ -65,7 +65,10 @@ async fn webhook_server(state: ServerState) -> anyhow::Result<()> {
         .await
         .context("Cannot create TCP/IP server socket")?;
 
-    tracing::info!("Listening on 0.0.0.0:{}", listener.local_addr()?.port());
+    tracing::info!(
+        "Listening on http://0.0.0.0:{}",
+        listener.local_addr()?.port()
+    );
 
     axum::serve(listener, app).await?;
     Ok(())
