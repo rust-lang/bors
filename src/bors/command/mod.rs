@@ -63,6 +63,8 @@ impl FromStr for RollupMode {
 }
 
 /// Bors command specified by a user.
+///
+/// When modifying commands, remember to also update `templates/help.html`.
 #[derive(Debug, PartialEq)]
 pub enum BorsCommand {
     /// Approve a commit.
