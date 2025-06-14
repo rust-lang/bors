@@ -78,17 +78,32 @@
                 <tr>
                     <td><code>ping</code></td>
                     <td class="empty"></td>
-                    <td>Send a ping to bors to check responsiveness</td>
+                    <td>Check if the bot is alive</td>
                 </tr>
                 <tr>
                     <td><code>help</code></td>
                     <td class="empty"></td>
-                    <td>Print help message with available commands</td>
+                    <td>Print help message</td>
                 </tr>
                 <tr>
-                    <td><code>rollup=&lt;never|iffy|maybe|always&gt;</code></td>
+                    <td><code>r+</code></td>
                     <td>review</td>
-                    <td>Mark the PR as "always", "maybe", "iffy", or "never" rollup-able</td>
+                    <td>Approve this PR on your behalf</td>
+                </tr>
+                <tr>
+                    <td><code>r=&lt;user&gt;</code></td>
+                    <td>review</td>
+                    <td>Approve the PR on behalf of the specified user(s)</td>
+                </tr>
+                <tr>
+                    <td><code>r-</code></td>
+                    <td>review</td>
+                    <td>Unapprove the PR</td>
+                </tr>
+                <tr>
+                    <td><code>p=&lt;priority&gt;</code> or <code>priority=&lt;priority&gt;</code></td>
+                    <td>review</td>
+                    <td>Set the priority of the PR</td>
                 </tr>
                 <tr>
                     <td><code>rollup</code></td>
@@ -101,64 +116,54 @@
                     <td>Short for <code>rollup=maybe</code></td>
                 </tr>
                 <tr>
-                    <td><code>p=&lt;priority&gt;</code></td>
+                    <td><code>rollup=&lt;never|iffy|maybe|always&gt;</code></td>
                     <td>review</td>
-                    <td>Set the priority of the approved PR (defaults to 0)</td>
+                    <td>Set the rollup status of the PR</td>
                 </tr>
                 <tr>
-                    <td><code>r=&lt;user&gt;</code></td>
+                    <td><code>r+ [p=&lt;priority&gt;] [rollup=&lt;mode&gt;]</code></td>
                     <td>review</td>
-                    <td>Approve the PR on behalf of the specified user</td>
+                    <td>Approve this PR on your behalf with options</td>
                 </tr>
                 <tr>
-                    <td><code>r+</code></td>
+                    <td><code>r=&lt;user&gt; [p=&lt;priority&gt;] [rollup=&lt;mode&gt;]</code></td>
                     <td>review</td>
-                    <td>Approve the PR and add it to the merge queue</td>
+                    <td>Approve the PR on behalf of the specified user(s) with options</td>
                 </tr>
                 <tr>
-                    <td><code>r-</code></td>
-                    <td>review</td>
-                    <td>Reject the PR and remove it from the merge queue</td>
-                </tr>
-                <tr>
-                    <td><code>retry</code></td>
-                    <td>review</td>
-                    <td>Retry the failed build</td>
-                </tr>
-                <tr>
-                    <td><code>retry-</code></td>
-                    <td>review</td>
-                    <td>Cancel the retry</td>
-                </tr>
-                <tr>
-                    <td><code>try</code></td>
+                    <td><code>try [parent=&lt;sha&gt;] [jobs=&lt;job1,job2,...&gt;]</code></td>
                     <td>try</td>
-                    <td>Run the build without merging</td>
+                    <td>Run a try build (max 10 jobs)</td>
                 </tr>
                 <tr>
-                    <td><code>try-</code></td>
+                    <td><code>try cancel</code></td>
                     <td>try</td>
-                    <td>Cancel the try build</td>
+                    <td>Cancel a running try build</td>
                 </tr>
                 <tr>
                     <td><code>delegate+</code></td>
                     <td>review</td>
-                    <td>Delegate approval authority to another user</td>
+                    <td>Short for <code>delegate=review</code></td>
                 </tr>
                 <tr>
                     <td><code>delegate-</code></td>
                     <td>review</td>
-                    <td>Remove delegated approval authority</td>
+                    <td>Remove any previously granted delegated permissions</td>
                 </tr>
                 <tr>
-                    <td><code>treeclosed=</code></td>
+                    <td><code>delegate=&lt;try|review&gt;</code></td>
                     <td>review</td>
-                    <td>Close the tree to new PRs</td>
+                    <td>Delegate permissions to the PR author (try or review)</td>
                 </tr>
                 <tr>
-                    <td><code>treeclosed-</code></td>
+                    <td><code>treeclosed-</code> or <code>treeopen</code></td>
                     <td>review</td>
-                    <td>Reopen the tree to new PRs</td>
+                    <td>Open the repository tree for merging</td>
+                </tr>
+                <tr>
+                    <td><code>treeclosed=&lt;priority&gt;</code></td>
+                    <td>review</td>
+                    <td>Close the tree for PRs with priority less than <code>&lt;priority&gt;</code></td>
                 </tr>
             </tbody>
         </table>
@@ -166,9 +171,10 @@
 
     <h2>Examples</h2>
     <ul>
-        <li><code>{{ cmd_prefix }} r+ p=1</code></li>
-        <li><code>{{ cmd_prefix }} try parent=abc123</code></li>
-        <li><code>{{ cmd_prefix }} try @rust-timer queue</code>: Short-hand for compile-perf benchmarking of PRs.</li>
+        <li><code>{{ cmd_prefix }} r=user1,user2 p=5</code>: Approve on behalf of <code>user1</code> and <code>user2</code> with priority 5</li>
+        <li><code>{{ cmd_prefix }} r+ rollup p=1</code>: Approve with priority 1 and always rollup</li>
+        <li><code>{{ cmd_prefix }} try parent=last</code>: Start a try build using the same parent as the last try</li>
+        <li><code>{{ cmd_prefix }} try @rust-timer queue</code>: Short-hand for compile-perf benchmarking of PRs</li>
     </ul>
 </main>
 {% endblock %}
