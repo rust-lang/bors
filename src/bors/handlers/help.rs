@@ -53,6 +53,8 @@ You can use the following commands:
 - `r-`: Unapprove this PR
 - `p=<priority>` or `priority=<priority>`: Set the priority of this PR
 - `rollup=<never|iffy|maybe|always>`: Set the rollup status of the PR
+- `rollup`: Short for `rollup=always`
+- `rollup-`: Short for `rollup=maybe`
 - `delegate=<try|review>`: Delegate permissions for running try builds or approving to the PR author
     - `try` allows the PR author to start try builds.
     - `review` allows the PR author to both start try builds and approve the PR.
@@ -95,6 +97,8 @@ mod tests {
             - `r-`: Unapprove this PR
             - `p=<priority>` or `priority=<priority>`: Set the priority of this PR
             - `rollup=<never|iffy|maybe|always>`: Set the rollup status of the PR
+            - `rollup`: Short for `rollup=always`
+            - `rollup-`: Short for `rollup=maybe`
             - `delegate=<try|review>`: Delegate permissions for running try builds or approving to the PR author
                 - `try` allows the PR author to start try builds.
                 - `review` allows the PR author to both start try builds and approve the PR.

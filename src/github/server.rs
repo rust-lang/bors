@@ -41,6 +41,7 @@ pub struct ServerState {
     webhook_secret: WebhookSecret,
     repositories: HashMap<GithubRepoName, Arc<RepositoryState>>,
     db: Arc<PgDbClient>,
+    cmd_prefix: String,
 }
 
 impl ServerState {
@@ -50,6 +51,7 @@ impl ServerState {
         webhook_secret: WebhookSecret,
         repositories: HashMap<GithubRepoName, Arc<RepositoryState>>,
         db: Arc<PgDbClient>,
+        cmd_prefix: String,
     ) -> Self {
         Self {
             repository_event_queue,
@@ -57,11 +59,16 @@ impl ServerState {
             webhook_secret,
             repositories,
             db,
+            cmd_prefix,
         }
     }
 
     pub fn get_webhook_secret(&self) -> &WebhookSecret {
         &self.webhook_secret
+    }
+
+    pub fn get_cmd_prefix(&self) -> &str {
+        &self.cmd_prefix
     }
 }
 
@@ -113,7 +120,10 @@ async fn help_handler(State(state): State<ServerStateRef>) -> impl IntoResponse 
         });
     }
 
-    HtmlTemplate(HelpTemplate { repos })
+    HtmlTemplate(HelpTemplate {
+        repos,
+        cmd_prefix: state.get_cmd_prefix().to_string(),
+    })
 }
 
 async fn queue_handler(

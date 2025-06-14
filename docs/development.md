@@ -121,6 +121,12 @@ $ cargo sqlx prepare -- --all-targets
 
 After that, you should commit the changes to the `.sqlx` directory.
 
+## Updating commands
+When modifying commands, make sure to update both:
+
+1. The help page in `templates/help.html`
+2. The `@bors help` command output in `src/bors/handlers/help.rs`
+
 ## Logs in tests
 By default, logs are disabled in tests. To enable them, add `#[traced_test]`
 on top of the test function.

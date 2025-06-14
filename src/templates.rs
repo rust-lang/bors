@@ -25,6 +25,7 @@ where
 #[template(path = "help.html")]
 pub struct HelpTemplate {
     pub repos: Vec<RepositoryView>,
+    pub cmd_prefix: String,
 }
 
 pub struct RepositoryView {
