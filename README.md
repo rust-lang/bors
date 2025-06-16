@@ -2,7 +2,6 @@
 Home of a (WIP) rewrite of the [`homu`](https://github.com/rust-lang/homu) bors implementation in Rust.
 
 There are a few documents that should help with understanding the bot:
-- [Commands](docs/commands.md) supported by the bot.
 - [Design](docs/design.md) of the bot.
 - [Development guide](docs/development.md).
 
