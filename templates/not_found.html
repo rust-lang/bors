@@ -4,14 +4,19 @@
 
 {% block head %}
 <style>
-  * {
-    font-family: sans-serif;
-    text-align: center;
-  }
+    main {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        margin: 0;
+        text-align: center;
+    }
 </style>
 {% endblock %}
 
 {% block body %}
-<h1>Page not found</h1>
-<p><a href="/">Go back to the index</a></p>
+<main>
+    <h1>Page not found</h1>
+    <p><a href="/">Go back to the index</a></p>
+</main>
 {% endblock %}

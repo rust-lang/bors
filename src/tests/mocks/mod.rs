@@ -13,6 +13,7 @@ use crate::tests::mocks::github::GitHubMockServer;
 use crate::tests::mocks::permissions::TeamApiMockServer;
 
 pub use bors::BorsBuilder;
+pub use bors::default_cmd_prefix;
 pub use bors::run_test;
 pub use comment::Comment;
 pub use permissions::Permissions;
