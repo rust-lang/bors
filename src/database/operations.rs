@@ -53,9 +53,11 @@ pub(crate) async fn get_pull_request(
         pr.base_branch,
         pr.mergeable_state as "mergeable_state: MergeableState",
         pr.created_at as "created_at: DateTime<Utc>",
-        build AS "try_build: BuildModel"
+        try_build AS "try_build: BuildModel",
+        auto_build AS "auto_build: BuildModel"
     FROM pull_request as pr
-    LEFT JOIN build ON pr.build_id = build.id
+    LEFT JOIN build AS try_build ON pr.build_id = try_build.id
+    LEFT JOIN build AS auto_build ON pr.auto_build_id = auto_build.id
     WHERE pr.repository = $1 AND
           pr.number = $2
     "#,
@@ -163,9 +165,11 @@ pub(crate) async fn upsert_pull_request(
                 pr.base_branch,
                 pr.mergeable_state as "mergeable_state: MergeableState",
                 pr.created_at as "created_at: DateTime<Utc>",
-                build AS "try_build: BuildModel"
+                try_build AS "try_build: BuildModel",
+                auto_build AS "auto_build: BuildModel"
             FROM upserted_pr as pr
-            LEFT JOIN build ON pr.build_id = build.id
+            LEFT JOIN build AS try_build ON pr.build_id = try_build.id
+            LEFT JOIN build AS auto_build ON pr.auto_build_id = auto_build.id
             "#,
             repo as &GithubRepoName,
             params.pr_number.0 as i32,
@@ -212,9 +216,11 @@ pub(crate) async fn get_nonclosed_pull_requests_by_base_branch(
                 pr.base_branch,
                 pr.mergeable_state as "mergeable_state: MergeableState",
                 pr.created_at as "created_at: DateTime<Utc>",
-                build AS "try_build: BuildModel"
+                try_build AS "try_build: BuildModel",
+                auto_build AS "auto_build: BuildModel"
             FROM pull_request as pr
-            LEFT JOIN build ON pr.build_id = build.id
+            LEFT JOIN build AS try_build ON pr.build_id = try_build.id
+            LEFT JOIN build AS auto_build ON pr.auto_build_id = auto_build.id
             WHERE pr.repository = $1
               AND pr.base_branch = $2
               AND pr.status IN ('open', 'draft')
@@ -256,9 +262,11 @@ pub(crate) async fn get_nonclosed_pull_requests(
                 pr.base_branch,
                 pr.mergeable_state as "mergeable_state: MergeableState",
                 pr.created_at as "created_at: DateTime<Utc>",
-                build AS "try_build: BuildModel"
+                try_build AS "try_build: BuildModel",
+                auto_build AS "auto_build: BuildModel"
             FROM pull_request as pr
-            LEFT JOIN build ON pr.build_id = build.id
+            LEFT JOIN build AS try_build ON pr.build_id = try_build.id
+            LEFT JOIN build AS auto_build ON pr.auto_build_id = auto_build.id
             WHERE pr.repository = $1
                 AND pr.status IN ('open', 'draft')
             "#,
@@ -318,9 +326,11 @@ pub(crate) async fn get_prs_with_unknown_mergeable_state(
                 pr.base_branch,
                 pr.mergeable_state as "mergeable_state: MergeableState",
                 pr.created_at as "created_at: DateTime<Utc>",
-                build AS "try_build: BuildModel"
+                try_build AS "try_build: BuildModel",
+                auto_build AS "auto_build: BuildModel"
             FROM pull_request as pr
-            LEFT JOIN build ON pr.build_id = build.id
+            LEFT JOIN build AS try_build ON pr.build_id = try_build.id
+            LEFT JOIN build AS auto_build ON pr.auto_build_id = auto_build.id
             WHERE pr.repository = $1
               AND pr.mergeable_state = 'unknown'
               AND pr.status IN ('open', 'draft')
@@ -470,10 +480,12 @@ SELECT
     pr.mergeable_state as "mergeable_state: MergeableState",
     pr.rollup as "rollup: RollupMode",
     pr.created_at as "created_at: DateTime<Utc>",
-    build AS "try_build: BuildModel"
+    try_build AS "try_build: BuildModel",
+    auto_build AS "auto_build: BuildModel"
 FROM pull_request as pr
-LEFT JOIN build ON pr.build_id = build.id
-WHERE build.id = $1
+LEFT JOIN build AS try_build ON pr.build_id = try_build.id
+LEFT JOIN build AS auto_build ON pr.auto_build_id = auto_build.id
+WHERE try_build.id = $1
 "#,
             build_id
         )

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n                pr.id,\n                pr.repository as \"repository: GithubRepoName\",\n                pr.number as \"number!: i64\",\n                pr.title,\n                pr.author,\n                pr.assignees as \"assignees: Assignees\",\n                (\n                    pr.approved_by,\n                    pr.approved_sha\n                ) AS \"approval_status!: ApprovalStatus\",\n                pr.status as \"pr_status: PullRequestStatus\",\n                pr.priority,\n                pr.rollup as \"rollup: RollupMode\",\n                pr.delegated_permission as \"delegated_permission: DelegatedPermission\",\n                pr.base_branch,\n                pr.mergeable_state as \"mergeable_state: MergeableState\",\n                pr.created_at as \"created_at: DateTime<Utc>\",\n                build AS \"try_build: BuildModel\"\n            FROM pull_request as pr\n            LEFT JOIN build ON pr.build_id = build.id\n            WHERE pr.repository = $1\n                AND pr.status IN ('open', 'draft')\n            ",
+  "query": "\n    SELECT\n        pr.id,\n        pr.repository as \"repository: GithubRepoName\",\n        pr.number as \"number!: i64\",\n        pr.title,\n        pr.author,\n        pr.assignees as \"assignees: Assignees\",\n        (\n            pr.approved_by,\n            pr.approved_sha\n        ) AS \"approval_status!: ApprovalStatus\",\n        pr.status as \"pr_status: PullRequestStatus\",\n        pr.priority,\n        pr.rollup as \"rollup: RollupMode\",\n        pr.delegated_permission as \"delegated_permission: DelegatedPermission\",\n        pr.base_branch,\n        pr.mergeable_state as \"mergeable_state: MergeableState\",\n        pr.created_at as \"created_at: DateTime<Utc>\",\n        try_build AS \"try_build: BuildModel\",\n        auto_build AS \"auto_build: BuildModel\"\n    FROM pull_request as pr\n    LEFT JOIN build AS try_build ON pr.build_id = try_build.id\n    LEFT JOIN build AS auto_build ON pr.auto_build_id = auto_build.id\n    WHERE pr.repository = $1 AND\n          pr.number = $2\n    ",
   "describe": {
     "columns": [
       {
@@ -113,11 +113,53 @@
             }
           }
         }
+      },
+      {
+        "ordinal": 15,
+        "name": "auto_build: BuildModel",
+        "type_info": {
+          "Custom": {
+            "name": "build",
+            "kind": {
+              "Composite": [
+                [
+                  "id",
+                  "Int4"
+                ],
+                [
+                  "repository",
+                  "Text"
+                ],
+                [
+                  "branch",
+                  "Text"
+                ],
+                [
+                  "commit_sha",
+                  "Text"
+                ],
+                [
+                  "status",
+                  "Text"
+                ],
+                [
+                  "parent",
+                  "Text"
+                ],
+                [
+                  "created_at",
+                  "Timestamptz"
+                ]
+              ]
+            }
+          }
+        }
       }
     ],
     "parameters": {
       "Left": [
-        "Text"
+        "Text",
+        "Int8"
       ]
     },
     "nullable": [
@@ -135,8 +177,9 @@
       false,
       false,
       false,
+      null,
       null
     ]
   },
-  "hash": "676d0b8475eebb8ccbfbd877b41b2a8b1f2f4f6d5e2662db9d5c2e02d613c769"
+  "hash": "c2e28346b7e7102194e0cf188b925e212f389fb9ed0f5f59f44524944b874bf6"
 }
