@@ -19,6 +19,7 @@ use crate::bors::handlers::trybuild::{TRY_BRANCH_NAME, command_try_build, comman
 use crate::bors::handlers::workflow::{
     handle_check_suite_completed, handle_workflow_completed, handle_workflow_started,
 };
+use crate::bors::merge_queue::MergeQueueEvent;
 use crate::bors::{BorsContext, Comment, RepositoryState};
 use crate::database::{DelegatedPermission, PullRequestModel};
 use crate::github::{GithubUser, PullRequest, PullRequestNumber};
@@ -33,6 +34,7 @@ use pr_events::{
 };
 use refresh::sync_pull_requests_state;
 use review::{command_delegate, command_set_priority, command_set_rollup, command_undelegate};
+use tokio::sync::mpsc;
 use tracing::Instrument;
 
 use super::mergeable_queue::MergeableQueueSender;
@@ -51,6 +53,7 @@ mod workflow;
 pub async fn handle_bors_repository_event(
     event: BorsRepositoryEvent,
     ctx: Arc<BorsContext>,
+    merge_queue_tx: mpsc::Sender<MergeQueueEvent>,
     mergeable_queue_tx: MergeableQueueSender,
 ) -> anyhow::Result<()> {
     let db = Arc::clone(&ctx.db);
@@ -81,7 +84,7 @@ pub async fn handle_bors_repository_event(
                 author = comment.author.username
             );
             let pr_number = comment.pr_number;
-            if let Err(error) = handle_comment(Arc::clone(&repo), db, ctx, comment)
+            if let Err(error) = handle_comment(Arc::clone(&repo), db, ctx, merge_queue_tx, comment)
                 .instrument(span.clone())
                 .await
             {
@@ -347,6 +350,7 @@ async fn handle_comment(
     repo: Arc<RepositoryState>,
     database: Arc<PgDbClient>,
     ctx: Arc<BorsContext>,
+    merge_queue_tx: mpsc::Sender<MergeQueueEvent>,
     comment: PullRequestComment,
 ) -> anyhow::Result<()> {
     let pr_number = comment.pr_number;
@@ -514,6 +518,11 @@ async fn handle_comment(
             }
         }
     }
+
+    if let Err(err) = merge_queue_tx.send(()).await {
+        tracing::error!("Failed to send merge queue message: {err}");
+    }
+
     Ok(())
 }
 

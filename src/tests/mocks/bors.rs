@@ -16,6 +16,7 @@ use super::pull_request::{
     GitHubPullRequestEventPayload, GitHubPushEventPayload, PullRequestChangeEvent,
 };
 use super::repository::PullRequest;
+use crate::bors::merge_queue::MergeQueueEvent;
 use crate::bors::mergeable_queue::MergeableQueueSender;
 use crate::bors::{
     RollupMode, WAIT_FOR_CANCEL_TIMED_OUT_BUILDS_REFRESH, WAIT_FOR_MERGEABILITY_STATUS_REFRESH,
@@ -102,6 +103,7 @@ pub struct BorsTester {
     http_mock: ExternalHttpMock,
     github: GitHubState,
     db: Arc<PgDbClient>,
+    merge_queue_tx: Sender<MergeQueueEvent>,
     mergeable_queue_tx: MergeableQueueSender,
     // Sender for bors global events
     global_tx: Sender<BorsGlobalEvent>,
@@ -133,6 +135,7 @@ impl BorsTester {
             repository_tx,
             global_tx,
             mergeable_queue_tx,
+            merge_queue_tx,
             bors_process,
         } = create_bors_process(ctx, mock.github_client(), mock.team_api_client());
 
@@ -151,6 +154,7 @@ impl BorsTester {
                 http_mock: mock,
                 github,
                 db,
+                merge_queue_tx,
                 mergeable_queue_tx,
                 global_tx,
                 webhooks_active: true,
@@ -771,6 +775,7 @@ impl BorsTester {
         // Make sure that the event channel senders are closed
         drop(self.app);
         drop(self.global_tx);
+        drop(self.merge_queue_tx);
         self.mergeable_queue_tx.shutdown();
         // Wait until all events are handled in the bors service
         bors.await.unwrap();

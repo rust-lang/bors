@@ -515,6 +515,24 @@ pub(crate) async fn update_pr_build_id(
     .await
 }
 
+pub(crate) async fn update_pr_auto_build_id(
+    executor: impl PgExecutor<'_>,
+    pr_id: i32,
+    build_id: i32,
+) -> anyhow::Result<()> {
+    measure_db_query("update_pr_auto_build_id", || async {
+        sqlx::query!(
+            "UPDATE pull_request SET auto_build_id = $1 WHERE id = $2",
+            build_id,
+            pr_id
+        )
+        .execute(executor)
+        .await?;
+        Ok(())
+    })
+    .await
+}
+
 pub(crate) async fn create_build(
     executor: impl PgExecutor<'_>,
     repo: &GithubRepoName,
@@ -938,6 +956,81 @@ pub(crate) async fn upsert_repository(
         .await?;
 
         Ok(())
+    })
+    .await
+}
+
+pub(crate) async fn get_merge_queue_pull_requests(
+    executor: impl PgExecutor<'_>,
+    repo: &GithubRepoName,
+    tree_priority: Option<i32>,
+) -> anyhow::Result<Vec<PullRequestModel>> {
+    measure_db_query("get_merge_queue_pull_requests", || async {
+        let records = sqlx::query_as!(
+            PullRequestModel,
+            r#"
+            SELECT
+                pr.id,
+                pr.repository as "repository: GithubRepoName",
+                pr.number as "number!: i64",
+                pr.title,
+                pr.author,
+                pr.assignees as "assignees: Assignees",
+                (
+                    pr.approved_by,
+                    pr.approved_sha
+                ) AS "approval_status!: ApprovalStatus",
+                pr.status as "pr_status: PullRequestStatus",
+                pr.priority,
+                pr.rollup as "rollup: RollupMode",
+                pr.delegated_permission as "delegated_permission: DelegatedPermission",
+                pr.base_branch,
+                pr.mergeable_state as "mergeable_state: MergeableState",
+                pr.created_at as "created_at: DateTime<Utc>",
+                try_build AS "try_build: BuildModel",
+                auto_build AS "auto_build: BuildModel"
+            FROM pull_request as pr
+            LEFT JOIN build AS try_build ON pr.build_id = try_build.id
+            LEFT JOIN build AS auto_build ON pr.auto_build_id = auto_build.id
+            WHERE pr.repository = $1
+              AND pr.status = 'open'
+              AND pr.approved_by IS NOT NULL
+              AND pr.mergeable_state = 'mergeable'
+              -- Tree closure check (if tree_priority is set)
+              AND ($2::int IS NULL OR pr.priority >= $2)
+            ORDER BY
+                -- 1. Build status priority
+                CASE
+                    WHEN auto_build.status = 'pending' THEN 1
+                    WHEN pr.approved_by IS NOT NULL AND auto_build.id IS NULL THEN 2
+                    WHEN auto_build.id IS NULL THEN 3
+                    WHEN auto_build.status IN ('cancelled', 'timeouted') THEN 4
+                    WHEN auto_build.status = 'failure' THEN 5
+                    WHEN auto_build.status = 'success' THEN 6
+                    ELSE -1
+                END,
+                -- 2. Priority
+                -COALESCE(pr.priority, 0),
+                -- 3. Rollup (capped at -1)
+                GREATEST(
+                    CASE
+                        WHEN pr.rollup = 'always' THEN -2
+                        WHEN pr.rollup = 'maybe' THEN 0
+                        WHEN pr.rollup = 'iffy' THEN -1
+                        WHEN pr.rollup = 'never' THEN 1
+                        ELSE 0
+                    END,
+                    -1
+                ),
+                -- 4. PR number (older PRs first)
+                pr.number
+            "#,
+            repo as &GithubRepoName,
+            tree_priority
+        )
+        .fetch_all(executor)
+        .await?;
+        Ok(records)
     })
     .await
 }
