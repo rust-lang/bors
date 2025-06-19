@@ -19,7 +19,7 @@ use crate::bors::handlers::trybuild::{TRY_BRANCH_NAME, command_try_build, comman
 use crate::bors::handlers::workflow::{
     handle_check_suite_completed, handle_workflow_completed, handle_workflow_started,
 };
-use crate::bors::merge_queue::MergeQueueEvent;
+use crate::bors::merge_queue::{AUTO_BRANCH_NAME, MergeQueueEvent};
 use crate::bors::{BorsContext, Comment, RepositoryState};
 use crate::database::{DelegatedPermission, PullRequestModel};
 use crate::github::{GithubUser, PullRequest, PullRequestNumber};
@@ -41,7 +41,7 @@ use super::mergeable_queue::MergeableQueueSender;
 
 mod help;
 mod info;
-mod labels;
+pub mod labels;
 mod ping;
 mod pr_events;
 mod refresh;
@@ -119,7 +119,7 @@ pub async fn handle_bors_repository_event(
                 repo = payload.repository.to_string(),
                 id = payload.run_id.into_inner()
             );
-            handle_workflow_completed(repo, db, payload)
+            handle_workflow_completed(repo, db, merge_queue_tx, payload)
                 .instrument(span.clone())
                 .await?;
         }
@@ -128,7 +128,7 @@ pub async fn handle_bors_repository_event(
                 "Check suite completed",
                 repo = payload.repository.to_string(),
             );
-            handle_check_suite_completed(repo, db, payload)
+            handle_check_suite_completed(repo, db, merge_queue_tx, payload)
                 .instrument(span.clone())
                 .await?;
         }
@@ -558,7 +558,7 @@ async fn reload_repos(
 
 /// Is this branch interesting for the bot?
 fn is_bors_observed_branch(branch: &str) -> bool {
-    branch == TRY_BRANCH_NAME
+    matches!(branch, TRY_BRANCH_NAME | AUTO_BRANCH_NAME)
 }
 
 /// Deny permission for a request.

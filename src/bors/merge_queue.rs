@@ -5,18 +5,22 @@ use std::sync::Arc;
 
 use crate::{
     BorsContext,
-    bors::{Comment, RepositoryState, comment::merge_conflict_comment},
+    bors::{
+        RepositoryState,
+        comment::{auto_build_started_comment, merge_conflict_comment},
+        handlers::labels::handle_label_trigger,
+    },
     database::{BuildStatus, PullRequestModel},
-    github::{CommitSha, MergeError, api::client::GithubRepositoryClient},
+    github::{CommitSha, LabelTrigger, MergeError, api::client::GithubRepositoryClient},
 };
 
 /// Branch used for preparing merge commits.
 /// This branch should not run CI checks.
-const AUTO_MERGE_BRANCH_NAME: &str = "automation/bors/auto-merge";
+pub(super) const AUTO_MERGE_BRANCH_NAME: &str = "automation/bors/auto-merge";
 
 /// Branch where CI checks run for merge builds.
 /// This branch should run CI checks.
-const AUTO_BRANCH_NAME: &str = "automation/bors/auto";
+pub(super) const AUTO_BRANCH_NAME: &str = "automation/bors/auto";
 
 pub type MergeQueueEvent = ();
 
@@ -57,15 +61,15 @@ pub async fn handle_merge_queue(ctx: Arc<BorsContext>) -> anyhow::Result<()> {
                         );
                         break;
                     }
-                    // Build completed successfully - attempt to merge into base branch.
+                    // Successful builds should already be merged via webhooks,
+                    // so we handle stuck PRs caused by GitHub failures or crashes here.
                     BuildStatus::Success => {
-                        // Push the merge commit to the base branch.
-                        repo.client
-                            .set_branch_to_sha(
-                                &pr.base_branch,
-                                &CommitSha(auto_build.commit_sha.clone()),
-                            )
-                            .await?;
+                        // TODO: Implement recovery mechanism.
+                        tracing::warn!(
+                            "PR {} has a successful build, skipping (should already be merged)",
+                            pr.number
+                        );
+                        continue;
                     }
                     BuildStatus::Failure | BuildStatus::Cancelled | BuildStatus::Timeouted => {
                         tracing::debug!(
@@ -113,8 +117,7 @@ async fn start_auto_build(
     let gh_pr = client.get_pull_request(pr.number).await?;
     let base_sha = client.get_branch_sha(&pr.base_branch).await?;
 
-    // Format: "Auto merge of #123 - user:branch, r=approver\n\nTitle\n\nDescription"
-    let merge_message = format!(
+    let auto_merge_commit_message = format!(
         "Auto merge of #{} - {}, r={}\n\n{}\n\n{}",
         pr.number,
         gh_pr.head_label,
@@ -123,14 +126,22 @@ async fn start_auto_build(
         gh_pr.message
     );
 
-    match attempt_merge(&repo.client, &gh_pr.head.sha, &base_sha, &merge_message).await? {
+    // 1. Attempt to merge the PR and base branch
+    match attempt_merge(
+        &repo.client,
+        &gh_pr.head.sha,
+        &base_sha,
+        &auto_merge_commit_message,
+    )
+    .await?
+    {
         MergeResult::Success(merge_sha) => {
-            // 1. Push merge commit to auto branch where CI runs
+            // 2. Push merge commit to auto branch where CI runs
             client
                 .set_branch_to_sha(AUTO_BRANCH_NAME, &merge_sha)
                 .await?;
 
-            // 2. Record the build in the database
+            // 3. Record the build in the database
             ctx.db
                 .attach_try_build(
                     &pr,
@@ -140,16 +151,12 @@ async fn start_auto_build(
                 )
                 .await?;
 
-            // 3. Post status comment
-            let comment = format!(
-                ":hourglass: Testing commit {} with merge {}...",
-                gh_pr.head.sha, merge_sha
-            );
-            client
-                .post_comment(pr.number, Comment::new(comment))
-                .await?;
+            // 4. Update label and post status comment
+            handle_label_trigger(repo, pr.number, LabelTrigger::AutoBuildStarted).await?;
+            let comment = auto_build_started_comment(&gh_pr.head.sha, &merge_sha);
+            client.post_comment(pr.number, comment).await?;
 
-            // 4. Update GitHub status
+            // 5. Update GitHub status
             let desc = format!(
                 "Testing commit {} with merge {}...",
                 gh_pr.head.sha, merge_sha
@@ -175,7 +182,7 @@ async fn start_auto_build(
     }
 }
 
-/// Attempt to merge two branches.
+/// Attempts to merge the given head SHA into `AUTO_MERGE_BRANCH_NAME` at the given base SHA.
 async fn attempt_merge(
     client: &GithubRepositoryClient,
     head_sha: &CommitSha,
