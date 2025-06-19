@@ -6,7 +6,6 @@ use tokio::sync::mpsc;
 
 use crate::PgDbClient;
 use crate::bors::CheckSuiteStatus;
-use crate::bors::Comment;
 use crate::bors::PullRequestStatus;
 use crate::bors::RepositoryState;
 use crate::bors::comment::auto_build_failed_comment;
@@ -201,9 +200,21 @@ async fn try_complete_build(
         return Ok(());
     }
 
-    match payload.branch.as_str() {
+    let branch = payload.branch.as_str();
+    let (status, trigger) = match (branch, has_failure) {
+        (TRY_BRANCH_NAME, true) => (BuildStatus::Failure, LabelTrigger::TryBuildFailed),
+        (TRY_BRANCH_NAME, false) => (BuildStatus::Success, LabelTrigger::TryBuildSucceeded),
+        (AUTO_BRANCH_NAME, true) => (BuildStatus::Failure, LabelTrigger::AutoBuildFailed),
+        (AUTO_BRANCH_NAME, false) => (BuildStatus::Success, LabelTrigger::AutoBuildSucceeded),
+        _ => unreachable!(),
+    };
+
+    db.update_build_status(&build, status).await?;
+    handle_label_trigger(repo, pr.number, trigger).await?;
+
+    match branch {
         TRY_BRANCH_NAME => {
-            complete_try_build(db, repo, pr, build, workflows, has_failure, payload).await?
+            complete_try_build(repo, pr, build, workflows, has_failure, payload).await?
         }
         AUTO_BRANCH_NAME => {
             complete_auto_build(
@@ -226,7 +237,6 @@ async fn try_complete_build(
 
 /// Complete the try build workflow.
 async fn complete_try_build(
-    db: &PgDbClient,
     repo: &RepositoryState,
     pr: PullRequestModel,
     build: BuildModel,
@@ -234,15 +244,6 @@ async fn complete_try_build(
     has_failure: bool,
     payload: CheckSuiteCompleted,
 ) -> anyhow::Result<()> {
-    let (status, trigger) = if has_failure {
-        (BuildStatus::Failure, LabelTrigger::TryBuildFailed)
-    } else {
-        (BuildStatus::Success, LabelTrigger::TryBuildSucceeded)
-    };
-
-    db.update_build_status(&build, status).await?;
-    handle_label_trigger(repo, pr.number, trigger).await?;
-
     let message = if !has_failure {
         tracing::info!("Workflow succeeded");
         try_build_succeeded_comment(&workflows, payload.commit_sha, &build)
@@ -256,6 +257,7 @@ async fn complete_try_build(
 }
 
 /// Complete the auto build workflow.
+#[allow(clippy::too_many_arguments)]
 async fn complete_auto_build(
     db: &PgDbClient,
     repo: &RepositoryState,
@@ -266,41 +268,33 @@ async fn complete_auto_build(
     merge_queue_tx: mpsc::Sender<MergeQueueEvent>,
     payload: CheckSuiteCompleted,
 ) -> anyhow::Result<()> {
-    let (status, trigger) = if has_failure {
-        (BuildStatus::Failure, LabelTrigger::AutoBuildFailed)
+    let (build_succeeded, merge_succeeded) = if has_failure {
+        tracing::info!("Auto build failed");
+        (false, false)
     } else {
-        (BuildStatus::Success, LabelTrigger::AutoBuildSucceeded)
-    };
-
-    db.update_build_status(&build, status).await?;
-    handle_label_trigger(repo, pr.number, trigger).await?;
-
-    let merge_succeeded = if !has_failure {
+        // Update base branch to point to the merged and tested commit
         match repo
             .client
             .set_branch_to_sha(&pr.base_branch, &payload.commit_sha)
             .await
         {
-            Ok(_) => {
+            Ok(()) => {
+                tracing::info!("Auto build succeeded and merged");
                 db.set_pr_status(&pr.repository, pr.number, PullRequestStatus::Merged)
                     .await?;
-                true
+                (true, true)
             }
             Err(e) => {
                 tracing::error!("Failed to push to base branch: {:?}", e);
                 db.update_build_status(&build, BuildStatus::Failure).await?;
-                false
+                (true, false)
             }
         }
-    } else {
-        false
     };
 
-    let message = if has_failure {
-        tracing::info!("Auto build failed");
+    let message = if !build_succeeded {
         auto_build_failed_comment(&workflows)
     } else if merge_succeeded {
-        tracing::info!("Auto build succeeded and merged");
         auto_build_succeeded_comment(
             &workflows,
             pr.approver().unwrap_or("<unknown>"),
@@ -308,17 +302,14 @@ async fn complete_auto_build(
             &pr.base_branch,
         )
     } else {
-        // TODO: Deal with failed push to branch properly.
-        Comment::new(":x: Test successful but failed to push to base branch".to_string())
+        todo!("Deal with failed branch push");
     };
-
     repo.client.post_comment(pr.number, message).await?;
 
-    // Update GitHub status
-    let (gh_status, gh_desc) = if has_failure || !merge_succeeded {
-        (StatusState::Failure, "Build failed")
-    } else {
+    let (gh_status, gh_desc) = if build_succeeded && merge_succeeded {
         (StatusState::Success, "Build succeeded")
+    } else {
+        (StatusState::Failure, "Build failed")
     };
 
     let gh_pr = repo.client.get_pull_request(pr.number).await?;
@@ -333,7 +324,7 @@ async fn complete_auto_build(
         .await?;
 
     if let Err(err) = merge_queue_tx.send(()).await {
-        tracing::error!("Failed to trigger merge queue: {err}");
+        tracing::error!("Failed to invoke merge queue: {err}");
     }
 
     Ok(())

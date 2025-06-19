@@ -14,7 +14,7 @@ use crate::{
     github::{CommitSha, LabelTrigger, MergeError, api::client::GithubRepositoryClient},
 };
 
-/// Branch used for preparing merge commits.
+/// Branch used for performing merge operations.
 /// This branch should not run CI checks.
 pub(super) const AUTO_MERGE_BRANCH_NAME: &str = "automation/bors/auto-merge";
 
@@ -43,7 +43,9 @@ pub async fn handle_merge_queue(ctx: Arc<BorsContext>) -> anyhow::Result<()> {
             }
         };
         let priority = repo_db.tree_state.priority();
-        // Fetch all eligible PRs from the database (pending PRs come first).
+        // Fetch all eligible PRs from the database.
+        // Pending PRs come first - this is important as we make sure to block the queue to
+        // prevent starting simultaneous auto-builds.
         let prs = ctx
             .db
             .get_merge_queue_pull_requests(repo_name, priority)
@@ -54,7 +56,7 @@ pub async fn handle_merge_queue(ctx: Arc<BorsContext>) -> anyhow::Result<()> {
 
             if let Some(auto_build) = &pr.auto_build {
                 match auto_build.status {
-                    // Build in progress - stop queue to prevent starting simultaneous auto-builds.
+                    // Build in progress - stop queue. We can only have one PR built at a time.
                     BuildStatus::Pending => {
                         tracing::debug!(
                             "PR {repo_name}/{pr_num} has a pending build - blocking queue"
@@ -64,12 +66,11 @@ pub async fn handle_merge_queue(ctx: Arc<BorsContext>) -> anyhow::Result<()> {
                     // Successful builds should already be merged via webhooks,
                     // so we handle stuck PRs caused by GitHub failures or crashes here.
                     BuildStatus::Success => {
-                        // TODO: Implement recovery mechanism.
                         tracing::warn!(
                             "PR {} has a successful build, skipping (should already be merged)",
                             pr.number
                         );
-                        continue;
+                        todo!("Implement stuck PR recovery mechanism");
                     }
                     BuildStatus::Failure | BuildStatus::Cancelled | BuildStatus::Timeouted => {
                         tracing::debug!(
@@ -82,7 +83,7 @@ pub async fn handle_merge_queue(ctx: Arc<BorsContext>) -> anyhow::Result<()> {
                 }
             }
 
-            // No build exists for this PR - start a new merge build.
+            // No build exists for this PR - try to start a new merge build.
             match start_auto_build(&repo, &ctx, pr).await {
                 Ok(true) => {
                     tracing::info!("Starting merge build for PR {pr_num}");
@@ -95,7 +96,7 @@ pub async fn handle_merge_queue(ctx: Arc<BorsContext>) -> anyhow::Result<()> {
                     continue;
                 }
                 Err(error) => {
-                    // Unexpected error - the PR will remain in the queue for a retry.
+                    // Unexpected error - the PR will remain in the "queue" for a retry.
                     tracing::error!("Error starting merge build for PR {pr_num}: {:?}", error);
                     continue;
                 }
@@ -126,7 +127,7 @@ async fn start_auto_build(
         gh_pr.message
     );
 
-    // 1. Attempt to merge the PR and base branch
+    // 1. Merge PR head with base branch on `AUTO_MERGE_BRANCH_NAME`
     match attempt_merge(
         &repo.client,
         &gh_pr.head.sha,
@@ -136,7 +137,7 @@ async fn start_auto_build(
     .await?
     {
         MergeResult::Success(merge_sha) => {
-            // 2. Push merge commit to auto branch where CI runs
+            // 2. Push merge commit to `AUTO_BRANCH_NAME` where CI runs
             client
                 .set_branch_to_sha(AUTO_BRANCH_NAME, &merge_sha)
                 .await?;
@@ -151,12 +152,14 @@ async fn start_auto_build(
                 )
                 .await?;
 
-            // 4. Update label and post status comment
+            // 4. Update label
             handle_label_trigger(repo, pr.number, LabelTrigger::AutoBuildStarted).await?;
+
+            // 5. Post status comment
             let comment = auto_build_started_comment(&gh_pr.head.sha, &merge_sha);
             client.post_comment(pr.number, comment).await?;
 
-            // 5. Update GitHub status
+            // 6. Set GitHub commit status to pending on PR head
             let desc = format!(
                 "Testing commit {} with merge {}...",
                 gh_pr.head.sha, merge_sha
@@ -171,18 +174,18 @@ async fn start_auto_build(
                 )
                 .await?;
 
-            return Ok(true);
+            Ok(true)
         }
         MergeResult::Conflict => {
             repo.client
                 .post_comment(pr.number, merge_conflict_comment(&gh_pr.head.name))
                 .await?;
-            return Ok(false);
+            Ok(false)
         }
     }
 }
 
-/// Attempts to merge the given head SHA into `AUTO_MERGE_BRANCH_NAME` at the given base SHA.
+/// Attempts to merge the given head SHA with base SHA via `AUTO_MERGE_BRANCH_NAME`.
 async fn attempt_merge(
     client: &GithubRepositoryClient,
     head_sha: &CommitSha,
@@ -191,13 +194,13 @@ async fn attempt_merge(
 ) -> anyhow::Result<MergeResult> {
     tracing::debug!("Attempting to merge with base SHA {base_sha}");
 
-    // Reset auto-merge branch to base branch
+    // Reset auto merge branch to point to base branch
     client
         .set_branch_to_sha(AUTO_MERGE_BRANCH_NAME, base_sha)
         .await
-        .map_err(|error| anyhow!("Cannot set try merge branch to {}: {error:?}", base_sha.0))?;
+        .map_err(|error| anyhow!("Cannot set auto merge branch to {}: {error:?}", base_sha.0))?;
 
-    // then merge PR commit into auto-merge branch.
+    // then merge PR head commit into auto merge branch.
     match client
         .merge_branches(AUTO_MERGE_BRANCH_NAME, head_sha, merge_message)
         .await

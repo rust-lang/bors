@@ -307,7 +307,7 @@ async fn consume_merge_queue(
     ctx: Arc<BorsContext>,
     mut merge_queue_rx: mpsc::Receiver<MergeQueueEvent>,
 ) {
-    while let Some(_) = merge_queue_rx.recv().await {
+    while merge_queue_rx.recv().await.is_some() {
         // Drain any extras that have arrived.
         while let Ok(()) = merge_queue_rx.try_recv() {
             // We can do this as we know the state of the queue has changed
