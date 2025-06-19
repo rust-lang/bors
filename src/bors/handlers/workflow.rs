@@ -272,7 +272,7 @@ async fn complete_auto_build(
         tracing::info!("Auto build failed");
         (false, false)
     } else {
-        // Update base branch to point to the merged and tested commit
+        // Update base branch to point to the tested commit
         match repo
             .client
             .set_branch_to_sha(&pr.base_branch, &payload.commit_sha)
