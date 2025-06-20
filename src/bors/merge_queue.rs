@@ -10,7 +10,7 @@ use crate::{
         comment::{auto_build_started_comment, merge_conflict_comment},
         handlers::labels::handle_label_trigger,
     },
-    database::{BuildStatus, PullRequestModel},
+    database::{BuildStatus, MergeableState, PullRequestModel},
     github::{CommitSha, LabelTrigger, MergeError, api::client::GithubRepositoryClient},
     utils::sort_queue::sort_queue_prs,
 };
@@ -180,6 +180,10 @@ async fn start_auto_build(
             repo.client
                 .post_comment(pr.number, merge_conflict_comment(&gh_pr.head.name))
                 .await?;
+            ctx.db
+                .update_pr_mergeable_state(&pr, MergeableState::HasConflicts)
+                .await?;
+
             Ok(false)
         }
     }
