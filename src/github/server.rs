@@ -324,16 +324,20 @@ async fn consume_merge_queue(
     mut merge_queue_rx: mpsc::Receiver<MergeQueueEvent>,
 ) {
     while merge_queue_rx.recv().await.is_some() {
-        // Drain any extras that have arrived.
+        let mut drained_count = 0;
+        // Drain any extras that have arrived. We can do this as we know the state of
+        // the queue has changed and this single run should capture those changes.
         while let Ok(()) = merge_queue_rx.try_recv() {
-            // We can do this as we know the state of the queue has changed
-            // and this single run should capture those changes.
+            drained_count += 1;
         }
 
         let ctx = ctx.clone();
 
         let span = tracing::info_span!("MergeQueue");
-        tracing::debug!("Processing merge queue");
+        tracing::debug!(
+            "Processing merge queue, drained {} extra events",
+            drained_count
+        );
         if let Err(error) = handle_merge_queue(ctx).instrument(span.clone()).await {
             handle_root_error(span, error);
         }
