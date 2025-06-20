@@ -1014,6 +1014,19 @@ line two
     }
 
     #[test]
+    fn parse_try_jobs_glob() {
+        let cmds = parse_commands("@bors try jobs=ci-1,lint_2,foo*");
+        assert_eq!(cmds.len(), 1);
+        assert_eq!(
+            cmds[0],
+            Ok(BorsCommand::Try {
+                parent: None,
+                jobs: vec!["ci-1".to_string(), "lint_2".to_string(), "foo*".to_string()]
+            })
+        );
+    }
+
+    #[test]
     fn parse_try_jobs_empty() {
         let cmds = parse_commands("@bors try jobs=");
         assert_eq!(cmds.len(), 1);
