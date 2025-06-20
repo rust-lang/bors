@@ -6,8 +6,10 @@ use std::sync::Arc;
 use crate::{
     BorsContext,
     bors::{
-        RepositoryState,
-        comment::{auto_build_started_comment, merge_conflict_comment},
+        PullRequestStatus, RepositoryState,
+        comment::{
+            auto_build_push_failed_comment, auto_build_started_comment, merge_conflict_comment,
+        },
         handlers::labels::handle_label_trigger,
     },
     database::{BuildStatus, MergeableState, PullRequestModel},
@@ -55,6 +57,8 @@ pub async fn handle_merge_queue(ctx: Arc<BorsContext>) -> anyhow::Result<()> {
             let pr_num = pr.number;
 
             if let Some(auto_build) = &pr.auto_build {
+                let commit_sha = CommitSha(auto_build.commit_sha.clone());
+
                 match auto_build.status {
                     // Build in progress - stop queue. We can only have one PR built at a time.
                     BuildStatus::Pending => {
@@ -63,14 +67,34 @@ pub async fn handle_merge_queue(ctx: Arc<BorsContext>) -> anyhow::Result<()> {
                         );
                         break;
                     }
-                    // Successful builds should already be merged via webhooks,
-                    // so we handle stuck PRs caused by GitHub failures or crashes here.
+                    // Build successful- point the base branch to the merged commit.
                     BuildStatus::Success => {
-                        tracing::warn!(
-                            "PR {} has a successful build, skipping (should already be merged)",
-                            pr.number
-                        );
-                        todo!("Implement stuck PR recovery mechanism");
+                        match repo
+                            .client
+                            .set_branch_to_sha(&pr.base_branch, &commit_sha)
+                            .await
+                        {
+                            Ok(()) => {
+                                tracing::info!("Auto build succeeded and merged");
+                                ctx.db
+                                    .set_pr_status(
+                                        &pr.repository,
+                                        pr.number,
+                                        PullRequestStatus::Merged,
+                                    )
+                                    .await?;
+                            }
+                            Err(e) => {
+                                tracing::error!("Failed to push to base branch: {:?}", e);
+
+                                let comment =
+                                    auto_build_push_failed_comment(&commit_sha, &pr.base_branch);
+                                repo.client.post_comment(pr.number, comment).await?;
+
+                                // Continue to the next PR and keep it in the queue.
+                                continue;
+                            }
+                        };
                     }
                     BuildStatus::Failure | BuildStatus::Cancelled | BuildStatus::Timeouted => {
                         unreachable!("Failed auto builds should be filtered out by SQL query");

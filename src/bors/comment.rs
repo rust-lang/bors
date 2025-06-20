@@ -221,3 +221,12 @@ pub fn auto_build_failed_comment(workflows: &[WorkflowModel]) -> Comment {
         Comment::new(":broken_heart: Test failed".to_string())
     }
 }
+
+pub fn auto_build_push_failed_comment(merge_sha: &CommitSha, base_branch: &str) -> Comment {
+    Comment::new(format!(
+        ":x: Failed to push commit `{}` to `{}` branch.\n\n\
+This may be a temporary GitHub issue and will be retried on the next queue run.\n\n\
+",
+        merge_sha, base_branch
+    ))
+}
