@@ -73,12 +73,7 @@ pub async fn handle_merge_queue(ctx: Arc<BorsContext>) -> anyhow::Result<()> {
                         todo!("Implement stuck PR recovery mechanism");
                     }
                     BuildStatus::Failure | BuildStatus::Cancelled | BuildStatus::Timeouted => {
-                        tracing::debug!(
-                            "PR {} has a failed build ({}), skipping",
-                            pr.number,
-                            auto_build.status
-                        );
-                        continue;
+                        unreachable!("Failed auto builds should be filtered out by SQL query");
                     }
                 }
             }

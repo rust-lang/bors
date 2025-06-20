@@ -965,7 +965,7 @@ pub(crate) async fn get_merge_queue_prs(
     repo: &GithubRepoName,
     tree_priority: Option<i32>,
 ) -> anyhow::Result<Vec<PullRequestModel>> {
-    measure_db_query("get_approved_mergeable_pull_requests", || async {
+    measure_db_query("get_merge_queue_prs", || async {
         let records = sqlx::query_as!(
             PullRequestModel,
             r#"
@@ -996,6 +996,8 @@ pub(crate) async fn get_merge_queue_prs(
               AND pr.status = 'open'
               AND pr.approved_by IS NOT NULL
               AND pr.mergeable_state = 'mergeable'
+              -- Exclude PRs with failed auto builds
+              AND (auto_build.status IS NULL OR auto_build.status NOT IN ('failure', 'cancelled', 'timeouted'))
               -- Tree closure check (if tree_priority is set)
               AND ($2::int IS NULL OR pr.priority >= $2)
             "#,
