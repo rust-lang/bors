@@ -9,7 +9,7 @@ use crate::github::PullRequestNumber;
 use crate::github::{CommitSha, GithubRepoName};
 
 use super::operations::{
-    approve_pull_request, create_build, create_pull_request, create_workflow,
+    approve_pull_request, clear_pr_auto_build, create_build, create_pull_request, create_workflow,
     delegate_pull_request, find_build, find_pr_by_build, get_merge_queue_prs,
     get_nonclosed_pull_requests, get_nonclosed_pull_requests_by_base_branch,
     get_prs_with_unknown_mergeable_state, get_pull_request, get_repository, get_repository_by_name,
@@ -318,5 +318,9 @@ impl PgDbClient {
         tree_priority: Option<u32>,
     ) -> anyhow::Result<Vec<PullRequestModel>> {
         get_merge_queue_prs(&self.pool, repo, tree_priority.map(|p| p as i32)).await
+    }
+
+    pub async fn clear_pr_auto_build(&self, pr: &PullRequestModel) -> anyhow::Result<()> {
+        clear_pr_auto_build(&self.pool, pr.id).await
     }
 }

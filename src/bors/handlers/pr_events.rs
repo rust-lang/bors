@@ -54,7 +54,7 @@ pub(super) async fn handle_push_to_pull_request(
 
     mergeable_queue.enqueue(repo_state.repository().clone(), pr_number);
 
-    cancel_active_auto_build_for_pr(&repo_state, &db, &pr_model).await?;
+    clear_auto_build_for_pr(&repo_state, &db, &pr_model).await?;
 
     if !pr_model.is_approved() {
         return Ok(());
@@ -264,7 +264,7 @@ PR will need to be re-approved."#,
         .await
 }
 
-async fn cancel_active_auto_build_for_pr(
+async fn clear_auto_build_for_pr(
     repo_state: &RepositoryState,
     db: &PgDbClient,
     pr_model: &PullRequestModel,
@@ -273,21 +273,20 @@ async fn cancel_active_auto_build_for_pr(
         return Ok(());
     };
 
-    if auto_build.status != BuildStatus::Pending {
-        return Ok(());
+    if auto_build.status == BuildStatus::Pending {
+        tracing::info!(
+            "Cancelling auto build for PR {} due to push",
+            pr_model.number
+        );
+
+        cancel_build_workflows(&repo_state.client, db, auto_build).await?;
     }
 
     tracing::info!(
-        "Cancelling auto build for PR {} due to push",
+        "Clearing auto build reference for PR {} due to push",
         pr_model.number
     );
-
-    if let Err(error) = cancel_build_workflows(&repo_state.client, db, auto_build).await {
-        tracing::error!(
-            "Could not cancel auto build workflows for PR {}: {error:?}",
-            pr_model.number
-        );
-    }
+    db.clear_pr_auto_build(pr_model).await?;
 
     Ok(())
 }
