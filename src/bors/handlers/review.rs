@@ -20,6 +20,7 @@ use crate::permissions::PermissionType;
 
 /// Approve a pull request.
 /// A pull request can only be approved by a user of sufficient authority.
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn command_approve(
     repo_state: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
