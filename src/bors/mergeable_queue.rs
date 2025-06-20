@@ -121,8 +121,7 @@ impl MergeableQueueSender {
         );
     }
 
-    #[allow(dead_code)]
-    pub fn enqueue_now(&self, pr_number: PullRequestNumber, repo: GithubRepoName) {
+    pub fn enqueue_now(&self, repo: GithubRepoName, pr_number: PullRequestNumber) {
         self.insert_item(
             MergeableQueueItem {
                 pull_request: QueuedPullRequest { pr_number, repo },
