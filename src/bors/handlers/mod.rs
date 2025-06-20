@@ -84,7 +84,7 @@ pub async fn handle_bors_repository_event(
                 author = comment.author.username
             );
             let pr_number = comment.pr_number;
-            if let Err(error) = handle_comment(Arc::clone(&repo), db, ctx, comment)
+            if let Err(error) = handle_comment(Arc::clone(&repo), db, ctx, merge_queue_tx, comment)
                 .instrument(span.clone())
                 .await
             {
@@ -354,6 +354,7 @@ async fn handle_comment(
     repo: Arc<RepositoryState>,
     database: Arc<PgDbClient>,
     ctx: Arc<BorsContext>,
+    merge_queue_tx: mpsc::Sender<MergeQueueEvent>,
     comment: PullRequestComment,
 ) -> anyhow::Result<()> {
     let pr_number = comment.pr_number;
@@ -374,6 +375,8 @@ async fn handle_comment(
         .with_context(|| format!("Cannot get information about PR {pr_number}"))?;
 
     for command in commands {
+        let merge_queue_tx = merge_queue_tx.clone();
+
         match command {
             Ok(command) => {
                 // Reload the PR state from DB, because a previous command might have changed it.
@@ -399,6 +402,7 @@ async fn handle_comment(
                         command_approve(
                             repo,
                             database,
+                            merge_queue_tx,
                             &pr,
                             &comment.author,
                             &approver,
@@ -429,7 +433,7 @@ async fn handle_comment(
                     }
                     BorsCommand::Unapprove => {
                         let span = tracing::info_span!("Unapprove");
-                        command_unapprove(repo, database, &pr, &comment.author)
+                        command_unapprove(repo, database, merge_queue_tx, &pr, &comment.author)
                             .instrument(span)
                             .await
                     }

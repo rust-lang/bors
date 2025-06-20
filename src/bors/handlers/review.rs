@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use tokio::sync::mpsc;
+
 use crate::PgDbClient;
 use crate::bors::Comment;
 use crate::bors::RepositoryState;
@@ -8,6 +10,7 @@ use crate::bors::command::RollupMode;
 use crate::bors::handlers::has_permission;
 use crate::bors::handlers::labels::handle_label_trigger;
 use crate::bors::handlers::{PullRequestData, deny_request};
+use crate::bors::merge_queue::MergeQueueEvent;
 use crate::database::ApprovalInfo;
 use crate::database::DelegatedPermission;
 use crate::database::TreeState;
@@ -20,6 +23,7 @@ use crate::permissions::PermissionType;
 pub(super) async fn command_approve(
     repo_state: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
+    merge_queue_tx: mpsc::Sender<MergeQueueEvent>,
     pr: &PullRequestData,
     author: &GithubUser,
     approver: &Approver,
@@ -42,7 +46,9 @@ pub(super) async fn command_approve(
 
     db.approve(&pr.db, approval_info, priority, rollup).await?;
     handle_label_trigger(&repo_state, pr.number(), LabelTrigger::Approved).await?;
-    notify_of_approval(&repo_state, pr, approver.as_str()).await
+    notify_of_approval(&repo_state, pr, approver.as_str()).await?;
+    merge_queue_tx.send(()).await?;
+    Ok(())
 }
 
 /// Unapprove a pull request.
@@ -50,6 +56,7 @@ pub(super) async fn command_approve(
 pub(super) async fn command_unapprove(
     repo_state: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
+    merge_queue_tx: mpsc::Sender<MergeQueueEvent>,
     pr: &PullRequestData,
     author: &GithubUser,
 ) -> anyhow::Result<()> {
@@ -61,7 +68,9 @@ pub(super) async fn command_unapprove(
 
     db.unapprove(&pr.db).await?;
     handle_label_trigger(&repo_state, pr.number(), LabelTrigger::Unapproved).await?;
-    notify_of_unapproval(&repo_state, pr).await
+    notify_of_unapproval(&repo_state, pr).await?;
+    merge_queue_tx.send(()).await?;
+    Ok(())
 }
 
 /// Set the priority of a pull request.

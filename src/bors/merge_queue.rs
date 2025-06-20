@@ -67,7 +67,7 @@ pub async fn handle_merge_queue(ctx: Arc<BorsContext>) -> anyhow::Result<()> {
                         );
                         break;
                     }
-                    // Build successful- point the base branch to the merged commit.
+                    // Build successful - point the base branch to the merged commit.
                     BuildStatus::Success => {
                         match repo
                             .client
