@@ -56,7 +56,6 @@ pub(super) async fn command_approve(
 pub(super) async fn command_unapprove(
     repo_state: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
-    merge_queue_tx: mpsc::Sender<MergeQueueEvent>,
     pr: &PullRequestData,
     author: &GithubUser,
 ) -> anyhow::Result<()> {
@@ -68,9 +67,7 @@ pub(super) async fn command_unapprove(
 
     db.unapprove(&pr.db).await?;
     handle_label_trigger(&repo_state, pr.number(), LabelTrigger::Unapproved).await?;
-    notify_of_unapproval(&repo_state, pr).await?;
-    merge_queue_tx.send(()).await?;
-    Ok(())
+    notify_of_unapproval(&repo_state, pr).await
 }
 
 /// Set the priority of a pull request.
