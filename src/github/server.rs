@@ -220,10 +220,17 @@ pub fn create_bors_process(
                 consume_repository_events(
                     ctx.clone(),
                     repository_rx,
-                    merge_queue_tx,
+                    merge_queue_tx.clone(),
                     mq_tx.clone()
                 ),
-                consume_global_events(ctx.clone(), global_rx, mq_tx, gh_client, team_api),
+                consume_global_events(
+                    ctx.clone(),
+                    global_rx,
+                    mq_tx.clone(),
+                    merge_queue_tx,
+                    gh_client,
+                    team_api
+                ),
                 consume_merge_queue(ctx.clone(), merge_queue_rx),
                 consume_mergeable_queue(ctx, mergeable_queue_rx)
             );
@@ -234,10 +241,10 @@ pub fn create_bors_process(
         #[cfg(not(test))]
         {
             tokio::select! {
-                _ = consume_repository_events(ctx.clone(), repository_rx, merge_queue_tx, mq_tx.clone()) => {
+                _ = consume_repository_events(ctx.clone(), repository_rx, merge_queue_tx.clone(), mq_tx.clone()) => {
                     tracing::error!("Repository event handling process has ended");
                 }
-                _ = consume_global_events(ctx.clone(), global_rx, mq_tx, gh_client, team_api) => {
+                _ = consume_global_events(ctx.clone(), global_rx, mq_tx, merge_queue_tx, gh_client, team_api) => {
                     tracing::error!("Global event handling process has ended");
                 }
                 _ = consume_merge_queue(ctx.clone(), merge_queue_rx) => {
@@ -286,6 +293,7 @@ async fn consume_global_events(
     ctx: Arc<BorsContext>,
     mut global_rx: mpsc::Receiver<BorsGlobalEvent>,
     mergeable_queue_tx: MergeableQueueSender,
+    merge_queue_tx: mpsc::Sender<MergeQueueEvent>,
     gh_client: Octocrab,
     team_api: TeamApiClient,
 ) {
@@ -295,10 +303,16 @@ async fn consume_global_events(
 
         let span = tracing::info_span!("GlobalEvent");
         tracing::debug!("Received global event: {event:#?}");
-        if let Err(error) =
-            handle_bors_global_event(event, ctx, &gh_client, &team_api, mergeable_queue_tx)
-                .instrument(span.clone())
-                .await
+        if let Err(error) = handle_bors_global_event(
+            event,
+            ctx,
+            &gh_client,
+            &team_api,
+            mergeable_queue_tx,
+            merge_queue_tx.clone(),
+        )
+        .instrument(span.clone())
+        .await
         {
             handle_root_error(span, error);
         }

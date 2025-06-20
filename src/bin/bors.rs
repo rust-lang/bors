@@ -32,6 +32,9 @@ const MERGEABILITY_STATUS_INTERVAL: Duration = Duration::from_secs(60 * 10);
 /// How often should the bot synchronize PR state.
 const PR_STATE_PERIODIC_REFRESH: Duration = Duration::from_secs(60 * 10);
 
+/// How often should the bot process the merge queue.
+const MERGE_QUEUE_INTERVAL: Duration = Duration::from_secs(30);
+
 #[derive(clap::Parser)]
 struct Opts {
     /// Github App ID.
@@ -157,6 +160,7 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
         let mut cancel_builds_refresh = make_interval(CANCEL_TIMED_OUT_BUILDS_INTERVAL);
         let mut mergeability_status_refresh = make_interval(MERGEABILITY_STATUS_INTERVAL);
         let mut prs_interval = make_interval(PR_STATE_PERIODIC_REFRESH);
+        let mut merge_queue_interval = make_interval(MERGE_QUEUE_INTERVAL);
         loop {
             tokio::select! {
                 _ = config_refresh.tick() => {
@@ -173,6 +177,9 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
                 }
                 _ = prs_interval.tick() => {
                     refresh_tx.send(BorsGlobalEvent::RefreshPullRequestState).await?;
+                }
+                _ = merge_queue_interval.tick() => {
+                    refresh_tx.send(BorsGlobalEvent::ProcessMergeQueue).await?;
                 }
             }
         }

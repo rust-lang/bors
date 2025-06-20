@@ -241,6 +241,7 @@ pub async fn handle_bors_global_event(
     gh_client: &Octocrab,
     team_api_client: &TeamApiClient,
     mergeable_queue_tx: MergeableQueueSender,
+    merge_queue_tx: mpsc::Sender<MergeQueueEvent>,
 ) -> anyhow::Result<()> {
     let db = Arc::clone(&ctx.db);
     match event {
@@ -315,6 +316,9 @@ pub async fn handle_bors_global_event(
 
             #[cfg(test)]
             crate::bors::WAIT_FOR_PR_STATUS_REFRESH.mark();
+        }
+        BorsGlobalEvent::ProcessMergeQueue => {
+            merge_queue_tx.send(()).await?;
         }
     }
     Ok(())
