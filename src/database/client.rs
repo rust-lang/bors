@@ -1,7 +1,6 @@
 use sqlx::PgPool;
 
 use crate::bors::{PullRequestStatus, RollupMode};
-use crate::database::operations::get_merge_queue_pull_requests;
 use crate::database::{
     BuildModel, BuildStatus, PullRequestModel, RepoModel, TreeState, WorkflowModel, WorkflowStatus,
     WorkflowType,
@@ -11,14 +10,14 @@ use crate::github::{CommitSha, GithubRepoName};
 
 use super::operations::{
     approve_pull_request, create_build, create_pull_request, create_workflow,
-    delegate_pull_request, find_build, find_pr_by_build, get_nonclosed_pull_requests,
-    get_nonclosed_pull_requests_by_base_branch, get_prs_with_unknown_mergeable_state,
-    get_pull_request, get_repository, get_repository_by_name, get_running_builds,
-    get_workflow_urls_for_build, get_workflows_for_build, insert_repo_if_not_exists,
-    set_pr_assignees, set_pr_priority, set_pr_rollup, set_pr_status, unapprove_pull_request,
-    undelegate_pull_request, update_build_status, update_mergeable_states_by_base_branch,
-    update_pr_auto_build_id, update_pr_build_id, update_pr_mergeable_state, update_workflow_status,
-    upsert_pull_request, upsert_repository,
+    delegate_pull_request, find_build, find_pr_by_build, get_merge_queue_prs,
+    get_nonclosed_pull_requests, get_nonclosed_pull_requests_by_base_branch,
+    get_prs_with_unknown_mergeable_state, get_pull_request, get_repository, get_repository_by_name,
+    get_running_builds, get_workflow_urls_for_build, get_workflows_for_build,
+    insert_repo_if_not_exists, set_pr_assignees, set_pr_priority, set_pr_rollup, set_pr_status,
+    unapprove_pull_request, undelegate_pull_request, update_build_status,
+    update_mergeable_states_by_base_branch, update_pr_auto_build_id, update_pr_build_id,
+    update_pr_mergeable_state, update_workflow_status, upsert_pull_request, upsert_repository,
 };
 use super::{ApprovalInfo, DelegatedPermission, MergeableState, RunId, UpsertPullRequestParams};
 
@@ -313,11 +312,11 @@ impl PgDbClient {
         upsert_repository(&self.pool, repo, tree_state).await
     }
 
-    pub async fn get_merge_queue_pull_requests(
+    pub async fn get_merge_queue_prs(
         &self,
         repo: &GithubRepoName,
         tree_priority: Option<u32>,
     ) -> anyhow::Result<Vec<PullRequestModel>> {
-        get_merge_queue_pull_requests(&self.pool, repo, tree_priority.map(|p| p as i32)).await
+        get_merge_queue_prs(&self.pool, repo, tree_priority.map(|p| p as i32)).await
     }
 }

@@ -12,6 +12,7 @@ use crate::{
     },
     database::{BuildStatus, PullRequestModel},
     github::{CommitSha, LabelTrigger, MergeError, api::client::GithubRepositoryClient},
+    utils::sort_queue::sort_queue_prs,
 };
 
 /// Branch used for performing merge operations.
@@ -43,13 +44,12 @@ pub async fn handle_merge_queue(ctx: Arc<BorsContext>) -> anyhow::Result<()> {
             }
         };
         let priority = repo_db.tree_state.priority();
-        // Fetch all eligible PRs from the database.
+        let prs = ctx.db.get_merge_queue_prs(repo_name, priority).await?;
+
+        // Sort PRs according to merge queue priority rules.
         // Pending PRs come first - this is important as we make sure to block the queue to
         // prevent starting simultaneous auto-builds.
-        let prs = ctx
-            .db
-            .get_merge_queue_pull_requests(repo_name, priority)
-            .await?;
+        let prs = sort_queue_prs(prs);
 
         for pr in prs {
             let pr_num = pr.number;

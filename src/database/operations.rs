@@ -960,12 +960,12 @@ pub(crate) async fn upsert_repository(
     .await
 }
 
-pub(crate) async fn get_merge_queue_pull_requests(
+pub(crate) async fn get_merge_queue_prs(
     executor: impl PgExecutor<'_>,
     repo: &GithubRepoName,
     tree_priority: Option<i32>,
 ) -> anyhow::Result<Vec<PullRequestModel>> {
-    measure_db_query("get_merge_queue_pull_requests", || async {
+    measure_db_query("get_approved_mergeable_pull_requests", || async {
         let records = sqlx::query_as!(
             PullRequestModel,
             r#"
@@ -998,32 +998,6 @@ pub(crate) async fn get_merge_queue_pull_requests(
               AND pr.mergeable_state = 'mergeable'
               -- Tree closure check (if tree_priority is set)
               AND ($2::int IS NULL OR pr.priority >= $2)
-            ORDER BY
-                -- 1. Build status priority
-                CASE
-                    WHEN auto_build.status = 'pending' THEN 1
-                    WHEN pr.approved_by IS NOT NULL AND auto_build.id IS NULL THEN 2
-                    WHEN auto_build.id IS NULL THEN 3
-                    WHEN auto_build.status IN ('cancelled', 'timeouted') THEN 4
-                    WHEN auto_build.status = 'failure' THEN 5
-                    WHEN auto_build.status = 'success' THEN 6
-                    ELSE -1
-                END,
-                -- 2. Priority
-                -COALESCE(pr.priority, 0),
-                -- 3. Rollup (capped at -1)
-                GREATEST(
-                    CASE
-                        WHEN pr.rollup = 'always' THEN -2
-                        WHEN pr.rollup = 'maybe' THEN 0
-                        WHEN pr.rollup = 'iffy' THEN -1
-                        WHEN pr.rollup = 'never' THEN 1
-                        ELSE 0
-                    END,
-                    -1
-                ),
-                -- 4. PR number (older PRs first)
-                pr.number
             "#,
             repo as &GithubRepoName,
             tree_priority

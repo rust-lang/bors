@@ -13,6 +13,7 @@ use crate::github::webhook::WebhookSecret;
 use crate::templates::{
     HelpTemplate, HtmlTemplate, NotFoundTemplate, PullRequestStats, QueueTemplate, RepositoryView,
 };
+use crate::utils::sort_queue::sort_queue_prs;
 use crate::{BorsGlobalEvent, BorsRepositoryEvent, PgDbClient, TeamApiClient};
 
 use super::AppError;
@@ -133,6 +134,7 @@ async fn queue_handler(
     };
 
     let prs = state.db.get_nonclosed_pull_requests(&repo.name).await?;
+    let prs = sort_queue_prs(prs);
 
     // TODO: add failed count
     let (approved_count, rolled_up_count) = prs.iter().fold((0, 0), |(approved, rolled_up), pr| {
