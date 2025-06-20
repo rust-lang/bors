@@ -84,7 +84,7 @@ pub async fn handle_bors_repository_event(
                 author = comment.author.username
             );
             let pr_number = comment.pr_number;
-            if let Err(error) = handle_comment(Arc::clone(&repo), db, ctx, merge_queue_tx, comment)
+            if let Err(error) = handle_comment(Arc::clone(&repo), db, ctx, comment)
                 .instrument(span.clone())
                 .await
             {
@@ -354,7 +354,6 @@ async fn handle_comment(
     repo: Arc<RepositoryState>,
     database: Arc<PgDbClient>,
     ctx: Arc<BorsContext>,
-    merge_queue_tx: mpsc::Sender<MergeQueueEvent>,
     comment: PullRequestComment,
 ) -> anyhow::Result<()> {
     let pr_number = comment.pr_number;
@@ -521,10 +520,6 @@ async fn handle_comment(
                     .context("Could not reply to PR comment")?;
             }
         }
-    }
-
-    if let Err(err) = merge_queue_tx.send(()).await {
-        tracing::error!("Failed to send merge queue message: {err}");
     }
 
     Ok(())
