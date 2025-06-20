@@ -144,7 +144,7 @@ async fn start_auto_build(
 
             // 3. Record the build in the database
             ctx.db
-                .attach_try_build(
+                .attach_auto_build(
                     &pr,
                     AUTO_BRANCH_NAME.to_string(),
                     merge_sha.clone(),
