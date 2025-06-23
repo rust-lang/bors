@@ -1,5 +1,6 @@
 use anyhow::Context;
 use octocrab::Octocrab;
+pub use octocrab::models::StatusState;
 use octocrab::models::{App, Repository};
 use tracing::log;
 
@@ -340,6 +341,40 @@ impl GithubRepositoryClient {
             prs.push(pr.into());
         }
         Ok(prs)
+    }
+
+    /// Create a commit status for the given SHA.
+    pub async fn create_commit_status(
+        &self,
+        sha: &CommitSha,
+        state: StatusState,
+        target_url: Option<&str>,
+        description: Option<&str>,
+        context: Option<&str>,
+    ) -> anyhow::Result<()> {
+        perform_network_request_with_retry("create_commit_status", || async {
+            let repos = self
+                .client
+                .repos(&self.repository().owner, &self.repository().name);
+            let mut builder = repos.create_status(sha.0.clone(), state);
+
+            if let Some(url) = target_url {
+                builder = builder.target(url.to_string());
+            }
+            if let Some(desc) = description {
+                builder = builder.description(desc.to_string());
+            }
+            if let Some(ctx) = context {
+                builder = builder.context(ctx.to_string());
+            }
+
+            builder
+                .send()
+                .await
+                .context("Cannot create commit status")?;
+            Ok(())
+        })
+        .await?
     }
 
     fn format_pr(&self, pr: PullRequestNumber) -> String {

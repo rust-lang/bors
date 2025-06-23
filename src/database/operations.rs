@@ -53,9 +53,11 @@ pub(crate) async fn get_pull_request(
         pr.base_branch,
         pr.mergeable_state as "mergeable_state: MergeableState",
         pr.created_at as "created_at: DateTime<Utc>",
-        build AS "try_build: BuildModel"
+        try_build AS "try_build: BuildModel",
+        auto_build AS "auto_build: BuildModel"
     FROM pull_request as pr
-    LEFT JOIN build ON pr.build_id = build.id
+    LEFT JOIN build AS try_build ON pr.build_id = try_build.id
+    LEFT JOIN build AS auto_build ON pr.auto_build_id = auto_build.id
     WHERE pr.repository = $1 AND
           pr.number = $2
     "#,
@@ -163,9 +165,11 @@ pub(crate) async fn upsert_pull_request(
                 pr.base_branch,
                 pr.mergeable_state as "mergeable_state: MergeableState",
                 pr.created_at as "created_at: DateTime<Utc>",
-                build AS "try_build: BuildModel"
+                try_build AS "try_build: BuildModel",
+                auto_build AS "auto_build: BuildModel"
             FROM upserted_pr as pr
-            LEFT JOIN build ON pr.build_id = build.id
+            LEFT JOIN build AS try_build ON pr.build_id = try_build.id
+            LEFT JOIN build AS auto_build ON pr.auto_build_id = auto_build.id
             "#,
             repo as &GithubRepoName,
             params.pr_number.0 as i32,
@@ -212,9 +216,11 @@ pub(crate) async fn get_nonclosed_pull_requests_by_base_branch(
                 pr.base_branch,
                 pr.mergeable_state as "mergeable_state: MergeableState",
                 pr.created_at as "created_at: DateTime<Utc>",
-                build AS "try_build: BuildModel"
+                try_build AS "try_build: BuildModel",
+                auto_build AS "auto_build: BuildModel"
             FROM pull_request as pr
-            LEFT JOIN build ON pr.build_id = build.id
+            LEFT JOIN build AS try_build ON pr.build_id = try_build.id
+            LEFT JOIN build AS auto_build ON pr.auto_build_id = auto_build.id
             WHERE pr.repository = $1
               AND pr.base_branch = $2
               AND pr.status IN ('open', 'draft')
@@ -256,9 +262,11 @@ pub(crate) async fn get_nonclosed_pull_requests(
                 pr.base_branch,
                 pr.mergeable_state as "mergeable_state: MergeableState",
                 pr.created_at as "created_at: DateTime<Utc>",
-                build AS "try_build: BuildModel"
+                try_build AS "try_build: BuildModel",
+                auto_build AS "auto_build: BuildModel"
             FROM pull_request as pr
-            LEFT JOIN build ON pr.build_id = build.id
+            LEFT JOIN build AS try_build ON pr.build_id = try_build.id
+            LEFT JOIN build AS auto_build ON pr.auto_build_id = auto_build.id
             WHERE pr.repository = $1
                 AND pr.status IN ('open', 'draft')
             "#,
@@ -318,9 +326,11 @@ pub(crate) async fn get_prs_with_unknown_mergeable_state(
                 pr.base_branch,
                 pr.mergeable_state as "mergeable_state: MergeableState",
                 pr.created_at as "created_at: DateTime<Utc>",
-                build AS "try_build: BuildModel"
+                try_build AS "try_build: BuildModel",
+                auto_build AS "auto_build: BuildModel"
             FROM pull_request as pr
-            LEFT JOIN build ON pr.build_id = build.id
+            LEFT JOIN build AS try_build ON pr.build_id = try_build.id
+            LEFT JOIN build AS auto_build ON pr.auto_build_id = auto_build.id
             WHERE pr.repository = $1
               AND pr.mergeable_state = 'unknown'
               AND pr.status IN ('open', 'draft')
@@ -470,10 +480,12 @@ SELECT
     pr.mergeable_state as "mergeable_state: MergeableState",
     pr.rollup as "rollup: RollupMode",
     pr.created_at as "created_at: DateTime<Utc>",
-    build AS "try_build: BuildModel"
+    try_build AS "try_build: BuildModel",
+    auto_build AS "auto_build: BuildModel"
 FROM pull_request as pr
-LEFT JOIN build ON pr.build_id = build.id
-WHERE build.id = $1
+LEFT JOIN build AS try_build ON pr.build_id = try_build.id
+LEFT JOIN build AS auto_build ON pr.auto_build_id = auto_build.id
+WHERE try_build.id = $1
 "#,
             build_id
         )
@@ -494,6 +506,40 @@ pub(crate) async fn update_pr_build_id(
         sqlx::query!(
             "UPDATE pull_request SET build_id = $1 WHERE id = $2",
             build_id,
+            pr_id
+        )
+        .execute(executor)
+        .await?;
+        Ok(())
+    })
+    .await
+}
+
+pub(crate) async fn update_pr_auto_build_id(
+    executor: impl PgExecutor<'_>,
+    pr_id: i32,
+    build_id: i32,
+) -> anyhow::Result<()> {
+    measure_db_query("update_pr_auto_build_id", || async {
+        sqlx::query!(
+            "UPDATE pull_request SET auto_build_id = $1 WHERE id = $2",
+            build_id,
+            pr_id
+        )
+        .execute(executor)
+        .await?;
+        Ok(())
+    })
+    .await
+}
+
+pub(crate) async fn clear_pr_auto_build(
+    executor: impl PgExecutor<'_>,
+    pr_id: i32,
+) -> anyhow::Result<()> {
+    measure_db_query("clear_pr_auto_build", || async {
+        sqlx::query!(
+            "UPDATE pull_request SET auto_build_id = NULL WHERE id = $1",
             pr_id
         )
         .execute(executor)
@@ -926,6 +972,57 @@ pub(crate) async fn upsert_repository(
         .await?;
 
         Ok(())
+    })
+    .await
+}
+
+pub(crate) async fn get_merge_queue_prs(
+    executor: impl PgExecutor<'_>,
+    repo: &GithubRepoName,
+    tree_priority: Option<i32>,
+) -> anyhow::Result<Vec<PullRequestModel>> {
+    measure_db_query("get_merge_queue_prs", || async {
+        let records = sqlx::query_as!(
+            PullRequestModel,
+            r#"
+            SELECT
+                pr.id,
+                pr.repository as "repository: GithubRepoName",
+                pr.number as "number!: i64",
+                pr.title,
+                pr.author,
+                pr.assignees as "assignees: Assignees",
+                (
+                    pr.approved_by,
+                    pr.approved_sha
+                ) AS "approval_status!: ApprovalStatus",
+                pr.status as "pr_status: PullRequestStatus",
+                pr.priority,
+                pr.rollup as "rollup: RollupMode",
+                pr.delegated_permission as "delegated_permission: DelegatedPermission",
+                pr.base_branch,
+                pr.mergeable_state as "mergeable_state: MergeableState",
+                pr.created_at as "created_at: DateTime<Utc>",
+                try_build AS "try_build: BuildModel",
+                auto_build AS "auto_build: BuildModel"
+            FROM pull_request as pr
+            LEFT JOIN build AS try_build ON pr.build_id = try_build.id
+            LEFT JOIN build AS auto_build ON pr.auto_build_id = auto_build.id
+            WHERE pr.repository = $1
+              AND pr.status = 'open'
+              AND pr.approved_by IS NOT NULL
+              AND pr.mergeable_state = 'mergeable'
+              -- Exclude PRs with failed auto builds
+              AND (auto_build.status IS NULL OR auto_build.status NOT IN ('failure', 'cancelled', 'timeouted'))
+              -- Tree closure check (if tree_priority is set)
+              AND ($2::int IS NULL OR pr.priority >= $2)
+            "#,
+            repo as &GithubRepoName,
+            tree_priority
+        )
+        .fetch_all(executor)
+        .await?;
+        Ok(records)
     })
     .await
 }

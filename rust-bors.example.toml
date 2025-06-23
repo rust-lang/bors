@@ -8,9 +8,15 @@ timeout = 3600
 # - try: Try build has started
 # - try_succeed: Try build has finished
 # - try_failed: Try build has failed
+# - auto: Auto build has started
+# - auto_succeed: Auto build has finished
+# - auto_failed: Auto build has failed
 # (Optional)
 [labels]
 approve = ["+approved"]
 try = ["+foo", "-bar"]
 try_succeed = ["+foobar", "+foo", "+baz"]
 try_failed = []
+auto = ["+merge-testing"]
+auto_succeed = ["+merged", "-merge-testing"]
+auto_failed = ["+merge-failed", "-merge-testing"]

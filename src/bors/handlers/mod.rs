@@ -19,6 +19,7 @@ use crate::bors::handlers::trybuild::{TRY_BRANCH_NAME, command_try_build, comman
 use crate::bors::handlers::workflow::{
     handle_check_suite_completed, handle_workflow_completed, handle_workflow_started,
 };
+use crate::bors::merge_queue::{AUTO_BRANCH_NAME, MergeQueueEvent};
 use crate::bors::{BorsContext, Comment, RepositoryState};
 use crate::database::{DelegatedPermission, PullRequestModel};
 use crate::github::{GithubUser, PullRequest, PullRequestNumber};
@@ -33,13 +34,14 @@ use pr_events::{
 };
 use refresh::sync_pull_requests_state;
 use review::{command_delegate, command_set_priority, command_set_rollup, command_undelegate};
+use tokio::sync::mpsc;
 use tracing::Instrument;
 
 use super::mergeable_queue::MergeableQueueSender;
 
 mod help;
 mod info;
-mod labels;
+pub mod labels;
 mod ping;
 mod pr_events;
 mod refresh;
@@ -51,6 +53,7 @@ mod workflow;
 pub async fn handle_bors_repository_event(
     event: BorsRepositoryEvent,
     ctx: Arc<BorsContext>,
+    merge_queue_tx: mpsc::Sender<MergeQueueEvent>,
     mergeable_queue_tx: MergeableQueueSender,
 ) -> anyhow::Result<()> {
     let db = Arc::clone(&ctx.db);
@@ -81,7 +84,7 @@ pub async fn handle_bors_repository_event(
                 author = comment.author.username
             );
             let pr_number = comment.pr_number;
-            if let Err(error) = handle_comment(Arc::clone(&repo), db, ctx, comment)
+            if let Err(error) = handle_comment(Arc::clone(&repo), db, ctx, merge_queue_tx, comment)
                 .instrument(span.clone())
                 .await
             {
@@ -116,7 +119,7 @@ pub async fn handle_bors_repository_event(
                 repo = payload.repository.to_string(),
                 id = payload.run_id.into_inner()
             );
-            handle_workflow_completed(repo, db, payload)
+            handle_workflow_completed(repo, db, merge_queue_tx, payload)
                 .instrument(span.clone())
                 .await?;
         }
@@ -125,7 +128,7 @@ pub async fn handle_bors_repository_event(
                 "Check suite completed",
                 repo = payload.repository.to_string(),
             );
-            handle_check_suite_completed(repo, db, payload)
+            handle_check_suite_completed(repo, db, merge_queue_tx, payload)
                 .instrument(span.clone())
                 .await?;
         }
@@ -238,6 +241,7 @@ pub async fn handle_bors_global_event(
     gh_client: &Octocrab,
     team_api_client: &TeamApiClient,
     mergeable_queue_tx: MergeableQueueSender,
+    merge_queue_tx: mpsc::Sender<MergeQueueEvent>,
 ) -> anyhow::Result<()> {
     let db = Arc::clone(&ctx.db);
     match event {
@@ -313,6 +317,9 @@ pub async fn handle_bors_global_event(
             #[cfg(test)]
             crate::bors::WAIT_FOR_PR_STATUS_REFRESH.mark();
         }
+        BorsGlobalEvent::ProcessMergeQueue => {
+            merge_queue_tx.send(()).await?;
+        }
     }
     Ok(())
 }
@@ -347,6 +354,7 @@ async fn handle_comment(
     repo: Arc<RepositoryState>,
     database: Arc<PgDbClient>,
     ctx: Arc<BorsContext>,
+    merge_queue_tx: mpsc::Sender<MergeQueueEvent>,
     comment: PullRequestComment,
 ) -> anyhow::Result<()> {
     let pr_number = comment.pr_number;
@@ -367,6 +375,8 @@ async fn handle_comment(
         .with_context(|| format!("Cannot get information about PR {pr_number}"))?;
 
     for command in commands {
+        let merge_queue_tx = merge_queue_tx.clone();
+
         match command {
             Ok(command) => {
                 // Reload the PR state from DB, because a previous command might have changed it.
@@ -392,6 +402,7 @@ async fn handle_comment(
                         command_approve(
                             repo,
                             database,
+                            merge_queue_tx,
                             &pr,
                             &comment.author,
                             &approver,
@@ -514,6 +525,7 @@ async fn handle_comment(
             }
         }
     }
+
     Ok(())
 }
 
@@ -549,7 +561,7 @@ async fn reload_repos(
 
 /// Is this branch interesting for the bot?
 fn is_bors_observed_branch(branch: &str) -> bool {
-    branch == TRY_BRANCH_NAME
+    matches!(branch, TRY_BRANCH_NAME | AUTO_BRANCH_NAME)
 }
 
 /// Deny permission for a request.

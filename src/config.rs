@@ -58,6 +58,9 @@ where
         Try,
         TrySucceed,
         TryFailed,
+        Auto,
+        AutoSucceed,
+        AutoFailed,
     }
 
     impl From<Trigger> for LabelTrigger {
@@ -68,6 +71,9 @@ where
                 Trigger::Try => LabelTrigger::TryBuildStarted,
                 Trigger::TrySucceed => LabelTrigger::TryBuildSucceeded,
                 Trigger::TryFailed => LabelTrigger::TryBuildFailed,
+                Trigger::Auto => LabelTrigger::AutoBuildStarted,
+                Trigger::AutoSucceed => LabelTrigger::AutoBuildSucceeded,
+                Trigger::AutoFailed => LabelTrigger::AutoBuildFailed,
             }
         }
     }

@@ -5,9 +5,10 @@ use crate::bors::event::{
     PullRequestReopened, PullRequestUnassigned, PushToBranch,
 };
 use crate::bors::handlers::labels::handle_label_trigger;
+use crate::bors::handlers::trybuild::cancel_build_workflows;
 use crate::bors::mergeable_queue::MergeableQueueSender;
 use crate::bors::{Comment, PullRequestStatus, RepositoryState};
-use crate::database::MergeableState;
+use crate::database::{BuildStatus, MergeableState, PullRequestModel};
 use crate::github::{CommitSha, LabelTrigger, PullRequestNumber};
 use std::sync::Arc;
 
@@ -52,6 +53,8 @@ pub(super) async fn handle_push_to_pull_request(
         .await?;
 
     mergeable_queue.enqueue(repo_state.repository().clone(), pr_number);
+
+    clear_auto_build_for_pr(&repo_state, &db, &pr_model).await?;
 
     if !pr_model.is_approved() {
         return Ok(());
@@ -259,6 +262,33 @@ PR will need to be re-approved."#,
             )),
         )
         .await
+}
+
+async fn clear_auto_build_for_pr(
+    repo_state: &RepositoryState,
+    db: &PgDbClient,
+    pr_model: &PullRequestModel,
+) -> anyhow::Result<()> {
+    let Some(auto_build) = &pr_model.auto_build else {
+        return Ok(());
+    };
+
+    if auto_build.status == BuildStatus::Pending {
+        tracing::info!(
+            "Cancelling auto build for PR {} due to push",
+            pr_model.number
+        );
+
+        cancel_build_workflows(&repo_state.client, db, auto_build).await?;
+    }
+
+    tracing::info!(
+        "Clearing auto build reference for PR {} due to push",
+        pr_model.number
+    );
+    db.clear_pr_auto_build(pr_model).await?;
+
+    Ok(())
 }
 
 #[cfg(test)]

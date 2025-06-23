@@ -1,13 +1,24 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use octocrab::models::StatusState;
+use tokio::sync::mpsc;
+
 use crate::PgDbClient;
 use crate::bors::CheckSuiteStatus;
 use crate::bors::RepositoryState;
+use crate::bors::comment::auto_build_failed_comment;
+use crate::bors::comment::auto_build_succeeded_comment;
 use crate::bors::comment::{try_build_succeeded_comment, workflow_failed_comment};
 use crate::bors::event::{CheckSuiteCompleted, WorkflowCompleted, WorkflowStarted};
+use crate::bors::handlers::TRY_BRANCH_NAME;
 use crate::bors::handlers::is_bors_observed_branch;
 use crate::bors::handlers::labels::handle_label_trigger;
+use crate::bors::merge_queue::AUTO_BRANCH_NAME;
+use crate::bors::merge_queue::MergeQueueEvent;
+use crate::database::BuildModel;
+use crate::database::PullRequestModel;
+use crate::database::WorkflowModel;
 use crate::database::{BuildStatus, WorkflowStatus};
 use crate::github::LabelTrigger;
 
@@ -62,6 +73,7 @@ pub(super) async fn handle_workflow_started(
 pub(super) async fn handle_workflow_completed(
     repo: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
+    merge_queue_tx: mpsc::Sender<MergeQueueEvent>,
     mut payload: WorkflowCompleted,
 ) -> anyhow::Result<()> {
     if !is_bors_observed_branch(&payload.branch) {
@@ -95,12 +107,13 @@ pub(super) async fn handle_workflow_completed(
         branch: payload.branch,
         commit_sha: payload.commit_sha,
     };
-    try_complete_build(repo.as_ref(), db.as_ref(), event).await
+    try_complete_build(repo.as_ref(), db.as_ref(), merge_queue_tx, event).await
 }
 
 pub(super) async fn handle_check_suite_completed(
     repo: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
+    merge_queue_tx: mpsc::Sender<MergeQueueEvent>,
     payload: CheckSuiteCompleted,
 ) -> anyhow::Result<()> {
     if !is_bors_observed_branch(&payload.branch) {
@@ -112,13 +125,15 @@ pub(super) async fn handle_check_suite_completed(
         payload.branch,
         payload.commit_sha
     );
-    try_complete_build(repo.as_ref(), db.as_ref(), payload).await
+
+    try_complete_build(repo.as_ref(), db.as_ref(), merge_queue_tx, payload).await
 }
 
 /// Try to complete a pending build.
 async fn try_complete_build(
     repo: &RepositoryState,
     db: &PgDbClient,
+    merge_queue_tx: mpsc::Sender<MergeQueueEvent>,
     payload: CheckSuiteCompleted,
 ) -> anyhow::Result<()> {
     if !is_bors_observed_branch(&payload.branch) {
@@ -184,15 +199,40 @@ async fn try_complete_build(
         return Ok(());
     }
 
-    let (status, trigger) = if has_failure {
-        (BuildStatus::Failure, LabelTrigger::TryBuildFailed)
-    } else {
-        (BuildStatus::Success, LabelTrigger::TryBuildSucceeded)
+    let branch = payload.branch.as_str();
+    let (status, trigger) = match (branch, has_failure) {
+        (TRY_BRANCH_NAME, true) => (BuildStatus::Failure, LabelTrigger::TryBuildFailed),
+        (TRY_BRANCH_NAME, false) => (BuildStatus::Success, LabelTrigger::TryBuildSucceeded),
+        (AUTO_BRANCH_NAME, true) => (BuildStatus::Failure, LabelTrigger::AutoBuildFailed),
+        (AUTO_BRANCH_NAME, false) => (BuildStatus::Success, LabelTrigger::AutoBuildSucceeded),
+        _ => unreachable!(),
     };
-    db.update_build_status(&build, status).await?;
 
+    db.update_build_status(&build, status).await?;
     handle_label_trigger(repo, pr.number, trigger).await?;
 
+    match branch {
+        TRY_BRANCH_NAME => {
+            complete_try_build(repo, pr, build, workflows, has_failure, payload).await?
+        }
+        AUTO_BRANCH_NAME => {
+            complete_auto_build(repo, pr, workflows, has_failure, payload, merge_queue_tx).await?;
+        }
+        _ => unreachable!("Branch should only be bors-observed branch"),
+    }
+
+    Ok(())
+}
+
+/// Complete the try build workflow.
+async fn complete_try_build(
+    repo: &RepositoryState,
+    pr: PullRequestModel,
+    build: BuildModel,
+    workflows: Vec<WorkflowModel>,
+    has_failure: bool,
+    payload: CheckSuiteCompleted,
+) -> anyhow::Result<()> {
     let message = if !has_failure {
         tracing::info!("Workflow succeeded");
         try_build_succeeded_comment(&workflows, payload.commit_sha, &build)
@@ -201,6 +241,51 @@ async fn try_complete_build(
         workflow_failed_comment(&workflows)
     };
     repo.client.post_comment(pr.number, message).await?;
+
+    Ok(())
+}
+
+/// Complete the auto build workflow.
+async fn complete_auto_build(
+    repo: &RepositoryState,
+    pr: PullRequestModel,
+    workflows: Vec<WorkflowModel>,
+    has_failure: bool,
+    payload: CheckSuiteCompleted,
+    merge_queue_tx: mpsc::Sender<MergeQueueEvent>,
+) -> anyhow::Result<()> {
+    let comment = if !has_failure {
+        tracing::info!("Auto build failed");
+        auto_build_failed_comment(&workflows)
+    } else {
+        tracing::info!("Auto build succeeded");
+        auto_build_succeeded_comment(
+            &workflows,
+            pr.approver().unwrap_or("<unknown>"),
+            &payload.commit_sha,
+            &pr.base_branch,
+        )
+    };
+    repo.client.post_comment(pr.number, comment).await?;
+
+    let (gh_status, gh_desc) = if !has_failure {
+        (StatusState::Failure, "Build failed")
+    } else {
+        (StatusState::Success, "Build succeeded")
+    };
+
+    let gh_pr = repo.client.get_pull_request(pr.number).await?;
+    repo.client
+        .create_commit_status(
+            &gh_pr.head.sha,
+            gh_status,
+            None,
+            Some(gh_desc),
+            Some("bors"),
+        )
+        .await?;
+
+    merge_queue_tx.send(()).await?;
 
     Ok(())
 }
