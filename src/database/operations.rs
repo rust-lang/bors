@@ -56,7 +56,7 @@ pub(crate) async fn get_pull_request(
         try_build AS "try_build: BuildModel",
         auto_build AS "auto_build: BuildModel"
     FROM pull_request as pr
-    LEFT JOIN build AS try_build ON pr.build_id = try_build.id
+    LEFT JOIN build AS try_build ON pr.try_build_id = try_build.id
     LEFT JOIN build AS auto_build ON pr.auto_build_id = auto_build.id
     WHERE pr.repository = $1 AND
           pr.number = $2
@@ -168,7 +168,7 @@ pub(crate) async fn upsert_pull_request(
                 try_build AS "try_build: BuildModel",
                 auto_build AS "auto_build: BuildModel"
             FROM upserted_pr as pr
-            LEFT JOIN build AS try_build ON pr.build_id = try_build.id
+            LEFT JOIN build AS try_build ON pr.try_build_id = try_build.id
             LEFT JOIN build AS auto_build ON pr.auto_build_id = auto_build.id
             "#,
             repo as &GithubRepoName,
@@ -219,7 +219,7 @@ pub(crate) async fn get_nonclosed_pull_requests_by_base_branch(
                 try_build AS "try_build: BuildModel",
                 auto_build AS "auto_build: BuildModel"
             FROM pull_request as pr
-            LEFT JOIN build AS try_build ON pr.build_id = try_build.id
+            LEFT JOIN build AS try_build ON pr.try_build_id = try_build.id
             LEFT JOIN build AS auto_build ON pr.auto_build_id = auto_build.id
             WHERE pr.repository = $1
               AND pr.base_branch = $2
@@ -265,7 +265,7 @@ pub(crate) async fn get_nonclosed_pull_requests(
                 try_build AS "try_build: BuildModel",
                 auto_build AS "auto_build: BuildModel"
             FROM pull_request as pr
-            LEFT JOIN build AS try_build ON pr.build_id = try_build.id
+            LEFT JOIN build AS try_build ON pr.try_build_id = try_build.id
             LEFT JOIN build AS auto_build ON pr.auto_build_id = auto_build.id
             WHERE pr.repository = $1
                 AND pr.status IN ('open', 'draft')
@@ -329,7 +329,7 @@ pub(crate) async fn get_prs_with_unknown_mergeable_state(
                 try_build AS "try_build: BuildModel",
                 auto_build AS "auto_build: BuildModel"
             FROM pull_request as pr
-            LEFT JOIN build AS try_build ON pr.build_id = try_build.id
+            LEFT JOIN build AS try_build ON pr.try_build_id = try_build.id
             LEFT JOIN build AS auto_build ON pr.auto_build_id = auto_build.id
             WHERE pr.repository = $1
               AND pr.mergeable_state = 'unknown'
@@ -483,7 +483,7 @@ SELECT
     try_build AS "try_build: BuildModel",
     auto_build AS "auto_build: BuildModel"
 FROM pull_request as pr
-LEFT JOIN build AS try_build ON pr.build_id = try_build.id
+LEFT JOIN build AS try_build ON pr.try_build_id = try_build.id
 LEFT JOIN build AS auto_build ON pr.auto_build_id = auto_build.id
 WHERE try_build.id = $1 OR auto_build.id = $1
 "#,
@@ -497,15 +497,15 @@ WHERE try_build.id = $1 OR auto_build.id = $1
     .await
 }
 
-pub(crate) async fn update_pr_build_id(
+pub(crate) async fn update_pr_try_build_id(
     executor: impl PgExecutor<'_>,
     pr_id: i32,
-    build_id: i32,
+    try_build_id: i32,
 ) -> anyhow::Result<()> {
-    measure_db_query("update_pr_build_id", || async {
+    measure_db_query("update_pr_try_build_id", || async {
         sqlx::query!(
-            "UPDATE pull_request SET build_id = $1 WHERE id = $2",
-            build_id,
+            "UPDATE pull_request SET try_build_id = $1 WHERE id = $2",
+            try_build_id,
             pr_id
         )
         .execute(executor)

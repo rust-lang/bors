@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "UPDATE pull_request SET build_id = $1 WHERE id = $2",
+  "query": "UPDATE pull_request SET try_build_id = $1 WHERE id = $2",
   "describe": {
     "columns": [],
     "parameters": {
@@ -11,5 +11,5 @@
     },
     "nullable": []
   },
-  "hash": "b08f5d2126abcdcfb1b2dad7a95806b2a19be003f7d0cba74c9cf5d966296474"
+  "hash": "e766e5d3d5c9323532585bd1c770e6d19f443219fdf2b4debce24b22bf91868a"
 }
