@@ -329,6 +329,7 @@ pub struct PullRequestModel {
     pub priority: Option<i32>,
     pub rollup: Option<RollupMode>,
     pub try_build: Option<BuildModel>,
+    pub auto_build: Option<BuildModel>,
     pub created_at: DateTime<Utc>,
 }
 

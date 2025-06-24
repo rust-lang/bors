@@ -1,0 +1,191 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            WITH upserted_pr AS (\n                INSERT INTO pull_request (repository, number, title, author, assignees, base_branch, mergeable_state, status)\n                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)\n                ON CONFLICT (repository, number)\n                DO UPDATE SET\n                    title = $3,\n                    author = $4,\n                    assignees = $5,\n                    base_branch = $6,\n                    mergeable_state = $7,\n                    status = $8\n                RETURNING *\n            )\n            SELECT\n                pr.id,\n                pr.repository as \"repository: GithubRepoName\",\n                pr.number as \"number!: i64\",\n                pr.title,\n                pr.author,\n                pr.assignees as \"assignees: Assignees\",\n                (\n                    pr.approved_by,\n                    pr.approved_sha\n                ) AS \"approval_status!: ApprovalStatus\",\n                pr.status as \"pr_status: PullRequestStatus\",\n                pr.priority,\n                pr.rollup as \"rollup: RollupMode\",\n                pr.delegated_permission as \"delegated_permission: DelegatedPermission\",\n                pr.base_branch,\n                pr.mergeable_state as \"mergeable_state: MergeableState\",\n                pr.created_at as \"created_at: DateTime<Utc>\",\n                try_build AS \"try_build: BuildModel\",\n                auto_build AS \"auto_build: BuildModel\"\n            FROM upserted_pr as pr\n            LEFT JOIN build AS try_build ON pr.try_build_id = try_build.id\n            LEFT JOIN build AS auto_build ON pr.auto_build_id = auto_build.id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "repository: GithubRepoName",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "number!: i64",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "title",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "author",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "assignees: Assignees",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "approval_status!: ApprovalStatus",
+        "type_info": "Record"
+      },
+      {
+        "ordinal": 7,
+        "name": "pr_status: PullRequestStatus",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "priority",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 9,
+        "name": "rollup: RollupMode",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "delegated_permission: DelegatedPermission",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "base_branch",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 12,
+        "name": "mergeable_state: MergeableState",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 13,
+        "name": "created_at: DateTime<Utc>",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 14,
+        "name": "try_build: BuildModel",
+        "type_info": {
+          "Custom": {
+            "name": "build",
+            "kind": {
+              "Composite": [
+                [
+                  "id",
+                  "Int4"
+                ],
+                [
+                  "repository",
+                  "Text"
+                ],
+                [
+                  "branch",
+                  "Text"
+                ],
+                [
+                  "commit_sha",
+                  "Text"
+                ],
+                [
+                  "status",
+                  "Text"
+                ],
+                [
+                  "parent",
+                  "Text"
+                ],
+                [
+                  "created_at",
+                  "Timestamptz"
+                ]
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 15,
+        "name": "auto_build: BuildModel",
+        "type_info": {
+          "Custom": {
+            "name": "build",
+            "kind": {
+              "Composite": [
+                [
+                  "id",
+                  "Int4"
+                ],
+                [
+                  "repository",
+                  "Text"
+                ],
+                [
+                  "branch",
+                  "Text"
+                ],
+                [
+                  "commit_sha",
+                  "Text"
+                ],
+                [
+                  "status",
+                  "Text"
+                ],
+                [
+                  "parent",
+                  "Text"
+                ],
+                [
+                  "created_at",
+                  "Timestamptz"
+                ]
+              ]
+            }
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      null,
+      false,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "367bf2de86a8a92b56b2be296cef119a7835ab5fd09326265a4a1403d0d6ad19"
+}

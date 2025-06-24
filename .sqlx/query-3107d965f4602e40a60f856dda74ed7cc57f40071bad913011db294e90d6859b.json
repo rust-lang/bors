@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n                pr.id,\n                pr.repository as \"repository: GithubRepoName\",\n                pr.number as \"number!: i64\",\n                pr.title,\n                pr.author,\n                pr.assignees as \"assignees: Assignees\",\n                (\n                    pr.approved_by,\n                    pr.approved_sha\n                ) AS \"approval_status!: ApprovalStatus\",\n                pr.status as \"pr_status: PullRequestStatus\",\n                pr.priority,\n                pr.rollup as \"rollup: RollupMode\",\n                pr.delegated_permission as \"delegated_permission: DelegatedPermission\",\n                pr.base_branch,\n                pr.mergeable_state as \"mergeable_state: MergeableState\",\n                pr.created_at as \"created_at: DateTime<Utc>\",\n                build AS \"try_build: BuildModel\"\n            FROM pull_request as pr\n            LEFT JOIN build ON pr.build_id = build.id\n            WHERE pr.repository = $1\n              AND pr.base_branch = $2\n              AND pr.status IN ('open', 'draft')\n            ",
+  "query": "\nSELECT\n    pr.id,\n    pr.repository as \"repository: GithubRepoName\",\n    pr.number as \"number!: i64\",\n    pr.title,\n    pr.author,\n    pr.assignees as \"assignees: Assignees\",\n    (\n        pr.approved_by,\n        pr.approved_sha\n    ) AS \"approval_status!: ApprovalStatus\",\n    pr.status as \"pr_status: PullRequestStatus\",\n    pr.delegated_permission as \"delegated_permission: DelegatedPermission\",\n    pr.priority,\n    pr.base_branch,\n    pr.mergeable_state as \"mergeable_state: MergeableState\",\n    pr.rollup as \"rollup: RollupMode\",\n    pr.created_at as \"created_at: DateTime<Utc>\",\n    try_build AS \"try_build: BuildModel\",\n    auto_build AS \"auto_build: BuildModel\"\nFROM pull_request as pr\nLEFT JOIN build AS try_build ON pr.try_build_id = try_build.id\nLEFT JOIN build AS auto_build ON pr.auto_build_id = auto_build.id\nWHERE try_build.id = $1 OR auto_build.id = $1\n",
   "describe": {
     "columns": [
       {
@@ -45,27 +45,27 @@
       },
       {
         "ordinal": 8,
-        "name": "priority",
-        "type_info": "Int4"
-      },
-      {
-        "ordinal": 9,
-        "name": "rollup: RollupMode",
-        "type_info": "Text"
-      },
-      {
-        "ordinal": 10,
         "name": "delegated_permission: DelegatedPermission",
         "type_info": "Text"
       },
       {
-        "ordinal": 11,
+        "ordinal": 9,
+        "name": "priority",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 10,
         "name": "base_branch",
         "type_info": "Text"
       },
       {
-        "ordinal": 12,
+        "ordinal": 11,
         "name": "mergeable_state: MergeableState",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 12,
+        "name": "rollup: RollupMode",
         "type_info": "Text"
       },
       {
@@ -113,12 +113,52 @@
             }
           }
         }
+      },
+      {
+        "ordinal": 15,
+        "name": "auto_build: BuildModel",
+        "type_info": {
+          "Custom": {
+            "name": "build",
+            "kind": {
+              "Composite": [
+                [
+                  "id",
+                  "Int4"
+                ],
+                [
+                  "repository",
+                  "Text"
+                ],
+                [
+                  "branch",
+                  "Text"
+                ],
+                [
+                  "commit_sha",
+                  "Text"
+                ],
+                [
+                  "status",
+                  "Text"
+                ],
+                [
+                  "parent",
+                  "Text"
+                ],
+                [
+                  "created_at",
+                  "Timestamptz"
+                ]
+              ]
+            }
+          }
+        }
       }
     ],
     "parameters": {
       "Left": [
-        "Text",
-        "Text"
+        "Int4"
       ]
     },
     "nullable": [
@@ -132,12 +172,13 @@
       false,
       true,
       true,
+      false,
+      false,
       true,
       false,
-      false,
-      false,
+      null,
       null
     ]
   },
-  "hash": "9174f0f76f57b4cdfcbc3b40310643169c56424f25df617bdd84739e1b6ec5e1"
+  "hash": "3107d965f4602e40a60f856dda74ed7cc57f40071bad913011db294e90d6859b"
 }

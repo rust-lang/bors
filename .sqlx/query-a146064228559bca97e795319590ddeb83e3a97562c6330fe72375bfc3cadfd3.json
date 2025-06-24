@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            WITH upserted_pr AS (\n                INSERT INTO pull_request (repository, number, title, author, assignees, base_branch, mergeable_state, status)\n                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)\n                ON CONFLICT (repository, number)\n                DO UPDATE SET\n                    title = $3,\n                    author = $4,\n                    assignees = $5,\n                    base_branch = $6,\n                    mergeable_state = $7,\n                    status = $8\n                RETURNING *\n            )\n            SELECT\n                pr.id,\n                pr.repository as \"repository: GithubRepoName\",\n                pr.number as \"number!: i64\",\n                pr.title,\n                pr.author,\n                pr.assignees as \"assignees: Assignees\",\n                (\n                    pr.approved_by,\n                    pr.approved_sha\n                ) AS \"approval_status!: ApprovalStatus\",\n                pr.status as \"pr_status: PullRequestStatus\",\n                pr.priority,\n                pr.rollup as \"rollup: RollupMode\",\n                pr.delegated_permission as \"delegated_permission: DelegatedPermission\",\n                pr.base_branch,\n                pr.mergeable_state as \"mergeable_state: MergeableState\",\n                pr.created_at as \"created_at: DateTime<Utc>\",\n                build AS \"try_build: BuildModel\"\n            FROM upserted_pr as pr\n            LEFT JOIN build ON pr.build_id = build.id\n            ",
+  "query": "\n            SELECT\n                pr.id,\n                pr.repository as \"repository: GithubRepoName\",\n                pr.number as \"number!: i64\",\n                pr.title,\n                pr.author,\n                pr.assignees as \"assignees: Assignees\",\n                (\n                    pr.approved_by,\n                    pr.approved_sha\n                ) AS \"approval_status!: ApprovalStatus\",\n                pr.status as \"pr_status: PullRequestStatus\",\n                pr.priority,\n                pr.rollup as \"rollup: RollupMode\",\n                pr.delegated_permission as \"delegated_permission: DelegatedPermission\",\n                pr.base_branch,\n                pr.mergeable_state as \"mergeable_state: MergeableState\",\n                pr.created_at as \"created_at: DateTime<Utc>\",\n                try_build AS \"try_build: BuildModel\",\n                auto_build AS \"auto_build: BuildModel\"\n            FROM pull_request as pr\n            LEFT JOIN build AS try_build ON pr.try_build_id = try_build.id\n            LEFT JOIN build AS auto_build ON pr.auto_build_id = auto_build.id\n            WHERE pr.repository = $1\n                AND pr.status IN ('open', 'draft')\n            ",
   "describe": {
     "columns": [
       {
@@ -113,17 +113,51 @@
             }
           }
         }
+      },
+      {
+        "ordinal": 15,
+        "name": "auto_build: BuildModel",
+        "type_info": {
+          "Custom": {
+            "name": "build",
+            "kind": {
+              "Composite": [
+                [
+                  "id",
+                  "Int4"
+                ],
+                [
+                  "repository",
+                  "Text"
+                ],
+                [
+                  "branch",
+                  "Text"
+                ],
+                [
+                  "commit_sha",
+                  "Text"
+                ],
+                [
+                  "status",
+                  "Text"
+                ],
+                [
+                  "parent",
+                  "Text"
+                ],
+                [
+                  "created_at",
+                  "Timestamptz"
+                ]
+              ]
+            }
+          }
+        }
       }
     ],
     "parameters": {
       "Left": [
-        "Text",
-        "Int8",
-        "Text",
-        "Text",
-        "Text",
-        "Text",
-        "Text",
         "Text"
       ]
     },
@@ -142,8 +176,9 @@
       false,
       false,
       false,
-      true
+      null,
+      null
     ]
   },
-  "hash": "5dfd742dce68994fa90e7311ce0fa745fdd075768b9b2ef672ea36dafbcab620"
+  "hash": "a146064228559bca97e795319590ddeb83e3a97562c6330fe72375bfc3cadfd3"
 }
