@@ -1,3 +1,4 @@
+use crate::bors::handlers::trybuild::cancel_build_workflows;
 use crate::PgDbClient;
 use crate::bors::event::{
     PullRequestAssigned, PullRequestClosed, PullRequestConvertedToDraft, PullRequestEdited,
@@ -7,7 +8,7 @@ use crate::bors::event::{
 use crate::bors::handlers::labels::handle_label_trigger;
 use crate::bors::mergeable_queue::MergeableQueueSender;
 use crate::bors::{Comment, PullRequestStatus, RepositoryState};
-use crate::database::MergeableState;
+use crate::database::{BuildStatus, MergeableState};
 use crate::github::{CommitSha, LabelTrigger, PullRequestNumber};
 use std::sync::Arc;
 
@@ -52,6 +53,13 @@ pub(super) async fn handle_push_to_pull_request(
         .await?;
 
     mergeable_queue.enqueue(repo_state.repository().clone(), pr_number);
+
+    if let Some(auto_build) = &pr_model.auto_build {
+        if auto_build.status == BuildStatus::Pending {
+            tracing::info!("Cancelling auto build for PR {pr_number} due to push");
+            cancel_build_workflows(&repo_state.client, &db, auto_build).await?;
+        }
+    }
 
     if !pr_model.is_approved() {
         return Ok(());
