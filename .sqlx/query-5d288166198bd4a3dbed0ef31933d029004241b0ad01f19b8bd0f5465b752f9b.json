@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            -- Clear the PR's auto_build_id\n            WITH removed_auto_build AS (\n                UPDATE pull_request\n                SET auto_build_id = NULL\n                WHERE id = $1 AND auto_build_id IS NOT NULL\n                RETURNING auto_build_id\n            )\n            -- Delete the build record if one was removed\n            DELETE FROM build\n            WHERE id IN (SELECT auto_build_id FROM removed_auto_build)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "5d288166198bd4a3dbed0ef31933d029004241b0ad01f19b8bd0f5465b752f9b"
+}

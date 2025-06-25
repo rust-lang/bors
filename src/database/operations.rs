@@ -941,3 +941,31 @@ pub(crate) async fn upsert_repository(
     })
     .await
 }
+
+/// Removes the auto build associated with a PR and deletes the build record (if one exists).
+pub(crate) async fn delete_auto_build(
+    executor: impl PgExecutor<'_>,
+    pr_id: i32,
+) -> anyhow::Result<()> {
+    measure_db_query("delete_auto_build", || async {
+        sqlx::query!(
+            r#"
+            -- Clear the PR's auto_build_id
+            WITH removed_auto_build AS (
+                UPDATE pull_request
+                SET auto_build_id = NULL
+                WHERE id = $1 AND auto_build_id IS NOT NULL
+                RETURNING auto_build_id
+            )
+            -- Delete the build record if one was removed
+            DELETE FROM build
+            WHERE id IN (SELECT auto_build_id FROM removed_auto_build)
+            "#,
+            pr_id
+        )
+        .execute(executor)
+        .await?;
+        Ok(())
+    })
+    .await
+}
