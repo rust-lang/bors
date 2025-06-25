@@ -298,7 +298,8 @@ async fn notify_of_cancelled_workflows(
     pr_number: PullRequestNumber,
     workflow_urls: impl Iterator<Item = String>,
 ) -> anyhow::Result<()> {
-    let mut comment = r#"Auto build cancelled. Cancelled workflows:"#.to_string();
+    let mut comment =
+        r#"Auto build cancelled due to push to branch. Cancelled workflows:"#.to_string();
     for url in workflow_urls {
         comment += format!("\n- {}", url).as_str();
     }
@@ -316,7 +317,7 @@ async fn notify_of_unclean_auto_build_cancelled_comment(
         .post_comment(
             pr_number,
             Comment::new(
-                "Auto build was cancelled. It was not possible to cancel some workflows."
+                "Auto build was cancelled due to push to branch. It was not possible to cancel some workflows."
                     .to_string(),
             ),
         )
