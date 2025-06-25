@@ -69,6 +69,29 @@ Everytime you want to run bors:
   - Configure the webhook URL for your app to point to `<address>/github`. You can use [gh webhook](https://docs.github.com/en/webhooks/testing-and-troubleshooting-webhooks/using-the-github-cli-to-forward-webhooks-for-testing) for that.
 - Try `@bors ping` on some PR on the test repository :)
 
+## Seeding
+For testing the merge queue, there's a `scripts/seed.py` script that can automatically create multiple PRs and approve them with `@bors r+` command.
+
+### Prerequisites
+```console
+$ pip install PyGithub
+```
+
+### Usage
+The script requires a GitHub personal access token with the following permissions:
+- **Contents** (read/write)
+- **Pull requests** (read/write)
+- **Issues** (write)
+
+```console
+$ python scripts/seed.py --repo owner/repo-name --token $GITHUB_TOKEN --count 5
+```
+
+### What it does
+1. Creates multiple branches with simple changes (new markdown files)
+2. Opens pull requests for each branch
+3. Posts `@bors r+` comments to approve each PR
+
 ## Database
 You must have `sqlx-cli` installed for the following commands to work.
 ```console
