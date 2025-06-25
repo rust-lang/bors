@@ -57,7 +57,25 @@ pub(super) async fn handle_push_to_pull_request(
     if let Some(auto_build) = &pr_model.auto_build {
         if auto_build.status == BuildStatus::Pending {
             tracing::info!("Cancelling auto build for PR {pr_number} due to push");
-            cancel_build_workflows(&repo_state.client, &db, auto_build).await?;
+
+            match cancel_build_workflows(&repo_state.client, db.as_ref(), auto_build).await {
+                Err(error) => {
+                    tracing::error!(
+                        "Could not cancel workflows for SHA {}: {error:?}",
+                        auto_build.commit_sha
+                    );
+
+                    notify_of_unclean_auto_build_cancelled_comment(&repo_state, pr_number).await?
+                }
+                Ok(workflow_ids) => {
+                    tracing::info!("Auto build cancelled");
+
+                    let workflow_urls = repo_state
+                        .client
+                        .get_workflow_urls(workflow_ids.into_iter());
+                    notify_of_cancelled_workflows(&repo_state, pr_number, workflow_urls).await?
+                }
+            };
         }
 
         tracing::info!(
@@ -271,6 +289,36 @@ async fn notify_of_pushed_pr(
 PR will need to be re-approved."#,
                 head_sha
             )),
+        )
+        .await
+}
+
+async fn notify_of_cancelled_workflows(
+    repo: &RepositoryState,
+    pr_number: PullRequestNumber,
+    workflow_urls: impl Iterator<Item = String>,
+) -> anyhow::Result<()> {
+    let mut comment = r#"Auto build cancelled. Cancelled workflows:"#.to_string();
+    for url in workflow_urls {
+        comment += format!("\n- {}", url).as_str();
+    }
+
+    repo.client
+        .post_comment(pr_number, Comment::new(comment))
+        .await
+}
+
+async fn notify_of_unclean_auto_build_cancelled_comment(
+    repo: &RepositoryState,
+    pr_number: PullRequestNumber,
+) -> anyhow::Result<()> {
+    repo.client
+        .post_comment(
+            pr_number,
+            Comment::new(
+                "Auto build was cancelled. It was not possible to cancel some workflows."
+                    .to_string(),
+            ),
         )
         .await
 }
