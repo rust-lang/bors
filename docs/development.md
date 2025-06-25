@@ -70,7 +70,7 @@ Everytime you want to run bors:
 - Try `@bors ping` on some PR on the test repository :)
 
 ## Seeding
-For testing the merge queue, there's a `seed.py` script that can automatically create multiple PRs and approve them with `@bors r+` command.
+For testing the merge queue, there's a `scripts/seed.py` script that can automatically create multiple PRs and approve them with `@bors r+` command.
 
 ### Prerequisites
 ```console
@@ -84,7 +84,7 @@ The script requires a GitHub personal access token with the following permission
 - **Issues** (write)
 
 ```console
-$ python seed.py --repo owner/repo-name --token $GITHUB_TOKEN --count 5
+$ python scripts/seed.py --repo owner/repo-name --token $GITHUB_TOKEN --count 5
 ```
 
 ### What it does
