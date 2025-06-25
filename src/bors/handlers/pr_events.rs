@@ -1,4 +1,3 @@
-use crate::bors::handlers::trybuild::cancel_build_workflows;
 use crate::PgDbClient;
 use crate::bors::event::{
     PullRequestAssigned, PullRequestClosed, PullRequestConvertedToDraft, PullRequestEdited,
@@ -6,6 +5,7 @@ use crate::bors::event::{
     PullRequestReopened, PullRequestUnassigned, PushToBranch,
 };
 use crate::bors::handlers::labels::handle_label_trigger;
+use crate::bors::handlers::trybuild::cancel_build_workflows;
 use crate::bors::mergeable_queue::MergeableQueueSender;
 use crate::bors::{Comment, PullRequestStatus, RepositoryState};
 use crate::database::{BuildStatus, MergeableState};
@@ -59,6 +59,12 @@ pub(super) async fn handle_push_to_pull_request(
             tracing::info!("Cancelling auto build for PR {pr_number} due to push");
             cancel_build_workflows(&repo_state.client, &db, auto_build).await?;
         }
+
+        tracing::info!(
+            "Deleting auto build {} for PR {pr_number} due to push",
+            auto_build.id
+        );
+        db.delete_auto_build(&pr_model).await?;
     }
 
     if !pr_model.is_approved() {
