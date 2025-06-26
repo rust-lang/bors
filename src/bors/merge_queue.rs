@@ -6,7 +6,7 @@ use std::sync::Arc;
 use crate::{
     BorsContext,
     bors::{
-        RepositoryState,
+        PullRequestStatus, RepositoryState,
         comment::{auto_build_started_comment, merge_conflict_comment},
         handlers::labels::handle_label_trigger,
     },
@@ -55,6 +55,8 @@ pub async fn handle_merge_queue(ctx: Arc<BorsContext>) -> anyhow::Result<()> {
             let pr_num = pr.number;
 
             if let Some(auto_build) = &pr.auto_build {
+                let commit_sha = CommitSha(auto_build.commit_sha.clone());
+
                 match auto_build.status {
                     // Build in progress - stop queue. We can only have one PR built at a time.
                     BuildStatus::Pending => {
@@ -63,7 +65,28 @@ pub async fn handle_merge_queue(ctx: Arc<BorsContext>) -> anyhow::Result<()> {
                     }
                     // Build successful - point the base branch to the merged commit.
                     BuildStatus::Success => {
-                        todo!("Merge to base branch");
+                        match repo
+                            .client
+                            .set_branch_to_sha(&pr.base_branch, &commit_sha)
+                            .await
+                        {
+                            Ok(()) => {
+                                tracing::info!("Auto build succeeded and merged for PR {pr_num}");
+                                ctx.db
+                                    .set_pr_status(
+                                        &pr.repository,
+                                        pr.number,
+                                        PullRequestStatus::Merged,
+                                    )
+                                    .await?;
+                            }
+                            Err(error) => {
+                                // Continue to the next PR and keep it in the queue.
+                                tracing::error!("Failed to push to base branch: {:?}", error);
+                            }
+                        };
+
+                        continue;
                     }
                     BuildStatus::Failure | BuildStatus::Cancelled | BuildStatus::Timeouted => {
                         unreachable!("Failed auto builds should be filtered out by SQL query");
