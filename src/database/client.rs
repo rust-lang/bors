@@ -17,8 +17,8 @@ use super::operations::{
     get_running_builds, get_workflow_urls_for_build, get_workflows_for_build,
     insert_repo_if_not_exists, set_pr_assignees, set_pr_priority, set_pr_rollup, set_pr_status,
     unapprove_pull_request, undelegate_pull_request, update_build_status,
-    update_mergeable_states_by_base_branch, update_pr_mergeable_state, update_pr_try_build_id,
-    update_workflow_status, upsert_pull_request, upsert_repository,
+    update_mergeable_states_by_base_branch, update_pr_auto_build_id, update_pr_mergeable_state,
+    update_pr_try_build_id, update_workflow_status, upsert_pull_request, upsert_repository,
 };
 use super::{ApprovalInfo, DelegatedPermission, MergeableState, RunId, UpsertPullRequestParams};
 
@@ -187,6 +187,21 @@ impl PgDbClient {
         let build_id =
             create_build(&mut *tx, &pr.repository, &branch, &commit_sha, &parent).await?;
         update_pr_try_build_id(&mut *tx, pr.id, build_id).await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    pub async fn attach_auto_build(
+        &self,
+        pr: &PullRequestModel,
+        branch: String,
+        commit_sha: CommitSha,
+        parent: CommitSha,
+    ) -> anyhow::Result<()> {
+        let mut tx = self.pool.begin().await?;
+        let build_id =
+            create_build(&mut *tx, &pr.repository, &branch, &commit_sha, &parent).await?;
+        update_pr_auto_build_id(&mut *tx, pr.id, build_id).await?;
         tx.commit().await?;
         Ok(())
     }

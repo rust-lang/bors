@@ -1,18 +1,26 @@
 use anyhow::anyhow;
+use octocrab::models::StatusState;
 
 use std::sync::Arc;
 
 use crate::{
     BorsContext,
-    bors::RepositoryState,
+    bors::{
+        RepositoryState, comment::auto_build_started_comment,
+        handlers::labels::handle_label_trigger,
+    },
     database::{BuildStatus, PullRequestModel},
-    github::{CommitSha, MergeError, api::client::GithubRepositoryClient},
+    github::{CommitSha, LabelTrigger, MergeError, api::client::GithubRepositoryClient},
     utils::sort_queue::sort_queue_prs,
 };
 
 /// Branch used for performing merge operations.
 /// This branch should not run CI checks.
 pub(super) const AUTO_MERGE_BRANCH_NAME: &str = "automation/bors/auto-merge";
+
+/// Branch where CI checks run for auto builds.
+/// This branch should run CI checks.
+pub(super) const AUTO_BRANCH_NAME: &str = "automation/bors/auto";
 
 pub type MergeQueueEvent = ();
 
@@ -63,7 +71,7 @@ pub async fn handle_merge_queue(ctx: Arc<BorsContext>) -> anyhow::Result<()> {
             }
 
             // No build exists for this PR - start a new auto build.
-            match start_auto_build(&repo, pr).await {
+            match start_auto_build(&repo, &ctx, pr).await {
                 Ok(true) => {
                     tracing::info!("Starting auto build for PR {pr_num}");
                     // We can only have one PR being built at a time - block the queue.
@@ -89,6 +97,8 @@ pub async fn handle_merge_queue(ctx: Arc<BorsContext>) -> anyhow::Result<()> {
 /// Starts a new auto build for a pull request.
 async fn start_auto_build(
     repo: &Arc<RepositoryState>,
+    ctx: &Arc<BorsContext>,
+
     pr: PullRequestModel,
 ) -> anyhow::Result<bool> {
     let client = &repo.client;
@@ -115,7 +125,44 @@ async fn start_auto_build(
     .await?
     {
         MergeResult::Success(merge_sha) => {
-            todo!("Deal with auto build merge success");
+            // 2. Push merge commit to `AUTO_BRANCH_NAME` where CI runs
+            client
+                .set_branch_to_sha(AUTO_BRANCH_NAME, &merge_sha)
+                .await?;
+
+            // 3. Record the build in the database
+            ctx.db
+                .attach_auto_build(
+                    &pr,
+                    AUTO_BRANCH_NAME.to_string(),
+                    merge_sha.clone(),
+                    base_sha,
+                )
+                .await?;
+
+            // 4. Set GitHub commit status to pending on PR head
+            let desc = format!(
+                "Testing commit {} with merge {}...",
+                gh_pr.head.sha, merge_sha
+            );
+            client
+                .create_commit_status(
+                    &gh_pr.head.sha,
+                    StatusState::Pending,
+                    None,
+                    Some(&desc),
+                    Some("bors"),
+                )
+                .await?;
+
+            // 5. Post status comment
+            let comment = auto_build_started_comment(&gh_pr.head.sha, &merge_sha);
+            client.post_comment(pr.number, comment).await?;
+
+            // 6. Update label
+            handle_label_trigger(repo, pr.number, LabelTrigger::AutoBuildSucceeded).await?;
+
+            Ok(true)
         }
         MergeResult::Conflict => {
             todo!("Deal with auto build merge conflict");

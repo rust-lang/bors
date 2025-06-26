@@ -41,7 +41,7 @@ use super::mergeable_queue::MergeableQueueSender;
 
 mod help;
 mod info;
-mod labels;
+pub mod labels;
 mod ping;
 mod pr_events;
 mod refresh;
