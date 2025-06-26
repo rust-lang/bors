@@ -109,6 +109,22 @@ pub async fn handle_merge_queue(ctx: Arc<BorsContext>) -> anyhow::Result<()> {
                                         error
                                     );
 
+                                    let gh_pr = repo.client.get_pull_request(pr_num).await?;
+
+                                    let desc = format!(
+                                        "Test was successful, but fast-forwarding failed: {}",
+                                        &error.to_string()
+                                    );
+                                    repo.client
+                                        .create_commit_status(
+                                            &gh_pr.head.sha,
+                                            StatusState::Error,
+                                            None,
+                                            Some(&desc),
+                                            Some("bors"),
+                                        )
+                                        .await?;
+
                                     let comment =
                                         auto_build_push_failed_comment(&error.to_string());
                                     repo.client.post_comment(pr.number, comment).await?;
