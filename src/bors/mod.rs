@@ -22,6 +22,7 @@ pub mod comment;
 mod context;
 pub mod event;
 mod handlers;
+pub mod merge_queue;
 pub mod mergeable_queue;
 
 #[cfg(test)]
