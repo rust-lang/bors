@@ -188,3 +188,36 @@ pub fn auto_build_started_comment(head_sha: &CommitSha, merge_sha: &CommitSha) -
         head_sha, merge_sha
     ))
 }
+
+pub fn auto_build_failed_comment(workflows: &[WorkflowModel]) -> Comment {
+    let failed_workflow = workflows
+        .iter()
+        .find(|w| w.status == WorkflowStatus::Failure);
+
+    if let Some(workflow) = failed_workflow {
+        Comment::new(format!(
+            ":broken_heart: Test failed - [{}]({})",
+            workflow.name, workflow.url
+        ))
+    } else {
+        Comment::new(":broken_heart: Test failed".to_string())
+    }
+}
+
+pub fn auto_build_succeeded_comment(
+    workflows: &[WorkflowModel],
+    approved_by: &str,
+    merge_sha: &CommitSha,
+    base_ref: &str,
+) -> Comment {
+    let urls = workflows
+        .iter()
+        .map(|w| format!("[{}]({})", w.name, w.url))
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    Comment::new(format!(
+        ":sunny: Test successful - {}\nApproved by: `{}`\nPushing {} to `{}`...",
+        urls, approved_by, merge_sha, base_ref
+    ))
+}
