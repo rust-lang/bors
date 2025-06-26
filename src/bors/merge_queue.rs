@@ -1,7 +1,7 @@
 use anyhow::anyhow;
 use octocrab::models::StatusState;
-
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
+use tokio::sync::Mutex;
 
 use crate::{
     BorsContext,
@@ -26,6 +26,8 @@ pub(super) const AUTO_MERGE_BRANCH_NAME: &str = "automation/bors/auto-merge";
 /// This branch should run CI checks.
 pub(super) const AUTO_BRANCH_NAME: &str = "automation/bors/auto";
 
+static MERGE_QUEUE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
 pub type MergeQueueEvent = ();
 
 enum MergeResult {
@@ -34,6 +36,10 @@ enum MergeResult {
 }
 
 pub async fn handle_merge_queue(ctx: Arc<BorsContext>) -> anyhow::Result<()> {
+    // Prevent concurrent merge queue processing.
+    let lock = MERGE_QUEUE_LOCK.get_or_init(|| Mutex::new(()));
+    let _guard = lock.lock().await;
+
     let repos: Vec<Arc<RepositoryState>> =
         ctx.repositories.read().unwrap().values().cloned().collect();
 
