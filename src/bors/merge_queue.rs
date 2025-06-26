@@ -8,7 +8,8 @@ use crate::{
     bors::{
         PullRequestStatus, RepositoryState,
         comment::{
-            auto_build_push_failed_comment, auto_build_started_comment, merge_conflict_comment,
+            auto_build_base_moved_comment, auto_build_push_failed_comment,
+            auto_build_started_comment, merge_conflict_comment,
         },
         handlers::labels::handle_label_trigger,
     },
@@ -83,10 +84,35 @@ pub async fn handle_merge_queue(ctx: Arc<BorsContext>) -> anyhow::Result<()> {
                                     .await?;
                             }
                             Err(error) => {
-                                tracing::error!("Failed to push to base branch: {:?}", error);
+                                let current_base_sha =
+                                    repo.client.get_branch_sha(&pr.base_branch).await?;
+                                let build_time_base_sha = CommitSha(auto_build.parent.clone());
 
-                                let comment = auto_build_push_failed_comment(&error.to_string());
-                                repo.client.post_comment(pr.number, comment).await?;
+                                if current_base_sha != build_time_base_sha {
+                                    tracing::info!(
+                                        "Base branch has moved for PR {pr_num} (was: {}, now: {}). Deleting auto build.",
+                                        build_time_base_sha,
+                                        current_base_sha
+                                    );
+
+                                    let comment = auto_build_base_moved_comment(
+                                        &pr.base_branch,
+                                        &build_time_base_sha,
+                                        &current_base_sha,
+                                    );
+                                    repo.client.post_comment(pr.number, comment).await?;
+
+                                    ctx.db.delete_auto_build(&pr).await?;
+                                } else {
+                                    tracing::error!(
+                                        "Failed to push PR {pr_num} to base branch: {:?}",
+                                        error
+                                    );
+
+                                    let comment =
+                                        auto_build_push_failed_comment(&error.to_string());
+                                    repo.client.post_comment(pr.number, comment).await?;
+                                }
                             }
                         };
 
