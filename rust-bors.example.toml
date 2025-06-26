@@ -8,9 +8,14 @@ timeout = 3600
 # - try: Try build has started
 # - try_succeed: Try build has finished
 # - try_failed: Try build has failed
+# - auto_succeed: Auto build has succeeded
+# - auto_failed: Auto build has failed
+# - conflict: PR has merge conflicts
 # (Optional)
 [labels]
-approve = ["+approved"]
 try = ["+foo", "-bar"]
 try_succeed = ["+foobar", "+foo", "+baz"]
 try_failed = []
+auto_succeed = ["+merged"]
+auto_failed = ["+build-failed"]
+conflict = ["+needs-rebase"]
