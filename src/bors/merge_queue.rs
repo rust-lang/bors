@@ -1,10 +1,25 @@
+use anyhow::anyhow;
+
 use std::sync::Arc;
 
 use crate::{
-    BorsContext, bors::RepositoryState, database::BuildStatus, utils::sort_queue::sort_queue_prs,
+    BorsContext,
+    bors::RepositoryState,
+    database::{BuildStatus, PullRequestModel},
+    github::{CommitSha, MergeError, api::client::GithubRepositoryClient},
+    utils::sort_queue::sort_queue_prs,
 };
 
+/// Branch used for performing merge operations.
+/// This branch should not run CI checks.
+pub(super) const AUTO_MERGE_BRANCH_NAME: &str = "automation/bors/auto-merge";
+
 pub type MergeQueueEvent = ();
+
+enum MergeResult {
+    Success(CommitSha),
+    Conflict,
+}
 
 pub async fn handle_merge_queue(ctx: Arc<BorsContext>) -> anyhow::Result<()> {
     let repos: Vec<Arc<RepositoryState>> =
@@ -46,8 +61,98 @@ pub async fn handle_merge_queue(ctx: Arc<BorsContext>) -> anyhow::Result<()> {
                     }
                 }
             }
+
+            // No build exists for this PR - start a new auto build.
+            match start_auto_build(&repo, pr).await {
+                Ok(true) => {
+                    tracing::info!("Starting auto build for PR {pr_num}");
+                    // We can only have one PR being built at a time - block the queue.
+                    break;
+                }
+                Ok(false) => {
+                    // Failed due to issue with the PR (e.g. merge conflicts).
+                    tracing::debug!("Failed to start auto build for PR {pr_num}");
+                    continue;
+                }
+                Err(error) => {
+                    // Unexpected error - the PR will remain in the "queue" for a retry.
+                    tracing::error!("Error starting auto build for PR {pr_num}: {:?}", error);
+                    continue;
+                }
+            }
         }
     }
 
     Ok(())
+}
+
+/// Starts a new auto build for a pull request.
+async fn start_auto_build(
+    repo: &Arc<RepositoryState>,
+    pr: PullRequestModel,
+) -> anyhow::Result<bool> {
+    let client = &repo.client;
+
+    let gh_pr = client.get_pull_request(pr.number).await?;
+    let base_sha = client.get_branch_sha(&pr.base_branch).await?;
+
+    let auto_merge_commit_message = format!(
+        "Auto merge of #{} - {}, r={}\n\n{}\n\n{}",
+        pr.number,
+        gh_pr.head_label,
+        pr.approver().unwrap_or("<unknown>"),
+        pr.title,
+        gh_pr.message
+    );
+
+    // 1. Merge PR head with base branch on `AUTO_MERGE_BRANCH_NAME`
+    match attempt_merge(
+        &repo.client,
+        &gh_pr.head.sha,
+        &base_sha,
+        &auto_merge_commit_message,
+    )
+    .await?
+    {
+        MergeResult::Success(merge_sha) => {
+            todo!("Deal with auto build merge success");
+        }
+        MergeResult::Conflict => {
+            todo!("Deal with auto build merge conflict");
+        }
+    }
+}
+
+/// Attempts to merge the given head SHA with base SHA via `AUTO_MERGE_BRANCH_NAME`.
+async fn attempt_merge(
+    client: &GithubRepositoryClient,
+    head_sha: &CommitSha,
+    base_sha: &CommitSha,
+    merge_message: &str,
+) -> anyhow::Result<MergeResult> {
+    tracing::debug!("Attempting to merge with base SHA {base_sha}");
+
+    // Reset auto merge branch to point to base branch
+    client
+        .set_branch_to_sha(AUTO_MERGE_BRANCH_NAME, base_sha)
+        .await
+        .map_err(|error| anyhow!("Cannot set auto merge branch to {}: {error:?}", base_sha.0))?;
+
+    // then merge PR head commit into auto merge branch.
+    match client
+        .merge_branches(AUTO_MERGE_BRANCH_NAME, head_sha, merge_message)
+        .await
+    {
+        Ok(merge_sha) => {
+            tracing::debug!("Merge successful, SHA: {merge_sha}");
+
+            Ok(MergeResult::Success(merge_sha))
+        }
+        Err(MergeError::Conflict) => {
+            tracing::warn!("Merge conflict");
+
+            Ok(MergeResult::Conflict)
+        }
+        Err(error) => Err(error.into()),
+    }
 }
