@@ -19,7 +19,7 @@ use crate::bors::handlers::trybuild::{TRY_BRANCH_NAME, command_try_build, comman
 use crate::bors::handlers::workflow::{
     handle_check_suite_completed, handle_workflow_completed, handle_workflow_started,
 };
-use crate::bors::merge_queue::MergeQueueEvent;
+use crate::bors::merge_queue::{MergeQueueEvent, AUTO_BRANCH_NAME};
 use crate::bors::{BorsContext, Comment, RepositoryState};
 use crate::database::{DelegatedPermission, PullRequestModel};
 use crate::github::{GithubUser, PullRequest, PullRequestNumber};
@@ -555,7 +555,7 @@ async fn reload_repos(
 
 /// Is this branch interesting for the bot?
 fn is_bors_observed_branch(branch: &str) -> bool {
-    branch == TRY_BRANCH_NAME
+    matches!(branch, TRY_BRANCH_NAME | AUTO_BRANCH_NAME)
 }
 
 /// Deny permission for a request.
