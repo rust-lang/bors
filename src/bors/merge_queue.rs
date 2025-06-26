@@ -70,7 +70,7 @@ pub async fn handle_merge_queue(ctx: Arc<BorsContext>) -> anyhow::Result<()> {
                     BuildStatus::Success => {
                         match repo
                             .client
-                            .set_branch_to_sha(&pr.base_branch, &commit_sha)
+                            .set_branch_to_sha(&pr.base_branch, &commit_sha, false)
                             .await
                         {
                             Ok(()) => {
@@ -197,7 +197,7 @@ async fn start_auto_build(
         MergeResult::Success(merge_sha) => {
             // 2. Push merge commit to `AUTO_BRANCH_NAME` where CI runs
             client
-                .set_branch_to_sha(AUTO_BRANCH_NAME, &merge_sha)
+                .set_branch_to_sha(AUTO_BRANCH_NAME, &merge_sha, true)
                 .await?;
 
             // 3. Record the build in the database
@@ -276,7 +276,7 @@ async fn attempt_merge(
 
     // Reset auto merge branch to point to base branch
     client
-        .set_branch_to_sha(AUTO_MERGE_BRANCH_NAME, base_sha)
+        .set_branch_to_sha(AUTO_MERGE_BRANCH_NAME, base_sha, true)
         .await
         .map_err(|error| anyhow!("Cannot set auto merge branch to {}: {error:?}", base_sha.0))?;
 

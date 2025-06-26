@@ -146,7 +146,7 @@ async fn attempt_merge(
 
     // First set the try branch to our base commit (either the selected parent or the main branch).
     client
-        .set_branch_to_sha(TRY_MERGE_BRANCH_NAME, base_sha)
+        .set_branch_to_sha(TRY_MERGE_BRANCH_NAME, base_sha, true)
         .await
         .map_err(|error| anyhow!("Cannot set try merge branch to {}: {error:?}", base_sha.0))?;
 
@@ -177,7 +177,7 @@ async fn run_try_build(
     parent_sha: CommitSha,
 ) -> anyhow::Result<()> {
     client
-        .set_branch_to_sha(TRY_BRANCH_NAME, &commit_sha)
+        .set_branch_to_sha(TRY_BRANCH_NAME, &commit_sha, true)
         .await
         .map_err(|error| anyhow!("Cannot set try branch to main branch: {error:?}"))?;
 

@@ -139,9 +139,14 @@ impl GithubRepositoryClient {
     }
 
     /// Set the given branch to a commit with the given `sha`.
-    pub async fn set_branch_to_sha(&self, branch: &str, sha: &CommitSha) -> anyhow::Result<()> {
+    pub async fn set_branch_to_sha(
+        &self,
+        branch: &str,
+        sha: &CommitSha,
+        force: bool,
+    ) -> anyhow::Result<()> {
         perform_network_request_with_retry("set_branch_to_sha", || async {
-            Ok(set_branch_to_commit(self, branch.to_string(), sha).await?)
+            Ok(set_branch_to_commit(self, branch.to_string(), sha, force).await?)
         })
         .await?
     }
