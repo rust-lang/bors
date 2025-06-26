@@ -7,6 +7,7 @@ pub enum LabelTrigger {
     TryBuildSucceeded,
     TryBuildFailed,
     AutoBuildSucceeded,
+    Conflict,
 }
 
 #[derive(Debug, Eq, PartialEq)]

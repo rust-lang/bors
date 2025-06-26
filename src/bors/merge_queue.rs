@@ -6,10 +6,11 @@ use std::sync::Arc;
 use crate::{
     BorsContext,
     bors::{
-        RepositoryState, comment::auto_build_started_comment,
+        RepositoryState,
+        comment::{auto_build_started_comment, merge_conflict_comment},
         handlers::labels::handle_label_trigger,
     },
-    database::{BuildStatus, PullRequestModel},
+    database::{BuildStatus, MergeableState, PullRequestModel},
     github::{CommitSha, LabelTrigger, MergeError, api::client::GithubRepositoryClient},
     utils::sort_queue::sort_queue_prs,
 };
@@ -165,7 +166,32 @@ async fn start_auto_build(
             Ok(true)
         }
         MergeResult::Conflict => {
-            todo!("Deal with auto build merge conflict");
+            // 2. Record in database
+            ctx.db
+                .update_pr_mergeable_state(&pr, MergeableState::HasConflicts)
+                .await?;
+
+            // 3. Set GitHub commit status to error on PR head
+            // We don't set it to failure as this issue is likely on GitHub's end.
+            client
+                .create_commit_status(
+                    &gh_pr.head.sha,
+                    StatusState::Error,
+                    None,
+                    Some("Merge conflict"),
+                    Some("bors"),
+                )
+                .await?;
+
+            // 4. Post comment
+            client
+                .post_comment(pr.number, merge_conflict_comment(&gh_pr.head.name))
+                .await?;
+
+            // 5. Update label
+            handle_label_trigger(repo, pr.number, LabelTrigger::Conflict).await?;
+
+            Ok(false)
         }
     }
 }
