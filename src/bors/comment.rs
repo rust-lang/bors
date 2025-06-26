@@ -221,3 +221,9 @@ pub fn auto_build_succeeded_comment(
         urls, approved_by, merge_sha, base_ref
     ))
 }
+
+pub fn auto_build_push_failed_comment(error: &str) -> Comment {
+    Comment::new(format!(
+        ":eyes: Test was successful, but fast-forwarding failed: {error}",
+    ))
+}

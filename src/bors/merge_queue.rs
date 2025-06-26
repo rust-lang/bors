@@ -7,7 +7,9 @@ use crate::{
     BorsContext,
     bors::{
         PullRequestStatus, RepositoryState,
-        comment::{auto_build_started_comment, merge_conflict_comment},
+        comment::{
+            auto_build_push_failed_comment, auto_build_started_comment, merge_conflict_comment,
+        },
         handlers::labels::handle_label_trigger,
     },
     database::{BuildStatus, MergeableState, PullRequestModel},
@@ -81,8 +83,10 @@ pub async fn handle_merge_queue(ctx: Arc<BorsContext>) -> anyhow::Result<()> {
                                     .await?;
                             }
                             Err(error) => {
-                                // Continue to the next PR and keep it in the queue.
                                 tracing::error!("Failed to push to base branch: {:?}", error);
+
+                                let comment = auto_build_push_failed_comment(&error.to_string());
+                                repo.client.post_comment(pr.number, comment).await?;
                             }
                         };
 
