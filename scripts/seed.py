@@ -18,7 +18,8 @@ from github import Github, Auth
 from github.GithubException import GithubException
 
 def create_pr(repo, index):
-    branch_name = f"test-pr-{index}-{int(time.time())}"
+    timestamp = int(time.time())
+    branch_name = f"test-pr-{index}-{timestamp}"
 
     # Get the default branch
     default_branch = repo.default_branch
@@ -33,7 +34,7 @@ def create_pr(repo, index):
     # Create markdown file
     content = f"# Test File {index}\n\nGenerated at: {time.strftime('%Y-%m-%d %H:%M:%S')}\n"
     repo.create_file(
-        path=f"test-file-{index}.md",
+        path=f"test-file-{index}-{timestamp}.md",
         message=f"Test change {index}: Add test file",
         content=content,
         branch=branch_name
@@ -41,7 +42,7 @@ def create_pr(repo, index):
 
     # Create pull request
     pr = repo.create_pull(
-        title=f"Test PR {index}: Automated test change",
+        title=f"Test PR {index}-{timestamp}: Automated test change",
         body="This is an automated test PR.",
         head=branch_name,
         base=default_branch
