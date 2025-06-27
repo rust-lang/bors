@@ -56,8 +56,8 @@ pub async fn handle_merge_queue(ctx: Arc<BorsContext>) -> anyhow::Result<()> {
         let prs = ctx.db.get_merge_queue_prs(repo_name, priority).await?;
 
         // Sort PRs according to merge queue priority rules.
-        // Pending PRs come first - this is important as we make sure to block the queue to
-        // prevent starting simultaneous auto-builds.
+        // Successful builds come first so they can be merged immediately,
+        // then pending builds (which block the queue to prevent starting simultaneous auto-builds).
         let prs = sort_queue_prs(prs);
 
         for pr in prs {
@@ -67,11 +67,6 @@ pub async fn handle_merge_queue(ctx: Arc<BorsContext>) -> anyhow::Result<()> {
                 let commit_sha = CommitSha(auto_build.commit_sha.clone());
 
                 match auto_build.status {
-                    // Build in progress - stop queue. We can only have one PR built at a time.
-                    BuildStatus::Pending => {
-                        tracing::info!("PR {pr_num} has a pending build - blocking queue");
-                        break;
-                    }
                     // Build successful - point the base branch to the merged commit.
                     BuildStatus::Success => {
                         match repo
@@ -139,6 +134,11 @@ pub async fn handle_merge_queue(ctx: Arc<BorsContext>) -> anyhow::Result<()> {
                         };
 
                         continue;
+                    }
+                    // Build in progress - stop queue. We can only have one PR built at a time.
+                    BuildStatus::Pending => {
+                        tracing::info!("PR {pr_num} has a pending build - blocking queue");
+                        break;
                     }
                     BuildStatus::Failure | BuildStatus::Cancelled | BuildStatus::Timeouted => {
                         unreachable!("Failed auto builds should be filtered out by SQL query");

@@ -29,16 +29,16 @@ pub fn sort_queue_prs(mut prs: Vec<PullRequestModel>) -> Vec<PullRequestModel> {
 fn get_status_priority(pr: &PullRequestModel) -> i32 {
     match &pr.auto_build {
         Some(build) => match build.status {
-            BuildStatus::Pending => 1,
-            BuildStatus::Success => 6,
+            BuildStatus::Success => 1,
+            BuildStatus::Pending => 2,
             BuildStatus::Failure => 5,
             BuildStatus::Cancelled | BuildStatus::Timeouted => 4,
         },
         None => {
             if pr.is_approved() {
-                2 // approved but no build
+                3 // approved but no build
             } else {
-                3 // no status
+                4 // no status
             }
         }
     }
