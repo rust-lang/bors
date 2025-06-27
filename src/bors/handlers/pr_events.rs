@@ -269,8 +269,7 @@ async fn notify_of_edited_pr(
         .post_comment(
             pr_number,
             Comment::new(format!(
-                r#":warning: The base branch changed to `{base_name}`, and the
-PR will need to be re-approved."#,
+                r#":warning: The base branch changed to `{base_name}`, and the PR will need to be re-approved."#,
             )),
         )
         .await
@@ -285,8 +284,7 @@ async fn notify_of_pushed_pr(
         .post_comment(
             pr_number,
             Comment::new(format!(
-                r#":warning: A new commit `{}` was pushed to the branch, the
-PR will need to be re-approved."#,
+                r#":warning: A new commit {} was pushed to the branch, the PR will need to be re-approved."#,
                 head_sha
             )),
         )
@@ -347,10 +345,7 @@ mod tests {
 
             insta::assert_snapshot!(
                 tester.get_comment().await?,
-                @r"
-            :warning: The base branch changed to `beta`, and the
-            PR will need to be re-approved.
-            "
+                @":warning: The base branch changed to `beta`, and the PR will need to be re-approved."
             );
             tester.default_pr().await.expect_unapproved();
             Ok(tester)
@@ -403,10 +398,7 @@ mod tests {
 
             insta::assert_snapshot!(
                 tester.get_comment().await?,
-                @r"
-            :warning: A new commit `pr-1-commit-1` was pushed to the branch, the
-            PR will need to be re-approved.
-            "
+                @":warning: A new commit pr-1-commit-1 was pushed to the branch, the PR will need to be re-approved."
             );
             tester.default_pr().await.expect_unapproved();
             Ok(tester)
