@@ -227,13 +227,3 @@ pub fn auto_build_push_failed_comment(error: &str) -> Comment {
         ":eyes: Test was successful, but fast-forwarding failed: {error}",
     ))
 }
-
-pub fn auto_build_base_moved_comment(
-    base_ref: &str,
-    old_base: &CommitSha,
-    new_base: &CommitSha,
-) -> Comment {
-    Comment::new(format!(
-        ":warning: Auto build outdated due to push to {base_ref} ({old_base} → {new_base}). Auto build will be rebuilt.",
-    ))
-}
