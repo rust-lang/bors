@@ -107,6 +107,10 @@ pub async fn handle_merge_queue(ctx: Arc<BorsContext>) -> anyhow::Result<()> {
                                     )
                                     .await?;
 
+                                ctx.db
+                                    .update_build_status(auto_build, BuildStatus::Failure)
+                                    .await?;
+
                                 let comment = auto_build_push_failed_comment(&error.to_string());
                                 repo.client.post_comment(pr.number, comment).await?;
                             }
