@@ -1,5 +1,5 @@
 use anyhow::anyhow;
-use octocrab::models::StatusState;
+use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
 use std::sync::{Arc, OnceLock};
 use tokio::sync::Mutex;
 
@@ -96,12 +96,14 @@ pub async fn handle_merge_queue(ctx: Arc<BorsContext>) -> anyhow::Result<()> {
                                     &error.to_string()
                                 );
                                 repo.client
-                                    .create_commit_status(
+                                    .create_check_run(
                                         &gh_pr.head.sha,
-                                        StatusState::Error,
-                                        None,
+                                        "bors",
+                                        CheckRunStatus::Completed,
+                                        Some(CheckRunConclusion::Failure),
+                                        Some("Bors build status"),
                                         Some(&desc),
-                                        Some("bors"),
+                                        None,
                                     )
                                     .await?;
 
@@ -195,18 +197,20 @@ async fn start_auto_build(
                 )
                 .await?;
 
-            // 4. Set GitHub commit status to pending on PR head
+            // 4. Set GitHub check run to pending on PR head
             let desc = format!(
                 "Testing commit {} with merge {}...",
                 gh_pr.head.sha, merge_sha
             );
             client
-                .create_commit_status(
+                .create_check_run(
                     &gh_pr.head.sha,
-                    StatusState::Pending,
+                    "bors",
+                    CheckRunStatus::InProgress,
                     None,
+                    Some("Bors build status"),
                     Some(&desc),
-                    Some("bors"),
+                    None,
                 )
                 .await?;
 
@@ -225,15 +229,17 @@ async fn start_auto_build(
                 .update_pr_mergeable_state(&pr, MergeableState::HasConflicts)
                 .await?;
 
-            // 3. Set GitHub commit status to error on PR head
+            // 3. Set GitHub check run to error on PR head
             // We don't set it to failure as this issue is likely on GitHub's end.
             client
-                .create_commit_status(
+                .create_check_run(
                     &gh_pr.head.sha,
-                    StatusState::Error,
-                    None,
+                    "bors",
+                    CheckRunStatus::Completed,
+                    Some(CheckRunConclusion::Failure),
+                    Some("Bors build status"),
                     Some("Merge conflict"),
-                    Some("bors"),
+                    None,
                 )
                 .await?;
 

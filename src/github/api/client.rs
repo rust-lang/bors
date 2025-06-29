@@ -1,6 +1,7 @@
 use anyhow::Context;
 use octocrab::Octocrab;
-use octocrab::models::{App, Repository, StatusState};
+use octocrab::models::{App, Repository};
+use octocrab::params::checks::{CheckRunConclusion, CheckRunOutput, CheckRunStatus};
 use tracing::log;
 
 use crate::bors::event::PullRequestComment;
@@ -347,35 +348,44 @@ impl GithubRepositoryClient {
         Ok(prs)
     }
 
-    /// Create a commit status for the given SHA.
-    pub async fn create_commit_status(
+    /// Create a check run for the given SHA.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn create_check_run(
         &self,
         sha: &CommitSha,
-        state: StatusState,
-        target_url: Option<&str>,
-        description: Option<&str>,
-        context: Option<&str>,
+        name: &str,
+        status: CheckRunStatus,
+        conclusion: Option<CheckRunConclusion>,
+        output_title: Option<&str>,
+        output_summary: Option<&str>,
+        details_url: Option<&str>,
     ) -> anyhow::Result<()> {
-        perform_network_request_with_retry("create_commit_status", || async {
-            let repos = self
+        perform_network_request_with_retry("create_check_run", || async {
+            let checks = self
                 .client
-                .repos(&self.repository().owner, &self.repository().name);
-            let mut builder = repos.create_status(sha.0.clone(), state);
+                .checks(&self.repository().owner, &self.repository().name);
+            let mut builder = checks.create_check_run(name, sha.0.clone()).status(status);
 
-            if let Some(url) = target_url {
-                builder = builder.target(url.to_string());
-            }
-            if let Some(desc) = description {
-                builder = builder.description(desc.to_string());
-            }
-            if let Some(ctx) = context {
-                builder = builder.context(ctx.to_string());
+            if let Some(conclusion) = conclusion {
+                builder = builder.conclusion(conclusion);
             }
 
-            builder
-                .send()
-                .await
-                .context("Cannot create commit status")?;
+            if let (Some(title), Some(summary)) = (output_title, output_summary) {
+                let output = CheckRunOutput {
+                    title: title.to_string(),
+                    summary: summary.to_string(),
+                    text: None,
+                    annotations: Vec::new(),
+                    images: Vec::new(),
+                };
+                builder = builder.output(output);
+            }
+
+            if let Some(url) = details_url {
+                builder = builder.details_url(url);
+            }
+
+            builder.send().await.context("Cannot create check run")?;
             Ok(())
         })
         .await?

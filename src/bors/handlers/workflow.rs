@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use octocrab::models::StatusState;
+use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
 
 use crate::PgDbClient;
 use crate::bors::CheckSuiteStatus;
@@ -261,15 +261,31 @@ async fn complete_auto_build(
     };
     repo.client.post_comment(pr.number, comment).await?;
 
-    let (status, desc) = if !has_failure {
-        (StatusState::Success, "Build succeeded")
+    let (status, conclusion, desc) = if !has_failure {
+        (
+            CheckRunStatus::Completed,
+            Some(CheckRunConclusion::Success),
+            "Build succeeded",
+        )
     } else {
-        (StatusState::Failure, "Build failed")
+        (
+            CheckRunStatus::Completed,
+            Some(CheckRunConclusion::Failure),
+            "Build failed",
+        )
     };
 
     let gh_pr = repo.client.get_pull_request(pr.number).await?;
     repo.client
-        .create_commit_status(&gh_pr.head.sha, status, None, Some(desc), Some("bors"))
+        .create_check_run(
+            &gh_pr.head.sha,
+            "bors",
+            status,
+            conclusion,
+            Some("Bors build status"),
+            Some(desc),
+            None,
+        )
         .await?;
 
     Ok(())
