@@ -1,6 +1,7 @@
 use sqlx::PgPool;
 
 use crate::bors::{PullRequestStatus, RollupMode};
+use crate::database::operations::get_merge_queue_prs;
 use crate::database::{
     BuildModel, BuildStatus, PullRequestModel, RepoModel, TreeState, WorkflowModel, WorkflowStatus,
     WorkflowType,
@@ -16,8 +17,8 @@ use super::operations::{
     get_running_builds, get_workflow_urls_for_build, get_workflows_for_build,
     insert_repo_if_not_exists, set_pr_assignees, set_pr_priority, set_pr_rollup, set_pr_status,
     unapprove_pull_request, undelegate_pull_request, update_build_status,
-    update_mergeable_states_by_base_branch, update_pr_mergeable_state, update_pr_try_build_id,
-    update_workflow_status, upsert_pull_request, upsert_repository,
+    update_mergeable_states_by_base_branch, update_pr_auto_build_id, update_pr_mergeable_state,
+    update_pr_try_build_id, update_workflow_status, upsert_pull_request, upsert_repository,
 };
 use super::{ApprovalInfo, DelegatedPermission, MergeableState, RunId, UpsertPullRequestParams};
 
@@ -190,6 +191,21 @@ impl PgDbClient {
         Ok(())
     }
 
+    pub async fn attach_auto_build(
+        &self,
+        pr: &PullRequestModel,
+        branch: String,
+        commit_sha: CommitSha,
+        parent: CommitSha,
+    ) -> anyhow::Result<()> {
+        let mut tx = self.pool.begin().await?;
+        let build_id =
+            create_build(&mut *tx, &pr.repository, &branch, &commit_sha, &parent).await?;
+        update_pr_auto_build_id(&mut *tx, pr.id, build_id).await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
     pub async fn find_build(
         &self,
         repo: &GithubRepoName,
@@ -299,5 +315,13 @@ impl PgDbClient {
 
     pub async fn delete_auto_build(&self, pr: &PullRequestModel) -> anyhow::Result<()> {
         delete_auto_build(&self.pool, pr.id).await
+    }
+
+    pub async fn get_merge_queue_prs(
+        &self,
+        repo: &GithubRepoName,
+        tree_priority: Option<u32>,
+    ) -> anyhow::Result<Vec<PullRequestModel>> {
+        get_merge_queue_prs(&self.pool, repo, tree_priority.map(|p| p as i32)).await
     }
 }

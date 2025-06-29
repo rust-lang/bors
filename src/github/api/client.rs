@@ -1,6 +1,7 @@
 use anyhow::Context;
 use octocrab::Octocrab;
 use octocrab::models::{App, Repository};
+use octocrab::params::checks::{CheckRunConclusion, CheckRunOutput, CheckRunStatus};
 use tracing::log;
 
 use crate::bors::event::PullRequestComment;
@@ -139,9 +140,14 @@ impl GithubRepositoryClient {
     }
 
     /// Set the given branch to a commit with the given `sha`.
-    pub async fn set_branch_to_sha(&self, branch: &str, sha: &CommitSha) -> anyhow::Result<()> {
+    pub async fn set_branch_to_sha(
+        &self,
+        branch: &str,
+        sha: &CommitSha,
+        force: bool,
+    ) -> anyhow::Result<()> {
         perform_network_request_with_retry("set_branch_to_sha", || async {
-            Ok(set_branch_to_commit(self, branch.to_string(), sha).await?)
+            Ok(set_branch_to_commit(self, branch.to_string(), sha, force).await?)
         })
         .await?
     }
@@ -340,6 +346,49 @@ impl GithubRepositoryClient {
             prs.push(pr.into());
         }
         Ok(prs)
+    }
+
+    /// Create a check run for the given SHA.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn create_check_run(
+        &self,
+        sha: &CommitSha,
+        name: &str,
+        status: CheckRunStatus,
+        conclusion: Option<CheckRunConclusion>,
+        output_title: Option<&str>,
+        output_summary: Option<&str>,
+        details_url: Option<&str>,
+    ) -> anyhow::Result<()> {
+        perform_network_request_with_retry("create_check_run", || async {
+            let checks = self
+                .client
+                .checks(&self.repository().owner, &self.repository().name);
+            let mut builder = checks.create_check_run(name, sha.0.clone()).status(status);
+
+            if let Some(conclusion) = conclusion {
+                builder = builder.conclusion(conclusion);
+            }
+
+            if let (Some(title), Some(summary)) = (output_title, output_summary) {
+                let output = CheckRunOutput {
+                    title: title.to_string(),
+                    summary: summary.to_string(),
+                    text: None,
+                    annotations: Vec::new(),
+                    images: Vec::new(),
+                };
+                builder = builder.output(output);
+            }
+
+            if let Some(url) = details_url {
+                builder = builder.details_url(url);
+            }
+
+            builder.send().await.context("Cannot create check run")?;
+            Ok(())
+        })
+        .await?
     }
 
     fn format_pr(&self, pr: PullRequestNumber) -> String {

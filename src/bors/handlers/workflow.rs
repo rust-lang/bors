@@ -1,13 +1,22 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
+
 use crate::PgDbClient;
 use crate::bors::CheckSuiteStatus;
 use crate::bors::RepositoryState;
+use crate::bors::comment::auto_build_failed_comment;
+use crate::bors::comment::auto_build_succeeded_comment;
 use crate::bors::comment::{try_build_succeeded_comment, workflow_failed_comment};
 use crate::bors::event::{CheckSuiteCompleted, WorkflowCompleted, WorkflowStarted};
+use crate::bors::handlers::TRY_BRANCH_NAME;
 use crate::bors::handlers::is_bors_observed_branch;
 use crate::bors::handlers::labels::handle_label_trigger;
+use crate::bors::merge_queue::AUTO_BRANCH_NAME;
+use crate::database::BuildModel;
+use crate::database::PullRequestModel;
+use crate::database::WorkflowModel;
 use crate::database::{BuildStatus, WorkflowStatus};
 use crate::github::LabelTrigger;
 
@@ -184,15 +193,40 @@ async fn try_complete_build(
         return Ok(());
     }
 
-    let (status, trigger) = if has_failure {
-        (BuildStatus::Failure, LabelTrigger::TryBuildFailed)
-    } else {
-        (BuildStatus::Success, LabelTrigger::TryBuildSucceeded)
+    let branch = payload.branch.as_str();
+    let (status, trigger) = match (branch, has_failure) {
+        (TRY_BRANCH_NAME, true) => (BuildStatus::Failure, LabelTrigger::TryBuildFailed),
+        (TRY_BRANCH_NAME, false) => (BuildStatus::Success, LabelTrigger::TryBuildSucceeded),
+        (AUTO_BRANCH_NAME, true) => (BuildStatus::Failure, LabelTrigger::AutoBuildFailed),
+        (AUTO_BRANCH_NAME, false) => (BuildStatus::Success, LabelTrigger::AutoBuildSucceeded),
+        _ => unreachable!(),
     };
-    db.update_build_status(&build, status).await?;
 
+    db.update_build_status(&build, status).await?;
     handle_label_trigger(repo, pr.number, trigger).await?;
 
+    match branch {
+        TRY_BRANCH_NAME => {
+            complete_try_build(repo, pr, build, workflows, has_failure, payload).await?
+        }
+        AUTO_BRANCH_NAME => {
+            complete_auto_build(repo, pr, workflows, has_failure, payload).await?;
+        }
+        _ => unreachable!("Branch should only be bors-observed branch"),
+    }
+
+    Ok(())
+}
+
+/// Complete try build workflow.
+async fn complete_try_build(
+    repo: &RepositoryState,
+    pr: PullRequestModel,
+    build: BuildModel,
+    workflows: Vec<WorkflowModel>,
+    has_failure: bool,
+    payload: CheckSuiteCompleted,
+) -> anyhow::Result<()> {
     let message = if !has_failure {
         tracing::info!("Workflow succeeded");
         try_build_succeeded_comment(&workflows, payload.commit_sha, &build)
@@ -201,6 +235,58 @@ async fn try_complete_build(
         workflow_failed_comment(&workflows)
     };
     repo.client.post_comment(pr.number, message).await?;
+
+    Ok(())
+}
+
+/// Complete auto build workflow.
+async fn complete_auto_build(
+    repo: &RepositoryState,
+    pr: PullRequestModel,
+    workflows: Vec<WorkflowModel>,
+    has_failure: bool,
+    payload: CheckSuiteCompleted,
+) -> anyhow::Result<()> {
+    let comment = if !has_failure {
+        tracing::info!("Auto build succeeded for PR {}", pr.number);
+        auto_build_succeeded_comment(
+            &workflows,
+            pr.approver().unwrap_or("<unknown>"),
+            &payload.commit_sha,
+            &pr.base_branch,
+        )
+    } else {
+        tracing::info!("Auto build failed for PR {}", pr.number);
+        auto_build_failed_comment(&workflows)
+    };
+    repo.client.post_comment(pr.number, comment).await?;
+
+    let (status, conclusion, desc) = if !has_failure {
+        (
+            CheckRunStatus::Completed,
+            Some(CheckRunConclusion::Success),
+            "Build succeeded",
+        )
+    } else {
+        (
+            CheckRunStatus::Completed,
+            Some(CheckRunConclusion::Failure),
+            "Build failed",
+        )
+    };
+
+    let gh_pr = repo.client.get_pull_request(pr.number).await?;
+    repo.client
+        .create_check_run(
+            &gh_pr.head.sha,
+            "bors",
+            status,
+            conclusion,
+            Some("Bors build status"),
+            Some(desc),
+            None,
+        )
+        .await?;
 
     Ok(())
 }
