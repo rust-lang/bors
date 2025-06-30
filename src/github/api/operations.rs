@@ -5,8 +5,7 @@ use thiserror::Error;
 use crate::github::CommitSha;
 use crate::github::api::client::GithubRepositoryClient;
 
-#[derive(Copy, Clone, serde::Serialize)]
-#[serde(rename_all = "lowercase")]
+#[derive(Copy, Clone)]
 pub enum ForcePush {
     Yes,
     No,
