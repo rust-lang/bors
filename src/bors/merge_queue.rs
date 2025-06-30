@@ -1,6 +1,9 @@
 use anyhow::anyhow;
 use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
+use std::future::Future;
 use std::sync::Arc;
+use tokio::sync::mpsc;
+use tracing::Instrument;
 
 use crate::{
     BorsContext,
@@ -35,7 +38,7 @@ enum MergeResult {
     Conflict,
 }
 
-pub async fn handle_merge_queue(ctx: Arc<BorsContext>) -> anyhow::Result<()> {
+pub async fn merge_queue_tick(ctx: Arc<BorsContext>) -> anyhow::Result<()> {
     let repos: Vec<Arc<RepositoryState>> =
         ctx.repositories.read().unwrap().values().cloned().collect();
 
@@ -169,7 +172,6 @@ pub async fn handle_merge_queue(ctx: Arc<BorsContext>) -> anyhow::Result<()> {
 async fn start_auto_build(
     repo: &Arc<RepositoryState>,
     ctx: &Arc<BorsContext>,
-
     pr: PullRequestModel,
 ) -> anyhow::Result<bool> {
     let client = &repo.client;
@@ -299,4 +301,35 @@ async fn attempt_merge(
         }
         Err(error) => Err(error.into()),
     }
+}
+
+pub fn start_merge_queue(
+    ctx: Arc<BorsContext>,
+) -> (
+    mpsc::Sender<MergeQueueEvent>,
+    impl Future<Output = anyhow::Result<()>>,
+) {
+    let (tx, mut rx) = mpsc::channel::<MergeQueueEvent>(10);
+
+    let fut = async move {
+        while rx.recv().await.is_some() {
+            let span = tracing::info_span!("MergeQueue");
+            tracing::debug!("Processing merge queue");
+            if let Err(error) = merge_queue_tick(ctx.clone()).instrument(span.clone()).await {
+                // In tests, we want to panic on all errors.
+                #[cfg(test)]
+                {
+                    panic!("Handler failed: {error:?}");
+                }
+                #[cfg(not(test))]
+                {
+                    use crate::utils::logging::LogError;
+                    span.log_error(error);
+                }
+            }
+        }
+        Ok(())
+    };
+
+    (tx, fut)
 }

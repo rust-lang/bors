@@ -1,5 +1,5 @@
 use crate::bors::event::BorsEvent;
-use crate::bors::merge_queue::{MergeQueueEvent, handle_merge_queue};
+use crate::bors::merge_queue::{MergeQueueEvent, start_merge_queue};
 use crate::bors::mergeable_queue::{
     MergeableQueueReceiver, MergeableQueueSender, create_mergeable_queue,
     handle_mergeable_queue_item,
@@ -209,22 +209,22 @@ pub fn create_bors_process(
 ) -> BorsProcess {
     let (repository_tx, repository_rx) = mpsc::channel::<BorsRepositoryEvent>(1024);
     let (global_tx, global_rx) = mpsc::channel::<BorsGlobalEvent>(1024);
-    let (merge_queue_tx, merge_queue_rx) = mpsc::channel::<MergeQueueEvent>(128);
     let (mergeable_queue_tx, mergeable_queue_rx) = create_mergeable_queue();
 
     let mq_tx = mergeable_queue_tx.clone();
+    let ctx = Arc::new(ctx);
+
+    let (merge_queue_tx, merge_queue_fut) = start_merge_queue(ctx.clone());
     let merge_queue_tx_clone = merge_queue_tx.clone();
 
     let service = async move {
-        let ctx = Arc::new(ctx);
-
         // In tests, we shutdown these futures by dropping the channel sender,
         // In that case, we need to wait until both of these futures resolve,
         // to make sure that they are able to handle all the events in the queue
         // before finishing.
         #[cfg(test)]
         {
-            tokio::join!(
+            let _ = tokio::join!(
                 consume_repository_events(ctx.clone(), repository_rx, mq_tx.clone()),
                 consume_global_events(
                     ctx.clone(),
@@ -235,7 +235,7 @@ pub fn create_bors_process(
                     team_api
                 ),
                 consume_mergeable_queue(ctx.clone(), mergeable_queue_rx),
-                consume_merge_queue(ctx, merge_queue_rx)
+                merge_queue_fut
             );
         }
         // In real execution, the bot runs forever. If there is something that finishes
@@ -253,8 +253,11 @@ pub fn create_bors_process(
                 _ = consume_mergeable_queue(ctx.clone(), mergeable_queue_rx) => {
                     tracing::error!("Mergeable queue handling process has ended")
                 }
-                _ = consume_merge_queue(ctx.clone(), merge_queue_rx) => {
-                    tracing::error!("Merge queue handling process has ended")
+                result = merge_queue_fut => {
+                    match result {
+                        Ok(()) => tracing::error!("Merge queue handling process has ended"),
+                        Err(e) => tracing::error!("Merge queue handling process has ended with error: {:?}", e)
+                    }
                 }
             }
         }
@@ -333,21 +336,6 @@ async fn consume_mergeable_queue(
             .instrument(span.clone())
             .await
         {
-            handle_root_error(span, error);
-        }
-    }
-}
-
-async fn consume_merge_queue(
-    ctx: Arc<BorsContext>,
-    mut merge_queue_rx: mpsc::Receiver<MergeQueueEvent>,
-) {
-    while merge_queue_rx.recv().await.is_some() {
-        let ctx = ctx.clone();
-
-        let span = tracing::info_span!("MergeQueue");
-        tracing::debug!("Processing merge queue");
-        if let Err(error) = handle_merge_queue(ctx).instrument(span.clone()).await {
             handle_root_error(span, error);
         }
     }
