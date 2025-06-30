@@ -16,6 +16,7 @@ use crate::database::RunId;
 use crate::database::{BuildModel, BuildStatus, PullRequestModel};
 use crate::github::GithubRepoName;
 use crate::github::api::client::GithubRepositoryClient;
+use crate::github::api::operations::ForcePush;
 use crate::github::{CommitSha, GithubUser, LabelTrigger, MergeError, PullRequestNumber};
 use crate::permissions::PermissionType;
 use crate::utils::text::suppress_github_mentions;
@@ -146,7 +147,7 @@ async fn attempt_merge(
 
     // First set the try branch to our base commit (either the selected parent or the main branch).
     client
-        .set_branch_to_sha(TRY_MERGE_BRANCH_NAME, base_sha)
+        .set_branch_to_sha(TRY_MERGE_BRANCH_NAME, base_sha, ForcePush::Yes)
         .await
         .map_err(|error| anyhow!("Cannot set try merge branch to {}: {error:?}", base_sha.0))?;
 
@@ -177,7 +178,7 @@ async fn run_try_build(
     parent_sha: CommitSha,
 ) -> anyhow::Result<()> {
     client
-        .set_branch_to_sha(TRY_BRANCH_NAME, &commit_sha)
+        .set_branch_to_sha(TRY_BRANCH_NAME, &commit_sha, ForcePush::Yes)
         .await
         .map_err(|error| anyhow!("Cannot set try branch to main branch: {error:?}"))?;
 

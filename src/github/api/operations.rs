@@ -5,7 +5,7 @@ use thiserror::Error;
 use crate::github::CommitSha;
 use crate::github::api::client::GithubRepositoryClient;
 
-#[derive(serde::Serialize)]
+#[derive(Copy, Clone, serde::Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ForcePush {
     Yes,
@@ -101,9 +101,10 @@ pub async fn set_branch_to_commit(
     repo: &GithubRepositoryClient,
     branch_name: String,
     sha: &CommitSha,
+    force: ForcePush,
 ) -> Result<(), BranchUpdateError> {
     // Fast-path: assume that the branch exists
-    match update_branch(repo, branch_name.clone(), sha, ForcePush::Yes).await {
+    match update_branch(repo, branch_name.clone(), sha, force).await {
         Ok(_) => Ok(()),
         Err(BranchUpdateError::BranchNotFound(_)) => {
             // Branch does not exist yet, try to create it
