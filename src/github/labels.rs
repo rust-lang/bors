@@ -6,8 +6,6 @@ pub enum LabelTrigger {
     TryBuildStarted,
     TryBuildSucceeded,
     TryBuildFailed,
-    AutoBuildSucceeded,
-    AutoBuildFailed,
     Conflict,
 }
 

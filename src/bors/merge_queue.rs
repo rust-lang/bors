@@ -222,9 +222,6 @@ async fn start_auto_build(
             let comment = auto_build_started_comment(&gh_pr.head.sha, &merge_sha);
             client.post_comment(pr.number, comment).await?;
 
-            // 6. Update label
-            handle_label_trigger(repo, pr.number, LabelTrigger::AutoBuildSucceeded).await?;
-
             Ok(true)
         }
         MergeResult::Conflict => {

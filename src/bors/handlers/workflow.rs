@@ -193,19 +193,14 @@ async fn try_complete_build(
         return Ok(());
     }
 
-    let branch = payload.branch.as_str();
-    let (status, trigger) = match (branch, has_failure) {
-        (TRY_BRANCH_NAME, true) => (BuildStatus::Failure, LabelTrigger::TryBuildFailed),
-        (TRY_BRANCH_NAME, false) => (BuildStatus::Success, LabelTrigger::TryBuildSucceeded),
-        (AUTO_BRANCH_NAME, true) => (BuildStatus::Failure, LabelTrigger::AutoBuildFailed),
-        (AUTO_BRANCH_NAME, false) => (BuildStatus::Success, LabelTrigger::AutoBuildSucceeded),
-        _ => unreachable!(),
+    let status = if !has_failure {
+        BuildStatus::Success
+    } else {
+        BuildStatus::Failure
     };
-
     db.update_build_status(&build, status).await?;
-    handle_label_trigger(repo, pr.number, trigger).await?;
 
-    match branch {
+    match payload.branch.as_str() {
         TRY_BRANCH_NAME => {
             complete_try_build(repo, pr, build, workflows, has_failure, payload).await?
         }
@@ -227,13 +222,21 @@ async fn complete_try_build(
     has_failure: bool,
     payload: CheckSuiteCompleted,
 ) -> anyhow::Result<()> {
-    let message = if !has_failure {
+    let (trigger, message) = if !has_failure {
         tracing::info!("Workflow succeeded");
-        try_build_succeeded_comment(&workflows, payload.commit_sha, &build)
+        (
+            LabelTrigger::TryBuildSucceeded,
+            try_build_succeeded_comment(&workflows, payload.commit_sha, &build),
+        )
     } else {
         tracing::info!("Workflow failed");
-        workflow_failed_comment(&workflows)
+        (
+            LabelTrigger::TryBuildFailed,
+            workflow_failed_comment(&workflows),
+        )
     };
+
+    handle_label_trigger(repo, pr.number, trigger).await?;
     repo.client.post_comment(pr.number, message).await?;
 
     Ok(())
