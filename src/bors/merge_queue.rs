@@ -1,7 +1,6 @@
 use anyhow::anyhow;
 use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
-use std::sync::{Arc, OnceLock};
-use tokio::sync::Mutex;
+use std::sync::Arc;
 
 use crate::{
     BorsContext,
@@ -14,7 +13,10 @@ use crate::{
         handlers::labels::handle_label_trigger,
     },
     database::{BuildStatus, MergeableState, PullRequestModel},
-    github::{CommitSha, LabelTrigger, MergeError, api::client::GithubRepositoryClient, api::operations::ForcePush},
+    github::{
+        CommitSha, LabelTrigger, MergeError, api::client::GithubRepositoryClient,
+        api::operations::ForcePush,
+    },
     utils::sort_queue::sort_queue_prs,
 };
 
@@ -26,8 +28,6 @@ pub(super) const AUTO_MERGE_BRANCH_NAME: &str = "automation/bors/auto-merge";
 /// This branch should run CI checks.
 pub(super) const AUTO_BRANCH_NAME: &str = "automation/bors/auto";
 
-static MERGE_QUEUE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-
 pub type MergeQueueEvent = ();
 
 enum MergeResult {
@@ -36,10 +36,6 @@ enum MergeResult {
 }
 
 pub async fn handle_merge_queue(ctx: Arc<BorsContext>) -> anyhow::Result<()> {
-    // Prevent concurrent merge queue processing.
-    let lock = MERGE_QUEUE_LOCK.get_or_init(|| Mutex::new(()));
-    let _guard = lock.lock().await;
-
     let repos: Vec<Arc<RepositoryState>> =
         ctx.repositories.read().unwrap().values().cloned().collect();
 
