@@ -14,7 +14,7 @@ use crate::{
         handlers::labels::handle_label_trigger,
     },
     database::{BuildStatus, MergeableState, PullRequestModel},
-    github::{CommitSha, LabelTrigger, MergeError, api::client::GithubRepositoryClient},
+    github::{CommitSha, LabelTrigger, MergeError, api::client::GithubRepositoryClient, api::operations::ForcePush},
     utils::sort_queue::sort_queue_prs,
 };
 
@@ -80,7 +80,7 @@ pub async fn handle_merge_queue(ctx: Arc<BorsContext>) -> anyhow::Result<()> {
 
                         match repo
                             .client
-                            .set_branch_to_sha(&pr.base_branch, &commit_sha, false)
+                            .set_branch_to_sha(&pr.base_branch, &commit_sha, ForcePush::No)
                             .await
                         {
                             Ok(()) => {
@@ -202,7 +202,7 @@ async fn start_auto_build(
         MergeResult::Success(merge_sha) => {
             // 2. Push merge commit to `AUTO_BRANCH_NAME` where CI runs
             client
-                .set_branch_to_sha(AUTO_BRANCH_NAME, &merge_sha, true)
+                .set_branch_to_sha(AUTO_BRANCH_NAME, &merge_sha, ForcePush::Yes)
                 .await?;
 
             // 3. Record the build in the database
@@ -282,7 +282,7 @@ async fn attempt_merge(
 
     // Reset auto merge branch to point to base branch
     client
-        .set_branch_to_sha(AUTO_MERGE_BRANCH_NAME, base_sha, true)
+        .set_branch_to_sha(AUTO_MERGE_BRANCH_NAME, base_sha, ForcePush::Yes)
         .await
         .map_err(|error| anyhow!("Cannot set auto merge branch to {}: {error:?}", base_sha.0))?;
 

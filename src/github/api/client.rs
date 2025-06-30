@@ -9,7 +9,7 @@ use crate::bors::{CheckSuite, CheckSuiteStatus, Comment};
 use crate::config::{CONFIG_FILE_PATH, RepositoryConfig};
 use crate::database::RunId;
 use crate::github::api::base_github_html_url;
-use crate::github::api::operations::{MergeError, merge_branches, set_branch_to_commit};
+use crate::github::api::operations::{MergeError, merge_branches, set_branch_to_commit, ForcePush};
 use crate::github::{CommitSha, GithubRepoName, PullRequest, PullRequestNumber};
 use crate::utils::timing::{measure_network_request, perform_network_request_with_retry};
 use futures::TryStreamExt;
@@ -144,7 +144,7 @@ impl GithubRepositoryClient {
         &self,
         branch: &str,
         sha: &CommitSha,
-        force: bool,
+        force: ForcePush,
     ) -> anyhow::Result<()> {
         perform_network_request_with_retry("set_branch_to_sha", || async {
             Ok(set_branch_to_commit(self, branch.to_string(), sha, force).await?)
