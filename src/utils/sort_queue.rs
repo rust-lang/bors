@@ -15,7 +15,12 @@ pub fn sort_queue_prs(mut prs: Vec<PullRequestModel>) -> Vec<PullRequestModel> {
             // 3. Compare approval status (approved PRs should come first)
             .then_with(|| a.is_approved().cmp(&b.is_approved()).reverse())
             // 4. Compare priority numbers (higher priority should come first)
-            .then_with(|| b.priority.unwrap_or(0).cmp(&a.priority.unwrap_or(0)))
+            .then_with(|| {
+                a.priority
+                    .unwrap_or(0)
+                    .cmp(&b.priority.unwrap_or(0))
+                    .reverse()
+            })
             // 5. Compare rollup mode (-1 = never/iffy, 0 = maybe, 1 = always)
             .then_with(|| {
                 get_rollup_priority(a.rollup.as_ref()).cmp(&get_rollup_priority(b.rollup.as_ref()))
