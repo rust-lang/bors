@@ -75,12 +75,16 @@ pub async fn handle_merge_queue(ctx: Arc<BorsContext>) -> anyhow::Result<()> {
                         {
                             Ok(()) => {
                                 tracing::info!("Auto build succeeded and merged for PR {pr_num}");
+
                                 ctx.db
                                     .set_pr_status(
                                         &pr.repository,
                                         pr.number,
                                         PullRequestStatus::Merged,
                                     )
+                                    .await?;
+
+                                handle_label_trigger(&repo, pr.number, LabelTrigger::Succeeded)
                                     .await?;
                             }
                             Err(error) => {
