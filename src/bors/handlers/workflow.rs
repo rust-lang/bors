@@ -7,7 +7,6 @@ use crate::PgDbClient;
 use crate::bors::CheckSuiteStatus;
 use crate::bors::RepositoryState;
 use crate::bors::comment::auto_build_failed_comment;
-use crate::bors::comment::auto_build_succeeded_comment;
 use crate::bors::comment::{try_build_succeeded_comment, workflow_failed_comment};
 use crate::bors::event::{CheckSuiteCompleted, WorkflowCompleted, WorkflowStarted};
 use crate::bors::handlers::TRY_BRANCH_NAME;
@@ -205,7 +204,7 @@ async fn try_complete_build(
             complete_try_build(repo, pr, build, workflows, has_failure, payload).await?
         }
         AUTO_BRANCH_NAME => {
-            complete_auto_build(repo, pr, workflows, has_failure, payload).await?;
+            complete_auto_build(repo, pr, workflows, has_failure).await?;
         }
         _ => unreachable!("Branch should only be bors-observed branch"),
     }
@@ -248,21 +247,14 @@ async fn complete_auto_build(
     pr: PullRequestModel,
     workflows: Vec<WorkflowModel>,
     has_failure: bool,
-    payload: CheckSuiteCompleted,
 ) -> anyhow::Result<()> {
-    let comment = if !has_failure {
-        tracing::info!("Auto build succeeded for PR {}", pr.number);
-        auto_build_succeeded_comment(
-            &workflows,
-            pr.approver().unwrap_or("<unknown>"),
-            &payload.commit_sha,
-            &pr.base_branch,
-        )
-    } else {
+    if has_failure {
         tracing::info!("Auto build failed for PR {}", pr.number);
-        auto_build_failed_comment(&workflows)
-    };
-    repo.client.post_comment(pr.number, comment).await?;
+        let comment = auto_build_failed_comment(&workflows);
+        repo.client.post_comment(pr.number, comment).await?;
+    } else {
+        tracing::info!("Auto build succeeded for PR {}", pr.number);
+    }
 
     let (status, conclusion, desc) = if !has_failure {
         (

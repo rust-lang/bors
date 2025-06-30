@@ -8,7 +8,8 @@ use crate::{
     bors::{
         PullRequestStatus, RepositoryState,
         comment::{
-            auto_build_push_failed_comment, auto_build_started_comment, merge_conflict_comment,
+            auto_build_push_failed_comment, auto_build_started_comment,
+            auto_build_succeeded_comment, merge_conflict_comment,
         },
         handlers::labels::handle_label_trigger,
     },
@@ -68,6 +69,15 @@ pub async fn handle_merge_queue(ctx: Arc<BorsContext>) -> anyhow::Result<()> {
                 match auto_build.status {
                     // Build successful - point the base branch to the merged commit.
                     BuildStatus::Success => {
+                        let workflows = ctx.db.get_workflows_for_build(auto_build).await?;
+                        let comment = auto_build_succeeded_comment(
+                            &workflows,
+                            pr.approver().unwrap_or("<unknown>"),
+                            &commit_sha,
+                            &pr.base_branch,
+                        );
+                        repo.client.post_comment(pr.number, comment).await?;
+
                         match repo
                             .client
                             .set_branch_to_sha(&pr.base_branch, &commit_sha, false)
