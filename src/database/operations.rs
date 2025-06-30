@@ -988,6 +988,10 @@ pub(crate) async fn delete_auto_build(
     .await
 }
 
+/// Fetches pull requests eligible for merge:
+/// - Only approved PRs that are open and mergeable
+/// - Excludes PRs with failed/cancelled/timed-out auto builds
+/// - Excludes PRs that do not meet the tree closure priority threshold (if tree closed)
 pub(crate) async fn get_merge_queue_prs(
     executor: impl PgExecutor<'_>,
     repo: &GithubRepoName,
