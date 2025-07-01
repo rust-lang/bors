@@ -3,7 +3,7 @@
 use crate::bors::command::{Approver, BorsCommand, Parent};
 use crate::database::DelegatedPermission;
 use crate::github::CommitSha;
-use pulldown_cmark::{CowStr, Event, Parser, Tag, TagEnd, TextMergeStream};
+use pulldown_cmark::{Event, Parser, Tag, TagEnd, TextMergeStream};
 use std::collections::HashSet;
 use std::str::FromStr;
 
@@ -46,10 +46,9 @@ impl CommandParser {
     /// Assumes that each command spands at most one line and that there are not more commands on
     /// each line.
     pub fn parse_commands(&self, text: &str) -> Vec<Result<BorsCommand, CommandParseError>> {
-        let segments = extract_text_segments(text);
+        let segments = extract_text_from_markdown(text);
         segments
-            .iter()
-            .flat_map(|segment| segment.lines())
+            .lines()
             .filter_map(|line| match line.find(&self.prefix) {
                 Some(index) => {
                     let input = &line[index + self.prefix.len()..];
@@ -62,18 +61,21 @@ impl CommandParser {
 }
 
 /// Extract text segments from a Markdown `text`.
-fn extract_text_segments(text: &str) -> Vec<CowStr> {
+fn extract_text_from_markdown(text: &str) -> String {
     let md_parser = TextMergeStream::new(Parser::new(text));
     let mut stack = vec![];
-    let mut segments = vec![];
+    let mut cleaned_text = String::new();
 
     for event in md_parser.into_iter() {
         match event {
             Event::Text(text) | Event::Html(text) => {
                 // Only consider commands in raw text outside of wrapping elements
                 if stack.is_empty() {
-                    segments.push(text);
+                    cleaned_text.push_str(&text);
                 }
+            }
+            Event::SoftBreak | Event::HardBreak => {
+                cleaned_text.push('\n');
             }
             Event::Start(tag) => match tag {
                 // Ignore content in the following wrapping elements
@@ -84,8 +86,15 @@ fn extract_text_segments(text: &str) -> Vec<CowStr> {
                 | Tag::Image { .. } => {
                     stack.push(tag);
                 }
+                // Special case to support `*foo*`, which is used for custom try jobs using `glob`.
+                Tag::Emphasis => {
+                    cleaned_text.push('*');
+                }
                 _ => {}
             },
+            Event::End(TagEnd::Emphasis) => {
+                cleaned_text.push('*');
+            }
             Event::End(tag) => {
                 if let Some(start_tag) = stack.last() {
                     match (start_tag, tag) {
@@ -103,7 +112,7 @@ fn extract_text_segments(text: &str) -> Vec<CowStr> {
             _ => {}
         }
     }
-    segments
+    cleaned_text
 }
 
 type ParseResult<T = BorsCommand> = Option<Result<T, CommandParseError>>;
@@ -1022,6 +1031,20 @@ line two
             Ok(BorsCommand::Try {
                 parent: None,
                 jobs: vec!["ci-1".to_string(), "lint_2".to_string(), "foo*".to_string()]
+            })
+        );
+    }
+
+    // Make sure that *foo* gets parsed as foo, ignoring the Markdown italics.
+    #[test]
+    fn parse_try_jobs_glob_2() {
+        let cmds = parse_commands("@bors try jobs=*x86_64-msvc*");
+        assert_eq!(cmds.len(), 1);
+        assert_eq!(
+            cmds[0],
+            Ok(BorsCommand::Try {
+                parent: None,
+                jobs: vec!["*x86_64-msvc*".to_string()]
             })
         );
     }
