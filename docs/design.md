@@ -113,6 +113,90 @@ the branch to parent, and then again after merging the PR commit).
 
 Note that `automation/bors/try-merge` should not have any CI workflows configured! These should be configured for the `automation/bors/try` branch instead.
 
+## Auto builds
+The merge queue is an automated system that processes approved pull requests and merges them into the base branch after
+ensuring they pass all CI checks. PRs are approved using the `@bors r+` command and then "queued" automatically.
+
+Here is a sequence diagram that describes what happens when a PR is approved and enters the merge queue:
+
+```text
++-----+                            +-------+                              +-----+ +-----+ +---------+
+| PR  |                            | bors  |                              | GHA | | DB  | | teamAPI |
++-----+                            +-------+                              +-----+ +-----+ +---------+
+   |                                   |                                     |       |         |
+   | @bors r+ (via webhook)            |                                     |       |         |
+   |---------------------------------->|                                     |       |         |
+   |                                   |                                     |       |         |
+   |                                   | check user permissions              |       |         |
+   |                                   |------------------------------------------------------>|
+   |                                   |                                     |       |         |
+   |                                   | store approval in DB                |       |         |
+   |                                   |-------------------------------------------->|         |
+   |                                   |                                     |       |         |
+   | comment: "Commit abc123 approved" |                                     |       |         |
+   |<----------------------------------|                                     |       |         |
+   |                                   |                                     |       |         |
+   |                                   | (every 30s: process merge queue)    |       |         |
+   |                                   |                                     |       |         |
+   |                                   | merge PR with base to `auto-merge`  |       |         |
+   |                                   |------------------------------------>|       |         |
+   |                                   |                                     |       |         |
+   |                                   | push merge commit to `auto`         |       |         |
+   |                                   |------------------------------------>|       |         |
+   |                                   |                                     |       |         |
+   |                                   | create check run on PR head         |       |         |
+   |                                   |------------------------------------>|       |         |
+   |                                   |                                     |       |         |
+   |                                   | store auto build                    |       |         |
+   |                                   |-------------------------------------------->|         |
+   |                                   |                                     |       |         |
+   |  comment: ":hourglass: Testing.." |                                     |       |         |
+   |<----------------------------------|                                     |       |         |
+   |                                   |                                     |       |         |
+   |                                   |                 workflow started    |       |         |
+   |                                   |<------------------------------------|       |         |
+   |                                   |                                     |       |         |
+   |                                   | store workflow in DB                |       |         |
+   |                                   |-------------------------------------------->|         |
+   |                                   |                                     |       |         |
+   |                                   |                workflow completed   |       |         |
+   |                                   |<------------------------------------|       |         |
+   |                                   |                                     |       |         |
+   |                                   | update workflow status              |       |         |
+   |                                   |-------------------------------------------->|         |
+   |                                   |                                     |       |         |
+   |                                   | query check suites for commit       |       |         |
+   |                                   |------------------------------------>|       |         |
+   |                                   |                                     |       |         |
+   |                                   | (wait for all check suites)         |       |         |
+   |                                   |                                     |       |         |
+   |                                   |         check suite completed       |       |         |
+   |                                   |<------------------------------------|       |         |
+   |                                   |                                     |       |         |
+   |                                   | update build status                 |       |         |
+   |                                   |-------------------------------------------->|         |
+   |                                   |                                     |       |         |
+   |                                   | update check run on PR head         |       |         |
+   |                                   |------------------------------------>|       |         |
+   |                                   |                                     |       |         |
+   |                                   | fast-forward base branch            |       |         |
+   |                                   |------------------------------------>|       |         |
+   |                                   |                                     |       |         |
+   | comment: ":sunny: Test successful"|                                     |       |         |
+   |<----------------------------------|                                     |       |         |
+   |                                   |                                     |       |         |
+```
+
+The merge queue first merges the PR with the latest base branch commit in `automation/bors/auto-merge`, then pushes
+this merged commit to `automation/bors/auto` where CI tests run. If all tests pass, the base branch is fast-forwarded
+to the merge commit.
+
+Only one auto build runs at a time to ensure that each PR is tested against the same branch state it will be merged into,
+preventing the problem where two PRs pass tests independently but fail when combined.
+
+Note that `automation/bors/auto-merge` should not have any CI workflows configured! These should be configured for the
+`automation/bors/auto` branch instead.
+
 ## Recognizing that CI has succeeded/failed
 With [homu](https://github.com/rust-lang/homu) (the old bors implementation), GitHub actions CI running repositories had
 to use a "fake" job that marked the whole CI workflow as succeeded or failed, to signal to bors if it should consider

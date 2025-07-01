@@ -5,6 +5,21 @@ use thiserror::Error;
 use crate::github::CommitSha;
 use crate::github::api::client::GithubRepositoryClient;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ForcePush {
+    Yes,
+    No,
+}
+
+impl From<ForcePush> for bool {
+    fn from(force_push: ForcePush) -> bool {
+        match force_push {
+            ForcePush::Yes => true,
+            ForcePush::No => false,
+        }
+    }
+}
+
 #[derive(Error, Debug)]
 pub enum MergeError {
     #[error("Branch not found")]
@@ -88,15 +103,16 @@ pub async fn merge_branches(
     }
 }
 
-/// Forcefully updates the branch to the given commit `sha`.
+/// Updates the branch to the given commit `sha`.
 /// If the branch does not exist yet, it instead attempts to create it.
 pub async fn set_branch_to_commit(
     repo: &GithubRepositoryClient,
     branch_name: String,
     sha: &CommitSha,
+    force: ForcePush,
 ) -> Result<(), BranchUpdateError> {
     // Fast-path: assume that the branch exists
-    match update_branch(repo, branch_name.clone(), sha).await {
+    match update_branch(repo, branch_name.clone(), sha, force).await {
         Ok(_) => Ok(()),
         Err(BranchUpdateError::BranchNotFound(_)) => {
             // Branch does not exist yet, try to create it
@@ -132,11 +148,12 @@ pub enum BranchUpdateError {
     Custom(String),
 }
 
-/// Force update the branch with the given `branch_name` to the given `sha`.
+/// Update the branch with the given `branch_name` to the given `sha`.
 async fn update_branch(
     repo: &GithubRepositoryClient,
     branch_name: String,
     sha: &CommitSha,
+    force: ForcePush,
 ) -> Result<(), BranchUpdateError> {
     let url = format!(
         "/repos/{}/git/refs/{}",
@@ -152,7 +169,7 @@ async fn update_branch(
             url.as_str(),
             Some(&serde_json::json!({
                 "sha": sha.as_ref(),
-                "force": true
+                "force": bool::from(force)
             })),
         )
         .await?;

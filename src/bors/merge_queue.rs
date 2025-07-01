@@ -1,0 +1,335 @@
+use anyhow::anyhow;
+use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
+use std::future::Future;
+use std::sync::Arc;
+use tokio::sync::mpsc;
+use tracing::Instrument;
+
+use crate::{
+    BorsContext,
+    bors::{
+        PullRequestStatus, RepositoryState,
+        comment::{
+            auto_build_push_failed_comment, auto_build_started_comment,
+            auto_build_succeeded_comment, merge_conflict_comment,
+        },
+        handlers::labels::handle_label_trigger,
+    },
+    database::{BuildStatus, MergeableState, PullRequestModel},
+    github::{
+        CommitSha, LabelTrigger, MergeError, api::client::GithubRepositoryClient,
+        api::operations::ForcePush,
+    },
+    utils::sort_queue::sort_queue_prs,
+};
+
+/// Branch used for performing merge operations.
+/// This branch should not run CI checks.
+pub(super) const AUTO_MERGE_BRANCH_NAME: &str = "automation/bors/auto-merge";
+
+/// Branch where CI checks run for auto builds.
+/// This branch should run CI checks.
+pub(super) const AUTO_BRANCH_NAME: &str = "automation/bors/auto";
+
+pub type MergeQueueEvent = ();
+
+enum MergeResult {
+    Success(CommitSha),
+    Conflict,
+}
+
+pub async fn merge_queue_tick(ctx: Arc<BorsContext>) -> anyhow::Result<()> {
+    let repos: Vec<Arc<RepositoryState>> =
+        ctx.repositories.read().unwrap().values().cloned().collect();
+
+    for repo in repos {
+        let repo_name = repo.repository();
+        let repo_db = match ctx.db.repo_db(repo_name).await? {
+            Some(repo) => repo,
+            None => {
+                tracing::error!("Repository {repo_name} not found");
+                continue;
+            }
+        };
+        let priority = repo_db.tree_state.priority();
+        let prs = ctx.db.get_merge_queue_prs(repo_name, priority).await?;
+
+        // Sort PRs according to merge queue priority rules.
+        // Successful builds come first so they can be merged immediately,
+        // then pending builds (which block the queue to prevent starting simultaneous auto-builds).
+        let prs = sort_queue_prs(prs);
+
+        for pr in prs {
+            let pr_num = pr.number;
+
+            if let Some(auto_build) = &pr.auto_build {
+                let commit_sha = CommitSha(auto_build.commit_sha.clone());
+
+                match auto_build.status {
+                    // Build successful - point the base branch to the merged commit.
+                    BuildStatus::Success => {
+                        let workflows = ctx.db.get_workflows_for_build(auto_build).await?;
+                        let comment = auto_build_succeeded_comment(
+                            &workflows,
+                            pr.approver().unwrap_or("<unknown>"),
+                            &commit_sha,
+                            &pr.base_branch,
+                        );
+                        repo.client.post_comment(pr.number, comment).await?;
+
+                        match repo
+                            .client
+                            .set_branch_to_sha(&pr.base_branch, &commit_sha, ForcePush::No)
+                            .await
+                        {
+                            Ok(()) => {
+                                tracing::info!("Auto build succeeded and merged for PR {pr_num}");
+
+                                ctx.db
+                                    .set_pr_status(
+                                        &pr.repository,
+                                        pr.number,
+                                        PullRequestStatus::Merged,
+                                    )
+                                    .await?;
+
+                                handle_label_trigger(&repo, pr.number, LabelTrigger::Succeeded)
+                                    .await?;
+                            }
+                            Err(error) => {
+                                tracing::error!(
+                                    "Failed to push PR {pr_num} to base branch: {:?}",
+                                    error
+                                );
+
+                                let gh_pr = repo.client.get_pull_request(pr_num).await?;
+
+                                let desc = format!(
+                                    "Test was successful, but fast-forwarding failed: {}",
+                                    &error.to_string()
+                                );
+                                repo.client
+                                    .create_check_run(
+                                        &gh_pr.head.sha,
+                                        "bors",
+                                        CheckRunStatus::Completed,
+                                        Some(CheckRunConclusion::Failure),
+                                        Some("Bors build status"),
+                                        Some(&desc),
+                                        None,
+                                    )
+                                    .await?;
+
+                                ctx.db
+                                    .update_build_status(auto_build, BuildStatus::Failure)
+                                    .await?;
+
+                                let comment = auto_build_push_failed_comment(&error.to_string());
+                                repo.client.post_comment(pr.number, comment).await?;
+                            }
+                        };
+
+                        // We break rather than continue to give GitHub time to update the base
+                        // branch.
+                        break;
+                    }
+                    // Build in progress - stop queue. We can only have one PR built at a time.
+                    BuildStatus::Pending => {
+                        tracing::info!("PR {pr_num} has a pending build - blocking queue");
+                        break;
+                    }
+                    BuildStatus::Failure | BuildStatus::Cancelled | BuildStatus::Timeouted => {
+                        unreachable!("Failed auto builds should be filtered out by SQL query");
+                    }
+                }
+            }
+
+            // No build exists for this PR - start a new auto build.
+            match start_auto_build(&repo, &ctx, pr).await {
+                Ok(true) => {
+                    tracing::info!("Starting auto build for PR {pr_num}");
+                    // We can only have one PR being built at a time - block the queue.
+                    break;
+                }
+                Ok(false) => {
+                    // Failed due to issue with the PR (e.g. merge conflicts).
+                    tracing::debug!("Failed to start auto build for PR {pr_num}");
+                    continue;
+                }
+                Err(error) => {
+                    // Unexpected error - the PR will remain in the "queue" for a retry.
+                    tracing::error!("Error starting auto build for PR {pr_num}: {:?}", error);
+                    continue;
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Starts a new auto build for a pull request.
+async fn start_auto_build(
+    repo: &Arc<RepositoryState>,
+    ctx: &Arc<BorsContext>,
+    pr: PullRequestModel,
+) -> anyhow::Result<bool> {
+    let client = &repo.client;
+
+    let gh_pr = client.get_pull_request(pr.number).await?;
+    let base_sha = client.get_branch_sha(&pr.base_branch).await?;
+
+    let auto_merge_commit_message = format!(
+        "Auto merge of #{} - {}, r={}\n\n{}\n\n{}",
+        pr.number,
+        gh_pr.head_label,
+        pr.approver().unwrap_or("<unknown>"),
+        pr.title,
+        gh_pr.message
+    );
+
+    // 1. Merge PR head with base branch on `AUTO_MERGE_BRANCH_NAME`
+    match attempt_merge(
+        &repo.client,
+        &gh_pr.head.sha,
+        &base_sha,
+        &auto_merge_commit_message,
+    )
+    .await?
+    {
+        MergeResult::Success(merge_sha) => {
+            // 2. Push merge commit to `AUTO_BRANCH_NAME` where CI runs
+            client
+                .set_branch_to_sha(AUTO_BRANCH_NAME, &merge_sha, ForcePush::Yes)
+                .await?;
+
+            // 3. Record the build in the database
+            ctx.db
+                .attach_auto_build(
+                    &pr,
+                    AUTO_BRANCH_NAME.to_string(),
+                    merge_sha.clone(),
+                    base_sha,
+                )
+                .await?;
+
+            // 4. Set GitHub check run to pending on PR head
+            let desc = format!(
+                "Testing commit {} with merge {}...",
+                gh_pr.head.sha, merge_sha
+            );
+            client
+                .create_check_run(
+                    &gh_pr.head.sha,
+                    "bors",
+                    CheckRunStatus::InProgress,
+                    None,
+                    Some("Bors build status"),
+                    Some(&desc),
+                    None,
+                )
+                .await?;
+
+            // 5. Post status comment
+            let comment = auto_build_started_comment(&gh_pr.head.sha, &merge_sha);
+            client.post_comment(pr.number, comment).await?;
+
+            Ok(true)
+        }
+        MergeResult::Conflict => {
+            // 2. Record in database
+            ctx.db
+                .update_pr_mergeable_state(&pr, MergeableState::HasConflicts)
+                .await?;
+
+            // 3. Set GitHub check run to error on PR head
+            // We don't set it to failure as this issue is likely on GitHub's end.
+            client
+                .create_check_run(
+                    &gh_pr.head.sha,
+                    "bors",
+                    CheckRunStatus::Completed,
+                    Some(CheckRunConclusion::Failure),
+                    Some("Bors build status"),
+                    Some("Merge conflict"),
+                    None,
+                )
+                .await?;
+
+            // 4. Post comment
+            client
+                .post_comment(pr.number, merge_conflict_comment(&gh_pr.head.name))
+                .await?;
+
+            // 5. Update label
+            handle_label_trigger(repo, pr.number, LabelTrigger::Conflict).await?;
+
+            Ok(false)
+        }
+    }
+}
+
+/// Attempts to merge the given head SHA with base SHA via `AUTO_MERGE_BRANCH_NAME`.
+async fn attempt_merge(
+    client: &GithubRepositoryClient,
+    head_sha: &CommitSha,
+    base_sha: &CommitSha,
+    merge_message: &str,
+) -> anyhow::Result<MergeResult> {
+    tracing::debug!("Attempting to merge with base SHA {base_sha}");
+
+    // Reset auto merge branch to point to base branch
+    client
+        .set_branch_to_sha(AUTO_MERGE_BRANCH_NAME, base_sha, ForcePush::Yes)
+        .await
+        .map_err(|error| anyhow!("Cannot set auto merge branch to {}: {error:?}", base_sha.0))?;
+
+    // then merge PR head commit into auto merge branch.
+    match client
+        .merge_branches(AUTO_MERGE_BRANCH_NAME, head_sha, merge_message)
+        .await
+    {
+        Ok(merge_sha) => {
+            tracing::debug!("Merge successful, SHA: {merge_sha}");
+
+            Ok(MergeResult::Success(merge_sha))
+        }
+        Err(MergeError::Conflict) => {
+            tracing::warn!("Merge conflict");
+
+            Ok(MergeResult::Conflict)
+        }
+        Err(error) => Err(error.into()),
+    }
+}
+
+pub fn start_merge_queue(
+    ctx: Arc<BorsContext>,
+) -> (
+    mpsc::Sender<MergeQueueEvent>,
+    impl Future<Output = anyhow::Result<()>>,
+) {
+    let (tx, mut rx) = mpsc::channel::<MergeQueueEvent>(10);
+
+    let fut = async move {
+        while rx.recv().await.is_some() {
+            let span = tracing::info_span!("MergeQueue");
+            tracing::debug!("Processing merge queue");
+            if let Err(error) = merge_queue_tick(ctx.clone()).instrument(span.clone()).await {
+                // In tests, we want to panic on all errors.
+                #[cfg(test)]
+                {
+                    panic!("Handler failed: {error:?}");
+                }
+                #[cfg(not(test))]
+                {
+                    use crate::utils::logging::LogError;
+                    span.log_error(error);
+                }
+            }
+        }
+        Ok(())
+    };
+
+    (tx, fut)
+}
