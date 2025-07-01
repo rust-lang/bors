@@ -5,6 +5,12 @@ use thiserror::Error;
 use crate::github::CommitSha;
 use crate::github::api::client::GithubRepositoryClient;
 
+#[derive(Copy, Clone)]
+pub enum ForcePush {
+    Yes,
+    No,
+}
+
 #[derive(Error, Debug)]
 pub enum MergeError {
     #[error("Branch not found")]
@@ -94,9 +100,10 @@ pub async fn set_branch_to_commit(
     repo: &GithubRepositoryClient,
     branch_name: String,
     sha: &CommitSha,
+    force: ForcePush,
 ) -> Result<(), BranchUpdateError> {
     // Fast-path: assume that the branch exists
-    match update_branch(repo, branch_name.clone(), sha).await {
+    match update_branch(repo, branch_name.clone(), sha, force).await {
         Ok(_) => Ok(()),
         Err(BranchUpdateError::BranchNotFound(_)) => {
             // Branch does not exist yet, try to create it
@@ -137,6 +144,7 @@ async fn update_branch(
     repo: &GithubRepositoryClient,
     branch_name: String,
     sha: &CommitSha,
+    force: ForcePush,
 ) -> Result<(), BranchUpdateError> {
     let url = format!(
         "/repos/{}/git/refs/{}",
@@ -152,7 +160,7 @@ async fn update_branch(
             url.as_str(),
             Some(&serde_json::json!({
                 "sha": sha.as_ref(),
-                "force": true
+                "force": matches!(force, ForcePush::Yes)
             })),
         )
         .await?;
