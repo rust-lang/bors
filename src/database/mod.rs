@@ -310,6 +310,7 @@ pub struct BuildModel {
     pub status: BuildStatus,
     pub parent: String,
     pub created_at: DateTime<Utc>,
+    pub check_run_id: Option<i64>,
 }
 
 /// Represents a pull request.

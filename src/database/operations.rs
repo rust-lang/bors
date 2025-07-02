@@ -557,9 +557,10 @@ SELECT
     repository as "repository: GithubRepoName",
     branch,
     commit_sha,
-    parent,
     status as "status: BuildStatus",
-    created_at as "created_at: DateTime<Utc>"
+    parent,
+    created_at as "created_at: DateTime<Utc>",
+    check_run_id
 FROM build
 WHERE repository = $1
     AND branch = $2
@@ -589,9 +590,10 @@ SELECT
     repository as "repository: GithubRepoName",
     branch,
     commit_sha,
-    parent,
     status as "status: BuildStatus",
-    created_at as "created_at: DateTime<Utc>"
+    parent,
+    created_at as "created_at: DateTime<Utc>",
+    check_run_id
 FROM build
 WHERE repository = $1
     AND status = $2
@@ -750,7 +752,8 @@ SELECT
         build.commit_sha,
         build.status,
         build.parent,
-        build.created_at
+        build.created_at,
+        build.check_run_id
     ) AS "build!: BuildModel"
 FROM workflow
     LEFT JOIN build ON workflow.build_id = build.id
@@ -809,7 +812,8 @@ SELECT
         build.commit_sha,
         build.status,
         build.parent,
-        build.created_at
+        build.created_at,
+        build.check_run_id
     ) AS "build!: BuildModel"
 FROM workflow
     LEFT JOIN build ON workflow.build_id = build.id
