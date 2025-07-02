@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\nSELECT\n    id,\n    repository as \"repository: GithubRepoName\",\n    branch,\n    commit_sha,\n    parent,\n    status as \"status: BuildStatus\",\n    created_at as \"created_at: DateTime<Utc>\"\nFROM build\nWHERE repository = $1\n    AND branch = $2\n    AND commit_sha = $3\n",
+  "query": "\nSELECT\n    id,\n    repository as \"repository: GithubRepoName\",\n    branch,\n    commit_sha,\n    status as \"status: BuildStatus\",\n    parent,\n    created_at as \"created_at: DateTime<Utc>\",\n    check_run_id\nFROM build\nWHERE repository = $1\n    AND status = $2\n",
   "describe": {
     "columns": [
       {
@@ -25,23 +25,27 @@
       },
       {
         "ordinal": 4,
-        "name": "parent",
+        "name": "status: BuildStatus",
         "type_info": "Text"
       },
       {
         "ordinal": 5,
-        "name": "status: BuildStatus",
+        "name": "parent",
         "type_info": "Text"
       },
       {
         "ordinal": 6,
         "name": "created_at: DateTime<Utc>",
         "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "check_run_id",
+        "type_info": "Int8"
       }
     ],
     "parameters": {
       "Left": [
-        "Text",
         "Text",
         "Text"
       ]
@@ -53,8 +57,9 @@
       false,
       false,
       false,
-      false
+      false,
+      true
     ]
   },
-  "hash": "1a744cce3bc5cf50c0eb8d78100281153c6755c7a667690c2dc80e5f3d5cb0ce"
+  "hash": "02da9f6b50aedf8ccca20aa166c04e7406180ec882d79a0c5d5961779894a6f0"
 }

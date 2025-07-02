@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\nSELECT\n    workflow.id,\n    workflow.name,\n    workflow.url,\n    workflow.run_id,\n    workflow.type as \"workflow_type: WorkflowType\",\n    workflow.status as \"status: WorkflowStatus\",\n    workflow.created_at as \"created_at: DateTime<Utc>\",\n    (\n        build.id,\n        build.repository,\n        build.branch,\n        build.commit_sha,\n        build.status,\n        build.parent,\n        build.created_at\n    ) AS \"build!: BuildModel\"\nFROM workflow\n    LEFT JOIN build ON workflow.build_id = build.id\n",
+  "query": "\nSELECT\n    workflow.id,\n    workflow.name,\n    workflow.url,\n    workflow.run_id,\n    workflow.type as \"workflow_type: WorkflowType\",\n    workflow.status as \"status: WorkflowStatus\",\n    workflow.created_at as \"created_at: DateTime<Utc>\",\n    (\n        build.id,\n        build.repository,\n        build.branch,\n        build.commit_sha,\n        build.status,\n        build.parent,\n        build.created_at,\n        build.check_run_id\n    ) AS \"build!: BuildModel\"\nFROM workflow\n    LEFT JOIN build ON workflow.build_id = build.id\n",
   "describe": {
     "columns": [
       {
@@ -58,5 +58,5 @@
       null
     ]
   },
-  "hash": "4ba899ceb5200a74b944f26b4df293d6eaeb7c10e4a9d594b003f04a7f493dc1"
+  "hash": "7c02e94615e2ac8d8ea1d45b7b21a3dc29b884f514131df60aeb63569568e82f"
 }
