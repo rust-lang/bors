@@ -269,7 +269,8 @@ async fn notify_of_edited_pr(
         .post_comment(
             pr_number,
             Comment::new(format!(
-                ":warning: The base branch changed to `{base_name}`, and the PR will need to be re-approved.",
+                r#":warning: The base branch changed to `{base_name}`, and the
+PR will need to be re-approved."#,
             )),
         )
         .await
@@ -284,7 +285,8 @@ async fn notify_of_pushed_pr(
         .post_comment(
             pr_number,
             Comment::new(format!(
-                r#":warning: A new commit {} was pushed to the branch, the PR will need to be re-approved."#,
+                r#":warning: A new commit `{}` was pushed to the branch, the
+PR will need to be re-approved."#,
                 head_sha
             )),
         )
@@ -345,7 +347,10 @@ mod tests {
 
             insta::assert_snapshot!(
                 tester.get_comment().await?,
-                @":warning: The base branch changed to `beta`, and the PR will need to be re-approved."
+                @r"
+            :warning: The base branch changed to `beta`, and the
+            PR will need to be re-approved.
+            "
             );
             tester.default_pr().await.expect_unapproved();
             Ok(tester)
@@ -398,7 +403,10 @@ mod tests {
 
             insta::assert_snapshot!(
                 tester.get_comment().await?,
-                @":warning: A new commit pr-1-commit-1 was pushed to the branch, the PR will need to be re-approved."
+                @r"
+            :warning: A new commit `pr-1-commit-1` was pushed to the branch, the
+            PR will need to be re-approved.
+            "
             );
             tester.default_pr().await.expect_unapproved();
             Ok(tester)
@@ -478,7 +486,9 @@ mod tests {
                     pr.pr_status == PullRequestStatus::Open
                 })
                 .await?;
-            tester.close_pr(default_repo_name(), pr.number.0).await?;
+            tester
+                .set_pr_status_closed(default_repo_name(), pr.number.0)
+                .await?;
             tester
                 .wait_for_pr(default_repo_name(), pr.number.0, |pr| {
                     pr.pr_status == PullRequestStatus::Closed
@@ -505,7 +515,7 @@ mod tests {
                 })
                 .await?;
             tester
-                .ready_for_review(default_repo_name(), pr.number.0)
+                .set_pr_status_ready_for_review(default_repo_name(), pr.number.0)
                 .await?;
             tester
                 .wait_for_pr(default_repo_name(), pr.number.0, |pr| {
@@ -527,7 +537,7 @@ mod tests {
                 })
                 .await?;
             tester
-                .convert_to_draft(default_repo_name(), pr.number.0)
+                .set_pr_status_draft(default_repo_name(), pr.number.0)
                 .await?;
             tester
                 .wait_for_pr(default_repo_name(), pr.number.0, |pr| {
@@ -595,7 +605,9 @@ mod tests {
                     pr.pr_status == PullRequestStatus::Open
                 })
                 .await?;
-            tester.merge_pr(default_repo_name(), pr.number.0).await?;
+            tester
+                .set_pr_status_merged(default_repo_name(), pr.number.0)
+                .await?;
             tester
                 .wait_for_pr(default_repo_name(), pr.number.0, |pr| {
                     pr.pr_status == PullRequestStatus::Merged
