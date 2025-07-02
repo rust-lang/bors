@@ -427,29 +427,6 @@ impl BorsTester {
         Ok(pr)
     }
 
-    pub async fn close_pr(
-        &mut self,
-        repo_name: GithubRepoName,
-        pr_number: u64,
-    ) -> anyhow::Result<()> {
-        let pr = {
-            let repo = self.github.get_repo(&repo_name);
-            let mut repo = repo.lock();
-            let pr = repo
-                .pull_requests
-                .get_mut(&pr_number)
-                .expect("PR must be opened before closing it");
-            pr.close_pr();
-            pr.clone()
-        };
-        self.send_webhook(
-            "pull_request",
-            GitHubPullRequestEventPayload::new(pr.clone(), "closed", None),
-        )
-        .await?;
-        Ok(())
-    }
-
     pub async fn reopen_pr(
         &mut self,
         repo_name: GithubRepoName,
@@ -473,7 +450,30 @@ impl BorsTester {
         Ok(())
     }
 
-    pub async fn convert_to_draft(
+    pub async fn set_pr_status_closed(
+        &mut self,
+        repo_name: GithubRepoName,
+        pr_number: u64,
+    ) -> anyhow::Result<()> {
+        let pr = {
+            let repo = self.github.get_repo(&repo_name);
+            let mut repo = repo.lock();
+            let pr = repo
+                .pull_requests
+                .get_mut(&pr_number)
+                .expect("PR must be opened before closing it");
+            pr.close_pr();
+            pr.clone()
+        };
+        self.send_webhook(
+            "pull_request",
+            GitHubPullRequestEventPayload::new(pr.clone(), "closed", None),
+        )
+        .await?;
+        Ok(())
+    }
+
+    pub async fn set_pr_status_draft(
         &mut self,
         repo_name: GithubRepoName,
         pr_number: u64,
@@ -496,7 +496,7 @@ impl BorsTester {
         Ok(())
     }
 
-    pub async fn ready_for_review(
+    pub async fn set_pr_status_ready_for_review(
         &mut self,
         repo_name: GithubRepoName,
         pr_number: u64,
@@ -519,7 +519,7 @@ impl BorsTester {
         Ok(())
     }
 
-    pub async fn merge_pr(
+    pub async fn set_pr_status_merged(
         &mut self,
         repo_name: GithubRepoName,
         pr_number: u64,

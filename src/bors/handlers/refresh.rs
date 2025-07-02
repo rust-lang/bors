@@ -339,7 +339,9 @@ timeout = 3600
                 .await?;
             tester
                 .with_blocked_webhooks(async |tester| {
-                    tester.close_pr(default_repo_name(), pr.number.0).await
+                    tester
+                        .set_pr_status_closed(default_repo_name(), pr.number.0)
+                        .await
                 })
                 .await?;
             tester.refresh_prs().await;
@@ -359,7 +361,7 @@ timeout = 3600
             tester
                 .with_blocked_webhooks(async |tester| {
                     tester
-                        .convert_to_draft(default_repo_name(), pr.number.0)
+                        .set_pr_status_draft(default_repo_name(), pr.number.0)
                         .await
                 })
                 .await?;
