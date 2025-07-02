@@ -163,6 +163,10 @@ handled during merge and rebase. This is normal, and you should still perform st
     Comment::new(message)
 }
 
+pub fn approve_non_open_pr_comment() -> Comment {
+    Comment::new("Only open, non-draft PRs can be approved".to_string())
+}
+
 fn list_workflows_status(workflows: &[WorkflowModel]) -> String {
     workflows
         .iter()

@@ -1,13 +1,14 @@
 use std::sync::Arc;
 
 use crate::PgDbClient;
-use crate::bors::Comment;
 use crate::bors::RepositoryState;
 use crate::bors::command::Approver;
 use crate::bors::command::RollupMode;
+use crate::bors::comment::approve_non_open_pr_comment;
 use crate::bors::handlers::has_permission;
 use crate::bors::handlers::labels::handle_label_trigger;
 use crate::bors::handlers::{PullRequestData, deny_request};
+use crate::bors::{Comment, PullRequestStatus};
 use crate::database::ApprovalInfo;
 use crate::database::DelegatedPermission;
 use crate::database::TreeState;
@@ -31,6 +32,15 @@ pub(super) async fn command_approve(
         deny_request(&repo_state, pr.number(), author, PermissionType::Review).await?;
         return Ok(());
     };
+
+    if !matches!(pr.github.status, PullRequestStatus::Open) {
+        repo_state
+            .client
+            .post_comment(pr.number(), approve_non_open_pr_comment())
+            .await?;
+        return Ok(());
+    }
+
     let approver = match approver {
         Approver::Myself => author.username.clone(),
         Approver::Specified(approver) => approver.clone(),
@@ -1039,5 +1049,47 @@ mod tests {
             Ok(tester)
         })
         .await;
+    }
+
+    #[sqlx::test]
+    async fn approve_draft_pr(pool: sqlx::PgPool) {
+        run_test(pool, |mut tester| async {
+            tester
+                .set_pr_status_draft(default_repo_name(), default_pr_number())
+                .await?;
+            tester.post_comment("@bors r+").await?;
+            insta::assert_snapshot!(tester.get_comment().await?, @"Only open, non-draft PRs can be approved");
+            tester.default_pr().await.expect_unapproved();
+            Ok(tester)
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn approve_closed_pr(pool: sqlx::PgPool) {
+        run_test(pool, |mut tester| async {
+            tester
+                .set_pr_status_closed(default_repo_name(), default_pr_number())
+                .await?;
+            tester.post_comment("@bors r+").await?;
+            insta::assert_snapshot!(tester.get_comment().await?, @"Only open, non-draft PRs can be approved");
+            tester.default_pr().await.expect_unapproved();
+            Ok(tester)
+        })
+            .await;
+    }
+
+    #[sqlx::test]
+    async fn approve_merged_pr(pool: sqlx::PgPool) {
+        run_test(pool, |mut tester| async {
+            tester
+                .set_pr_status_merged(default_repo_name(), default_pr_number())
+                .await?;
+            tester.post_comment("@bors r+").await?;
+            insta::assert_snapshot!(tester.get_comment().await?, @"Only open, non-draft PRs can be approved");
+            tester.default_pr().await.expect_unapproved();
+            Ok(tester)
+        })
+            .await;
     }
 }
