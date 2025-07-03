@@ -1,6 +1,7 @@
 use http::StatusCode;
+use octocrab::models::CheckRunId;
 use octocrab::models::checks::CheckRun;
-use octocrab::params::checks::{CheckRunOutput, CheckRunStatus};
+use octocrab::params::checks::{CheckRunConclusion, CheckRunOutput, CheckRunStatus};
 use octocrab::params::repos::Reference;
 use thiserror::Error;
 
@@ -180,7 +181,6 @@ async fn update_branch(
     }
 }
 
-/// Create a check run.
 pub async fn create_check_run(
     repo: &GithubRepositoryClient,
     name: &str,
@@ -197,4 +197,30 @@ pub async fn create_check_run(
         .output(output)
         .send()
         .await
+}
+
+pub async fn update_check_run(
+    repo: &GithubRepositoryClient,
+    check_run_id: u64,
+    status: CheckRunStatus,
+    conclusion: Option<CheckRunConclusion>,
+    output: Option<CheckRunOutput>,
+) -> Result<CheckRun, octocrab::Error> {
+    let checks = repo
+        .client()
+        .checks(repo.repository().owner(), repo.repository().name());
+
+    let mut request = checks
+        .update_check_run(CheckRunId(check_run_id))
+        .status(status);
+
+    if let Some(conclusion) = conclusion {
+        request = request.conclusion(conclusion);
+    }
+
+    if let Some(output) = output {
+        request = request.output(output);
+    }
+
+    request.send().await
 }

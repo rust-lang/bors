@@ -31,7 +31,7 @@ use crate::tests::mocks::workflow::{
     CheckSuite, GitHubCheckRunEventPayload, GitHubCheckSuiteEventPayload,
     GitHubWorkflowEventPayload, TestWorkflowStatus, Workflow, WorkflowEvent, WorkflowEventKind,
 };
-use octocrab::params::checks::CheckRunStatus;
+use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
 
 pub fn default_cmd_prefix() -> String {
     "@bors".to_string()
@@ -675,8 +675,9 @@ impl BorsTester {
         &self,
         head_sha: &str,
         name: &str,
-        status: CheckRunStatus,
         title: &str,
+        status: CheckRunStatus,
+        conclusion: Option<CheckRunConclusion>,
     ) -> &Self {
         let repo = self.default_repo();
         let repo = repo.lock();
@@ -694,6 +695,16 @@ impl BorsTester {
             CheckRunStatus::InProgress => "in_progress",
             CheckRunStatus::Completed => "completed",
         };
+        let expected_conclusion = conclusion.map(|c| match c {
+            CheckRunConclusion::Success => "success",
+            CheckRunConclusion::Failure => "failure",
+            CheckRunConclusion::Neutral => "neutral",
+            CheckRunConclusion::Cancelled => "cancelled",
+            CheckRunConclusion::TimedOut => "timed_out",
+            CheckRunConclusion::ActionRequired => "action_required",
+            CheckRunConclusion::Stale => "stale",
+            CheckRunConclusion::Skipped => "skipped",
+        });
 
         assert_eq!(
             (
@@ -701,9 +712,17 @@ impl BorsTester {
                 check_run.head_sha.as_str(),
                 check_run.status.as_str(),
                 check_run.title.as_str(),
+                check_run.conclusion.as_deref(),
                 check_run.external_id.parse::<u64>().is_ok()
             ),
-            (name, head_sha, expected_status, title, true)
+            (
+                name,
+                head_sha,
+                expected_status,
+                title,
+                expected_conclusion,
+                true
+            )
         );
 
         self

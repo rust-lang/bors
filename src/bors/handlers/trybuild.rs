@@ -350,7 +350,7 @@ mod tests {
         BorsBuilder, Comment, GitHubState, User, Workflow, WorkflowEvent, default_pr_number,
         default_repo_name, run_test,
     };
-    use octocrab::params::checks::CheckRunStatus;
+    use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
 
     #[sqlx::test]
     async fn try_success(pool: sqlx::PgPool) {
@@ -909,13 +909,60 @@ try_failed = ["+foo", "+bar", "-baz"]
             tester.expect_check_run(
                 &tester.default_pr().await.get_gh_pr().head_sha,
                 TRY_BUILD_CHECK_RUN_NAME,
-                CheckRunStatus::InProgress,
                 "Bors try build",
+                CheckRunStatus::InProgress,
+                None,
             );
 
             let check_run = tester.get_check_run().await?;
             insta::assert_snapshot!(check_run.summary, @"");
             insta::assert_snapshot!(check_run.text, @"");
+
+            Ok(tester)
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn try_build_updates_check_run_on_success(pool: sqlx::PgPool) {
+        run_test(pool.clone(), |mut tester| async {
+            tester.create_branch(TRY_BRANCH_NAME).expect_suites(1);
+            tester.post_comment("@bors try").await?;
+            tester.expect_comments(1).await;
+
+            tester.workflow_success(tester.try_branch()).await?;
+            tester.expect_comments(1).await;
+
+            tester.expect_check_run(
+                &tester.default_pr().await.get_gh_pr().head_sha,
+                TRY_BUILD_CHECK_RUN_NAME,
+                "Bors try build",
+                CheckRunStatus::Completed,
+                Some(CheckRunConclusion::Success),
+            );
+
+            Ok(tester)
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn try_build_updates_check_run_on_failure(pool: sqlx::PgPool) {
+        run_test(pool.clone(), |mut tester| async {
+            tester.create_branch(TRY_BRANCH_NAME).expect_suites(1);
+            tester.post_comment("@bors try").await?;
+            tester.expect_comments(1).await;
+
+            tester.workflow_failure(tester.try_branch()).await?;
+            tester.expect_comments(1).await;
+
+            tester.expect_check_run(
+                &tester.default_pr().await.get_gh_pr().head_sha,
+                TRY_BUILD_CHECK_RUN_NAME,
+                "Bors try build",
+                CheckRunStatus::Completed,
+                Some(CheckRunConclusion::Failure),
+            );
 
             Ok(tester)
         })

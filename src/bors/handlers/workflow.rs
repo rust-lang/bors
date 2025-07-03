@@ -1,6 +1,9 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use octocrab::params::checks::CheckRunConclusion;
+use octocrab::params::checks::CheckRunStatus;
+
 use crate::PgDbClient;
 use crate::bors::CheckSuiteStatus;
 use crate::bors::RepositoryState;
@@ -192,6 +195,18 @@ async fn try_complete_build(
     db.update_build_status(&build, status).await?;
 
     handle_label_trigger(repo, pr.number, trigger).await?;
+
+    if let Some(check_run_id) = build.check_run_id {
+        let (status, conclusion) = if has_failure {
+            (CheckRunStatus::Completed, Some(CheckRunConclusion::Failure))
+        } else {
+            (CheckRunStatus::Completed, Some(CheckRunConclusion::Success))
+        };
+
+        repo.client
+            .update_check_run(check_run_id as u64, status, conclusion, None)
+            .await?;
+    }
 
     let message = if !has_failure {
         tracing::info!("Workflow succeeded");

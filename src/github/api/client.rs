@@ -2,7 +2,7 @@ use anyhow::Context;
 use octocrab::Octocrab;
 use octocrab::models::checks::CheckRun;
 use octocrab::models::{App, Repository};
-use octocrab::params::checks::{CheckRunOutput, CheckRunStatus};
+use octocrab::params::checks::{CheckRunConclusion, CheckRunOutput, CheckRunStatus};
 use tracing::log;
 
 use crate::bors::event::PullRequestComment;
@@ -11,7 +11,7 @@ use crate::config::{CONFIG_FILE_PATH, RepositoryConfig};
 use crate::database::RunId;
 use crate::github::api::base_github_html_url;
 use crate::github::api::operations::{
-    ForcePush, MergeError, create_check_run, merge_branches, set_branch_to_commit,
+    ForcePush, MergeError, create_check_run, merge_branches, set_branch_to_commit, update_check_run,
 };
 use crate::github::{CommitSha, GithubRepoName, PullRequest, PullRequestNumber};
 use crate::utils::timing::{measure_network_request, perform_network_request_with_retry};
@@ -182,6 +182,22 @@ impl GithubRepositoryClient {
             create_check_run(self, name, head_sha, status, output, external_id)
                 .await
                 .context("Cannot create check run")
+        })
+        .await
+    }
+
+    /// Update a check run with the given check run ID.
+    pub async fn update_check_run(
+        &self,
+        check_run_id: u64,
+        status: CheckRunStatus,
+        conclusion: Option<CheckRunConclusion>,
+        output: Option<CheckRunOutput>,
+    ) -> anyhow::Result<CheckRun> {
+        measure_network_request("update_check_run", || async {
+            update_check_run(self, check_run_id, status, conclusion, output)
+                .await
+                .context("Cannot update check run")
         })
         .await
     }
