@@ -212,10 +212,9 @@ impl Repo {
         status: String,
         conclusion: Option<String>,
     ) {
-        if let Some(check_run) = self.check_runs.get_mut(check_run_id as usize) {
-            check_run.status = status;
-            check_run.conclusion = conclusion;
-        }
+        let check_run = self.check_runs.get_mut(check_run_id as usize).unwrap();
+        check_run.status = status;
+        check_run.conclusion = conclusion;
     }
 
     pub fn get_next_pr_push_counter(&mut self) -> u64 {
