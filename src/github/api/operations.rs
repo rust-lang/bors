@@ -1,4 +1,7 @@
 use http::StatusCode;
+use octocrab::models::CheckRunId;
+use octocrab::models::checks::CheckRun;
+use octocrab::params::checks::{CheckRunConclusion, CheckRunOutput, CheckRunStatus};
 use octocrab::params::repos::Reference;
 use thiserror::Error;
 
@@ -176,4 +179,48 @@ async fn update_branch(
         StatusCode::OK => Ok(()),
         _ => Err(BranchUpdateError::BranchNotFound(branch_name)),
     }
+}
+
+pub async fn create_check_run(
+    repo: &GithubRepositoryClient,
+    name: &str,
+    head_sha: &CommitSha,
+    status: CheckRunStatus,
+    output: CheckRunOutput,
+    external_id: &str,
+) -> Result<CheckRun, octocrab::Error> {
+    repo.client()
+        .checks(repo.repository().owner(), repo.repository().name())
+        .create_check_run(name, head_sha.to_string())
+        .external_id(external_id)
+        .status(status)
+        .output(output)
+        .send()
+        .await
+}
+
+pub async fn update_check_run(
+    repo: &GithubRepositoryClient,
+    check_run_id: u64,
+    status: CheckRunStatus,
+    conclusion: Option<CheckRunConclusion>,
+    output: Option<CheckRunOutput>,
+) -> Result<CheckRun, octocrab::Error> {
+    let checks = repo
+        .client()
+        .checks(repo.repository().owner(), repo.repository().name());
+
+    let mut request = checks
+        .update_check_run(CheckRunId(check_run_id))
+        .status(status);
+
+    if let Some(conclusion) = conclusion {
+        request = request.conclusion(conclusion);
+    }
+
+    if let Some(output) = output {
+        request = request.output(output);
+    }
+
+    request.send().await
 }
