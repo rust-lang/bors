@@ -97,6 +97,9 @@ pub(super) async fn command_try_build(
 
             handle_label_trigger(repo, pr.number(), LabelTrigger::TryBuildStarted).await?;
 
+            // Create a check run to track the try build status in GitHub's UI.
+            // This gets added to the PR's head SHA so GitHub shows UI in the checks tab and
+            // the bottom of the PR.
             let check_run = repo
                 .client
                 .create_check_run(
