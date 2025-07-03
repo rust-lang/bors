@@ -36,7 +36,7 @@ pub(super) const TRY_MERGE_BRANCH_NAME: &str = "automation/bors/try-merge";
 pub(super) const TRY_BRANCH_NAME: &str = "automation/bors/try";
 
 // The name of the check run seen in the GitHub UI.
-const TRY_BUILD_CHECK_RUN_NAME: &str = "Bors try build";
+pub(super) const TRY_BUILD_CHECK_RUN_NAME: &str = "Bors try build";
 
 /// Performs a so-called try build - merges the PR branch into a special branch designed
 /// for running CI checks.
