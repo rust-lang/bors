@@ -26,7 +26,6 @@ use crate::github::api::load_repositories;
 use crate::github::server::BorsProcess;
 use crate::github::{GithubRepoName, PullRequestNumber};
 use crate::tests::mocks::comment::{Comment, GitHubIssueCommentEventPayload};
-use crate::tests::mocks::repository;
 use crate::tests::mocks::workflow::{
     CheckSuite, GitHubCheckRunEventPayload, GitHubCheckSuiteEventPayload,
     GitHubWorkflowEventPayload, TestWorkflowStatus, Workflow, WorkflowEvent, WorkflowEventKind,
@@ -272,17 +271,6 @@ impl BorsTester {
 
     pub fn try_branch(&self) -> Branch {
         self.get_branch("automation/bors/try")
-    }
-
-    /// Get the latest check run.
-    pub async fn get_check_run(&mut self) -> anyhow::Result<repository::CheckRunData> {
-        Ok(self
-            .default_repo()
-            .lock()
-            .check_runs
-            .last()
-            .unwrap()
-            .clone())
     }
 
     /// Wait until the next bot comment is received on the default repo and the default PR.
