@@ -15,9 +15,9 @@ use super::operations::{
     get_prs_with_unknown_mergeable_state, get_pull_request, get_repository, get_repository_by_name,
     get_running_builds, get_workflow_urls_for_build, get_workflows_for_build,
     insert_repo_if_not_exists, set_pr_assignees, set_pr_priority, set_pr_rollup, set_pr_status,
-    unapprove_pull_request, undelegate_pull_request, update_build_status,
-    update_mergeable_states_by_base_branch, update_pr_mergeable_state, update_pr_try_build_id,
-    update_workflow_status, upsert_pull_request, upsert_repository,
+    unapprove_pull_request, undelegate_pull_request, update_build_check_run_id,
+    update_build_status, update_mergeable_states_by_base_branch, update_pr_mergeable_state,
+    update_pr_try_build_id, update_workflow_status, upsert_pull_request, upsert_repository,
 };
 use super::{ApprovalInfo, DelegatedPermission, MergeableState, RunId, UpsertPullRequestParams};
 
@@ -212,6 +212,14 @@ impl PgDbClient {
         status: BuildStatus,
     ) -> anyhow::Result<()> {
         update_build_status(&self.pool, build.id, status).await
+    }
+
+    pub async fn update_build_check_run_id(
+        &self,
+        build: &BuildModel,
+        check_run_id: i64,
+    ) -> anyhow::Result<()> {
+        update_build_check_run_id(&self.pool, build.id, check_run_id).await
     }
 
     pub async fn create_workflow(

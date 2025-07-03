@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
 use anyhow::{Context, anyhow};
+use octocrab::params::checks::CheckRunOutput;
+use octocrab::params::checks::CheckRunStatus;
 
 use crate::PgDbClient;
 use crate::bors::RepositoryState;
@@ -32,6 +34,9 @@ pub(super) const TRY_MERGE_BRANCH_NAME: &str = "automation/bors/try-merge";
 
 // This branch should run CI checks.
 pub(super) const TRY_BRANCH_NAME: &str = "automation/bors/try";
+
+// The name of the check run seen in the GitHub UI.
+const TRY_BUILD_CHECK_RUN_NAME: &str = "Bors try build";
 
 /// Performs a so-called try build - merges the PR branch into a special branch designed
 /// for running CI checks.
@@ -90,6 +95,35 @@ pub(super) async fn command_try_build(
             run_try_build(&repo.client, &db, &pr.db, merge_sha.clone(), base_sha).await?;
 
             handle_label_trigger(repo, pr.number(), LabelTrigger::TryBuildStarted).await?;
+
+            let build = db
+                .find_build(
+                    repo.repository(),
+                    TRY_BRANCH_NAME.to_string(),
+                    merge_sha.clone(),
+                )
+                .await?
+                .ok_or_else(|| anyhow!("Could not find build just created"))?;
+
+            let check_run = repo
+                .client
+                .create_check_run(
+                    TRY_BUILD_CHECK_RUN_NAME,
+                    &pr.github.head.sha,
+                    CheckRunStatus::InProgress,
+                    CheckRunOutput {
+                        title: "Bors try build".to_string(),
+                        summary: "".to_string(),
+                        text: None,
+                        annotations: vec![],
+                        images: vec![],
+                    },
+                    &build.id.to_string(),
+                )
+                .await?;
+
+            db.update_build_check_run_id(&build, check_run.id.into_inner() as i64)
+                .await?;
 
             repo.client
                 .post_comment(
@@ -307,13 +341,16 @@ fn auto_merge_commit_message(
 
 #[cfg(test)]
 mod tests {
-    use crate::bors::handlers::trybuild::{TRY_BRANCH_NAME, TRY_MERGE_BRANCH_NAME};
+    use crate::bors::handlers::trybuild::{
+        TRY_BRANCH_NAME, TRY_BUILD_CHECK_RUN_NAME, TRY_MERGE_BRANCH_NAME,
+    };
     use crate::database::operations::get_all_workflows;
     use crate::github::CommitSha;
     use crate::tests::mocks::{
         BorsBuilder, Comment, GitHubState, User, Workflow, WorkflowEvent, default_pr_number,
         default_repo_name, run_test,
     };
+    use octocrab::params::checks::CheckRunStatus;
 
     #[sqlx::test]
     async fn try_success(pool: sqlx::PgPool) {
@@ -860,5 +897,28 @@ try_failed = ["+foo", "+bar", "-baz"]
                 Ok(tester)
             })
             .await;
+    }
+
+    #[sqlx::test]
+    async fn try_build_creates_check_run(pool: sqlx::PgPool) {
+        run_test(pool.clone(), |mut tester| async {
+            tester.create_branch(TRY_BRANCH_NAME).expect_suites(1);
+            tester.post_comment("@bors try").await?;
+            tester.expect_comments(1).await;
+
+            tester.expect_check_run(
+                &tester.default_pr().await.get_gh_pr().head_sha,
+                TRY_BUILD_CHECK_RUN_NAME,
+                CheckRunStatus::InProgress,
+                "Bors try build",
+            );
+
+            let check_run = tester.get_check_run().await?;
+            insta::assert_snapshot!(check_run.summary, @"");
+            insta::assert_snapshot!(check_run.text, @"");
+
+            Ok(tester)
+        })
+        .await;
     }
 }

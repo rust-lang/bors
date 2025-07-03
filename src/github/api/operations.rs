@@ -1,4 +1,6 @@
 use http::StatusCode;
+use octocrab::models::checks::CheckRun;
+use octocrab::params::checks::{CheckRunOutput, CheckRunStatus};
 use octocrab::params::repos::Reference;
 use thiserror::Error;
 
@@ -176,4 +178,23 @@ async fn update_branch(
         StatusCode::OK => Ok(()),
         _ => Err(BranchUpdateError::BranchNotFound(branch_name)),
     }
+}
+
+/// Create a check run.
+pub async fn create_check_run(
+    repo: &GithubRepositoryClient,
+    name: &str,
+    head_sha: &CommitSha,
+    status: CheckRunStatus,
+    output: CheckRunOutput,
+    external_id: &str,
+) -> Result<CheckRun, octocrab::Error> {
+    repo.client()
+        .checks(repo.repository().owner(), repo.repository().name())
+        .create_check_run(name, head_sha.to_string())
+        .external_id(external_id)
+        .status(status)
+        .output(output)
+        .send()
+        .await
 }
