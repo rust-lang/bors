@@ -946,6 +946,24 @@ pub(crate) async fn upsert_repository(
     .await
 }
 
+pub(crate) async fn update_build_check_run_id(
+    executor: impl PgExecutor<'_>,
+    build_id: i32,
+    check_run_id: i64,
+) -> anyhow::Result<()> {
+    measure_db_query("update_build_check_run_id", || async {
+        sqlx::query!(
+            "UPDATE build SET check_run_id = $1 WHERE id = $2",
+            check_run_id,
+            build_id
+        )
+        .execute(executor)
+        .await?;
+        Ok(())
+    })
+    .await
+}
+
 /// Removes the auto build associated with a PR and deletes the build record (if one exists).
 pub(crate) async fn delete_auto_build(
     executor: impl PgExecutor<'_>,
