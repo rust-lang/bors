@@ -181,13 +181,13 @@ impl PgDbClient {
         branch: String,
         commit_sha: CommitSha,
         parent: CommitSha,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<i32> {
         let mut tx = self.pool.begin().await?;
         let build_id =
             create_build(&mut *tx, &pr.repository, &branch, &commit_sha, &parent).await?;
         update_pr_try_build_id(&mut *tx, pr.id, build_id).await?;
         tx.commit().await?;
-        Ok(())
+        Ok(build_id)
     }
 
     pub async fn find_build(
@@ -216,10 +216,10 @@ impl PgDbClient {
 
     pub async fn update_build_check_run_id(
         &self,
-        build: &BuildModel,
+        build_id: i32,
         check_run_id: i64,
     ) -> anyhow::Result<()> {
-        update_build_check_run_id(&self.pool, build.id, check_run_id).await
+        update_build_check_run_id(&self.pool, build_id, check_run_id).await
     }
 
     pub async fn create_workflow(

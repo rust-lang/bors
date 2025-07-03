@@ -92,18 +92,10 @@ pub(super) async fn command_try_build(
     {
         MergeResult::Success(merge_sha) => {
             // If the merge was succesful, run CI with merged commit
-            run_try_build(&repo.client, &db, &pr.db, merge_sha.clone(), base_sha).await?;
+            let build_id =
+                run_try_build(&repo.client, &db, &pr.db, merge_sha.clone(), base_sha).await?;
 
             handle_label_trigger(repo, pr.number(), LabelTrigger::TryBuildStarted).await?;
-
-            let build = db
-                .find_build(
-                    repo.repository(),
-                    TRY_BRANCH_NAME.to_string(),
-                    merge_sha.clone(),
-                )
-                .await?
-                .ok_or_else(|| anyhow!("Could not find build just created"))?;
 
             let check_run = repo
                 .client
@@ -118,11 +110,11 @@ pub(super) async fn command_try_build(
                         annotations: vec![],
                         images: vec![],
                     },
-                    &build.id.to_string(),
+                    &build_id.to_string(),
                 )
                 .await?;
 
-            db.update_build_check_run_id(&build, check_run.id.into_inner() as i64)
+            db.update_build_check_run_id(build_id, check_run.id.into_inner() as i64)
                 .await?;
 
             repo.client
@@ -210,17 +202,18 @@ async fn run_try_build(
     pr: &PullRequestModel,
     commit_sha: CommitSha,
     parent_sha: CommitSha,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<i32> {
     client
         .set_branch_to_sha(TRY_BRANCH_NAME, &commit_sha, ForcePush::Yes)
         .await
         .map_err(|error| anyhow!("Cannot set try branch to main branch: {error:?}"))?;
 
-    db.attach_try_build(pr, TRY_BRANCH_NAME.to_string(), commit_sha, parent_sha)
+    let build_id = db
+        .attach_try_build(pr, TRY_BRANCH_NAME.to_string(), commit_sha, parent_sha)
         .await?;
 
     tracing::info!("Try build started");
-    Ok(())
+    Ok(build_id)
 }
 
 enum MergeResult {
