@@ -304,10 +304,15 @@ impl Display for BuildStatus {
 #[sqlx(type_name = "build")]
 pub struct BuildModel {
     pub id: PrimaryKey,
+    /// The GitHub repository this build belongs to.
     pub repository: GithubRepoName,
+    /// The branch where this build is running (e.g., "automation/bors/try").
     pub branch: String,
+    /// The SHA of the commit being built.
     pub commit_sha: String,
+    /// Current status of the build (pending, success, failure, etc.).
     pub status: BuildStatus,
+    /// The base commit SHA that this build is merged with (e.g., main branch HEAD).
     pub parent: String,
     pub created_at: DateTime<Utc>,
 }
@@ -316,19 +321,33 @@ pub struct BuildModel {
 #[derive(Debug)]
 pub struct PullRequestModel {
     pub id: PrimaryKey,
+    /// The GitHub repository this PR belongs to.
     pub repository: GithubRepoName,
+    /// The GitHub pull request number.
     pub number: PullRequestNumber,
+    /// The title of the pull request in GitHub.
     pub title: String,
+    /// The GitHub username of the PR author.
     pub author: String,
+    /// List of GitHub usernames assigned to this PR.
     pub assignees: Vec<String>,
+    /// The GitHub PR state: open, closed, draft, or merged.
     pub pr_status: PullRequestStatus,
+    /// The target branch this PR will be merged into.
     pub base_branch: String,
+    /// GitHub's determination of PR mergeability.
     pub mergeable_state: MergeableState,
+    /// Approval status including approver and approved commit SHA.
     pub approval_status: ApprovalStatus,
+    /// Temporary permissions granted to the PR author by a reviewer (try or review).
     pub delegated_permission: Option<DelegatedPermission>,
+    /// Priority for merge queue ordering. Higher priority PRs are merged first.
     pub priority: Option<i32>,
+    /// Rollup mode determining if this PR can be included in rollup builds.
     pub rollup: Option<RollupMode>,
+    /// The (latest) try build associated with this PR, if any.
     pub try_build: Option<BuildModel>,
+    /// The (latest) auto merge build associated with this PR, if any.
     pub auto_build: Option<BuildModel>,
     pub created_at: DateTime<Utc>,
 }
@@ -359,7 +378,9 @@ impl PullRequestModel {
 #[sqlx(type_name = "TEXT")]
 #[sqlx(rename_all = "lowercase")]
 pub enum WorkflowType {
+    /// GitHub Actions workflow.
     Github,
+    /// External CI system workflow.
     External,
 }
 
@@ -379,11 +400,17 @@ pub enum WorkflowStatus {
 /// Represents a workflow run, coming either from Github Actions or from some external CI.
 pub struct WorkflowModel {
     pub id: PrimaryKey,
+    /// The build this workflow is associated with.
     pub build: BuildModel,
+    /// The name of the workflow (e.g., "CI", "Tests").
     pub name: String,
+    /// URL to view this workflow run on GitHub or external CI.
     pub url: String,
+    /// Unique identifier for this workflow run.
     pub run_id: RunId,
+    /// Whether this is a GitHub Actions workflow or external CI.
     pub workflow_type: WorkflowType,
+    /// Current status of the workflow (pending, success, failure).
     pub status: WorkflowStatus,
     pub created_at: DateTime<Utc>,
 }
@@ -474,7 +501,9 @@ impl From<PullRequest> for UpsertPullRequestParams {
 /// Represents a repository configuration.
 pub struct RepoModel {
     pub id: PrimaryKey,
+    /// The GitHub repository name in "owner/repo" format.
     pub name: GithubRepoName,
+    /// State of the repository tree (open or closed with priority threshold).
     pub tree_state: TreeState,
     pub created_at: DateTime<Utc>,
 }
