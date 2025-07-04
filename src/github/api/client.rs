@@ -1,6 +1,8 @@
 use anyhow::Context;
 use octocrab::Octocrab;
+use octocrab::models::checks::CheckRun;
 use octocrab::models::{App, Repository};
+use octocrab::params::checks::{CheckRunConclusion, CheckRunOutput, CheckRunStatus};
 use tracing::log;
 
 use crate::bors::event::PullRequestComment;
@@ -8,7 +10,9 @@ use crate::bors::{CheckSuite, CheckSuiteStatus, Comment};
 use crate::config::{CONFIG_FILE_PATH, RepositoryConfig};
 use crate::database::RunId;
 use crate::github::api::base_github_html_url;
-use crate::github::api::operations::{ForcePush, MergeError, merge_branches, set_branch_to_commit};
+use crate::github::api::operations::{
+    ForcePush, MergeError, create_check_run, merge_branches, set_branch_to_commit, update_check_run,
+};
 use crate::github::{CommitSha, GithubRepoName, PullRequest, PullRequestNumber};
 use crate::utils::timing::{measure_network_request, perform_network_request_with_retry};
 use futures::TryStreamExt;
@@ -163,6 +167,39 @@ impl GithubRepositoryClient {
         })
         .await
         .map_err(|_| MergeError::Timeout)?
+    }
+
+    /// Create a check run for the given commit.
+    pub async fn create_check_run(
+        &self,
+        name: &str,
+        head_sha: &CommitSha,
+        status: CheckRunStatus,
+        output: CheckRunOutput,
+        external_id: &str,
+    ) -> anyhow::Result<CheckRun> {
+        measure_network_request("create_check_run", || async {
+            create_check_run(self, name, head_sha, status, output, external_id)
+                .await
+                .context("Cannot create check run")
+        })
+        .await
+    }
+
+    /// Update a check run with the given check run ID.
+    pub async fn update_check_run(
+        &self,
+        check_run_id: u64,
+        status: CheckRunStatus,
+        conclusion: Option<CheckRunConclusion>,
+        output: Option<CheckRunOutput>,
+    ) -> anyhow::Result<CheckRun> {
+        measure_network_request("update_check_run", || async {
+            update_check_run(self, check_run_id, status, conclusion, output)
+                .await
+                .context("Cannot update check run")
+        })
+        .await
     }
 
     /// Find all check suites attached to the given commit and branch.

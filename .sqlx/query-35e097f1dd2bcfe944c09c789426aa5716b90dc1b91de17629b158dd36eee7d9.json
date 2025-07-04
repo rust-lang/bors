@@ -108,6 +108,10 @@
                 [
                   "created_at",
                   "Timestamptz"
+                ],
+                [
+                  "check_run_id",
+                  "Int8"
                 ]
               ]
             }
@@ -149,6 +153,10 @@
                 [
                   "created_at",
                   "Timestamptz"
+                ],
+                [
+                  "check_run_id",
+                  "Int8"
                 ]
               ]
             }
