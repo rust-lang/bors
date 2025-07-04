@@ -1049,6 +1049,21 @@ line two
         );
     }
 
+    // Make sure that foo\\* gets parsed as foo*, so that people can escape * to avoid weird
+    // rendering on GitHub.
+    #[test]
+    fn parse_try_jobs_glob_3() {
+        let cmds = parse_commands("@bors try jobs=\\*x86_64-msvc\\*,foo\\*");
+        assert_eq!(cmds.len(), 1);
+        assert_eq!(
+            cmds[0],
+            Ok(BorsCommand::Try {
+                parent: None,
+                jobs: vec!["*x86_64-msvc*".to_string(), "foo*".to_string()]
+            })
+        );
+    }
+
     #[test]
     fn parse_try_jobs_empty() {
         let cmds = parse_commands("@bors try jobs=");
