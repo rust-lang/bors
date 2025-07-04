@@ -274,17 +274,6 @@ impl BorsTester {
         self.get_branch("automation/bors/try")
     }
 
-    /// Get the latest check run.
-    pub async fn get_check_run(&mut self) -> anyhow::Result<repository::CheckRunData> {
-        Ok(self
-            .default_repo()
-            .lock()
-            .check_runs
-            .last()
-            .unwrap()
-            .clone())
-    }
-
     /// Wait until the next bot comment is received on the default repo and the default PR.
     pub async fn get_comment(&mut self) -> anyhow::Result<String> {
         Ok(self

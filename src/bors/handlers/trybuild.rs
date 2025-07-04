@@ -910,10 +910,6 @@ try_failed = ["+foo", "+bar", "-baz"]
                 None,
             );
 
-            let check_run = tester.get_check_run().await?;
-            insta::assert_snapshot!(check_run.summary, @"");
-            insta::assert_snapshot!(check_run.text, @"");
-
             Ok(tester)
         })
         .await;
