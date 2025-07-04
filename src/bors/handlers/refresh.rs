@@ -36,7 +36,7 @@ pub async fn cancel_timed_out_builds(
                     .update_check_run(
                         check_run_id as u64,
                         CheckRunStatus::Completed,
-                        Some(CheckRunConclusion::Cancelled),
+                        Some(CheckRunConclusion::TimedOut),
                         None,
                     )
                     .await
@@ -305,7 +305,7 @@ timeout = 3600
                     TRY_BUILD_CHECK_RUN_NAME,
                     "Bors try build",
                     CheckRunStatus::Completed,
-                    Some(CheckRunConclusion::Cancelled),
+                    Some(CheckRunConclusion::TimedOut),
                 );
 
                 Ok(tester)
