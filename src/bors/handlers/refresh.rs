@@ -41,7 +41,7 @@ pub async fn cancel_timed_out_builds(
                     )
                     .await
                 {
-                    tracing::error!("Could not update check run {}: {error:?}", check_run_id);
+                    tracing::error!("Could not update check run {check_run_id}: {error:?}");
                 }
             }
 
