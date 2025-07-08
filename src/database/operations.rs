@@ -557,9 +557,10 @@ SELECT
     repository as "repository: GithubRepoName",
     branch,
     commit_sha,
-    parent,
     status as "status: BuildStatus",
-    created_at as "created_at: DateTime<Utc>"
+    parent,
+    created_at as "created_at: DateTime<Utc>",
+    check_run_id
 FROM build
 WHERE repository = $1
     AND branch = $2
@@ -589,9 +590,10 @@ SELECT
     repository as "repository: GithubRepoName",
     branch,
     commit_sha,
-    parent,
     status as "status: BuildStatus",
-    created_at as "created_at: DateTime<Utc>"
+    parent,
+    created_at as "created_at: DateTime<Utc>",
+    check_run_id
 FROM build
 WHERE repository = $1
     AND status = $2
@@ -750,7 +752,8 @@ SELECT
         build.commit_sha,
         build.status,
         build.parent,
-        build.created_at
+        build.created_at,
+        build.check_run_id
     ) AS "build!: BuildModel"
 FROM workflow
     LEFT JOIN build ON workflow.build_id = build.id
@@ -809,7 +812,8 @@ SELECT
         build.commit_sha,
         build.status,
         build.parent,
-        build.created_at
+        build.created_at,
+        build.check_run_id
     ) AS "build!: BuildModel"
 FROM workflow
     LEFT JOIN build ON workflow.build_id = build.id
@@ -937,6 +941,24 @@ pub(crate) async fn upsert_repository(
         .execute(executor)
         .await?;
 
+        Ok(())
+    })
+    .await
+}
+
+pub(crate) async fn update_build_check_run_id(
+    executor: impl PgExecutor<'_>,
+    build_id: i32,
+    check_run_id: i64,
+) -> anyhow::Result<()> {
+    measure_db_query("update_build_check_run_id", || async {
+        sqlx::query!(
+            "UPDATE build SET check_run_id = $1 WHERE id = $2",
+            check_run_id,
+            build_id
+        )
+        .execute(executor)
+        .await?;
         Ok(())
     })
     .await
