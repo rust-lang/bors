@@ -349,6 +349,8 @@ async fn handle_comment(
     ctx: Arc<BorsContext>,
     comment: PullRequestComment,
 ) -> anyhow::Result<()> {
+    use std::fmt::Write;
+
     let pr_number = comment.pr_number;
     let commands = ctx.parser.parse_commands(&comment.text);
 
@@ -488,7 +490,7 @@ async fn handle_comment(
                 }
             }
             Err(error) => {
-                let message = match error {
+                let mut message = match error {
                     CommandParseError::MissingCommand => "Missing command.".to_string(),
                     CommandParseError::UnknownCommand(command) => {
                         format!(r#"Unknown command "{command}"."#)
@@ -503,9 +505,14 @@ async fn handle_comment(
                         format!(r#"Argument "{arg}" found multiple times."#)
                     }
                     CommandParseError::ValidationError(error) => {
-                        format!("Invalid command: {error}")
+                        format!("Invalid command: {error}.")
                     }
                 };
+                writeln!(
+                    message,
+                    " Run `{} help` to see available commands.",
+                    ctx.parser.prefix()
+                )?;
                 tracing::warn!("{}", message);
                 repo.client
                     .post_comment(pr_github.number, Comment::new(message))
@@ -627,6 +634,16 @@ mod tests {
         run_test(pool, |mut tester| async {
             tester.default_repo().lock().pull_request_error = true;
             tester.post_comment("no command").await?;
+            Ok(tester)
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn unknown_command(pool: sqlx::PgPool) {
+        run_test(pool, |mut tester| async {
+            tester.post_comment(Comment::from("@bors foo")).await?;
+            insta::assert_snapshot!(tester.get_comment().await?, @r#"Unknown command "foo". Run `@bors help` to see available commands."#);
             Ok(tester)
         })
         .await;
