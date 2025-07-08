@@ -8,6 +8,8 @@ There are a few documents that should help with understanding the bot:
 If you want to help testing the bot, please ask around on the [`#t-infra`](https://rust-lang.zulipchat.com/#narrow/stream/242791-t-infra)
 stream on Rust Zulip.
 
+The production instance of the bot is deployed at https://bors-prod.rust-lang.net. You can find its help page with the list of supported commands [here](https://bors-prod.rust-lang.net/help).
+
 ## Configuration
 There are several parameters that can be configured when launching the bot. Parameters without a default value are
 required.
