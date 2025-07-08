@@ -74,7 +74,7 @@ fn extract_text_from_markdown(text: &str) -> String {
                     cleaned_text.push_str(&text);
                 }
             }
-            Event::SoftBreak | Event::HardBreak => {
+            Event::SoftBreak | Event::HardBreak | Event::End(TagEnd::Paragraph) => {
                 cleaned_text.push('\n');
             }
             Event::Start(tag) => match tag {
@@ -1089,6 +1089,24 @@ line two
             ),
         )
         "###);
+    }
+
+    #[test]
+    fn parse_try_md_paragraph() {
+        let cmds = parse_commands(
+            "@bors try
+
+for the crater",
+        );
+        assert_eq!(cmds.len(), 1);
+        insta::assert_debug_snapshot!(cmds[0], @r"
+        Ok(
+            Try {
+                parent: None,
+                jobs: [],
+            },
+        )
+        ");
     }
 
     #[test]
