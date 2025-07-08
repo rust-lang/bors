@@ -53,7 +53,7 @@ One-time setup:
 - Create your own GitHub app.
   - Configure its webhook secret.
   - Configure its private key.
-  - Give it permissions for `Actions` (r/w), `Checks` (r), `Commit statuses` (r), `Contents` (r/w), `Issues` (r/w) and
+  - Give it permissions for `Actions` (r/w), `Checks` (r/w), `Commit statuses` (r), `Contents` (r/w), `Issues` (r/w) and
   `Pull requests` (r/w).
   - Subscribe it to webhook events `Check suite`, `Check run`, `Issue comment`, `Issues`, `Pull request`,
     `Pull request review`, `Pull request review comment` and `Workflow run`.

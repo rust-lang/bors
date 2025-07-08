@@ -3,7 +3,6 @@ use std::time::Duration;
 
 use anyhow::Context;
 use chrono::{DateTime, Utc};
-use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
 use std::collections::BTreeMap;
 
 use crate::bors::Comment;
@@ -29,22 +28,6 @@ pub async fn cancel_timed_out_builds(
 
             db.update_build_status(&build, BuildStatus::Cancelled)
                 .await?;
-
-            if let Some(check_run_id) = build.check_run_id {
-                if let Err(error) = repo
-                    .client
-                    .update_check_run(
-                        check_run_id as u64,
-                        CheckRunStatus::Completed,
-                        Some(CheckRunConclusion::TimedOut),
-                        None,
-                    )
-                    .await
-                {
-                    tracing::error!("Could not update check run {check_run_id}: {error:?}");
-                }
-            }
-
             if let Some(pr) = db.find_pr_by_build(&build).await? {
                 if let Err(error) = cancel_build_workflows(&repo.client, db, &build).await {
                     tracing::error!(
@@ -198,13 +181,11 @@ fn elapsed_time(date: DateTime<Utc>) -> Duration {
 mod tests {
     use crate::bors::PullRequestStatus;
     use crate::bors::handlers::refresh::MOCK_TIME;
-    use crate::bors::handlers::trybuild::TRY_BUILD_CHECK_RUN_NAME;
     use crate::database::{MergeableState, OctocrabMergeableState};
     use crate::tests::mocks::{
         BorsBuilder, GitHubState, default_pr_number, default_repo_name, run_test,
     };
     use chrono::Utc;
-    use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
     use std::future::Future;
     use std::time::Duration;
     use tokio::runtime::RuntimeFlavor;
@@ -281,33 +262,6 @@ timeout = 3600
                         .len(),
                     0
                 );
-                Ok(tester)
-            })
-            .await;
-    }
-
-    #[sqlx::test]
-    async fn refresh_cancel_build_updates_check_run(pool: sqlx::PgPool) {
-        BorsBuilder::new(pool)
-            .github(gh_state_with_long_timeout())
-            .run_test(|mut tester| async move {
-                tester.post_comment("@bors try").await?;
-                tester.expect_comments(1).await;
-
-                with_mocked_time(Duration::from_secs(4000), async {
-                    tester.cancel_timed_out_builds().await;
-                })
-                .await;
-                tester.expect_comments(1).await;
-
-                tester.expect_check_run(
-                    &tester.default_pr().await.get_gh_pr().head_sha,
-                    TRY_BUILD_CHECK_RUN_NAME,
-                    "Bors try build",
-                    CheckRunStatus::Completed,
-                    Some(CheckRunConclusion::TimedOut),
-                );
-
                 Ok(tester)
             })
             .await;
