@@ -21,7 +21,7 @@ thiserror = "2"
 # Serialization
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-toml = "0.8"
+toml = "0.9"
 
 # GitHub
 octocrab = { version = "0.44", features = ["timeout", "stream"] }
