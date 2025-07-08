@@ -1,8 +1,6 @@
 use std::sync::Arc;
 
 use anyhow::{Context, anyhow};
-use octocrab::params::checks::CheckRunOutput;
-use octocrab::params::checks::CheckRunStatus;
 
 use crate::PgDbClient;
 use crate::bors::RepositoryState;
@@ -34,9 +32,6 @@ pub(super) const TRY_MERGE_BRANCH_NAME: &str = "automation/bors/try-merge";
 
 // This branch should run CI checks.
 pub(super) const TRY_BRANCH_NAME: &str = "automation/bors/try";
-
-// The name of the check run seen in the GitHub UI.
-const TRY_BUILD_CHECK_RUN_NAME: &str = "Bors try build";
 
 /// Performs a so-called try build - merges the PR branch into a special branch designed
 /// for running CI checks.
@@ -92,33 +87,9 @@ pub(super) async fn command_try_build(
     {
         MergeResult::Success(merge_sha) => {
             // If the merge was succesful, run CI with merged commit
-            let build_id =
-                run_try_build(&repo.client, &db, &pr.db, merge_sha.clone(), base_sha).await?;
+            run_try_build(&repo.client, &db, &pr.db, merge_sha.clone(), base_sha).await?;
 
             handle_label_trigger(repo, pr.number(), LabelTrigger::TryBuildStarted).await?;
-
-            // Create a check run to track the try build status in GitHub's UI.
-            // This gets added to the PR's head SHA so GitHub shows UI in the checks tab and
-            // the bottom of the PR.
-            let check_run = repo
-                .client
-                .create_check_run(
-                    TRY_BUILD_CHECK_RUN_NAME,
-                    &pr.github.head.sha,
-                    CheckRunStatus::InProgress,
-                    CheckRunOutput {
-                        title: "Bors try build".to_string(),
-                        summary: "".to_string(),
-                        text: None,
-                        annotations: vec![],
-                        images: vec![],
-                    },
-                    &build_id.to_string(),
-                )
-                .await?;
-
-            db.update_build_check_run_id(build_id, check_run.id.into_inner() as i64)
-                .await?;
 
             repo.client
                 .post_comment(
@@ -205,18 +176,17 @@ async fn run_try_build(
     pr: &PullRequestModel,
     commit_sha: CommitSha,
     parent_sha: CommitSha,
-) -> anyhow::Result<i32> {
+) -> anyhow::Result<()> {
     client
         .set_branch_to_sha(TRY_BRANCH_NAME, &commit_sha, ForcePush::Yes)
         .await
         .map_err(|error| anyhow!("Cannot set try branch to main branch: {error:?}"))?;
 
-    let build_id = db
-        .attach_try_build(pr, TRY_BRANCH_NAME.to_string(), commit_sha, parent_sha)
+    db.attach_try_build(pr, TRY_BRANCH_NAME.to_string(), commit_sha, parent_sha)
         .await?;
 
     tracing::info!("Try build started");
-    Ok(build_id)
+    Ok(())
 }
 
 enum MergeResult {
@@ -337,16 +307,13 @@ fn auto_merge_commit_message(
 
 #[cfg(test)]
 mod tests {
-    use crate::bors::handlers::trybuild::{
-        TRY_BRANCH_NAME, TRY_BUILD_CHECK_RUN_NAME, TRY_MERGE_BRANCH_NAME,
-    };
+    use crate::bors::handlers::trybuild::{TRY_BRANCH_NAME, TRY_MERGE_BRANCH_NAME};
     use crate::database::operations::get_all_workflows;
     use crate::github::CommitSha;
     use crate::tests::mocks::{
         BorsBuilder, Comment, GitHubState, User, Workflow, WorkflowEvent, default_pr_number,
         default_repo_name, run_test,
     };
-    use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
 
     #[sqlx::test]
     async fn try_success(pool: sqlx::PgPool) {
@@ -893,75 +860,5 @@ try_failed = ["+foo", "+bar", "-baz"]
                 Ok(tester)
             })
             .await;
-    }
-
-    #[sqlx::test]
-    async fn try_build_creates_check_run(pool: sqlx::PgPool) {
-        run_test(pool.clone(), |mut tester| async {
-            tester.create_branch(TRY_BRANCH_NAME).expect_suites(1);
-            tester.post_comment("@bors try").await?;
-            tester.expect_comments(1).await;
-
-            tester.expect_check_run(
-                &tester.default_pr().await.get_gh_pr().head_sha,
-                TRY_BUILD_CHECK_RUN_NAME,
-                "Bors try build",
-                CheckRunStatus::InProgress,
-                None,
-            );
-
-            let check_run = tester.get_check_run().await?;
-            insta::assert_snapshot!(check_run.summary, @"");
-            insta::assert_snapshot!(check_run.text, @"");
-
-            Ok(tester)
-        })
-        .await;
-    }
-
-    #[sqlx::test]
-    async fn try_build_updates_check_run_on_success(pool: sqlx::PgPool) {
-        run_test(pool.clone(), |mut tester| async {
-            tester.create_branch(TRY_BRANCH_NAME).expect_suites(1);
-            tester.post_comment("@bors try").await?;
-            tester.expect_comments(1).await;
-
-            tester.workflow_success(tester.try_branch()).await?;
-            tester.expect_comments(1).await;
-
-            tester.expect_check_run(
-                &tester.default_pr().await.get_gh_pr().head_sha,
-                TRY_BUILD_CHECK_RUN_NAME,
-                "Bors try build",
-                CheckRunStatus::Completed,
-                Some(CheckRunConclusion::Success),
-            );
-
-            Ok(tester)
-        })
-        .await;
-    }
-
-    #[sqlx::test]
-    async fn try_build_updates_check_run_on_failure(pool: sqlx::PgPool) {
-        run_test(pool.clone(), |mut tester| async {
-            tester.create_branch(TRY_BRANCH_NAME).expect_suites(1);
-            tester.post_comment("@bors try").await?;
-            tester.expect_comments(1).await;
-
-            tester.workflow_failure(tester.try_branch()).await?;
-            tester.expect_comments(1).await;
-
-            tester.expect_check_run(
-                &tester.default_pr().await.get_gh_pr().head_sha,
-                TRY_BUILD_CHECK_RUN_NAME,
-                "Bors try build",
-                CheckRunStatus::Completed,
-                Some(CheckRunConclusion::Failure),
-            );
-
-            Ok(tester)
-        })
-        .await;
     }
 }

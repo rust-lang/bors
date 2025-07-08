@@ -26,12 +26,10 @@ use crate::github::api::load_repositories;
 use crate::github::server::BorsProcess;
 use crate::github::{GithubRepoName, PullRequestNumber};
 use crate::tests::mocks::comment::{Comment, GitHubIssueCommentEventPayload};
-use crate::tests::mocks::repository;
 use crate::tests::mocks::workflow::{
     CheckSuite, GitHubCheckRunEventPayload, GitHubCheckSuiteEventPayload,
     GitHubWorkflowEventPayload, TestWorkflowStatus, Workflow, WorkflowEvent, WorkflowEventKind,
 };
-use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
 
 pub fn default_cmd_prefix() -> String {
     "@bors".to_string()
@@ -272,17 +270,6 @@ impl BorsTester {
 
     pub fn try_branch(&self) -> Branch {
         self.get_branch("automation/bors/try")
-    }
-
-    /// Get the latest check run.
-    pub async fn get_check_run(&mut self) -> anyhow::Result<repository::CheckRunData> {
-        Ok(self
-            .default_repo()
-            .lock()
-            .check_runs
-            .last()
-            .unwrap()
-            .clone())
     }
 
     /// Wait until the next bot comment is received on the default repo and the default PR.
@@ -668,64 +655,6 @@ impl BorsTester {
                 .await
                 .unwrap_or_else(|_| panic!("Failed to get comment #{i}"));
         }
-    }
-
-    #[track_caller]
-    pub fn expect_check_run(
-        &self,
-        head_sha: &str,
-        name: &str,
-        title: &str,
-        status: CheckRunStatus,
-        conclusion: Option<CheckRunConclusion>,
-    ) -> &Self {
-        let repo = self.default_repo();
-        let repo = repo.lock();
-        let check_runs: Vec<_> = repo
-            .check_runs
-            .iter()
-            .filter(|check_run| check_run.head_sha == head_sha)
-            .collect();
-
-        assert_eq!(check_runs.len(), 1);
-
-        let check_run = check_runs[0];
-        let expected_status = match status {
-            CheckRunStatus::Queued => "queued",
-            CheckRunStatus::InProgress => "in_progress",
-            CheckRunStatus::Completed => "completed",
-        };
-        let expected_conclusion = conclusion.map(|c| match c {
-            CheckRunConclusion::Success => "success",
-            CheckRunConclusion::Failure => "failure",
-            CheckRunConclusion::Neutral => "neutral",
-            CheckRunConclusion::Cancelled => "cancelled",
-            CheckRunConclusion::TimedOut => "timed_out",
-            CheckRunConclusion::ActionRequired => "action_required",
-            CheckRunConclusion::Stale => "stale",
-            CheckRunConclusion::Skipped => "skipped",
-        });
-
-        assert_eq!(
-            (
-                check_run.name.as_str(),
-                check_run.head_sha.as_str(),
-                check_run.status.as_str(),
-                check_run.title.as_str(),
-                check_run.conclusion.as_deref(),
-                check_run.external_id.parse::<u64>().is_ok()
-            ),
-            (
-                name,
-                head_sha,
-                expected_status,
-                title,
-                expected_conclusion,
-                true
-            )
-        );
-
-        self
     }
 
     /// Wait until the given condition is true.

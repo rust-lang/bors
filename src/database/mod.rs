@@ -315,7 +315,6 @@ pub struct BuildModel {
     /// The base commit SHA that this build is merged with (e.g., main branch HEAD).
     pub parent: String,
     pub created_at: DateTime<Utc>,
-    /// The ID of the check run associated with the build.
     pub check_run_id: Option<i64>,
 }
 
