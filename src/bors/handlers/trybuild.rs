@@ -19,6 +19,7 @@ use crate::github::{CommitSha, GithubUser, LabelTrigger, MergeError, PullRequest
 use crate::permissions::PermissionType;
 use crate::utils::text::suppress_github_mentions;
 use anyhow::{Context, anyhow};
+use octocrab::params::checks::CheckRunConclusion;
 use octocrab::params::checks::CheckRunOutput;
 use octocrab::params::checks::CheckRunStatus;
 use tracing::log;
@@ -155,7 +156,7 @@ async fn cancel_previous_try_build(
 ) -> anyhow::Result<Vec<String>> {
     assert_eq!(build.status, BuildStatus::Pending);
 
-    match cancel_build_workflows(&repo.client, db, build).await {
+    match cancel_build_workflows(&repo.client, db, build, CheckRunConclusion::Cancelled).await {
         Ok(workflow_ids) => {
             tracing::info!("Try build cancelled");
             Ok(repo
@@ -267,7 +268,14 @@ pub(super) async fn command_try_cancel(
         return Ok(());
     };
 
-    match cancel_build_workflows(&repo.client, db.as_ref(), build).await {
+    match cancel_build_workflows(
+        &repo.client,
+        db.as_ref(),
+        build,
+        CheckRunConclusion::Cancelled,
+    )
+    .await
+    {
         Err(error) => {
             tracing::error!(
                 "Could not cancel workflows for SHA {}: {error:?}",
@@ -298,6 +306,7 @@ pub async fn cancel_build_workflows(
     client: &GithubRepositoryClient,
     db: &PgDbClient,
     build: &BuildModel,
+    check_run_conclusion: CheckRunConclusion,
 ) -> anyhow::Result<Vec<RunId>> {
     let pending_workflows = db.get_pending_workflows_for_build(build).await?;
 
@@ -306,6 +315,20 @@ pub async fn cancel_build_workflows(
 
     db.update_build_status(build, BuildStatus::Cancelled)
         .await?;
+
+    if let Some(check_run_id) = build.check_run_id {
+        if let Err(error) = client
+            .update_check_run(
+                check_run_id as u64,
+                CheckRunStatus::Completed,
+                Some(check_run_conclusion),
+                None,
+            )
+            .await
+        {
+            tracing::error!("Could not update check run {check_run_id}: {error:?}");
+        }
+    }
 
     Ok(pending_workflows)
 }
@@ -963,6 +986,62 @@ try_failed = ["+foo", "+bar", "-baz"]
                 Some(CheckRunConclusion::Failure),
             );
 
+            Ok(tester)
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn try_cancel_updates_check_run_to_cancelled(pool: sqlx::PgPool) {
+        run_test(pool.clone(), |mut tester| async {
+            tester.create_branch(TRY_BRANCH_NAME).expect_suites(1);
+            tester.post_comment("@bors try").await?;
+            tester.expect_comments(1).await;
+
+            tester.post_comment("@bors try cancel").await?;
+            tester.expect_comments(1).await;
+
+            tester.expect_check_run(
+                &tester.default_pr().await.get_gh_pr().head_sha,
+                TRY_BUILD_CHECK_RUN_NAME,
+                "Bors try build",
+                CheckRunStatus::Completed,
+                Some(CheckRunConclusion::Cancelled),
+            );
+
+            Ok(tester)
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn new_try_build_cancels_previous_and_updates_check_run(pool: sqlx::PgPool) {
+        run_test(pool.clone(), |mut tester| async {
+            tester.create_branch(TRY_BRANCH_NAME).expect_suites(1);
+            tester.post_comment("@bors try").await?;
+            tester.expect_comments(1).await;
+
+            let prev_sha = tester.default_pr().await.get_gh_pr().head_sha;
+            tester
+                .push_to_pr(default_repo_name(), default_pr_number())
+                .await?;
+            tester.post_comment("@bors try").await?;
+            tester.expect_comments(1).await;
+
+            tester.expect_check_run(
+                &prev_sha,
+                TRY_BUILD_CHECK_RUN_NAME,
+                "Bors try build",
+                CheckRunStatus::Completed,
+                Some(CheckRunConclusion::Cancelled),
+            );
+            tester.expect_check_run(
+                &tester.default_pr().await.get_gh_pr().head_sha,
+                TRY_BUILD_CHECK_RUN_NAME,
+                "Bors try build",
+                CheckRunStatus::InProgress,
+                None,
+            );
             Ok(tester)
         })
         .await;

@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use anyhow::Context;
 use chrono::{DateTime, Utc};
-use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
+use octocrab::params::checks::CheckRunConclusion;
 use std::collections::BTreeMap;
 
 use crate::bors::Comment;
@@ -11,7 +11,6 @@ use crate::bors::PullRequestStatus;
 use crate::bors::RepositoryState;
 use crate::bors::handlers::trybuild::cancel_build_workflows;
 use crate::bors::mergeable_queue::MergeableQueueSender;
-use crate::database::BuildStatus;
 use crate::{PgDbClient, TeamApiClient};
 
 /// Cancel CI builds that have been running for too long
@@ -27,26 +26,11 @@ pub async fn cancel_timed_out_builds(
         if elapsed_time(build.created_at) >= timeout {
             tracing::info!("Cancelling build {}", build.commit_sha);
 
-            db.update_build_status(&build, BuildStatus::Cancelled)
-                .await?;
-
-            if let Some(check_run_id) = build.check_run_id {
-                if let Err(error) = repo
-                    .client
-                    .update_check_run(
-                        check_run_id as u64,
-                        CheckRunStatus::Completed,
-                        Some(CheckRunConclusion::TimedOut),
-                        None,
-                    )
-                    .await
-                {
-                    tracing::error!("Could not update check run {check_run_id}: {error:?}");
-                }
-            }
-
             if let Some(pr) = db.find_pr_by_build(&build).await? {
-                if let Err(error) = cancel_build_workflows(&repo.client, db, &build).await {
+                if let Err(error) =
+                    cancel_build_workflows(&repo.client, db, &build, CheckRunConclusion::TimedOut)
+                        .await
+                {
                     tracing::error!(
                         "Could not cancel workflows for SHA {}: {error:?}",
                         build.commit_sha
