@@ -23,14 +23,23 @@ required.
 | `--cmd-prefix`     | `CMD_PREFIX`         | @bors       | Prefix used to invoke bors commands in PR comments.       |
 
 ### Special branches
-The bot uses the following two branch names for its operations.
+The bot uses the following branch names for its operations.
+
+#### Try builds
 - `automation/bors/try-merge`
   - Used to perform merges of a pull request commit with a parent commit.
   - Should not be configured for any CI workflows!
 - `automation/bors/try`
   - This branch should be configured for CI workflows corresponding to try runs.
 
-The two branches are currently needed because we cannot set `try-merge` to parent and merge it with a PR commit
+#### Auto builds
+- `automation/bors/auto-merge`
+  - Used to merge PR with the latest base branch commit.
+  - Should not be configured for any CI workflows!
+- `automation/bors/auto`
+  - This branch should be configured for CI workflows that need to run before merging to the base branch.
+
+The merge and non-merge branches are needed because we cannot set branches to parent and merge them with a PR commit
 atomically using the GitHub API.
 
 ### GitHub app
@@ -42,5 +51,7 @@ Here is a guide on how to add a repository so that this bot can be used on it:
 describes the file can be found in `src/config.rs`. [Here](rust-bors.example.toml) is an example configuration file.
 2) Install the GitHub app corresponding to this bot to the corresponding repository. You can use the
 `https://github.com/settings/apps/<app-name>/installations` link (to be automated via `team` repo).
-3) Configure a CI workflow on push to the `automation/bors/try` branch.
-4) Give the bot permissions to push to `automation/bors/try` and `automation/bors/try-merge` (to be automated via `team` repo).
+3) Configure CI workflows on push to:
+   - `automation/bors/try` branch (for try builds)
+   - `automation/bors/auto` branch (for auto builds)
+4) Give the bot permissions to push to `automation/bors/try`, `automation/bors/try-merge`, `automation/bors/auto`, and `automation/bors/auto-merge` (to be automated via `team` repo).
