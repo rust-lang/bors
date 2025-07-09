@@ -10,6 +10,7 @@ use crate::bors::mergeable_queue::MergeableQueueSender;
 use crate::bors::{Comment, PullRequestStatus, RepositoryState};
 use crate::database::{BuildStatus, MergeableState};
 use crate::github::{CommitSha, LabelTrigger, PullRequestNumber};
+use octocrab::params::checks::CheckRunConclusion;
 use std::sync::Arc;
 
 pub(super) async fn handle_pull_request_edited(
@@ -58,7 +59,14 @@ pub(super) async fn handle_push_to_pull_request(
         if auto_build.status == BuildStatus::Pending {
             tracing::info!("Cancelling auto build for PR {pr_number} due to push");
 
-            match cancel_build_workflows(&repo_state.client, db.as_ref(), auto_build).await {
+            match cancel_build_workflows(
+                &repo_state.client,
+                db.as_ref(),
+                auto_build,
+                CheckRunConclusion::Cancelled,
+            )
+            .await
+            {
                 Err(error) => {
                     tracing::error!(
                         "Could not cancel workflows for SHA {}: {error:?}",
