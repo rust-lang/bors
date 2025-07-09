@@ -1,5 +1,5 @@
 use crate::bors::event::BorsEvent;
-use crate::bors::merge_queue::{MergeQueueEvent, start_merge_queue};
+use crate::bors::merge_queue::{MergeQueueSender, start_merge_queue};
 use crate::bors::mergeable_queue::{
     MergeableQueueReceiver, MergeableQueueSender, create_mergeable_queue,
     handle_mergeable_queue_item,
@@ -195,7 +195,7 @@ pub async fn github_webhook_handler(
 pub struct BorsProcess {
     pub repository_tx: mpsc::Sender<BorsRepositoryEvent>,
     pub global_tx: mpsc::Sender<BorsGlobalEvent>,
-    pub merge_queue_tx: mpsc::Sender<MergeQueueEvent>,
+    pub merge_queue_tx: MergeQueueSender,
     pub mergeable_queue_tx: MergeableQueueSender,
     pub bors_process: Pin<Box<dyn Future<Output = ()> + Send>>,
 }
@@ -293,7 +293,7 @@ async fn consume_global_events(
     ctx: Arc<BorsContext>,
     mut global_rx: mpsc::Receiver<BorsGlobalEvent>,
     mergeable_queue_tx: MergeableQueueSender,
-    merge_queue_tx: mpsc::Sender<MergeQueueEvent>,
+    merge_queue_tx: MergeQueueSender,
     gh_client: Octocrab,
     team_api: TeamApiClient,
 ) {

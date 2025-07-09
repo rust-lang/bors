@@ -5,15 +5,14 @@ use tracing::Instrument;
 
 use crate::BorsContext;
 
-pub type MergeQueueEvent = ();
+type MergeQueueEvent = ();
+pub type MergeQueueSender = mpsc::Sender<MergeQueueEvent>;
 
 pub async fn merge_queue_tick(_ctx: Arc<BorsContext>) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub fn start_merge_queue(
-    ctx: Arc<BorsContext>,
-) -> (mpsc::Sender<MergeQueueEvent>, impl Future<Output = ()>) {
+pub fn start_merge_queue(ctx: Arc<BorsContext>) -> (MergeQueueSender, impl Future<Output = ()>) {
     let (tx, mut rx) = mpsc::channel::<MergeQueueEvent>(10);
 
     let fut = async move {

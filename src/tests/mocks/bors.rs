@@ -16,7 +16,7 @@ use super::pull_request::{
     GitHubPullRequestEventPayload, GitHubPushEventPayload, PullRequestChangeEvent,
 };
 use super::repository::PullRequest;
-use crate::bors::merge_queue::MergeQueueEvent;
+use crate::bors::merge_queue::MergeQueueSender;
 use crate::bors::mergeable_queue::MergeableQueueSender;
 use crate::bors::{
     RollupMode, WAIT_FOR_CANCEL_TIMED_OUT_BUILDS_REFRESH, WAIT_FOR_MERGEABILITY_STATUS_REFRESH,
@@ -109,7 +109,7 @@ pub struct BorsTester {
     github: GitHubState,
     db: Arc<PgDbClient>,
     mergeable_queue_tx: MergeableQueueSender,
-    merge_queue_tx: Sender<MergeQueueEvent>,
+    merge_queue_tx: MergeQueueSender,
     // Sender for bors global events
     global_tx: Sender<BorsGlobalEvent>,
     // When this field is false, no webhooks should be generated from BorsTester methods
