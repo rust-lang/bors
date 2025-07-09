@@ -23,6 +23,11 @@ pub async fn merge_queue_tick(ctx: Arc<BorsContext>) -> anyhow::Result<()> {
                 continue;
             }
         };
+
+        if !repo.config.load().merge_queue_enabled {
+            continue;
+        }
+
         let priority = repo_db.tree_state.priority();
         let prs = ctx.db.get_merge_queue_prs(repo_name, priority).await?;
 

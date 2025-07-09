@@ -21,6 +21,8 @@ pub struct RepositoryConfig {
     pub labels: HashMap<LabelTrigger, Vec<LabelModification>>,
     #[serde(default, deserialize_with = "deserialize_duration_from_secs_opt")]
     pub min_ci_time: Option<Duration>,
+    #[serde(default)]
+    pub merge_queue_enabled: bool,
 }
 
 fn default_timeout() -> Duration {
@@ -165,6 +167,27 @@ mod tests {
         let content = "min_ci_time = 3600";
         let config = load_config(content);
         assert_eq!(config.min_ci_time, Some(Duration::from_secs(3600)));
+    }
+
+    #[test]
+    fn deserialize_merge_queue_enabled_default() {
+        let content = "";
+        let config = load_config(content);
+        assert_eq!(config.merge_queue_enabled, false);
+    }
+
+    #[test]
+    fn deserialize_merge_queue_enabled_true() {
+        let content = "merge_queue_enabled = true";
+        let config = load_config(content);
+        assert_eq!(config.merge_queue_enabled, true);
+    }
+
+    #[test]
+    fn deserialize_merge_queue_enabled_false() {
+        let content = "merge_queue_enabled = false";
+        let config = load_config(content);
+        assert_eq!(config.merge_queue_enabled, false);
     }
 
     #[test]
