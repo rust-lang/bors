@@ -1,9 +1,5 @@
 use std::sync::Arc;
 
-use anyhow::{Context, anyhow};
-use octocrab::params::checks::CheckRunOutput;
-use octocrab::params::checks::CheckRunStatus;
-
 use crate::PgDbClient;
 use crate::bors::RepositoryState;
 use crate::bors::command::Parent;
@@ -22,6 +18,10 @@ use crate::github::api::operations::ForcePush;
 use crate::github::{CommitSha, GithubUser, LabelTrigger, MergeError, PullRequestNumber};
 use crate::permissions::PermissionType;
 use crate::utils::text::suppress_github_mentions;
+use anyhow::{Context, anyhow};
+use octocrab::params::checks::CheckRunOutput;
+use octocrab::params::checks::CheckRunStatus;
+use tracing::log;
 
 use super::has_permission;
 use super::{PullRequestData, deny_request};
@@ -100,7 +100,7 @@ pub(super) async fn command_try_build(
             // Create a check run to track the try build status in GitHub's UI.
             // This gets added to the PR's head SHA so GitHub shows UI in the checks tab and
             // the bottom of the PR.
-            let check_run = repo
+            match repo
                 .client
                 .create_check_run(
                     TRY_BUILD_CHECK_RUN_NAME,
@@ -115,10 +115,17 @@ pub(super) async fn command_try_build(
                     },
                     &build_id.to_string(),
                 )
-                .await?;
-
-            db.update_build_check_run_id(build_id, check_run.id.into_inner() as i64)
-                .await?;
+                .await
+            {
+                Ok(check_run) => {
+                    db.update_build_check_run_id(build_id, check_run.id.into_inner() as i64)
+                        .await?;
+                }
+                Err(error) => {
+                    // Check runs aren't critical, don't block progress if they fail
+                    log::error!("Cannot create check run: {error:?}");
+                }
+            }
 
             repo.client
                 .post_comment(
