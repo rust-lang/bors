@@ -4,11 +4,38 @@ use tokio::sync::mpsc;
 use tracing::Instrument;
 
 use crate::BorsContext;
+use crate::bors::RepositoryState;
+use crate::utils::sort_queue::sort_queue_prs;
 
 type MergeQueueEvent = ();
 pub type MergeQueueSender = mpsc::Sender<MergeQueueEvent>;
 
-pub async fn merge_queue_tick(_ctx: Arc<BorsContext>) -> anyhow::Result<()> {
+pub async fn merge_queue_tick(ctx: Arc<BorsContext>) -> anyhow::Result<()> {
+    let repos: Vec<Arc<RepositoryState>> =
+        ctx.repositories.read().unwrap().values().cloned().collect();
+
+    for repo in repos {
+        let repo_name = repo.repository();
+        let repo_db = match ctx.db.repo_db(repo_name).await? {
+            Some(repo) => repo,
+            None => {
+                tracing::error!("Repository {repo_name} not found");
+                continue;
+            }
+        };
+        let priority = repo_db.tree_state.priority();
+        let prs = ctx.db.get_merge_queue_prs(repo_name, priority).await?;
+
+        // Sort PRs according to merge queue priority rules.
+        // Successful builds come first so they can be merged immediately,
+        // then pending builds (which block the queue to prevent starting simultaneous auto-builds).
+        let prs = sort_queue_prs(prs);
+
+        for _ in prs {
+            // Process PRs...
+        }
+    }
+
     Ok(())
 }
 
