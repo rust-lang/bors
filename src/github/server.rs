@@ -263,7 +263,7 @@ async fn consume_repository_events(
         let mergeable_queue_tx = mergeable_queue_tx.clone();
 
         let span = tracing::info_span!("RepositoryEvent");
-        tracing::debug!("Received repository event: {event:#?}");
+        tracing::debug!("Received repository event: {event:?}");
         if let Err(error) = handle_bors_repository_event(event, ctx, mergeable_queue_tx)
             .instrument(span.clone())
             .await
@@ -285,7 +285,7 @@ async fn consume_global_events(
         let mergeable_queue_tx = mergeable_queue_tx.clone();
 
         let span = tracing::info_span!("GlobalEvent");
-        tracing::debug!("Received global event: {event:#?}");
+        tracing::debug!("Received global event: {event:?}");
         if let Err(error) =
             handle_bors_global_event(event, ctx, &gh_client, &team_api, mergeable_queue_tx)
                 .instrument(span.clone())
