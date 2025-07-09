@@ -177,7 +177,7 @@ async fn load_config(client: &GithubRepositoryClient) -> anyhow::Result<Reposito
     let name = client.repository();
     match client.load_config().await {
         Ok(config) => {
-            tracing::info!("Loaded repository config for {name}: {config:#?}");
+            tracing::info!("Loaded repository config for {name}: {config:?}");
             Ok(config)
         }
         Err(error) => Err(anyhow::anyhow!(
