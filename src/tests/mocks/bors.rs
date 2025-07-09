@@ -839,7 +839,7 @@ impl BorsTester {
         // Make sure that the event channel senders are closed
         drop(self.app);
         drop(self.global_tx);
-        drop(self.merge_queue_tx);
+        self.merge_queue_tx.shutdown();
         self.mergeable_queue_tx.shutdown();
         // Wait until all events are handled in the bors service
         bors.await.unwrap();

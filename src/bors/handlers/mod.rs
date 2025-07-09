@@ -19,7 +19,7 @@ use crate::bors::handlers::trybuild::{TRY_BRANCH_NAME, command_try_build, comman
 use crate::bors::handlers::workflow::{
     handle_check_suite_completed, handle_workflow_completed, handle_workflow_started,
 };
-use crate::bors::merge_queue::MergeQueueSender;
+use crate::bors::merge_queue::{AUTO_BRANCH_NAME, MergeQueueSender};
 use crate::bors::{BorsContext, Comment, RepositoryState};
 use crate::database::{DelegatedPermission, PullRequestModel};
 use crate::github::{GithubUser, PullRequest, PullRequestNumber};
@@ -53,6 +53,7 @@ pub async fn handle_bors_repository_event(
     event: BorsRepositoryEvent,
     ctx: Arc<BorsContext>,
     mergeable_queue_tx: MergeableQueueSender,
+    merge_queue_tx: MergeQueueSender,
 ) -> anyhow::Result<()> {
     let db = Arc::clone(&ctx.db);
     let Some(repo) = ctx
@@ -82,9 +83,10 @@ pub async fn handle_bors_repository_event(
                 author = comment.author.username
             );
             let pr_number = comment.pr_number;
-            if let Err(error) = handle_comment(Arc::clone(&repo), db, ctx, comment)
-                .instrument(span.clone())
-                .await
+            if let Err(error) =
+                handle_comment(Arc::clone(&repo), db, ctx, comment, merge_queue_tx.clone())
+                    .instrument(span.clone())
+                    .await
             {
                 repo.client
                     .post_comment(
@@ -117,7 +119,7 @@ pub async fn handle_bors_repository_event(
                 repo = payload.repository.to_string(),
                 id = payload.run_id.into_inner()
             );
-            handle_workflow_completed(repo, db, payload)
+            handle_workflow_completed(repo, db, payload, &merge_queue_tx)
                 .instrument(span.clone())
                 .await?;
         }
@@ -126,7 +128,7 @@ pub async fn handle_bors_repository_event(
                 "Check suite completed",
                 repo = payload.repository.to_string(),
             );
-            handle_check_suite_completed(repo, db, payload)
+            handle_check_suite_completed(repo, db, payload, &merge_queue_tx)
                 .instrument(span.clone())
                 .await?;
         }
@@ -353,6 +355,7 @@ async fn handle_comment(
     database: Arc<PgDbClient>,
     ctx: Arc<BorsContext>,
     comment: PullRequestComment,
+    merge_queue_tx: MergeQueueSender,
 ) -> anyhow::Result<()> {
     use std::fmt::Write;
 
@@ -404,13 +407,14 @@ async fn handle_comment(
                             &approver,
                             priority,
                             rollup,
+                            &merge_queue_tx,
                         )
                         .instrument(span)
                         .await
                     }
                     BorsCommand::OpenTree => {
                         let span = tracing::info_span!("TreeOpen");
-                        command_open_tree(repo, database, &pr, &comment.author)
+                        command_open_tree(repo, database, &pr, &comment.author, &merge_queue_tx)
                             .instrument(span)
                             .await
                     }
@@ -423,6 +427,7 @@ async fn handle_comment(
                             &comment.author,
                             priority,
                             &comment.html_url,
+                            &merge_queue_tx,
                         )
                         .instrument(span)
                         .await
@@ -561,7 +566,7 @@ async fn reload_repos(
 
 /// Is this branch interesting for the bot?
 fn is_bors_observed_branch(branch: &str) -> bool {
-    branch == TRY_BRANCH_NAME
+    branch == TRY_BRANCH_NAME || branch == AUTO_BRANCH_NAME
 }
 
 /// Deny permission for a request.

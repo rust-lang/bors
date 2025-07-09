@@ -8,6 +8,7 @@ use crate::bors::comment::approve_non_open_pr_comment;
 use crate::bors::handlers::has_permission;
 use crate::bors::handlers::labels::handle_label_trigger;
 use crate::bors::handlers::{PullRequestData, deny_request};
+use crate::bors::merge_queue::MergeQueueSender;
 use crate::bors::{Comment, PullRequestStatus};
 use crate::database::ApprovalInfo;
 use crate::database::DelegatedPermission;
@@ -18,6 +19,7 @@ use crate::permissions::PermissionType;
 
 /// Approve a pull request.
 /// A pull request can only be approved by a user of sufficient authority.
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn command_approve(
     repo_state: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
@@ -26,6 +28,7 @@ pub(super) async fn command_approve(
     approver: &Approver,
     priority: Option<u32>,
     rollup: Option<RollupMode>,
+    merge_queue_tx: &MergeQueueSender,
 ) -> anyhow::Result<()> {
     tracing::info!("Approving PR {}", pr.number());
     if !has_permission(&repo_state, author, pr, PermissionType::Review).await? {
@@ -52,6 +55,8 @@ pub(super) async fn command_approve(
 
     db.approve(&pr.db, approval_info, priority, rollup).await?;
     handle_label_trigger(&repo_state, pr.number(), LabelTrigger::Approved).await?;
+
+    merge_queue_tx.send(()).await?;
     notify_of_approval(&repo_state, pr, approver.as_str()).await
 }
 
@@ -156,6 +161,7 @@ pub(super) async fn command_close_tree(
     author: &GithubUser,
     priority: u32,
     comment_url: &str,
+    merge_queue_tx: &MergeQueueSender,
 ) -> anyhow::Result<()> {
     if !sufficient_approve_permission(repo_state.clone(), author) {
         deny_request(&repo_state, pr.number(), author, PermissionType::Review).await?;
@@ -169,6 +175,8 @@ pub(super) async fn command_close_tree(
         },
     )
     .await?;
+
+    merge_queue_tx.send(()).await?;
     notify_of_tree_closed(&repo_state, pr.number(), priority).await
 }
 
@@ -177,6 +185,7 @@ pub(super) async fn command_open_tree(
     db: Arc<PgDbClient>,
     pr: &PullRequestData,
     author: &GithubUser,
+    merge_queue_tx: &MergeQueueSender,
 ) -> anyhow::Result<()> {
     if !sufficient_delegate_permission(repo_state.clone(), author) {
         deny_request(&repo_state, pr.number(), author, PermissionType::Review).await?;
@@ -185,6 +194,8 @@ pub(super) async fn command_open_tree(
 
     db.upsert_repository(repo_state.repository(), TreeState::Open)
         .await?;
+
+    merge_queue_tx.send(()).await?;
     notify_of_tree_open(&repo_state, pr.number()).await
 }
 
