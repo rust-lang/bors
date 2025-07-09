@@ -203,9 +203,13 @@ async fn try_complete_build(
             (CheckRunStatus::Completed, Some(CheckRunConclusion::Success))
         };
 
-        repo.client
+        if let Err(error) = repo
+            .client
             .update_check_run(check_run_id as u64, status, conclusion, None)
-            .await?;
+            .await
+        {
+            tracing::error!("Could not update check run {check_run_id}: {error:?}");
+        }
     }
 
     let message = if !has_failure {
