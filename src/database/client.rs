@@ -1,6 +1,7 @@
 use sqlx::PgPool;
 
 use crate::bors::{PullRequestStatus, RollupMode};
+use crate::database::operations::get_merge_queue_prs;
 use crate::database::{
     BuildModel, BuildStatus, PullRequestModel, RepoModel, TreeState, WorkflowModel, WorkflowStatus,
     WorkflowType,
@@ -307,5 +308,13 @@ impl PgDbClient {
 
     pub async fn delete_auto_build(&self, pr: &PullRequestModel) -> anyhow::Result<()> {
         delete_auto_build(&self.pool, pr.id).await
+    }
+
+    pub async fn get_merge_queue_prs(
+        &self,
+        repo: &GithubRepoName,
+        tree_priority: Option<u32>,
+    ) -> anyhow::Result<Vec<PullRequestModel>> {
+        get_merge_queue_prs(&self.pool, repo, tree_priority.map(|p| p as i32)).await
     }
 }

@@ -11,6 +11,8 @@ use crate::bors::comment::{try_build_succeeded_comment, workflow_failed_comment}
 use crate::bors::event::{CheckSuiteCompleted, WorkflowCompleted, WorkflowStarted};
 use crate::bors::handlers::is_bors_observed_branch;
 use crate::bors::handlers::labels::handle_label_trigger;
+use crate::bors::merge_queue::AUTO_BRANCH_NAME;
+use crate::bors::merge_queue::MergeQueueSender;
 use crate::database::{BuildStatus, WorkflowStatus};
 use crate::github::LabelTrigger;
 
@@ -66,6 +68,7 @@ pub(super) async fn handle_workflow_completed(
     repo: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
     mut payload: WorkflowCompleted,
+    merge_queue_tx: &MergeQueueSender,
 ) -> anyhow::Result<()> {
     if !is_bors_observed_branch(&payload.branch) {
         return Ok(());
@@ -98,13 +101,14 @@ pub(super) async fn handle_workflow_completed(
         branch: payload.branch,
         commit_sha: payload.commit_sha,
     };
-    try_complete_build(repo.as_ref(), db.as_ref(), event).await
+    try_complete_build(repo.as_ref(), db.as_ref(), event, merge_queue_tx).await
 }
 
 pub(super) async fn handle_check_suite_completed(
     repo: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
     payload: CheckSuiteCompleted,
+    merge_queue_tx: &MergeQueueSender,
 ) -> anyhow::Result<()> {
     if !is_bors_observed_branch(&payload.branch) {
         return Ok(());
@@ -115,7 +119,7 @@ pub(super) async fn handle_check_suite_completed(
         payload.branch,
         payload.commit_sha
     );
-    try_complete_build(repo.as_ref(), db.as_ref(), payload).await
+    try_complete_build(repo.as_ref(), db.as_ref(), payload, merge_queue_tx).await
 }
 
 /// Try to complete a pending build.
@@ -123,6 +127,7 @@ async fn try_complete_build(
     repo: &RepositoryState,
     db: &PgDbClient,
     payload: CheckSuiteCompleted,
+    merge_queue_tx: &MergeQueueSender,
 ) -> anyhow::Result<()> {
     if !is_bors_observed_branch(&payload.branch) {
         return Ok(());
@@ -220,6 +225,11 @@ async fn try_complete_build(
         workflow_failed_comment(&workflows)
     };
     repo.client.post_comment(pr.number, message).await?;
+
+    // Trigger merge queue when an auto build completes
+    if payload.branch == AUTO_BRANCH_NAME {
+        merge_queue_tx.trigger().await?;
+    }
 
     Ok(())
 }

@@ -12,15 +12,26 @@ pub const CONFIG_FILE_PATH: &str = "rust-bors.toml";
 /// file located in the root of the repository file tree.
 #[derive(serde::Deserialize, Debug)]
 pub struct RepositoryConfig {
+    /// Maximum duration (in seconds) to wait for CI checks to complete before timing out.
+    /// Defaults to 3600 seconds (1 hour).
     #[serde(
         default = "default_timeout",
         deserialize_with = "deserialize_duration_from_secs"
     )]
     pub timeout: Duration,
+    /// Label modifications to apply when specific events occur.
+    /// Maps trigger events (approve, try, etc.) to label additions/removals.
+    /// Format: `trigger = ["+label_to_add", "-label_to_remove"]`
     #[serde(default, deserialize_with = "deserialize_labels")]
     pub labels: HashMap<LabelTrigger, Vec<LabelModification>>,
+    /// Minimum time (in seconds) to wait for CI checks to complete before proceeding.
+    /// Defaults to `None` (no minimum wait time).
     #[serde(default, deserialize_with = "deserialize_duration_from_secs_opt")]
     pub min_ci_time: Option<Duration>,
+    /// Whether auto merging is enabled.
+    /// Defaults to false.
+    #[serde(default)]
+    pub merge_queue_enabled: bool,
 }
 
 fn default_timeout() -> Duration {
@@ -165,6 +176,27 @@ mod tests {
         let content = "min_ci_time = 3600";
         let config = load_config(content);
         assert_eq!(config.min_ci_time, Some(Duration::from_secs(3600)));
+    }
+
+    #[test]
+    fn deserialize_merge_queue_enabled_default() {
+        let content = "";
+        let config = load_config(content);
+        assert_eq!(config.merge_queue_enabled, false);
+    }
+
+    #[test]
+    fn deserialize_merge_queue_enabled_true() {
+        let content = "merge_queue_enabled = true";
+        let config = load_config(content);
+        assert_eq!(config.merge_queue_enabled, true);
+    }
+
+    #[test]
+    fn deserialize_merge_queue_enabled_false() {
+        let content = "merge_queue_enabled = false";
+        let config = load_config(content);
+        assert_eq!(config.merge_queue_enabled, false);
     }
 
     #[test]
