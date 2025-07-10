@@ -210,13 +210,12 @@ pub fn create_bors_process(
     let (repository_tx, repository_rx) = mpsc::channel::<BorsRepositoryEvent>(1024);
     let (global_tx, global_rx) = mpsc::channel::<BorsGlobalEvent>(1024);
     let (mergeable_queue_tx, mergeable_queue_rx) = create_mergeable_queue();
+    let mergeable_queue_tx2 = mergeable_queue_tx.clone();
 
-    let mq_tx = mergeable_queue_tx.clone();
     let ctx = Arc::new(ctx);
 
     let (merge_queue_tx, merge_queue_fut) = start_merge_queue(ctx.clone());
-    let merge_queue_tx_clone = merge_queue_tx.clone();
-    let merge_queue_tx_for_return = merge_queue_tx.clone();
+    let merge_queue_tx2 = merge_queue_tx.clone();
 
     let service = async move {
         // In tests, we shutdown these futures by dropping the channel sender,
@@ -229,14 +228,14 @@ pub fn create_bors_process(
                 consume_repository_events(
                     ctx.clone(),
                     repository_rx,
-                    mq_tx.clone(),
-                    merge_queue_tx_clone.clone()
+                    mergeable_queue_tx2.clone(),
+                    merge_queue_tx2.clone()
                 ),
                 consume_global_events(
                     ctx.clone(),
                     global_rx,
-                    mq_tx,
-                    merge_queue_tx,
+                    mergeable_queue_tx2,
+                    merge_queue_tx2,
                     gh_client,
                     team_api
                 ),
@@ -250,10 +249,10 @@ pub fn create_bors_process(
         #[cfg(not(test))]
         {
             tokio::select! {
-                _ = consume_repository_events(ctx.clone(), repository_rx, mq_tx.clone(), merge_queue_tx_clone.clone()) => {
+                _ = consume_repository_events(ctx.clone(), repository_rx, mergeable_queue_tx2.clone(), merge_queue_tx2.clone()) => {
                     tracing::error!("Repository event handling process has ended");
                 }
-                _ = consume_global_events(ctx.clone(), global_rx, mq_tx, merge_queue_tx, gh_client, team_api) => {
+                _ = consume_global_events(ctx.clone(), global_rx, mergeable_queue_tx2, merge_queue_tx2, gh_client, team_api) => {
                     tracing::error!("Global event handling process has ended");
                 }
                 _ = consume_mergeable_queue(ctx.clone(), mergeable_queue_rx) => {
@@ -270,7 +269,7 @@ pub fn create_bors_process(
         repository_tx,
         global_tx,
         mergeable_queue_tx,
-        merge_queue_tx: merge_queue_tx_for_return,
+        merge_queue_tx,
         bors_process: Box::pin(service),
     }
 }
