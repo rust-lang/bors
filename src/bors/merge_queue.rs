@@ -19,7 +19,7 @@ pub struct MergeQueueSender {
 }
 
 impl MergeQueueSender {
-    pub async fn send(&self, _value: ()) -> Result<(), mpsc::error::SendError<()>> {
+    pub async fn trigger(&self) -> Result<(), mpsc::error::SendError<()>> {
         self.inner
             .send(MergeQueueEvent::Trigger)
             .await

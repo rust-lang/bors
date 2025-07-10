@@ -56,7 +56,7 @@ pub(super) async fn command_approve(
     db.approve(&pr.db, approval_info, priority, rollup).await?;
     handle_label_trigger(&repo_state, pr.number(), LabelTrigger::Approved).await?;
 
-    merge_queue_tx.send(()).await?;
+    merge_queue_tx.trigger().await?;
     notify_of_approval(&repo_state, pr, approver.as_str()).await
 }
 
@@ -176,7 +176,7 @@ pub(super) async fn command_close_tree(
     )
     .await?;
 
-    merge_queue_tx.send(()).await?;
+    merge_queue_tx.trigger().await?;
     notify_of_tree_closed(&repo_state, pr.number(), priority).await
 }
 
@@ -195,7 +195,7 @@ pub(super) async fn command_open_tree(
     db.upsert_repository(repo_state.repository(), TreeState::Open)
         .await?;
 
-    merge_queue_tx.send(()).await?;
+    merge_queue_tx.trigger().await?;
     notify_of_tree_open(&repo_state, pr.number()).await
 }
 

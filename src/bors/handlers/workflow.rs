@@ -224,7 +224,7 @@ async fn try_complete_build(
 
     // Trigger merge queue when an auto build completes
     if payload.branch == AUTO_BRANCH_NAME {
-        merge_queue_tx.send(()).await?;
+        merge_queue_tx.trigger().await?;
     }
 
     Ok(())

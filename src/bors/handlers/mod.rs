@@ -318,7 +318,7 @@ pub async fn handle_bors_global_event(
             crate::bors::WAIT_FOR_PR_STATUS_REFRESH.mark();
         }
         BorsGlobalEvent::ProcessMergeQueue => {
-            merge_queue_tx.send(()).await?;
+            merge_queue_tx.trigger().await?;
         }
     }
     Ok(())
