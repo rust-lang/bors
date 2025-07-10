@@ -842,7 +842,12 @@ impl BorsTester {
         self.merge_queue_tx.shutdown();
         self.mergeable_queue_tx.shutdown();
         // Wait until all events are handled in the bors service
-        bors.await.unwrap();
+        match tokio::time::timeout(Duration::from_secs(5), bors).await {
+            Ok(res) => res.expect("Bors service ended with an error"),
+            Err(_) => panic!(
+                "Timed out waiting for bors service to shutdown. Maybe you forgot to close some channel senders?"
+            ),
+        }
         // Flush any local queues
         self.http_mock.gh_server.assert_empty_queues().await;
         self.github
