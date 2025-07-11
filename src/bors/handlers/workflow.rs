@@ -237,9 +237,13 @@ async fn try_complete_build(
 #[cfg(test)]
 mod tests {
     use crate::bors::handlers::trybuild::TRY_BRANCH_NAME;
+    use crate::bors::merge_queue::{AUTO_BUILD_CHECK_RUN_NAME, AUTO_BRANCH_NAME};
     use crate::database::WorkflowStatus;
     use crate::database::operations::get_all_workflows;
-    use crate::tests::mocks::{Branch, CheckSuite, Workflow, WorkflowEvent, run_test};
+    use crate::tests::mocks::{
+        BorsBuilder, Branch, CheckSuite, GitHubState, Workflow, WorkflowEvent, default_pr_number,
+        run_test,
+    };
 
     #[sqlx::test]
     async fn workflow_started_unknown_build(pool: sqlx::PgPool) {
