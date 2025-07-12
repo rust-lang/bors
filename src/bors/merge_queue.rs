@@ -6,8 +6,8 @@ use tokio::sync::mpsc;
 use tracing::Instrument;
 
 use crate::BorsContext;
-use crate::bors::RepositoryState;
-use crate::bors::comment::auto_build_started_comment;
+use crate::bors::comment::{auto_build_started_comment, auto_build_succeeded_comment};
+use crate::bors::{PullRequestStatus, RepositoryState};
 use crate::database::{BuildStatus, PullRequestModel};
 use crate::github::api::client::GithubRepositoryClient;
 use crate::github::api::operations::ForcePush;
@@ -84,9 +84,39 @@ pub async fn merge_queue_tick(ctx: Arc<BorsContext>) -> anyhow::Result<()> {
             let pr_num = pr.number;
 
             if let Some(auto_build) = &pr.auto_build {
+                let commit_sha = CommitSha(auto_build.commit_sha.clone());
+
                 match auto_build.status {
                     // Build successful - point the base branch to the merged commit.
                     BuildStatus::Success => {
+                        let workflows = ctx.db.get_workflows_for_build(auto_build).await?;
+                        let comment = auto_build_succeeded_comment(
+                            &workflows,
+                            pr.approver().unwrap_or("<unknown>"),
+                            &commit_sha,
+                            &pr.base_branch,
+                        );
+                        repo.client.post_comment(pr.number, comment).await?;
+
+                        match repo
+                            .client
+                            .set_branch_to_sha(&pr.base_branch, &commit_sha, ForcePush::No)
+                            .await
+                        {
+                            Ok(()) => {
+                                tracing::info!("Auto build succeeded and merged for PR {pr_num}");
+
+                                ctx.db
+                                    .set_pr_status(
+                                        &pr.repository,
+                                        pr.number,
+                                        PullRequestStatus::Merged,
+                                    )
+                                    .await?;
+                            }
+                            Err(_) => {}
+                        };
+
                         // Break to give GitHub time to update the base branch.
                         break;
                     }
@@ -337,7 +367,7 @@ mod tests {
     }
 
     #[sqlx::test]
-    async fn auto_workflow_started_comment(pool: sqlx::PgPool) {
+    async fn auto_build_started_comment(pool: sqlx::PgPool) {
         run_test(pool, |mut tester| async {
             tester.create_branch(AUTO_BRANCH_NAME).expect_suites(1);
 

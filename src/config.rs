@@ -69,6 +69,8 @@ where
         Try,
         TrySucceed,
         TryFailed,
+        Succeeded,
+        Failed,
     }
 
     impl From<Trigger> for LabelTrigger {
@@ -79,6 +81,8 @@ where
                 Trigger::Try => LabelTrigger::TryBuildStarted,
                 Trigger::TrySucceed => LabelTrigger::TryBuildSucceeded,
                 Trigger::TryFailed => LabelTrigger::TryBuildFailed,
+                Trigger::Succeeded => LabelTrigger::Succeeded,
+                Trigger::Failed => LabelTrigger::Failed,
             }
         }
     }
@@ -206,9 +210,11 @@ approve = ["+approved"]
 try = ["+foo", "-bar"]
 try_succeed = ["+foobar", "+foo", "+baz"]
 try_failed = []
+auto_succeed = ["+foobar", "-foo"]
+auto_failed = ["+bar", "+baz"]
 "#;
         let config = load_config(content);
-        insta::assert_debug_snapshot!(config.labels.into_iter().collect::<BTreeMap<_, _>>(), @r###"
+        insta::assert_debug_snapshot!(config.labels.into_iter().collect::<BTreeMap<_, _>>(), @r#"
         {
             Approved: [
                 Add(
@@ -240,8 +246,24 @@ try_failed = []
                 ),
             ],
             TryBuildFailed: [],
+            AutoBuildSucceeded: [
+                Add(
+                    "foobar",
+                ),
+                Remove(
+                    "foo",
+                ),
+            ],
+            AutoBuildFailed: [
+                Add(
+                    "bar",
+                ),
+                Add(
+                    "baz",
+                ),
+            ],
         }
-        "###);
+        "#);
     }
 
     #[test]
