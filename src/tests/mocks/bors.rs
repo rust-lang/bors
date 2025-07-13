@@ -952,6 +952,14 @@ impl PullRequestProxy {
     }
 
     #[track_caller]
+    pub fn expect_auto_build_failed(&self) {
+        assert_eq!(
+            self.require_db_pr().auto_build.as_ref().unwrap().status,
+            BuildStatus::Failure
+        );
+    }
+
+    #[track_caller]
     fn require_db_pr(&self) -> &PullRequestModel {
         self.db_pr.as_ref().unwrap()
     }
