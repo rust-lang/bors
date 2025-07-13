@@ -518,6 +518,32 @@ mod tests {
     }
 
     #[test]
+    fn parse_approve_empty_reviewer() {
+        let cmds = parse_commands("@bors r=");
+        assert_eq!(cmds.len(), 1);
+        insta::assert_debug_snapshot!(cmds[0], @r#"
+        Err(
+            MissingArgValue {
+                arg: "r",
+            },
+        )
+        "#);
+    }
+
+    #[test]
+    fn parse_approve_space_after_r() {
+        let cmds = parse_commands("@bors r= user1");
+        assert_eq!(cmds.len(), 1);
+        insta::assert_debug_snapshot!(cmds[0], @r#"
+        Err(
+            MissingArgValue {
+                arg: "r",
+            },
+        )
+        "#);
+    }
+
+    #[test]
     fn parse_approve_with_priority() {
         let cmds = parse_commands("@bors r+ p=1");
         assert_eq!(cmds.len(), 1);
