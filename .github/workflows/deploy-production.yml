@@ -1,0 +1,45 @@
+name: Deploy production
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy-to-production:
+    name: Deploy to production
+    runs-on: ubuntu-latest
+    environment: production
+    concurrency: production
+    if: github.repository_owner == 'rust-lang'
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::351621253146:role/gha-access
+          aws-region: us-east-2
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - uses: docker/setup-buildx-action@v3
+      - name: Build and tag the Docker image
+        env:
+          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          REPOSITORY: bors
+          IMAGE_TAG: latest
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          tags: ${{ env.REGISTRY }}/${{ env.REPOSITORY }}:${{ env.IMAGE_TAG }}
+          push: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Kick ECS to deploy new version
+        run: aws ecs update-service --service bors --cluster bors --force-new-deployment
