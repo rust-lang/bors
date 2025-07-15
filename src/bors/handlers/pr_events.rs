@@ -334,6 +334,7 @@ async fn notify_of_unclean_auto_build_cancelled_comment(
 
 #[cfg(test)]
 mod tests {
+
     use crate::bors::PullRequestStatus;
     use crate::tests::mocks::default_pr_number;
     use crate::{

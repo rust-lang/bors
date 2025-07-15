@@ -210,8 +210,8 @@ approve = ["+approved"]
 try = ["+foo", "-bar"]
 try_succeed = ["+foobar", "+foo", "+baz"]
 try_failed = []
-auto_succeed = ["+foobar", "-foo"]
-auto_failed = ["+bar", "+baz"]
+succeeded = ["+foobar", "-foo"]
+failed = ["+bar", "+baz"]
 "#;
         let config = load_config(content);
         insta::assert_debug_snapshot!(config.labels.into_iter().collect::<BTreeMap<_, _>>(), @r#"
@@ -246,7 +246,7 @@ auto_failed = ["+bar", "+baz"]
                 ),
             ],
             TryBuildFailed: [],
-            AutoBuildSucceeded: [
+            Succeeded: [
                 Add(
                     "foobar",
                 ),
@@ -254,7 +254,7 @@ auto_failed = ["+bar", "+baz"]
                     "foo",
                 ),
             ],
-            AutoBuildFailed: [
+            Failed: [
                 Add(
                     "bar",
                 ),

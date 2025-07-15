@@ -29,7 +29,7 @@ pub use workflow::Workflow;
 pub use workflow::WorkflowEvent;
 
 mod app;
-mod bors;
+pub mod bors;
 mod comment;
 mod github;
 mod permissions;

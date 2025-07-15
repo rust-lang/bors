@@ -235,7 +235,6 @@ impl Default for Repo {
     fn default() -> Self {
         let config = r#"
 timeout = 3600
-merge_queue_enabled = true
 
 # Set labels on PR approvals
 [labels]
@@ -502,7 +501,7 @@ async fn mock_update_branch(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
             }
 
             let data: SetRefRequest = req.body_json().unwrap();
-            
+
             if repo.push_error {
                 return ResponseTemplate::new(500).set_body_string("Simulated push error");
             }
