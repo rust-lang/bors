@@ -24,7 +24,7 @@ use crate::bors::{BorsContext, Comment, RepositoryState};
 use crate::database::{DelegatedPermission, PullRequestModel};
 use crate::github::{GithubUser, PullRequest, PullRequestNumber};
 use crate::permissions::PermissionType;
-use crate::{PgDbClient, TeamApiClient, load_repositories};
+use crate::{CommandParser, PgDbClient, TeamApiClient, load_repositories};
 use anyhow::Context;
 use octocrab::Octocrab;
 use pr_events::{
@@ -360,7 +360,23 @@ async fn handle_comment(
     use std::fmt::Write;
 
     let pr_number = comment.pr_number;
-    let commands = ctx.parser.parse_commands(&comment.text);
+    let mut commands = ctx.parser.parse_commands(&comment.text);
+
+    // Temporary special case for migration from homu on rust-lang/rust.
+    // Try to parse `@bors try` commands with a hardcoded prefix normally assigned to homu.
+    if repo.repository().owner() == "rust-lang" && repo.repository().name() == "rust" {
+        let homu_commands = CommandParser::new_try_only("@bors".to_string())
+            .parse_commands(&comment.text)
+            .into_iter()
+            .filter(|res| match res {
+                // Let homu handle unknown and missing commands
+                Err(CommandParseError::UnknownCommand(_) | CommandParseError::MissingCommand) => {
+                    false
+                }
+                _ => true,
+            });
+        commands.extend(homu_commands);
+    }
 
     // Bail if no commands
     if commands.is_empty() {
