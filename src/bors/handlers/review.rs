@@ -4,7 +4,9 @@ use crate::PgDbClient;
 use crate::bors::RepositoryState;
 use crate::bors::command::Approver;
 use crate::bors::command::RollupMode;
-use crate::bors::comment::approve_non_open_pr_comment;
+use crate::bors::comment::{
+    approve_non_open_pr_comment, delegate_comment, delegate_try_builds_comment,
+};
 use crate::bors::handlers::has_permission;
 use crate::bors::handlers::labels::handle_label_trigger;
 use crate::bors::handlers::{PullRequestData, deny_request};
@@ -102,6 +104,7 @@ pub(super) async fn command_delegate(
     pr: &PullRequestData,
     author: &GithubUser,
     delegated_permission: DelegatedPermission,
+    bot_prefix: &str,
 ) -> anyhow::Result<()> {
     tracing::info!(
         "Delegating PR {} {} permissions",
@@ -118,7 +121,9 @@ pub(super) async fn command_delegate(
         &repo_state,
         pr.number(),
         &pr.github.author.username,
+        &author.username,
         delegated_permission,
+        bot_prefix,
     )
     .await
 }
@@ -268,19 +273,16 @@ async fn notify_of_delegation(
     repo: &RepositoryState,
     pr_number: PullRequestNumber,
     delegatee: &str,
+    delegator: &str,
     delegated_permission: DelegatedPermission,
+    bot_prefix: &str,
 ) -> anyhow::Result<()> {
-    let message = match delegated_permission {
-        DelegatedPermission::Try => format!(
-            "@{} can now perform try builds on this pull request",
-            delegatee
-        ),
-        DelegatedPermission::Review => format!("@{} can now approve this pull request", delegatee),
+    let comment = match delegated_permission {
+        DelegatedPermission::Try => delegate_try_builds_comment(delegatee, bot_prefix),
+        DelegatedPermission::Review => delegate_comment(delegatee, delegator, bot_prefix),
     };
 
-    repo.client
-        .post_comment(pr_number, Comment::new(message))
-        .await
+    repo.client.post_comment(pr_number, comment).await
 }
 
 #[cfg(test)]
@@ -542,7 +544,11 @@ mod tests {
                     .await?;
                 insta::assert_snapshot!(
                     tester.get_comment().await?,
-                    @"@default-user can now approve this pull request"
+                    @r#"
+                :v: @default-user, you can now approve this pull request!
+
+                If @reviewer told you to "`r=me`" after making some further change, then please make that change and post `@bors r=reviewer`.
+                "#
                 );
 
                 tester
@@ -980,7 +986,11 @@ mod tests {
                     .await?;
                 insta::assert_snapshot!(
                     tester.get_comment().await?,
-                    @"@default-user can now perform try builds on this pull request"
+                    @r"
+                :v: @default-user, you can now perform try builds on this pull request!
+
+                You can now post `@bors try` to start a try build.
+                "
                 );
                 tester
                     .default_pr()

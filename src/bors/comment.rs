@@ -167,6 +167,26 @@ pub fn approve_non_open_pr_comment() -> Comment {
     Comment::new("Only open, non-draft PRs can be approved".to_string())
 }
 
+pub fn delegate_try_builds_comment(delegatee: &str, bot_prefix: &str) -> Comment {
+    Comment::new(format!(
+        r":v: @{delegatee}, you can now perform try builds on this pull request!
+
+You can now post `{bot_prefix} try` to start a try build.
+    ",
+    ))
+}
+
+/// `delegatee` is the user who received the delegation privileges, while `delegator` is the user
+/// who gave these privileges to the `delegatee`.
+pub fn delegate_comment(delegatee: &str, delegator: &str, bot_prefix: &str) -> Comment {
+    Comment::new(format!(
+        r#":v: @{delegatee}, you can now approve this pull request!
+
+If @{delegator} told you to "`r=me`" after making some further change, then please make that change and post `{bot_prefix} r={delegator}`.
+"#
+    ))
+}
+
 fn list_workflows_status(workflows: &[WorkflowModel]) -> String {
     workflows
         .iter()
