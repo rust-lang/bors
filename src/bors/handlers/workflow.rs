@@ -9,6 +9,7 @@ use crate::bors::CheckSuiteStatus;
 use crate::bors::RepositoryState;
 use crate::bors::comment::{try_build_succeeded_comment, workflow_failed_comment};
 use crate::bors::event::{CheckSuiteCompleted, WorkflowCompleted, WorkflowStarted};
+use crate::bors::handlers::TRY_BRANCH_NAME;
 use crate::bors::handlers::is_bors_observed_branch;
 use crate::bors::handlers::labels::handle_label_trigger;
 use crate::bors::merge_queue::AUTO_BRANCH_NAME;
@@ -177,6 +178,7 @@ async fn try_complete_build(
     let has_failure = checks
         .iter()
         .any(|check| matches!(check.status, CheckSuiteStatus::Failure));
+    let build_succeeded = !has_failure;
 
     let mut workflows = db.get_workflows_for_build(&build).await?;
     workflows.sort_by(|a, b| a.name.cmp(&b.name));
@@ -193,42 +195,78 @@ async fn try_complete_build(
         return Ok(());
     }
 
-    let (status, trigger) = if has_failure {
-        (BuildStatus::Failure, LabelTrigger::TryBuildFailed)
-    } else {
-        (BuildStatus::Success, LabelTrigger::TryBuildSucceeded)
-    };
-    db.update_build_status(&build, status).await?;
+    let pr_num = pr.number;
 
-    handle_label_trigger(repo, pr.number, trigger).await?;
+    if build_succeeded {
+        tracing::info!("Build succeeded for PR {pr_num}");
+    } else {
+        tracing::info!("Build failed for PR {pr_num}");
+    }
+
+    let branch = payload.branch.as_str();
+    let (status, trigger, comment_opt) = match (branch, build_succeeded) {
+        (TRY_BRANCH_NAME, true) => (
+            BuildStatus::Success,
+            LabelTrigger::TryBuildSucceeded,
+            Some(try_build_succeeded_comment(
+                &workflows,
+                payload.commit_sha.clone(),
+                &build,
+            )),
+        ),
+        (TRY_BRANCH_NAME, false) => (
+            BuildStatus::Failure,
+            LabelTrigger::TryBuildFailed,
+            Some(workflow_failed_comment(&workflows)),
+        ),
+        (AUTO_BRANCH_NAME, true) => (BuildStatus::Success, LabelTrigger::Succeeded, None),
+        (AUTO_BRANCH_NAME, false) => (
+            BuildStatus::Failure,
+            LabelTrigger::Failed,
+            Some(workflow_failed_comment(&workflows)),
+        ),
+        _ => unreachable!("Branch should be bors observed branch"),
+    };
+
+    db.update_build_status(&build, status).await?;
+    handle_label_trigger(repo, pr_num, trigger).await?;
+
+    if let Some(comment) = comment_opt {
+        repo.client.post_comment(pr_num, comment).await?;
+    }
 
     if let Some(check_run_id) = build.check_run_id {
-        let (status, conclusion) = if has_failure {
-            (CheckRunStatus::Completed, Some(CheckRunConclusion::Failure))
+        tracing::info!(
+            "Updating check run {check_run_id} for build {} on {branch}",
+            build.commit_sha,
+        );
+        let conclusion = if build_succeeded {
+            Some(CheckRunConclusion::Success)
         } else {
-            (CheckRunStatus::Completed, Some(CheckRunConclusion::Success))
+            Some(CheckRunConclusion::Failure)
         };
 
         if let Err(error) = repo
             .client
-            .update_check_run(check_run_id as u64, status, conclusion, None)
+            .update_check_run(
+                check_run_id as u64,
+                CheckRunStatus::Completed,
+                conclusion,
+                None,
+            )
             .await
         {
             tracing::error!("Could not update check run {check_run_id}: {error:?}");
         }
+    } else {
+        tracing::warn!(
+            "No check_run_id found for build {} on {branch}",
+            build.commit_sha,
+        );
     }
 
-    let message = if !has_failure {
-        tracing::info!("Workflow succeeded");
-        try_build_succeeded_comment(&workflows, payload.commit_sha, &build)
-    } else {
-        tracing::info!("Workflow failed");
-        workflow_failed_comment(&workflows)
-    };
-    repo.client.post_comment(pr.number, message).await?;
-
     // Trigger merge queue when an auto build completes
-    if payload.branch == AUTO_BRANCH_NAME {
+    if branch == AUTO_BRANCH_NAME {
         merge_queue_tx.trigger().await?;
     }
 
@@ -237,10 +275,24 @@ async fn try_complete_build(
 
 #[cfg(test)]
 mod tests {
+    use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
+
     use crate::bors::handlers::trybuild::TRY_BRANCH_NAME;
-    use crate::database::WorkflowStatus;
+    use crate::bors::merge_queue::{AUTO_BRANCH_NAME, AUTO_BUILD_CHECK_RUN_NAME};
     use crate::database::operations::get_all_workflows;
-    use crate::tests::mocks::{Branch, CheckSuite, Workflow, WorkflowEvent, run_test};
+    use crate::database::{BuildStatus, WorkflowStatus};
+    use crate::tests::mocks::{
+        BorsBuilder, Branch, CheckSuite, GitHubState, Workflow, WorkflowEvent, default_pr_number,
+        run_test,
+    };
+
+    fn gh_state_with_merge_queue() -> GitHubState {
+        GitHubState::default().with_default_config(
+            r#"
+    merge_queue_enabled = true
+    "#,
+        )
+    }
 
     #[sqlx::test]
     async fn workflow_started_unknown_build(pool: sqlx::PgPool) {
@@ -420,5 +472,181 @@ mod tests {
             Ok(tester)
         })
         .await;
+    }
+
+    #[sqlx::test]
+    async fn auto_build_success_comment(pool: sqlx::PgPool) {
+        let github = GitHubState::default().with_default_config(
+            r#"
+merge_queue_enabled = true
+"#,
+        );
+
+        BorsBuilder::new(pool)
+            .github(github)
+            .run_test(|mut tester| async {
+                tester.create_branch(AUTO_BRANCH_NAME).expect_suites(1);
+
+                tester.post_comment("@bors r+").await?;
+                tester.expect_comments(1).await;
+
+                tester.process_merge_queue().await;
+                tester.expect_comments(1).await;
+
+                tester.workflow_success(tester.auto_branch()).await?;
+                tester.process_merge_queue().await;
+                insta::assert_snapshot!(
+                    tester.get_comment().await?,
+                    @r"
+            :sunny: Test successful - [Workflow1](https://github.com/workflows/Workflow1/1)
+            Approved by: `default-user`
+            Pushing merge-main-sha1-pr-1-sha-0 to `main`...
+            "
+                );
+
+                Ok(tester)
+            })
+            .await;
+    }
+
+    #[sqlx::test]
+    async fn auto_build_check_run_success(pool: sqlx::PgPool) {
+        let github = GitHubState::default().with_default_config(
+            r#"
+merge_queue_enabled = true
+"#,
+        );
+
+        BorsBuilder::new(pool)
+            .github(github)
+            .run_test(|mut tester| async {
+                tester.create_branch(AUTO_BRANCH_NAME).expect_suites(1);
+                tester.post_comment("@bors r+").await?;
+                tester.expect_comments(1).await;
+                tester.process_merge_queue().await;
+                tester.expect_comments(1).await;
+
+                tester.workflow_success(tester.auto_branch()).await?;
+                tester.process_merge_queue().await;
+                tester.expect_comments(1).await;
+                tester.expect_check_run(
+                    &tester.default_pr().await.get_gh_pr().head_sha,
+                    AUTO_BUILD_CHECK_RUN_NAME,
+                    AUTO_BUILD_CHECK_RUN_NAME,
+                    CheckRunStatus::Completed,
+                    Some(CheckRunConclusion::Success),
+                );
+                Ok(tester)
+            })
+            .await;
+    }
+
+    #[sqlx::test]
+    async fn auto_build_success_labels(pool: sqlx::PgPool) {
+        let github = GitHubState::default().with_default_config(
+            r#"
+merge_queue_enabled = true
+
+[labels]
+succeeded = ["+foo", "+bar", "-baz"]
+"#,
+        );
+
+        BorsBuilder::new(pool)
+            .github(github)
+            .run_test(|mut tester| async {
+                tester.create_branch(AUTO_BRANCH_NAME).expect_suites(1);
+                tester.post_comment("@bors r+").await?;
+                tester.expect_comments(1).await;
+                tester.process_merge_queue().await;
+                tester.expect_comments(1).await;
+
+                let repo = tester.default_repo();
+                repo.lock()
+                    .get_pr(default_pr_number())
+                    .check_added_labels(&[]);
+                tester.workflow_success(tester.auto_branch()).await?;
+                tester.process_merge_queue().await;
+                tester.expect_comments(1).await;
+
+                let pr = repo.lock().get_pr(default_pr_number()).clone();
+                pr.check_added_labels(&["foo", "bar"]);
+                pr.check_removed_labels(&["baz"]);
+
+                Ok(tester)
+            })
+            .await;
+    }
+
+    #[sqlx::test]
+    async fn auto_build_failed_labels(pool: sqlx::PgPool) {
+        let github = GitHubState::default().with_default_config(
+            r#"
+    merge_queue_enabled = true
+
+    [labels]
+    failed = ["+foo", "+bar", "-baz"]
+    "#,
+        );
+
+        BorsBuilder::new(pool)
+            .github(github)
+            .run_test(|mut tester| async {
+                tester.create_branch(AUTO_BRANCH_NAME).expect_suites(1);
+                tester.post_comment("@bors r+").await?;
+                tester.expect_comments(1).await;
+                tester.process_merge_queue().await;
+                tester.expect_comments(1).await;
+
+                let repo = tester.default_repo();
+                repo.lock()
+                    .get_pr(default_pr_number())
+                    .check_added_labels(&[]);
+
+                tester.workflow_failure(tester.auto_branch()).await?;
+                tester
+                    .wait_for_default_pr(|pr| {
+                        pr.auto_build.as_ref().unwrap().status == BuildStatus::Failure
+                    })
+                    .await?;
+                tester.expect_comments(1).await;
+
+                let pr = repo.lock().get_pr(default_pr_number()).clone();
+                pr.check_added_labels(&["foo", "bar"]);
+                pr.check_removed_labels(&["baz"]);
+
+                Ok(tester)
+            })
+            .await;
+    }
+
+    #[sqlx::test]
+    async fn auto_build_failure_updates_check_run_on(pool: sqlx::PgPool) {
+        BorsBuilder::new(pool)
+            .github(gh_state_with_merge_queue())
+            .run_test(|mut tester| async {
+                tester.create_branch(AUTO_BRANCH_NAME).expect_suites(1);
+                tester.post_comment("@bors r+").await?;
+                tester.expect_comments(1).await;
+                tester.process_merge_queue().await;
+                tester.expect_comments(1).await;
+
+                tester.workflow_failure(tester.auto_branch()).await?;
+                tester.expect_comments(1).await;
+                tester
+                    .wait_for_default_pr(|pr| {
+                        pr.auto_build.as_ref().unwrap().status == BuildStatus::Failure
+                    })
+                    .await?;
+                tester.expect_check_run(
+                    &tester.default_pr().await.get_gh_pr().head_sha,
+                    AUTO_BUILD_CHECK_RUN_NAME,
+                    AUTO_BUILD_CHECK_RUN_NAME,
+                    CheckRunStatus::Completed,
+                    Some(CheckRunConclusion::Failure),
+                );
+                Ok(tester)
+            })
+            .await;
     }
 }
