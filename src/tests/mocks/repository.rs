@@ -4,6 +4,7 @@ use std::{collections::HashMap, time::SystemTime};
 use crate::bors::{CheckSuiteStatus, PullRequestStatus};
 use base64::Engine;
 use chrono::{DateTime, Utc};
+use octocrab::models::CheckSuiteId;
 use octocrab::models::pulls::MergeableState;
 use octocrab::models::repos::Object;
 use octocrab::models::repos::Object::Commit;
@@ -574,6 +575,7 @@ async fn mock_merge_branch(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
 async fn mock_check_suites(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
     #[derive(serde::Serialize)]
     struct CheckSuitePayload {
+        id: CheckSuiteId,
         conclusion: Option<String>,
         head_branch: String,
     }
@@ -594,7 +596,9 @@ async fn mock_check_suites(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
                 check_suites: branch
                     .get_suites()
                     .iter()
-                    .map(|suite| CheckSuitePayload {
+                    .enumerate()
+                    .map(|(index, suite)| CheckSuitePayload {
+                        id: CheckSuiteId(index as u64),
                         conclusion: match suite {
                             CheckSuiteStatus::Pending => None,
                             CheckSuiteStatus::Success => Some("success".to_string()),
