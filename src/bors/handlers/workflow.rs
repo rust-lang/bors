@@ -170,6 +170,7 @@ async fn try_complete_build(
         .iter()
         .any(|check| matches!(check.status, CheckSuiteStatus::Pending))
     {
+        tracing::debug!("Some check suites are still pending: {checks:?}");
         return Ok(());
     }
 

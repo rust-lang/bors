@@ -1,8 +1,9 @@
 use anyhow::Context;
 use octocrab::Octocrab;
 use octocrab::models::checks::CheckRun;
-use octocrab::models::{App, Repository};
+use octocrab::models::{App, CheckSuiteId, Repository};
 use octocrab::params::checks::{CheckRunConclusion, CheckRunOutput, CheckRunStatus};
+use std::fmt::Debug;
 use tracing::log;
 
 use crate::bors::event::PullRequestComment;
@@ -16,6 +17,7 @@ use crate::github::api::operations::{
 use crate::github::{CommitSha, GithubRepoName, PullRequest, PullRequestNumber};
 use crate::utils::timing::{measure_network_request, perform_network_request_with_retry};
 use futures::TryStreamExt;
+use serde::de::DeserializeOwned;
 
 /// Provides access to a single app installation (repository) using the GitHub API.
 pub struct GithubRepositoryClient {
@@ -96,11 +98,7 @@ impl GithubRepositoryClient {
         perform_network_request_with_retry("get_branch_sha", || async {
             // https://docs.github.com/en/rest/branches/branches?apiVersion=2022-11-28#get-a-branch
             let branch: octocrab::models::repos::Branch = self
-                .client
-                .get(
-                    format!("/repos/{}/branches/{name}", self.repository()).as_str(),
-                    None::<&()>,
-                )
+                .get_request(&format!("branches/{name}"))
                 .await
                 .context("Cannot deserialize branch")?;
             Ok(CommitSha(branch.commit.sha))
@@ -210,6 +208,7 @@ impl GithubRepositoryClient {
     ) -> anyhow::Result<Vec<CheckSuite>> {
         #[derive(serde::Deserialize, Debug)]
         struct CheckSuitePayload {
+            id: CheckSuiteId,
             conclusion: Option<String>,
             head_branch: String,
         }
@@ -221,17 +220,7 @@ impl GithubRepositoryClient {
 
         perform_network_request_with_retry("get_check_suites_for_commit", || async {
             let response: CheckSuiteResponse = self
-                .client
-                .get(
-                    format!(
-                        "/repos/{}/{}/commits/{}/check-suites",
-                        self.repo_name.owner(),
-                        self.repo_name.name(),
-                        sha.0
-                    )
-                    .as_str(),
-                    None::<&()>,
-                )
+                .get_request(&format!("commits/{}/check-suites", sha.0))
                 .await
                 .context("Cannot fetch CheckSuiteResponse")?;
 
@@ -240,6 +229,7 @@ impl GithubRepositoryClient {
                 .into_iter()
                 .filter(|suite| suite.head_branch == branch)
                 .map(|suite| CheckSuite {
+                    id: suite.id,
                     status: match suite.conclusion {
                         Some(status) => match status.as_str() {
                             "success" => CheckSuiteStatus::Success,
@@ -249,14 +239,19 @@ impl GithubRepositoryClient {
                             }
                             _ => {
                                 tracing::warn!(
-                                    "Received unknown check suite status for {}/{}: {status}",
-                                    self.repo_name,
-                                    sha
+                                    "Received unknown check suite conclusion for {}@{sha}: {status}",
+                                    self.repo_name
                                 );
                                 CheckSuiteStatus::Pending
                             }
                         },
-                        None => CheckSuiteStatus::Pending,
+                        None => {
+                            tracing::warn!(
+                                "Received empty check suite conclusion for {}@{sha}",
+                                self.repo_name,
+                            );
+                            CheckSuiteStatus::Pending
+                        }
                     },
                 })
                 .collect();
@@ -382,6 +377,18 @@ impl GithubRepositoryClient {
             prs.push(pr.into());
         }
         Ok(prs)
+    }
+
+    async fn get_request<T: DeserializeOwned + Debug>(&self, path: &str) -> anyhow::Result<T> {
+        let url = format!(
+            "/repos/{}/{}/{path}",
+            self.repo_name.owner(),
+            self.repo_name.name(),
+        );
+        tracing::debug!("Sending request to {url}");
+        let response: T = self.client.get(url.as_str(), None::<&()>).await?;
+        tracing::debug!("Received response: {response:?}");
+        Ok(response)
     }
 
     fn format_pr(&self, pr: PullRequestNumber) -> String {

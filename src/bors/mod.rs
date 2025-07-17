@@ -2,12 +2,12 @@ use std::fmt;
 use std::str::FromStr;
 
 use arc_swap::ArcSwap;
-
 pub use command::CommandParser;
 pub use command::RollupMode;
 pub use comment::Comment;
 pub use context::BorsContext;
 pub use handlers::{handle_bors_global_event, handle_bors_repository_event};
+use octocrab::models::CheckSuiteId;
 use serde::Serialize;
 
 use crate::config::RepositoryConfig;
@@ -48,7 +48,8 @@ pub enum CheckSuiteStatus {
 /// Corresponds to a single GitHub actions workflow run, or to a single external CI check run.
 #[derive(Clone, Debug)]
 pub struct CheckSuite {
-    pub(crate) status: CheckSuiteStatus,
+    pub id: CheckSuiteId,
+    pub status: CheckSuiteStatus,
 }
 
 /// An access point to a single repository.
