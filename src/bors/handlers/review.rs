@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use crate::PgDbClient;
 use crate::bors::RepositoryState;
-use crate::bors::command::Approver;
 use crate::bors::command::RollupMode;
+use crate::bors::command::{Approver, CommandPrefix};
 use crate::bors::comment::{
     approve_non_open_pr_comment, delegate_comment, delegate_try_builds_comment,
 };
@@ -104,7 +104,7 @@ pub(super) async fn command_delegate(
     pr: &PullRequestData,
     author: &GithubUser,
     delegated_permission: DelegatedPermission,
-    bot_prefix: &str,
+    bot_prefix: &CommandPrefix,
 ) -> anyhow::Result<()> {
     tracing::info!(
         "Delegating PR {} {} permissions",
@@ -275,7 +275,7 @@ async fn notify_of_delegation(
     delegatee: &str,
     delegator: &str,
     delegated_permission: DelegatedPermission,
-    bot_prefix: &str,
+    bot_prefix: &CommandPrefix,
 ) -> anyhow::Result<()> {
     let comment = match delegated_permission {
         DelegatedPermission::Try => delegate_try_builds_comment(delegatee, bot_prefix),

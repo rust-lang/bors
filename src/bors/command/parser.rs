@@ -1,6 +1,6 @@
 //! Defines parsers for bors commands.
 
-use crate::bors::command::{Approver, BorsCommand, Parent};
+use crate::bors::command::{Approver, BorsCommand, CommandPrefix, Parent};
 use crate::database::DelegatedPermission;
 use crate::github::CommitSha;
 use pulldown_cmark::{Event, Parser, Tag, TagEnd, TextMergeStream};
@@ -27,17 +27,17 @@ enum CommandPart<'a> {
 }
 
 pub struct CommandParser {
-    prefix: String,
+    prefix: CommandPrefix,
 }
 
 impl CommandParser {
-    pub fn new(prefix: String) -> Self {
+    pub fn new(prefix: CommandPrefix) -> Self {
         Self { prefix }
     }
 
     /// Prefix of the bot, used to invoke commands from PR comments.
     /// For example `@bors`.
-    pub fn prefix(&self) -> &str {
+    pub fn prefix(&self) -> &CommandPrefix {
         &self.prefix
     }
 
@@ -49,9 +49,9 @@ impl CommandParser {
         let segments = extract_text_from_markdown(text);
         segments
             .lines()
-            .filter_map(|line| match line.find(&self.prefix) {
+            .filter_map(|line| match line.find(self.prefix.as_ref()) {
                 Some(index) => {
-                    let input = &line[index + self.prefix.len()..];
+                    let input = &line[index + self.prefix.as_ref().len()..];
                     parse_command(input)
                 }
                 None => None,
@@ -1346,6 +1346,6 @@ I am markdown HTML comment
     }
 
     fn parse_commands(text: &str) -> Vec<Result<BorsCommand, CommandParseError>> {
-        CommandParser::new("@bors".to_string()).parse_commands(text)
+        CommandParser::new("@bors".to_string().into()).parse_commands(text)
     }
 }

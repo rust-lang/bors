@@ -1,5 +1,6 @@
 use serde::Serialize;
 
+use crate::bors::command::CommandPrefix;
 use crate::database::BuildModel;
 use crate::{
     database::{WorkflowModel, WorkflowStatus},
@@ -105,7 +106,7 @@ pub fn workflow_failed_comment(workflows: &[WorkflowModel]) -> Comment {
 pub fn try_build_started_comment(
     head_sha: &CommitSha,
     merge_sha: &CommitSha,
-    bot_prefix: &str,
+    bot_prefix: &CommandPrefix,
     cancelled_workflow_urls: Vec<String>,
 ) -> Comment {
     use std::fmt::Write;
@@ -167,7 +168,7 @@ pub fn approve_non_open_pr_comment() -> Comment {
     Comment::new("Only open, non-draft PRs can be approved".to_string())
 }
 
-pub fn delegate_try_builds_comment(delegatee: &str, bot_prefix: &str) -> Comment {
+pub fn delegate_try_builds_comment(delegatee: &str, bot_prefix: &CommandPrefix) -> Comment {
     Comment::new(format!(
         r":v: @{delegatee}, you can now perform try builds on this pull request!
 
@@ -178,7 +179,7 @@ You can now post `{bot_prefix} try` to start a try build.
 
 /// `delegatee` is the user who received the delegation privileges, while `delegator` is the user
 /// who gave these privileges to the `delegatee`.
-pub fn delegate_comment(delegatee: &str, delegator: &str, bot_prefix: &str) -> Comment {
+pub fn delegate_comment(delegatee: &str, delegator: &str, bot_prefix: &CommandPrefix) -> Comment {
     Comment::new(format!(
         r#":v: @{delegatee}, you can now approve this pull request!
 

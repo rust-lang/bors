@@ -19,8 +19,8 @@ use super::repository::PullRequest;
 use crate::bors::merge_queue::MergeQueueSender;
 use crate::bors::mergeable_queue::MergeableQueueSender;
 use crate::bors::{
-    RollupMode, WAIT_FOR_CANCEL_TIMED_OUT_BUILDS_REFRESH, WAIT_FOR_MERGEABILITY_STATUS_REFRESH,
-    WAIT_FOR_PR_STATUS_REFRESH, WAIT_FOR_WORKFLOW_STARTED,
+    CommandPrefix, RollupMode, WAIT_FOR_CANCEL_TIMED_OUT_BUILDS_REFRESH,
+    WAIT_FOR_MERGEABILITY_STATUS_REFRESH, WAIT_FOR_PR_STATUS_REFRESH, WAIT_FOR_WORKFLOW_STARTED,
 };
 use crate::database::{BuildStatus, DelegatedPermission, OctocrabMergeableState, PullRequestModel};
 use crate::github::api::load_repositories;
@@ -33,9 +33,6 @@ use crate::tests::mocks::workflow::{
 };
 use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
 
-pub fn default_cmd_prefix() -> String {
-    "@bors".to_string()
-}
 use crate::tests::mocks::{
     Branch, ExternalHttpMock, GitHubState, Repo, User, default_pr_number, default_repo_name,
 };
@@ -45,6 +42,10 @@ use crate::{
     BorsContext, BorsGlobalEvent, CommandParser, PgDbClient, ServerState, WebhookSecret,
     create_app, create_bors_process,
 };
+
+pub fn default_cmd_prefix() -> CommandPrefix {
+    "@bors".to_string().into()
+}
 
 pub struct BorsBuilder {
     github: GitHubState,
@@ -131,7 +132,7 @@ impl BorsTester {
         }
 
         let ctx = BorsContext::new(
-            CommandParser::new("@bors".to_string()),
+            CommandParser::new("@bors".to_string().into()),
             db.clone(),
             repos.clone(),
         );
