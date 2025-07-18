@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::PgDbClient;
 use crate::bors::RepositoryState;
-use crate::bors::command::Parent;
+use crate::bors::command::{CommandPrefix, Parent};
 use crate::bors::comment::no_try_build_in_progress_comment;
 use crate::bors::comment::try_build_cancelled_comment;
 use crate::bors::comment::unclean_try_build_cancelled_comment;
@@ -51,7 +51,7 @@ pub(super) async fn command_try_build(
     author: &GithubUser,
     parent: Option<Parent>,
     jobs: Vec<String>,
-    bot_prefix: &str,
+    bot_prefix: &CommandPrefix,
 ) -> anyhow::Result<()> {
     let repo = repo.as_ref();
     if !has_permission(repo, author, pr, PermissionType::Try).await? {

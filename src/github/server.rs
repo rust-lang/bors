@@ -5,7 +5,7 @@ use crate::bors::mergeable_queue::{
     handle_mergeable_queue_item,
 };
 use crate::bors::{
-    BorsContext, RepositoryState, RollupMode, handle_bors_global_event,
+    BorsContext, CommandPrefix, RepositoryState, RollupMode, handle_bors_global_event,
     handle_bors_repository_event,
 };
 use crate::github::webhook::GitHubWebhook;
@@ -42,7 +42,7 @@ pub struct ServerState {
     webhook_secret: WebhookSecret,
     repositories: HashMap<GithubRepoName, Arc<RepositoryState>>,
     db: Arc<PgDbClient>,
-    cmd_prefix: String,
+    cmd_prefix: CommandPrefix,
 }
 
 impl ServerState {
@@ -52,7 +52,7 @@ impl ServerState {
         webhook_secret: WebhookSecret,
         repositories: HashMap<GithubRepoName, Arc<RepositoryState>>,
         db: Arc<PgDbClient>,
-        cmd_prefix: String,
+        cmd_prefix: CommandPrefix,
     ) -> Self {
         Self {
             repository_event_queue,
@@ -68,7 +68,7 @@ impl ServerState {
         &self.webhook_secret
     }
 
-    pub fn get_cmd_prefix(&self) -> &str {
+    pub fn get_cmd_prefix(&self) -> &CommandPrefix {
         &self.cmd_prefix
     }
 }
@@ -123,7 +123,7 @@ async fn help_handler(State(state): State<ServerStateRef>) -> impl IntoResponse 
 
     HtmlTemplate(HelpTemplate {
         repos,
-        cmd_prefix: state.get_cmd_prefix().to_string(),
+        cmd_prefix: state.get_cmd_prefix().as_ref().to_string(),
     })
 }
 

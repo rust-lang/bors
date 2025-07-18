@@ -446,9 +446,16 @@ async fn handle_comment(
                     }
                     BorsCommand::SetDelegate(delegate_type) => {
                         let span = tracing::info_span!("Delegate");
-                        command_delegate(repo, database, &pr, &comment.author, delegate_type)
-                            .instrument(span)
-                            .await
+                        command_delegate(
+                            repo,
+                            database,
+                            &pr,
+                            &comment.author,
+                            delegate_type,
+                            ctx.parser.prefix(),
+                        )
+                        .instrument(span)
+                        .await
                     }
                     BorsCommand::Undelegate => {
                         let span = tracing::info_span!("Undelegate");

@@ -25,6 +25,8 @@ mod handlers;
 pub mod merge_queue;
 pub mod mergeable_queue;
 
+pub use command::CommandPrefix;
+
 #[cfg(test)]
 pub static WAIT_FOR_CANCEL_TIMED_OUT_BUILDS_REFRESH: TestSyncMarker = TestSyncMarker::new();
 

@@ -1,5 +1,6 @@
 mod parser;
 use std::fmt;
+use std::fmt::{Display, Formatter};
 use std::str::FromStr;
 
 use crate::{database::DelegatedPermission, github::CommitSha};
@@ -7,6 +8,27 @@ pub use parser::{CommandParseError, CommandParser};
 
 /// Priority of a commit.
 pub type Priority = u32;
+
+/// Command prefix used to identify bors commands, e.g. `@bors`.
+pub struct CommandPrefix(String);
+
+impl From<String> for CommandPrefix {
+    fn from(value: String) -> Self {
+        Self(value)
+    }
+}
+
+impl Display for CommandPrefix {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl AsRef<str> for CommandPrefix {
+    fn as_ref(&self) -> &str {
+        self.0.as_str()
+    }
+}
 
 /// Type of parent allowed in a try build
 #[derive(Clone, Debug, PartialEq)]
