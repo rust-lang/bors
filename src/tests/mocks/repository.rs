@@ -54,6 +54,7 @@ pub struct PullRequest {
     pub merged_at: Option<DateTime<Utc>>,
     pub closed_at: Option<DateTime<Utc>>,
     pub assignees: Vec<User>,
+    pub description: String,
 }
 
 impl PullRequest {
@@ -76,6 +77,7 @@ impl PullRequest {
             merged_at: None,
             closed_at: None,
             assignees: Vec::new(),
+            description: format!("Description of PR {number}"),
         }
     }
 }
