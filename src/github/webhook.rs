@@ -13,7 +13,7 @@ use octocrab::models::events::payload::{
 };
 use octocrab::models::pulls::{PullRequest, Review};
 use octocrab::models::webhook_events::payload::PullRequestWebhookEventAction;
-use octocrab::models::{App, Author, CheckRun, Repository, RunId, workflows};
+use octocrab::models::{Author, Repository, RunId, workflows};
 use secrecy::{ExposeSecret, SecretString};
 use sha2::Sha256;
 
@@ -59,22 +59,6 @@ pub struct WebhookRepository {
 pub struct WebhookWorkflowRun<'a> {
     action: &'a str,
     workflow_run: workflows::Run,
-    repository: Repository,
-}
-
-#[derive(serde::Deserialize, Debug)]
-pub struct CheckRunInner {
-    #[serde(flatten)]
-    check_run: CheckRun,
-    name: String,
-    check_suite: CheckSuiteInner,
-    app: App,
-}
-
-#[derive(serde::Deserialize, Debug)]
-pub struct WebhookCheckRun<'a> {
-    action: &'a str,
-    check_run: CheckRunInner,
     repository: Repository,
 }
 
@@ -186,7 +170,6 @@ fn parse_webhook_event(request: Parts, body: &[u8]) -> anyhow::Result<Option<Bor
             BorsGlobalEvent::InstallationsChanged,
         ))),
         b"workflow_run" => parse_workflow_run_events(body),
-        b"check_run" => parse_check_run_events(body),
         b"check_suite" => parse_check_suite_events(body),
         _ => {
             tracing::debug!("Ignoring unknown event type {:?}", event_type.to_str());
@@ -375,32 +358,6 @@ fn parse_workflow_run_events(body: &[u8]) -> anyhow::Result<Option<BorsEvent>> {
     Ok(result)
 }
 
-fn parse_check_run_events(body: &[u8]) -> anyhow::Result<Option<BorsEvent>> {
-    let payload: WebhookCheckRun = serde_json::from_slice(body).unwrap();
-
-    // We are only interested in check runs from external CI services.
-    // These basically correspond to workflow runs from GHA.
-    if payload.check_run.app.owner.login == "github" {
-        return Ok(None);
-    }
-
-    let repository_name = parse_repository_name(&payload.repository)?;
-    if payload.action == "created" {
-        Ok(Some(BorsEvent::Repository(
-            BorsRepositoryEvent::WorkflowStarted(WorkflowStarted {
-                repository: repository_name,
-                name: payload.check_run.name.to_string(),
-                branch: payload.check_run.check_suite.head_branch,
-                commit_sha: CommitSha(payload.check_run.check_suite.head_sha),
-                run_id: RunId(payload.check_run.check_run.id.map(|v| v.0).unwrap_or(0)),
-                workflow_type: WorkflowType::External,
-                url: payload.check_run.check_run.html_url.unwrap_or_default(),
-            }),
-        )))
-    } else {
-        Ok(None)
-    }
-}
 fn parse_check_suite_events(body: &[u8]) -> anyhow::Result<Option<BorsEvent>> {
     let payload: WebhookCheckSuite = serde_json::from_slice(body)?;
     let repository_name = parse_repository_name(&payload.repository)?;
@@ -1541,47 +1498,6 @@ mod tests {
         )
         "###
         );
-    }
-
-    #[tokio::test]
-    async fn check_run_created_external() {
-        insta::assert_debug_snapshot!(
-            check_webhook("webhook/check-run-created-external.json", "check_run").await,
-            @r###"
-        Ok(
-            GitHubWebhook(
-                Repository(
-                    WorkflowStarted(
-                        WorkflowStarted {
-                            repository: GithubRepoName {
-                                owner: "kobzol",
-                                name: "bors-kindergarten",
-                            },
-                            name: "check",
-                            branch: "automation/bors/try-merge",
-                            commit_sha: CommitSha(
-                                "3d5258c8dd4fce72a4ea67387499fe69ea410928",
-                            ),
-                            run_id: RunId(
-                                13293850093,
-                            ),
-                            workflow_type: External,
-                            url: "https://github.com/Kobzol/bors-kindergarten/runs/13293850093",
-                        },
-                    ),
-                ),
-            ),
-        )
-        "###
-        );
-    }
-
-    #[tokio::test]
-    async fn check_run_created_gha() {
-        assert!(matches!(
-            check_webhook("webhook/check-run-created-gha.json", "check_run").await,
-            Err(StatusCode::OK)
-        ));
     }
 
     #[tokio::test]
