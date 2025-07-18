@@ -16,9 +16,7 @@ use crate::bors::handlers::review::{
     command_approve, command_close_tree, command_open_tree, command_unapprove,
 };
 use crate::bors::handlers::trybuild::{TRY_BRANCH_NAME, command_try_build, command_try_cancel};
-use crate::bors::handlers::workflow::{
-    handle_check_suite_completed, handle_workflow_completed, handle_workflow_started,
-};
+use crate::bors::handlers::workflow::{handle_workflow_completed, handle_workflow_started};
 use crate::bors::merge_queue::{AUTO_BRANCH_NAME, MergeQueueSender};
 use crate::bors::{BorsContext, Comment, RepositoryState};
 use crate::database::{DelegatedPermission, PullRequestModel};
@@ -120,15 +118,6 @@ pub async fn handle_bors_repository_event(
                 id = payload.run_id.into_inner()
             );
             handle_workflow_completed(repo, db, payload, &merge_queue_tx)
-                .instrument(span.clone())
-                .await?;
-        }
-        BorsRepositoryEvent::CheckSuiteCompleted(payload) => {
-            let span = tracing::info_span!(
-                "Check suite completed",
-                repo = payload.repository.to_string(),
-            );
-            handle_check_suite_completed(repo, db, payload, &merge_queue_tx)
                 .instrument(span.clone())
                 .await?;
         }

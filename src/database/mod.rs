@@ -387,7 +387,7 @@ pub enum WorkflowType {
 }
 
 /// Status of a workflow.
-#[derive(Debug, PartialEq, sqlx::Type)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, sqlx::Type)]
 #[sqlx(type_name = "TEXT")]
 #[sqlx(rename_all = "lowercase")]
 pub enum WorkflowStatus {
@@ -400,6 +400,7 @@ pub enum WorkflowStatus {
 }
 
 /// Represents a workflow run, coming either from Github Actions or from some external CI.
+#[derive(Debug)]
 pub struct WorkflowModel {
     pub id: PrimaryKey,
     /// The build this workflow is associated with.

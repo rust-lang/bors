@@ -7,7 +7,7 @@ pub use command::RollupMode;
 pub use comment::Comment;
 pub use context::BorsContext;
 pub use handlers::{handle_bors_global_event, handle_bors_repository_event};
-use octocrab::models::CheckSuiteId;
+use octocrab::models::RunId;
 use serde::Serialize;
 
 use crate::config::RepositoryConfig;
@@ -25,6 +25,7 @@ mod handlers;
 pub mod merge_queue;
 pub mod mergeable_queue;
 
+use crate::database::WorkflowStatus;
 pub use command::CommandPrefix;
 
 #[cfg(test)]
@@ -39,19 +40,11 @@ pub static WAIT_FOR_PR_STATUS_REFRESH: TestSyncMarker = TestSyncMarker::new();
 #[cfg(test)]
 pub static WAIT_FOR_WORKFLOW_STARTED: TestSyncMarker = TestSyncMarker::new();
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum CheckSuiteStatus {
-    Pending,
-    Failure,
-    Success,
-}
-
-/// A GitHub check suite.
-/// Corresponds to a single GitHub actions workflow run, or to a single external CI check run.
+/// Corresponds to a single execution of a workflow.
 #[derive(Clone, Debug)]
-pub struct CheckSuite {
-    pub id: CheckSuiteId,
-    pub status: CheckSuiteStatus,
+pub struct WorkflowRun {
+    pub id: RunId,
+    pub status: WorkflowStatus,
 }
 
 /// An access point to a single repository.

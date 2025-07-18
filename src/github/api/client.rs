@@ -7,9 +7,9 @@ use std::fmt::Debug;
 use tracing::log;
 
 use crate::bors::event::PullRequestComment;
-use crate::bors::{CheckSuite, CheckSuiteStatus, Comment};
+use crate::bors::{Comment, WorkflowRun};
 use crate::config::{CONFIG_FILE_PATH, RepositoryConfig};
-use crate::database::RunId;
+use crate::database::{RunId, WorkflowStatus};
 use crate::github::api::base_github_html_url;
 use crate::github::api::operations::{
     ForcePush, MergeError, create_check_run, merge_branches, set_branch_to_commit, update_check_run,
@@ -200,62 +200,57 @@ impl GithubRepositoryClient {
         .await
     }
 
-    /// Find all check suites attached to the given commit and branch.
-    pub async fn get_check_suites_for_commit(
+    /// Find all workflows attached to a specific check suite.
+    pub async fn get_workflow_runs_for_check_suite(
         &self,
-        branch: &str,
-        sha: &CommitSha,
-    ) -> anyhow::Result<Vec<CheckSuite>> {
+        check_suite_id: CheckSuiteId,
+    ) -> anyhow::Result<Vec<WorkflowRun>> {
         #[derive(serde::Deserialize, Debug)]
-        struct CheckSuitePayload {
-            id: CheckSuiteId,
+        struct WorkflowRunResponse {
+            id: octocrab::models::RunId,
+            status: String,
             conclusion: Option<String>,
-            head_branch: String,
         }
 
         #[derive(serde::Deserialize, Debug)]
-        struct CheckSuiteResponse {
-            check_suites: Vec<CheckSuitePayload>,
+        struct WorkflowRunsResponse {
+            workflow_runs: Vec<WorkflowRunResponse>,
         }
 
-        perform_network_request_with_retry("get_check_suites_for_commit", || async {
-            let response: CheckSuiteResponse = self
-                .get_request(&format!("commits/{}/check-suites", sha.0))
+        perform_network_request_with_retry("get_workflows_for_check_suite", || async {
+            // We use a manual query, because octocrab currently doesn't allow filtering by
+            // check_suite_id when listing workflow runs.
+            // Note: we don't handle paging here, as we don't expect to get more than 30 workflows
+            // per check suite.
+            let response: WorkflowRunsResponse = self
+                .get_request(&format!("actions/runs?check_suite_id={check_suite_id}"))
                 .await
-                .context("Cannot fetch CheckSuiteResponse")?;
+                .context("Cannot fetch workflow runs for a check suite")?;
 
-            let suites = response
-                .check_suites
-                .into_iter()
-                .filter(|suite| suite.head_branch == branch)
-                .map(|suite| CheckSuite {
-                    id: suite.id,
-                    status: match suite.conclusion {
-                        Some(status) => match status.as_str() {
-                            "success" => CheckSuiteStatus::Success,
-                            "failure" | "neutral" | "cancelled" | "skipped" | "timed_out"
-                            | "action_required" | "startup_failure" | "stale" => {
-                                CheckSuiteStatus::Failure
-                            }
-                            _ => {
-                                tracing::warn!(
-                                    "Received unknown check suite conclusion for {}@{sha}: {status}",
-                                    self.repo_name
-                                );
-                                CheckSuiteStatus::Pending
-                            }
-                        },
+            fn get_status(run: &WorkflowRunResponse) -> WorkflowStatus {
+                match run.status.as_str() {
+                    "completed" => match run.conclusion.as_deref() {
+                        Some("success") => WorkflowStatus::Success,
+                        Some(_) => WorkflowStatus::Failure,
                         None => {
-                            tracing::warn!(
-                                "Received empty check suite conclusion for {}@{sha}",
-                                self.repo_name,
-                            );
-                            CheckSuiteStatus::Pending
+                            tracing::warn!("Received completed status with empty conclusion for workflow run {}", run.id);
+                            WorkflowStatus::Failure
                         }
                     },
+                    "failure" | "startup_failure" => WorkflowStatus::Failure,
+                    _ => WorkflowStatus::Pending
+                }
+            }
+
+            let runs = response
+                .workflow_runs
+                .into_iter()
+                .map(|run| WorkflowRun {
+                    id: run.id,
+                    status: get_status(&run),
                 })
                 .collect();
-            Ok(suites)
+            Ok(runs)
         })
         .await?
     }

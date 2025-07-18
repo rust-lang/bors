@@ -13,15 +13,15 @@ use octocrab::models::events::payload::{
 };
 use octocrab::models::pulls::{PullRequest, Review};
 use octocrab::models::webhook_events::payload::PullRequestWebhookEventAction;
-use octocrab::models::{App, Author, CheckRun, Repository, RunId, workflows};
+use octocrab::models::{Author, CheckSuiteId, Repository, workflows};
 use secrecy::{ExposeSecret, SecretString};
 use sha2::Sha256;
 
 use crate::bors::event::{
-    BorsEvent, BorsGlobalEvent, BorsRepositoryEvent, CheckSuiteCompleted, PullRequestAssigned,
-    PullRequestClosed, PullRequestComment, PullRequestConvertedToDraft, PullRequestEdited,
-    PullRequestMerged, PullRequestOpened, PullRequestPushed, PullRequestReadyForReview,
-    PullRequestReopened, PullRequestUnassigned, PushToBranch, WorkflowCompleted, WorkflowStarted,
+    BorsEvent, BorsGlobalEvent, BorsRepositoryEvent, PullRequestAssigned, PullRequestClosed,
+    PullRequestComment, PullRequestConvertedToDraft, PullRequestEdited, PullRequestMerged,
+    PullRequestOpened, PullRequestPushed, PullRequestReadyForReview, PullRequestReopened,
+    PullRequestUnassigned, PushToBranch, WorkflowRunCompleted, WorkflowRunStarted,
 };
 use crate::database::{WorkflowStatus, WorkflowType};
 use crate::github::server::ServerStateRef;
@@ -42,7 +42,7 @@ impl WebhookSecret {
 }
 
 #[derive(serde::Deserialize, Debug)]
-pub struct WebhookPushToBranchEvent {
+struct WebhookPushToBranchEvent {
     repository: Repository,
     #[serde(rename = "ref")]
     ref_field: String,
@@ -51,48 +51,26 @@ pub struct WebhookPushToBranchEvent {
 /// This struct is used to extract the repository and user from a GitHub webhook event.
 /// The wrapper exists because octocrab doesn't expose/parse the repository field.
 #[derive(serde::Deserialize, Debug)]
-pub struct WebhookRepository {
+struct WebhookRepository {
     repository: Repository,
 }
 
 #[derive(serde::Deserialize, Debug)]
-pub struct WebhookWorkflowRun<'a> {
+struct WebhookWorkflowRun<'a> {
     action: &'a str,
-    workflow_run: workflows::Run,
+    workflow_run: WorkflowRunInner,
     repository: Repository,
 }
 
 #[derive(serde::Deserialize, Debug)]
-pub struct CheckRunInner {
+struct WorkflowRunInner {
+    check_suite_id: CheckSuiteId,
     #[serde(flatten)]
-    check_run: CheckRun,
-    name: String,
-    check_suite: CheckSuiteInner,
-    app: App,
-}
-
-#[derive(serde::Deserialize, Debug)]
-pub struct WebhookCheckRun<'a> {
-    action: &'a str,
-    check_run: CheckRunInner,
-    repository: Repository,
-}
-
-#[derive(serde::Deserialize, Debug)]
-pub struct CheckSuiteInner {
-    head_branch: String,
-    head_sha: String,
-}
-
-#[derive(serde::Deserialize, Debug)]
-pub struct WebhookCheckSuite<'a> {
-    action: &'a str,
-    check_suite: CheckSuiteInner,
-    repository: Repository,
+    run: workflows::Run,
 }
 
 #[derive(Debug, serde::Deserialize)]
-pub struct WebhookPullRequestReviewEvent<'a> {
+struct WebhookPullRequestReviewEvent<'a> {
     action: &'a str,
     pull_request: PullRequest,
     review: Review,
@@ -186,8 +164,6 @@ fn parse_webhook_event(request: Parts, body: &[u8]) -> anyhow::Result<Option<Bor
             BorsGlobalEvent::InstallationsChanged,
         ))),
         b"workflow_run" => parse_workflow_run_events(body),
-        b"check_run" => parse_check_run_events(body),
-        b"check_suite" => parse_check_suite_events(body),
         _ => {
             tracing::debug!("Ignoring unknown event type {:?}", event_type.to_str());
             Ok(None)
@@ -337,33 +313,40 @@ fn parse_workflow_run_events(body: &[u8]) -> anyhow::Result<Option<BorsEvent>> {
     let repository_name = parse_repository_name(&payload.repository)?;
     let result = match payload.action {
         "requested" => Some(BorsEvent::Repository(BorsRepositoryEvent::WorkflowStarted(
-            WorkflowStarted {
+            WorkflowRunStarted {
                 repository: repository_name,
-                name: payload.workflow_run.name,
-                branch: payload.workflow_run.head_branch,
-                commit_sha: CommitSha(payload.workflow_run.head_sha),
-                run_id: RunId(payload.workflow_run.id.0),
+                name: payload.workflow_run.run.name,
+                branch: payload.workflow_run.run.head_branch,
+                commit_sha: CommitSha(payload.workflow_run.run.head_sha),
+                run_id: payload.workflow_run.run.id,
                 workflow_type: WorkflowType::Github,
-                url: payload.workflow_run.html_url.into(),
+                url: payload.workflow_run.run.html_url.into(),
             },
         ))),
         "completed" => {
             let running_time = if let (Some(started_at), Some(completed_at)) = (
-                Some(payload.workflow_run.created_at),
-                Some(payload.workflow_run.updated_at),
+                Some(payload.workflow_run.run.created_at),
+                Some(payload.workflow_run.run.updated_at),
             ) {
                 Some(completed_at - started_at)
             } else {
                 None
             };
             Some(BorsEvent::Repository(
-                BorsRepositoryEvent::WorkflowCompleted(WorkflowCompleted {
+                BorsRepositoryEvent::WorkflowCompleted(WorkflowRunCompleted {
                     repository: repository_name,
-                    branch: payload.workflow_run.head_branch,
-                    commit_sha: CommitSha(payload.workflow_run.head_sha),
-                    run_id: RunId(payload.workflow_run.id.0),
+                    branch: payload.workflow_run.run.head_branch,
+                    commit_sha: CommitSha(payload.workflow_run.run.head_sha),
+                    run_id: payload.workflow_run.run.id,
+                    check_suite_id: payload.workflow_run.check_suite_id,
                     running_time,
-                    status: match payload.workflow_run.conclusion.unwrap_or_default().as_str() {
+                    status: match payload
+                        .workflow_run
+                        .run
+                        .conclusion
+                        .unwrap_or_default()
+                        .as_str()
+                    {
                         "success" => WorkflowStatus::Success,
                         _ => WorkflowStatus::Failure,
                     },
@@ -373,48 +356,6 @@ fn parse_workflow_run_events(body: &[u8]) -> anyhow::Result<Option<BorsEvent>> {
         _ => None,
     };
     Ok(result)
-}
-
-fn parse_check_run_events(body: &[u8]) -> anyhow::Result<Option<BorsEvent>> {
-    let payload: WebhookCheckRun = serde_json::from_slice(body).unwrap();
-
-    // We are only interested in check runs from external CI services.
-    // These basically correspond to workflow runs from GHA.
-    if payload.check_run.app.owner.login == "github" {
-        return Ok(None);
-    }
-
-    let repository_name = parse_repository_name(&payload.repository)?;
-    if payload.action == "created" {
-        Ok(Some(BorsEvent::Repository(
-            BorsRepositoryEvent::WorkflowStarted(WorkflowStarted {
-                repository: repository_name,
-                name: payload.check_run.name.to_string(),
-                branch: payload.check_run.check_suite.head_branch,
-                commit_sha: CommitSha(payload.check_run.check_suite.head_sha),
-                run_id: RunId(payload.check_run.check_run.id.map(|v| v.0).unwrap_or(0)),
-                workflow_type: WorkflowType::External,
-                url: payload.check_run.check_run.html_url.unwrap_or_default(),
-            }),
-        )))
-    } else {
-        Ok(None)
-    }
-}
-fn parse_check_suite_events(body: &[u8]) -> anyhow::Result<Option<BorsEvent>> {
-    let payload: WebhookCheckSuite = serde_json::from_slice(body)?;
-    let repository_name = parse_repository_name(&payload.repository)?;
-    if payload.action == "completed" {
-        Ok(Some(BorsEvent::Repository(
-            BorsRepositoryEvent::CheckSuiteCompleted(CheckSuiteCompleted {
-                repository: repository_name,
-                branch: payload.check_suite.head_branch,
-                commit_sha: CommitSha(payload.check_suite.head_sha),
-            }),
-        )))
-    } else {
-        Ok(None)
-    }
 }
 
 fn parse_pr_review_comment(
@@ -1477,12 +1418,12 @@ mod tests {
     async fn workflow_run_requested() {
         insta::assert_debug_snapshot!(
             check_webhook("webhook/workflow-run-requested.json", "workflow_run").await,
-            @r###"
+            @r#"
         Ok(
             GitHubWebhook(
                 Repository(
                     WorkflowStarted(
-                        WorkflowStarted {
+                        WorkflowRunStarted {
                             repository: GithubRepoName {
                                 owner: "kobzol",
                                 name: "bors-kindergarten",
@@ -1502,7 +1443,7 @@ mod tests {
                 ),
             ),
         )
-        "###
+        "#
         );
     }
 
@@ -1510,12 +1451,12 @@ mod tests {
     async fn workflow_run_completed() {
         insta::assert_debug_snapshot!(
             check_webhook("webhook/workflow-run-completed.json", "workflow_run").await,
-            @r###"
+            @r#"
         Ok(
             GitHubWebhook(
                 Repository(
                     WorkflowCompleted(
-                        WorkflowCompleted {
+                        WorkflowRunCompleted {
                             repository: GithubRepoName {
                                 owner: "kobzol",
                                 name: "bors-kindergarten",
@@ -1534,54 +1475,16 @@ mod tests {
                                     nanos: 0,
                                 },
                             ),
+                            check_suite_id: CheckSuiteId(
+                                12717696197,
+                            ),
                         },
                     ),
                 ),
             ),
         )
-        "###
+        "#
         );
-    }
-
-    #[tokio::test]
-    async fn check_run_created_external() {
-        insta::assert_debug_snapshot!(
-            check_webhook("webhook/check-run-created-external.json", "check_run").await,
-            @r###"
-        Ok(
-            GitHubWebhook(
-                Repository(
-                    WorkflowStarted(
-                        WorkflowStarted {
-                            repository: GithubRepoName {
-                                owner: "kobzol",
-                                name: "bors-kindergarten",
-                            },
-                            name: "check",
-                            branch: "automation/bors/try-merge",
-                            commit_sha: CommitSha(
-                                "3d5258c8dd4fce72a4ea67387499fe69ea410928",
-                            ),
-                            run_id: RunId(
-                                13293850093,
-                            ),
-                            workflow_type: External,
-                            url: "https://github.com/Kobzol/bors-kindergarten/runs/13293850093",
-                        },
-                    ),
-                ),
-            ),
-        )
-        "###
-        );
-    }
-
-    #[tokio::test]
-    async fn check_run_created_gha() {
-        assert!(matches!(
-            check_webhook("webhook/check-run-created-gha.json", "check_run").await,
-            Err(StatusCode::OK)
-        ));
     }
 
     #[tokio::test]

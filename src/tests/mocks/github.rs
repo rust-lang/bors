@@ -1,7 +1,5 @@
-use anyhow::Context;
 use octocrab::Octocrab;
 use std::collections::HashMap;
-use std::time::Duration;
 use wiremock::MockServer;
 
 use crate::create_github_client;
@@ -10,8 +8,6 @@ use crate::tests::mocks::GitHubState;
 use crate::tests::mocks::app::{AppHandler, default_app_id};
 use crate::tests::mocks::comment::Comment;
 use crate::tests::mocks::repository::{mock_repo, mock_repo_list};
-
-const DEFAULT_TIMEOUT: Duration = Duration::from_secs(3);
 
 /// Represents the state of a simulated GH repo.
 pub struct GitHubRepoState {
@@ -92,10 +88,7 @@ impl GitHubMockServer {
 
     pub async fn get_comment(&mut self, repo: GithubRepoName, pr: u64) -> anyhow::Result<Comment> {
         let repo = self.repos.get_mut(&repo).expect("Repository not found");
-        let fut = repo.get_comment(pr);
-        let comment = tokio::time::timeout(DEFAULT_TIMEOUT, fut)
-            .await
-            .context("Timed out while waiting for a comment to be received")?;
+        let comment = repo.get_comment(pr).await;
         Ok(comment)
     }
 

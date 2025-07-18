@@ -13,6 +13,7 @@ use crate::tests::mocks::github::GitHubMockServer;
 use crate::tests::mocks::permissions::TeamApiMockServer;
 
 pub use bors::BorsBuilder;
+pub use bors::BorsTester;
 pub use bors::default_cmd_prefix;
 pub use bors::run_test;
 pub use comment::Comment;
@@ -23,10 +24,8 @@ pub use repository::Repo;
 pub use repository::default_branch_name;
 pub use repository::default_repo_name;
 pub use user::User;
-pub use workflow::CheckSuite;
-pub use workflow::TestWorkflowStatus;
-pub use workflow::Workflow;
 pub use workflow::WorkflowEvent;
+pub use workflow::WorkflowRunData;
 
 mod app;
 mod bors;
@@ -93,7 +92,11 @@ impl GitHubState {
     }
 
     pub fn check_cancelled_workflows(&self, repo: GithubRepoName, expected_run_ids: &[u64]) {
-        let mut workflows = self.get_repo(&repo).lock().cancelled_workflows.clone();
+        let mut workflows = self
+            .get_repo(&repo)
+            .lock()
+            .workflows_cancelled_by_bors
+            .clone();
         workflows.sort();
 
         let mut expected = expected_run_ids.to_vec();

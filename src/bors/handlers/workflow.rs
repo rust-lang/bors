@@ -5,20 +5,19 @@ use octocrab::params::checks::CheckRunConclusion;
 use octocrab::params::checks::CheckRunStatus;
 
 use crate::PgDbClient;
-use crate::bors::CheckSuiteStatus;
-use crate::bors::RepositoryState;
 use crate::bors::comment::{try_build_succeeded_comment, workflow_failed_comment};
-use crate::bors::event::{CheckSuiteCompleted, WorkflowCompleted, WorkflowStarted};
+use crate::bors::event::{WorkflowRunCompleted, WorkflowRunStarted};
 use crate::bors::handlers::is_bors_observed_branch;
 use crate::bors::handlers::labels::handle_label_trigger;
 use crate::bors::merge_queue::AUTO_BRANCH_NAME;
 use crate::bors::merge_queue::MergeQueueSender;
+use crate::bors::{RepositoryState, WorkflowRun};
 use crate::database::{BuildStatus, WorkflowStatus};
 use crate::github::LabelTrigger;
 
 pub(super) async fn handle_workflow_started(
     db: Arc<PgDbClient>,
-    payload: WorkflowStarted,
+    payload: WorkflowRunStarted,
 ) -> anyhow::Result<()> {
     if !is_bors_observed_branch(&payload.branch) {
         return Ok(());
@@ -67,7 +66,7 @@ pub(super) async fn handle_workflow_started(
 pub(super) async fn handle_workflow_completed(
     repo: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
-    mut payload: WorkflowCompleted,
+    mut payload: WorkflowRunCompleted,
     merge_queue_tx: &MergeQueueSender,
 ) -> anyhow::Result<()> {
     if !is_bors_observed_branch(&payload.branch) {
@@ -95,38 +94,17 @@ pub(super) async fn handle_workflow_completed(
     db.update_workflow_status(*payload.run_id, payload.status)
         .await?;
 
-    // Try to complete the build
-    let event = CheckSuiteCompleted {
-        repository: payload.repository,
-        branch: payload.branch,
-        commit_sha: payload.commit_sha,
-    };
-    try_complete_build(repo.as_ref(), db.as_ref(), event, merge_queue_tx).await
+    maybe_complete_build(repo.as_ref(), db.as_ref(), payload, merge_queue_tx).await
 }
 
-pub(super) async fn handle_check_suite_completed(
-    repo: Arc<RepositoryState>,
-    db: Arc<PgDbClient>,
-    payload: CheckSuiteCompleted,
-    merge_queue_tx: &MergeQueueSender,
-) -> anyhow::Result<()> {
-    if !is_bors_observed_branch(&payload.branch) {
-        return Ok(());
-    }
-
-    tracing::info!(
-        "Received check suite completed (branch={}, commit={})",
-        payload.branch,
-        payload.commit_sha
-    );
-    try_complete_build(repo.as_ref(), db.as_ref(), payload, merge_queue_tx).await
-}
-
-/// Try to complete a pending build.
-async fn try_complete_build(
+/// Attempt to complete a pending build after a workflow run has been completed.
+/// We assume that the status of the completed workflow run has already been updated in the
+/// database.
+/// We also assume that there is only a single check suite attached to a single build of a commit.
+async fn maybe_complete_build(
     repo: &RepositoryState,
     db: &PgDbClient,
-    payload: CheckSuiteCompleted,
+    payload: WorkflowRunCompleted,
     merge_queue_tx: &MergeQueueSender,
 ) -> anyhow::Result<()> {
     if !is_bors_observed_branch(&payload.branch) {
@@ -158,40 +136,54 @@ async fn try_complete_build(
         return Ok(());
     };
 
-    // Ask GitHub what are all the check suites attached to the given commit.
-    // This tells us for how many workflows we should wait.
-    let checks = repo
-        .client
-        .get_check_suites_for_commit(&payload.branch, &payload.commit_sha)
-        .await?;
+    // Load the workflow runs that we know about from the DB. We know about workflow runs for
+    // which we have received a started or a completed event.
+    let mut db_workflow_runs = db.get_workflows_for_build(&build).await?;
+    tracing::debug!("Workflow runs from DB: {db_workflow_runs:?}");
 
-    // Some checks are still running, let's wait for the next event
-    if checks
-        .iter()
-        .any(|check| matches!(check.status, CheckSuiteStatus::Pending))
-    {
-        tracing::debug!("Some check suites are still pending: {checks:?}");
-        return Ok(());
-    }
+    // If the workflow run was a success, check if we're still waiting for some other workflow run.
+    // If it was a failure, then immediately mark the build as failed.
+    if payload.status == WorkflowStatus::Success {
+        {
+            // Ask GitHub about all workflow runs attached to the check suite of the completed workflow run.
+            // This tells us for how many workflow runs we should wait.
+            // We assume that this number is final, and after a single workflow run has been completed, no
+            // other workflow runs attached to the check suite can appear out of nowhere.
+            // Note: we actually only need the number of workflow runs in this function, but we download
+            // some data about them to have better logging.
+            let gh_workflow_runs: Vec<WorkflowRun> = repo
+                .client
+                .get_workflow_runs_for_check_suite(payload.check_suite_id)
+                .await?;
+            tracing::debug!("Workflow runs from GitHub: {gh_workflow_runs:?}");
 
-    let has_failure = checks
-        .iter()
-        .any(|check| matches!(check.status, CheckSuiteStatus::Failure));
+            // This could happen if a workflow run webhook is lost, or if one workflow run manages to finish
+            // before another workflow run even manages to start. It should be rare.
+            // We will wait for the next workflow run completed webhook.
+            if db_workflow_runs.len() < gh_workflow_runs.len() {
+                tracing::warn!("Workflow count mismatch, waiting for the next webhook");
+                return Ok(());
+            }
+        }
 
-    let mut workflows = db.get_workflows_for_build(&build).await?;
-    workflows.sort_by(|a, b| a.name.cmp(&b.name));
-
-    // If this happens, there is a race condition in GH webhooks and we haven't received a workflow
-    // finished/failed event for some workflow yet. In this case, wait for that event before
-    // posting the PR comment.
-    if workflows.len() < checks.len()
-        || workflows
+        // We have all expected workflow runs in the DB, but some of them are still pending.
+        // Wait for the next workflow run to be finished.
+        if db_workflow_runs
             .iter()
             .any(|w| w.status == WorkflowStatus::Pending)
-    {
-        tracing::warn!("All checks are finished, but some workflows are still pending");
-        return Ok(());
+        {
+            tracing::info!("Some workflows are not finished yet, waiting for the next webhook.");
+            return Ok(());
+        }
     }
+
+    // Below this point, we assume that the build has completed.
+    // Either all workflow runs attached to the corresponding check suite are completed or there
+    // was at least one failure.
+
+    let has_failure = db_workflow_runs
+        .iter()
+        .any(|check| matches!(check.status, WorkflowStatus::Failure));
 
     let (status, trigger) = if has_failure {
         (BuildStatus::Failure, LabelTrigger::TryBuildFailed)
@@ -218,12 +210,13 @@ async fn try_complete_build(
         }
     }
 
+    db_workflow_runs.sort_by(|a, b| a.name.cmp(&b.name));
     let message = if !has_failure {
         tracing::info!("Workflow succeeded");
-        try_build_succeeded_comment(&workflows, payload.commit_sha, &build)
+        try_build_succeeded_comment(&db_workflow_runs, payload.commit_sha, &build)
     } else {
         tracing::info!("Workflow failed");
-        workflow_failed_comment(&workflows)
+        workflow_failed_comment(&db_workflow_runs)
     };
     repo.client.post_comment(pr.number, message).await?;
 
@@ -237,10 +230,10 @@ async fn try_complete_build(
 
 #[cfg(test)]
 mod tests {
-    use crate::bors::handlers::trybuild::TRY_BRANCH_NAME;
     use crate::database::WorkflowStatus;
     use crate::database::operations::get_all_workflows;
-    use crate::tests::mocks::{Branch, CheckSuite, Workflow, WorkflowEvent, run_test};
+    use crate::tests::BorsTester;
+    use crate::tests::mocks::{Branch, WorkflowEvent, WorkflowRunData, run_test};
 
     #[sqlx::test]
     async fn workflow_started_unknown_build(pool: sqlx::PgPool) {
@@ -293,7 +286,7 @@ mod tests {
             tester.post_comment("@bors try").await?;
             tester.expect_comments(1).await;
 
-            let workflow = Workflow::from(tester.try_branch());
+            let workflow = WorkflowRunData::from(tester.try_branch());
             tester
                 .workflow_event(WorkflowEvent::started(workflow.clone()))
                 .await?;
@@ -306,32 +299,22 @@ mod tests {
         assert_eq!(get_all_workflows(&pool).await.unwrap().len(), 2);
     }
 
+    // First start both workflows, then finish both of them.
     #[sqlx::test]
-    async fn try_check_suite_finished_missing_build(pool: sqlx::PgPool) {
-        run_test(pool, async |tester| {
-            tester
-                .check_suite(CheckSuite::completed(Branch::new(
-                    "<branch>",
-                    "<unknown-sha>",
-                )))
-                .await?;
-            Ok(())
-        })
-        .await;
-    }
-
-    #[sqlx::test]
-    async fn try_success_multiple_suites(pool: sqlx::PgPool) {
-        run_test(pool, async |tester| {
-            tester.create_branch(TRY_BRANCH_NAME).expect_suites(2);
+    async fn try_success_multiple_workflows_per_suite_1(pool: sqlx::PgPool) {
+        run_test(pool, async |tester: &mut BorsTester| {
             tester.post_comment("@bors try").await?;
             tester.expect_comments(1).await;
-            tester
-                .workflow_success(Workflow::from(tester.try_branch()).with_run_id(1))
-                .await?;
-            tester
-                .workflow_success(Workflow::from(tester.try_branch()).with_run_id(2))
-                .await?;
+
+            let w1 = WorkflowRunData::from(tester.try_branch()).with_run_id(1);
+            let w2 = WorkflowRunData::from(tester.try_branch()).with_run_id(2);
+
+            // Let the GH mock know about the existence of the second workflow
+            tester.default_repo().lock().update_workflow_run(w2.clone(), WorkflowStatus::Pending);
+            // Finish w1 while w2 is not yet in the DB
+            tester.workflow_full_success(w1).await?;
+            tester.workflow_full_success(w2).await?;
+
             insta::assert_snapshot!(
                 tester.get_comment().await?,
                 @r#"
@@ -348,54 +331,26 @@ mod tests {
         .await;
     }
 
+    // First start and finish the first workflow, then do the same for the second one.
     #[sqlx::test]
-    async fn try_failure_multiple_suites(pool: sqlx::PgPool) {
-        run_test(pool, async |tester| {
-            tester.create_branch(TRY_BRANCH_NAME).expect_suites(2);
-            tester.post_comment("@bors try").await?;
-            tester.expect_comments(1).await;
-            tester
-                .workflow_success(Workflow::from(tester.try_branch()).with_run_id(1))
-                .await?;
-            tester
-                .workflow_failure(Workflow::from(tester.try_branch()).with_run_id(2))
-                .await?;
-            insta::assert_snapshot!(
-                tester.get_comment().await?,
-                @r###"
-            :broken_heart: Test failed
-            - [Workflow1](https://github.com/workflows/Workflow1/1) :white_check_mark:
-            - [Workflow1](https://github.com/workflows/Workflow1/2) :x:
-            "###
-            );
-            Ok(())
-        })
-        .await;
-    }
-
-    #[sqlx::test]
-    async fn try_suite_completed_received_before_workflow_completed(pool: sqlx::PgPool) {
-        run_test(pool, async |tester| {
-            tester.create_branch(TRY_BRANCH_NAME).expect_suites(1);
+    async fn try_success_multiple_workflows_per_suite_2(pool: sqlx::PgPool) {
+        run_test(pool, async |tester: &mut BorsTester| {
             tester.post_comment("@bors try").await?;
             tester.expect_comments(1).await;
 
-            // Check suite completed received before the workflow has finished.
-            // We should wait until workflow finished is received before posting the comment.
-            let branch = tester.try_branch();
-            tester
-                .workflow_event(WorkflowEvent::started(branch.clone()))
-                .await?;
-            tester
-                .check_suite(CheckSuite::completed(branch.clone()))
-                .await?;
-            tester
-                .workflow_event(WorkflowEvent::success(branch))
-                .await?;
+            let w1 = WorkflowRunData::from(tester.try_branch()).with_run_id(1);
+            let w2 = WorkflowRunData::from(tester.try_branch()).with_run_id(2);
+            tester.workflow_start(w1.clone()).await?;
+            tester.workflow_start(w2.clone()).await?;
+
+            tester.workflow_event(WorkflowEvent::success(w1)).await?;
+            tester.workflow_event(WorkflowEvent::success(w2)).await?;
             insta::assert_snapshot!(
                 tester.get_comment().await?,
                 @r#"
-            :sunny: Try build successful ([Workflow1](https://github.com/workflows/Workflow1/1))
+            :sunny: Try build successful
+            - [Workflow1](https://github.com/workflows/Workflow1/1) :white_check_mark:
+            - [Workflow1](https://github.com/workflows/Workflow1/2) :white_check_mark:
             Build commit: merge-main-sha1-pr-1-sha-0 (`merge-main-sha1-pr-1-sha-0`, parent: `main-sha1`)
 
             <!-- homu: {"type":"TryBuildCompleted","merge_sha":"merge-main-sha1-pr-1-sha-0"} -->
@@ -403,20 +358,30 @@ mod tests {
             );
             Ok(())
         })
-        .await;
+            .await;
     }
 
+    // Finish the build early when we encounter the first failure
     #[sqlx::test]
-    async fn try_check_suite_finished_twice(pool: sqlx::PgPool) {
-        run_test(pool, async |tester| {
-            tester.create_branch(TRY_BRANCH_NAME).expect_suites(1);
+    async fn try_failure_multiple_workflows_early(pool: sqlx::PgPool) {
+        run_test(pool, async |tester: &mut BorsTester| {
             tester.post_comment("@bors try").await?;
             tester.expect_comments(1).await;
-            tester.workflow_success(tester.try_branch()).await?;
-            tester
-                .check_suite(CheckSuite::completed(tester.try_branch()))
-                .await?;
-            tester.expect_comments(1).await;
+
+            let w1 = WorkflowRunData::from(tester.try_branch()).with_run_id(1);
+            let w2 = WorkflowRunData::from(tester.try_branch()).with_run_id(2);
+            tester.workflow_start(w1.clone()).await?;
+            tester.workflow_start(w2.clone()).await?;
+
+            tester.workflow_event(WorkflowEvent::failure(w2)).await?;
+            insta::assert_snapshot!(
+                tester.get_comment().await?,
+                @r"
+            :broken_heart: Test failed
+            - [Workflow1](https://github.com/workflows/Workflow1/1) :question:
+            - [Workflow1](https://github.com/workflows/Workflow1/2) :x:
+            "
+            );
             Ok(())
         })
         .await;

@@ -304,7 +304,7 @@ timeout = 3600
             .run_test(async |tester| {
                 tester.post_comment("@bors try").await?;
                 tester.expect_comments(1).await;
-                tester.start_workflow(tester.try_branch()).await?;
+                tester.workflow_start(tester.try_branch()).await?;
 
                 with_mocked_time(Duration::from_secs(4000), async {
                     tester.cancel_timed_out_builds().await;

@@ -1,7 +1,7 @@
 use crate::database::{WorkflowStatus, WorkflowType};
 use crate::github::{CommitSha, GithubRepoName, GithubUser, PullRequest, PullRequestNumber};
 use chrono::Duration;
-use octocrab::models::RunId;
+use octocrab::models::{CheckSuiteId, RunId};
 
 #[derive(Debug)]
 pub enum BorsRepositoryEvent {
@@ -31,12 +31,9 @@ pub enum BorsRepositoryEvent {
     /// when a branch is deleted or when a tag is deleted.
     PushToBranch(PushToBranch),
     /// A workflow run on Github Actions or a check run from external CI system has been started.
-    WorkflowStarted(WorkflowStarted),
+    WorkflowStarted(WorkflowRunStarted),
     /// A workflow run on Github Actions or a check run from external CI system has been completed.
-    WorkflowCompleted(WorkflowCompleted),
-    /// A check suite has been completed, either as a workflow run on Github Actions, or as a
-    /// workflow from some external CI system.
-    CheckSuiteCompleted(CheckSuiteCompleted),
+    WorkflowCompleted(WorkflowRunCompleted),
 }
 
 impl BorsRepositoryEvent {
@@ -56,7 +53,6 @@ impl BorsRepositoryEvent {
             BorsRepositoryEvent::PushToBranch(payload) => &payload.repository,
             BorsRepositoryEvent::WorkflowStarted(workflow) => &workflow.repository,
             BorsRepositoryEvent::WorkflowCompleted(workflow) => &workflow.repository,
-            BorsRepositoryEvent::CheckSuiteCompleted(payload) => &payload.repository,
         }
     }
 }
@@ -166,7 +162,7 @@ pub struct PushToBranch {
 }
 
 #[derive(Debug)]
-pub struct WorkflowStarted {
+pub struct WorkflowRunStarted {
     pub repository: GithubRepoName,
     pub name: String,
     pub branch: String,
@@ -177,18 +173,13 @@ pub struct WorkflowStarted {
 }
 
 #[derive(Debug)]
-pub struct WorkflowCompleted {
+pub struct WorkflowRunCompleted {
     pub repository: GithubRepoName,
     pub branch: String,
     pub commit_sha: CommitSha,
     pub run_id: RunId,
     pub status: WorkflowStatus,
     pub running_time: Option<Duration>,
-}
-
-#[derive(Debug)]
-pub struct CheckSuiteCompleted {
-    pub repository: GithubRepoName,
-    pub branch: String,
-    pub commit_sha: CommitSha,
+    /// Check suite to which this workflow is attached.
+    pub check_suite_id: CheckSuiteId,
 }

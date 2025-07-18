@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::{collections::HashMap, time::SystemTime};
 
-use crate::bors::{CheckSuiteStatus, PullRequestStatus};
+use crate::bors::PullRequestStatus;
 use base64::Engine;
 use chrono::{DateTime, Utc};
 use octocrab::models::CheckSuiteId;
@@ -9,6 +9,13 @@ use octocrab::models::pulls::MergeableState;
 use octocrab::models::repos::Object;
 use octocrab::models::repos::Object::Commit;
 
+use crate::database::WorkflowStatus;
+use crate::github::{GithubRepoName, PullRequestNumber};
+use crate::permissions::PermissionType;
+use crate::tests::mocks::comment::Comment;
+use crate::tests::mocks::permissions::Permissions;
+use crate::tests::mocks::pull_request::mock_pull_requests;
+use crate::tests::mocks::{GitHubState, WorkflowRunData, default_pr_number, dynamic_mock_req};
 use parking_lot::Mutex;
 use serde::Serialize;
 use tokio::sync::mpsc::Sender;
@@ -17,13 +24,6 @@ use wiremock::{
     Mock, MockServer, Request, ResponseTemplate,
     matchers::{method, path},
 };
-
-use crate::github::{GithubRepoName, PullRequestNumber};
-use crate::permissions::PermissionType;
-use crate::tests::mocks::comment::Comment;
-use crate::tests::mocks::permissions::Permissions;
-use crate::tests::mocks::pull_request::mock_pull_requests;
-use crate::tests::mocks::{GitHubState, TestWorkflowStatus, default_pr_number, dynamic_mock_req};
 
 use super::user::{GitHubUser, User};
 
@@ -142,16 +142,24 @@ impl PullRequest {
 }
 
 #[derive(Clone)]
+pub struct WorkflowRun {
+    workflow_run: WorkflowRunData,
+    status: WorkflowStatus,
+}
+
+#[derive(Clone)]
 pub struct Repo {
     pub name: GithubRepoName,
     pub permissions: Permissions,
     pub config: String,
     pub branches: Vec<Branch>,
-    pub cancelled_workflows: Vec<u64>,
+    pub workflows_cancelled_by_bors: Vec<u64>,
     pub workflow_cancel_error: bool,
+    /// All workflows that we know about from the side of the test.
+    pub workflow_runs: Vec<WorkflowRun>,
     pub pull_requests: HashMap<u64, PullRequest>,
     pub check_runs: Vec<CheckRunData>,
-    // Cause pull request fetch to fail.
+    /// Cause pull request fetch to fail.
     pub pull_request_error: bool,
     pub pr_push_counter: u64,
 }
@@ -164,8 +172,9 @@ impl Repo {
             config,
             pull_requests: Default::default(),
             branches: vec![Branch::default()],
-            cancelled_workflows: vec![],
+            workflows_cancelled_by_bors: vec![],
             workflow_cancel_error: false,
+            workflow_runs: vec![],
             pull_request_error: false,
             pr_push_counter: 0,
             check_runs: vec![],
@@ -195,12 +204,8 @@ impl Repo {
         self.branches.iter_mut().find(|b| b.name == name)
     }
 
-    pub fn get_branch_by_sha(&mut self, sha: &str) -> Option<&mut Branch> {
-        self.branches.iter_mut().find(|b| b.sha == sha)
-    }
-
     pub fn add_cancelled_workflow(&mut self, run_id: u64) {
-        self.cancelled_workflows.push(run_id);
+        self.workflows_cancelled_by_bors.push(run_id);
     }
 
     pub fn add_check_run(&mut self, check_run: CheckRunData) {
@@ -216,6 +221,22 @@ impl Repo {
         let check_run = self.check_runs.get_mut(check_run_id as usize).unwrap();
         check_run.status = status;
         check_run.conclusion = conclusion;
+    }
+
+    /// Inserts or updates the status of the given workflow run.
+    pub fn update_workflow_run(&mut self, workflow_run: WorkflowRunData, status: WorkflowStatus) {
+        if let Some(workflow) = self
+            .workflow_runs
+            .iter_mut()
+            .find(|w| w.workflow_run.run_id == workflow_run.run_id)
+        {
+            workflow.status = status;
+        } else {
+            self.workflow_runs.push(WorkflowRun {
+                workflow_run,
+                status,
+            });
+        }
     }
 
     pub fn get_next_pr_push_counter(&mut self) -> u64 {
@@ -266,7 +287,6 @@ pub struct Branch {
     sha: String,
     commit_message: String,
     sha_history: Vec<String>,
-    suite_statuses: Vec<CheckSuiteStatus>,
     merge_counter: u64,
     pub merge_conflict: bool,
 }
@@ -278,7 +298,6 @@ impl Branch {
             sha: sha.to_string(),
             commit_message: format!("Commit {sha}"),
             sha_history: vec![],
-            suite_statuses: vec![CheckSuiteStatus::Pending],
             merge_counter: 0,
             merge_conflict: false,
         }
@@ -289,35 +308,6 @@ impl Branch {
     }
     pub fn get_sha(&self) -> &str {
         &self.sha
-    }
-    pub fn get_suites(&self) -> &[CheckSuiteStatus] {
-        &self.suite_statuses
-    }
-
-    /// Sets the expectation that this branch will receive `count` suites.
-    pub fn expect_suites(&mut self, count: usize) {
-        self.suite_statuses = vec![CheckSuiteStatus::Pending; count];
-    }
-    pub fn suite_finished(&mut self, status: TestWorkflowStatus) {
-        for suite in self.suite_statuses.iter_mut() {
-            if matches!(suite, CheckSuiteStatus::Pending) {
-                *suite = match status {
-                    TestWorkflowStatus::Success => CheckSuiteStatus::Success,
-                    TestWorkflowStatus::Failure => CheckSuiteStatus::Failure,
-                };
-                return;
-            }
-        }
-        panic!(
-            "Received more suites than expected ({}) for branch {}",
-            self.suite_statuses.len(),
-            self.name
-        );
-    }
-    pub fn reset_suites(&mut self) {
-        for suite in self.suite_statuses.iter_mut() {
-            *suite = CheckSuiteStatus::Pending;
-        }
     }
 
     pub fn set_to_sha(&mut self, sha: &str) {
@@ -381,6 +371,7 @@ pub async fn mock_repo(
     mock_branches(repo.clone(), mock_server).await;
     mock_cancel_workflow(repo.clone(), mock_server).await;
     mock_check_runs(repo.clone(), mock_server).await;
+    mock_workflow_runs(repo.clone(), mock_server).await;
     mock_config(repo, mock_server).await;
 }
 
@@ -389,7 +380,6 @@ async fn mock_branches(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
     mock_create_branch(repo.clone(), mock_server).await;
     mock_update_branch(repo.clone(), mock_server).await;
     mock_merge_branch(repo.clone(), mock_server).await;
-    mock_check_suites(repo, mock_server).await;
 }
 
 async fn mock_cancel_workflow(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
@@ -572,49 +562,67 @@ async fn mock_merge_branch(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
         .await;
 }
 
-async fn mock_check_suites(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
-    #[derive(serde::Serialize)]
-    struct CheckSuitePayload {
-        id: CheckSuiteId,
+async fn mock_workflow_runs(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
+    #[derive(serde::Serialize, Debug)]
+    struct WorkflowRunResponse {
+        id: octocrab::models::RunId,
+        status: String,
         conclusion: Option<String>,
-        head_branch: String,
     }
 
-    #[derive(serde::Serialize)]
-    struct CheckSuiteResponse {
-        check_suites: Vec<CheckSuitePayload>,
+    #[derive(serde::Serialize, Debug)]
+    struct WorkflowRunsResponse {
+        workflow_runs: Vec<WorkflowRunResponse>,
     }
 
     let repo_name = repo.lock().name.clone();
     dynamic_mock_req(
-        move |_req: &Request, [sha]: [&str; 1]| {
-            let mut repo = repo.lock();
-            let Some(branch) = repo.get_branch_by_sha(sha) else {
-                return ResponseTemplate::new(404);
-            };
-            let response = CheckSuiteResponse {
-                check_suites: branch
-                    .get_suites()
-                    .iter()
-                    .enumerate()
-                    .map(|(index, suite)| CheckSuitePayload {
-                        id: CheckSuiteId(index as u64),
-                        conclusion: match suite {
-                            CheckSuiteStatus::Pending => None,
-                            CheckSuiteStatus::Success => Some("success".to_string()),
-                            CheckSuiteStatus::Failure => Some("failure".to_string()),
+        move |req: &Request, []| {
+            let repo = repo.lock();
+            let check_suite_id: CheckSuiteId = get_query_param(req, "check_suite_id")
+                .parse::<u64>()
+                .unwrap()
+                .into();
+            let workflow_runs: Vec<WorkflowRun> = repo
+                .workflow_runs
+                .iter()
+                .filter(|w| w.workflow_run.check_suite_id == check_suite_id)
+                .cloned()
+                .collect();
+
+            let response = WorkflowRunsResponse {
+                workflow_runs: workflow_runs
+                    .into_iter()
+                    .map(|run| WorkflowRunResponse {
+                        id: run.workflow_run.run_id,
+                        status: match run.status {
+                            WorkflowStatus::Pending => "pending",
+                            WorkflowStatus::Success | WorkflowStatus::Failure => "completed",
+                        }
+                        .to_string(),
+                        conclusion: match run.status {
+                            WorkflowStatus::Success => Some("success".to_string()),
+                            WorkflowStatus::Failure => Some("failure".to_string()),
+                            _ => None,
                         },
-                        head_branch: branch.name.clone(),
                     })
                     .collect(),
             };
             ResponseTemplate::new(200).set_body_json(response)
         },
         "GET",
-        format!("^/repos/{repo_name}/commits/(.*)/check-suites$"),
+        format!("^/repos/{repo_name}/actions/runs"),
     )
     .mount(mock_server)
     .await;
+}
+
+fn get_query_param(req: &Request, key: &str) -> String {
+    req.url
+        .query_pairs()
+        .find(|(k, _)| k == key)
+        .map(|(_, v)| v.to_string())
+        .unwrap_or_else(|| panic!("Query parameter {key} not found in {}", req.url))
 }
 
 async fn mock_config(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
