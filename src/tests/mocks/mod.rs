@@ -29,7 +29,7 @@ pub use workflow::WorkflowJob;
 pub use workflow::WorkflowRunData;
 
 mod app;
-mod bors;
+pub mod bors;
 mod comment;
 mod github;
 mod permissions;

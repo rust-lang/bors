@@ -1,3 +1,5 @@
+use anyhow::anyhow;
+use octocrab::params::checks::{CheckRunOutput, CheckRunStatus};
 use std::future::Future;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -5,7 +7,17 @@ use tracing::Instrument;
 
 use crate::BorsContext;
 use crate::bors::RepositoryState;
+use crate::bors::comment::auto_build_started_comment;
+use crate::database::{BuildStatus, PullRequestModel};
+use crate::github::api::client::GithubRepositoryClient;
+use crate::github::api::operations::ForcePush;
+use crate::github::{CommitSha, MergeError};
 use crate::utils::sort_queue::sort_queue_prs;
+
+enum MergeResult {
+    Success(CommitSha),
+    Conflict,
+}
 
 #[derive(Debug)]
 enum MergeQueueEvent {
@@ -31,9 +43,16 @@ impl MergeQueueSender {
     }
 }
 
+/// Branch used for performing merge operations.
+/// This branch should not run CI checks.
+pub(super) const AUTO_MERGE_BRANCH_NAME: &str = "automation/bors/auto-merge";
+
 /// Branch where CI checks run for auto builds.
 /// This branch should run CI checks.
 pub(super) const AUTO_BRANCH_NAME: &str = "automation/bors/auto";
+
+// The name of the check run seen in the GitHub UI.
+pub(super) const AUTO_BUILD_CHECK_RUN_NAME: &str = "Bors auto build";
 
 pub async fn merge_queue_tick(ctx: Arc<BorsContext>) -> anyhow::Result<()> {
     let repos: Vec<Arc<RepositoryState>> =
@@ -61,12 +80,171 @@ pub async fn merge_queue_tick(ctx: Arc<BorsContext>) -> anyhow::Result<()> {
         // then pending builds (which block the queue to prevent starting simultaneous auto-builds).
         let prs = sort_queue_prs(prs);
 
-        for _ in prs {
-            // Process PRs...
+        for pr in prs {
+            let pr_num = pr.number;
+
+            if let Some(auto_build) = &pr.auto_build {
+                match auto_build.status {
+                    // Build successful - point the base branch to the merged commit.
+                    BuildStatus::Success => {
+                        // Break to give GitHub time to update the base branch.
+                        break;
+                    }
+                    // Build in progress - stop queue. We can only have one PR being built
+                    // at a time.
+                    BuildStatus::Pending => {
+                        tracing::info!("PR {pr_num} has a pending build - blocking queue");
+                        break;
+                    }
+                    BuildStatus::Failure | BuildStatus::Cancelled | BuildStatus::Timeouted => {
+                        unreachable!("Failed auto builds should be filtered out by SQL query");
+                    }
+                }
+            }
+
+            // No build exists for this PR - start a new auto build.
+            match start_auto_build(&repo, &ctx, pr).await {
+                Ok(true) => {
+                    tracing::info!("Starting auto build for PR {pr_num}");
+                    break;
+                }
+                Ok(false) => {
+                    tracing::debug!("Failed to start auto build for PR {pr_num}");
+                    continue;
+                }
+                Err(error) => {
+                    // Unexpected error - the PR will remain in the "queue" for a retry.
+                    tracing::error!("Error starting auto build for PR {pr_num}: {:?}", error);
+                    continue;
+                }
+            }
         }
     }
 
+    #[cfg(test)]
+    crate::bors::WAIT_FOR_MERGE_QUEUE.mark();
+
     Ok(())
+}
+
+/// Starts a new auto build for a pull request.
+async fn start_auto_build(
+    repo: &Arc<RepositoryState>,
+    ctx: &Arc<BorsContext>,
+    pr: PullRequestModel,
+) -> anyhow::Result<bool> {
+    let client = &repo.client;
+
+    let gh_pr = client.get_pull_request(pr.number).await?;
+    let base_sha = client.get_branch_sha(&pr.base_branch).await?;
+
+    let auto_merge_commit_message = format!(
+        "Auto merge of #{} - {}, r={}\n\n{}\n\n{}",
+        pr.number,
+        gh_pr.head_label,
+        pr.approver().unwrap_or("<unknown>"),
+        pr.title,
+        gh_pr.message
+    );
+
+    // 1. Merge PR head with base branch on `AUTO_MERGE_BRANCH_NAME`
+    match attempt_merge(
+        &repo.client,
+        &gh_pr.head.sha,
+        &base_sha,
+        &auto_merge_commit_message,
+    )
+    .await?
+    {
+        MergeResult::Success(merge_sha) => {
+            // 2. Push merge commit to `AUTO_BRANCH_NAME` where CI runs
+            client
+                .set_branch_to_sha(AUTO_BRANCH_NAME, &merge_sha, ForcePush::Yes)
+                .await?;
+
+            // 3. Record the build in the database
+            let build_id = ctx
+                .db
+                .attach_auto_build(
+                    &pr,
+                    AUTO_BRANCH_NAME.to_string(),
+                    merge_sha.clone(),
+                    base_sha,
+                )
+                .await?;
+
+            // 4. Set GitHub check run to pending on PR head
+            match client
+                .create_check_run(
+                    AUTO_BUILD_CHECK_RUN_NAME,
+                    &gh_pr.head.sha,
+                    CheckRunStatus::InProgress,
+                    CheckRunOutput {
+                        title: AUTO_BUILD_CHECK_RUN_NAME.to_string(),
+                        summary: "".to_string(),
+                        text: None,
+                        annotations: vec![],
+                        images: vec![],
+                    },
+                    &build_id.to_string(),
+                )
+                .await
+            {
+                Ok(check_run) => {
+                    tracing::info!(
+                        "Created check run {} for build {build_id}",
+                        check_run.id.into_inner()
+                    );
+                    ctx.db
+                        .update_build_check_run_id(build_id, check_run.id.into_inner() as i64)
+                        .await?;
+                }
+                Err(error) => {
+                    // Check runs aren't critical, don't block progress if they fail
+                    tracing::error!("Cannot create check run: {error:?}");
+                }
+            }
+
+            // 5. Post status comment
+            let comment = auto_build_started_comment(&gh_pr.head.sha, &merge_sha);
+            client.post_comment(pr.number, comment).await?;
+
+            Ok(true)
+        }
+        MergeResult::Conflict => Ok(false),
+    }
+}
+
+/// Attempts to merge the given head SHA with base SHA via `AUTO_MERGE_BRANCH_NAME`.
+async fn attempt_merge(
+    client: &GithubRepositoryClient,
+    head_sha: &CommitSha,
+    base_sha: &CommitSha,
+    merge_message: &str,
+) -> anyhow::Result<MergeResult> {
+    tracing::debug!("Attempting to merge with base SHA {base_sha}");
+
+    // Reset auto merge branch to point to base branch
+    client
+        .set_branch_to_sha(AUTO_MERGE_BRANCH_NAME, base_sha, ForcePush::Yes)
+        .await
+        .map_err(|error| anyhow!("Cannot set auto merge branch to {}: {error:?}", base_sha.0))?;
+
+    // then merge PR head commit into auto merge branch.
+    match client
+        .merge_branches(AUTO_MERGE_BRANCH_NAME, head_sha, merge_message)
+        .await
+    {
+        Ok(merge_sha) => {
+            tracing::debug!("Merge successful, SHA: {merge_sha}");
+            Ok(MergeResult::Success(merge_sha))
+        }
+        Err(MergeError::Conflict) => {
+            tracing::warn!("Merge conflict");
+            Ok(MergeResult::Conflict)
+        }
+        Err(error) => Err(error.into()),
+    }
 }
 
 pub fn start_merge_queue(ctx: Arc<BorsContext>) -> (MergeQueueSender, impl Future<Output = ()>) {
@@ -102,4 +280,115 @@ pub fn start_merge_queue(ctx: Arc<BorsContext>) -> (MergeQueueSender, impl Futur
     };
 
     (sender, fut)
+}
+
+#[cfg(test)]
+mod tests {
+
+    use octocrab::params::checks::CheckRunStatus;
+    use sqlx::PgPool;
+
+    use crate::{
+        bors::merge_queue::{AUTO_BRANCH_NAME, AUTO_BUILD_CHECK_RUN_NAME},
+        database::{WorkflowStatus, operations::get_all_workflows},
+        github::CommitSha,
+        tests::{
+            BorsTester,
+            mocks::{BorsBuilder, GitHubState, WorkflowEvent, default_repo_name},
+        },
+    };
+
+    fn gh_state_with_merge_queue() -> GitHubState {
+        GitHubState::default().with_default_config(
+            r#"
+      merge_queue_enabled = true
+      "#,
+        )
+    }
+
+    pub async fn run_merge_queue_test<F: AsyncFnOnce(&mut BorsTester) -> anyhow::Result<()>>(
+        pool: PgPool,
+        f: F,
+    ) -> GitHubState {
+        BorsBuilder::new(pool)
+            .github(gh_state_with_merge_queue())
+            .run_test(f)
+            .await
+    }
+
+    async fn start_auto_build(tester: &mut BorsTester) -> anyhow::Result<()> {
+        tester.post_comment("@bors r+").await?;
+        tester.expect_comments(1).await;
+        tester.process_merge_queue().await;
+        tester.expect_comments(1).await;
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn auto_workflow_started(pool: sqlx::PgPool) {
+        run_merge_queue_test(pool.clone(), async |mut tester| {
+            start_auto_build(&mut tester).await?;
+            tester
+                .workflow_event(WorkflowEvent::started(tester.auto_branch()))
+                .await?;
+            Ok(())
+        })
+        .await;
+
+        let suite = get_all_workflows(&pool).await.unwrap().pop().unwrap();
+        assert_eq!(suite.status, WorkflowStatus::Pending);
+    }
+
+    #[sqlx::test]
+    async fn auto_workflow_check_run_created(pool: sqlx::PgPool) {
+        run_merge_queue_test(pool, async |mut tester| {
+            start_auto_build(&mut tester).await?;
+            tester.expect_check_run(
+                &tester.default_pr().await.get_gh_pr().head_sha,
+                AUTO_BUILD_CHECK_RUN_NAME,
+                AUTO_BUILD_CHECK_RUN_NAME,
+                CheckRunStatus::InProgress,
+                None,
+            );
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn auto_build_started_comment(pool: sqlx::PgPool) {
+        run_merge_queue_test(pool, async |tester| {
+            tester.post_comment("@bors r+").await?;
+            tester.expect_comments(1).await;
+            tester.process_merge_queue().await;
+            insta::assert_snapshot!(
+                tester.get_comment().await?,
+                @":hourglass: Testing commit pr-1-sha with merge merge-main-sha1-pr-1-sha-0..."
+            );
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn auto_build_insert_into_db(pool: sqlx::PgPool) {
+        run_merge_queue_test(pool, async |mut tester| {
+            start_auto_build(&mut tester).await?;
+            tester.workflow_full_success(tester.auto_branch()).await?;
+            tester.expect_comments(1).await;
+            assert!(
+                tester
+                    .db()
+                    .find_build(
+                        &default_repo_name(),
+                        AUTO_BRANCH_NAME.to_string(),
+                        CommitSha(tester.auto_branch().get_sha().to_string()),
+                    )
+                    .await?
+                    .is_some()
+            );
+            Ok(())
+        })
+        .await;
+    }
 }

@@ -303,3 +303,10 @@ fn list_workflows_status(workflows: &[WorkflowModel]) -> String {
         .collect::<Vec<_>>()
         .join("\n")
 }
+
+pub fn auto_build_started_comment(head_sha: &CommitSha, merge_sha: &CommitSha) -> Comment {
+    Comment::new(format!(
+        ":hourglass: Testing commit {} with merge {}...",
+        head_sha, merge_sha
+    ))
+}

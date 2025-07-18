@@ -1,7 +1,7 @@
 use sqlx::PgPool;
 
 use crate::bors::{PullRequestStatus, RollupMode};
-use crate::database::operations::get_merge_queue_prs;
+use crate::database::operations::{get_merge_queue_prs, update_pr_auto_build_id};
 use crate::database::{
     BuildModel, BuildStatus, PullRequestModel, RepoModel, TreeState, WorkflowModel, WorkflowStatus,
     WorkflowType,
@@ -187,6 +187,21 @@ impl PgDbClient {
         let build_id =
             create_build(&mut *tx, &pr.repository, &branch, &commit_sha, &parent).await?;
         update_pr_try_build_id(&mut *tx, pr.id, build_id).await?;
+        tx.commit().await?;
+        Ok(build_id)
+    }
+
+    pub async fn attach_auto_build(
+        &self,
+        pr: &PullRequestModel,
+        branch: String,
+        commit_sha: CommitSha,
+        parent: CommitSha,
+    ) -> anyhow::Result<i32> {
+        let mut tx = self.pool.begin().await?;
+        let build_id =
+            create_build(&mut *tx, &pr.repository, &branch, &commit_sha, &parent).await?;
+        update_pr_auto_build_id(&mut *tx, pr.id, build_id).await?;
         tx.commit().await?;
         Ok(build_id)
     }
