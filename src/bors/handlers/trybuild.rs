@@ -366,12 +366,19 @@ fn create_merge_commit_message(
     match &merge_type {
         // Strip all PR text for try builds, to avoid useless issue pings on the repository.
         // Only keep any lines starting with `CUSTOM_TRY_JOB_PREFIX`.
-        MergeType::Try { .. } => {
-            pr_description = pr_description
-                .lines()
-                .map(|l| l.trim())
-                .filter(|l| l.starts_with(CUSTOM_TRY_JOB_PREFIX))
-                .join("\n");
+        MergeType::Try { try_jobs } => {
+            // If we do not have any custom try jobs, keep the ones that might be in the PR
+            // description.
+            pr_description = if try_jobs.is_empty() {
+                pr_description
+                    .lines()
+                    .map(|l| l.trim())
+                    .filter(|l| l.starts_with(CUSTOM_TRY_JOB_PREFIX))
+                    .join("\n")
+            } else {
+                // If we do have custom jobs, ignore the original description completely
+                String::new()
+            };
         }
     };
 
@@ -550,6 +557,36 @@ try-job: Bar
 
             try-job: Foo
             try-job: Bar
+            ");
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn try_commit_message_overwrite_try_jobs(pool: sqlx::PgPool) {
+        run_test(pool, async |tester: &mut BorsTester| {
+            tester
+                .edit_pr(default_repo_name(), default_pr_number(), |pr| {
+                    pr.description = r"This is a very good PR.
+
+try-job: Foo
+try-job: Bar
+"
+                    .to_string();
+                })
+                .await?;
+
+            tester.post_comment("@bors try jobs=Baz,Baz2").await?;
+            tester.expect_comments(1).await;
+
+            insta::assert_snapshot!(tester.get_branch_commit_message(&tester.try_branch()), @r"
+            Auto merge of rust-lang/borstest#1 - pr-1, r=<try>
+            PR #1
+
+
+            try-job: Baz
+            try-job: Baz2
             ");
             Ok(())
         })
