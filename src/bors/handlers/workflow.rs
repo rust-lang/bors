@@ -219,7 +219,7 @@ async fn maybe_complete_build(
         // Download failed jobs
         let mut workflow_runs: Vec<FailedWorkflowRun> = vec![];
         for workflow_run in db_workflow_runs {
-            let failed_jobs = match get_failed_jobs(&repo, &workflow_run).await {
+            let failed_jobs = match get_failed_jobs(repo, &workflow_run).await {
                 Ok(jobs) => jobs,
                 Err(error) => {
                     tracing::error!(

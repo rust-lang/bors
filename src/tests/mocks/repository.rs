@@ -1,21 +1,23 @@
 use std::sync::Arc;
 use std::{collections::HashMap, time::SystemTime};
 
+use super::user::{GitHubUser, User};
 use crate::bors::PullRequestStatus;
-use base64::Engine;
-use chrono::{DateTime, Utc};
-use octocrab::models::CheckSuiteId;
-use octocrab::models::pulls::MergeableState;
-use octocrab::models::repos::Object;
-use octocrab::models::repos::Object::Commit;
-
 use crate::database::WorkflowStatus;
 use crate::github::{GithubRepoName, PullRequestNumber};
 use crate::permissions::PermissionType;
 use crate::tests::mocks::comment::Comment;
 use crate::tests::mocks::permissions::Permissions;
 use crate::tests::mocks::pull_request::mock_pull_requests;
+use crate::tests::mocks::workflow::WorkflowJob;
 use crate::tests::mocks::{GitHubState, WorkflowRunData, default_pr_number, dynamic_mock_req};
+use base64::Engine;
+use chrono::{DateTime, Utc};
+use octocrab::models::pulls::MergeableState;
+use octocrab::models::repos::Object;
+use octocrab::models::repos::Object::Commit;
+use octocrab::models::workflows::{Conclusion, Status, Step};
+use octocrab::models::{CheckSuiteId, JobId, RunId};
 use parking_lot::Mutex;
 use serde::Serialize;
 use tokio::sync::mpsc::Sender;
@@ -24,8 +26,6 @@ use wiremock::{
     Mock, MockServer, Request, ResponseTemplate,
     matchers::{method, path},
 };
-
-use super::user::{GitHubUser, User};
 
 #[derive(Clone, Debug)]
 pub struct CheckRunData {
@@ -386,6 +386,7 @@ pub async fn mock_repo(
     mock_cancel_workflow(repo.clone(), mock_server).await;
     mock_check_runs(repo.clone(), mock_server).await;
     mock_workflow_runs(repo.clone(), mock_server).await;
+    mock_workflow_jobs(repo.clone(), mock_server).await;
     mock_config(repo, mock_server).await;
 }
 
@@ -580,8 +581,8 @@ async fn mock_workflow_runs(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
     #[derive(serde::Serialize, Debug)]
     struct WorkflowRunResponse {
         id: octocrab::models::RunId,
-        status: String,
-        conclusion: Option<String>,
+        status: Status,
+        conclusion: Option<Conclusion>,
     }
 
     #[derive(serde::Serialize, Debug)]
@@ -607,25 +608,64 @@ async fn mock_workflow_runs(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
             let response = WorkflowRunsResponse {
                 workflow_runs: workflow_runs
                     .into_iter()
-                    .map(|run| WorkflowRunResponse {
-                        id: run.workflow_run.run_id,
-                        status: match run.status {
-                            WorkflowStatus::Pending => "pending",
-                            WorkflowStatus::Success | WorkflowStatus::Failure => "completed",
+                    .map(|run| {
+                        let (status, conclusion) = status_to_gh(run.status);
+                        WorkflowRunResponse {
+                            id: run.workflow_run.run_id,
+                            status,
+                            conclusion,
                         }
-                        .to_string(),
-                        conclusion: match run.status {
-                            WorkflowStatus::Success => Some("success".to_string()),
-                            WorkflowStatus::Failure => Some("failure".to_string()),
-                            _ => None,
-                        },
                     })
                     .collect(),
             };
             ResponseTemplate::new(200).set_body_json(response)
         },
         "GET",
-        format!("^/repos/{repo_name}/actions/runs"),
+        format!("^/repos/{repo_name}/actions/runs$"),
+    )
+    .mount(mock_server)
+    .await;
+}
+
+/// Returns (status, conclusion).
+fn status_to_gh(status: WorkflowStatus) -> (Status, Option<Conclusion>) {
+    let conclusion = match status {
+        WorkflowStatus::Success => Some(Conclusion::Success),
+        WorkflowStatus::Failure => Some(Conclusion::Failure),
+        _ => None,
+    };
+    let status = match status {
+        WorkflowStatus::Pending => Status::Pending,
+        WorkflowStatus::Success | WorkflowStatus::Failure => Status::Completed,
+    };
+    (status, conclusion)
+}
+
+async fn mock_workflow_jobs(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
+    let repo_name = repo.lock().name.clone();
+    dynamic_mock_req(
+        move |_req: &Request, [run_id]: [&str; 1]| {
+            let repo = repo.lock();
+            let run_id: RunId = run_id.parse::<u64>().expect("Non-integer run id").into();
+            let workflow_run = repo
+                .workflow_runs
+                .iter()
+                .find(|w| w.workflow_run.run_id == run_id)
+                .unwrap_or_else(|| panic!("Workflow run with ID {run_id} not found"));
+
+            let response = GitHubWorkflowJobs {
+                total_count: workflow_run.workflow_run.jobs.len() as u64,
+                jobs: workflow_run
+                    .workflow_run
+                    .jobs
+                    .iter()
+                    .map(|job| workflow_job_to_gh(job, run_id))
+                    .collect(),
+            };
+            ResponseTemplate::new(200).set_body_json(response)
+        },
+        "GET",
+        format!("^/repos/{repo_name}/actions/runs/(.*)/jobs"),
     )
     .mount(mock_server)
     .await;
@@ -922,4 +962,74 @@ struct GitHubRef {
     node_id: String,
     url: Url,
     object: Object,
+}
+
+#[derive(Serialize)]
+struct GitHubWorkflowJobs {
+    total_count: u64,
+    jobs: Vec<GitHubWorkflowJob>,
+}
+
+#[derive(Serialize)]
+struct GitHubWorkflowJob {
+    id: JobId,
+    run_id: RunId,
+    workflow_name: String,
+    head_branch: String,
+    run_url: Url,
+    run_attempt: u32,
+
+    node_id: String,
+    head_sha: String,
+    url: Url,
+    html_url: Url,
+    status: Status,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    conclusion: Option<Conclusion>,
+    created_at: DateTime<Utc>,
+    started_at: DateTime<Utc>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    completed_at: Option<DateTime<Utc>>,
+    name: String,
+    steps: Vec<Step>,
+    check_run_url: String,
+    labels: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    runner_id: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    runner_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    runner_group_id: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    runner_group_name: Option<String>,
+}
+
+fn workflow_job_to_gh(job: &WorkflowJob, run_id: RunId) -> GitHubWorkflowJob {
+    let WorkflowJob { id, status } = job;
+    let (status, conclusion) = status_to_gh(*status);
+    GitHubWorkflowJob {
+        id: *id,
+        run_id,
+        workflow_name: "".to_string(),
+        head_branch: "".to_string(),
+        run_url: "https://test.com".parse().unwrap(),
+        run_attempt: 0,
+        node_id: "".to_string(),
+        head_sha: "".to_string(),
+        url: "https://test.com".parse().unwrap(),
+        html_url: format!("https://github.com/job-logs/{id}").parse().unwrap(),
+        status,
+        conclusion,
+        created_at: Default::default(),
+        started_at: Default::default(),
+        completed_at: None,
+        name: format!("Job {id}"),
+        steps: vec![],
+        check_run_url: "".to_string(),
+        labels: vec![],
+        runner_id: None,
+        runner_name: None,
+        runner_group_id: None,
+        runner_group_name: None,
+    }
 }

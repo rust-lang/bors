@@ -417,9 +417,10 @@ mod tests {
     use crate::github::CommitSha;
     use crate::tests::BorsTester;
     use crate::tests::mocks::{
-        BorsBuilder, Comment, GitHubState, User, WorkflowEvent, WorkflowRunData, default_pr_number,
-        default_repo_name, run_test,
+        BorsBuilder, Comment, GitHubState, User, WorkflowEvent, WorkflowJob, WorkflowRunData,
+        default_pr_number, default_repo_name, run_test,
     };
+    use octocrab::models::JobId;
     use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
 
     #[sqlx::test]
@@ -455,6 +456,42 @@ mod tests {
             Ok(())
         })
         .await;
+    }
+
+    #[sqlx::test]
+    async fn try_failure_job(pool: sqlx::PgPool) {
+        run_test(pool, async |tester: &mut BorsTester| {
+            tester.post_comment("@bors try").await?;
+            tester.expect_comments(1).await;
+
+            let mut workflow = WorkflowRunData::from(tester.try_branch());
+            workflow.jobs.push(WorkflowJob {
+                id: JobId(42),
+                status: WorkflowStatus::Failure,
+            });
+            workflow.jobs.push(WorkflowJob {
+                id: JobId(50),
+                status: WorkflowStatus::Failure,
+            });
+            workflow.jobs.push(WorkflowJob {
+                id: JobId(51),
+                status: WorkflowStatus::Success,
+            });
+
+            tester.default_repo().lock().update_workflow_run(workflow.clone(), WorkflowStatus::Pending);
+            tester.workflow_full_failure(workflow).await?;
+            insta::assert_snapshot!(
+                tester.get_comment().await?,
+                @r"
+            :broken_heart: Test failed ([Workflow1](https://github.com/workflows/Workflow1/1)). Failed jobs:
+
+            - `Job 42` ([web logs](https://github.com/job-logs/42), [extended logs](https://triage.rust-lang.org/gha-logs/rust-lang/borstest/42))
+            - `Job 50` ([web logs](https://github.com/job-logs/50), [extended logs](https://triage.rust-lang.org/gha-logs/rust-lang/borstest/50))
+            "
+            );
+            Ok(())
+        })
+            .await;
     }
 
     #[sqlx::test]

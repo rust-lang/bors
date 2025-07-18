@@ -1,11 +1,11 @@
-use chrono::{DateTime, Utc};
-use octocrab::models::{CheckSuiteId, RunId, WorkflowId};
-use serde::Serialize;
-use url::Url;
-
+use crate::database::WorkflowStatus;
 use crate::github::GithubRepoName;
 use crate::tests::mocks::default_repo_name;
 use crate::tests::mocks::repository::{Branch, GitHubRepository};
+use chrono::{DateTime, Utc};
+use octocrab::models::{CheckSuiteId, JobId, RunId, WorkflowId};
+use serde::Serialize;
+use url::Url;
 
 #[derive(Clone)]
 pub struct WorkflowEvent {
@@ -45,12 +45,19 @@ pub enum WorkflowEventKind {
 }
 
 #[derive(Clone)]
+pub struct WorkflowJob {
+    pub id: JobId,
+    pub status: WorkflowStatus,
+}
+
+#[derive(Clone)]
 pub struct WorkflowRunData {
     pub repository: GithubRepoName,
     name: String,
     pub run_id: RunId,
     pub check_suite_id: CheckSuiteId,
     pub head_branch: String,
+    pub jobs: Vec<WorkflowJob>,
     head_sha: String,
 }
 
@@ -62,6 +69,7 @@ impl WorkflowRunData {
             run_id: RunId(1),
             check_suite_id: CheckSuiteId(1),
             head_branch: branch.get_name().to_string(),
+            jobs: vec![],
             head_sha: branch.get_sha().to_string(),
         }
     }

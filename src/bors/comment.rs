@@ -115,8 +115,7 @@ pub fn build_failed_comment(
 
         let mut failed_jobs: Vec<Job> = failed_workflows
             .into_iter()
-            .map(|w| w.failed_jobs)
-            .flatten()
+            .flat_map(|w| w.failed_jobs)
             .collect();
         failed_jobs.sort_by(|l, r| l.name.cmp(&r.name));
 
