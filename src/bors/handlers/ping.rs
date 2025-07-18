@@ -20,10 +20,10 @@ mod tests {
 
     #[sqlx::test]
     async fn ping_command(pool: sqlx::PgPool) {
-        run_test(pool, |mut tester| async {
+        run_test(pool, async |tester| {
             tester.post_comment("@bors ping").await?;
             assert_eq!(tester.get_comment().await?, "Pong 🏓!");
-            Ok(tester)
+            Ok(())
         })
         .await;
     }

@@ -380,7 +380,7 @@ mod tests {
 
     #[sqlx::test]
     async fn try_success(pool: sqlx::PgPool) {
-        run_test(pool.clone(), |mut tester| async {
+        run_test(pool, async |tester| {
             tester.create_branch(TRY_BRANCH_NAME).expect_suites(1);
             tester.post_comment("@bors try").await?;
             tester.expect_comments(1).await;
@@ -394,14 +394,14 @@ mod tests {
             <!-- homu: {"type":"TryBuildCompleted","merge_sha":"merge-main-sha1-pr-1-sha-0"} -->
             "#
             );
-            Ok(tester)
+            Ok(())
         })
         .await;
     }
 
     #[sqlx::test]
     async fn try_failure(pool: sqlx::PgPool) {
-        run_test(pool.clone(), |mut tester| async {
+        run_test(pool, async |tester| {
             tester.create_branch(TRY_BRANCH_NAME).expect_suites(1);
             tester.post_comment("@bors try").await?;
             tester.expect_comments(1).await;
@@ -413,14 +413,14 @@ mod tests {
             - [Workflow1](https://github.com/workflows/Workflow1/1) :x:
             "###
             );
-            Ok(tester)
+            Ok(())
         })
         .await;
     }
 
     #[sqlx::test]
     async fn try_no_permissions(pool: sqlx::PgPool) {
-        run_test(pool, |mut tester| async {
+        run_test(pool, async |tester| {
             tester
                 .post_comment(Comment::from("@bors try").with_author(User::unprivileged()))
                 .await?;
@@ -428,14 +428,14 @@ mod tests {
                 tester.get_comment().await?,
                 @"@unprivileged-user: :key: Insufficient privileges: not in try users"
             );
-            Ok(tester)
+            Ok(())
         })
         .await;
     }
 
     #[sqlx::test]
     async fn try_only_requires_try_permission(pool: sqlx::PgPool) {
-        run_test(pool, |mut tester| async {
+        run_test(pool, async |tester| {
             tester
                 .post_comment(Comment::from("@bors try").with_author(User::try_user()))
                 .await?;
@@ -447,14 +447,14 @@ mod tests {
             To cancel the try build, run the command `@bors try cancel`.
             "
             );
-            Ok(tester)
+            Ok(())
         })
         .await;
     }
 
     #[sqlx::test]
     async fn try_merge_comment(pool: sqlx::PgPool) {
-        run_test(pool, |mut tester| async {
+        run_test(pool, async |tester| {
             tester.post_comment("@bors try").await?;
             insta::assert_snapshot!(
                 tester.get_comment().await?,
@@ -464,17 +464,17 @@ mod tests {
             To cancel the try build, run the command `@bors try cancel`.
             "
             );
-            Ok(tester)
+            Ok(())
         })
         .await;
     }
 
     #[sqlx::test]
     async fn try_merge_branch_history(pool: sqlx::PgPool) {
-        let gh = run_test(pool, |mut tester| async {
+        let gh = run_test(pool, async |tester| {
             tester.post_comment("@bors try").await?;
             tester.expect_comments(1).await;
-            Ok(tester)
+            Ok(())
         })
         .await;
         gh.check_sha_history(
@@ -491,12 +491,12 @@ mod tests {
 
     #[sqlx::test]
     async fn try_merge_explicit_parent(pool: sqlx::PgPool) {
-        let gh = run_test(pool, |mut tester| async {
+        let gh = run_test(pool, async |tester| {
             tester
                 .post_comment("@bors try parent=ea9c1b050cc8b420c2c211d2177811e564a4dc60")
                 .await?;
             tester.expect_comments(1).await;
-            Ok(tester)
+            Ok(())
         })
         .await;
         gh.check_sha_history(
@@ -511,7 +511,7 @@ mod tests {
 
     #[sqlx::test]
     async fn try_merge_last_parent(pool: sqlx::PgPool) {
-        let gh = run_test(pool, |mut tester| async {
+        let gh = run_test(pool, async |tester| {
             tester
                 .post_comment("@bors try parent=ea9c1b050cc8b420c2c211d2177811e564a4dc60")
                 .await?;
@@ -524,7 +524,7 @@ mod tests {
 
             To cancel the try build, run the command `@bors try cancel`.
             ");
-            Ok(tester)
+            Ok(())
         })
         .await;
         gh.check_sha_history(
@@ -541,19 +541,19 @@ mod tests {
 
     #[sqlx::test]
     async fn try_merge_last_parent_unknown(pool: sqlx::PgPool) {
-        run_test(pool, |mut tester| async {
+        run_test(pool, async |tester| {
             tester
                 .post_comment("@bors try parent=last")
                 .await?;
             insta::assert_snapshot!(tester.get_comment().await?, @":exclamation: There was no previous build. Please set an explicit parent or remove the `parent=last` argument to use the default parent.");
-            Ok(tester)
+            Ok(())
         })
             .await;
     }
 
     #[sqlx::test]
     async fn try_merge_conflict(pool: sqlx::PgPool) {
-        run_test(pool, |mut tester| async {
+        run_test(pool, async |tester| {
             tester.create_branch(TRY_MERGE_BRANCH_NAME)
                 .merge_conflict = true;
             tester
@@ -589,14 +589,14 @@ mod tests {
 
             </details>
             "###);
-            Ok(tester)
+            Ok(())
         })
             .await;
     }
 
     #[sqlx::test]
     async fn try_merge_insert_into_db(pool: sqlx::PgPool) {
-        run_test(pool, |mut tester| async {
+        run_test(pool, async |tester| {
             tester.post_comment("@bors try").await?;
             tester.expect_comments(1).await;
             assert!(
@@ -610,14 +610,14 @@ mod tests {
                     .await?
                     .is_some()
             );
-            Ok(tester)
+            Ok(())
         })
         .await;
     }
 
     #[sqlx::test]
     async fn try_cancel_previous_build_no_workflows(pool: sqlx::PgPool) {
-        run_test(pool, |mut tester| async {
+        run_test(pool, async |tester| {
             tester.post_comment("@bors try").await?;
             tester.expect_comments(1).await;
             tester.post_comment("@bors try").await?;
@@ -626,7 +626,7 @@ mod tests {
 
             To cancel the try build, run the command `@bors try cancel`.
             ");
-            Ok(tester)
+            Ok(())
         })
         .await;
     }
@@ -634,7 +634,7 @@ mod tests {
     // Make sure that the second try command knows about the result of the first one.
     #[sqlx::test]
     async fn multiple_commands_in_one_comment(pool: sqlx::PgPool) {
-        run_test(pool, |mut tester| async {
+        run_test(pool, async |tester| {
             tester
                 .post_comment(
                     r#"
@@ -649,14 +649,14 @@ mod tests {
             To cancel the try build, run the command `@bors try cancel`.
             ");
             insta::assert_snapshot!(tester.get_comment().await?, @"Try build cancelled. Cancelled workflows:");
-            Ok(tester)
+            Ok(())
         })
         .await;
     }
 
     #[sqlx::test]
     async fn try_cancel_previous_build_running_workflows(pool: sqlx::PgPool) {
-        let gh = run_test(pool, |mut tester| async {
+        let gh = run_test(pool, async |tester| {
             tester.post_comment("@bors try").await?;
             tester.expect_comments(1).await;
             tester
@@ -671,7 +671,7 @@ mod tests {
 
             To cancel the try build, run the command `@bors try cancel`.
             ");
-            Ok(tester)
+            Ok(())
         })
         .await;
         gh.check_cancelled_workflows(default_repo_name(), &[123]);
@@ -679,7 +679,7 @@ mod tests {
 
     #[sqlx::test]
     async fn try_again_after_checks_finish(pool: sqlx::PgPool) {
-        run_test(pool, |mut tester| async {
+        run_test(pool, async |tester| {
             tester.post_comment("@bors try").await?;
             tester.expect_comments(1).await;
             tester
@@ -703,24 +703,24 @@ mod tests {
 
             <!-- homu: {"type":"TryBuildCompleted","merge_sha":"merge-main-sha1-pr-1-sha-1"} -->
             "#);
-            Ok(tester)
+            Ok(())
         })
         .await;
     }
 
     #[sqlx::test]
     async fn try_cancel_no_running_build(pool: sqlx::PgPool) {
-        run_test(pool, |mut tester| async {
+        run_test(pool, async |tester| {
             tester.post_comment("@bors try cancel").await?;
             insta::assert_snapshot!(tester.get_comment().await?, @":exclamation: There is currently no try build in progress.");
-            Ok(tester)
+            Ok(())
         })
             .await;
     }
 
     #[sqlx::test]
     async fn try_cancel_cancel_workflows(pool: sqlx::PgPool) {
-        let gh = run_test(pool, |mut tester| async {
+        let gh = run_test(pool, async |tester| {
             tester.post_comment("@bors try").await?;
             tester.expect_comments(1).await;
 
@@ -741,7 +741,7 @@ mod tests {
             - https://github.com/rust-lang/borstest/actions/runs/123
             - https://github.com/rust-lang/borstest/actions/runs/124
             "###);
-            Ok(tester)
+            Ok(())
         })
         .await;
         gh.check_cancelled_workflows(default_repo_name(), &[123, 124]);
@@ -749,7 +749,7 @@ mod tests {
 
     #[sqlx::test]
     async fn try_cancel_error(pool: sqlx::PgPool) {
-        run_test(pool, |mut tester| async {
+        run_test(pool, async |tester| {
             tester.default_repo().lock().workflow_cancel_error = true;
             tester.post_comment("@bors try").await?;
             tester.expect_comments(1).await;
@@ -758,14 +758,14 @@ mod tests {
                 .await?;
             tester.post_comment("@bors try cancel").await?;
             insta::assert_snapshot!(tester.get_comment().await?, @"Try build was cancelled. It was not possible to cancel some workflows.");
-            Ok(tester)
+            Ok(())
         })
         .await;
     }
 
     #[sqlx::test]
     async fn try_cancel_cancel_in_db(pool: sqlx::PgPool) {
-        run_test(pool, |mut tester| async {
+        run_test(pool, async |tester| {
             tester.default_repo().lock().workflow_cancel_error = true;
             tester.post_comment("@bors try").await?;
             tester.expect_comments(1).await;
@@ -773,14 +773,14 @@ mod tests {
             tester.expect_comments(1).await;
 
             tester.default_pr().await.expect_try_build_cancelled();
-            Ok(tester)
+            Ok(())
         })
         .await;
     }
 
     #[sqlx::test]
     async fn try_cancel_ignore_finished_workflows(pool: sqlx::PgPool) {
-        let gh = run_test(pool, |mut tester| async {
+        let gh = run_test(pool, async |tester| {
             tester.create_branch(TRY_BRANCH_NAME).expect_suites(3);
             tester.post_comment("@bors try").await?;
             tester.expect_comments(1).await;
@@ -799,7 +799,7 @@ mod tests {
                 .await?;
             tester.post_comment("@bors try cancel").await?;
             tester.expect_comments(1).await;
-            Ok(tester)
+            Ok(())
         })
         .await;
         gh.check_cancelled_workflows(default_repo_name(), &[3]);
@@ -807,7 +807,7 @@ mod tests {
 
     #[sqlx::test]
     async fn try_cancel_ignore_external_workflows(pool: sqlx::PgPool) {
-        let gh = run_test(pool, |mut tester| async {
+        let gh = run_test(pool, async |tester| {
             tester.create_branch(TRY_BRANCH_NAME).expect_suites(1);
             tester.post_comment("@bors try").await?;
             tester.expect_comments(1).await;
@@ -816,7 +816,7 @@ mod tests {
                 .await?;
             tester.post_comment("@bors try cancel").await?;
             tester.expect_comments(1).await;
-            Ok(tester)
+            Ok(())
         })
         .await;
         gh.check_cancelled_workflows(default_repo_name(), &[]);
@@ -824,7 +824,7 @@ mod tests {
 
     #[sqlx::test]
     async fn try_workflow_start_after_cancel(pool: sqlx::PgPool) {
-        run_test(pool.clone(), |mut tester| async {
+        run_test(pool.clone(), async |tester| {
             tester.post_comment("@bors try").await?;
             tester.expect_comments(1).await;
             tester.post_comment("@bors try cancel").await?;
@@ -833,7 +833,7 @@ mod tests {
             tester
                 .workflow_event(WorkflowEvent::started(tester.try_branch()))
                 .await?;
-            Ok(tester)
+            Ok(())
         })
         .await;
         assert_eq!(get_all_workflows(&pool).await.unwrap().len(), 0);
@@ -848,7 +848,7 @@ mod tests {
 try = ["+foo", "+bar", "-baz"]
 "#,
             ))
-            .run_test(|mut tester| async {
+            .run_test(async |tester| {
                 tester.post_comment("@bors try").await?;
                 insta::assert_snapshot!(tester.get_comment().await?, @r"
                 :hourglass: Trying commit pr-1-sha with merge merge-main-sha1-pr-1-sha-0…
@@ -859,7 +859,7 @@ try = ["+foo", "+bar", "-baz"]
                 let pr = repo.lock().get_pr(default_pr_number()).clone();
                 pr.check_added_labels(&["foo", "bar"]);
                 pr.check_removed_labels(&["baz"]);
-                Ok(tester)
+                Ok(())
             })
             .await;
     }
@@ -873,7 +873,7 @@ try = ["+foo", "+bar", "-baz"]
 try_succeed = ["+foo", "+bar", "-baz"]
 "#,
             ))
-            .run_test(|mut tester| async {
+            .run_test(async |tester| {
                 tester.post_comment("@bors try").await?;
                 insta::assert_snapshot!(tester.get_comment().await?, @r"
                 :hourglass: Trying commit pr-1-sha with merge merge-main-sha1-pr-1-sha-0…
@@ -889,7 +889,7 @@ try_succeed = ["+foo", "+bar", "-baz"]
                 let pr = repo.lock().get_pr(default_pr_number()).clone();
                 pr.check_added_labels(&["foo", "bar"]);
                 pr.check_removed_labels(&["baz"]);
-                Ok(tester)
+                Ok(())
             })
             .await;
     }
@@ -903,7 +903,7 @@ try_succeed = ["+foo", "+bar", "-baz"]
 try_failed = ["+foo", "+bar", "-baz"]
 "#,
             ))
-            .run_test(|mut tester| async {
+            .run_test(async |tester| {
                 tester.create_branch(TRY_BRANCH_NAME).expect_suites(1);
                 tester.post_comment("@bors try").await?;
                 insta::assert_snapshot!(tester.get_comment().await?, @r"
@@ -920,14 +920,14 @@ try_failed = ["+foo", "+bar", "-baz"]
                 let pr = repo.lock().get_pr(default_pr_number()).clone();
                 pr.check_added_labels(&["foo", "bar"]);
                 pr.check_removed_labels(&["baz"]);
-                Ok(tester)
+                Ok(())
             })
             .await;
     }
 
     #[sqlx::test]
     async fn try_build_creates_check_run(pool: sqlx::PgPool) {
-        run_test(pool.clone(), |mut tester| async {
+        run_test(pool, async |tester| {
             tester.create_branch(TRY_BRANCH_NAME).expect_suites(1);
             tester.post_comment("@bors try").await?;
             tester.expect_comments(1).await;
@@ -940,14 +940,14 @@ try_failed = ["+foo", "+bar", "-baz"]
                 None,
             );
 
-            Ok(tester)
+            Ok(())
         })
         .await;
     }
 
     #[sqlx::test]
     async fn try_build_updates_check_run_on_success(pool: sqlx::PgPool) {
-        run_test(pool.clone(), |mut tester| async {
+        run_test(pool, async |tester| {
             tester.create_branch(TRY_BRANCH_NAME).expect_suites(1);
             tester.post_comment("@bors try").await?;
             tester.expect_comments(1).await;
@@ -963,14 +963,14 @@ try_failed = ["+foo", "+bar", "-baz"]
                 Some(CheckRunConclusion::Success),
             );
 
-            Ok(tester)
+            Ok(())
         })
         .await;
     }
 
     #[sqlx::test]
     async fn try_build_updates_check_run_on_failure(pool: sqlx::PgPool) {
-        run_test(pool.clone(), |mut tester| async {
+        run_test(pool, async |tester| {
             tester.create_branch(TRY_BRANCH_NAME).expect_suites(1);
             tester.post_comment("@bors try").await?;
             tester.expect_comments(1).await;
@@ -986,14 +986,14 @@ try_failed = ["+foo", "+bar", "-baz"]
                 Some(CheckRunConclusion::Failure),
             );
 
-            Ok(tester)
+            Ok(())
         })
         .await;
     }
 
     #[sqlx::test]
     async fn try_cancel_updates_check_run_to_cancelled(pool: sqlx::PgPool) {
-        run_test(pool.clone(), |mut tester| async {
+        run_test(pool, async |tester| {
             tester.create_branch(TRY_BRANCH_NAME).expect_suites(1);
             tester.post_comment("@bors try").await?;
             tester.expect_comments(1).await;
@@ -1009,14 +1009,14 @@ try_failed = ["+foo", "+bar", "-baz"]
                 Some(CheckRunConclusion::Cancelled),
             );
 
-            Ok(tester)
+            Ok(())
         })
         .await;
     }
 
     #[sqlx::test]
     async fn new_try_build_cancels_previous_and_updates_check_run(pool: sqlx::PgPool) {
-        run_test(pool.clone(), |mut tester| async {
+        run_test(pool, async |tester| {
             tester.create_branch(TRY_BRANCH_NAME).expect_suites(1);
             tester.post_comment("@bors try").await?;
             tester.expect_comments(1).await;
@@ -1042,7 +1042,7 @@ try_failed = ["+foo", "+bar", "-baz"]
                 CheckRunStatus::InProgress,
                 None,
             );
-            Ok(tester)
+            Ok(())
         })
         .await;
     }

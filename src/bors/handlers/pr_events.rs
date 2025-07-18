@@ -343,7 +343,7 @@ mod tests {
 
     #[sqlx::test]
     async fn unapprove_on_base_edited(pool: sqlx::PgPool) {
-        run_test(pool, |mut tester| async {
+        run_test(pool, async |tester| {
             tester.post_comment("@bors r+").await?;
             tester.expect_comments(1).await;
             let branch = tester.create_branch("beta").clone();
@@ -361,14 +361,14 @@ mod tests {
             "
             );
             tester.default_pr().await.expect_unapproved();
-            Ok(tester)
+            Ok(())
         })
         .await;
     }
 
     #[sqlx::test]
     async fn edit_pr_do_nothing_when_base_not_edited(pool: sqlx::PgPool) {
-        run_test(pool, |mut tester| async {
+        run_test(pool, async |tester| {
             tester.post_comment("@bors r+").await?;
             tester.expect_comments(1).await;
             tester
@@ -379,14 +379,14 @@ mod tests {
                 .default_pr()
                 .await
                 .expect_approved_by(&User::default_pr_author().name);
-            Ok(tester)
+            Ok(())
         })
         .await;
     }
 
     #[sqlx::test]
     async fn edit_pr_do_nothing_when_not_approved(pool: sqlx::PgPool) {
-        run_test(pool, |mut tester| async {
+        run_test(pool, async |tester| {
             let branch = tester.create_branch("beta").clone();
             tester
                 .edit_pr(default_repo_name(), default_pr_number(), |pr| {
@@ -395,14 +395,14 @@ mod tests {
                 .await?;
 
             // No comment should be posted
-            Ok(tester)
+            Ok(())
         })
         .await;
     }
 
     #[sqlx::test]
     async fn unapprove_on_push(pool: sqlx::PgPool) {
-        run_test(pool, |mut tester| async {
+        run_test(pool, async |tester| {
             tester.post_comment("@bors r+").await?;
             tester.expect_comments(1).await;
             tester
@@ -417,27 +417,27 @@ mod tests {
             "
             );
             tester.default_pr().await.expect_unapproved();
-            Ok(tester)
+            Ok(())
         })
         .await;
     }
 
     #[sqlx::test]
     async fn push_to_pr_do_nothing_when_not_approved(pool: sqlx::PgPool) {
-        run_test(pool, |mut tester| async {
+        run_test(pool, async |tester| {
             tester
                 .push_to_pr(default_repo_name(), default_pr_number())
                 .await?;
 
             // No comment should be posted
-            Ok(tester)
+            Ok(())
         })
         .await;
     }
 
     #[sqlx::test]
     async fn store_base_branch_on_pr_opened(pool: sqlx::PgPool) {
-        run_test(pool, |mut tester| async {
+        run_test(pool, async |tester| {
             let pr = tester.open_pr(default_repo_name(), false).await?;
             tester
                 .wait_for_pr(default_repo_name(), pr.number.0, |pr| {
@@ -445,14 +445,14 @@ mod tests {
                         && pr.pr_status == PullRequestStatus::Open
                 })
                 .await?;
-            Ok(tester)
+            Ok(())
         })
         .await;
     }
 
     #[sqlx::test]
     async fn update_base_branch_on_pr_edited(pool: sqlx::PgPool) {
-        run_test(pool.clone(), |mut tester| async {
+        run_test(pool, async |tester| {
             let branch = tester.create_branch("foo").clone();
             tester
                 .edit_pr(default_repo_name(), default_pr_number(), |pr| {
@@ -464,14 +464,14 @@ mod tests {
                     pr.base_branch == "foo"
                 })
                 .await?;
-            Ok(tester)
+            Ok(())
         })
         .await;
     }
 
     #[sqlx::test]
     async fn update_mergeable_state_on_pr_edited(pool: sqlx::PgPool) {
-        run_test(pool.clone(), |mut tester| async {
+        run_test(pool, async |tester| {
             tester
                 .edit_pr(default_repo_name(), default_pr_number(), |pr| {
                     pr.mergeable_state = OctocrabMergeableState::Dirty;
@@ -480,14 +480,14 @@ mod tests {
             tester
                 .wait_for_default_pr(|pr| pr.mergeable_state == MergeableState::HasConflicts)
                 .await?;
-            Ok(tester)
+            Ok(())
         })
         .await;
     }
 
     #[sqlx::test]
     async fn open_close_and_reopen_pr(pool: sqlx::PgPool) {
-        run_test(pool, |mut tester| async {
+        run_test(pool, async |tester| {
             let pr = tester.open_pr(default_repo_name(), false).await?;
             tester
                 .wait_for_pr(default_repo_name(), pr.number.0, |pr| {
@@ -508,14 +508,14 @@ mod tests {
                     pr.pr_status == PullRequestStatus::Open
                 })
                 .await?;
-            Ok(tester)
+            Ok(())
         })
         .await;
     }
 
     #[sqlx::test]
     async fn open_draft_pr_and_convert_to_ready_for_review(pool: sqlx::PgPool) {
-        run_test(pool, |mut tester| async {
+        run_test(pool, async |tester| {
             let pr = tester.open_pr(default_repo_name(), true).await?;
             tester
                 .wait_for_pr(default_repo_name(), pr.number.0, |pr| {
@@ -530,14 +530,14 @@ mod tests {
                     pr.pr_status == PullRequestStatus::Open
                 })
                 .await?;
-            Ok(tester)
+            Ok(())
         })
         .await;
     }
 
     #[sqlx::test]
     async fn open_pr_and_convert_to_draft(pool: sqlx::PgPool) {
-        run_test(pool, |mut tester| async {
+        run_test(pool, async |tester| {
             let pr = tester.open_pr(default_repo_name(), false).await?;
             tester
                 .wait_for_pr(default_repo_name(), pr.number.0, |pr| {
@@ -552,14 +552,14 @@ mod tests {
                     pr.pr_status == PullRequestStatus::Draft
                 })
                 .await?;
-            Ok(tester)
+            Ok(())
         })
         .await;
     }
 
     #[sqlx::test]
     async fn assign_pr_updates_assignees(pool: sqlx::PgPool) {
-        run_test(pool, |mut tester| async {
+        run_test(pool, async |tester| {
             let pr = tester.open_pr(default_repo_name(), false).await?;
             tester
                 .wait_for_pr(default_repo_name(), pr.number.0, |pr| {
@@ -574,14 +574,14 @@ mod tests {
                     pr.assignees == vec![User::reviewer().name]
                 })
                 .await?;
-            Ok(tester)
+            Ok(())
         })
         .await;
     }
 
     #[sqlx::test]
     async fn unassign_pr_updates_assignees(pool: sqlx::PgPool) {
-        run_test(pool, |mut tester| async {
+        run_test(pool, async |tester| {
             let pr = tester.open_pr(default_repo_name(), false).await?;
             tester
                 .assign_pr(default_repo_name(), pr.number.0, User::reviewer())
@@ -599,14 +599,14 @@ mod tests {
                     pr.assignees.is_empty()
                 })
                 .await?;
-            Ok(tester)
+            Ok(())
         })
         .await;
     }
 
     #[sqlx::test]
     async fn open_and_merge_pr(pool: sqlx::PgPool) {
-        run_test(pool, |mut tester| async {
+        run_test(pool, async |tester| {
             let pr = tester.open_pr(default_repo_name(), false).await?;
             tester
                 .wait_for_pr(default_repo_name(), pr.number.0, |pr| {
@@ -621,14 +621,14 @@ mod tests {
                     pr.pr_status == PullRequestStatus::Merged
                 })
                 .await?;
-            Ok(tester)
+            Ok(())
         })
         .await;
     }
 
     #[sqlx::test]
     async fn mergeable_queue_processes_pr_base_change(pool: sqlx::PgPool) {
-        run_test(pool, |mut tester| async {
+        run_test(pool, async |tester| {
             let branch = tester.create_branch("beta").clone();
             tester
                 .edit_pr(default_repo_name(), default_pr_number(), |pr| {
@@ -647,14 +647,14 @@ mod tests {
             tester
                 .wait_for_default_pr(|pr| pr.mergeable_state == MergeableState::HasConflicts)
                 .await?;
-            Ok(tester)
+            Ok(())
         })
         .await;
     }
 
     #[sqlx::test]
     async fn enqueue_prs_on_push_to_branch(pool: sqlx::PgPool) {
-        run_test(pool, |mut tester| async {
+        run_test(pool, async |tester| {
             tester.open_pr(default_repo_name(), false).await?;
             tester.push_to_branch(default_branch_name()).await?;
             tester
@@ -668,14 +668,14 @@ mod tests {
             tester
                 .wait_for_default_pr(|pr| pr.mergeable_state == MergeableState::HasConflicts)
                 .await?;
-            Ok(tester)
+            Ok(())
         })
         .await;
     }
 
     #[sqlx::test]
     async fn enqueue_prs_on_pr_opened(pool: sqlx::PgPool) {
-        run_test(pool, |mut tester| async {
+        run_test(pool, async |tester| {
             tester.open_pr(default_repo_name(), false).await?;
             tester
                 .wait_for_default_pr(|pr| pr.mergeable_state == MergeableState::Unknown)
@@ -688,14 +688,14 @@ mod tests {
             tester
                 .wait_for_default_pr(|pr| pr.mergeable_state == MergeableState::HasConflicts)
                 .await?;
-            Ok(tester)
+            Ok(())
         })
         .await;
     }
 
     #[sqlx::test]
     async fn enqueue_prs_on_pr_reopened(pool: sqlx::PgPool) {
-        run_test(pool, |mut tester| async {
+        run_test(pool, async |tester| {
             tester
                 .default_repo()
                 .lock()
@@ -715,14 +715,14 @@ mod tests {
             tester
                 .wait_for_default_pr(|pr| pr.mergeable_state == MergeableState::HasConflicts)
                 .await?;
-            Ok(tester)
+            Ok(())
         })
         .await;
     }
 
     #[sqlx::test]
     async fn enqueue_prs_on_push_to_pr(pool: sqlx::PgPool) {
-        run_test(pool, |mut tester| async {
+        run_test(pool, async |tester| {
             tester
                 .push_to_pr(default_repo_name(), default_pr_number())
                 .await?;
@@ -737,7 +737,7 @@ mod tests {
             tester
                 .wait_for_default_pr(|pr| pr.mergeable_state == MergeableState::HasConflicts)
                 .await?;
-            Ok(tester)
+            Ok(())
         })
         .await;
     }

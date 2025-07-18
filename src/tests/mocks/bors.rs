@@ -67,21 +67,34 @@ impl BorsBuilder {
     /// This closure is used to ensure that the test has to return `BorsTester`
     /// to us, so that we can call `finish()` on it. Without that call, we couldn't
     /// ensure that some async task within the bors process hasn't crashed.
-    pub async fn run_test<
-        F: FnOnce(BorsTester) -> Fut,
-        Fut: Future<Output = anyhow::Result<BorsTester>>,
-    >(
+    pub async fn run_test<F: AsyncFnOnce(&mut BorsTester) -> anyhow::Result<()>>(
         self,
         f: F,
     ) -> GitHubState {
         // We return `tester` and `bors` separately, so that we can finish `bors`
-        // even if `f` returns a result, for better error propagation.
-        let (tester, bors) = BorsTester::new(self.pool, self.github).await;
-        match f(tester).await {
-            Ok(tester) => tester.finish(bors).await,
-            Err(error) => {
-                let result = bors.await;
-                panic!("Error in test:\n{error:?}\n\nBors service result:\n{result:?}");
+        // even if `f` returns an error or times out, for better error propagation.
+        let (mut tester, bors) = BorsTester::new(self.pool, self.github).await;
+
+        let timeout = Duration::from_secs(10);
+        let result = tokio::time::timeout(timeout, f(&mut tester)).await;
+        let gh_state = tester.finish(bors).await;
+
+        match result {
+            Ok(res) => match res {
+                Ok(_) => gh_state.expect("Bors service has failed"),
+                Err(error) => {
+                    panic!(
+                        "Test has failed: {error:?}\n\nBors service error: {:?}",
+                        gh_state.err()
+                    );
+                }
+            },
+            Err(_) => {
+                panic!(
+                    "Test has timeouted after {}s\n\nBors service error: {:?}",
+                    timeout.as_secs(),
+                    gh_state.err()
+                );
             }
         }
     }
@@ -89,10 +102,7 @@ impl BorsBuilder {
 
 /// Simple end-to-end test entrypoint for tests that don't need to prepare any custom state.
 /// See [GitHubState::default] for how does the default state look like.
-pub async fn run_test<
-    F: FnOnce(BorsTester) -> Fut,
-    Fut: Future<Output = anyhow::Result<BorsTester>>,
->(
+pub async fn run_test<F: AsyncFnOnce(&mut BorsTester) -> anyhow::Result<()>>(
     pool: PgPool,
     f: F,
 ) -> GitHubState {
@@ -836,7 +846,7 @@ impl BorsTester {
         Ok(())
     }
 
-    async fn finish(self, bors: JoinHandle<()>) -> GitHubState {
+    async fn finish(self, bors: JoinHandle<()>) -> anyhow::Result<GitHubState> {
         // Make sure that the event channel senders are closed
         drop(self.app);
         drop(self.global_tx);
@@ -844,14 +854,16 @@ impl BorsTester {
         self.mergeable_queue_tx.shutdown();
         // Wait until all events are handled in the bors service
         match tokio::time::timeout(Duration::from_secs(5), bors).await {
-            Ok(res) => res.expect("Bors service ended with an error"),
-            Err(_) => panic!(
-                "Timed out waiting for bors service to shutdown. Maybe you forgot to close some channel senders?"
-            ),
-        }
+            Ok(res) => res?,
+            Err(_) => {
+                return Err(anyhow::anyhow!(
+                    "Timed out waiting for bors service to shutdown. Maybe you forgot to close some channel senders?"
+                ));
+            }
+        };
         // Flush any local queues
         self.http_mock.gh_server.assert_empty_queues().await;
-        self.github
+        Ok(self.github)
     }
 }
 

@@ -64,7 +64,7 @@ mod tests {
 
     #[sqlx::test]
     async fn info_for_unapproved_pr(pool: sqlx::PgPool) {
-        run_test(pool, |mut tester| async {
+        run_test(pool, async |tester| {
             tester.post_comment("@bors info").await?;
             insta::assert_snapshot!(
                 tester.get_comment().await?,
@@ -75,14 +75,14 @@ mod tests {
             - Mergeable: yes
             "
             );
-            Ok(tester)
+            Ok(())
         })
         .await;
     }
 
     #[sqlx::test]
     async fn info_for_approved_pr(pool: sqlx::PgPool) {
-        run_test(pool, |mut tester| async {
+        run_test(pool, async |tester| {
             tester.post_comment("@bors r+").await?;
             tester.expect_comments(1).await;
 
@@ -96,14 +96,14 @@ mod tests {
             - Mergeable: yes
             "
             );
-            Ok(tester)
+            Ok(())
         })
         .await;
     }
 
     #[sqlx::test]
     async fn info_for_pr_with_priority(pool: sqlx::PgPool) {
-        run_test(pool, |mut tester| async {
+        run_test(pool, async |tester| {
             tester.post_comment("@bors p=5").await?;
             tester
                 .wait_for_default_pr(|pr| pr.priority == Some(5))
@@ -119,14 +119,14 @@ mod tests {
             - Mergeable: yes
             "
             );
-            Ok(tester)
+            Ok(())
         })
         .await;
     }
 
     #[sqlx::test]
     async fn info_for_pr_with_try_build(pool: sqlx::PgPool) {
-        run_test(pool, |mut tester| async {
+        run_test(pool, async |tester| {
             tester.post_comment("@bors try").await?;
             tester.expect_comments(1).await;
 
@@ -141,14 +141,14 @@ mod tests {
             - Try build is in progress
             "
             );
-            Ok(tester)
+            Ok(())
         })
         .await;
     }
 
     #[sqlx::test]
     async fn info_for_pr_with_everything(pool: sqlx::PgPool) {
-        run_test(pool, |mut tester| async {
+        run_test(pool, async |tester| {
             tester.post_comment("@bors r+ p=10").await?;
             tester.expect_comments(1).await;
 
@@ -171,7 +171,7 @@ mod tests {
             	- Workflow URL: https://github.com/workflows/Workflow1/1
             "
             );
-            Ok(tester)
+            Ok(())
         })
         .await;
     }
