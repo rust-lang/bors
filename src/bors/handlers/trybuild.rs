@@ -470,6 +470,22 @@ mod tests {
     }
 
     #[sqlx::test]
+    async fn try_merge_commit_message(pool: sqlx::PgPool) {
+        run_test(pool, async |tester: &mut BorsTester| {
+            tester.post_comment("@bors try").await?;
+            tester.expect_comments(1).await;
+            insta::assert_snapshot!(tester.get_branch_commit_message(&tester.try_branch()), @r"
+            Auto merge of rust-lang/borstest#1 - pr-1, r=<try>
+            PR #1
+
+            Description of PR #1
+            ");
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
     async fn try_merge_branch_history(pool: sqlx::PgPool) {
         let gh = run_test(pool, async |tester| {
             tester.post_comment("@bors try").await?;

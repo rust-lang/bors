@@ -153,6 +153,7 @@ pub struct Repo {
     pub permissions: Permissions,
     pub config: String,
     pub branches: Vec<Branch>,
+    pub commit_messages: HashMap<String, String>,
     pub workflows_cancelled_by_bors: Vec<u64>,
     pub workflow_cancel_error: bool,
     /// All workflows that we know about from the side of the test.
@@ -172,6 +173,7 @@ impl Repo {
             config,
             pull_requests: Default::default(),
             branches: vec![Branch::default()],
+            commit_messages: Default::default(),
             workflows_cancelled_by_bors: vec![],
             workflow_cancel_error: false,
             workflow_runs: vec![],
@@ -243,6 +245,18 @@ impl Repo {
         self.pr_push_counter += 1;
         self.pr_push_counter
     }
+
+    pub fn get_commit_message(&self, sha: &str) -> String {
+        self.commit_messages
+            .get(sha)
+            .expect("Commit message not found")
+            .clone()
+    }
+
+    pub fn set_commit_message(&mut self, sha: &str, message: &str) {
+        self.commit_messages
+            .insert(sha.to_string(), message.to_string());
+    }
 }
 
 /// Represents the default repository for tests.
@@ -285,7 +299,6 @@ pub fn default_repo_name() -> GithubRepoName {
 pub struct Branch {
     name: String,
     sha: String,
-    commit_message: String,
     sha_history: Vec<String>,
     merge_counter: u64,
     pub merge_conflict: bool,
@@ -296,7 +309,6 @@ impl Branch {
         Self {
             name: name.to_string(),
             sha: sha.to_string(),
-            commit_message: format!("Commit {sha}"),
             sha_history: vec![],
             merge_counter: 0,
             merge_conflict: false,
@@ -549,7 +561,7 @@ async fn mock_merge_branch(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
             );
             base_branch.merge_counter += 1;
             base_branch.set_to_sha(&merge_sha);
-            base_branch.commit_message = data.commit_message;
+            repo.set_commit_message(&merge_sha, &data.commit_message);
 
             #[derive(serde::Serialize)]
             struct MergeResponse {

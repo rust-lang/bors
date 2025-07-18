@@ -47,7 +47,7 @@ use crate::{
 
 /// How long should we wait before we timeout a test.
 /// You can increase this if you want to do interactive debugging.
-const TEST_TIMEOUT: Duration = Duration::from_secs(10);
+const TEST_TIMEOUT: Duration = Duration::from_secs(100);
 
 pub fn default_cmd_prefix() -> CommandPrefix {
     "@bors".to_string().into()
@@ -275,6 +275,13 @@ impl BorsTester {
             .get_branch_by_name(name)
             .unwrap()
             .clone()
+    }
+
+    pub fn get_branch_commit_message(&self, branch: &Branch) -> String {
+        self.github
+            .default_repo()
+            .lock()
+            .get_commit_message(branch.get_sha())
     }
 
     pub async fn push_to_branch(&mut self, branch: &str) -> anyhow::Result<()> {

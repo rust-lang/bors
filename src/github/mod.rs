@@ -83,7 +83,7 @@ impl From<octocrab::models::Author> for GithubUser {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct CommitSha(pub String);
 
 impl From<String> for CommitSha {
