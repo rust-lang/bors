@@ -25,6 +25,7 @@ pub use repository::default_branch_name;
 pub use repository::default_repo_name;
 pub use user::User;
 pub use workflow::WorkflowEvent;
+pub use workflow::WorkflowJob;
 pub use workflow::WorkflowRunData;
 
 mod app;

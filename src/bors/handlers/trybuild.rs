@@ -10,7 +10,6 @@ use crate::bors::comment::{
     cant_find_last_parent_comment, merge_conflict_comment, try_build_started_comment,
 };
 use crate::bors::handlers::labels::handle_label_trigger;
-use crate::database::RunId;
 use crate::database::{BuildModel, BuildStatus, PullRequestModel};
 use crate::github::GithubRepoName;
 use crate::github::api::client::GithubRepositoryClient;
@@ -20,6 +19,7 @@ use crate::permissions::PermissionType;
 use crate::utils::text::suppress_github_mentions;
 use anyhow::{Context, anyhow};
 use itertools::Itertools;
+use octocrab::models::CheckRunId;
 use octocrab::params::checks::CheckRunConclusion;
 use octocrab::params::checks::CheckRunOutput;
 use octocrab::params::checks::CheckRunStatus;
@@ -312,8 +312,12 @@ pub async fn cancel_build_workflows(
     db: &PgDbClient,
     build: &BuildModel,
     check_run_conclusion: CheckRunConclusion,
-) -> anyhow::Result<Vec<RunId>> {
+) -> anyhow::Result<Vec<octocrab::models::RunId>> {
     let pending_workflows = db.get_pending_workflows_for_build(build).await?;
+    let pending_workflows: Vec<octocrab::models::RunId> = pending_workflows
+        .into_iter()
+        .map(|id| octocrab::models::RunId(id.0))
+        .collect();
 
     tracing::info!("Cancelling workflows {:?}", pending_workflows);
     client.cancel_workflows(&pending_workflows).await?;
@@ -324,7 +328,7 @@ pub async fn cancel_build_workflows(
     if let Some(check_run_id) = build.check_run_id {
         if let Err(error) = client
             .update_check_run(
-                check_run_id as u64,
+                CheckRunId(check_run_id as u64),
                 CheckRunStatus::Completed,
                 Some(check_run_conclusion),
                 None,
@@ -413,9 +417,10 @@ mod tests {
     use crate::github::CommitSha;
     use crate::tests::BorsTester;
     use crate::tests::mocks::{
-        BorsBuilder, Comment, GitHubState, User, WorkflowEvent, WorkflowRunData, default_pr_number,
-        default_repo_name, run_test,
+        BorsBuilder, Comment, GitHubState, User, WorkflowEvent, WorkflowJob, WorkflowRunData,
+        default_pr_number, default_repo_name, run_test,
     };
+    use octocrab::models::JobId;
     use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
 
     #[sqlx::test]
@@ -446,14 +451,47 @@ mod tests {
             tester.workflow_full_failure(tester.try_branch()).await?;
             insta::assert_snapshot!(
                 tester.get_comment().await?,
-                @r###"
-            :broken_heart: Test failed
-            - [Workflow1](https://github.com/workflows/Workflow1/1) :x:
-            "###
+                @":broken_heart: Test failed ([Workflow1](https://github.com/workflows/Workflow1/1))"
             );
             Ok(())
         })
         .await;
+    }
+
+    #[sqlx::test]
+    async fn try_failure_job(pool: sqlx::PgPool) {
+        run_test(pool, async |tester: &mut BorsTester| {
+            tester.post_comment("@bors try").await?;
+            tester.expect_comments(1).await;
+
+            let mut workflow = WorkflowRunData::from(tester.try_branch());
+            workflow.jobs.push(WorkflowJob {
+                id: JobId(42),
+                status: WorkflowStatus::Failure,
+            });
+            workflow.jobs.push(WorkflowJob {
+                id: JobId(50),
+                status: WorkflowStatus::Failure,
+            });
+            workflow.jobs.push(WorkflowJob {
+                id: JobId(51),
+                status: WorkflowStatus::Success,
+            });
+
+            tester.default_repo().lock().update_workflow_run(workflow.clone(), WorkflowStatus::Pending);
+            tester.workflow_full_failure(workflow).await?;
+            insta::assert_snapshot!(
+                tester.get_comment().await?,
+                @r"
+            :broken_heart: Test failed ([Workflow1](https://github.com/workflows/Workflow1/1)). Failed jobs:
+
+            - `Job 42` ([web logs](https://github.com/job-logs/42), [extended logs](https://triage.rust-lang.org/gha-logs/rust-lang/borstest/42))
+            - `Job 50` ([web logs](https://github.com/job-logs/50), [extended logs](https://triage.rust-lang.org/gha-logs/rust-lang/borstest/50))
+            "
+            );
+            Ok(())
+        })
+            .await;
     }
 
     #[sqlx::test]

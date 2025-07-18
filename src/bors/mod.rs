@@ -8,6 +8,7 @@ pub use comment::Comment;
 pub use context::BorsContext;
 pub use handlers::{handle_bors_global_event, handle_bors_repository_event};
 use octocrab::models::RunId;
+use octocrab::models::workflows::Job;
 use serde::Serialize;
 
 use crate::config::RepositoryConfig;
@@ -25,7 +26,7 @@ mod handlers;
 pub mod merge_queue;
 pub mod mergeable_queue;
 
-use crate::database::WorkflowStatus;
+use crate::database::{WorkflowModel, WorkflowStatus};
 pub use command::CommandPrefix;
 
 #[cfg(test)]
@@ -45,6 +46,11 @@ pub static WAIT_FOR_WORKFLOW_STARTED: TestSyncMarker = TestSyncMarker::new();
 pub struct WorkflowRun {
     pub id: RunId,
     pub status: WorkflowStatus,
+}
+
+pub struct FailedWorkflowRun {
+    pub workflow_run: WorkflowModel,
+    pub failed_jobs: Vec<Job>,
 }
 
 /// An access point to a single repository.

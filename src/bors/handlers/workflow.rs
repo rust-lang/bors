@@ -1,19 +1,19 @@
-use std::sync::Arc;
-use std::time::Duration;
-
-use octocrab::params::checks::CheckRunConclusion;
-use octocrab::params::checks::CheckRunStatus;
-
 use crate::PgDbClient;
-use crate::bors::comment::{try_build_succeeded_comment, workflow_failed_comment};
+use crate::bors::comment::{build_failed_comment, try_build_succeeded_comment};
 use crate::bors::event::{WorkflowRunCompleted, WorkflowRunStarted};
 use crate::bors::handlers::is_bors_observed_branch;
 use crate::bors::handlers::labels::handle_label_trigger;
 use crate::bors::merge_queue::AUTO_BRANCH_NAME;
 use crate::bors::merge_queue::MergeQueueSender;
-use crate::bors::{RepositoryState, WorkflowRun};
-use crate::database::{BuildStatus, WorkflowStatus};
+use crate::bors::{FailedWorkflowRun, RepositoryState, WorkflowRun};
+use crate::database::{BuildStatus, WorkflowModel, WorkflowStatus};
 use crate::github::LabelTrigger;
+use octocrab::models::CheckRunId;
+use octocrab::models::workflows::{Conclusion, Job, Status};
+use octocrab::params::checks::CheckRunConclusion;
+use octocrab::params::checks::CheckRunStatus;
+use std::sync::Arc;
+use std::time::Duration;
 
 pub(super) async fn handle_workflow_started(
     db: Arc<PgDbClient>,
@@ -203,7 +203,7 @@ async fn maybe_complete_build(
 
         if let Err(error) = repo
             .client
-            .update_check_run(check_run_id as u64, status, conclusion, None)
+            .update_check_run(CheckRunId(check_run_id as u64), status, conclusion, None)
             .await
         {
             tracing::error!("Could not update check run {check_run_id}: {error:?}");
@@ -211,12 +211,32 @@ async fn maybe_complete_build(
     }
 
     db_workflow_runs.sort_by(|a, b| a.name.cmp(&b.name));
+
     let message = if !has_failure {
-        tracing::info!("Workflow succeeded");
+        tracing::info!("Build succeeded");
         try_build_succeeded_comment(&db_workflow_runs, payload.commit_sha, &build)
     } else {
-        tracing::info!("Workflow failed");
-        workflow_failed_comment(&db_workflow_runs)
+        // Download failed jobs
+        let mut workflow_runs: Vec<FailedWorkflowRun> = vec![];
+        for workflow_run in db_workflow_runs {
+            let failed_jobs = match get_failed_jobs(repo, &workflow_run).await {
+                Ok(jobs) => jobs,
+                Err(error) => {
+                    tracing::error!(
+                        "Cannot download jobs for workflow run {}: {error:?}",
+                        workflow_run.run_id
+                    );
+                    vec![]
+                }
+            };
+            workflow_runs.push(FailedWorkflowRun {
+                workflow_run,
+                failed_jobs,
+            })
+        }
+
+        tracing::info!("Build failed");
+        build_failed_comment(repo.repository(), workflow_runs)
     };
     repo.client.post_comment(pr.number, message).await?;
 
@@ -226,6 +246,29 @@ async fn maybe_complete_build(
     }
 
     Ok(())
+}
+
+/// Return failed jobs from the given workflow run.
+async fn get_failed_jobs(
+    repo: &RepositoryState,
+    workflow_run: &WorkflowModel,
+) -> anyhow::Result<Vec<Job>> {
+    let jobs = repo
+        .client
+        .get_jobs_for_workflow_run(workflow_run.run_id.into())
+        .await?;
+    Ok(jobs
+        .into_iter()
+        .filter(|j| {
+            j.status == Status::Failed || {
+                j.status == Status::Completed
+                    && matches!(
+                        j.conclusion,
+                        Some(Conclusion::Failure | Conclusion::Cancelled | Conclusion::TimedOut)
+                    )
+            }
+        })
+        .collect())
 }
 
 #[cfg(test)]
@@ -376,11 +419,7 @@ mod tests {
             tester.workflow_event(WorkflowEvent::failure(w2)).await?;
             insta::assert_snapshot!(
                 tester.get_comment().await?,
-                @r"
-            :broken_heart: Test failed
-            - [Workflow1](https://github.com/workflows/Workflow1/1) :question:
-            - [Workflow1](https://github.com/workflows/Workflow1/2) :x:
-            "
+                @":broken_heart: Test failed ([Workflow1](https://github.com/workflows/Workflow1/1), [Workflow1](https://github.com/workflows/Workflow1/2))"
             );
             Ok(())
         })
