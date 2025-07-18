@@ -1418,12 +1418,12 @@ mod tests {
     async fn workflow_run_requested() {
         insta::assert_debug_snapshot!(
             check_webhook("webhook/workflow-run-requested.json", "workflow_run").await,
-            @r###"
+            @r#"
         Ok(
             GitHubWebhook(
                 Repository(
                     WorkflowStarted(
-                        WorkflowStarted {
+                        WorkflowRunStarted {
                             repository: GithubRepoName {
                                 owner: "kobzol",
                                 name: "bors-kindergarten",
@@ -1443,7 +1443,7 @@ mod tests {
                 ),
             ),
         )
-        "###
+        "#
         );
     }
 
@@ -1451,12 +1451,12 @@ mod tests {
     async fn workflow_run_completed() {
         insta::assert_debug_snapshot!(
             check_webhook("webhook/workflow-run-completed.json", "workflow_run").await,
-            @r###"
+            @r#"
         Ok(
             GitHubWebhook(
                 Repository(
                     WorkflowCompleted(
-                        WorkflowCompleted {
+                        WorkflowRunCompleted {
                             repository: GithubRepoName {
                                 owner: "kobzol",
                                 name: "bors-kindergarten",
@@ -1475,12 +1475,15 @@ mod tests {
                                     nanos: 0,
                                 },
                             ),
+                            check_suite_id: CheckSuiteId(
+                                12717696197,
+                            ),
                         },
                     ),
                 ),
             ),
         )
-        "###
+        "#
         );
     }
 

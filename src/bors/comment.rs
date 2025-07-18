@@ -196,10 +196,10 @@ fn list_workflows_status(workflows: &[WorkflowModel]) -> String {
                 "- [{}]({}) {}",
                 w.name,
                 w.url,
-                if w.status == WorkflowStatus::Success {
-                    ":white_check_mark:"
-                } else {
-                    ":x:"
+                match w.status {
+                    WorkflowStatus::Success => ":white_check_mark:",
+                    WorkflowStatus::Failure => ":x:",
+                    WorkflowStatus::Pending => ":question:",
                 }
             )
         })

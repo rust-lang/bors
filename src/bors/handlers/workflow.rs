@@ -141,40 +141,45 @@ async fn maybe_complete_build(
     let mut db_workflow_runs = db.get_workflows_for_build(&build).await?;
     tracing::debug!("Workflow runs from DB: {db_workflow_runs:?}");
 
-    {
-        // Ask GitHub about all workflow runs attached to the check suite of the completed workflow run.
-        // This tells us for how many workflow runs we should wait.
-        // We assume that this number is final, and after a single workflow run has been completed, no
-        // other workflow runs attached to the check suite can appear out of nowhere.
-        // Note: we actually only need the number of workflow runs in this function, but we download
-        // some data about them to have better logging.
-        let gh_workflow_runs: Vec<WorkflowRun> = repo
-            .client
-            .get_workflow_runs_for_check_suite(payload.check_suite_id)
-            .await?;
-        tracing::debug!("Workflow runs from GitHub: {gh_workflow_runs:?}");
+    // If the workflow run was a success, check if we're still waiting for some other workflow run.
+    // If it was a failure, then immediately mark the build as failed.
+    if payload.status == WorkflowStatus::Success {
+        {
+            // Ask GitHub about all workflow runs attached to the check suite of the completed workflow run.
+            // This tells us for how many workflow runs we should wait.
+            // We assume that this number is final, and after a single workflow run has been completed, no
+            // other workflow runs attached to the check suite can appear out of nowhere.
+            // Note: we actually only need the number of workflow runs in this function, but we download
+            // some data about them to have better logging.
+            let gh_workflow_runs: Vec<WorkflowRun> = repo
+                .client
+                .get_workflow_runs_for_check_suite(payload.check_suite_id)
+                .await?;
+            tracing::debug!("Workflow runs from GitHub: {gh_workflow_runs:?}");
 
-        // This could happen if a workflow run webhook is lost, or if one workflow run manages to finish
-        // before another workflow run even manages to start. It should be rare.
-        // We will wait for the next workflow run completed webhook.
-        if db_workflow_runs.len() < gh_workflow_runs.len() {
-            tracing::warn!("Workflow count mismatch, waiting for the next webhook");
+            // This could happen if a workflow run webhook is lost, or if one workflow run manages to finish
+            // before another workflow run even manages to start. It should be rare.
+            // We will wait for the next workflow run completed webhook.
+            if db_workflow_runs.len() < gh_workflow_runs.len() {
+                tracing::warn!("Workflow count mismatch, waiting for the next webhook");
+                return Ok(());
+            }
+        }
+
+        // We have all expected workflow runs in the DB, but some of them are still pending.
+        // Wait for the next workflow run to be finished.
+        if db_workflow_runs
+            .iter()
+            .any(|w| w.status == WorkflowStatus::Pending)
+        {
+            tracing::info!("Some workflows are not finished yet, waiting for the next webhook.");
             return Ok(());
         }
     }
 
-    // We have all expected workflow runs in the DB, but some of them are still pending.
-    // Wait for the next workflow run to be finished.
-    if db_workflow_runs
-        .iter()
-        .any(|w| w.status == WorkflowStatus::Pending)
-    {
-        tracing::info!("Some workflows are not finished yet, waiting for the next webhook.");
-        return Ok(());
-    }
-
-    // Below this point, we assume that the build has completed, because all workflow runs attached
-    // to the corresponding check suite are completed.
+    // Below this point, we assume that the build has completed.
+    // Either all workflow runs attached to the corresponding check suite are completed or there
+    // was at least one failure.
 
     let has_failure = db_workflow_runs
         .iter()
@@ -225,10 +230,10 @@ async fn maybe_complete_build(
 
 #[cfg(test)]
 mod tests {
-    use crate::bors::handlers::trybuild::TRY_BRANCH_NAME;
     use crate::database::WorkflowStatus;
     use crate::database::operations::get_all_workflows;
-    use crate::tests::mocks::{Branch, Workflow, WorkflowEvent, run_test};
+    use crate::tests::BorsTester;
+    use crate::tests::mocks::{Branch, WorkflowEvent, WorkflowRunData, run_test};
 
     #[sqlx::test]
     async fn workflow_started_unknown_build(pool: sqlx::PgPool) {
@@ -281,7 +286,7 @@ mod tests {
             tester.post_comment("@bors try").await?;
             tester.expect_comments(1).await;
 
-            let workflow = Workflow::from(tester.try_branch());
+            let workflow = WorkflowRunData::from(tester.try_branch());
             tester
                 .workflow_event(WorkflowEvent::started(workflow.clone()))
                 .await?;
@@ -294,18 +299,22 @@ mod tests {
         assert_eq!(get_all_workflows(&pool).await.unwrap().len(), 2);
     }
 
+    // First start both workflows, then finish both of them.
     #[sqlx::test]
-    async fn try_success_multiple_suites(pool: sqlx::PgPool) {
-        run_test(pool, async |tester| {
-            tester.create_branch(TRY_BRANCH_NAME).expect_suites(2);
+    async fn try_success_multiple_workflows_per_suite_1(pool: sqlx::PgPool) {
+        run_test(pool, async |tester: &mut BorsTester| {
             tester.post_comment("@bors try").await?;
             tester.expect_comments(1).await;
-            tester
-                .workflow_success(Workflow::from(tester.try_branch()).with_run_id(1))
-                .await?;
-            tester
-                .workflow_success(Workflow::from(tester.try_branch()).with_run_id(2))
-                .await?;
+
+            let w1 = WorkflowRunData::from(tester.try_branch()).with_run_id(1);
+            let w2 = WorkflowRunData::from(tester.try_branch()).with_run_id(2);
+
+            // Let the GH mock know about the existence of the second workflow
+            tester.default_repo().lock().update_workflow_run(w2.clone(), WorkflowStatus::Pending);
+            // Finish w1 while w2 is not yet in the DB
+            tester.workflow_full_success(w1).await?;
+            tester.workflow_full_success(w2).await?;
+
             insta::assert_snapshot!(
                 tester.get_comment().await?,
                 @r#"
@@ -322,25 +331,56 @@ mod tests {
         .await;
     }
 
+    // First start and finish the first workflow, then do the same for the second one.
     #[sqlx::test]
-    async fn try_failure_multiple_suites(pool: sqlx::PgPool) {
-        run_test(pool, async |tester| {
-            tester.create_branch(TRY_BRANCH_NAME).expect_suites(2);
+    async fn try_success_multiple_workflows_per_suite_2(pool: sqlx::PgPool) {
+        run_test(pool, async |tester: &mut BorsTester| {
             tester.post_comment("@bors try").await?;
             tester.expect_comments(1).await;
-            tester
-                .workflow_success(Workflow::from(tester.try_branch()).with_run_id(1))
-                .await?;
-            tester
-                .workflow_failure(Workflow::from(tester.try_branch()).with_run_id(2))
-                .await?;
+
+            let w1 = WorkflowRunData::from(tester.try_branch()).with_run_id(1);
+            let w2 = WorkflowRunData::from(tester.try_branch()).with_run_id(2);
+            tester.workflow_start(w1.clone()).await?;
+            tester.workflow_start(w2.clone()).await?;
+
+            tester.workflow_event(WorkflowEvent::success(w1)).await?;
+            tester.workflow_event(WorkflowEvent::success(w2)).await?;
             insta::assert_snapshot!(
                 tester.get_comment().await?,
-                @r###"
-            :broken_heart: Test failed
+                @r#"
+            :sunny: Try build successful
             - [Workflow1](https://github.com/workflows/Workflow1/1) :white_check_mark:
+            - [Workflow1](https://github.com/workflows/Workflow1/2) :white_check_mark:
+            Build commit: merge-main-sha1-pr-1-sha-0 (`merge-main-sha1-pr-1-sha-0`, parent: `main-sha1`)
+
+            <!-- homu: {"type":"TryBuildCompleted","merge_sha":"merge-main-sha1-pr-1-sha-0"} -->
+            "#
+            );
+            Ok(())
+        })
+            .await;
+    }
+
+    // Finish the build early when we encounter the first failure
+    #[sqlx::test]
+    async fn try_failure_multiple_workflows_early(pool: sqlx::PgPool) {
+        run_test(pool, async |tester: &mut BorsTester| {
+            tester.post_comment("@bors try").await?;
+            tester.expect_comments(1).await;
+
+            let w1 = WorkflowRunData::from(tester.try_branch()).with_run_id(1);
+            let w2 = WorkflowRunData::from(tester.try_branch()).with_run_id(2);
+            tester.workflow_start(w1.clone()).await?;
+            tester.workflow_start(w2.clone()).await?;
+
+            tester.workflow_event(WorkflowEvent::failure(w2)).await?;
+            insta::assert_snapshot!(
+                tester.get_comment().await?,
+                @r"
+            :broken_heart: Test failed
+            - [Workflow1](https://github.com/workflows/Workflow1/1) :question:
             - [Workflow1](https://github.com/workflows/Workflow1/2) :x:
-            "###
+            "
             );
             Ok(())
         })

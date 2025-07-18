@@ -17,7 +17,6 @@ use crate::github::api::operations::{
 use crate::github::{CommitSha, GithubRepoName, PullRequest, PullRequestNumber};
 use crate::utils::timing::{measure_network_request, perform_network_request_with_retry};
 use futures::TryStreamExt;
-use octocrab::models::workflows::Run;
 use serde::de::DeserializeOwned;
 
 /// Provides access to a single app installation (repository) using the GitHub API.

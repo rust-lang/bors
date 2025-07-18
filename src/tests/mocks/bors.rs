@@ -22,13 +22,16 @@ use crate::bors::{
     CommandPrefix, RollupMode, WAIT_FOR_CANCEL_TIMED_OUT_BUILDS_REFRESH,
     WAIT_FOR_MERGEABILITY_STATUS_REFRESH, WAIT_FOR_PR_STATUS_REFRESH, WAIT_FOR_WORKFLOW_STARTED,
 };
-use crate::database::{BuildStatus, DelegatedPermission, OctocrabMergeableState, PullRequestModel};
+use crate::database::{
+    BuildStatus, DelegatedPermission, OctocrabMergeableState, PullRequestModel, WorkflowStatus,
+};
 use crate::github::api::load_repositories;
 use crate::github::server::BorsProcess;
 use crate::github::{GithubRepoName, PullRequestNumber};
 use crate::tests::mocks::comment::{Comment, GitHubIssueCommentEventPayload};
 use crate::tests::mocks::workflow::{
-    GitHubWorkflowEventPayload, TestWorkflowStatus, Workflow, WorkflowEvent, WorkflowEventKind,
+    GitHubWorkflowEventPayload, TestWorkflowStatus, WorkflowEvent, WorkflowEventKind,
+    WorkflowRunData,
 };
 use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
 
@@ -41,6 +44,10 @@ use crate::{
     BorsContext, BorsGlobalEvent, CommandParser, PgDbClient, ServerState, WebhookSecret,
     create_app, create_bors_process,
 };
+
+/// How long should we wait before we timeout a test.
+/// You can increase this if you want to do interactive debugging.
+const TEST_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub fn default_cmd_prefix() -> CommandPrefix {
     "@bors".to_string().into()
@@ -74,8 +81,7 @@ impl BorsBuilder {
         // even if `f` returns an error or times out, for better error propagation.
         let (mut tester, bors) = BorsTester::new(self.pool, self.github).await;
 
-        let timeout = Duration::from_secs(10);
-        let result = tokio::time::timeout(timeout, f(&mut tester)).await;
+        let result = tokio::time::timeout(TEST_TIMEOUT, f(&mut tester)).await;
         let gh_state = tester.finish(bors).await;
 
         match result {
@@ -91,7 +97,7 @@ impl BorsBuilder {
             Err(_) => {
                 panic!(
                     "Test has timeouted after {}s\n\nBors service error: {:?}",
-                    timeout.as_secs(),
+                    TEST_TIMEOUT.as_secs(),
                     gh_state.err()
                 );
             }
@@ -262,13 +268,6 @@ impl BorsTester {
         }
     }
 
-    pub fn get_branch_mut(&mut self, name: &str) -> MappedMutexGuard<RawMutex, Branch> {
-        let repo = self.github.repos.get(&default_repo_name()).unwrap();
-        MutexGuard::map(repo.lock(), move |repo| {
-            repo.get_branch_by_name(name).unwrap()
-        })
-    }
-
     pub fn get_branch(&self, name: &str) -> Branch {
         self.github
             .default_repo()
@@ -352,29 +351,28 @@ impl BorsTester {
 
     /// Performs a single started/success/failure workflow event.
     pub async fn workflow_event(&mut self, event: WorkflowEvent) -> anyhow::Result<()> {
-        if let Some(branch) = self
-            .github
-            .get_repo(&event.workflow.repository.clone())
-            .lock()
-            .get_branch_by_name(&event.workflow.head_branch)
+        // Update the status of the workflow in the GitHub state mock
         {
-            match &event.event {
-                WorkflowEventKind::Started => {}
-                WorkflowEventKind::Completed { status } => {
-                    let status = match status.as_str() {
-                        "success" => TestWorkflowStatus::Success,
-                        "failure" => TestWorkflowStatus::Failure,
-                        _ => unreachable!(),
-                    };
-                    branch.suite_finished(status);
-                }
-            }
+            let repo = self.github.get_repo(&event.workflow.repository.clone());
+            let mut repo = repo.lock();
+            let status = match &event.event {
+                WorkflowEventKind::Started => WorkflowStatus::Pending,
+                WorkflowEventKind::Completed { status } => match status.as_str() {
+                    "success" => WorkflowStatus::Success,
+                    "failure" => WorkflowStatus::Failure,
+                    _ => unreachable!(),
+                },
+            };
+            repo.update_workflow_run(event.workflow.clone(), status);
         }
         self.webhook_workflow(event).await
     }
 
     /// Start a workflow and wait until the workflow has been handled by bors.
-    pub async fn start_workflow<W: Into<Workflow>>(&mut self, workflow: W) -> anyhow::Result<()> {
+    pub async fn workflow_start<W: Into<WorkflowRunData>>(
+        &mut self,
+        workflow: W,
+    ) -> anyhow::Result<()> {
         wait_for_marker(
             async || self.workflow_event(WorkflowEvent::started(workflow)).await,
             &WAIT_FOR_WORKFLOW_STARTED,
@@ -384,7 +382,7 @@ impl BorsTester {
 
     /// Performs all necessary events to complete a single workflow (start, success/fail).
     #[inline]
-    pub async fn workflow_full<W: Into<Workflow>>(
+    pub async fn workflow_full<W: Into<WorkflowRunData>>(
         &mut self,
         workflow: W,
         status: TestWorkflowStatus,
@@ -400,12 +398,18 @@ impl BorsTester {
         self.workflow_event(event).await
     }
 
-    pub async fn workflow_success<W: Into<Workflow>>(&mut self, workflow: W) -> anyhow::Result<()> {
+    pub async fn workflow_full_success<W: Into<WorkflowRunData>>(
+        &mut self,
+        workflow: W,
+    ) -> anyhow::Result<()> {
         self.workflow_full(workflow, TestWorkflowStatus::Success)
             .await
     }
 
-    pub async fn workflow_failure<W: Into<Workflow>>(&mut self, workflow: W) -> anyhow::Result<()> {
+    pub async fn workflow_full_failure<W: Into<WorkflowRunData>>(
+        &mut self,
+        workflow: W,
+    ) -> anyhow::Result<()> {
         self.workflow_full(workflow, TestWorkflowStatus::Failure)
             .await
     }
