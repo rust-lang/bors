@@ -42,7 +42,7 @@ impl WebhookSecret {
 }
 
 #[derive(serde::Deserialize, Debug)]
-pub struct WebhookPushToBranchEvent {
+struct WebhookPushToBranchEvent {
     repository: Repository,
     #[serde(rename = "ref")]
     ref_field: String,
@@ -51,19 +51,19 @@ pub struct WebhookPushToBranchEvent {
 /// This struct is used to extract the repository and user from a GitHub webhook event.
 /// The wrapper exists because octocrab doesn't expose/parse the repository field.
 #[derive(serde::Deserialize, Debug)]
-pub struct WebhookRepository {
+struct WebhookRepository {
     repository: Repository,
 }
 
 #[derive(serde::Deserialize, Debug)]
-pub struct WebhookWorkflowRun<'a> {
+struct WebhookWorkflowRun<'a> {
     action: &'a str,
     workflow_run: workflows::Run,
     repository: Repository,
 }
 
 #[derive(Debug, serde::Deserialize)]
-pub struct WebhookPullRequestReviewEvent<'a> {
+struct WebhookPullRequestReviewEvent<'a> {
     action: &'a str,
     pull_request: PullRequest,
     review: Review,
