@@ -83,7 +83,7 @@ mod tests {
 
     #[sqlx::test]
     async fn help_command(pool: sqlx::PgPool) {
-        run_test(pool, |mut tester| async {
+        run_test(pool, async |tester| {
             tester.post_comment("@bors help").await?;
             insta::assert_snapshot!(tester.get_comment().await?, @r"
             You can use the following commands:
@@ -119,7 +119,7 @@ mod tests {
             - `ping`: Check if the bot is alive
             - `help`: Print this help message
             ");
-            Ok(tester)
+            Ok(())
         })
         .await;
     }

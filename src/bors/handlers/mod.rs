@@ -636,32 +636,32 @@ mod tests {
 
     #[sqlx::test]
     async fn ignore_bot_comment(pool: sqlx::PgPool) {
-        run_test(pool, |mut tester| async {
+        run_test(pool, async |tester| {
             tester
                 .post_comment(Comment::from("@bors ping").with_author(User::bors_bot()))
                 .await?;
             // Returning here will make sure that no comments were received
-            Ok(tester)
+            Ok(())
         })
         .await;
     }
 
     #[sqlx::test]
     async fn do_not_load_pr_on_unrelated_comment(pool: sqlx::PgPool) {
-        run_test(pool, |mut tester| async {
+        run_test(pool, async |tester| {
             tester.default_repo().lock().pull_request_error = true;
             tester.post_comment("no command").await?;
-            Ok(tester)
+            Ok(())
         })
         .await;
     }
 
     #[sqlx::test]
     async fn unknown_command(pool: sqlx::PgPool) {
-        run_test(pool, |mut tester| async {
+        run_test(pool, async |tester| {
             tester.post_comment(Comment::from("@bors foo")).await?;
             insta::assert_snapshot!(tester.get_comment().await?, @r#"Unknown command "foo". Run `@bors help` to see available commands."#);
-            Ok(tester)
+            Ok(())
         })
         .await;
     }

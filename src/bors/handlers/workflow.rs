@@ -244,14 +244,14 @@ mod tests {
 
     #[sqlx::test]
     async fn workflow_started_unknown_build(pool: sqlx::PgPool) {
-        run_test(pool.clone(), |mut tester| async {
+        run_test(pool.clone(), async |tester| {
             tester
                 .workflow_event(WorkflowEvent::started(Branch::new(
                     "unknown",
                     "unknown-sha",
                 )))
                 .await?;
-            Ok(tester)
+            Ok(())
         })
         .await;
         assert_eq!(get_all_workflows(&pool).await.unwrap().len(), 0);
@@ -259,14 +259,14 @@ mod tests {
 
     #[sqlx::test]
     async fn workflow_completed_unknown_build(pool: sqlx::PgPool) {
-        run_test(pool.clone(), |mut tester| async {
+        run_test(pool.clone(), async |tester| {
             tester
                 .workflow_event(WorkflowEvent::success(Branch::new(
                     "unknown",
                     "unknown-sha",
                 )))
                 .await?;
-            Ok(tester)
+            Ok(())
         })
         .await;
         assert_eq!(get_all_workflows(&pool).await.unwrap().len(), 0);
@@ -274,13 +274,13 @@ mod tests {
 
     #[sqlx::test]
     async fn try_workflow_started(pool: sqlx::PgPool) {
-        run_test(pool.clone(), |mut tester| async {
+        run_test(pool.clone(), async |tester| {
             tester.post_comment("@bors try").await?;
             tester.expect_comments(1).await;
             tester
                 .workflow_event(WorkflowEvent::started(tester.try_branch()))
                 .await?;
-            Ok(tester)
+            Ok(())
         })
         .await;
         let suite = get_all_workflows(&pool).await.unwrap().pop().unwrap();
@@ -289,7 +289,7 @@ mod tests {
 
     #[sqlx::test]
     async fn try_workflow_start_twice(pool: sqlx::PgPool) {
-        run_test(pool.clone(), |mut tester| async {
+        run_test(pool.clone(), async |tester| {
             tester.post_comment("@bors try").await?;
             tester.expect_comments(1).await;
 
@@ -300,7 +300,7 @@ mod tests {
             tester
                 .workflow_event(WorkflowEvent::started(workflow.with_run_id(2)))
                 .await?;
-            Ok(tester)
+            Ok(())
         })
         .await;
         assert_eq!(get_all_workflows(&pool).await.unwrap().len(), 2);
@@ -308,21 +308,21 @@ mod tests {
 
     #[sqlx::test]
     async fn try_check_suite_finished_missing_build(pool: sqlx::PgPool) {
-        run_test(pool.clone(), |mut tester| async {
+        run_test(pool, async |tester| {
             tester
                 .check_suite(CheckSuite::completed(Branch::new(
                     "<branch>",
                     "<unknown-sha>",
                 )))
                 .await?;
-            Ok(tester)
+            Ok(())
         })
         .await;
     }
 
     #[sqlx::test]
     async fn try_success_multiple_suites(pool: sqlx::PgPool) {
-        run_test(pool.clone(), |mut tester| async {
+        run_test(pool, async |tester| {
             tester.create_branch(TRY_BRANCH_NAME).expect_suites(2);
             tester.post_comment("@bors try").await?;
             tester.expect_comments(1).await;
@@ -343,14 +343,14 @@ mod tests {
             <!-- homu: {"type":"TryBuildCompleted","merge_sha":"merge-main-sha1-pr-1-sha-0"} -->
             "#
             );
-            Ok(tester)
+            Ok(())
         })
         .await;
     }
 
     #[sqlx::test]
     async fn try_failure_multiple_suites(pool: sqlx::PgPool) {
-        run_test(pool.clone(), |mut tester| async {
+        run_test(pool, async |tester| {
             tester.create_branch(TRY_BRANCH_NAME).expect_suites(2);
             tester.post_comment("@bors try").await?;
             tester.expect_comments(1).await;
@@ -368,14 +368,14 @@ mod tests {
             - [Workflow1](https://github.com/workflows/Workflow1/2) :x:
             "###
             );
-            Ok(tester)
+            Ok(())
         })
         .await;
     }
 
     #[sqlx::test]
     async fn try_suite_completed_received_before_workflow_completed(pool: sqlx::PgPool) {
-        run_test(pool.clone(), |mut tester| async {
+        run_test(pool, async |tester| {
             tester.create_branch(TRY_BRANCH_NAME).expect_suites(1);
             tester.post_comment("@bors try").await?;
             tester.expect_comments(1).await;
@@ -401,14 +401,14 @@ mod tests {
             <!-- homu: {"type":"TryBuildCompleted","merge_sha":"merge-main-sha1-pr-1-sha-0"} -->
             "#
             );
-            Ok(tester)
+            Ok(())
         })
         .await;
     }
 
     #[sqlx::test]
     async fn try_check_suite_finished_twice(pool: sqlx::PgPool) {
-        run_test(pool.clone(), |mut tester| async {
+        run_test(pool, async |tester| {
             tester.create_branch(TRY_BRANCH_NAME).expect_suites(1);
             tester.post_comment("@bors try").await?;
             tester.expect_comments(1).await;
@@ -417,7 +417,7 @@ mod tests {
                 .check_suite(CheckSuite::completed(tester.try_branch()))
                 .await?;
             tester.expect_comments(1).await;
-            Ok(tester)
+            Ok(())
         })
         .await;
     }
