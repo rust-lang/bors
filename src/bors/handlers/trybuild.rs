@@ -19,6 +19,7 @@ use crate::github::{CommitSha, GithubUser, LabelTrigger, MergeError, PullRequest
 use crate::permissions::PermissionType;
 use crate::utils::text::suppress_github_mentions;
 use anyhow::{Context, anyhow};
+use itertools::Itertools;
 use octocrab::params::checks::CheckRunConclusion;
 use octocrab::params::checks::CheckRunOutput;
 use octocrab::params::checks::CheckRunStatus;
@@ -87,7 +88,11 @@ pub(super) async fn command_try_build(
         &repo.client,
         &pr.github.head.sha,
         &base_sha,
-        &auto_merge_commit_message(pr, repo.client.repository(), "<try>", jobs),
+        &create_merge_commit_message(
+            pr,
+            repo.client.repository(),
+            MergeType::Try { try_jobs: jobs },
+        ),
     )
     .await?
     {
@@ -339,28 +344,61 @@ fn get_pending_build(pr: &PullRequestModel) -> Option<&BuildModel> {
         .and_then(|b| (b.status == BuildStatus::Pending).then_some(b))
 }
 
-fn auto_merge_commit_message(
+/// Prefix used to specify custom try jobs in PR descriptions.
+const CUSTOM_TRY_JOB_PREFIX: &str = "try-job:";
+
+enum MergeType {
+    Try { try_jobs: Vec<String> },
+}
+
+fn create_merge_commit_message(
     pr: &PullRequestData,
     name: &GithubRepoName,
-    reviewer: &str,
-    jobs: Vec<String>,
+    merge_type: MergeType,
 ) -> String {
     let pr_number = pr.number();
+
+    let reviewer = match &merge_type {
+        MergeType::Try { .. } => "<try>",
+    };
+
+    let mut pr_description = suppress_github_mentions(&pr.github.message);
+    match &merge_type {
+        // Strip all PR text for try builds, to avoid useless issue pings on the repository.
+        // Only keep any lines starting with `CUSTOM_TRY_JOB_PREFIX`.
+        MergeType::Try { try_jobs } => {
+            // If we do not have any custom try jobs, keep the ones that might be in the PR
+            // description.
+            pr_description = if try_jobs.is_empty() {
+                pr_description
+                    .lines()
+                    .map(|l| l.trim())
+                    .filter(|l| l.starts_with(CUSTOM_TRY_JOB_PREFIX))
+                    .join("\n")
+            } else {
+                // If we do have custom jobs, ignore the original description completely
+                String::new()
+            };
+        }
+    };
+
     let mut message = format!(
         r#"Auto merge of {repo_owner}/{repo_name}#{pr_number} - {pr_label}, r={reviewer}
 {pr_title}
 
-{pr_message}"#,
+{pr_description}"#,
         pr_label = pr.github.head_label,
         pr_title = pr.github.title,
-        pr_message = suppress_github_mentions(&pr.github.message),
         repo_owner = name.owner(),
         repo_name = name.name()
     );
 
-    // if jobs is empty, try-job won't be added to the message
-    for job in jobs {
-        message.push_str(&format!("\ntry-job: {}", job));
+    match merge_type {
+        MergeType::Try { try_jobs } => {
+            for job in try_jobs {
+                message.push_str(&format!("\n{CUSTOM_TRY_JOB_PREFIX} {}", job));
+            }
+        }
     }
     message
 }
@@ -464,6 +502,92 @@ mod tests {
             To cancel the try build, run the command `@bors try cancel`.
             "
             );
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn try_commit_message_strip_description(pool: sqlx::PgPool) {
+        run_test(pool, async |tester: &mut BorsTester| {
+            tester
+                .edit_pr(default_repo_name(), default_pr_number(), |pr| {
+                    pr.description = r"This is a very good PR.
+
+It fixes so many issues, sir."
+                        .to_string();
+                })
+                .await?;
+
+            tester.post_comment("@bors try").await?;
+            tester.expect_comments(1).await;
+
+            insta::assert_snapshot!(tester.get_branch_commit_message(&tester.try_branch()), @r"
+            Auto merge of rust-lang/borstest#1 - pr-1, r=<try>
+            PR #1
+            ");
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn try_commit_message_strip_description_keep_try_jobs(pool: sqlx::PgPool) {
+        run_test(pool, async |tester: &mut BorsTester| {
+            tester
+                .edit_pr(default_repo_name(), default_pr_number(), |pr| {
+                    pr.description = r"This is a very good PR.
+
+try-job: Foo
+
+It fixes so many issues, sir.
+
+try-job: Bar
+"
+                    .to_string();
+                })
+                .await?;
+
+            tester.post_comment("@bors try").await?;
+            tester.expect_comments(1).await;
+
+            insta::assert_snapshot!(tester.get_branch_commit_message(&tester.try_branch()), @r"
+            Auto merge of rust-lang/borstest#1 - pr-1, r=<try>
+            PR #1
+
+            try-job: Foo
+            try-job: Bar
+            ");
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn try_commit_message_overwrite_try_jobs(pool: sqlx::PgPool) {
+        run_test(pool, async |tester: &mut BorsTester| {
+            tester
+                .edit_pr(default_repo_name(), default_pr_number(), |pr| {
+                    pr.description = r"This is a very good PR.
+
+try-job: Foo
+try-job: Bar
+"
+                    .to_string();
+                })
+                .await?;
+
+            tester.post_comment("@bors try jobs=Baz,Baz2").await?;
+            tester.expect_comments(1).await;
+
+            insta::assert_snapshot!(tester.get_branch_commit_message(&tester.try_branch()), @r"
+            Auto merge of rust-lang/borstest#1 - pr-1, r=<try>
+            PR #1
+
+
+            try-job: Baz
+            try-job: Baz2
+            ");
             Ok(())
         })
         .await;

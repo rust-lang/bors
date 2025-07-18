@@ -199,28 +199,43 @@ pub struct GitHubPullRequest {
 
 impl From<PullRequest> for GitHubPullRequest {
     fn from(pr: PullRequest) -> Self {
-        let number = pr.number.0;
-        GitHubPullRequest {
-            user: pr.author.clone().into(),
-            url: "https://test.com".to_string(),
-            id: number + 1000,
-            title: format!("PR #{number}"),
-            body: format!("Description of PR #{number}"),
-            mergeable_state: pr.mergeable_state,
-            draft: pr.status == PullRequestStatus::Draft,
+        let PullRequest {
             number,
+            repo: _,
+            added_labels: _,
+            removed_labels: _,
+            comment_counter: _,
+            head_sha,
+            author,
+            base_branch,
+            mergeable_state,
+            status,
+            merged_at,
+            closed_at,
+            assignees,
+            description,
+        } = pr;
+        GitHubPullRequest {
+            user: author.clone().into(),
+            url: "https://test.com".to_string(),
+            id: number.0 + 1000,
+            title: format!("PR #{number}"),
+            body: description,
+            mergeable_state,
+            draft: status == PullRequestStatus::Draft,
+            number: number.0,
             head: Box::new(GitHubHead {
                 label: format!("pr-{number}"),
                 ref_field: format!("pr-{number}"),
-                sha: pr.head_sha,
+                sha: head_sha,
             }),
             base: Box::new(GitHubBase {
-                ref_field: pr.base_branch.get_name().to_string(),
-                sha: pr.base_branch.get_sha().to_string(),
+                ref_field: base_branch.get_name().to_string(),
+                sha: base_branch.get_sha().to_string(),
             }),
-            merged_at: pr.merged_at,
-            closed_at: pr.closed_at,
-            assignees: pr.assignees.into_iter().map(Into::into).collect(),
+            merged_at,
+            closed_at,
+            assignees: assignees.into_iter().map(Into::into).collect(),
         }
     }
 }
