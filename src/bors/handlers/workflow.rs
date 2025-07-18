@@ -5,20 +5,19 @@ use octocrab::params::checks::CheckRunConclusion;
 use octocrab::params::checks::CheckRunStatus;
 
 use crate::PgDbClient;
-use crate::bors::CheckSuiteStatus;
-use crate::bors::RepositoryState;
 use crate::bors::comment::{try_build_succeeded_comment, workflow_failed_comment};
-use crate::bors::event::{WorkflowCompleted, WorkflowStarted};
+use crate::bors::event::{WorkflowRunCompleted, WorkflowRunStarted};
 use crate::bors::handlers::is_bors_observed_branch;
 use crate::bors::handlers::labels::handle_label_trigger;
 use crate::bors::merge_queue::AUTO_BRANCH_NAME;
 use crate::bors::merge_queue::MergeQueueSender;
+use crate::bors::{RepositoryState, WorkflowRun};
 use crate::database::{BuildStatus, WorkflowStatus};
 use crate::github::LabelTrigger;
 
 pub(super) async fn handle_workflow_started(
     db: Arc<PgDbClient>,
-    payload: WorkflowStarted,
+    payload: WorkflowRunStarted,
 ) -> anyhow::Result<()> {
     if !is_bors_observed_branch(&payload.branch) {
         return Ok(());
@@ -67,7 +66,7 @@ pub(super) async fn handle_workflow_started(
 pub(super) async fn handle_workflow_completed(
     repo: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
-    mut payload: WorkflowCompleted,
+    mut payload: WorkflowRunCompleted,
     merge_queue_tx: &MergeQueueSender,
 ) -> anyhow::Result<()> {
     if !is_bors_observed_branch(&payload.branch) {
@@ -95,14 +94,17 @@ pub(super) async fn handle_workflow_completed(
     db.update_workflow_status(*payload.run_id, payload.status)
         .await?;
 
-    try_complete_build(repo.as_ref(), db.as_ref(), payload, merge_queue_tx).await
+    maybe_complete_build(repo.as_ref(), db.as_ref(), payload, merge_queue_tx).await
 }
 
-/// Try to complete a pending build.
-async fn try_complete_build(
+/// Attempt to complete a pending build after a workflow run has been completed.
+/// We assume that the status of the completed workflow run has already been updated in the
+/// database.
+/// We also assume that there is only a single check suite attached to a single build of a commit.
+async fn maybe_complete_build(
     repo: &RepositoryState,
     db: &PgDbClient,
-    payload: WorkflowCompleted,
+    payload: WorkflowRunCompleted,
     merge_queue_tx: &MergeQueueSender,
 ) -> anyhow::Result<()> {
     if !is_bors_observed_branch(&payload.branch) {
@@ -134,40 +136,49 @@ async fn try_complete_build(
         return Ok(());
     };
 
-    // Ask GitHub what are all the check suites attached to the given commit.
-    // This tells us for how many workflows we should wait.
-    let checks = repo
-        .client
-        .get_check_suites_for_commit(&payload.branch, &payload.commit_sha)
-        .await?;
+    // Load the workflow runs that we know about from the DB. We know about workflow runs for
+    // which we have received a started or a completed event.
+    let mut db_workflow_runs = db.get_workflows_for_build(&build).await?;
+    tracing::debug!("Workflow runs from DB: {db_workflow_runs:?}");
 
-    // Some checks are still running, let's wait for the next event
-    if checks
-        .iter()
-        .any(|check| matches!(check.status, CheckSuiteStatus::Pending))
     {
-        tracing::debug!("Some check suites are still pending: {checks:?}");
+        // Ask GitHub about all workflow runs attached to the check suite of the completed workflow run.
+        // This tells us for how many workflow runs we should wait.
+        // We assume that this number is final, and after a single workflow run has been completed, no
+        // other workflow runs attached to the check suite can appear out of nowhere.
+        // Note: we actually only need the number of workflow runs in this function, but we download
+        // some data about them to have better logging.
+        let gh_workflow_runs: Vec<WorkflowRun> = repo
+            .client
+            .get_workflow_runs_for_check_suite(payload.check_suite_id)
+            .await?;
+        tracing::debug!("Workflow runs from GitHub: {gh_workflow_runs:?}");
+
+        // This could happen if a workflow run webhook is lost, or if one workflow run manages to finish
+        // before another workflow run even manages to start. It should be rare.
+        // We will wait for the next workflow run completed webhook.
+        if db_workflow_runs.len() < gh_workflow_runs.len() {
+            tracing::warn!("Workflow count mismatch, waiting for the next webhook");
+            return Ok(());
+        }
+    }
+
+    // We have all expected workflow runs in the DB, but some of them are still pending.
+    // Wait for the next workflow run to be finished.
+    if db_workflow_runs
+        .iter()
+        .any(|w| w.status == WorkflowStatus::Pending)
+    {
+        tracing::info!("Some workflows are not finished yet, waiting for the next webhook.");
         return Ok(());
     }
 
-    let has_failure = checks
+    // Below this point, we assume that the build has completed, because all workflow runs attached
+    // to the corresponding check suite are completed.
+
+    let has_failure = db_workflow_runs
         .iter()
-        .any(|check| matches!(check.status, CheckSuiteStatus::Failure));
-
-    let mut workflows = db.get_workflows_for_build(&build).await?;
-    workflows.sort_by(|a, b| a.name.cmp(&b.name));
-
-    // If this happens, there is a race condition in GH webhooks and we haven't received a workflow
-    // finished/failed event for some workflow yet. In this case, wait for that event before
-    // posting the PR comment.
-    if workflows.len() < checks.len()
-        || workflows
-            .iter()
-            .any(|w| w.status == WorkflowStatus::Pending)
-    {
-        tracing::warn!("All checks are finished, but some workflows are still pending");
-        return Ok(());
-    }
+        .any(|check| matches!(check.status, WorkflowStatus::Failure));
 
     let (status, trigger) = if has_failure {
         (BuildStatus::Failure, LabelTrigger::TryBuildFailed)
@@ -194,12 +205,13 @@ async fn try_complete_build(
         }
     }
 
+    db_workflow_runs.sort_by(|a, b| a.name.cmp(&b.name));
     let message = if !has_failure {
         tracing::info!("Workflow succeeded");
-        try_build_succeeded_comment(&workflows, payload.commit_sha, &build)
+        try_build_succeeded_comment(&db_workflow_runs, payload.commit_sha, &build)
     } else {
         tracing::info!("Workflow failed");
-        workflow_failed_comment(&workflows)
+        workflow_failed_comment(&db_workflow_runs)
     };
     repo.client.post_comment(pr.number, message).await?;
 

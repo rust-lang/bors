@@ -21,7 +21,7 @@ use crate::bors::event::{
     BorsEvent, BorsGlobalEvent, BorsRepositoryEvent, PullRequestAssigned, PullRequestClosed,
     PullRequestComment, PullRequestConvertedToDraft, PullRequestEdited, PullRequestMerged,
     PullRequestOpened, PullRequestPushed, PullRequestReadyForReview, PullRequestReopened,
-    PullRequestUnassigned, PushToBranch, WorkflowCompleted, WorkflowStarted,
+    PullRequestUnassigned, PushToBranch, WorkflowRunCompleted, WorkflowRunStarted,
 };
 use crate::database::{WorkflowStatus, WorkflowType};
 use crate::github::server::ServerStateRef;
@@ -313,7 +313,7 @@ fn parse_workflow_run_events(body: &[u8]) -> anyhow::Result<Option<BorsEvent>> {
     let repository_name = parse_repository_name(&payload.repository)?;
     let result = match payload.action {
         "requested" => Some(BorsEvent::Repository(BorsRepositoryEvent::WorkflowStarted(
-            WorkflowStarted {
+            WorkflowRunStarted {
                 repository: repository_name,
                 name: payload.workflow_run.run.name,
                 branch: payload.workflow_run.run.head_branch,
@@ -333,7 +333,7 @@ fn parse_workflow_run_events(body: &[u8]) -> anyhow::Result<Option<BorsEvent>> {
                 None
             };
             Some(BorsEvent::Repository(
-                BorsRepositoryEvent::WorkflowCompleted(WorkflowCompleted {
+                BorsRepositoryEvent::WorkflowCompleted(WorkflowRunCompleted {
                     repository: repository_name,
                     branch: payload.workflow_run.run.head_branch,
                     commit_sha: CommitSha(payload.workflow_run.run.head_sha),

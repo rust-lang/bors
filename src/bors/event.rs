@@ -31,9 +31,9 @@ pub enum BorsRepositoryEvent {
     /// when a branch is deleted or when a tag is deleted.
     PushToBranch(PushToBranch),
     /// A workflow run on Github Actions or a check run from external CI system has been started.
-    WorkflowStarted(WorkflowStarted),
+    WorkflowStarted(WorkflowRunStarted),
     /// A workflow run on Github Actions or a check run from external CI system has been completed.
-    WorkflowCompleted(WorkflowCompleted),
+    WorkflowCompleted(WorkflowRunCompleted),
 }
 
 impl BorsRepositoryEvent {
@@ -162,7 +162,7 @@ pub struct PushToBranch {
 }
 
 #[derive(Debug)]
-pub struct WorkflowStarted {
+pub struct WorkflowRunStarted {
     pub repository: GithubRepoName,
     pub name: String,
     pub branch: String,
@@ -173,7 +173,7 @@ pub struct WorkflowStarted {
 }
 
 #[derive(Debug)]
-pub struct WorkflowCompleted {
+pub struct WorkflowRunCompleted {
     pub repository: GithubRepoName,
     pub branch: String,
     pub commit_sha: CommitSha,

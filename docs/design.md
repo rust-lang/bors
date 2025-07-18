@@ -49,10 +49,13 @@ repository:
 (based on the `timeout` configured for the repository), it will cancel them.
 - Reload user permissions from the Team API.
 - Reload `rust-bors.toml` config for the repository from its main branch.
+- Reload the mergeability status of open PRs from GitHub.
+- Sync the status of PRs between the DB and GitHub.
+- Run the merge queue.
 
 ## Concurrency
 The bot is currently listening for GitHub webhooks concurrently, however it handles all commands serially, to avoid
-race conditions. This limitation is expected to be lifted in the future.
+race conditions. This limitation might be lifted in the future.
 
 ## Try builds
 A try build means that you execute a specific CI job on a PR (without merging the PR), to test if the job passes C
@@ -202,6 +205,13 @@ With [homu](https://github.com/rust-lang/homu) (the old bors implementation), Gi
 to use a "fake" job that marked the whole CI workflow as succeeded or failed, to signal to bors if it should consider
 the workflow to be OK or not.
 
-The new bors uses a different approach. It asks GitHub which [check suites](https://docs.github.com/en/rest/checks/suites)
-are attached to a given commit, and then it waits until all of these check suites complete (or until a timeout is reached).
-Thanks to this approach, there is no need to introduce fake CI jobs.
+The new bors uses a different approach. In an earlier implementation, it used to ask GitHub which [check suites](https://docs.github.com/en/rest/checks/suites) were attached to a given commit, and then it waited until all of these check suites were completed (or until a timeout was reached). However, this was too "powerful" for rust-lang/rust, where we currently have only a single CI workflow per commit, and it was producing certain race conditions, where GitHub would send us a webhook that a check suite was completed, but when we then asked the GitHub API about the status of the check suite, it was still marked as pending.
+
+To make the implementation more robust, it now behaves as follow:
+- We listen for the workflow completed webhook.
+- When it is received, we ask GitHub what are all the workflows attached to the workflow's check suite.
+- If all of them are completed, we mark the build as finished.
+
+Note that we explicitly do not read the "Check suite was completed" webhook, because it can actually be received *before* a webhook that tells us that the last workflow of that check suite was completed. If that happens, we could mark a build as completed without knowing the final conclusion of its workflows. That is not a big problem, but it would mean that we sometimes cannot post the real status of a workflow in the "build completed" bors comment on GitHub. So instead we just listen for the completed workflows.
+
+In any case, with new bors there is no need to introduce fake conclusion CI jobs.
