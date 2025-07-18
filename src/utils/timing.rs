@@ -110,7 +110,6 @@ mod tests {
     use std::time::Duration;
     use tokio::time::sleep;
 
-    #[tracing_test::traced_test]
     #[tokio::test]
     async fn test_measure_operation() {
         // Test basic timing functionality
@@ -123,7 +122,6 @@ mod tests {
         assert_eq!(result.unwrap_or_default(), 42);
     }
 
-    #[tracing_test::traced_test]
     #[tokio::test]
     async fn test_error_handling() {
         // Test that errors are properly propagated
