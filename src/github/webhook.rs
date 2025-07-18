@@ -13,7 +13,7 @@ use octocrab::models::events::payload::{
 };
 use octocrab::models::pulls::{PullRequest, Review};
 use octocrab::models::webhook_events::payload::PullRequestWebhookEventAction;
-use octocrab::models::{Author, Repository, RunId, workflows};
+use octocrab::models::{Author, CheckSuiteId, Repository, workflows};
 use secrecy::{ExposeSecret, SecretString};
 use sha2::Sha256;
 
@@ -58,8 +58,15 @@ struct WebhookRepository {
 #[derive(serde::Deserialize, Debug)]
 struct WebhookWorkflowRun<'a> {
     action: &'a str,
-    workflow_run: workflows::Run,
+    workflow_run: WorkflowRunInner,
     repository: Repository,
+}
+
+#[derive(serde::Deserialize, Debug)]
+struct WorkflowRunInner {
+    check_suite_id: CheckSuiteId,
+    #[serde(flatten)]
+    run: workflows::Run,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -308,18 +315,18 @@ fn parse_workflow_run_events(body: &[u8]) -> anyhow::Result<Option<BorsEvent>> {
         "requested" => Some(BorsEvent::Repository(BorsRepositoryEvent::WorkflowStarted(
             WorkflowStarted {
                 repository: repository_name,
-                name: payload.workflow_run.name,
-                branch: payload.workflow_run.head_branch,
-                commit_sha: CommitSha(payload.workflow_run.head_sha),
-                run_id: RunId(payload.workflow_run.id.0),
+                name: payload.workflow_run.run.name,
+                branch: payload.workflow_run.run.head_branch,
+                commit_sha: CommitSha(payload.workflow_run.run.head_sha),
+                run_id: payload.workflow_run.run.id,
                 workflow_type: WorkflowType::Github,
-                url: payload.workflow_run.html_url.into(),
+                url: payload.workflow_run.run.html_url.into(),
             },
         ))),
         "completed" => {
             let running_time = if let (Some(started_at), Some(completed_at)) = (
-                Some(payload.workflow_run.created_at),
-                Some(payload.workflow_run.updated_at),
+                Some(payload.workflow_run.run.created_at),
+                Some(payload.workflow_run.run.updated_at),
             ) {
                 Some(completed_at - started_at)
             } else {
@@ -328,11 +335,18 @@ fn parse_workflow_run_events(body: &[u8]) -> anyhow::Result<Option<BorsEvent>> {
             Some(BorsEvent::Repository(
                 BorsRepositoryEvent::WorkflowCompleted(WorkflowCompleted {
                     repository: repository_name,
-                    branch: payload.workflow_run.head_branch,
-                    commit_sha: CommitSha(payload.workflow_run.head_sha),
-                    run_id: RunId(payload.workflow_run.id.0),
+                    branch: payload.workflow_run.run.head_branch,
+                    commit_sha: CommitSha(payload.workflow_run.run.head_sha),
+                    run_id: payload.workflow_run.run.id,
+                    check_suite_id: payload.workflow_run.check_suite_id,
                     running_time,
-                    status: match payload.workflow_run.conclusion.unwrap_or_default().as_str() {
+                    status: match payload
+                        .workflow_run
+                        .run
+                        .conclusion
+                        .unwrap_or_default()
+                        .as_str()
+                    {
                         "success" => WorkflowStatus::Success,
                         _ => WorkflowStatus::Failure,
                     },

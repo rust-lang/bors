@@ -1,7 +1,7 @@
 use crate::database::{WorkflowStatus, WorkflowType};
 use crate::github::{CommitSha, GithubRepoName, GithubUser, PullRequest, PullRequestNumber};
 use chrono::Duration;
-use octocrab::models::RunId;
+use octocrab::models::{CheckSuiteId, RunId};
 
 #[derive(Debug)]
 pub enum BorsRepositoryEvent {
@@ -180,4 +180,6 @@ pub struct WorkflowCompleted {
     pub run_id: RunId,
     pub status: WorkflowStatus,
     pub running_time: Option<Duration>,
+    /// Check suite to which this workflow is attached.
+    pub check_suite_id: CheckSuiteId,
 }
