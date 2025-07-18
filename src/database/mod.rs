@@ -387,7 +387,7 @@ pub enum WorkflowType {
 }
 
 /// Status of a workflow.
-#[derive(Debug, PartialEq, sqlx::Type)]
+#[derive(Copy, Clone, Debug, PartialEq, sqlx::Type)]
 #[sqlx(type_name = "TEXT")]
 #[sqlx(rename_all = "lowercase")]
 pub enum WorkflowStatus {

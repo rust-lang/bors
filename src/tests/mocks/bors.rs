@@ -28,7 +28,6 @@ use crate::github::server::BorsProcess;
 use crate::github::{GithubRepoName, PullRequestNumber};
 use crate::tests::mocks::comment::{Comment, GitHubIssueCommentEventPayload};
 use crate::tests::mocks::workflow::{
-    CheckSuite, GitHubCheckRunEventPayload, GitHubCheckSuiteEventPayload,
     GitHubWorkflowEventPayload, TestWorkflowStatus, Workflow, WorkflowEvent, WorkflowEventKind,
 };
 use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
@@ -383,8 +382,7 @@ impl BorsTester {
         .await
     }
 
-    /// Performs all necessary events to complete a single workflow (start, success/fail,
-    /// check suite completed).
+    /// Performs all necessary events to complete a single workflow (start, success/fail).
     #[inline]
     pub async fn workflow_full<W: Into<Workflow>>(
         &mut self,
@@ -392,21 +390,14 @@ impl BorsTester {
         status: TestWorkflowStatus,
     ) -> anyhow::Result<()> {
         let workflow = workflow.into();
-        let branch = self.get_branch(&workflow.head_branch);
 
-        if !workflow.external {
-            self.workflow_event(WorkflowEvent::started(workflow.clone()))
-                .await?;
-            let event = match status {
-                TestWorkflowStatus::Success => WorkflowEvent::success(workflow.clone()),
-                TestWorkflowStatus::Failure => WorkflowEvent::failure(workflow.clone()),
-            };
-            self.workflow_event(event).await?;
-        } else {
-            self.webhook_external_workflow(workflow).await?;
-        }
-
-        self.check_suite(CheckSuite::completed(branch)).await
+        self.workflow_event(WorkflowEvent::started(workflow.clone()))
+            .await?;
+        let event = match status {
+            TestWorkflowStatus::Success => WorkflowEvent::success(workflow.clone()),
+            TestWorkflowStatus::Failure => WorkflowEvent::failure(workflow.clone()),
+        };
+        self.workflow_event(event).await
     }
 
     pub async fn workflow_success<W: Into<Workflow>>(&mut self, workflow: W) -> anyhow::Result<()> {
@@ -417,10 +408,6 @@ impl BorsTester {
     pub async fn workflow_failure<W: Into<Workflow>>(&mut self, workflow: W) -> anyhow::Result<()> {
         self.workflow_full(workflow, TestWorkflowStatus::Failure)
             .await
-    }
-
-    pub async fn check_suite<C: Into<CheckSuite>>(&mut self, check_suite: C) -> anyhow::Result<()> {
-        self.webhook_check_suite(check_suite.into()).await
     }
 
     pub async fn open_pr(
@@ -792,19 +779,6 @@ impl BorsTester {
     async fn webhook_workflow(&mut self, event: WorkflowEvent) -> anyhow::Result<()> {
         self.send_webhook("workflow_run", GitHubWorkflowEventPayload::from(event))
             .await
-    }
-
-    async fn webhook_external_workflow(&mut self, workflow: Workflow) -> anyhow::Result<()> {
-        self.send_webhook("check_run", GitHubCheckRunEventPayload::from(workflow))
-            .await
-    }
-
-    async fn webhook_check_suite(&mut self, check_suite: CheckSuite) -> anyhow::Result<()> {
-        self.send_webhook(
-            "check_suite",
-            GitHubCheckSuiteEventPayload::from(check_suite),
-        )
-        .await
     }
 
     async fn pull_request_edited(

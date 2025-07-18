@@ -18,10 +18,10 @@ use secrecy::{ExposeSecret, SecretString};
 use sha2::Sha256;
 
 use crate::bors::event::{
-    BorsEvent, BorsGlobalEvent, BorsRepositoryEvent, CheckSuiteCompleted, PullRequestAssigned,
-    PullRequestClosed, PullRequestComment, PullRequestConvertedToDraft, PullRequestEdited,
-    PullRequestMerged, PullRequestOpened, PullRequestPushed, PullRequestReadyForReview,
-    PullRequestReopened, PullRequestUnassigned, PushToBranch, WorkflowCompleted, WorkflowStarted,
+    BorsEvent, BorsGlobalEvent, BorsRepositoryEvent, PullRequestAssigned, PullRequestClosed,
+    PullRequestComment, PullRequestConvertedToDraft, PullRequestEdited, PullRequestMerged,
+    PullRequestOpened, PullRequestPushed, PullRequestReadyForReview, PullRequestReopened,
+    PullRequestUnassigned, PushToBranch, WorkflowCompleted, WorkflowStarted,
 };
 use crate::database::{WorkflowStatus, WorkflowType};
 use crate::github::server::ServerStateRef;
@@ -59,19 +59,6 @@ pub struct WebhookRepository {
 pub struct WebhookWorkflowRun<'a> {
     action: &'a str,
     workflow_run: workflows::Run,
-    repository: Repository,
-}
-
-#[derive(serde::Deserialize, Debug)]
-pub struct CheckSuiteInner {
-    head_branch: String,
-    head_sha: String,
-}
-
-#[derive(serde::Deserialize, Debug)]
-pub struct WebhookCheckSuite<'a> {
-    action: &'a str,
-    check_suite: CheckSuiteInner,
     repository: Repository,
 }
 
@@ -170,7 +157,6 @@ fn parse_webhook_event(request: Parts, body: &[u8]) -> anyhow::Result<Option<Bor
             BorsGlobalEvent::InstallationsChanged,
         ))),
         b"workflow_run" => parse_workflow_run_events(body),
-        b"check_suite" => parse_check_suite_events(body),
         _ => {
             tracing::debug!("Ignoring unknown event type {:?}", event_type.to_str());
             Ok(None)
@@ -356,22 +342,6 @@ fn parse_workflow_run_events(body: &[u8]) -> anyhow::Result<Option<BorsEvent>> {
         _ => None,
     };
     Ok(result)
-}
-
-fn parse_check_suite_events(body: &[u8]) -> anyhow::Result<Option<BorsEvent>> {
-    let payload: WebhookCheckSuite = serde_json::from_slice(body)?;
-    let repository_name = parse_repository_name(&payload.repository)?;
-    if payload.action == "completed" {
-        Ok(Some(BorsEvent::Repository(
-            BorsRepositoryEvent::CheckSuiteCompleted(CheckSuiteCompleted {
-                repository: repository_name,
-                branch: payload.check_suite.head_branch,
-                commit_sha: CommitSha(payload.check_suite.head_sha),
-            }),
-        )))
-    } else {
-        Ok(None)
-    }
 }
 
 fn parse_pr_review_comment(

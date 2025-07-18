@@ -34,9 +34,6 @@ pub enum BorsRepositoryEvent {
     WorkflowStarted(WorkflowStarted),
     /// A workflow run on Github Actions or a check run from external CI system has been completed.
     WorkflowCompleted(WorkflowCompleted),
-    /// A check suite has been completed, either as a workflow run on Github Actions, or as a
-    /// workflow from some external CI system.
-    CheckSuiteCompleted(CheckSuiteCompleted),
 }
 
 impl BorsRepositoryEvent {
@@ -56,7 +53,6 @@ impl BorsRepositoryEvent {
             BorsRepositoryEvent::PushToBranch(payload) => &payload.repository,
             BorsRepositoryEvent::WorkflowStarted(workflow) => &workflow.repository,
             BorsRepositoryEvent::WorkflowCompleted(workflow) => &workflow.repository,
-            BorsRepositoryEvent::CheckSuiteCompleted(payload) => &payload.repository,
         }
     }
 }
@@ -184,11 +180,4 @@ pub struct WorkflowCompleted {
     pub run_id: RunId,
     pub status: WorkflowStatus,
     pub running_time: Option<Duration>,
-}
-
-#[derive(Debug)]
-pub struct CheckSuiteCompleted {
-    pub repository: GithubRepoName,
-    pub branch: String,
-    pub commit_sha: CommitSha,
 }

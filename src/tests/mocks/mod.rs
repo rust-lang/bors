@@ -23,7 +23,6 @@ pub use repository::Repo;
 pub use repository::default_branch_name;
 pub use repository::default_repo_name;
 pub use user::User;
-pub use workflow::CheckSuite;
 pub use workflow::TestWorkflowStatus;
 pub use workflow::Workflow;
 pub use workflow::WorkflowEvent;

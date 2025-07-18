@@ -808,7 +808,6 @@ mod tests {
     #[sqlx::test]
     async fn try_cancel_ignore_external_workflows(pool: sqlx::PgPool) {
         let gh = run_test(pool, async |tester| {
-            tester.create_branch(TRY_BRANCH_NAME).expect_suites(1);
             tester.post_comment("@bors try").await?;
             tester.expect_comments(1).await;
             tester

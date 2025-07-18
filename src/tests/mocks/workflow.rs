@@ -92,16 +92,11 @@ pub struct Workflow {
     run_id: u64,
     pub head_branch: String,
     head_sha: String,
-    pub external: bool,
 }
 
 impl Workflow {
     pub fn with_run_id(self, run_id: u64) -> Self {
         Self { run_id, ..self }
-    }
-    pub fn make_external(mut self) -> Self {
-        self.external = true;
-        self
     }
 
     fn new(branch: Branch) -> Self {
@@ -111,7 +106,6 @@ impl Workflow {
             run_id: 1,
             head_branch: branch.get_name().to_string(),
             head_sha: branch.get_sha().to_string(),
-            external: false,
         }
     }
 }
@@ -138,7 +132,6 @@ pub struct GitHubWorkflowEventPayload {
 impl From<WorkflowEvent> for GitHubWorkflowEventPayload {
     fn from(value: WorkflowEvent) -> Self {
         let WorkflowEvent { event, workflow } = value;
-        assert!(!workflow.external);
 
         let url: Url = format!(
             "https://github.com/workflows/{}/{}",
@@ -207,8 +200,6 @@ pub struct GitHubCheckRunEventPayload {
 
 impl From<Workflow> for GitHubCheckRunEventPayload {
     fn from(workflow: Workflow) -> Self {
-        assert!(workflow.external);
-
         let mut app = GitHubApp::default();
         // We need the owner not to be GitHub
         app.owner = User::new(1234, "external-ci").into();

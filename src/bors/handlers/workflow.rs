@@ -8,7 +8,7 @@ use crate::PgDbClient;
 use crate::bors::CheckSuiteStatus;
 use crate::bors::RepositoryState;
 use crate::bors::comment::{try_build_succeeded_comment, workflow_failed_comment};
-use crate::bors::event::{CheckSuiteCompleted, WorkflowCompleted, WorkflowStarted};
+use crate::bors::event::{WorkflowCompleted, WorkflowStarted};
 use crate::bors::handlers::is_bors_observed_branch;
 use crate::bors::handlers::labels::handle_label_trigger;
 use crate::bors::merge_queue::AUTO_BRANCH_NAME;
@@ -95,30 +95,6 @@ pub(super) async fn handle_workflow_completed(
     db.update_workflow_status(*payload.run_id, payload.status)
         .await?;
 
-    // Try to complete the build
-    let event = CheckSuiteCompleted {
-        repository: payload.repository,
-        branch: payload.branch,
-        commit_sha: payload.commit_sha,
-    };
-    try_complete_build(repo.as_ref(), db.as_ref(), event, merge_queue_tx).await
-}
-
-pub(super) async fn handle_check_suite_completed(
-    repo: Arc<RepositoryState>,
-    db: Arc<PgDbClient>,
-    payload: CheckSuiteCompleted,
-    merge_queue_tx: &MergeQueueSender,
-) -> anyhow::Result<()> {
-    if !is_bors_observed_branch(&payload.branch) {
-        return Ok(());
-    }
-
-    tracing::info!(
-        "Received check suite completed (branch={}, commit={})",
-        payload.branch,
-        payload.commit_sha
-    );
     try_complete_build(repo.as_ref(), db.as_ref(), payload, merge_queue_tx).await
 }
 
@@ -126,7 +102,7 @@ pub(super) async fn handle_check_suite_completed(
 async fn try_complete_build(
     repo: &RepositoryState,
     db: &PgDbClient,
-    payload: CheckSuiteCompleted,
+    payload: WorkflowCompleted,
     merge_queue_tx: &MergeQueueSender,
 ) -> anyhow::Result<()> {
     if !is_bors_observed_branch(&payload.branch) {
@@ -240,7 +216,7 @@ mod tests {
     use crate::bors::handlers::trybuild::TRY_BRANCH_NAME;
     use crate::database::WorkflowStatus;
     use crate::database::operations::get_all_workflows;
-    use crate::tests::mocks::{Branch, CheckSuite, Workflow, WorkflowEvent, run_test};
+    use crate::tests::mocks::{Branch, Workflow, WorkflowEvent, run_test};
 
     #[sqlx::test]
     async fn workflow_started_unknown_build(pool: sqlx::PgPool) {
@@ -307,20 +283,6 @@ mod tests {
     }
 
     #[sqlx::test]
-    async fn try_check_suite_finished_missing_build(pool: sqlx::PgPool) {
-        run_test(pool, async |tester| {
-            tester
-                .check_suite(CheckSuite::completed(Branch::new(
-                    "<branch>",
-                    "<unknown-sha>",
-                )))
-                .await?;
-            Ok(())
-        })
-        .await;
-    }
-
-    #[sqlx::test]
     async fn try_success_multiple_suites(pool: sqlx::PgPool) {
         run_test(pool, async |tester| {
             tester.create_branch(TRY_BRANCH_NAME).expect_suites(2);
@@ -368,55 +330,6 @@ mod tests {
             - [Workflow1](https://github.com/workflows/Workflow1/2) :x:
             "###
             );
-            Ok(())
-        })
-        .await;
-    }
-
-    #[sqlx::test]
-    async fn try_suite_completed_received_before_workflow_completed(pool: sqlx::PgPool) {
-        run_test(pool, async |tester| {
-            tester.create_branch(TRY_BRANCH_NAME).expect_suites(1);
-            tester.post_comment("@bors try").await?;
-            tester.expect_comments(1).await;
-
-            // Check suite completed received before the workflow has finished.
-            // We should wait until workflow finished is received before posting the comment.
-            let branch = tester.try_branch();
-            tester
-                .workflow_event(WorkflowEvent::started(branch.clone()))
-                .await?;
-            tester
-                .check_suite(CheckSuite::completed(branch.clone()))
-                .await?;
-            tester
-                .workflow_event(WorkflowEvent::success(branch))
-                .await?;
-            insta::assert_snapshot!(
-                tester.get_comment().await?,
-                @r#"
-            :sunny: Try build successful ([Workflow1](https://github.com/workflows/Workflow1/1))
-            Build commit: merge-main-sha1-pr-1-sha-0 (`merge-main-sha1-pr-1-sha-0`, parent: `main-sha1`)
-
-            <!-- homu: {"type":"TryBuildCompleted","merge_sha":"merge-main-sha1-pr-1-sha-0"} -->
-            "#
-            );
-            Ok(())
-        })
-        .await;
-    }
-
-    #[sqlx::test]
-    async fn try_check_suite_finished_twice(pool: sqlx::PgPool) {
-        run_test(pool, async |tester| {
-            tester.create_branch(TRY_BRANCH_NAME).expect_suites(1);
-            tester.post_comment("@bors try").await?;
-            tester.expect_comments(1).await;
-            tester.workflow_success(tester.try_branch()).await?;
-            tester
-                .check_suite(CheckSuite::completed(tester.try_branch()))
-                .await?;
-            tester.expect_comments(1).await;
             Ok(())
         })
         .await;
