@@ -1,7 +1,12 @@
+use itertools::Itertools;
+use octocrab::models::workflows::Job;
 use serde::Serialize;
 
+use crate::bors::FailedWorkflowRun;
 use crate::bors::command::CommandPrefix;
 use crate::database::BuildModel;
+use crate::github::GithubRepoName;
+use crate::utils::text::pluralize;
 use crate::{
     database::{WorkflowModel, WorkflowStatus},
     github::CommitSha,
@@ -29,13 +34,14 @@ impl Comment {
 
     pub fn render(&self) -> String {
         if let Some(metadata) = &self.metadata {
-            return format!(
+            format!(
                 "{}\n<!-- homu: {} -->",
                 self.text,
                 serde_json::to_string(metadata).unwrap()
-            );
+            )
+        } else {
+            self.text.clone()
         }
-        self.text.clone()
     }
 }
 
@@ -94,13 +100,58 @@ pub fn try_build_cancelled_comment(workflow_urls: impl Iterator<Item = String>) 
     Comment::new(try_build_cancelled_comment)
 }
 
-pub fn workflow_failed_comment(workflows: &[WorkflowModel]) -> Comment {
-    let workflows_status = list_workflows_status(workflows);
-    Comment::new(format!(
-        r#":broken_heart: Test failed
-{}"#,
-        workflows_status
-    ))
+pub fn build_failed_comment(
+    repo: &GithubRepoName,
+    failed_workflows: Vec<FailedWorkflowRun>,
+) -> Comment {
+    use std::fmt::Write;
+
+    let mut msg = ":broken_heart: Test failed".to_string();
+    let mut workflow_links = failed_workflows
+        .iter()
+        .map(|w| format!("[{}]({})", w.workflow_run.name, w.workflow_run.url));
+    if !failed_workflows.is_empty() {
+        write!(msg, " ({})", workflow_links.join(", ")).unwrap();
+
+        let mut failed_jobs: Vec<Job> = failed_workflows
+            .into_iter()
+            .map(|w| w.failed_jobs)
+            .flatten()
+            .collect();
+        failed_jobs.sort_by(|l, r| l.name.cmp(&r.name));
+
+        if !failed_jobs.is_empty() {
+            write!(msg, ". Failed {}:\n\n", pluralize("job", failed_jobs.len())).unwrap();
+
+            let max_jobs_to_show = 5;
+            for job in failed_jobs.iter().take(max_jobs_to_show) {
+                let logs_url = job.html_url.to_string();
+                let extended_logs_url = format!(
+                    "https://triage.rust-lang.org/gha-logs/{}/{}/{}",
+                    repo.owner(),
+                    repo.name(),
+                    job.id
+                );
+                writeln!(
+                    msg,
+                    "- `{}` ([web logs]({}), [extended logs]({}))",
+                    job.name, logs_url, extended_logs_url
+                )
+                .unwrap();
+            }
+            if failed_jobs.len() > max_jobs_to_show {
+                let remaining = failed_jobs.len() - max_jobs_to_show;
+                writeln!(
+                    msg,
+                    "- (and {remaining} other {})",
+                    pluralize("job", remaining)
+                )
+                .unwrap();
+            }
+        }
+    }
+
+    Comment::new(msg)
 }
 
 pub fn try_build_started_comment(

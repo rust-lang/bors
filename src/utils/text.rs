@@ -1,4 +1,5 @@
 use regex::{Captures, Regex};
+use std::borrow::Cow;
 
 /// Replaces github @mentions with backticks to prevent accidental pings
 pub fn suppress_github_mentions(text: &str) -> String {
@@ -13,6 +14,15 @@ pub fn suppress_github_mentions(text: &str) -> String {
         .to_string()
 }
 
+/// Pluralizes a piece of text.
+pub fn pluralize(base: &str, count: usize) -> Cow<str> {
+    if count == 1 {
+        base.into()
+    } else {
+        format!("{base}s").into()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -25,5 +35,20 @@ mod tests {
             suppress_github_mentions("mail@example.com"),
             "mail@example.com"
         )
+    }
+
+    #[test]
+    fn pluralize_zero() {
+        assert_eq!(pluralize("foo", 0), "foos");
+    }
+
+    #[test]
+    fn pluralize_one() {
+        assert_eq!(pluralize("foo", 1), "foo");
+    }
+
+    #[test]
+    fn pluralize_two() {
+        assert_eq!(pluralize("foo", 2), "foos");
     }
 }

@@ -1,7 +1,7 @@
 use anyhow::Context;
 use octocrab::Octocrab;
 use octocrab::models::checks::CheckRun;
-use octocrab::models::{App, CheckSuiteId, Repository};
+use octocrab::models::{App, CheckRunId, CheckSuiteId, Repository, RunId};
 use octocrab::params::checks::{CheckRunConclusion, CheckRunOutput, CheckRunStatus};
 use std::fmt::Debug;
 use tracing::log;
@@ -9,7 +9,7 @@ use tracing::log;
 use crate::bors::event::PullRequestComment;
 use crate::bors::{Comment, WorkflowRun};
 use crate::config::{CONFIG_FILE_PATH, RepositoryConfig};
-use crate::database::{RunId, WorkflowStatus};
+use crate::database::WorkflowStatus;
 use crate::github::api::base_github_html_url;
 use crate::github::api::operations::{
     ForcePush, MergeError, create_check_run, merge_branches, set_branch_to_commit, update_check_run,
@@ -17,6 +17,7 @@ use crate::github::api::operations::{
 use crate::github::{CommitSha, GithubRepoName, PullRequest, PullRequestNumber};
 use crate::utils::timing::{measure_network_request, perform_network_request_with_retry};
 use futures::TryStreamExt;
+use octocrab::models::workflows::Job;
 use serde::de::DeserializeOwned;
 
 /// Provides access to a single app installation (repository) using the GitHub API.
@@ -187,7 +188,7 @@ impl GithubRepositoryClient {
     /// Update a check run with the given check run ID.
     pub async fn update_check_run(
         &self,
-        check_run_id: u64,
+        check_run_id: CheckRunId,
         status: CheckRunStatus,
         conclusion: Option<CheckRunConclusion>,
         output: Option<CheckRunOutput>,
@@ -207,7 +208,7 @@ impl GithubRepositoryClient {
     ) -> anyhow::Result<Vec<WorkflowRun>> {
         #[derive(serde::Deserialize, Debug)]
         struct WorkflowRunResponse {
-            id: octocrab::models::RunId,
+            id: RunId,
             status: String,
             conclusion: Option<String>,
         }
@@ -253,6 +254,29 @@ impl GithubRepositoryClient {
             Ok(runs)
         })
         .await?
+    }
+
+    /// Find all jobs for the latest execution of a workflow run with the given ID.
+    pub async fn get_jobs_for_workflow_run(&self, run_id: RunId) -> anyhow::Result<Vec<Job>> {
+        let response = self
+            .client
+            .workflows(&self.repo_name.owner, &self.repo_name.name)
+            .list_jobs(run_id)
+            .per_page(100)
+            .send()
+            .await?;
+
+        let mut jobs = Vec::with_capacity(
+            response
+                .total_count
+                .map(|v| v as usize)
+                .unwrap_or(response.items.len()),
+        );
+        let mut stream = std::pin::pin!(response.into_stream(&self.client));
+        while let Some(job) = stream.try_next().await? {
+            jobs.push(job);
+        }
+        Ok(jobs)
     }
 
     /// Cancels Github Actions workflows.

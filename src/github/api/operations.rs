@@ -201,7 +201,7 @@ pub async fn create_check_run(
 
 pub async fn update_check_run(
     repo: &GithubRepositoryClient,
-    check_run_id: u64,
+    check_run_id: CheckRunId,
     status: CheckRunStatus,
     conclusion: Option<CheckRunConclusion>,
     output: Option<CheckRunOutput>,
@@ -210,9 +210,7 @@ pub async fn update_check_run(
         .client()
         .checks(repo.repository().owner(), repo.repository().name());
 
-    let mut request = checks
-        .update_check_run(CheckRunId(check_run_id))
-        .status(status);
+    let mut request = checks.update_check_run(check_run_id).status(status);
 
     if let Some(conclusion) = conclusion {
         request = request.conclusion(conclusion);
