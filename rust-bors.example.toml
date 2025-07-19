@@ -19,3 +19,7 @@ approve = ["+approved"]
 try = ["+foo", "-bar"]
 try_succeed = ["+foobar", "+foo", "+baz"]
 try_failed = []
+
+# Labels that will block approval when present on a PR
+# (Optional)
+labels_blocking_approval = ["final-comment-period", "proposed-final-comment-period"]

@@ -11,6 +11,7 @@ pub const CONFIG_FILE_PATH: &str = "rust-bors.toml";
 /// Configuration of a repository loaded from a `rust-bors.toml`
 /// file located in the root of the repository file tree.
 #[derive(serde::Deserialize, Debug)]
+#[serde(deny_unknown_fields)]
 pub struct RepositoryConfig {
     /// Maximum duration (in seconds) to wait for CI checks to complete before timing out.
     /// Defaults to 3600 seconds (1 hour).
@@ -24,6 +25,9 @@ pub struct RepositoryConfig {
     /// Format: `trigger = ["+label_to_add", "-label_to_remove"]`
     #[serde(default, deserialize_with = "deserialize_labels")]
     pub labels: HashMap<LabelTrigger, Vec<LabelModification>>,
+    /// Labels that will block a PR from being approved when present on the PR.
+    #[serde(default)]
+    pub labels_blocking_approval: Vec<String>,
     /// Minimum time (in seconds) to wait for CI checks to complete before proceeding.
     /// Defaults to `None` (no minimum wait time).
     #[serde(default, deserialize_with = "deserialize_duration_from_secs_opt")]
@@ -250,6 +254,25 @@ try_failed = []
         let content = r#"[labels]
 try = ["foo"]
 "#;
+        load_config(content);
+    }
+
+    #[test]
+    fn deserialize_labels_blocking_approval() {
+        let content = r#"labels_blocking_approval = ["foo", "bar"]"#;
+        let config = load_config(content);
+        insta::assert_debug_snapshot!(config.labels_blocking_approval, @r#"
+        [
+            "foo",
+            "bar",
+        ]
+        "#);
+    }
+
+    #[test]
+    #[should_panic(expected = "unknown field `labels-blocking-approval`")]
+    fn deserialize_unknown_key_fail() {
+        let content = r#"labels-blocking-approval = ["foo", "bar"]"#;
         load_config(content);
     }
 

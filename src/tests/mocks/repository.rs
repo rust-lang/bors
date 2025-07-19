@@ -43,8 +43,8 @@ pub struct CheckRunData {
 pub struct PullRequest {
     pub number: PullRequestNumber,
     pub repo: GithubRepoName,
-    pub added_labels: Vec<String>,
-    pub removed_labels: Vec<String>,
+    pub labels_added_by_bors: Vec<String>,
+    pub labels_removed_by_bors: Vec<String>,
     pub comment_counter: u64,
     pub head_sha: String,
     pub author: User,
@@ -56,6 +56,7 @@ pub struct PullRequest {
     pub assignees: Vec<User>,
     pub description: String,
     pub title: String,
+    pub labels: Vec<String>,
 }
 
 impl PullRequest {
@@ -63,8 +64,8 @@ impl PullRequest {
         Self {
             number: PullRequestNumber(number),
             repo,
-            added_labels: Vec::new(),
-            removed_labels: Vec::new(),
+            labels_added_by_bors: Vec::new(),
+            labels_removed_by_bors: Vec::new(),
             comment_counter: 0,
             head_sha: format!("pr-{number}-sha"),
             author,
@@ -80,6 +81,7 @@ impl PullRequest {
             assignees: Vec::new(),
             description: format!("Description of PR {number}"),
             title: format!("Title of PR {number}"),
+            labels: Vec::new(),
         }
     }
 }
@@ -100,7 +102,7 @@ impl Default for PullRequest {
 impl PullRequest {
     pub fn check_added_labels(&self, labels: &[&str]) {
         let added_labels = self
-            .added_labels
+            .labels_added_by_bors
             .iter()
             .map(|s| s.as_str())
             .collect::<Vec<_>>();
@@ -109,7 +111,7 @@ impl PullRequest {
 
     pub fn check_removed_labels(&self, labels: &[&str]) {
         let removed_labels = self
-            .removed_labels
+            .labels_removed_by_bors
             .iter()
             .map(|s| s.as_str())
             .collect::<Vec<_>>();

@@ -134,7 +134,7 @@ async fn mock_pr_labels(
             let Some(pr) = repo.pull_requests.get_mut(&pr_number) else {
                 return ResponseTemplate::new(404);
             };
-            pr.added_labels.extend(data.labels.clone());
+            pr.labels_added_by_bors.extend(data.labels.clone());
 
             let labels: Vec<GitHubLabel> = data
                 .labels
@@ -162,7 +162,7 @@ async fn mock_pr_labels(
             let Some(pr) = repo.pull_requests.get_mut(&pr_number) else {
                 return ResponseTemplate::new(404);
             };
-            pr.removed_labels.push(label_name.to_string());
+            pr.labels_removed_by_bors.push(label_name.to_string());
 
             ResponseTemplate::new(200).set_body_json::<&[GitHubLabel]>(&[])
         },
@@ -195,6 +195,7 @@ pub struct GitHubPullRequest {
 
     user: GitHubUser,
     assignees: Vec<GitHubUser>,
+    labels: Vec<GitHubLabel>,
 }
 
 impl From<PullRequest> for GitHubPullRequest {
@@ -202,8 +203,8 @@ impl From<PullRequest> for GitHubPullRequest {
         let PullRequest {
             number,
             repo: _,
-            added_labels: _,
-            removed_labels: _,
+            labels_added_by_bors: _,
+            labels_removed_by_bors: _,
             comment_counter: _,
             head_sha,
             author,
@@ -215,6 +216,7 @@ impl From<PullRequest> for GitHubPullRequest {
             assignees,
             description,
             title,
+            labels,
         } = pr;
         GitHubPullRequest {
             user: author.clone().into(),
@@ -237,8 +239,29 @@ impl From<PullRequest> for GitHubPullRequest {
             merged_at,
             closed_at,
             assignees: assignees.into_iter().map(Into::into).collect(),
+            labels: labels
+                .into_iter()
+                .map(|label| GitHubLabel {
+                    id: LabelId(1),
+                    node_id: "".to_string(),
+                    url: "https://test.com".to_string().parse().unwrap(),
+                    name: label,
+                    color: "".to_string(),
+                    default: false,
+                })
+                .collect(),
         }
     }
+}
+
+#[derive(Serialize)]
+struct GitHubLabel {
+    id: LabelId,
+    node_id: String,
+    url: Url,
+    name: String,
+    color: String,
+    default: bool,
 }
 
 #[derive(Serialize)]
@@ -255,17 +278,6 @@ struct GitHubBase {
     ref_field: String,
     sha: String,
 }
-
-#[derive(Serialize)]
-struct GitHubLabel {
-    id: LabelId,
-    node_id: String,
-    url: Url,
-    name: String,
-    color: String,
-    default: bool,
-}
-
 #[derive(Serialize)]
 pub(super) struct GitHubPullRequestEventPayload {
     action: String,
