@@ -38,10 +38,10 @@ pub(super) async fn command_approve(
         return Ok(());
     };
 
-    if !matches!(pr.github.status, PullRequestStatus::Open) {
+    if let Some(error_comment) = check_pr_approval_validity(pr).await? {
         repo_state
             .client
-            .post_comment(pr.number(), approve_non_open_pr_comment())
+            .post_comment(pr.number(), error_comment)
             .await?;
         return Ok(());
     }
@@ -60,6 +60,16 @@ pub(super) async fn command_approve(
 
     merge_queue_tx.trigger().await?;
     notify_of_approval(&repo_state, pr, approver.as_str()).await
+}
+
+/// Check that the given PR can be approved in its current state.
+/// Returns `Ok(Some(comment))` if it **cannot** be approved; the comment should be sent to the
+/// pull request.
+async fn check_pr_approval_validity(pr: &PullRequestData) -> anyhow::Result<Option<Comment>> {
+    if !matches!(pr.github.status, PullRequestStatus::Open) {
+        return Ok(Some(approve_non_open_pr_comment()));
+    }
+    Ok(None)
 }
 
 /// Unapprove a pull request.
