@@ -24,6 +24,9 @@ pub struct RepositoryConfig {
     /// Format: `trigger = ["+label_to_add", "-label_to_remove"]`
     #[serde(default, deserialize_with = "deserialize_labels")]
     pub labels: HashMap<LabelTrigger, Vec<LabelModification>>,
+    /// Labels that will block a PR from being approved when present on the PR.
+    #[serde(default)]
+    pub labels_blocking_approval: Vec<String>,
     /// Minimum time (in seconds) to wait for CI checks to complete before proceeding.
     /// Defaults to `None` (no minimum wait time).
     #[serde(default, deserialize_with = "deserialize_duration_from_secs_opt")]
@@ -251,6 +254,18 @@ try_failed = []
 try = ["foo"]
 "#;
         load_config(content);
+    }
+
+    #[test]
+    fn deserialize_labels_blocking_approval() {
+        let content = r#"labels_blocking_approval = ["foo", "bar"]"#;
+        let config = load_config(content);
+        insta::assert_debug_snapshot!(config.labels_blocking_approval, @r#"
+        [
+            "foo",
+            "bar",
+        ]
+        "#);
     }
 
     fn load_config(config: &str) -> RepositoryConfig {
