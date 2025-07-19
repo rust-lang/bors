@@ -218,6 +218,15 @@ pub fn approve_non_open_pr_comment() -> Comment {
     Comment::new("Only open, non-draft PRs can be approved".to_string())
 }
 
+pub fn approve_wip_title(keyword: &str) -> Comment {
+    Comment::new(format!(
+        r":clipboard: Looks like this PR is still in progress, ignoring approval.
+
+Hint: Remove **{keyword}** from this PR's title when it is ready for review.
+"
+    ))
+}
+
 pub fn delegate_try_builds_comment(delegatee: &str, bot_prefix: &CommandPrefix) -> Comment {
     Comment::new(format!(
         r":v: @{delegatee}, you can now perform try builds on this pull request!
