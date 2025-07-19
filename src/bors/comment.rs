@@ -215,7 +215,7 @@ handled during merge and rebase. This is normal, and you should still perform st
 }
 
 pub fn approve_non_open_pr_comment() -> Comment {
-    Comment::new("Only open, non-draft PRs can be approved".to_string())
+    Comment::new(":clipboard: Only open, non-draft PRs can be approved.".to_string())
 }
 
 pub fn approve_wip_title(keyword: &str) -> Comment {
@@ -224,6 +224,17 @@ pub fn approve_wip_title(keyword: &str) -> Comment {
 
 Hint: Remove **{keyword}** from this PR's title when it is ready for review.
 "
+    ))
+}
+
+pub fn approve_blocking_labels_present(blocking_labels: &[&str]) -> Comment {
+    let labels = blocking_labels
+        .iter()
+        .map(|label| format!("`{label}`"))
+        .join(", ");
+    Comment::new(format!(
+        ":clipboard: This PR cannot be approved because it currently has the following {}: {labels}.",
+        pluralize("label", blocking_labels.len())
     ))
 }
 

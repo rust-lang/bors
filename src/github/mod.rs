@@ -121,6 +121,7 @@ pub struct PullRequest {
     pub author: GithubUser,
     pub assignees: Vec<GithubUser>,
     pub status: PullRequestStatus,
+    pub labels: Vec<String>,
 }
 
 impl From<octocrab::models::pulls::PullRequest> for PullRequest {
@@ -157,6 +158,12 @@ impl From<octocrab::models::pulls::PullRequest> for PullRequest {
             } else {
                 PullRequestStatus::Open
             },
+            labels: pr
+                .labels
+                .unwrap_or_default()
+                .into_iter()
+                .map(|l| l.name)
+                .collect(),
         }
     }
 }

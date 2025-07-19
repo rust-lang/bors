@@ -5,7 +5,8 @@ use crate::bors::RepositoryState;
 use crate::bors::command::RollupMode;
 use crate::bors::command::{Approver, CommandPrefix};
 use crate::bors::comment::{
-    approve_non_open_pr_comment, approve_wip_title, delegate_comment, delegate_try_builds_comment,
+    approve_blocking_labels_present, approve_non_open_pr_comment, approve_wip_title,
+    delegate_comment, delegate_try_builds_comment,
 };
 use crate::bors::handlers::has_permission;
 use crate::bors::handlers::labels::handle_label_trigger;
@@ -38,7 +39,7 @@ pub(super) async fn command_approve(
         return Ok(());
     };
 
-    if let Some(error_comment) = check_pr_approval_validity(pr).await? {
+    if let Some(error_comment) = check_pr_approval_validity(pr, &repo_state).await? {
         repo_state
             .client
             .post_comment(pr.number(), error_comment)
@@ -69,7 +70,10 @@ const WIP_KEYWORDS: &[&str] = &["wip", "[do not merge]"];
 /// Check that the given PR can be approved in its current state.
 /// Returns `Ok(Some(comment))` if it **cannot** be approved; the comment should be sent to the
 /// pull request.
-async fn check_pr_approval_validity(pr: &PullRequestData) -> anyhow::Result<Option<Comment>> {
+async fn check_pr_approval_validity(
+    pr: &PullRequestData,
+    repo: &RepositoryState,
+) -> anyhow::Result<Option<Comment>> {
     // Check PR status
     if !matches!(pr.github.status, PullRequestStatus::Open) {
         return Ok(Some(approve_non_open_pr_comment()));
@@ -79,6 +83,24 @@ async fn check_pr_approval_validity(pr: &PullRequestData) -> anyhow::Result<Opti
     let title = pr.github.title.to_lowercase();
     if let Some(wip_kw) = WIP_KEYWORDS.iter().find(|kw| title.contains(*kw)) {
         return Ok(Some(approve_wip_title(wip_kw)));
+    }
+
+    // Check blocking labels
+    let config = repo.config.load();
+    let blocking_labels: Vec<&str> = pr
+        .github
+        .labels
+        .iter()
+        .map(|label| label.as_str())
+        .filter(|label| {
+            config
+                .labels_blocking_approval
+                .iter()
+                .any(|blocking_label| blocking_label == label)
+        })
+        .collect();
+    if !blocking_labels.is_empty() {
+        return Ok(Some(approve_blocking_labels_present(&blocking_labels)));
     }
 
     Ok(None)
@@ -1102,7 +1124,7 @@ mod tests {
                 .set_pr_status_draft(default_repo_name(), default_pr_number())
                 .await?;
             tester.post_comment("@bors r+").await?;
-            insta::assert_snapshot!(tester.get_comment().await?, @"Only open, non-draft PRs can be approved");
+            insta::assert_snapshot!(tester.get_comment().await?, @":clipboard: Only open, non-draft PRs can be approved.");
             tester.default_pr().await.expect_unapproved();
             Ok(())
         })
@@ -1116,7 +1138,7 @@ mod tests {
                 .set_pr_status_closed(default_repo_name(), default_pr_number())
                 .await?;
             tester.post_comment("@bors r+").await?;
-            insta::assert_snapshot!(tester.get_comment().await?, @"Only open, non-draft PRs can be approved");
+            insta::assert_snapshot!(tester.get_comment().await?, @":clipboard: Only open, non-draft PRs can be approved.");
             tester.default_pr().await.expect_unapproved();
             Ok(())
         })
@@ -1130,7 +1152,7 @@ mod tests {
                 .set_pr_status_merged(default_repo_name(), default_pr_number())
                 .await?;
             tester.post_comment("@bors r+").await?;
-            insta::assert_snapshot!(tester.get_comment().await?, @"Only open, non-draft PRs can be approved");
+            insta::assert_snapshot!(tester.get_comment().await?, @":clipboard: Only open, non-draft PRs can be approved.");
             tester.default_pr().await.expect_unapproved();
             Ok(())
         })
@@ -1155,5 +1177,57 @@ mod tests {
             Ok(())
         })
         .await;
+    }
+
+    #[sqlx::test]
+    async fn approve_pr_with_blocked_label(pool: sqlx::PgPool) {
+        BorsBuilder::new(pool)
+            .github(GitHubState::default().with_default_config(
+                r#"
+labels_blocking_approval = ["proposed-final-comment-period"]
+"#,
+            ))
+            .run_test(async |tester: &mut BorsTester| {
+                tester
+                    .edit_pr(default_repo_name(), default_pr_number(), |pr| {
+                        pr.labels = vec![
+                            "S-waiting-on-review".to_string(),
+                            "proposed-final-comment-period".to_string(),
+                        ];
+                    })
+                    .await?;
+                tester.post_comment("@bors r+").await?;
+                insta::assert_snapshot!(tester.get_comment().await?, @":clipboard: This PR cannot be approved because it currently has the following label: `proposed-final-comment-period`.");
+                tester.default_pr().await.expect_unapproved();
+                Ok(())
+            })
+            .await;
+    }
+
+    #[sqlx::test]
+    async fn approve_pr_with_blocked_labels(pool: sqlx::PgPool) {
+        BorsBuilder::new(pool)
+            .github(GitHubState::default().with_default_config(
+                r#"
+labels_blocking_approval = ["proposed-final-comment-period", "final-comment-period"]
+"#,
+            ))
+            .run_test(async |tester: &mut BorsTester| {
+                tester
+                    .edit_pr(default_repo_name(), default_pr_number(), |pr| {
+                        pr.labels = vec![
+                            "S-waiting-on-review".to_string(),
+                            "proposed-final-comment-period".to_string(),
+                            "final-comment-period".to_string(),
+                            "S-blocked".to_string(),
+                        ];
+                    })
+                    .await?;
+                tester.post_comment("@bors r+").await?;
+                insta::assert_snapshot!(tester.get_comment().await?, @":clipboard: This PR cannot be approved because it currently has the following labels: `proposed-final-comment-period`, `final-comment-period`.");
+                tester.default_pr().await.expect_unapproved();
+                Ok(())
+            })
+            .await;
     }
 }
