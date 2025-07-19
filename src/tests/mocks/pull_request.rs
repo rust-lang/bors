@@ -214,12 +214,13 @@ impl From<PullRequest> for GitHubPullRequest {
             closed_at,
             assignees,
             description,
+            title,
         } = pr;
         GitHubPullRequest {
             user: author.clone().into(),
             url: "https://test.com".to_string(),
             id: number.0 + 1000,
-            title: format!("PR #{number}"),
+            title,
             body: description,
             mergeable_state,
             draft: status == PullRequestStatus::Draft,

@@ -5,7 +5,7 @@ use crate::bors::RepositoryState;
 use crate::bors::command::RollupMode;
 use crate::bors::command::{Approver, CommandPrefix};
 use crate::bors::comment::{
-    approve_non_open_pr_comment, delegate_comment, delegate_try_builds_comment,
+    approve_non_open_pr_comment, approve_wip_title, delegate_comment, delegate_try_builds_comment,
 };
 use crate::bors::handlers::has_permission;
 use crate::bors::handlers::labels::handle_label_trigger;
@@ -62,13 +62,25 @@ pub(super) async fn command_approve(
     notify_of_approval(&repo_state, pr, approver.as_str()).await
 }
 
+/// Keywords that will prevent an approval if they appear in the PR's title.
+/// They are checked in a case-insensitive manner.
+const WIP_KEYWORDS: &[&str] = &["wip", "[do not merge]"];
+
 /// Check that the given PR can be approved in its current state.
 /// Returns `Ok(Some(comment))` if it **cannot** be approved; the comment should be sent to the
 /// pull request.
 async fn check_pr_approval_validity(pr: &PullRequestData) -> anyhow::Result<Option<Comment>> {
+    // Check PR status
     if !matches!(pr.github.status, PullRequestStatus::Open) {
         return Ok(Some(approve_non_open_pr_comment()));
     }
+
+    // Check WIP title
+    let title = pr.github.title.to_lowercase();
+    if let Some(wip_kw) = WIP_KEYWORDS.iter().find(|kw| title.contains(*kw)) {
+        return Ok(Some(approve_wip_title(wip_kw)));
+    }
+
     Ok(None)
 }
 
@@ -298,6 +310,7 @@ async fn notify_of_delegation(
 #[cfg(test)]
 mod tests {
     use crate::database::{DelegatedPermission, TreeState};
+    use crate::tests::BorsTester;
     use crate::{
         bors::{
             RollupMode,
@@ -1122,5 +1135,25 @@ mod tests {
             Ok(())
         })
             .await;
+    }
+
+    #[sqlx::test]
+    async fn approve_wip_pr(pool: sqlx::PgPool) {
+        run_test(pool, async |tester: &mut BorsTester| {
+            tester
+                .edit_pr(default_repo_name(), default_pr_number(), |pr| {
+                    pr.title = "[do not merge] CI experiments".to_string();
+                })
+                .await?;
+            tester.post_comment("@bors r+").await?;
+            insta::assert_snapshot!(tester.get_comment().await?, @r"
+            :clipboard: Looks like this PR is still in progress, ignoring approval.
+
+            Hint: Remove **[do not merge]** from this PR's title when it is ready for review.
+            ");
+            tester.default_pr().await.expect_unapproved();
+            Ok(())
+        })
+        .await;
     }
 }

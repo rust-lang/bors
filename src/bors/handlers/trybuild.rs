@@ -562,7 +562,7 @@ It fixes so many issues, sir."
 
             insta::assert_snapshot!(tester.get_branch_commit_message(&tester.try_branch()), @r"
             Auto merge of rust-lang/borstest#1 - pr-1, r=<try>
-            PR #1
+            Title of PR 1
             ");
             Ok(())
         })
@@ -591,7 +591,7 @@ try-job: Bar
 
             insta::assert_snapshot!(tester.get_branch_commit_message(&tester.try_branch()), @r"
             Auto merge of rust-lang/borstest#1 - pr-1, r=<try>
-            PR #1
+            Title of PR 1
 
             try-job: Foo
             try-job: Bar
@@ -620,7 +620,7 @@ try-job: Bar
 
             insta::assert_snapshot!(tester.get_branch_commit_message(&tester.try_branch()), @r"
             Auto merge of rust-lang/borstest#1 - pr-1, r=<try>
-            PR #1
+            Title of PR 1
 
 
             try-job: Baz
