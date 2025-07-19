@@ -11,6 +11,7 @@ pub const CONFIG_FILE_PATH: &str = "rust-bors.toml";
 /// Configuration of a repository loaded from a `rust-bors.toml`
 /// file located in the root of the repository file tree.
 #[derive(serde::Deserialize, Debug)]
+#[serde(deny_unknown_fields)]
 pub struct RepositoryConfig {
     /// Maximum duration (in seconds) to wait for CI checks to complete before timing out.
     /// Defaults to 3600 seconds (1 hour).
@@ -266,6 +267,13 @@ try = ["foo"]
             "bar",
         ]
         "#);
+    }
+
+    #[test]
+    #[should_panic(expected = "unknown field `labels-blocking-approval`")]
+    fn deserialize_unknown_key_fail() {
+        let content = r#"labels-blocking-approval = ["foo", "bar"]"#;
+        load_config(content);
     }
 
     fn load_config(config: &str) -> RepositoryConfig {
