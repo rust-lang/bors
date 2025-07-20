@@ -11,7 +11,6 @@ use crate::bors::comment::{
 };
 use crate::bors::handlers::labels::handle_label_trigger;
 use crate::database::{BuildModel, BuildStatus, PullRequestModel};
-use crate::github::GithubRepoName;
 use crate::github::api::client::GithubRepositoryClient;
 use crate::github::api::operations::ForcePush;
 use crate::github::{CommitSha, GithubUser, LabelTrigger, MergeError, PullRequestNumber};
@@ -88,11 +87,7 @@ pub(super) async fn command_try_build(
         &repo.client,
         &pr.github.head.sha,
         &base_sha,
-        &create_merge_commit_message(
-            pr,
-            repo.client.repository(),
-            MergeType::Try { try_jobs: jobs },
-        ),
+        &create_merge_commit_message(pr, MergeType::Try { try_jobs: jobs }),
     )
     .await?
     {
@@ -355,11 +350,7 @@ enum MergeType {
     Try { try_jobs: Vec<String> },
 }
 
-fn create_merge_commit_message(
-    pr: &PullRequestData,
-    name: &GithubRepoName,
-    merge_type: MergeType,
-) -> String {
+fn create_merge_commit_message(pr: &PullRequestData, merge_type: MergeType) -> String {
     let pr_number = pr.number();
 
     let reviewer = match &merge_type {
@@ -387,14 +378,12 @@ fn create_merge_commit_message(
     };
 
     let mut message = format!(
-        r#"Auto merge of {repo_owner}/{repo_name}#{pr_number} - {pr_label}, r={reviewer}
+        r#"Auto merge of #{pr_number} - {pr_label}, r={reviewer}
 {pr_title}
 
 {pr_description}"#,
         pr_label = pr.github.head_label,
         pr_title = pr.github.title,
-        repo_owner = name.owner(),
-        repo_name = name.name()
     );
 
     match merge_type {
@@ -560,10 +549,10 @@ It fixes so many issues, sir."
             tester.post_comment("@bors try").await?;
             tester.expect_comments(1).await;
 
-            insta::assert_snapshot!(tester.get_branch_commit_message(&tester.try_branch()), @r"
-            Auto merge of rust-lang/borstest#1 - pr-1, r=<try>
+            insta::assert_snapshot!(tester.get_branch_commit_message(&tester.try_branch()), @r###"
+            Auto merge of #1 - pr-1, r=<try>
             Title of PR 1
-            ");
+            "###);
             Ok(())
         })
         .await;
@@ -589,13 +578,13 @@ try-job: Bar
             tester.post_comment("@bors try").await?;
             tester.expect_comments(1).await;
 
-            insta::assert_snapshot!(tester.get_branch_commit_message(&tester.try_branch()), @r"
-            Auto merge of rust-lang/borstest#1 - pr-1, r=<try>
+            insta::assert_snapshot!(tester.get_branch_commit_message(&tester.try_branch()), @r###"
+            Auto merge of #1 - pr-1, r=<try>
             Title of PR 1
 
             try-job: Foo
             try-job: Bar
-            ");
+            "###);
             Ok(())
         })
         .await;
@@ -618,14 +607,14 @@ try-job: Bar
             tester.post_comment("@bors try jobs=Baz,Baz2").await?;
             tester.expect_comments(1).await;
 
-            insta::assert_snapshot!(tester.get_branch_commit_message(&tester.try_branch()), @r"
-            Auto merge of rust-lang/borstest#1 - pr-1, r=<try>
+            insta::assert_snapshot!(tester.get_branch_commit_message(&tester.try_branch()), @r###"
+            Auto merge of #1 - pr-1, r=<try>
             Title of PR 1
 
 
             try-job: Baz
             try-job: Baz2
-            ");
+            "###);
             Ok(())
         })
         .await;
