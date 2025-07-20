@@ -104,7 +104,7 @@ fn check_non_null_column_without_default() {
                 columns_set_to_not_null: Default::default(),
                 columns_set_default_value: Default::default(),
             };
-            ast.visit(&mut visitor);
+            let _ = ast.visit(&mut visitor);
 
             if let Some(error) = visitor.compute_error() {
                 panic!(

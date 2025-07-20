@@ -11,7 +11,6 @@ use crate::bors::comment::{
 };
 use crate::bors::handlers::labels::handle_label_trigger;
 use crate::database::{BuildModel, BuildStatus, PullRequestModel};
-use crate::github::GithubRepoName;
 use crate::github::api::client::GithubRepositoryClient;
 use crate::github::api::operations::ForcePush;
 use crate::github::{CommitSha, GithubUser, LabelTrigger, MergeError, PullRequestNumber};
