@@ -310,3 +310,20 @@ pub fn auto_build_started_comment(head_sha: &CommitSha, merge_sha: &CommitSha) -
         head_sha, merge_sha
     ))
 }
+
+pub fn auto_build_succeeded_comment(
+    workflows: &[WorkflowModel],
+    approved_by: &str,
+    merge_sha: &CommitSha,
+    base_ref: &str,
+) -> Comment {
+    let urls = workflows
+        .iter()
+        .map(|w| format!("[{}]({})", w.name, w.url))
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    Comment::new(format!(
+        ":sunny: Test successful - {urls}\nApproved by: `{approved_by}`\nPushing {merge_sha} to `{base_ref}`...",
+    ))
+}

@@ -8,7 +8,7 @@ use url::Url;
 use crate::github::GithubRepoName;
 use crate::tests::mocks::repository::GitHubRepository;
 use crate::tests::mocks::user::{GitHubUser, User};
-use crate::tests::mocks::{Repo, default_pr_number};
+use crate::tests::mocks::{Repo, default_pr_number, default_repo_name};
 
 #[derive(Clone, Debug)]
 pub struct Comment {
@@ -28,6 +28,10 @@ impl Comment {
             content: content.to_string(),
             comment_id: 1, // comment_id will be updated by the mock server
         }
+    }
+
+    pub fn pr(pr: u64, content: &str) -> Self {
+        Self::new(default_repo_name(), pr, content)
     }
 
     pub fn with_author(self, author: User) -> Self {

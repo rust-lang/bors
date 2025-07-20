@@ -318,6 +318,20 @@ impl BorsTester {
             .content)
     }
 
+    /// Wait until the next bot comment is received on the specified PR and consume it.
+    pub async fn expect_comment_on_pr(
+        &mut self,
+        repo: GithubRepoName,
+        pr: u64,
+    ) -> anyhow::Result<String> {
+        Ok(self
+            .http_mock
+            .gh_server
+            .get_comment(repo, pr)
+            .await?
+            .content)
+    }
+
     //-- Generation of GitHub events --//
     pub async fn post_comment<C: Into<Comment>>(&mut self, comment: C) -> anyhow::Result<()> {
         self.webhook_comment(comment.into()).await
@@ -460,10 +474,23 @@ impl BorsTester {
         let number = {
             let repo = self.github.get_repo(&repo_name);
             let repo = repo.lock();
-            repo.pull_requests.keys().max().copied().unwrap_or(1)
+            repo.pull_requests.keys().max().copied().unwrap_or(0) + 1
         };
 
-        let pr = PullRequest::new(repo_name, number, User::default_pr_author(), is_draft);
+        let pr = PullRequest::new(
+            repo_name.clone(),
+            number,
+            User::default_pr_author(),
+            is_draft,
+        );
+
+        // Add the PR to the repository
+        {
+            let repo = self.github.get_repo(&repo_name);
+            let mut repo = repo.lock();
+            repo.pull_requests.insert(number, pr.clone());
+        }
+
         self.send_webhook(
             "pull_request",
             GitHubPullRequestEventPayload::new(pr.clone(), "opened", None),

@@ -52,41 +52,44 @@ pub async fn mock_pull_requests(
         .mount(mock_server)
         .await;
 
+    let repo_clone = repo.clone();
+    dynamic_mock_req(
+        move |_req: &Request, [pr_number]: [&str; 1]| {
+            let pr_number: u64 = pr_number.parse().unwrap();
+            let pull_request_error = repo_clone.lock().pull_request_error;
+            if pull_request_error {
+                ResponseTemplate::new(500)
+            } else if let Some(pr) = repo_clone.lock().pull_requests.get(&pr_number) {
+                ResponseTemplate::new(200).set_body_json(GitHubPullRequest::from(pr.clone()))
+            } else {
+                ResponseTemplate::new(404)
+            }
+        },
+        "GET",
+        format!("^/repos/{repo_name}/pulls/([0-9]+)$"),
+    )
+    .mount(mock_server)
+    .await;
+
+    mock_pr_comments(repo.clone(), comments_tx.clone(), mock_server).await;
+
     let prs = repo.lock().pull_requests.clone();
     for &pr_number in prs.keys() {
-        let repo_clone = repo.clone();
-        Mock::given(method("GET"))
-            .and(path(format!("/repos/{repo_name}/pulls/{pr_number}")))
-            .respond_with(move |_: &Request| {
-                let pull_request_error = repo_clone.lock().pull_request_error;
-                if pull_request_error {
-                    ResponseTemplate::new(500)
-                } else if let Some(pr) = repo_clone.lock().pull_requests.get(&pr_number) {
-                    ResponseTemplate::new(200).set_body_json(GitHubPullRequest::from(pr.clone()))
-                } else {
-                    ResponseTemplate::new(404)
-                }
-            })
-            .mount(mock_server)
-            .await;
-
-        mock_pr_comments(repo.clone(), pr_number, comments_tx.clone(), mock_server).await;
         mock_pr_labels(repo.clone(), repo_name.clone(), pr_number, mock_server).await;
     }
 }
 
 async fn mock_pr_comments(
     repo: Arc<Mutex<Repo>>,
-    pr_number: u64,
     comments_tx: Sender<Comment>,
     mock_server: &MockServer,
 ) {
     let repo_name = repo.lock().name.clone();
-    Mock::given(method("POST"))
-        .and(path(format!(
-            "/repos/{repo_name}/issues/{pr_number}/comments",
-        )))
-        .respond_with(move |req: &Request| {
+    let repo_name_clone = repo_name.clone();
+    dynamic_mock_req(
+        move |req: &Request, [pr_number]: [&str; 1]| {
+            let pr_number: u64 = pr_number.parse().unwrap();
+
             #[derive(Deserialize)]
             struct CommentCreatePayload {
                 body: String,
@@ -97,7 +100,7 @@ async fn mock_pr_comments(
             let pr = repo.pull_requests.get_mut(&pr_number).unwrap();
             let comment_id = pr.next_comment_id();
 
-            let comment = Comment::new(repo_name.clone(), pr_number, &comment_payload.body)
+            let comment = Comment::new(repo_name_clone.clone(), pr_number, &comment_payload.body)
                 .with_author(User::bors_bot())
                 .with_id(comment_id);
 
@@ -106,9 +109,12 @@ async fn mock_pr_comments(
             // `tx.send()`.
             comments_tx.try_send(comment.clone()).unwrap();
             ResponseTemplate::new(201).set_body_json(GitHubComment::from(comment))
-        })
-        .mount(mock_server)
-        .await;
+        },
+        "POST",
+        format!("^/repos/{repo_name}/issues/([0-9]+)/comments$"),
+    )
+    .mount(mock_server)
+    .await;
 }
 
 async fn mock_pr_labels(

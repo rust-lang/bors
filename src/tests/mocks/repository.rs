@@ -547,7 +547,7 @@ async fn mock_merge_branch(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
             let head_sha = match head {
                 None => {
                     // head is a SHA
-                    data.head
+                    data.head.clone()
                 }
                 Some(branch) => {
                     // head is a branch
@@ -562,10 +562,14 @@ async fn mock_merge_branch(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
                 return ResponseTemplate::new(409);
             }
 
-            let merge_sha = format!(
-                "merge-{}-{head_sha}-{}",
-                base_branch.sha, base_branch.merge_counter
-            );
+            let source_info = if head_sha.starts_with("pr-") && head_sha.ends_with("-sha") {
+                head_sha.strip_suffix("-sha").unwrap()
+            } else {
+                // Use the original head reference (branch name or SHA)
+                &data.head
+            };
+
+            let merge_sha = format!("merge-{}-{source_info}", base_branch.merge_counter);
             base_branch.merge_counter += 1;
             base_branch.set_to_sha(&merge_sha);
             repo.set_commit_message(&merge_sha, &data.commit_message);

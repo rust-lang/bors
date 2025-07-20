@@ -659,18 +659,22 @@ mod tests {
     #[sqlx::test]
     async fn enqueue_prs_on_push_to_branch(pool: sqlx::PgPool) {
         run_test(pool, async |tester| {
-            tester.open_pr(default_repo_name(), false).await?;
+            let pr = tester.open_pr(default_repo_name(), false).await?;
             tester.push_to_branch(default_branch_name()).await?;
             tester
-                .wait_for_default_pr(|pr| pr.mergeable_state == MergeableState::Unknown)
+                .wait_for_pr(default_repo_name(), pr.number.0, |pr| {
+                    pr.mergeable_state == MergeableState::Unknown
+                })
                 .await?;
             tester
                 .default_repo()
                 .lock()
-                .get_pr_mut(default_pr_number())
+                .get_pr_mut(pr.number.0)
                 .mergeable_state = OctocrabMergeableState::Dirty;
             tester
-                .wait_for_default_pr(|pr| pr.mergeable_state == MergeableState::HasConflicts)
+                .wait_for_pr(default_repo_name(), pr.number.0, |pr| {
+                    pr.mergeable_state == MergeableState::HasConflicts
+                })
                 .await?;
             Ok(())
         })
@@ -680,17 +684,21 @@ mod tests {
     #[sqlx::test]
     async fn enqueue_prs_on_pr_opened(pool: sqlx::PgPool) {
         run_test(pool, async |tester| {
-            tester.open_pr(default_repo_name(), false).await?;
+            let pr = tester.open_pr(default_repo_name(), false).await?;
             tester
-                .wait_for_default_pr(|pr| pr.mergeable_state == MergeableState::Unknown)
+                .wait_for_pr(default_repo_name(), pr.number.0, |pr| {
+                    pr.mergeable_state == MergeableState::Unknown
+                })
                 .await?;
             tester
                 .default_repo()
                 .lock()
-                .get_pr_mut(default_pr_number())
+                .get_pr_mut(pr.number.0)
                 .mergeable_state = OctocrabMergeableState::Dirty;
             tester
-                .wait_for_default_pr(|pr| pr.mergeable_state == MergeableState::HasConflicts)
+                .wait_for_pr(default_repo_name(), pr.number.0, |pr| {
+                    pr.mergeable_state == MergeableState::HasConflicts
+                })
                 .await?;
             Ok(())
         })

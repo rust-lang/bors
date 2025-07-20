@@ -6,8 +6,8 @@ use tokio::sync::mpsc;
 use tracing::Instrument;
 
 use crate::BorsContext;
-use crate::bors::RepositoryState;
-use crate::bors::comment::auto_build_started_comment;
+use crate::bors::comment::{auto_build_started_comment, auto_build_succeeded_comment};
+use crate::bors::{PullRequestStatus, RepositoryState};
 use crate::database::{BuildStatus, PullRequestModel};
 use crate::github::api::client::GithubRepositoryClient;
 use crate::github::api::operations::ForcePush;
@@ -84,9 +84,39 @@ pub async fn merge_queue_tick(ctx: Arc<BorsContext>) -> anyhow::Result<()> {
             let pr_num = pr.number;
 
             if let Some(auto_build) = &pr.auto_build {
+                let commit_sha = CommitSha(auto_build.commit_sha.clone());
+
                 match auto_build.status {
                     // Build successful - point the base branch to the merged commit.
                     BuildStatus::Success => {
+                        let workflows = ctx.db.get_workflows_for_build(auto_build).await?;
+                        let comment = auto_build_succeeded_comment(
+                            &workflows,
+                            pr.approver().unwrap_or("<unknown>"),
+                            &commit_sha,
+                            &pr.base_branch,
+                        );
+                        repo.client.post_comment(pr.number, comment).await?;
+
+                        match repo
+                            .client
+                            .set_branch_to_sha(&pr.base_branch, &commit_sha, ForcePush::No)
+                            .await
+                        {
+                            Ok(()) => {
+                                tracing::info!("Auto build succeeded and merged for PR {pr_num}");
+
+                                ctx.db
+                                    .set_pr_status(
+                                        &pr.repository,
+                                        pr.number,
+                                        PullRequestStatus::Merged,
+                                    )
+                                    .await?;
+                            }
+                            Err(_) => {}
+                        };
+
                         // Break to give GitHub time to update the base branch.
                         break;
                     }
@@ -289,12 +319,15 @@ mod tests {
     use sqlx::PgPool;
 
     use crate::{
-        bors::merge_queue::{AUTO_BRANCH_NAME, AUTO_BUILD_CHECK_RUN_NAME},
-        database::{WorkflowStatus, operations::get_all_workflows},
+        bors::{
+            PullRequestStatus,
+            merge_queue::{AUTO_BRANCH_NAME, AUTO_BUILD_CHECK_RUN_NAME, AUTO_MERGE_BRANCH_NAME},
+        },
+        database::{BuildStatus, WorkflowStatus, operations::get_all_workflows},
         github::CommitSha,
         tests::{
             BorsTester,
-            mocks::{BorsBuilder, GitHubState, WorkflowEvent, default_repo_name},
+            mocks::{BorsBuilder, Comment, GitHubState, WorkflowEvent, default_repo_name},
         },
     };
 
@@ -363,7 +396,7 @@ mod tests {
             tester.process_merge_queue().await;
             insta::assert_snapshot!(
                 tester.get_comment().await?,
-                @":hourglass: Testing commit pr-1-sha with merge merge-main-sha1-pr-1-sha-0..."
+                @":hourglass: Testing commit pr-1-sha with merge merge-0-pr-1..."
             );
             Ok(())
         })
@@ -390,5 +423,172 @@ mod tests {
             Ok(())
         })
         .await;
+    }
+
+    #[sqlx::test]
+    async fn auto_build_success_comment(pool: sqlx::PgPool) {
+        run_merge_queue_test(pool, async |tester| {
+            start_auto_build(tester).await?;
+            tester.workflow_full_success(tester.auto_branch()).await?;
+            insta::assert_snapshot!(
+                tester.get_comment().await?,
+                @r"
+            :sunny: Test successful - [Workflow1](https://github.com/workflows/Workflow1/1)
+            Approved by: `default-user`
+            Pushing merge-0-pr-1 to `main`...
+            "
+            );
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn auto_build_succeeds_and_merges_in_db(pool: sqlx::PgPool) {
+        run_merge_queue_test(pool, async |mut tester| {
+            start_auto_build(&mut tester).await?;
+            tester.workflow_full_success(tester.auto_branch()).await?;
+            tester.expect_comments(1).await;
+            tester
+                .wait_for_default_pr(|pr| {
+                    pr.auto_build.as_ref().unwrap().status == BuildStatus::Success
+                })
+                .await?;
+            tester
+                .wait_for_default_pr(|pr| pr.pr_status == PullRequestStatus::Merged)
+                .await?;
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn auto_build_branch_history(pool: sqlx::PgPool) {
+        let gh = run_merge_queue_test(pool, async |mut tester| {
+            start_auto_build(&mut tester).await?;
+            tester.workflow_full_success(tester.auto_branch()).await?;
+            tester.expect_comments(1).await;
+            Ok(())
+        })
+        .await;
+        gh.check_sha_history(default_repo_name(), "main", &["main-sha1", "merge-0-pr-1"]);
+        gh.check_sha_history(
+            default_repo_name(),
+            AUTO_MERGE_BRANCH_NAME,
+            &["main-sha1", "merge-0-pr-1"],
+        );
+        gh.check_sha_history(default_repo_name(), AUTO_BRANCH_NAME, &["merge-0-pr-1"]);
+    }
+
+    #[sqlx::test]
+    async fn merge_queue_sequential_order(pool: sqlx::PgPool) {
+        let gh = run_merge_queue_test(pool, async |tester| {
+            let pr2 = tester.open_pr(default_repo_name(), false).await?;
+            let pr3 = tester.open_pr(default_repo_name(), false).await?;
+
+            tester.post_comment("@bors r+").await?;
+            tester
+                .post_comment(Comment::pr(pr2.number.0, "@bors r+"))
+                .await?;
+            tester
+                .post_comment(Comment::pr(pr3.number.0, "@bors r+"))
+                .await?;
+
+            tester.expect_comments(1).await;
+            tester
+                .expect_comment_on_pr(default_repo_name(), pr2.number.0)
+                .await?;
+            tester
+                .expect_comment_on_pr(default_repo_name(), pr3.number.0)
+                .await?;
+
+            tester.process_merge_queue().await;
+            tester.expect_comments(1).await;
+            tester.workflow_full_success(tester.auto_branch()).await?;
+            tester.expect_comments(1).await;
+
+            tester.process_merge_queue().await;
+            tester
+                .expect_comment_on_pr(default_repo_name(), pr2.number.0)
+                .await?;
+            tester.workflow_full_success(tester.auto_branch()).await?;
+            tester
+                .expect_comment_on_pr(default_repo_name(), pr2.number.0)
+                .await?;
+
+            tester.process_merge_queue().await;
+            tester
+                .expect_comment_on_pr(default_repo_name(), pr3.number.0)
+                .await?;
+            tester.workflow_full_success(tester.auto_branch()).await?;
+            tester
+                .expect_comment_on_pr(default_repo_name(), pr3.number.0)
+                .await?;
+
+            Ok(())
+        })
+        .await;
+
+        gh.check_sha_history(
+            default_repo_name(),
+            "main",
+            &["main-sha1", "merge-0-pr-1", "merge-1-pr-2", "merge-2-pr-3"],
+        );
+    }
+
+    #[sqlx::test]
+    async fn merge_queue_priority_order(pool: sqlx::PgPool) {
+        let gh = run_merge_queue_test(pool, async |tester| {
+            let pr2 = tester.open_pr(default_repo_name(), false).await?;
+            let pr3 = tester.open_pr(default_repo_name(), false).await?;
+
+            tester.post_comment("@bors r+").await?;
+            tester
+                .post_comment(Comment::pr(pr2.number.0, "@bors r+"))
+                .await?;
+            tester
+                .post_comment(Comment::pr(pr3.number.0, "@bors r+ p=3"))
+                .await?;
+
+            tester.expect_comments(1).await;
+            tester
+                .expect_comment_on_pr(default_repo_name(), pr2.number.0)
+                .await?;
+            tester
+                .expect_comment_on_pr(default_repo_name(), pr3.number.0)
+                .await?;
+
+            tester.process_merge_queue().await;
+            tester.expect_comments(1).await;
+            tester.workflow_full_success(tester.auto_branch()).await?;
+            tester.expect_comments(1).await;
+
+            tester.process_merge_queue().await;
+            tester
+                .expect_comment_on_pr(default_repo_name(), pr3.number.0)
+                .await?;
+            tester.workflow_full_success(tester.auto_branch()).await?;
+            tester
+                .expect_comment_on_pr(default_repo_name(), pr3.number.0)
+                .await?;
+
+            tester.process_merge_queue().await;
+            tester
+                .expect_comment_on_pr(default_repo_name(), pr2.number.0)
+                .await?;
+            tester.workflow_full_success(tester.auto_branch()).await?;
+            tester
+                .expect_comment_on_pr(default_repo_name(), pr2.number.0)
+                .await?;
+
+            Ok(())
+        })
+        .await;
+
+        gh.check_sha_history(
+            default_repo_name(),
+            "main",
+            &["main-sha1", "merge-0-pr-1", "merge-1-pr-3", "merge-2-pr-2"],
+        );
     }
 }
