@@ -10,6 +10,7 @@ use crate::bors::mergeable_queue::MergeableQueueSender;
 use crate::bors::{Comment, PullRequestStatus, RepositoryState};
 use crate::database::{BuildStatus, MergeableState};
 use crate::github::{CommitSha, LabelTrigger, PullRequestNumber};
+use crate::utils::text::pluralize;
 use octocrab::params::checks::CheckRunConclusion;
 use std::sync::Arc;
 
@@ -256,13 +257,16 @@ pub(super) async fn handle_push_to_branch(
         .get_nonclosed_pull_requests_by_base_branch(repo_state.repository(), &payload.branch)
         .await?;
 
-    tracing::info!(
-        "Adding {} PR(s) to the mergeable queue due to base branch change",
-        rows
-    );
+    if !affected_prs.is_empty() {
+        tracing::info!(
+            "Adding {rows} {} to the mergeable queue due to a new commit pushed to base branch `{}`",
+            pluralize("PR", rows as usize),
+            payload.branch
+        );
 
-    for pr in affected_prs {
-        mergeable_queue.enqueue(repo_state.repository().clone(), pr.number);
+        for pr in affected_prs {
+            mergeable_queue.enqueue(repo_state.repository().clone(), pr.number);
+        }
     }
 
     Ok(())
