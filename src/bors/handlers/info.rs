@@ -51,6 +51,18 @@ pub(super) async fn command_info(
         }
     }
 
+    // Auto build status
+    if let Some(auto_build) = &pr.db.auto_build {
+        writeln!(message, "- Auto build is in progress")?;
+
+        if let Ok(urls) = db.get_workflow_urls_for_build(auto_build).await {
+            message.extend(
+                urls.into_iter()
+                    .map(|url| format!("\t- Workflow URL: {url}")),
+            );
+        }
+    }
+
     repo.client
         .post_comment(pr.number(), Comment::new(message))
         .await?;
