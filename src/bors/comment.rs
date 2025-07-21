@@ -215,6 +215,21 @@ handled during merge and rebase. This is normal, and you should still perform st
     Comment::new(message)
 }
 
+pub fn approved_comment(
+    web_url: &str,
+    repo: &GithubRepoName,
+    commit_sha: &CommitSha,
+    reviewer: &str,
+) -> Comment {
+    Comment::new(format!(
+        r":pushpin: Commit {commit_sha} has been approved by `{reviewer}`
+
+It is now in the [queue]({web_url}/queue/{}) for this repository.
+",
+        repo.name()
+    ))
+}
+
 pub fn approve_non_open_pr_comment() -> Comment {
     Comment::new(":clipboard: Only open, non-draft PRs can be approved.".to_string())
 }

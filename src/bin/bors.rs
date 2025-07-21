@@ -56,6 +56,10 @@ struct Opts {
     /// Prefix used for bot commands in PR comments.
     #[arg(long, env = "CMD_PREFIX", default_value = "@bors")]
     cmd_prefix: String,
+
+    /// Web URL where the bot's website is deployed.
+    #[arg(long, env = "WEB_URL", default_value = "http://localhost:8080")]
+    web_url: String,
 }
 
 /// Starts a server that receives GitHub webhooks and generates events into a queue
@@ -140,6 +144,7 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
         CommandParser::new(opts.cmd_prefix.clone().into()),
         db.clone(),
         repos.clone(),
+        &opts.web_url,
     );
     let BorsProcess {
         repository_tx,
