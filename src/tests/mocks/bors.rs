@@ -150,6 +150,7 @@ impl BorsTester {
             CommandParser::new("@bors".to_string().into()),
             db.clone(),
             repos.clone(),
+            "https://test.com/bors",
         );
 
         let BorsProcess {

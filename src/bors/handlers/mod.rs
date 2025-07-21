@@ -389,6 +389,7 @@ async fn handle_comment(
                     } => {
                         let span = tracing::info_span!("Approve");
                         command_approve(
+                            ctx.clone(),
                             repo,
                             database,
                             &pr,

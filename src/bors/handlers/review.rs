@@ -1,12 +1,11 @@
 use std::sync::Arc;
 
-use crate::PgDbClient;
 use crate::bors::RepositoryState;
 use crate::bors::command::RollupMode;
 use crate::bors::command::{Approver, CommandPrefix};
 use crate::bors::comment::{
     approve_blocking_labels_present, approve_non_open_pr_comment, approve_wip_title,
-    delegate_comment, delegate_try_builds_comment, unapprove_non_open_pr_comment,
+    approved_comment, delegate_comment, delegate_try_builds_comment, unapprove_non_open_pr_comment,
 };
 use crate::bors::handlers::has_permission;
 use crate::bors::handlers::labels::handle_label_trigger;
@@ -19,11 +18,13 @@ use crate::database::TreeState;
 use crate::github::LabelTrigger;
 use crate::github::{GithubUser, PullRequestNumber};
 use crate::permissions::PermissionType;
+use crate::{BorsContext, PgDbClient};
 
 /// Approve a pull request.
 /// A pull request can only be approved by a user of sufficient authority.
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn command_approve(
+    ctx: Arc<BorsContext>,
     repo_state: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
     pr: &PullRequestData,
@@ -60,7 +61,7 @@ pub(super) async fn command_approve(
     handle_label_trigger(&repo_state, pr.number(), LabelTrigger::Approved).await?;
 
     merge_queue_tx.trigger().await?;
-    notify_of_approval(&repo_state, pr, approver.as_str()).await
+    notify_of_approval(ctx, &repo_state, pr, approver.as_str()).await
 }
 
 /// Keywords that will prevent an approval if they appear in the PR's title.
@@ -309,6 +310,7 @@ async fn notify_of_unapproval(repo: &RepositoryState, pr: &PullRequestData) -> a
 }
 
 async fn notify_of_approval(
+    ctx: Arc<BorsContext>,
     repo: &RepositoryState,
     pr: &PullRequestData,
     approver: &str,
@@ -316,10 +318,12 @@ async fn notify_of_approval(
     repo.client
         .post_comment(
             pr.db.number,
-            Comment::new(format!(
-                "Commit {} has been approved by `{}`",
-                pr.github.head.sha, approver
-            )),
+            approved_comment(
+                ctx.get_web_url(),
+                repo.repository(),
+                &pr.github.head.sha,
+                approver,
+            ),
         )
         .await
 }
@@ -361,7 +365,11 @@ mod tests {
             tester.post_comment("@bors r+").await?;
             insta::assert_snapshot!(
                 tester.get_comment().await?,
-                @"Commit pr-1-sha has been approved by `default-user`"
+                @r"
+            :pushpin: Commit pr-1-sha has been approved by `default-user`
+
+            It is now in the [queue](https://test.com/bors/queue/borstest) for this repository.
+            "
             );
 
             tester
@@ -383,7 +391,11 @@ mod tests {
                 .await?;
             insta::assert_snapshot!(
                 tester.get_comment().await?,
-                @"Commit pr-1-sha has been approved by `user1`"
+                @r"
+            :pushpin: Commit pr-1-sha has been approved by `user1`
+
+            It is now in the [queue](https://test.com/bors/queue/borstest) for this repository.
+            "
             );
 
             tester.default_pr().await.expect_approved_by(approve_user);
@@ -429,7 +441,11 @@ mod tests {
             tester.post_comment("@bors r+").await?;
             insta::assert_snapshot!(
                 tester.get_comment().await?,
-                @"Commit pr-1-sha has been approved by `default-user`",
+                @r"
+            :pushpin: Commit pr-1-sha has been approved by `default-user`
+
+            It is now in the [queue](https://test.com/bors/queue/borstest) for this repository.
+            ",
             );
             tester
                 .default_pr()
