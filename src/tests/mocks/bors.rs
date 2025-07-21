@@ -86,7 +86,11 @@ impl BorsBuilder {
 
         match result {
             Ok(res) => match res {
-                Ok(_) => gh_state.expect("Bors service has failed"),
+                Ok(_) => gh_state
+                    .context("Bors service has failed")
+                    // This makes the error nicer
+                    .map_err(|e| e.to_string())
+                    .unwrap(),
                 Err(error) => {
                     panic!(
                         "Test has failed: {error:?}\n\nBors service error: {:?}",
