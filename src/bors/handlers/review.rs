@@ -6,7 +6,7 @@ use crate::bors::command::RollupMode;
 use crate::bors::command::{Approver, CommandPrefix};
 use crate::bors::comment::{
     approve_blocking_labels_present, approve_non_open_pr_comment, approve_wip_title,
-    delegate_comment, delegate_try_builds_comment,
+    delegate_comment, delegate_try_builds_comment, unapprove_non_open_pr_comment,
 };
 use crate::bors::handlers::has_permission;
 use crate::bors::handlers::labels::handle_label_trigger;
@@ -119,6 +119,17 @@ pub(super) async fn command_unapprove(
         deny_request(&repo_state, pr.number(), author, PermissionType::Review).await?;
         return Ok(());
     };
+
+    if !matches!(
+        pr.github.status,
+        PullRequestStatus::Open | PullRequestStatus::Draft
+    ) {
+        repo_state
+            .client
+            .post_comment(pr.number(), unapprove_non_open_pr_comment())
+            .await?;
+        return Ok(());
+    }
 
     db.unapprove(&pr.db).await?;
     handle_label_trigger(&repo_state, pr.number(), LabelTrigger::Unapproved).await?;
@@ -431,6 +442,51 @@ mod tests {
             );
 
             tester.default_pr().await.expect_unapproved();
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn unapprove_lacking_permissions(pool: sqlx::PgPool) {
+        run_test(pool, async |tester: &mut BorsTester| {
+            tester.post_comment("@bors r+").await?;
+            tester.expect_comments(1).await;
+            tester
+                .post_comment(Comment::from("@bors r-").with_author(User::unprivileged()))
+                .await?;
+            insta::assert_snapshot!(
+                tester.get_comment().await?,
+                @"@unprivileged-user: :key: Insufficient privileges: not in review users"
+            );
+
+            tester
+                .default_pr()
+                .await
+                .expect_approved_by(&User::default_pr_author().name);
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn unapprove_merged_pr(pool: sqlx::PgPool) {
+        run_test(pool, async |tester: &mut BorsTester| {
+            tester.post_comment("@bors r+").await?;
+            tester.expect_comments(1).await;
+            tester
+                .set_pr_status_closed(default_repo_name(), default_pr_number())
+                .await?;
+            tester.post_comment("@bors r-").await?;
+            insta::assert_snapshot!(
+                tester.get_comment().await?,
+                @":clipboard: Only unclosed PRs can be unapproved."
+            );
+
+            tester
+                .default_pr()
+                .await
+                .expect_approved_by(&User::default_pr_author().name);
             Ok(())
         })
         .await;
