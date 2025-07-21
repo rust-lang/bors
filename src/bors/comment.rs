@@ -1,6 +1,7 @@
 use itertools::Itertools;
 use octocrab::models::workflows::Job;
 use serde::Serialize;
+use std::time::Duration;
 
 use crate::bors::FailedWorkflowRun;
 use crate::bors::command::CommandPrefix;
@@ -255,6 +256,13 @@ pub fn delegate_comment(delegatee: &str, delegator: &str, bot_prefix: &CommandPr
 
 If @{delegator} told you to "`r=me`" after making some further change, then please make that change and post `{bot_prefix} r={delegator}`.
 "#
+    ))
+}
+
+pub fn build_timed_out_comment(timeout: Duration) -> Comment {
+    Comment::new(format!(
+        ":boom: Test timed out after `{}`s",
+        timeout.as_secs()
     ))
 }
 

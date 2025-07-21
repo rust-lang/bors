@@ -6,9 +6,9 @@ use chrono::{DateTime, Utc};
 use octocrab::params::checks::CheckRunConclusion;
 use std::collections::BTreeMap;
 
-use crate::bors::Comment;
 use crate::bors::PullRequestStatus;
 use crate::bors::RepositoryState;
+use crate::bors::comment::build_timed_out_comment;
 use crate::bors::handlers::trybuild::cancel_build_workflows;
 use crate::bors::mergeable_queue::MergeableQueueSender;
 use crate::{PgDbClient, TeamApiClient};
@@ -39,7 +39,7 @@ pub async fn cancel_timed_out_builds(
 
                 if let Err(error) = repo
                     .client
-                    .post_comment(pr.number, Comment::new(":boom: Test timed out".to_string()))
+                    .post_comment(pr.number, build_timed_out_comment(timeout))
                     .await
                 {
                     tracing::error!("Could not send comment to PR {}: {error:?}", pr.number);
@@ -255,7 +255,7 @@ timeout = 3600
                     tester.cancel_timed_out_builds().await;
                 })
                 .await;
-                insta::assert_snapshot!(tester.get_comment().await?, @":boom: Test timed out");
+                insta::assert_snapshot!(tester.get_comment().await?, @":boom: Test timed out after `3600`s");
                 assert_eq!(
                     tester
                         .db()
