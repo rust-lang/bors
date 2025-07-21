@@ -104,12 +104,14 @@ pub async fn sync_pull_requests_state(
     repo: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
 ) -> anyhow::Result<()> {
+    tracing::debug!("Refreshing PR state from GitHub");
+
     let repo = repo.as_ref();
     let db = db.as_ref();
     let repo_name = repo.repository();
-    // load open/draft prs from github
+    // Load open/draft prs from GitHub
     let nonclosed_gh_prs = repo.client.fetch_nonclosed_pull_requests().await?;
-    // load open/draft prs from db
+    // Load open/draft prs from the DB
     let nonclosed_db_prs = db.get_nonclosed_pull_requests(repo_name).await?;
 
     let nonclosed_gh_prs_num = nonclosed_gh_prs
