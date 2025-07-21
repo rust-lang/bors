@@ -158,6 +158,18 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
     }
 
     let refresh_process = async move {
+        // Refresh state when starting the bot: first reload PRs from GitHub, then check their
+        // mergeability, then time out potentially stale builds, and then run the merge queue.
+        let startup_events = [
+            BorsGlobalEvent::RefreshPullRequestState,
+            BorsGlobalEvent::RefreshPullRequestMergeability,
+            BorsGlobalEvent::CancelTimedOutBuilds,
+            BorsGlobalEvent::ProcessMergeQueue,
+        ];
+        for event in startup_events {
+            refresh_tx.send(event).await?;
+        }
+
         let mut config_refresh = make_interval(CONFIG_REFRESH_INTERVAL);
         let mut permissions_refresh = make_interval(PERMISSIONS_REFRESH_INTERVAL);
         let mut cancel_builds_refresh = make_interval(CANCEL_TIMED_OUT_BUILDS_INTERVAL);

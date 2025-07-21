@@ -241,36 +241,27 @@ pub async fn handle_bors_global_event(
                 .await?;
         }
         BorsGlobalEvent::RefreshConfig => {
-            let span = tracing::info_span!("Refresh configuration of repositories");
+            let span = tracing::info_span!("Refresh config");
             for_each_repo(&ctx, |repo| {
-                let span = tracing::info_span!(
-                    "Refresh configuration",
-                    repo = repo.repository().to_string()
-                );
+                let span = tracing::info_span!("Repo", repo = repo.repository().to_string());
                 reload_repository_config(repo).instrument(span)
             })
             .instrument(span)
             .await?;
         }
         BorsGlobalEvent::RefreshPermissions => {
-            let span = tracing::info_span!("Refresh permissions of repositories");
+            let span = tracing::info_span!("Refresh permissions");
             for_each_repo(&ctx, |repo| {
-                let span = tracing::info_span!(
-                    "Refresh permissions",
-                    repo = repo.repository().to_string()
-                );
+                let span = tracing::info_span!("Repo", repo = repo.repository().to_string());
                 reload_repository_permissions(repo, team_api_client).instrument(span)
             })
             .instrument(span)
             .await?;
         }
         BorsGlobalEvent::CancelTimedOutBuilds => {
-            let span = tracing::info_span!("Cancel timed out builds of repositories");
+            let span = tracing::info_span!("Cancel timed out builds");
             for_each_repo(&ctx, |repo| {
-                let span = tracing::info_span!(
-                    "Cancel timed out builds",
-                    repo = repo.repository().to_string()
-                );
+                let span = tracing::info_span!("Repo", repo = repo.repository().to_string());
                 cancel_timed_out_builds(repo, &db).instrument(span)
             })
             .instrument(span)
@@ -280,12 +271,9 @@ pub async fn handle_bors_global_event(
             crate::bors::WAIT_FOR_CANCEL_TIMED_OUT_BUILDS_REFRESH.mark();
         }
         BorsGlobalEvent::RefreshPullRequestMergeability => {
-            let span = tracing::info_span!("Refresh PR mergeability status of repositories");
+            let span = tracing::info_span!("Refresh PR mergeability status");
             for_each_repo(&ctx, |repo| {
-                let span = tracing::info_span!(
-                    "Refresh PR mergeability status",
-                    repo = repo.repository().to_string()
-                );
+                let span = tracing::info_span!("Repo", repo = repo.repository().to_string());
                 reload_unknown_mergeable_prs(repo, &db, mergeable_queue_tx.clone()).instrument(span)
             })
             .instrument(span)
@@ -295,7 +283,7 @@ pub async fn handle_bors_global_event(
             crate::bors::WAIT_FOR_MERGEABILITY_STATUS_REFRESH.mark();
         }
         BorsGlobalEvent::RefreshPullRequestState => {
-            let span = tracing::info_span!("Refresh");
+            let span = tracing::info_span!("Refresh PR status");
             for_each_repo(&ctx, |repo| {
                 let subspan = tracing::info_span!("Repo", repo = repo.repository().to_string());
                 sync_pull_requests_state(repo, Arc::clone(&db)).instrument(subspan)
