@@ -28,11 +28,22 @@ enum CommandPart<'a> {
 
 pub struct CommandParser {
     prefix: CommandPrefix,
+    parsers: Vec<ParserFn>,
 }
 
 impl CommandParser {
     pub fn new(prefix: CommandPrefix) -> Self {
-        Self { prefix }
+        Self {
+            prefix,
+            parsers: DEFAULT_PARSERS.to_vec(),
+        }
+    }
+
+    pub fn new_try_only(prefix: CommandPrefix) -> Self {
+        Self {
+            prefix,
+            parsers: ONLY_TRY_PARSERS.to_vec(),
+        }
     }
 
     /// Prefix of the bot, used to invoke commands from PR comments.
@@ -52,7 +63,7 @@ impl CommandParser {
             .filter_map(|line| match line.find(self.prefix.as_ref()) {
                 Some(index) => {
                     let input = &line[index + self.prefix.as_ref().len()..];
-                    parse_command(input)
+                    parse_command(input, &self.parsers)
                 }
                 None => None,
             })
@@ -116,9 +127,10 @@ fn extract_text_from_markdown(text: &str) -> String {
 }
 
 type ParseResult<T = BorsCommand> = Option<Result<T, CommandParseError>>;
+type ParserFn = fn(&CommandPart<'_>, &[CommandPart<'_>]) -> ParseResult;
 
 // The order of the parsers in the vector is important
-const PARSERS: &[fn(&CommandPart<'_>, &[CommandPart<'_>]) -> ParseResult] = &[
+const DEFAULT_PARSERS: &[ParserFn] = &[
     parser_approval,
     parser_unapprove,
     parser_rollup,
@@ -133,12 +145,14 @@ const PARSERS: &[fn(&CommandPart<'_>, &[CommandPart<'_>]) -> ParseResult] = &[
     parser_tree_ops,
 ];
 
-fn parse_command(input: &str) -> ParseResult {
+const ONLY_TRY_PARSERS: &[ParserFn] = &[parser_try_cancel, parser_try];
+
+fn parse_command(input: &str, parsers: &[ParserFn]) -> ParseResult {
     match parse_parts(input) {
         Ok(parts) => match parts.as_slice() {
             [] => Some(Err(CommandParseError::MissingCommand)),
             [command, arguments @ ..] => {
-                for parser in PARSERS {
+                for parser in parsers {
                     if let Some(result) = parser(command, arguments) {
                         return Some(result);
                     }
