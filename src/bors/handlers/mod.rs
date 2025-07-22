@@ -341,7 +341,7 @@ async fn handle_comment(
 
     // Temporary special case for migration from homu on rust-lang/rust.
     // Try to parse `@bors try` commands with a hardcoded prefix normally assigned to homu.
-    if repo.repository().owner() == "rust-lang" && repo.repository().name() == "rust" {
+    if ctx.parser.prefix().as_ref() != "@bors" {
         let homu_commands = CommandParser::new_try_only(CommandPrefix::from("@bors".to_string()))
             .parse_commands(&comment.text)
             .into_iter()
