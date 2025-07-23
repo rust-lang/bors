@@ -68,10 +68,10 @@ where
     #[derive(serde::Deserialize, Eq, PartialEq, Hash)]
     #[serde(rename_all = "snake_case")]
     enum Trigger {
-        Approve,
-        Unapprove,
+        Approved,
+        Unapproved,
         Try,
-        TrySucceed,
+        TrySucceeded,
         TryFailed,
         AutoBuildSucceeded,
         AutoBuildFailed,
@@ -80,10 +80,10 @@ where
     impl From<Trigger> for LabelTrigger {
         fn from(value: Trigger) -> Self {
             match value {
-                Trigger::Approve => LabelTrigger::Approved,
-                Trigger::Unapprove => LabelTrigger::Unapproved,
+                Trigger::Approved => LabelTrigger::Approved,
+                Trigger::Unapproved => LabelTrigger::Unapproved,
                 Trigger::Try => LabelTrigger::TryBuildStarted,
-                Trigger::TrySucceed => LabelTrigger::TryBuildSucceeded,
+                Trigger::TrySucceeded => LabelTrigger::TryBuildSucceeded,
                 Trigger::TryFailed => LabelTrigger::TryBuildFailed,
                 Trigger::AutoBuildSucceeded => LabelTrigger::AutoBuildSucceeded,
                 Trigger::AutoBuildFailed => LabelTrigger::AutoBuildFailed,
@@ -133,7 +133,7 @@ where
 
     let mut triggers = HashMap::<Trigger, Vec<Modification>>::deserialize(deserializer)?;
     // If there are any `approve` triggers, add `unapprove` triggers as well.
-    if let Some(modifications) = triggers.get(&Trigger::Approve) {
+    if let Some(modifications) = triggers.get(&Trigger::Approved) {
         let unapprove_modifications = modifications
             .iter()
             .map(|m| match m {
@@ -142,7 +142,7 @@ where
             })
             .collect::<Vec<_>>();
         triggers
-            .entry(Trigger::Unapprove)
+            .entry(Trigger::Unapproved)
             .or_insert_with(|| unapprove_modifications);
     }
     let triggers = triggers
@@ -210,9 +210,9 @@ mod tests {
     #[test]
     fn deserialize_labels() {
         let content = r#"[labels]
-approve = ["+approved"]
+approved = ["+approved"]
 try = ["+foo", "-bar"]
-try_succeed = ["+foobar", "+foo", "+baz"]
+try_succeeded = ["+foobar", "+foo", "+baz"]
 try_failed = []
 auto_build_succeeded = ["+foobar", "-foo"]
 auto_build_failed = ["+bar", "+baz"]

@@ -11,13 +11,13 @@ merge_queue_enabled = true
 # "+<label>" adds the label, while "-<label>" removes the label after the event.
 # Supported events:
 # - try: Try build has started
-# - try_succeed: Try build has finished
+# - try_succeeded: Try build has finished
 # - try_failed: Try build has failed
 # (Optional)
 [labels]
-approve = ["+approved"]
+approved = ["+approved"]
 try = ["+foo", "-bar"]
-try_succeed = ["+foobar", "+foo", "+baz"]
+try_succeeded = ["+foobar", "+foo", "+baz"]
 try_failed = []
 auto_build_succeeded = ["+foo", "+bar"]
 auto_build_failed = ["+foo", "+bar"]

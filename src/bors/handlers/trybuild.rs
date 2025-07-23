@@ -1004,7 +1004,7 @@ try = ["+foo", "+bar", "-baz"]
             .github(GitHubState::default().with_default_config(
                 r#"
 [labels]
-try_succeed = ["+foo", "+bar", "-baz"]
+try_succeeded = ["+foo", "+bar", "-baz"]
 "#,
             ))
             .run_test(async |tester| {
