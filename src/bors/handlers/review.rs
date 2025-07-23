@@ -417,6 +417,9 @@ async fn notify_of_unclean_auto_build_cancelled(
 
 #[cfg(test)]
 mod tests {
+    use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
+
+    use crate::bors::merge_queue::AUTO_BUILD_CHECK_RUN_NAME;
     use crate::database::{DelegatedPermission, TreeState};
     use crate::tests::BorsTester;
     use crate::{
@@ -1419,6 +1422,37 @@ merge_queue_enabled = true
                 tester.post_comment("@bors r-").await?;
                 tester.expect_comments(1).await;
                 insta::assert_snapshot!(tester.get_comment().await?, @"Auto build was cancelled due to unapproval. It was not possible to cancel some workflows.");
+                Ok(())
+            })
+            .await;
+    }
+
+    #[sqlx::test]
+    async fn unapprove_running_auto_build_updates_check_run(pool: sqlx::PgPool) {
+        BorsBuilder::new(pool)
+            .github(GitHubState::default().with_default_config(
+                r#"
+merge_queue_enabled = true
+"#,
+            ))
+            .run_test(async |tester: &mut BorsTester| {
+                tester.post_comment("@bors r+").await?;
+                tester.expect_comments(1).await;
+                tester.process_merge_queue().await;
+                tester.expect_comments(1).await;
+                tester
+                    .wait_for_default_pr(|pr| pr.auto_build.is_some())
+                    .await?;
+                tester.workflow_start(tester.auto_branch()).await?;
+                tester.post_comment("@bors r-").await?;
+                tester.expect_comments(2).await;
+                tester.expect_check_run(
+                    &tester.default_pr().await.get_gh_pr().head_sha,
+                    AUTO_BUILD_CHECK_RUN_NAME,
+                    AUTO_BUILD_CHECK_RUN_NAME,
+                    CheckRunStatus::Completed,
+                    Some(CheckRunConclusion::Cancelled),
+                );
                 Ok(())
             })
             .await;

@@ -338,7 +338,10 @@ async fn notify_of_unclean_auto_build_cancelled_comment(
 
 #[cfg(test)]
 mod tests {
+    use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
+
     use crate::bors::PullRequestStatus;
+    use crate::bors::merge_queue::AUTO_BUILD_CHECK_RUN_NAME;
     use crate::tests::mocks::{BorsBuilder, GitHubState, default_pr_number};
     use crate::{
         database::{MergeableState, OctocrabMergeableState},
@@ -834,6 +837,34 @@ mod tests {
                     .await?;
                 insta::assert_snapshot!(tester.get_comment().await?, @"Auto build was cancelled due to push to branch. It was not possible to cancel some workflows.");
                 tester.expect_comments(1).await;
+                Ok(())
+            })
+            .await;
+    }
+
+    #[sqlx::test]
+    async fn cancel_pending_auto_build_on_push_updates_check_run(pool: sqlx::PgPool) {
+        BorsBuilder::new(pool)
+            .github(gh_state_with_merge_queue())
+            .run_test(async |tester| {
+                tester.post_comment("@bors r+").await?;
+                tester.expect_comments(1).await;
+                tester.process_merge_queue().await;
+                tester.expect_comments(1).await;
+                tester.workflow_start(tester.auto_branch()).await?;
+
+                let prev_commit = &tester.default_pr().await.get_gh_pr().head_sha;
+                tester
+                    .push_to_pr(default_repo_name(), default_pr_number())
+                    .await?;
+                tester.expect_comments(2).await;
+                tester.expect_check_run(
+                    prev_commit,
+                    AUTO_BUILD_CHECK_RUN_NAME,
+                    AUTO_BUILD_CHECK_RUN_NAME,
+                    CheckRunStatus::Completed,
+                    Some(CheckRunConclusion::Cancelled),
+                );
                 Ok(())
             })
             .await;
