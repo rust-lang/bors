@@ -68,14 +68,6 @@ pub(super) async fn handle_push_to_pull_request(
             )
             .await
             {
-                Err(error) => {
-                    tracing::error!(
-                        "Could not cancel workflows for SHA {}: {error:?}",
-                        auto_build.commit_sha
-                    );
-
-                    notify_of_unclean_auto_build_cancelled_comment(&repo_state, pr_number).await?
-                }
                 Ok(workflow_ids) => {
                     tracing::info!("Auto build cancelled");
 
@@ -83,6 +75,14 @@ pub(super) async fn handle_push_to_pull_request(
                         .client
                         .get_workflow_urls(workflow_ids.into_iter());
                     notify_of_cancelled_workflows(&repo_state, pr_number, workflow_urls).await?
+                }
+                Err(error) => {
+                    tracing::error!(
+                        "Could not cancel workflows for SHA {}: {error:?}",
+                        auto_build.commit_sha
+                    );
+
+                    notify_of_unclean_auto_build_cancelled_comment(&repo_state, pr_number).await?
                 }
             };
         }

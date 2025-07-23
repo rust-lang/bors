@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use octocrab::params::checks::CheckRunConclusion;
+
 use crate::bors::RepositoryState;
 use crate::bors::command::RollupMode;
 use crate::bors::command::{Approver, CommandPrefix};
@@ -9,12 +11,13 @@ use crate::bors::comment::{
 };
 use crate::bors::handlers::has_permission;
 use crate::bors::handlers::labels::handle_label_trigger;
+use crate::bors::handlers::trybuild::cancel_build_workflows;
 use crate::bors::handlers::{PullRequestData, deny_request};
 use crate::bors::merge_queue::MergeQueueSender;
 use crate::bors::{Comment, PullRequestStatus};
-use crate::database::ApprovalInfo;
 use crate::database::DelegatedPermission;
 use crate::database::TreeState;
+use crate::database::{ApprovalInfo, BuildStatus};
 use crate::github::LabelTrigger;
 use crate::github::{GithubUser, PullRequestNumber};
 use crate::permissions::PermissionType;
@@ -115,9 +118,11 @@ pub(super) async fn command_unapprove(
     pr: &PullRequestData,
     author: &GithubUser,
 ) -> anyhow::Result<()> {
-    tracing::info!("Unapproving PR {}", pr.number());
+    let pr_num = pr.number();
+
+    tracing::info!("Unapproving PR {}", pr_num);
     if !has_permission(&repo_state, author, pr, PermissionType::Review).await? {
-        deny_request(&repo_state, pr.number(), author, PermissionType::Review).await?;
+        deny_request(&repo_state, pr_num, author, PermissionType::Review).await?;
         return Ok(());
     };
 
@@ -127,14 +132,50 @@ pub(super) async fn command_unapprove(
     ) {
         repo_state
             .client
-            .post_comment(pr.number(), unapprove_non_open_pr_comment())
+            .post_comment(pr_num, unapprove_non_open_pr_comment())
             .await?;
         return Ok(());
     }
 
     db.unapprove(&pr.db).await?;
     handle_label_trigger(&repo_state, pr.number(), LabelTrigger::Unapproved).await?;
-    notify_of_unapproval(&repo_state, pr).await
+    notify_of_unapproval(&repo_state, pr).await?;
+
+    if let Some(auto_build) = &pr.db.auto_build {
+        if auto_build.status != BuildStatus::Pending {
+            return Ok(());
+        }
+
+        tracing::info!("Cancelling auto build for PR {pr_num} due to push");
+
+        match cancel_build_workflows(
+            &repo_state.client,
+            db.as_ref(),
+            auto_build,
+            CheckRunConclusion::Cancelled,
+        )
+        .await
+        {
+            Ok(workflow_ids) => {
+                tracing::info!("Auto build cancelled");
+
+                let workflow_urls = repo_state
+                    .client
+                    .get_workflow_urls(workflow_ids.into_iter());
+                notify_of_auto_build_cancelled(&repo_state, pr_num, workflow_urls).await?
+            }
+            Err(error) => {
+                tracing::error!(
+                    "Could not cancel workflows for SHA {}: {error:?}",
+                    auto_build.commit_sha
+                );
+
+                notify_of_unclean_auto_build_cancelled(&repo_state, pr_num).await?
+            }
+        };
+    }
+
+    Ok(())
 }
 
 /// Set the priority of a pull request.
@@ -342,6 +383,36 @@ async fn notify_of_delegation(
     };
 
     repo.client.post_comment(pr_number, comment).await
+}
+
+async fn notify_of_auto_build_cancelled(
+    repo: &RepositoryState,
+    pr_number: PullRequestNumber,
+    workflow_urls: impl Iterator<Item = String>,
+) -> anyhow::Result<()> {
+    let mut comment = r#"Auto build cancelled due to unapproval. Cancelled workflows:"#.to_string();
+    for url in workflow_urls {
+        comment += format!("\n- {}", url).as_str();
+    }
+
+    repo.client
+        .post_comment(pr_number, Comment::new(comment))
+        .await
+}
+
+async fn notify_of_unclean_auto_build_cancelled(
+    repo: &RepositoryState,
+    pr_number: PullRequestNumber,
+) -> anyhow::Result<()> {
+    repo.client
+        .post_comment(
+            pr_number,
+            Comment::new(
+                "Auto build was cancelled due to unapproval. It was not possible to cancel some workflows."
+                    .to_string(),
+            ),
+        )
+        .await
 }
 
 #[cfg(test)]
@@ -1294,6 +1365,60 @@ labels_blocking_approval = ["proposed-final-comment-period", "final-comment-peri
                 tester.post_comment("@bors r+").await?;
                 insta::assert_snapshot!(tester.get_comment().await?, @":clipboard: This PR cannot be approved because it currently has the following labels: `proposed-final-comment-period`, `final-comment-period`.");
                 tester.default_pr().await.expect_unapproved();
+                Ok(())
+            })
+            .await;
+    }
+
+    #[sqlx::test]
+    async fn unapprove_running_auto_build_pr_comment(pool: sqlx::PgPool) {
+        BorsBuilder::new(pool)
+            .github(GitHubState::default().with_default_config(
+                r#"
+merge_queue_enabled = true
+"#,
+            ))
+            .run_test(async |tester: &mut BorsTester| {
+                tester.post_comment("@bors r+").await?;
+                tester.expect_comments(1).await;
+                tester.process_merge_queue().await;
+                tester.expect_comments(1).await;
+                tester
+                    .wait_for_default_pr(|pr| pr.auto_build.is_some())
+                    .await?;
+                tester.workflow_start(tester.auto_branch()).await?;
+                tester.post_comment("@bors r-").await?;
+                tester.expect_comments(1).await;
+                insta::assert_snapshot!(tester.get_comment().await?, @r"
+                Auto build cancelled due to unapproval. Cancelled workflows:
+                - https://github.com/rust-lang/borstest/actions/runs/1
+                ");
+                Ok(())
+            })
+            .await;
+    }
+
+    #[sqlx::test]
+    async fn unapprove_running_auto_build_pr_failed_comment(pool: sqlx::PgPool) {
+        BorsBuilder::new(pool)
+            .github(GitHubState::default().with_default_config(
+                r#"
+merge_queue_enabled = true
+"#,
+            ))
+            .run_test(async |tester: &mut BorsTester| {
+                tester.default_repo().lock().workflow_cancel_error = true;
+                tester.post_comment("@bors r+").await?;
+                tester.expect_comments(1).await;
+                tester.process_merge_queue().await;
+                tester.expect_comments(1).await;
+                tester
+                    .wait_for_default_pr(|pr| pr.auto_build.is_some())
+                    .await?;
+                tester.workflow_start(tester.auto_branch()).await?;
+                tester.post_comment("@bors r-").await?;
+                tester.expect_comments(1).await;
+                insta::assert_snapshot!(tester.get_comment().await?, @"Auto build was cancelled due to unapproval. It was not possible to cancel some workflows.");
                 Ok(())
             })
             .await;
