@@ -156,24 +156,19 @@ Here is a sequence diagram that describes what happens when a PR is approved and
    |  comment: ":hourglass: Testing.." |                                     |       |         |
    |<----------------------------------|                                     |       |         |
    |                                   |                                     |       |         |
-   |                                   |                 workflow started    |       |         |
+   |                                   |                   workflow started  |       |         |
    |                                   |<------------------------------------|       |         |
    |                                   |                                     |       |         |
    |                                   | store workflow in DB                |       |         |
    |                                   |-------------------------------------------->|         |
    |                                   |                                     |       |         |
-   |                                   |                workflow completed   |       |         |
+   |                                   |                   workflow finished |       |         |
    |                                   |<------------------------------------|       |         |
    |                                   |                                     |       |         |
-   |                                   | update workflow status              |       |         |
+   |                                   | update auto build                   |       |         |
    |                                   |-------------------------------------------->|         |
    |                                   |                                     |       |         |
-   |                                   | query check suites for commit       |       |         |
-   |                                   |------------------------------------>|       |         |
-   |                                   |                                     |       |         |
-   |                                   | (wait for all check suites)         |       |         |
-   |                                   |                                     |       |         |
-   |                                   |         check suite completed       |       |         |
+   |                                   |            (last) workflow finished |       |         |
    |                                   |<------------------------------------|       |         |
    |                                   |                                     |       |         |
    |                                   | update build status                 |       |         |
