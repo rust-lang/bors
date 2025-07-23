@@ -303,3 +303,33 @@ fn list_workflows_status(workflows: &[WorkflowModel]) -> String {
         .collect::<Vec<_>>()
         .join("\n")
 }
+
+pub fn auto_build_started_comment(head_sha: &CommitSha, merge_sha: &CommitSha) -> Comment {
+    Comment::new(format!(
+        ":hourglass: Testing commit {} with merge {}...",
+        head_sha, merge_sha
+    ))
+}
+
+pub fn auto_build_succeeded_comment(
+    workflows: &[WorkflowModel],
+    approved_by: &str,
+    merge_sha: &CommitSha,
+    base_ref: &str,
+) -> Comment {
+    let urls = workflows
+        .iter()
+        .map(|w| format!("[{}]({})", w.name, w.url))
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    Comment::new(format!(
+        ":sunny: Test successful - {urls}\nApproved by: `{approved_by}`\nPushing {merge_sha} to `{base_ref}`...",
+    ))
+}
+
+pub fn auto_build_push_failed_comment(error: &str) -> Comment {
+    Comment::new(format!(
+        ":eyes: Test was successful, but fast-forwarding failed: {error}"
+    ))
+}

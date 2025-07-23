@@ -19,6 +19,8 @@ approve = ["+approved"]
 try = ["+foo", "-bar"]
 try_succeed = ["+foobar", "+foo", "+baz"]
 try_failed = []
+auto_build_succeeded = ["+foo", "+bar"]
+auto_build_failed = ["+foo", "+bar"]
 
 # Labels that will block approval when present on a PR
 # (Optional)

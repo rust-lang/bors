@@ -717,13 +717,9 @@ mod tests {
         gh.check_sha_history(
             default_repo_name(),
             TRY_MERGE_BRANCH_NAME,
-            &["main-sha1", "merge-main-sha1-pr-1-sha-0"],
+            &["main-sha1", "merge-0-pr-1"],
         );
-        gh.check_sha_history(
-            default_repo_name(),
-            TRY_BRANCH_NAME,
-            &["merge-main-sha1-pr-1-sha-0"],
-        );
+        gh.check_sha_history(default_repo_name(), TRY_BRANCH_NAME, &["merge-0-pr-1"]);
     }
 
     #[sqlx::test]
@@ -1130,7 +1126,7 @@ mod tests {
 
                 tester.post_comment("@bors try").await?;
                 insta::assert_snapshot!(tester.get_comment().await?, @r"
-                :hourglass: Trying commit pr-1-sha with merge merge-main-sha1-pr-1-sha-0…
+                :hourglass: Trying commit pr-1-sha with merge merge-0-pr-1…
 
                 To cancel the try build, run the command `@bors try cancel`.
                 ");

@@ -46,8 +46,8 @@ fn get_queue_blocking_priority(pr: &PullRequestModel) -> u32 {
 fn get_status_priority(pr: &PullRequestModel) -> u32 {
     match &pr.auto_build {
         Some(build) => match build.status {
-            BuildStatus::Success => 1,
-            BuildStatus::Pending => 1, // Same as success since queue blocking is handled separately
+            BuildStatus::Success => 0,
+            BuildStatus::Pending => 1,
             BuildStatus::Failure => 3,
             BuildStatus::Cancelled | BuildStatus::Timeouted => 2,
         },

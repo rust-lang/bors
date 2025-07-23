@@ -19,7 +19,7 @@ use super::repository::PullRequest;
 use crate::bors::merge_queue::MergeQueueSender;
 use crate::bors::mergeable_queue::MergeableQueueSender;
 use crate::bors::{
-    CommandPrefix, RollupMode, WAIT_FOR_CANCEL_TIMED_OUT_BUILDS_REFRESH,
+    CommandPrefix, RollupMode, WAIT_FOR_CANCEL_TIMED_OUT_BUILDS_REFRESH, WAIT_FOR_MERGE_QUEUE,
     WAIT_FOR_MERGEABILITY_STATUS_REFRESH, WAIT_FOR_PR_STATUS_REFRESH, WAIT_FOR_WORKFLOW_STARTED,
 };
 use crate::database::{
@@ -41,7 +41,7 @@ use crate::tests::mocks::{
 use crate::tests::util::TestSyncMarker;
 use crate::tests::webhook::{TEST_WEBHOOK_SECRET, create_webhook_request};
 use crate::{
-    BorsContext, BorsGlobalEvent, CommandParser, PgDbClient, ServerState, WebhookSecret,
+    BorsContext, BorsGlobalEvent, CommandParser, PgDbClient, ServerState, TreeState, WebhookSecret,
     create_app, create_bors_process,
 };
 
@@ -147,7 +147,13 @@ impl BorsTester {
         let mut repos = HashMap::default();
         for (name, repo) in loaded_repos {
             let repo = repo.unwrap();
-            repos.insert(name, Arc::new(repo));
+            repos.insert(name.clone(), Arc::new(repo));
+        }
+
+        for (name, _) in &repos {
+            if let Err(error) = db.insert_repo_if_not_exists(name, TreeState::Open).await {
+                tracing::warn!("Failed to insert repository {name} in test: {error:?}");
+            }
         }
 
         let ctx = BorsContext::new(
@@ -298,12 +304,30 @@ impl BorsTester {
         self.get_branch("automation/bors/try")
     }
 
+    pub fn auto_branch(&self) -> Branch {
+        self.get_branch("automation/bors/auto")
+    }
+
     /// Wait until the next bot comment is received on the default repo and the default PR.
     pub async fn get_comment(&mut self) -> anyhow::Result<String> {
         Ok(self
             .http_mock
             .gh_server
             .get_comment(Repo::default().name, default_pr_number())
+            .await?
+            .content)
+    }
+
+    /// Wait until the next bot comment is received on the specified PR and consume it.
+    pub async fn expect_comment_on_pr(
+        &mut self,
+        repo: GithubRepoName,
+        pr: u64,
+    ) -> anyhow::Result<String> {
+        Ok(self
+            .http_mock
+            .gh_server
+            .get_comment(repo, pr)
             .await?
             .content)
     }
@@ -356,6 +380,22 @@ impl BorsTester {
                 Ok(())
             },
             &WAIT_FOR_PR_STATUS_REFRESH,
+        )
+        .await
+        .unwrap();
+    }
+
+    pub async fn process_merge_queue(&self) {
+        // Wait until the merge queue processing is fully handled
+        wait_for_marker(
+            async || {
+                self.global_tx
+                    .send(BorsGlobalEvent::ProcessMergeQueue)
+                    .await
+                    .unwrap();
+                Ok(())
+            },
+            &WAIT_FOR_MERGE_QUEUE,
         )
         .await
         .unwrap();
@@ -434,10 +474,23 @@ impl BorsTester {
         let number = {
             let repo = self.github.get_repo(&repo_name);
             let repo = repo.lock();
-            repo.pull_requests.keys().max().copied().unwrap_or(1)
+            repo.pull_requests.keys().max().copied().unwrap_or(0) + 1
         };
 
-        let pr = PullRequest::new(repo_name, number, User::default_pr_author(), is_draft);
+        let pr = PullRequest::new(
+            repo_name.clone(),
+            number,
+            User::default_pr_author(),
+            is_draft,
+        );
+
+        // Add the PR to the repository
+        {
+            let repo = self.github.get_repo(&repo_name);
+            let mut repo = repo.lock();
+            repo.pull_requests.insert(number, pr.clone());
+        }
+
         self.send_webhook(
             "pull_request",
             GitHubPullRequestEventPayload::new(pr.clone(), "opened", None),

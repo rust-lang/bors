@@ -515,6 +515,24 @@ pub(crate) async fn update_pr_try_build_id(
     .await
 }
 
+pub(crate) async fn update_pr_auto_build_id(
+    executor: impl PgExecutor<'_>,
+    pr_id: i32,
+    auto_build_id: i32,
+) -> anyhow::Result<()> {
+    measure_db_query("update_pr_auto_build_id", || async {
+        sqlx::query!(
+            "UPDATE pull_request SET auto_build_id = $1 WHERE id = $2",
+            auto_build_id,
+            pr_id
+        )
+        .execute(executor)
+        .await?;
+        Ok(())
+    })
+    .await
+}
+
 pub(crate) async fn create_build(
     executor: impl PgExecutor<'_>,
     repo: &GithubRepoName,
