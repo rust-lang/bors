@@ -183,7 +183,7 @@ pub async fn merge_queue_tick(ctx: Arc<BorsContext>) -> anyhow::Result<()> {
                     tracing::error!("Error starting auto build for PR {pr_num}: {:?}", error);
                     // Unexpected error - the PR will remain in the queue for a retry. This is most
                     // likely a transient GitHub error.
-                    continue;
+                    break;
                 }
             }
         }
