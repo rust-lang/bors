@@ -339,11 +339,19 @@ async fn notify_of_unclean_auto_build_cancelled_comment(
 #[cfg(test)]
 mod tests {
     use crate::bors::PullRequestStatus;
-    use crate::tests::mocks::default_pr_number;
+    use crate::tests::mocks::{BorsBuilder, GitHubState, default_pr_number};
     use crate::{
         database::{MergeableState, OctocrabMergeableState},
         tests::mocks::{User, default_branch_name, default_repo_name, run_test},
     };
+
+    fn gh_state_with_merge_queue() -> GitHubState {
+        GitHubState::default().with_default_config(
+            r#"
+      merge_queue_enabled = true
+      "#,
+        )
+    }
 
     #[sqlx::test]
     async fn unapprove_on_base_edited(pool: sqlx::PgPool) {
@@ -752,5 +760,82 @@ mod tests {
             Ok(())
         })
         .await;
+    }
+
+    #[sqlx::test]
+    async fn delete_completed_auto_build_on_push(pool: sqlx::PgPool) {
+        BorsBuilder::new(pool)
+            .github(gh_state_with_merge_queue())
+            .run_test(async |tester| {
+                tester.post_comment("@bors r+").await?;
+                tester.expect_comments(1).await;
+                tester.process_merge_queue().await;
+                tester.expect_comments(1).await;
+                tester
+                    .wait_for_default_pr(|pr| pr.auto_build.is_some())
+                    .await?;
+                tester.workflow_full_success(tester.auto_branch()).await?;
+                tester.expect_comments(1).await;
+                tester
+                    .push_to_pr(default_repo_name(), default_pr_number())
+                    .await?;
+                tester.expect_comments(1).await;
+                tester
+                    .wait_for_default_pr(|pr| pr.auto_build.is_none())
+                    .await?;
+                Ok(())
+            })
+            .await;
+    }
+
+    #[sqlx::test]
+    async fn cancel_pending_auto_build_on_push_comment(pool: sqlx::PgPool) {
+        BorsBuilder::new(pool)
+            .github(gh_state_with_merge_queue())
+            .run_test(async |tester| {
+                tester.post_comment("@bors r+").await?;
+                tester.expect_comments(1).await;
+                tester.process_merge_queue().await;
+                tester.expect_comments(1).await;
+                tester
+                    .wait_for_default_pr(|pr| pr.auto_build.is_some())
+                    .await?;
+                tester.workflow_start(tester.auto_branch()).await?;
+                tester
+                    .push_to_pr(default_repo_name(), default_pr_number())
+                    .await?;
+                insta::assert_snapshot!(tester.get_comment().await?, @r"
+                Auto build cancelled due to push to branch. Cancelled workflows:
+                - https://github.com/rust-lang/borstest/actions/runs/1
+                ");
+                tester.expect_comments(1).await;
+                Ok(())
+            })
+            .await;
+    }
+
+    #[sqlx::test]
+    async fn cancel_pending_auto_build_on_push_error_comment(pool: sqlx::PgPool) {
+        BorsBuilder::new(pool)
+            .github(gh_state_with_merge_queue())
+            .run_test(async |tester| {
+                tester.default_repo().lock().workflow_cancel_error = true;
+                tester.post_comment("@bors r+").await?;
+                tester.expect_comments(1).await;
+                tester.process_merge_queue().await;
+                tester.expect_comments(1).await;
+                tester
+                    .wait_for_default_pr(|pr| pr.auto_build.is_some())
+                    .await?;
+
+                tester.workflow_start(tester.auto_branch()).await?;
+                tester
+                    .push_to_pr(default_repo_name(), default_pr_number())
+                    .await?;
+                insta::assert_snapshot!(tester.get_comment().await?, @"Auto build was cancelled due to push to branch. It was not possible to cancel some workflows.");
+                tester.expect_comments(1).await;
+                Ok(())
+            })
+            .await;
     }
 }

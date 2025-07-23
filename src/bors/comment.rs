@@ -324,7 +324,9 @@ pub fn auto_build_succeeded_comment(
         .join(", ");
 
     Comment::new(format!(
-        ":sunny: Test successful - {urls}\nApproved by: `{approved_by}`\nPushing {merge_sha} to `{base_ref}`...",
+        r#":sunny: Test successful - {urls}
+Approved by: `{approved_by}`
+Pushing {merge_sha} to `{base_ref}`..."#
     ))
 }
 
