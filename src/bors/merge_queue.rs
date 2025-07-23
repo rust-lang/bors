@@ -11,7 +11,7 @@ use crate::bors::comment::{
     auto_build_push_failed_comment, auto_build_started_comment, auto_build_succeeded_comment,
 };
 use crate::bors::{PullRequestStatus, RepositoryState};
-use crate::database::{BuildStatus, PullRequestModel};
+use crate::database::{BuildStatus, MergeableState, PullRequestModel};
 use crate::github::api::client::GithubRepositoryClient;
 use crate::github::api::operations::ForcePush;
 use crate::github::{CommitSha, MergeError};
@@ -165,18 +165,24 @@ pub async fn merge_queue_tick(ctx: Arc<BorsContext>) -> anyhow::Result<()> {
             }
 
             // No build exists for this PR - start a new auto build.
-            match start_auto_build(&repo, &ctx, pr).await {
+            match start_auto_build(&repo, &ctx, &pr).await {
                 Ok(true) => {
                     tracing::info!("Starting auto build for PR {pr_num}");
                     break;
                 }
                 Ok(false) => {
-                    tracing::debug!("Failed to start auto build for PR {pr_num}");
-                    continue;
+                    tracing::debug!(
+                        "Failed to start auto build for PR {pr_num} due to unexpected merge conflict"
+                    );
+                    ctx.db
+                        .update_pr_mergeable_state(&pr, MergeableState::HasConflicts)
+                        .await?;
+                    break;
                 }
                 Err(error) => {
-                    // Unexpected error - the PR will remain in the "queue" for a retry.
                     tracing::error!("Error starting auto build for PR {pr_num}: {:?}", error);
+                    // Unexpected error - the PR will remain in the queue for a retry. This is most
+                    // likely a transient GitHub error.
                     continue;
                 }
             }
@@ -193,7 +199,7 @@ pub async fn merge_queue_tick(ctx: Arc<BorsContext>) -> anyhow::Result<()> {
 async fn start_auto_build(
     repo: &Arc<RepositoryState>,
     ctx: &Arc<BorsContext>,
-    pr: PullRequestModel,
+    pr: &PullRequestModel,
 ) -> anyhow::Result<bool> {
     let client = &repo.client;
 
@@ -228,7 +234,7 @@ async fn start_auto_build(
             let build_id = ctx
                 .db
                 .attach_auto_build(
-                    &pr,
+                    pr,
                     AUTO_BRANCH_NAME.to_string(),
                     merge_sha.clone(),
                     base_sha,
