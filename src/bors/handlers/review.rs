@@ -137,10 +137,7 @@ pub(super) async fn command_unapprove(
         return Ok(());
     }
 
-    db.unapprove(&pr.db).await?;
-    handle_label_trigger(&repo_state, pr.number(), LabelTrigger::Unapproved).await?;
-    notify_of_unapproval(&repo_state, pr).await?;
-
+    let mut auto_build_cancel_message: Option<String> = None;
     if let Some(auto_build) = &pr.db.auto_build {
         if auto_build.status != BuildStatus::Pending {
             return Ok(());
@@ -162,7 +159,7 @@ pub(super) async fn command_unapprove(
                 let workflow_urls = repo_state
                     .client
                     .get_workflow_urls(workflow_ids.into_iter());
-                notify_of_auto_build_cancelled(&repo_state, pr_num, workflow_urls).await?
+                auto_build_cancel_message = Some(auto_build_cancelled_message(workflow_urls).await);
             }
             Err(error) => {
                 tracing::error!(
@@ -170,10 +167,14 @@ pub(super) async fn command_unapprove(
                     auto_build.commit_sha
                 );
 
-                notify_of_unclean_auto_build_cancelled(&repo_state, pr_num).await?
+                auto_build_cancel_message = Some(unclean_auto_build_cancelled_message().await);
             }
         };
     }
+
+    db.unapprove(&pr.db).await?;
+    handle_label_trigger(&repo_state, pr.number(), LabelTrigger::Unapproved).await?;
+    notify_of_unapproval(&repo_state, pr, auto_build_cancel_message).await?;
 
     Ok(())
 }
@@ -341,12 +342,19 @@ async fn notify_of_tree_open(
         .await
 }
 
-async fn notify_of_unapproval(repo: &RepositoryState, pr: &PullRequestData) -> anyhow::Result<()> {
+async fn notify_of_unapproval(
+    repo: &RepositoryState,
+    pr: &PullRequestData,
+    cancel_message: Option<String>,
+) -> anyhow::Result<()> {
+    let mut comment = format!("Commit {} has been unapproved.", pr.github.head.sha);
+
+    if let Some(message) = cancel_message {
+        comment.push_str(&format!("\n\n{message}"));
+    }
+
     repo.client
-        .post_comment(
-            pr.number(),
-            Comment::new(format!("Commit {} has been unapproved", pr.github.head.sha)),
-        )
+        .post_comment(pr.number(), Comment::new(comment))
         .await
 }
 
@@ -385,34 +393,18 @@ async fn notify_of_delegation(
     repo.client.post_comment(pr_number, comment).await
 }
 
-async fn notify_of_auto_build_cancelled(
-    repo: &RepositoryState,
-    pr_number: PullRequestNumber,
-    workflow_urls: impl Iterator<Item = String>,
-) -> anyhow::Result<()> {
+async fn auto_build_cancelled_message(workflow_urls: impl Iterator<Item = String>) -> String {
     let mut comment = r#"Auto build cancelled due to unapproval. Cancelled workflows:"#.to_string();
     for url in workflow_urls {
         comment += format!("\n- {}", url).as_str();
     }
 
-    repo.client
-        .post_comment(pr_number, Comment::new(comment))
-        .await
+    comment
 }
 
-async fn notify_of_unclean_auto_build_cancelled(
-    repo: &RepositoryState,
-    pr_number: PullRequestNumber,
-) -> anyhow::Result<()> {
-    repo.client
-        .post_comment(
-            pr_number,
-            Comment::new(
-                "Auto build was cancelled due to unapproval. It was not possible to cancel some workflows."
-                    .to_string(),
-            ),
-        )
-        .await
+async fn unclean_auto_build_cancelled_message() -> String {
+    "Auto build was cancelled due to unapproval. It was not possible to cancel some workflows."
+        .to_string()
 }
 
 #[cfg(test)]
@@ -528,7 +520,7 @@ mod tests {
             tester.post_comment("@bors r-").await?;
             insta::assert_snapshot!(
                 tester.get_comment().await?,
-                @"Commit pr-1-sha has been unapproved"
+                @"Commit pr-1-sha has been unapproved."
             );
 
             tester.default_pr().await.expect_unapproved();
@@ -1391,8 +1383,9 @@ merge_queue_enabled = true
                     .await?;
                 tester.workflow_start(tester.auto_branch()).await?;
                 tester.post_comment("@bors r-").await?;
-                tester.expect_comments(1).await;
                 insta::assert_snapshot!(tester.get_comment().await?, @r"
+                Commit pr-1-sha has been unapproved.
+
                 Auto build cancelled due to unapproval. Cancelled workflows:
                 - https://github.com/rust-lang/borstest/actions/runs/1
                 ");
@@ -1420,8 +1413,11 @@ merge_queue_enabled = true
                     .await?;
                 tester.workflow_start(tester.auto_branch()).await?;
                 tester.post_comment("@bors r-").await?;
-                tester.expect_comments(1).await;
-                insta::assert_snapshot!(tester.get_comment().await?, @"Auto build was cancelled due to unapproval. It was not possible to cancel some workflows.");
+                insta::assert_snapshot!(tester.get_comment().await?, @r"
+                Commit pr-1-sha has been unapproved.
+
+                Auto build was cancelled due to unapproval. It was not possible to cancel some workflows.
+                ");
                 Ok(())
             })
             .await;
@@ -1445,7 +1441,7 @@ merge_queue_enabled = true
                     .await?;
                 tester.workflow_start(tester.auto_branch()).await?;
                 tester.post_comment("@bors r-").await?;
-                tester.expect_comments(2).await;
+                tester.expect_comments(1).await;
                 tester.expect_check_run(
                     &tester.default_pr().await.get_gh_pr().head_sha,
                     AUTO_BUILD_CHECK_RUN_NAME,
