@@ -56,13 +56,6 @@ pub(super) async fn handle_push_to_pull_request(
 
     let auto_build_cancel_message =
         maybe_cancel_auto_build(&repo_state.client, &db, &pr_model).await?;
-    if let Some(auto_build) = &pr_model.auto_build {
-        tracing::info!(
-            "Deleting auto build {} for PR {pr_number} due to push",
-            auto_build.id
-        );
-        db.delete_auto_build(&pr_model).await?;
-    }
 
     if !pr_model.is_approved() {
         return Ok(());
@@ -711,32 +704,6 @@ mod tests {
             Ok(())
         })
         .await;
-    }
-
-    #[sqlx::test]
-    async fn delete_completed_auto_build_on_push(pool: sqlx::PgPool) {
-        BorsBuilder::new(pool)
-            .github(gh_state_with_merge_queue())
-            .run_test(async |tester| {
-                tester.post_comment("@bors r+").await?;
-                tester.expect_comments(1).await;
-                tester.process_merge_queue().await;
-                tester.expect_comments(1).await;
-                tester
-                    .wait_for_default_pr(|pr| pr.auto_build.is_some())
-                    .await?;
-                tester.workflow_full_success(tester.auto_branch()).await?;
-                tester.expect_comments(1).await;
-                tester
-                    .push_to_pr(default_repo_name(), default_pr_number())
-                    .await?;
-                tester.expect_comments(1).await;
-                tester
-                    .wait_for_default_pr(|pr| pr.auto_build.is_none())
-                    .await?;
-                Ok(())
-            })
-            .await;
     }
 
     #[sqlx::test]
