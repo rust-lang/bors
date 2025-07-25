@@ -284,7 +284,7 @@ impl PgDbClient {
     pub async fn get_pending_workflows_for_build(
         &self,
         build: &BuildModel,
-    ) -> anyhow::Result<Vec<RunId>> {
+    ) -> anyhow::Result<Vec<WorkflowModel>> {
         let workflows = self
             .get_workflows_for_build(build)
             .await?
@@ -292,8 +292,7 @@ impl PgDbClient {
             .filter(|w| {
                 w.status == WorkflowStatus::Pending && w.workflow_type == WorkflowType::Github
             })
-            .map(|w| w.run_id)
-            .collect::<Vec<_>>();
+            .collect::<Vec<WorkflowModel>>();
         Ok(workflows)
     }
 
