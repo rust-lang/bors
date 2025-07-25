@@ -74,7 +74,7 @@ async fn refresh_build(
             tracing::warn!(
                 "Detected orphaned pending without a PR, marking it as time outed: {build:?}"
             );
-            db.update_build_status(build, BuildStatus::Cancelled)
+            db.update_build_status(build, BuildStatus::Timeouted)
                 .await?;
         }
     }
