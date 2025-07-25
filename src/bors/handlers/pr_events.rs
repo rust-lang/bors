@@ -5,7 +5,7 @@ use crate::bors::event::{
     PullRequestReopened, PullRequestUnassigned, PushToBranch,
 };
 use crate::bors::handlers::unapprove_pr;
-use crate::bors::handlers::workflow::maybe_cancel_auto_build;
+use crate::bors::handlers::workflow::{AutoBuildCancelReason, maybe_cancel_auto_build};
 use crate::bors::mergeable_queue::MergeableQueueSender;
 use crate::bors::{Comment, PullRequestStatus, RepositoryState};
 use crate::database::MergeableState;
@@ -54,8 +54,13 @@ pub(super) async fn handle_push_to_pull_request(
 
     mergeable_queue.enqueue(repo_state.repository().clone(), pr_number);
 
-    let auto_build_cancel_message =
-        maybe_cancel_auto_build(&repo_state.client, &db, &pr_model).await?;
+    let auto_build_cancel_message = maybe_cancel_auto_build(
+        &repo_state.client,
+        &db,
+        &pr_model,
+        AutoBuildCancelReason::PushToPR,
+    )
+    .await?;
 
     if !pr_model.is_approved() {
         return Ok(());
@@ -726,7 +731,8 @@ mod tests {
                 :warning: A new commit `pr-1-commit-1` was pushed to the branch, the
                 PR will need to be re-approved.
 
-                Auto build cancelled. Cancelled workflows:
+                Auto build cancelled due to push. Cancelled workflows:
+
                 - https://github.com/workflows/Workflow1/1
                 ");
                 Ok(())
@@ -756,7 +762,7 @@ mod tests {
                 :warning: A new commit `pr-1-commit-1` was pushed to the branch, the
                 PR will need to be re-approved.
 
-                Auto build was cancelled. It was not possible to cancel some workflows.
+                Auto build cancelled due to push. It was not possible to cancel some workflows.
                 ");
                 Ok(())
             })

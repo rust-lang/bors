@@ -1,8 +1,5 @@
 use crate::PgDbClient;
-use crate::bors::comment::{
-    auto_build_cancelled_msg, auto_build_cancelled_with_failed_workflow_cancel_msg,
-    build_failed_comment, try_build_succeeded_comment,
-};
+use crate::bors::comment::{build_failed_comment, try_build_succeeded_comment};
 use crate::bors::event::{WorkflowRunCompleted, WorkflowRunStarted};
 use crate::bors::handlers::TRY_BRANCH_NAME;
 use crate::bors::handlers::is_bors_observed_branch;
@@ -377,6 +374,14 @@ pub async fn cancel_build(
     Ok(pending_workflows)
 }
 
+/// Why did we cancel an auto build?
+pub enum AutoBuildCancelReason {
+    /// A new commit was pushed to a PR while it was being tested in an auto build.
+    PushToPR,
+    /// A PR was unapproved while it was being tested in an auto build.
+    Unapproval,
+}
+
 /// Cancel an auto build attached to the PR, if there is any.
 /// Returns an optional string that can be attached to a PR comment, which describes the result of
 /// the workflow cancellation.
@@ -384,6 +389,7 @@ pub async fn maybe_cancel_auto_build(
     client: &GithubRepositoryClient,
     db: &PgDbClient,
     pr: &PullRequestModel,
+    reason: AutoBuildCancelReason,
 ) -> anyhow::Result<Option<String>> {
     let mut auto_build_cancel_message: Option<String> = None;
     if let Some(auto_build) = &pr.auto_build {
@@ -396,8 +402,9 @@ pub async fn maybe_cancel_auto_build(
         match cancel_build(client, db, auto_build, CheckRunConclusion::Cancelled).await {
             Ok(workflows) => {
                 tracing::info!("Auto build cancelled");
-                let workflow_urls = workflows.into_iter().map(|w| w.url);
-                auto_build_cancel_message = Some(auto_build_cancelled_msg(workflow_urls));
+                let workflow_urls = workflows.into_iter().map(|w| w.url).collect();
+                auto_build_cancel_message =
+                    Some(auto_build_cancelled_msg(reason, Some(workflow_urls)));
             }
             Err(CancelBuildError::FailedToMarkBuildAsCancelled(error)) => return Err(error),
             Err(CancelBuildError::FailedToCancelWorkflows(error)) => {
@@ -406,12 +413,36 @@ pub async fn maybe_cancel_auto_build(
                     auto_build.commit_sha
                 );
 
-                auto_build_cancel_message =
-                    Some(auto_build_cancelled_with_failed_workflow_cancel_msg());
+                auto_build_cancel_message = Some(auto_build_cancelled_msg(reason, None));
             }
         };
     }
     Ok(auto_build_cancel_message)
+}
+
+/// If `workflow_urls` is `None`, it was not possible to cancel workflows.
+fn auto_build_cancelled_msg(
+    reason: AutoBuildCancelReason,
+    cancelled_workflow_urls: Option<Vec<String>>,
+) -> String {
+    use std::fmt::Write;
+
+    let reason = match reason {
+        AutoBuildCancelReason::PushToPR => "push",
+        AutoBuildCancelReason::Unapproval => "unapproval",
+    };
+    let mut comment = format!("Auto build cancelled due to {reason}.");
+    match cancelled_workflow_urls {
+        Some(workflow_urls) => {
+            comment.push_str(" Cancelled workflows:\n");
+            for url in workflow_urls {
+                write!(comment, "\n- {url}").unwrap();
+            }
+        }
+        None => comment.push_str(" It was not possible to cancel some workflows."),
+    }
+
+    comment
 }
 
 #[cfg(test)]
