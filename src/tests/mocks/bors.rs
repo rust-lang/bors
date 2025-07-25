@@ -19,8 +19,8 @@ use super::repository::PullRequest;
 use crate::bors::merge_queue::MergeQueueSender;
 use crate::bors::mergeable_queue::MergeableQueueSender;
 use crate::bors::{
-    CommandPrefix, RollupMode, WAIT_FOR_CANCEL_TIMED_OUT_BUILDS_REFRESH, WAIT_FOR_MERGE_QUEUE,
-    WAIT_FOR_MERGEABILITY_STATUS_REFRESH, WAIT_FOR_PR_STATUS_REFRESH, WAIT_FOR_WORKFLOW_STARTED,
+    CommandPrefix, RollupMode, WAIT_FOR_MERGE_QUEUE, WAIT_FOR_MERGEABILITY_STATUS_REFRESH,
+    WAIT_FOR_PR_STATUS_REFRESH, WAIT_FOR_REFRESH_PENDING_BUILDS, WAIT_FOR_WORKFLOW_STARTED,
 };
 use crate::database::{
     BuildStatus, DelegatedPermission, OctocrabMergeableState, PullRequestModel, WorkflowStatus,
@@ -342,12 +342,12 @@ impl BorsTester {
         wait_for_marker(
             async || {
                 self.global_tx
-                    .send(BorsGlobalEvent::CancelTimedOutBuilds)
+                    .send(BorsGlobalEvent::RefreshPendingBuilds)
                     .await
                     .unwrap();
                 Ok(())
             },
-            &WAIT_FOR_CANCEL_TIMED_OUT_BUILDS_REFRESH,
+            &WAIT_FOR_REFRESH_PENDING_BUILDS,
         )
         .await
         .unwrap();

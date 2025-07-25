@@ -13,12 +13,12 @@ use crate::bors::handlers::trybuild::cancel_build_workflows;
 use crate::bors::mergeable_queue::MergeableQueueSender;
 use crate::{PgDbClient, TeamApiClient};
 
-/// Cancel CI builds that have been running for too long
-pub async fn cancel_timed_out_builds(
+/// Cancel CI builds that have been running for too long.
+pub async fn refresh_pending_builds(
     repo: Arc<RepositoryState>,
     db: &PgDbClient,
 ) -> anyhow::Result<()> {
-    let running_builds = db.get_running_builds(repo.repository()).await?;
+    let running_builds = db.get_pending_builds(repo.repository()).await?;
     tracing::info!("Found {} running build(s)", running_builds.len());
 
     let timeout = repo.config.load().timeout;
@@ -248,7 +248,7 @@ timeout = 3600
                     assert_eq!(
                         tester
                             .db()
-                            .get_running_builds(&default_repo_name())
+                            .get_pending_builds(&default_repo_name())
                             .await
                             .unwrap()
                             .len(),
@@ -261,7 +261,7 @@ timeout = 3600
                 assert_eq!(
                     tester
                         .db()
-                        .get_running_builds(&default_repo_name())
+                        .get_pending_builds(&default_repo_name())
                         .await
                         .unwrap()
                         .len(),
