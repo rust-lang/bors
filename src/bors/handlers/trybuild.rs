@@ -18,14 +18,13 @@ use crate::permissions::PermissionType;
 use crate::utils::text::suppress_github_mentions;
 use anyhow::{Context, anyhow};
 use itertools::Itertools;
-use octocrab::models::CheckRunId;
 use octocrab::params::checks::CheckRunConclusion;
 use octocrab::params::checks::CheckRunOutput;
 use octocrab::params::checks::CheckRunStatus;
 use tracing::log;
 
-use super::has_permission;
 use super::{PullRequestData, deny_request};
+use super::{has_permission, workflow};
 
 // This branch serves for preparing the final commit.
 // It will be reset to master and merged with the branch that should be tested.
@@ -156,7 +155,9 @@ async fn cancel_previous_try_build(
 ) -> anyhow::Result<Vec<String>> {
     assert_eq!(build.status, BuildStatus::Pending);
 
-    match cancel_build_workflows(&repo.client, db, build, CheckRunConclusion::Cancelled).await {
+    match workflow::cancel_build_workflows(&repo.client, db, build, CheckRunConclusion::Cancelled)
+        .await
+    {
         Ok(workflow_ids) => {
             tracing::info!("Try build cancelled");
             Ok(repo
@@ -268,7 +269,7 @@ pub(super) async fn command_try_cancel(
         return Ok(());
     };
 
-    match cancel_build_workflows(
+    match workflow::cancel_build_workflows(
         &repo.client,
         db.as_ref(),
         build,
@@ -300,41 +301,6 @@ pub(super) async fn command_try_cancel(
     };
 
     Ok(())
-}
-
-pub async fn cancel_build_workflows(
-    client: &GithubRepositoryClient,
-    db: &PgDbClient,
-    build: &BuildModel,
-    check_run_conclusion: CheckRunConclusion,
-) -> anyhow::Result<Vec<octocrab::models::RunId>> {
-    let pending_workflows = db.get_pending_workflows_for_build(build).await?;
-    let pending_workflows: Vec<octocrab::models::RunId> = pending_workflows
-        .into_iter()
-        .map(|id| octocrab::models::RunId(id.0))
-        .collect();
-
-    tracing::info!("Cancelling workflows {:?}", pending_workflows);
-    client.cancel_workflows(&pending_workflows).await?;
-
-    db.update_build_status(build, BuildStatus::Cancelled)
-        .await?;
-
-    if let Some(check_run_id) = build.check_run_id {
-        if let Err(error) = client
-            .update_check_run(
-                CheckRunId(check_run_id as u64),
-                CheckRunStatus::Completed,
-                Some(check_run_conclusion),
-                None,
-            )
-            .await
-        {
-            tracing::error!("Could not update check run {check_run_id}: {error:?}");
-        }
-    }
-
-    Ok(pending_workflows)
 }
 
 fn get_pending_build(pr: &PullRequestModel) -> Option<&BuildModel> {

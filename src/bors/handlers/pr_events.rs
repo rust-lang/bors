@@ -4,8 +4,8 @@ use crate::bors::event::{
     PullRequestMerged, PullRequestOpened, PullRequestPushed, PullRequestReadyForReview,
     PullRequestReopened, PullRequestUnassigned, PushToBranch,
 };
-use crate::bors::handlers::trybuild::cancel_build_workflows;
 use crate::bors::handlers::unapprove_pr;
+use crate::bors::handlers::workflow::cancel_build_workflows;
 use crate::bors::mergeable_queue::MergeableQueueSender;
 use crate::bors::{Comment, PullRequestStatus, RepositoryState};
 use crate::database::{BuildStatus, MergeableState};

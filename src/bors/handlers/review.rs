@@ -10,7 +10,7 @@ use crate::bors::comment::{
     approved_comment, delegate_comment, delegate_try_builds_comment, unapprove_non_open_pr_comment,
 };
 use crate::bors::handlers::labels::handle_label_trigger;
-use crate::bors::handlers::trybuild::cancel_build_workflows;
+use crate::bors::handlers::workflow::cancel_build_workflows;
 use crate::bors::handlers::{PullRequestData, deny_request};
 use crate::bors::handlers::{has_permission, unapprove_pr};
 use crate::bors::merge_queue::MergeQueueSender;

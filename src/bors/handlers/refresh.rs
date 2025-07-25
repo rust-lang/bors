@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 use crate::bors::PullRequestStatus;
 use crate::bors::RepositoryState;
 use crate::bors::comment::build_timed_out_comment;
-use crate::bors::handlers::trybuild::cancel_build_workflows;
+use crate::bors::handlers::workflow::cancel_build_workflows;
 use crate::bors::mergeable_queue::MergeableQueueSender;
 use crate::database::{BuildModel, BuildStatus};
 use crate::{PgDbClient, TeamApiClient};
@@ -42,7 +42,7 @@ async fn refresh_build(
         if let Some(pr) = db.find_pr_by_build(&build).await? {
             tracing::info!("Cancelling build {build:?}");
             if let Err(error) =
-                cancel_build(&repo.client, db, &build, CheckRunConclusion::TimedOut).await
+                cancel_build_workflows(&repo.client, db, &build, CheckRunConclusion::TimedOut).await
             {
                 tracing::error!(
                     "Could not cancel workflows for SHA {}: {error:?}",
