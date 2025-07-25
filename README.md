@@ -50,8 +50,9 @@ Here is a guide on how to add a repository so that this bot can be used on it:
 1) Add a file named `rust-bors.toml` to the root of the main branch of the repository. The configuration struct that
 describes the file can be found in `src/config.rs`. [Here](rust-bors.example.toml) is an example configuration file.
 2) Install the GitHub app corresponding to this bot to the corresponding repository. You can use the
-`https://github.com/settings/apps/<app-name>/installations` link (to be automated via `team` repo).
-3) Configure CI workflows on push to:
+`https://github.com/settings/apps/<app-name>/installations` link.
+3) Enable the corresponding permissions and webhook events for the GH app (see [this](docs/development.md#how-to-test-bors-on-live-repositories)).
+4) Configure CI workflows on push to:
    - `automation/bors/try` branch (for try builds)
    - `automation/bors/auto` branch (for auto builds)
-4) Give the bot permissions to push to `automation/bors/try`, `automation/bors/try-merge`, `automation/bors/auto`, and `automation/bors/auto-merge` (to be automated via `team` repo).
+5) Give the bot permissions to push to `automation/bors/try`, `automation/bors/try-merge`, `automation/bors/auto`, and `automation/bors/auto-merge`.
