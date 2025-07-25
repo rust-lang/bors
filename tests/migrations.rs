@@ -177,10 +177,12 @@ async fn apply_migrations_with_test_data(pool: PgPool) -> sqlx::Result<()> {
             .unwrap_or_else(|e| panic!("Failed to apply migration {:?}: {}", migration_path, e));
 
         let test_data_path = get_test_data_path(&migration_path);
-        let test_data = std::fs::read_to_string(&test_data_path).expect(&format!(
-            "Failed to read test data file: {}",
-            test_data_path.display()
-        ));
+        let test_data = std::fs::read_to_string(&test_data_path).unwrap_or_else(|error| {
+            panic!(
+                "Failed to read test data file `{}`: {error:?}",
+                test_data_path.display()
+            )
+        });
 
         pool.execute(&*test_data).await.unwrap_or_else(|e| {
             panic!(

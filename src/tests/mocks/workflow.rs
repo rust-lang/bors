@@ -125,7 +125,7 @@ impl From<WorkflowEvent> for GitHubWorkflowEventPayload {
             }
             .to_string(),
             workflow_run: GitHubWorkflowRun {
-                id: workflow.run_id.into(),
+                id: workflow.run_id,
                 workflow_id: 1.into(),
                 node_id: "".to_string(),
                 name: workflow.name,

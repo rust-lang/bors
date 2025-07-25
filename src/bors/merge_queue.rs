@@ -391,8 +391,8 @@ mod tests {
 
     #[sqlx::test]
     async fn auto_workflow_started(pool: sqlx::PgPool) {
-        run_merge_queue_test(pool.clone(), async |mut tester| {
-            start_auto_build(&mut tester).await?;
+        run_merge_queue_test(pool.clone(), async |tester| {
+            start_auto_build(tester).await?;
             tester
                 .workflow_event(WorkflowEvent::started(tester.auto_branch()))
                 .await?;
@@ -406,8 +406,8 @@ mod tests {
 
     #[sqlx::test]
     async fn auto_workflow_check_run_created(pool: sqlx::PgPool) {
-        run_merge_queue_test(pool, async |mut tester| {
-            start_auto_build(&mut tester).await?;
+        run_merge_queue_test(pool, async |tester| {
+            start_auto_build(tester).await?;
             tester.expect_check_run(
                 &tester.default_pr().await.get_gh_pr().head_sha,
                 AUTO_BUILD_CHECK_RUN_NAME,
@@ -437,8 +437,8 @@ mod tests {
 
     #[sqlx::test]
     async fn auto_build_insert_into_db(pool: sqlx::PgPool) {
-        run_merge_queue_test(pool, async |mut tester| {
-            start_auto_build(&mut tester).await?;
+        run_merge_queue_test(pool, async |tester| {
+            start_auto_build(tester).await?;
             tester.workflow_full_success(tester.auto_branch()).await?;
             tester.expect_comments(1).await;
             assert!(
@@ -477,8 +477,8 @@ mod tests {
 
     #[sqlx::test]
     async fn auto_build_succeeds_and_merges_in_db(pool: sqlx::PgPool) {
-        run_merge_queue_test(pool, async |mut tester| {
-            start_auto_build(&mut tester).await?;
+        run_merge_queue_test(pool, async |tester| {
+            start_auto_build(tester).await?;
             tester.workflow_full_success(tester.auto_branch()).await?;
             tester.expect_comments(1).await;
             tester
@@ -496,8 +496,8 @@ mod tests {
 
     #[sqlx::test]
     async fn auto_build_push_fail_comment(pool: sqlx::PgPool) {
-        run_merge_queue_test(pool, async |mut tester| {
-            start_auto_build(&mut tester).await?;
+        run_merge_queue_test(pool, async |tester| {
+            start_auto_build(tester).await?;
             tester.workflow_full_success(tester.auto_branch()).await?;
             tester.expect_comments(1).await;
 
@@ -515,8 +515,8 @@ mod tests {
 
     #[sqlx::test]
     async fn auto_build_push_fail_updates_check_run(pool: sqlx::PgPool) {
-        run_merge_queue_test(pool, async |mut tester| {
-            start_auto_build(&mut tester).await?;
+        run_merge_queue_test(pool, async |tester| {
+            start_auto_build(tester).await?;
             tester.workflow_full_success(tester.auto_branch()).await?;
             tester.expect_comments(1).await;
 
@@ -538,8 +538,8 @@ mod tests {
 
     #[sqlx::test]
     async fn auto_build_push_fail_in_db(pool: sqlx::PgPool) {
-        run_merge_queue_test(pool, async |mut tester| {
-            start_auto_build(&mut tester).await?;
+        run_merge_queue_test(pool, async |tester| {
+            start_auto_build(tester).await?;
             tester.workflow_full_success(tester.auto_branch()).await?;
             tester.expect_comments(1).await;
 
@@ -559,8 +559,8 @@ mod tests {
 
     #[sqlx::test]
     async fn auto_build_branch_history(pool: sqlx::PgPool) {
-        let gh = run_merge_queue_test(pool, async |mut tester| {
-            start_auto_build(&mut tester).await?;
+        let gh = run_merge_queue_test(pool, async |tester| {
+            start_auto_build(tester).await?;
             tester.workflow_full_success(tester.auto_branch()).await?;
             tester.expect_comments(1).await;
             Ok(())

@@ -65,6 +65,6 @@ impl TestSyncMarkerInner {
         let mut queue = self.rx.lock().await;
 
         // Remove all currently present messages
-        while let Ok(_) = queue.try_recv() {}
+        while queue.try_recv().is_ok() {}
     }
 }

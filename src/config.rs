@@ -190,21 +190,21 @@ mod tests {
     fn deserialize_merge_queue_enabled_default() {
         let content = "";
         let config = load_config(content);
-        assert_eq!(config.merge_queue_enabled, false);
+        assert!(!config.merge_queue_enabled);
     }
 
     #[test]
     fn deserialize_merge_queue_enabled_true() {
         let content = "merge_queue_enabled = true";
         let config = load_config(content);
-        assert_eq!(config.merge_queue_enabled, true);
+        assert!(config.merge_queue_enabled);
     }
 
     #[test]
     fn deserialize_merge_queue_enabled_false() {
         let content = "merge_queue_enabled = false";
         let config = load_config(content);
-        assert_eq!(config.merge_queue_enabled, false);
+        assert!(!config.merge_queue_enabled);
     }
 
     #[test]
