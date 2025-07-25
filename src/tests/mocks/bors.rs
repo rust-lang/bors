@@ -150,7 +150,7 @@ impl BorsTester {
             repos.insert(name.clone(), Arc::new(repo));
         }
 
-        for (name, _) in &repos {
+        for name in repos.keys() {
             if let Err(error) = db.insert_repo_if_not_exists(name, TreeState::Open).await {
                 tracing::warn!("Failed to insert repository {name} in test: {error:?}");
             }

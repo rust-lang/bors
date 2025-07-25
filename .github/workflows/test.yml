@@ -40,7 +40,7 @@ jobs:
         run: cargo test --workspace
 
       - name: Lint code
-        run: cargo clippy --workspace
+        run: cargo clippy --workspace --all-targets
 
       - name: Check formatting
         run: cargo fmt --all --check

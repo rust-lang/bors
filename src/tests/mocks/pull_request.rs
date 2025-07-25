@@ -42,7 +42,6 @@ pub async fn mock_pull_requests(
                 let prs = repo_clone.lock().pull_requests.clone();
                 ResponseTemplate::new(200).set_body_json(
                     prs.values()
-                        .into_iter()
                         .map(|pr| GitHubPullRequest::from(pr.clone()))
                         .filter(|pr| pr.closed_at.is_none())
                         .collect::<Vec<_>>(),
