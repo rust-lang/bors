@@ -1,9 +1,11 @@
 use std::sync::Arc;
 
+use super::mergeable_queue::MergeableQueueSender;
 use crate::bors::command::{BorsCommand, CommandParseError};
 use crate::bors::event::{BorsGlobalEvent, BorsRepositoryEvent, PullRequestComment};
 use crate::bors::handlers::help::command_help;
 use crate::bors::handlers::info::command_info;
+use crate::bors::handlers::labels::handle_label_trigger;
 use crate::bors::handlers::ping::command_ping;
 use crate::bors::handlers::pr_events::{
     handle_pull_request_assigned, handle_pull_request_unassigned,
@@ -20,7 +22,7 @@ use crate::bors::handlers::workflow::{handle_workflow_completed, handle_workflow
 use crate::bors::merge_queue::{AUTO_BRANCH_NAME, MergeQueueSender};
 use crate::bors::{BorsContext, CommandPrefix, Comment, RepositoryState};
 use crate::database::{DelegatedPermission, PullRequestModel};
-use crate::github::{GithubUser, PullRequest, PullRequestNumber};
+use crate::github::{GithubUser, LabelTrigger, PullRequest, PullRequestNumber};
 use crate::permissions::PermissionType;
 use crate::{CommandParser, PgDbClient, TeamApiClient, load_repositories};
 use anyhow::Context;
@@ -33,8 +35,6 @@ use pr_events::{
 use refresh::sync_pull_requests_state;
 use review::{command_delegate, command_set_priority, command_set_rollup, command_undelegate};
 use tracing::Instrument;
-
-use super::mergeable_queue::MergeableQueueSender;
 
 mod help;
 mod info;
@@ -626,6 +626,16 @@ async fn has_permission(
         });
 
     Ok(is_delegated)
+}
+
+/// Unapprove a PR in the DB and apply the corresponding label trigger.
+async fn unapprove_pr(
+    repo_state: &RepositoryState,
+    db: &PgDbClient,
+    pr: &PullRequestModel,
+) -> anyhow::Result<()> {
+    db.unapprove(pr).await?;
+    handle_label_trigger(repo_state, pr.number, LabelTrigger::Unapproved).await
 }
 
 #[cfg(test)]
