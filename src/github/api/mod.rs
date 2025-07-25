@@ -22,10 +22,6 @@ pub const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub const DEFAULT_RETRY_COUNT: u32 = 5;
 
-fn base_github_html_url() -> &'static str {
-    "https://github.com"
-}
-
 pub fn create_github_client(
     app_id: AppId,
     github_url: String,
@@ -101,7 +97,6 @@ pub async fn load_repositories(
                 app.clone(),
                 installation_client.clone(),
                 team_api_client,
-                repo.clone(),
                 name.clone(),
             )
             .await
@@ -152,12 +147,11 @@ async fn create_repo_state(
     app: App,
     repo_client: Octocrab,
     team_api_client: &TeamApiClient,
-    repo: Repository,
     name: GithubRepoName,
 ) -> anyhow::Result<RepositoryState> {
     tracing::info!("Found repository {name}");
 
-    let client = GithubRepositoryClient::new(app, repo_client, name.clone(), repo);
+    let client = GithubRepositoryClient::new(app, repo_client, name.clone());
 
     let permissions = team_api_client
         .load_permissions(&name)
