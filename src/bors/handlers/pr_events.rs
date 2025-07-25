@@ -4,12 +4,12 @@ use crate::bors::event::{
     PullRequestMerged, PullRequestOpened, PullRequestPushed, PullRequestReadyForReview,
     PullRequestReopened, PullRequestUnassigned, PushToBranch,
 };
-use crate::bors::handlers::labels::handle_label_trigger;
 use crate::bors::handlers::trybuild::cancel_build_workflows;
+use crate::bors::handlers::unapprove_pr;
 use crate::bors::mergeable_queue::MergeableQueueSender;
 use crate::bors::{Comment, PullRequestStatus, RepositoryState};
 use crate::database::{BuildStatus, MergeableState};
-use crate::github::{CommitSha, LabelTrigger, PullRequestNumber};
+use crate::github::{CommitSha, PullRequestNumber};
 use crate::utils::text::pluralize;
 use octocrab::params::checks::CheckRunConclusion;
 use std::sync::Arc;
@@ -37,8 +37,7 @@ pub(super) async fn handle_pull_request_edited(
         return Ok(());
     }
 
-    db.unapprove(&pr_model).await?;
-    handle_label_trigger(&repo_state, pr_number, LabelTrigger::Unapproved).await?;
+    unapprove_pr(&repo_state, &db, &pr_model).await?;
     notify_of_edited_pr(&repo_state, pr_number, &payload.pull_request.base.name).await
 }
 
@@ -99,8 +98,7 @@ pub(super) async fn handle_push_to_pull_request(
         return Ok(());
     }
 
-    db.unapprove(&pr_model).await?;
-    handle_label_trigger(&repo_state, pr_number, LabelTrigger::Unapproved).await?;
+    unapprove_pr(&repo_state, &db, &pr_model).await?;
     notify_of_pushed_pr(
         &repo_state,
         pr_number,
