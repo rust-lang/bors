@@ -13,7 +13,8 @@ use crate::bors::handlers::trybuild::cancel_build_workflows;
 use crate::bors::mergeable_queue::MergeableQueueSender;
 use crate::{PgDbClient, TeamApiClient};
 
-/// Cancel CI builds that have been running for too long.
+/// Go through pending builds and figure out if we need to do something about them:
+/// - Cancel CI builds that have been running for too long.
 pub async fn refresh_pending_builds(
     repo: Arc<RepositoryState>,
     db: &PgDbClient,
@@ -24,9 +25,8 @@ pub async fn refresh_pending_builds(
     let timeout = repo.config.load().timeout;
     for build in running_builds {
         if elapsed_time(build.created_at) >= timeout {
-            tracing::info!("Cancelling build {}", build.commit_sha);
-
             if let Some(pr) = db.find_pr_by_build(&build).await? {
+                tracing::info!("Cancelling build {build:?}");
                 if let Err(error) =
                     cancel_build_workflows(&repo.client, db, &build, CheckRunConclusion::TimedOut)
                         .await
@@ -45,7 +45,7 @@ pub async fn refresh_pending_builds(
                     tracing::error!("Could not send comment to PR {}: {error:?}", pr.number);
                 }
             } else {
-                tracing::warn!("No PR found for build {}", build.commit_sha);
+                tracing::warn!("No PR found for build {build:?}");
             }
         }
     }
