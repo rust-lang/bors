@@ -30,7 +30,7 @@ use crate::database::{WorkflowModel, WorkflowStatus};
 pub use command::CommandPrefix;
 
 #[cfg(test)]
-pub static WAIT_FOR_CANCEL_TIMED_OUT_BUILDS_REFRESH: TestSyncMarker = TestSyncMarker::new();
+pub static WAIT_FOR_REFRESH_PENDING_BUILDS: TestSyncMarker = TestSyncMarker::new();
 
 #[cfg(test)]
 pub static WAIT_FOR_MERGEABILITY_STATUS_REFRESH: TestSyncMarker = TestSyncMarker::new();

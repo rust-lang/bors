@@ -13,20 +13,20 @@ use crate::bors::handlers::trybuild::cancel_build_workflows;
 use crate::bors::mergeable_queue::MergeableQueueSender;
 use crate::{PgDbClient, TeamApiClient};
 
-/// Cancel CI builds that have been running for too long
-pub async fn cancel_timed_out_builds(
+/// Go through pending builds and figure out if we need to do something about them:
+/// - Cancel CI builds that have been running for too long.
+pub async fn refresh_pending_builds(
     repo: Arc<RepositoryState>,
     db: &PgDbClient,
 ) -> anyhow::Result<()> {
-    let running_builds = db.get_running_builds(repo.repository()).await?;
+    let running_builds = db.get_pending_builds(repo.repository()).await?;
     tracing::info!("Found {} running build(s)", running_builds.len());
 
     let timeout = repo.config.load().timeout;
     for build in running_builds {
         if elapsed_time(build.created_at) >= timeout {
-            tracing::info!("Cancelling build {}", build.commit_sha);
-
             if let Some(pr) = db.find_pr_by_build(&build).await? {
+                tracing::info!("Cancelling build {build:?}");
                 if let Err(error) =
                     cancel_build_workflows(&repo.client, db, &build, CheckRunConclusion::TimedOut)
                         .await
@@ -45,7 +45,7 @@ pub async fn cancel_timed_out_builds(
                     tracing::error!("Could not send comment to PR {}: {error:?}", pr.number);
                 }
             } else {
-                tracing::warn!("No PR found for build {}", build.commit_sha);
+                tracing::warn!("No PR found for build {build:?}");
             }
         }
     }
@@ -248,7 +248,7 @@ timeout = 3600
                     assert_eq!(
                         tester
                             .db()
-                            .get_running_builds(&default_repo_name())
+                            .get_pending_builds(&default_repo_name())
                             .await
                             .unwrap()
                             .len(),
@@ -261,7 +261,7 @@ timeout = 3600
                 assert_eq!(
                     tester
                         .db()
-                        .get_running_builds(&default_repo_name())
+                        .get_pending_builds(&default_repo_name())
                         .await
                         .unwrap()
                         .len(),

@@ -595,7 +595,7 @@ WHERE repository = $1
     .await
 }
 
-pub(crate) async fn get_running_builds(
+pub(crate) async fn get_pending_builds(
     executor: impl PgExecutor<'_>,
     repo: &GithubRepoName,
 ) -> anyhow::Result<Vec<BuildModel>> {

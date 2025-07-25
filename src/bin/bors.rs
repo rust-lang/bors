@@ -24,7 +24,7 @@ const CONFIG_REFRESH_INTERVAL: Duration = Duration::from_secs(120);
 const PERMISSIONS_REFRESH_INTERVAL: Duration = Duration::from_secs(120);
 
 /// How often should the bot attempt to time out CI builds that ran for too long.
-const CANCEL_TIMED_OUT_BUILDS_INTERVAL: Duration = Duration::from_secs(60 * 5);
+const PENDING_BUILDS_REFRESH_INTERVAL: Duration = Duration::from_secs(60 * 5);
 
 /// How often should the bot reload the mergeability status of PRs?
 const MERGEABILITY_STATUS_INTERVAL: Duration = Duration::from_secs(60 * 10);
@@ -168,7 +168,7 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
         let startup_events = [
             BorsGlobalEvent::RefreshPullRequestState,
             BorsGlobalEvent::RefreshPullRequestMergeability,
-            BorsGlobalEvent::CancelTimedOutBuilds,
+            BorsGlobalEvent::RefreshPendingBuilds,
             BorsGlobalEvent::ProcessMergeQueue,
         ];
         for event in startup_events {
@@ -177,7 +177,7 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
 
         let mut config_refresh = make_interval(CONFIG_REFRESH_INTERVAL);
         let mut permissions_refresh = make_interval(PERMISSIONS_REFRESH_INTERVAL);
-        let mut cancel_builds_refresh = make_interval(CANCEL_TIMED_OUT_BUILDS_INTERVAL);
+        let mut refresh_pending_builds = make_interval(PENDING_BUILDS_REFRESH_INTERVAL);
         let mut mergeability_status_refresh = make_interval(MERGEABILITY_STATUS_INTERVAL);
         let mut prs_interval = make_interval(PR_STATE_PERIODIC_REFRESH);
         let mut merge_queue_interval = make_interval(MERGE_QUEUE_INTERVAL);
@@ -189,8 +189,8 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
                 _ = permissions_refresh.tick() => {
                     refresh_tx.send(BorsGlobalEvent::RefreshPermissions).await?;
                 }
-                _ = cancel_builds_refresh.tick() => {
-                    refresh_tx.send(BorsGlobalEvent::CancelTimedOutBuilds).await?;
+                _ = refresh_pending_builds.tick() => {
+                    refresh_tx.send(BorsGlobalEvent::RefreshPendingBuilds).await?;
                 }
                 _ = mergeability_status_refresh.tick() => {
                     refresh_tx.send(BorsGlobalEvent::RefreshPullRequestMergeability).await?;

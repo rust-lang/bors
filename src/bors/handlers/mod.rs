@@ -9,7 +9,7 @@ use crate::bors::handlers::pr_events::{
     handle_pull_request_assigned, handle_pull_request_unassigned,
 };
 use crate::bors::handlers::refresh::{
-    cancel_timed_out_builds, reload_repository_config, reload_repository_permissions,
+    refresh_pending_builds, reload_repository_config, reload_repository_permissions,
     reload_unknown_mergeable_prs,
 };
 use crate::bors::handlers::review::{
@@ -258,17 +258,17 @@ pub async fn handle_bors_global_event(
             .instrument(span)
             .await?;
         }
-        BorsGlobalEvent::CancelTimedOutBuilds => {
-            let span = tracing::info_span!("Cancel timed out builds");
+        BorsGlobalEvent::RefreshPendingBuilds => {
+            let span = tracing::info_span!("Refresh pending builds");
             for_each_repo(&ctx, |repo| {
                 let span = tracing::info_span!("Repo", repo = repo.repository().to_string());
-                cancel_timed_out_builds(repo, &db).instrument(span)
+                refresh_pending_builds(repo, &db).instrument(span)
             })
             .instrument(span)
             .await?;
 
             #[cfg(test)]
-            crate::bors::WAIT_FOR_CANCEL_TIMED_OUT_BUILDS_REFRESH.mark();
+            crate::bors::WAIT_FOR_REFRESH_PENDING_BUILDS.mark();
         }
         BorsGlobalEvent::RefreshPullRequestMergeability => {
             let span = tracing::info_span!("Refresh PR mergeability status");
