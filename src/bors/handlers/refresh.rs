@@ -39,9 +39,9 @@ async fn refresh_build(
     timeout: Duration,
 ) -> anyhow::Result<()> {
     if elapsed_time(build.created_at) >= timeout {
-        if let Some(pr) = db.find_pr_by_build(&build).await? {
+        if let Some(pr) = db.find_pr_by_build(build).await? {
             tracing::info!("Cancelling build {build:?}");
-            match cancel_build(&repo.client, db, &build, CheckRunConclusion::TimedOut).await {
+            match cancel_build(&repo.client, db, build, CheckRunConclusion::TimedOut).await {
                 Ok(_) => {}
                 Err(
                     CancelBuildError::FailedToMarkBuildAsCancelled(error)
