@@ -733,7 +733,7 @@ mod tests {
 
                 Auto build cancelled due to push. Cancelled workflows:
 
-                - https://github.com/workflows/Workflow1/1
+                - https://github.com/rust-lang/borstest/actions/runs/1
                 ");
                 Ok(())
             })

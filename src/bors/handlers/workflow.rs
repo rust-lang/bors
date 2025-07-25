@@ -553,8 +553,8 @@ mod tests {
                 tester.get_comment().await?,
                 @r#"
             :sunny: Try build successful
-            - [Workflow1](https://github.com/workflows/Workflow1/1) :white_check_mark:
-            - [Workflow1](https://github.com/workflows/Workflow1/2) :white_check_mark:
+            - [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1) :white_check_mark:
+            - [Workflow1](https://github.com/rust-lang/borstest/actions/runs/2) :white_check_mark:
             Build commit: merge-0-pr-1 (`merge-0-pr-1`, parent: `main-sha1`)
 
             <!-- homu: {"type":"TryBuildCompleted","merge_sha":"merge-0-pr-1"} -->
@@ -583,8 +583,8 @@ mod tests {
                 tester.get_comment().await?,
                 @r#"
             :sunny: Try build successful
-            - [Workflow1](https://github.com/workflows/Workflow1/1) :white_check_mark:
-            - [Workflow1](https://github.com/workflows/Workflow1/2) :white_check_mark:
+            - [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1) :white_check_mark:
+            - [Workflow1](https://github.com/rust-lang/borstest/actions/runs/2) :white_check_mark:
             Build commit: merge-0-pr-1 (`merge-0-pr-1`, parent: `main-sha1`)
 
             <!-- homu: {"type":"TryBuildCompleted","merge_sha":"merge-0-pr-1"} -->
@@ -610,7 +610,7 @@ mod tests {
             tester.workflow_event(WorkflowEvent::failure(w2)).await?;
             insta::assert_snapshot!(
                 tester.get_comment().await?,
-                @":broken_heart: Test failed ([Workflow1](https://github.com/workflows/Workflow1/1), [Workflow1](https://github.com/workflows/Workflow1/2))"
+                @":broken_heart: Test failed ([Workflow1](https://github.com/rust-lang/borstest/actions/runs/1), [Workflow1](https://github.com/rust-lang/borstest/actions/runs/2))"
             );
             Ok(())
         })
@@ -750,7 +750,7 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
                 }).await?;
                 insta::assert_snapshot!(
                     tester.get_comment().await?,
-                    @":broken_heart: Test failed ([Workflow1](https://github.com/workflows/Workflow1/1))"
+                    @":broken_heart: Test failed ([Workflow1](https://github.com/rust-lang/borstest/actions/runs/1))"
                 );
 
                 Ok(())

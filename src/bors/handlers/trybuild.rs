@@ -387,7 +387,7 @@ mod tests {
             insta::assert_snapshot!(
                 tester.get_comment().await?,
                 @r#"
-            :sunny: Try build successful ([Workflow1](https://github.com/workflows/Workflow1/1))
+            :sunny: Try build successful ([Workflow1](https://github.com/rust-lang/borstest/actions/runs/1))
             Build commit: merge-0-pr-1 (`merge-0-pr-1`, parent: `main-sha1`)
 
             <!-- homu: {"type":"TryBuildCompleted","merge_sha":"merge-0-pr-1"} -->
@@ -406,7 +406,7 @@ mod tests {
             tester.workflow_full_failure(tester.try_branch()).await?;
             insta::assert_snapshot!(
                 tester.get_comment().await?,
-                @":broken_heart: Test failed ([Workflow1](https://github.com/workflows/Workflow1/1))"
+                @":broken_heart: Test failed ([Workflow1](https://github.com/rust-lang/borstest/actions/runs/1))"
             );
             Ok(())
         })
@@ -438,7 +438,7 @@ mod tests {
             insta::assert_snapshot!(
                 tester.get_comment().await?,
                 @r"
-            :broken_heart: Test failed ([Workflow1](https://github.com/workflows/Workflow1/1)). Failed jobs:
+            :broken_heart: Test failed ([Workflow1](https://github.com/rust-lang/borstest/actions/runs/1)). Failed jobs:
 
             - `Job 42` ([web logs](https://github.com/job-logs/42), [extended logs](https://triage.rust-lang.org/gha-logs/rust-lang/borstest/42))
             - `Job 50` ([web logs](https://github.com/job-logs/50), [extended logs](https://triage.rust-lang.org/gha-logs/rust-lang/borstest/50))
@@ -811,7 +811,7 @@ try-job: Bar
                 )
                 .await?;
             insta::assert_snapshot!(tester.get_comment().await?, @r#"
-            :sunny: Try build successful ([Workflow1](https://github.com/workflows/Workflow1/2))
+            :sunny: Try build successful ([Workflow1](https://github.com/rust-lang/borstest/actions/runs/2))
             Build commit: merge-1-pr-1 (`merge-1-pr-1`, parent: `main-sha1`)
 
             <!-- homu: {"type":"TryBuildCompleted","merge_sha":"merge-1-pr-1"} -->
@@ -851,8 +851,8 @@ try-job: Bar
             tester.post_comment("@bors try cancel").await?;
             insta::assert_snapshot!(tester.get_comment().await?, @r"
             Try build cancelled. Cancelled workflows:
-            - https://github.com/workflows/Workflow1/123
-            - https://github.com/workflows/Workflow1/124
+            - https://github.com/rust-lang/borstest/actions/runs/123
+            - https://github.com/rust-lang/borstest/actions/runs/124
             ");
             Ok(())
         })
@@ -921,7 +921,7 @@ try-job: Bar
             tester.post_comment("@bors try cancel").await?;
             insta::assert_snapshot!(tester.get_comment().await?, @r"
             Try build cancelled. Cancelled workflows:
-            - https://github.com/workflows/Workflow1/3
+            - https://github.com/rust-lang/borstest/actions/runs/3
             ");
             Ok(())
         })
