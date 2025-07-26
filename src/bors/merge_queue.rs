@@ -465,7 +465,7 @@ mod tests {
             insta::assert_snapshot!(
                 tester.get_comment().await?,
                 @r"
-            :sunny: Test successful - [Workflow1](https://github.com/workflows/Workflow1/1)
+            :sunny: Test successful - [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1)
             Approved by: `default-user`
             Pushing merge-0-pr-1 to `main`...
             "

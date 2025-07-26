@@ -11,8 +11,8 @@ use crate::github::{CommitSha, GithubRepoName};
 
 use super::operations::{
     approve_pull_request, create_build, create_pull_request, create_workflow,
-    delegate_pull_request, delete_auto_build, find_build, find_pr_by_build,
-    get_nonclosed_pull_requests, get_nonclosed_pull_requests_by_base_branch, get_pending_builds,
+    delegate_pull_request, find_build, find_pr_by_build, get_nonclosed_pull_requests,
+    get_nonclosed_pull_requests_by_base_branch, get_pending_builds,
     get_prs_with_unknown_mergeable_state, get_pull_request, get_repository, get_repository_by_name,
     get_workflow_urls_for_build, get_workflows_for_build, insert_repo_if_not_exists,
     set_pr_assignees, set_pr_priority, set_pr_rollup, set_pr_status, unapprove_pull_request,
@@ -284,7 +284,7 @@ impl PgDbClient {
     pub async fn get_pending_workflows_for_build(
         &self,
         build: &BuildModel,
-    ) -> anyhow::Result<Vec<RunId>> {
+    ) -> anyhow::Result<Vec<WorkflowModel>> {
         let workflows = self
             .get_workflows_for_build(build)
             .await?
@@ -292,8 +292,7 @@ impl PgDbClient {
             .filter(|w| {
                 w.status == WorkflowStatus::Pending && w.workflow_type == WorkflowType::Github
             })
-            .map(|w| w.run_id)
-            .collect::<Vec<_>>();
+            .collect::<Vec<WorkflowModel>>();
         Ok(workflows)
     }
 
@@ -319,10 +318,6 @@ impl PgDbClient {
         tree_state: TreeState,
     ) -> anyhow::Result<()> {
         upsert_repository(&self.pool, repo, tree_state).await
-    }
-
-    pub async fn delete_auto_build(&self, pr: &PullRequestModel) -> anyhow::Result<()> {
-        delete_auto_build(&self.pool, pr.id).await
     }
 
     pub async fn get_merge_queue_prs(

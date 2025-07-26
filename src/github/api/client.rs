@@ -1,7 +1,7 @@
 use anyhow::Context;
 use octocrab::Octocrab;
 use octocrab::models::checks::CheckRun;
-use octocrab::models::{App, CheckRunId, CheckSuiteId, Repository, RunId};
+use octocrab::models::{App, CheckRunId, CheckSuiteId, RunId};
 use octocrab::params::checks::{CheckRunConclusion, CheckRunOutput, CheckRunStatus};
 use std::fmt::Debug;
 use tracing::log;
@@ -10,7 +10,6 @@ use crate::bors::event::PullRequestComment;
 use crate::bors::{Comment, WorkflowRun};
 use crate::config::{CONFIG_FILE_PATH, RepositoryConfig};
 use crate::database::WorkflowStatus;
-use crate::github::api::base_github_html_url;
 use crate::github::api::operations::{
     ForcePush, MergeError, create_check_run, merge_branches, set_branch_to_commit, update_check_run,
 };
@@ -29,21 +28,14 @@ pub struct GithubRepositoryClient {
     // We store the name separately, because repository has an optional owner, but at this point
     // we must always have some owner of the repo.
     repo_name: GithubRepoName,
-    repository: Repository,
 }
 
 impl GithubRepositoryClient {
-    pub fn new(
-        app: App,
-        client: Octocrab,
-        repo_name: GithubRepoName,
-        repository: Repository,
-    ) -> Self {
+    pub fn new(app: App, client: Octocrab, repo_name: GithubRepoName) -> Self {
         Self {
             app,
             client,
             repo_name,
-            repository,
         }
     }
 
@@ -351,25 +343,6 @@ impl GithubRepositoryClient {
             Ok(())
         })
         .await?
-    }
-
-    /// Get a workflow url.
-    pub fn get_workflow_url(&self, run_id: RunId) -> String {
-        let html_url = self
-            .repository
-            .html_url
-            .as_ref()
-            .map(|url| url.to_string())
-            .unwrap_or_else(|| format!("{}/{}", base_github_html_url(), self.repository(),));
-        format!("{html_url}/actions/runs/{run_id}")
-    }
-
-    /// Get workflow url for a list of workflows.
-    pub fn get_workflow_urls<'a>(
-        &'a self,
-        run_ids: impl Iterator<Item = RunId> + 'a,
-    ) -> impl Iterator<Item = String> + 'a {
-        run_ids.map(|workflow_id| self.get_workflow_url(workflow_id))
     }
 
     pub async fn fetch_nonclosed_pull_requests(&self) -> anyhow::Result<Vec<PullRequest>> {

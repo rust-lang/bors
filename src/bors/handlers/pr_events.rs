@@ -4,14 +4,13 @@ use crate::bors::event::{
     PullRequestMerged, PullRequestOpened, PullRequestPushed, PullRequestReadyForReview,
     PullRequestReopened, PullRequestUnassigned, PushToBranch,
 };
-use crate::bors::handlers::trybuild::cancel_build_workflows;
 use crate::bors::handlers::unapprove_pr;
+use crate::bors::handlers::workflow::{AutoBuildCancelReason, maybe_cancel_auto_build};
 use crate::bors::mergeable_queue::MergeableQueueSender;
 use crate::bors::{Comment, PullRequestStatus, RepositoryState};
-use crate::database::{BuildStatus, MergeableState};
+use crate::database::MergeableState;
 use crate::github::{CommitSha, PullRequestNumber};
 use crate::utils::text::pluralize;
-use octocrab::params::checks::CheckRunConclusion;
 use std::sync::Arc;
 
 pub(super) async fn handle_pull_request_edited(
@@ -55,44 +54,13 @@ pub(super) async fn handle_push_to_pull_request(
 
     mergeable_queue.enqueue(repo_state.repository().clone(), pr_number);
 
-    let mut auto_build_cancel_message: Option<String> = None;
-    if let Some(auto_build) = &pr_model.auto_build {
-        if auto_build.status == BuildStatus::Pending {
-            tracing::info!("Cancelling auto build for PR {pr_number} due to push");
-
-            match cancel_build_workflows(
-                &repo_state.client,
-                db.as_ref(),
-                auto_build,
-                CheckRunConclusion::Cancelled,
-            )
-            .await
-            {
-                Ok(workflow_ids) => {
-                    tracing::info!("Auto build cancelled");
-
-                    let workflow_urls = repo_state
-                        .client
-                        .get_workflow_urls(workflow_ids.into_iter());
-                    auto_build_cancel_message = Some(cancelled_workflows_message(workflow_urls));
-                }
-                Err(error) => {
-                    tracing::error!(
-                        "Could not cancel workflows for SHA {}: {error:?}",
-                        auto_build.commit_sha
-                    );
-
-                    auto_build_cancel_message = Some(unclean_auto_build_cancelled_message());
-                }
-            };
-        }
-
-        tracing::info!(
-            "Deleting auto build {} for PR {pr_number} due to push",
-            auto_build.id
-        );
-        db.delete_auto_build(&pr_model).await?;
-    }
+    let auto_build_cancel_message = maybe_cancel_auto_build(
+        &repo_state.client,
+        &db,
+        &pr_model,
+        AutoBuildCancelReason::PushToPR,
+    )
+    .await?;
 
     if !pr_model.is_approved() {
         return Ok(());
@@ -312,21 +280,6 @@ PR will need to be re-approved."#,
     repo.client
         .post_comment(pr_number, Comment::new(comment))
         .await
-}
-
-fn cancelled_workflows_message(workflow_urls: impl Iterator<Item = String>) -> String {
-    let mut comment =
-        r#"Auto build cancelled due to push to branch. Cancelled workflows:"#.to_string();
-    for url in workflow_urls {
-        comment += format!("\n- {}", url).as_str();
-    }
-
-    comment
-}
-
-fn unclean_auto_build_cancelled_message() -> String {
-    "Auto build was cancelled due to push to branch. It was not possible to cancel some workflows."
-        .to_string()
 }
 
 #[cfg(test)]
@@ -759,32 +712,6 @@ mod tests {
     }
 
     #[sqlx::test]
-    async fn delete_completed_auto_build_on_push(pool: sqlx::PgPool) {
-        BorsBuilder::new(pool)
-            .github(gh_state_with_merge_queue())
-            .run_test(async |tester| {
-                tester.post_comment("@bors r+").await?;
-                tester.expect_comments(1).await;
-                tester.process_merge_queue().await;
-                tester.expect_comments(1).await;
-                tester
-                    .wait_for_default_pr(|pr| pr.auto_build.is_some())
-                    .await?;
-                tester.workflow_full_success(tester.auto_branch()).await?;
-                tester.expect_comments(1).await;
-                tester
-                    .push_to_pr(default_repo_name(), default_pr_number())
-                    .await?;
-                tester.expect_comments(1).await;
-                tester
-                    .wait_for_default_pr(|pr| pr.auto_build.is_none())
-                    .await?;
-                Ok(())
-            })
-            .await;
-    }
-
-    #[sqlx::test]
     async fn cancel_pending_auto_build_on_push_comment(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
             .github(gh_state_with_merge_queue())
@@ -804,7 +731,8 @@ mod tests {
                 :warning: A new commit `pr-1-commit-1` was pushed to the branch, the
                 PR will need to be re-approved.
 
-                Auto build cancelled due to push to branch. Cancelled workflows:
+                Auto build cancelled due to push. Cancelled workflows:
+
                 - https://github.com/rust-lang/borstest/actions/runs/1
                 ");
                 Ok(())
@@ -834,7 +762,7 @@ mod tests {
                 :warning: A new commit `pr-1-commit-1` was pushed to the branch, the
                 PR will need to be re-approved.
 
-                Auto build was cancelled due to push to branch. It was not possible to cancel some workflows.
+                Auto build cancelled due to push. It was not possible to cancel some workflows.
                 ");
                 Ok(())
             })

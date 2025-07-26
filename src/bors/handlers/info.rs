@@ -182,7 +182,7 @@ mod tests {
             - Priority: 10
             - Mergeable: yes
             - Try build is in progress
-            	- Workflow URL: https://github.com/workflows/Workflow1/1
+            	- Workflow URL: https://github.com/rust-lang/borstest/actions/runs/1
             "
             );
             Ok(())

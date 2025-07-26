@@ -113,8 +113,8 @@ impl From<WorkflowEvent> for GitHubWorkflowEventPayload {
         let WorkflowEvent { event, workflow } = value;
 
         let url: Url = format!(
-            "https://github.com/workflows/{}/{}",
-            workflow.name, workflow.run_id
+            "https://github.com/{}/actions/runs/{}",
+            workflow.repository, workflow.run_id
         )
         .parse()
         .unwrap();

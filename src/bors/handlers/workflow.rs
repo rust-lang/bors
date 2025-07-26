@@ -7,8 +7,9 @@ use crate::bors::handlers::labels::handle_label_trigger;
 use crate::bors::merge_queue::AUTO_BRANCH_NAME;
 use crate::bors::merge_queue::MergeQueueSender;
 use crate::bors::{FailedWorkflowRun, RepositoryState, WorkflowRun};
-use crate::database::{BuildStatus, WorkflowModel, WorkflowStatus};
+use crate::database::{BuildModel, BuildStatus, PullRequestModel, WorkflowModel, WorkflowStatus};
 use crate::github::LabelTrigger;
+use crate::github::api::client::GithubRepositoryClient;
 use octocrab::models::CheckRunId;
 use octocrab::models::workflows::{Conclusion, Job, Status};
 use octocrab::params::checks::CheckRunConclusion;
@@ -306,6 +307,144 @@ async fn get_failed_jobs(
         .collect())
 }
 
+/// We want to distinguish between a critical failure (a build was not marked as cancelled, in which
+/// case bors should not continue with its normal logic), and a less important failure (could not
+/// cancel some workflow or finish check run).
+#[must_use]
+pub enum CancelBuildError {
+    /// It was not possible to mark the build as cancelled.
+    FailedToMarkBuildAsCancelled(anyhow::Error),
+    /// The build was marked as cancelled, but it was not possible to cancel external workflows
+    /// and/or mark the check run status as cancelled.
+    FailedToCancelWorkflows(anyhow::Error),
+}
+
+/// Attempt to cancel a pending build.
+/// It also tries to cancel its pending workflows and check run status, but that has a lesser
+/// priority.
+pub async fn cancel_build(
+    client: &GithubRepositoryClient,
+    db: &PgDbClient,
+    build: &BuildModel,
+    check_run_conclusion: CheckRunConclusion,
+) -> Result<Vec<WorkflowModel>, CancelBuildError> {
+    assert_eq!(
+        build.status,
+        BuildStatus::Pending,
+        "Passed a non-pending build to `cancel_build`"
+    );
+
+    // This is the most important part: we need to ensure that the status of the build is switched
+    // to cancelled.
+    db.update_build_status(build, BuildStatus::Cancelled)
+        .await
+        .map_err(CancelBuildError::FailedToMarkBuildAsCancelled)?;
+
+    let pending_workflows = db
+        .get_pending_workflows_for_build(build)
+        .await
+        .map_err(CancelBuildError::FailedToCancelWorkflows)?;
+    let pending_workflow_ids: Vec<octocrab::models::RunId> = pending_workflows
+        .iter()
+        .map(|workflow| octocrab::models::RunId(workflow.run_id.0))
+        .collect();
+
+    tracing::info!("Cancelling workflows {:?}", pending_workflow_ids);
+    client
+        .cancel_workflows(&pending_workflow_ids)
+        .await
+        .map_err(CancelBuildError::FailedToCancelWorkflows)?;
+
+    if let Some(check_run_id) = build.check_run_id {
+        if let Err(error) = client
+            .update_check_run(
+                CheckRunId(check_run_id as u64),
+                CheckRunStatus::Completed,
+                Some(check_run_conclusion),
+                None,
+            )
+            .await
+        {
+            tracing::error!(
+                "Could not update check run {check_run_id} for build {build:?}: {error:?}"
+            );
+        }
+    }
+
+    Ok(pending_workflows)
+}
+
+/// Why did we cancel an auto build?
+pub enum AutoBuildCancelReason {
+    /// A new commit was pushed to a PR while it was being tested in an auto build.
+    PushToPR,
+    /// A PR was unapproved while it was being tested in an auto build.
+    Unapproval,
+}
+
+/// Cancel an auto build attached to the PR, if there is any.
+/// Returns an optional string that can be attached to a PR comment, which describes the result of
+/// the workflow cancellation.
+pub async fn maybe_cancel_auto_build(
+    client: &GithubRepositoryClient,
+    db: &PgDbClient,
+    pr: &PullRequestModel,
+    reason: AutoBuildCancelReason,
+) -> anyhow::Result<Option<String>> {
+    let mut auto_build_cancel_message: Option<String> = None;
+    if let Some(auto_build) = &pr.auto_build {
+        if auto_build.status != BuildStatus::Pending {
+            return Ok(None);
+        }
+
+        tracing::info!("Cancelling auto build {auto_build:?}");
+
+        match cancel_build(client, db, auto_build, CheckRunConclusion::Cancelled).await {
+            Ok(workflows) => {
+                tracing::info!("Auto build cancelled");
+                let workflow_urls = workflows.into_iter().map(|w| w.url).collect();
+                auto_build_cancel_message =
+                    Some(auto_build_cancelled_msg(reason, Some(workflow_urls)));
+            }
+            Err(CancelBuildError::FailedToMarkBuildAsCancelled(error)) => return Err(error),
+            Err(CancelBuildError::FailedToCancelWorkflows(error)) => {
+                tracing::error!(
+                    "Could not cancel workflows for auto build with SHA {}: {error:?}",
+                    auto_build.commit_sha
+                );
+
+                auto_build_cancel_message = Some(auto_build_cancelled_msg(reason, None));
+            }
+        };
+    }
+    Ok(auto_build_cancel_message)
+}
+
+/// If `workflow_urls` is `None`, it was not possible to cancel workflows.
+fn auto_build_cancelled_msg(
+    reason: AutoBuildCancelReason,
+    cancelled_workflow_urls: Option<Vec<String>>,
+) -> String {
+    use std::fmt::Write;
+
+    let reason = match reason {
+        AutoBuildCancelReason::PushToPR => "push",
+        AutoBuildCancelReason::Unapproval => "unapproval",
+    };
+    let mut comment = format!("Auto build cancelled due to {reason}.");
+    match cancelled_workflow_urls {
+        Some(workflow_urls) => {
+            comment.push_str(" Cancelled workflows:\n");
+            for url in workflow_urls {
+                write!(comment, "\n- {url}").unwrap();
+            }
+        }
+        None => comment.push_str(" It was not possible to cancel some workflows."),
+    }
+
+    comment
+}
+
 #[cfg(test)]
 mod tests {
     use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
@@ -414,8 +553,8 @@ mod tests {
                 tester.get_comment().await?,
                 @r#"
             :sunny: Try build successful
-            - [Workflow1](https://github.com/workflows/Workflow1/1) :white_check_mark:
-            - [Workflow1](https://github.com/workflows/Workflow1/2) :white_check_mark:
+            - [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1) :white_check_mark:
+            - [Workflow1](https://github.com/rust-lang/borstest/actions/runs/2) :white_check_mark:
             Build commit: merge-0-pr-1 (`merge-0-pr-1`, parent: `main-sha1`)
 
             <!-- homu: {"type":"TryBuildCompleted","merge_sha":"merge-0-pr-1"} -->
@@ -444,8 +583,8 @@ mod tests {
                 tester.get_comment().await?,
                 @r#"
             :sunny: Try build successful
-            - [Workflow1](https://github.com/workflows/Workflow1/1) :white_check_mark:
-            - [Workflow1](https://github.com/workflows/Workflow1/2) :white_check_mark:
+            - [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1) :white_check_mark:
+            - [Workflow1](https://github.com/rust-lang/borstest/actions/runs/2) :white_check_mark:
             Build commit: merge-0-pr-1 (`merge-0-pr-1`, parent: `main-sha1`)
 
             <!-- homu: {"type":"TryBuildCompleted","merge_sha":"merge-0-pr-1"} -->
@@ -471,7 +610,7 @@ mod tests {
             tester.workflow_event(WorkflowEvent::failure(w2)).await?;
             insta::assert_snapshot!(
                 tester.get_comment().await?,
-                @":broken_heart: Test failed ([Workflow1](https://github.com/workflows/Workflow1/1), [Workflow1](https://github.com/workflows/Workflow1/2))"
+                @":broken_heart: Test failed ([Workflow1](https://github.com/rust-lang/borstest/actions/runs/1), [Workflow1](https://github.com/rust-lang/borstest/actions/runs/2))"
             );
             Ok(())
         })
@@ -611,7 +750,7 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
                 }).await?;
                 insta::assert_snapshot!(
                     tester.get_comment().await?,
-                    @":broken_heart: Test failed ([Workflow1](https://github.com/workflows/Workflow1/1))"
+                    @":broken_heart: Test failed ([Workflow1](https://github.com/rust-lang/borstest/actions/runs/1))"
                 );
 
                 Ok(())

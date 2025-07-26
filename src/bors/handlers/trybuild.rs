@@ -1,15 +1,18 @@
 use std::sync::Arc;
 
+use super::has_permission;
+use super::{PullRequestData, deny_request};
 use crate::PgDbClient;
 use crate::bors::RepositoryState;
 use crate::bors::command::{CommandPrefix, Parent};
 use crate::bors::comment::no_try_build_in_progress_comment;
 use crate::bors::comment::try_build_cancelled_comment;
-use crate::bors::comment::unclean_try_build_cancelled_comment;
+use crate::bors::comment::try_build_cancelled_with_failed_workflow_cancel_comment;
 use crate::bors::comment::{
     cant_find_last_parent_comment, merge_conflict_comment, try_build_started_comment,
 };
 use crate::bors::handlers::labels::handle_label_trigger;
+use crate::bors::handlers::workflow::{CancelBuildError, cancel_build};
 use crate::database::{BuildModel, BuildStatus, PullRequestModel};
 use crate::github::api::client::GithubRepositoryClient;
 use crate::github::api::operations::ForcePush;
@@ -18,14 +21,10 @@ use crate::permissions::PermissionType;
 use crate::utils::text::suppress_github_mentions;
 use anyhow::{Context, anyhow};
 use itertools::Itertools;
-use octocrab::models::CheckRunId;
 use octocrab::params::checks::CheckRunConclusion;
 use octocrab::params::checks::CheckRunOutput;
 use octocrab::params::checks::CheckRunStatus;
 use tracing::log;
-
-use super::has_permission;
-use super::{PullRequestData, deny_request};
 
 // This branch serves for preparing the final commit.
 // It will be reset to master and merged with the branch that should be tested.
@@ -156,15 +155,13 @@ async fn cancel_previous_try_build(
 ) -> anyhow::Result<Vec<String>> {
     assert_eq!(build.status, BuildStatus::Pending);
 
-    match cancel_build_workflows(&repo.client, db, build, CheckRunConclusion::Cancelled).await {
-        Ok(workflow_ids) => {
+    match cancel_build(&repo.client, db, build, CheckRunConclusion::Cancelled).await {
+        Ok(workflows) => {
             tracing::info!("Try build cancelled");
-            Ok(repo
-                .client
-                .get_workflow_urls(workflow_ids.into_iter())
-                .collect())
+            Ok(workflows.into_iter().map(|w| w.url).collect())
         }
-        Err(error) => {
+        Err(CancelBuildError::FailedToMarkBuildAsCancelled(error)) => Err(error),
+        Err(CancelBuildError::FailedToCancelWorkflows(error)) => {
             tracing::error!(
                 "Could not cancel workflows for SHA {}: {error:?}",
                 build.commit_sha
@@ -261,14 +258,14 @@ pub(super) async fn command_try_cancel(
 
     let pr_number: PullRequestNumber = pr.number();
     let Some(build) = get_pending_build(&pr.db) else {
-        tracing::warn!("No build found");
+        tracing::info!("No try build found when trying to cancel a try build");
         repo.client
             .post_comment(pr_number, no_try_build_in_progress_comment())
             .await?;
         return Ok(());
     };
 
-    match cancel_build_workflows(
+    match cancel_build(
         &repo.client,
         db.as_ref(),
         build,
@@ -276,65 +273,34 @@ pub(super) async fn command_try_cancel(
     )
     .await
     {
-        Err(error) => {
-            tracing::error!(
-                "Could not cancel workflows for SHA {}: {error:?}",
-                build.commit_sha
-            );
-            repo.client
-                .post_comment(pr_number, unclean_try_build_cancelled_comment())
-                .await?
-        }
-        Ok(workflow_ids) => {
+        Ok(workflows) => {
             tracing::info!("Try build cancelled");
 
             repo.client
                 .post_comment(
                     pr_number,
-                    try_build_cancelled_comment(
-                        repo.client.get_workflow_urls(workflow_ids.into_iter()),
-                    ),
+                    try_build_cancelled_comment(workflows.into_iter().map(|w| w.url)),
+                )
+                .await?
+        }
+        Err(CancelBuildError::FailedToMarkBuildAsCancelled(error)) => {
+            return Err(error);
+        }
+        Err(CancelBuildError::FailedToCancelWorkflows(error)) => {
+            tracing::error!(
+                "Could not cancel workflows for try build with SHA {}: {error:?}",
+                build.commit_sha
+            );
+            repo.client
+                .post_comment(
+                    pr_number,
+                    try_build_cancelled_with_failed_workflow_cancel_comment(),
                 )
                 .await?
         }
     };
 
     Ok(())
-}
-
-pub async fn cancel_build_workflows(
-    client: &GithubRepositoryClient,
-    db: &PgDbClient,
-    build: &BuildModel,
-    check_run_conclusion: CheckRunConclusion,
-) -> anyhow::Result<Vec<octocrab::models::RunId>> {
-    let pending_workflows = db.get_pending_workflows_for_build(build).await?;
-    let pending_workflows: Vec<octocrab::models::RunId> = pending_workflows
-        .into_iter()
-        .map(|id| octocrab::models::RunId(id.0))
-        .collect();
-
-    tracing::info!("Cancelling workflows {:?}", pending_workflows);
-    client.cancel_workflows(&pending_workflows).await?;
-
-    db.update_build_status(build, BuildStatus::Cancelled)
-        .await?;
-
-    if let Some(check_run_id) = build.check_run_id {
-        if let Err(error) = client
-            .update_check_run(
-                CheckRunId(check_run_id as u64),
-                CheckRunStatus::Completed,
-                Some(check_run_conclusion),
-                None,
-            )
-            .await
-        {
-            tracing::error!("Could not update check run {check_run_id}: {error:?}");
-        }
-    }
-
-    Ok(pending_workflows)
 }
 
 fn get_pending_build(pr: &PullRequestModel) -> Option<&BuildModel> {
@@ -401,8 +367,8 @@ mod tests {
     use crate::bors::handlers::trybuild::{
         TRY_BRANCH_NAME, TRY_BUILD_CHECK_RUN_NAME, TRY_MERGE_BRANCH_NAME,
     };
-    use crate::database::WorkflowStatus;
     use crate::database::operations::get_all_workflows;
+    use crate::database::{BuildStatus, WorkflowStatus};
     use crate::github::CommitSha;
     use crate::tests::BorsTester;
     use crate::tests::mocks::{
@@ -421,7 +387,7 @@ mod tests {
             insta::assert_snapshot!(
                 tester.get_comment().await?,
                 @r#"
-            :sunny: Try build successful ([Workflow1](https://github.com/workflows/Workflow1/1))
+            :sunny: Try build successful ([Workflow1](https://github.com/rust-lang/borstest/actions/runs/1))
             Build commit: merge-0-pr-1 (`merge-0-pr-1`, parent: `main-sha1`)
 
             <!-- homu: {"type":"TryBuildCompleted","merge_sha":"merge-0-pr-1"} -->
@@ -440,7 +406,7 @@ mod tests {
             tester.workflow_full_failure(tester.try_branch()).await?;
             insta::assert_snapshot!(
                 tester.get_comment().await?,
-                @":broken_heart: Test failed ([Workflow1](https://github.com/workflows/Workflow1/1))"
+                @":broken_heart: Test failed ([Workflow1](https://github.com/rust-lang/borstest/actions/runs/1))"
             );
             Ok(())
         })
@@ -472,7 +438,7 @@ mod tests {
             insta::assert_snapshot!(
                 tester.get_comment().await?,
                 @r"
-            :broken_heart: Test failed ([Workflow1](https://github.com/workflows/Workflow1/1)). Failed jobs:
+            :broken_heart: Test failed ([Workflow1](https://github.com/rust-lang/borstest/actions/runs/1)). Failed jobs:
 
             - `Job 42` ([web logs](https://github.com/job-logs/42), [extended logs](https://triage.rust-lang.org/gha-logs/rust-lang/borstest/42))
             - `Job 50` ([web logs](https://github.com/job-logs/50), [extended logs](https://triage.rust-lang.org/gha-logs/rust-lang/borstest/50))
@@ -845,7 +811,7 @@ try-job: Bar
                 )
                 .await?;
             insta::assert_snapshot!(tester.get_comment().await?, @r#"
-            :sunny: Try build successful ([Workflow1](https://github.com/workflows/Workflow1/2))
+            :sunny: Try build successful ([Workflow1](https://github.com/rust-lang/borstest/actions/runs/2))
             Build commit: merge-1-pr-1 (`merge-1-pr-1`, parent: `main-sha1`)
 
             <!-- homu: {"type":"TryBuildCompleted","merge_sha":"merge-1-pr-1"} -->
@@ -883,11 +849,11 @@ try-job: Bar
                 ))
                 .await?;
             tester.post_comment("@bors try cancel").await?;
-            insta::assert_snapshot!(tester.get_comment().await?, @r###"
+            insta::assert_snapshot!(tester.get_comment().await?, @r"
             Try build cancelled. Cancelled workflows:
             - https://github.com/rust-lang/borstest/actions/runs/123
             - https://github.com/rust-lang/borstest/actions/runs/124
-            "###);
+            ");
             Ok(())
         })
         .await;
@@ -896,7 +862,7 @@ try-job: Bar
 
     #[sqlx::test]
     async fn try_cancel_error(pool: sqlx::PgPool) {
-        run_test(pool, async |tester| {
+        run_test(pool, async |tester: &mut BorsTester| {
             tester.default_repo().lock().workflow_cancel_error = true;
             tester.post_comment("@bors try").await?;
             tester.expect_comments(1).await;
@@ -905,6 +871,13 @@ try-job: Bar
                 .await?;
             tester.post_comment("@bors try cancel").await?;
             insta::assert_snapshot!(tester.get_comment().await?, @"Try build was cancelled. It was not possible to cancel some workflows.");
+            let build = tester.db().find_build(
+                &default_repo_name(),
+                tester.try_branch().get_name().to_string(),
+                tester.try_branch().get_sha().to_string().into()
+            ).await?.expect("build not found");
+            assert_eq!(build.status, BuildStatus::Cancelled);
+
             Ok(())
         })
         .await;

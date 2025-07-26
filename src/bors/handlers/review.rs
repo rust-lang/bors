@@ -1,7 +1,5 @@
 use std::sync::Arc;
 
-use octocrab::params::checks::CheckRunConclusion;
-
 use crate::bors::RepositoryState;
 use crate::bors::command::RollupMode;
 use crate::bors::command::{Approver, CommandPrefix};
@@ -10,14 +8,14 @@ use crate::bors::comment::{
     approved_comment, delegate_comment, delegate_try_builds_comment, unapprove_non_open_pr_comment,
 };
 use crate::bors::handlers::labels::handle_label_trigger;
-use crate::bors::handlers::trybuild::cancel_build_workflows;
+use crate::bors::handlers::workflow::{AutoBuildCancelReason, maybe_cancel_auto_build};
 use crate::bors::handlers::{PullRequestData, deny_request};
 use crate::bors::handlers::{has_permission, unapprove_pr};
 use crate::bors::merge_queue::MergeQueueSender;
 use crate::bors::{Comment, PullRequestStatus};
+use crate::database::ApprovalInfo;
 use crate::database::DelegatedPermission;
 use crate::database::TreeState;
-use crate::database::{ApprovalInfo, BuildStatus};
 use crate::github::LabelTrigger;
 use crate::github::{GithubUser, PullRequestNumber};
 use crate::permissions::PermissionType;
@@ -137,41 +135,13 @@ pub(super) async fn command_unapprove(
         return Ok(());
     }
 
-    let mut auto_build_cancel_message: Option<String> = None;
-    if let Some(auto_build) = &pr.db.auto_build {
-        if auto_build.status != BuildStatus::Pending {
-            return Ok(());
-        }
-
-        tracing::info!("Cancelling auto build for PR {pr_num} due to push");
-
-        match cancel_build_workflows(
-            &repo_state.client,
-            db.as_ref(),
-            auto_build,
-            CheckRunConclusion::Cancelled,
-        )
-        .await
-        {
-            Ok(workflow_ids) => {
-                tracing::info!("Auto build cancelled");
-
-                let workflow_urls = repo_state
-                    .client
-                    .get_workflow_urls(workflow_ids.into_iter());
-                auto_build_cancel_message = Some(auto_build_cancelled_message(workflow_urls).await);
-            }
-            Err(error) => {
-                tracing::error!(
-                    "Could not cancel workflows for SHA {}: {error:?}",
-                    auto_build.commit_sha
-                );
-
-                auto_build_cancel_message = Some(unclean_auto_build_cancelled_message().await);
-            }
-        };
-    }
-
+    let auto_build_cancel_message = maybe_cancel_auto_build(
+        &repo_state.client,
+        &db,
+        &pr.db,
+        AutoBuildCancelReason::Unapproval,
+    )
+    .await?;
     unapprove_pr(&repo_state, &db, &pr.db).await?;
     notify_of_unapproval(&repo_state, pr, auto_build_cancel_message).await?;
 
@@ -390,20 +360,6 @@ async fn notify_of_delegation(
     };
 
     repo.client.post_comment(pr_number, comment).await
-}
-
-async fn auto_build_cancelled_message(workflow_urls: impl Iterator<Item = String>) -> String {
-    let mut comment = r#"Auto build cancelled due to unapproval. Cancelled workflows:"#.to_string();
-    for url in workflow_urls {
-        comment += format!("\n- {}", url).as_str();
-    }
-
-    comment
-}
-
-async fn unclean_auto_build_cancelled_message() -> String {
-    "Auto build was cancelled due to unapproval. It was not possible to cancel some workflows."
-        .to_string()
 }
 
 #[cfg(test)]
@@ -1386,6 +1342,7 @@ merge_queue_enabled = true
                 Commit pr-1-sha has been unapproved.
 
                 Auto build cancelled due to unapproval. Cancelled workflows:
+
                 - https://github.com/rust-lang/borstest/actions/runs/1
                 ");
                 Ok(())
@@ -1415,7 +1372,7 @@ merge_queue_enabled = true
                 insta::assert_snapshot!(tester.get_comment().await?, @r"
                 Commit pr-1-sha has been unapproved.
 
-                Auto build was cancelled due to unapproval. It was not possible to cancel some workflows.
+                Auto build cancelled due to unapproval. It was not possible to cancel some workflows.
                 ");
                 Ok(())
             })
