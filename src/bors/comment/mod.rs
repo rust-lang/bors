@@ -13,6 +13,8 @@ use crate::{
     github::CommitSha,
 };
 
+pub mod label;
+
 /// A comment that can be posted to a pull request.
 pub struct Comment {
     text: String,
