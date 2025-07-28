@@ -1,5 +1,7 @@
 use std::fmt;
 use std::str::FromStr;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use arc_swap::ArcSwap;
 pub use command::CommandParser;
@@ -63,11 +65,38 @@ pub struct RepositoryState {
     pub client: GithubRepositoryClient,
     pub permissions: ArcSwap<UserPermissions>,
     pub config: ArcSwap<RepositoryConfig>,
+    pub merge_queue_cooldown: Mutex<Option<Instant>>,
 }
 
 impl RepositoryState {
     pub fn repository(&self) -> &GithubRepoName {
         self.client.repository()
+    }
+
+    pub fn is_in_cooldown(&self) -> bool {
+        if let Ok(cooldown) = self.merge_queue_cooldown.lock() {
+            if let Some(cooldown_until) = *cooldown {
+                return Instant::now() < cooldown_until;
+            }
+        }
+        false
+    }
+
+    pub fn set_cooldown(
+        &self,
+        duration: Duration,
+        sender: &crate::bors::merge_queue::MergeQueueSender,
+    ) {
+        if let Ok(mut cooldown) = self.merge_queue_cooldown.lock() {
+            *cooldown = Some(Instant::now() + duration);
+        }
+
+        // Schedule a retry after the cooldown period
+        let sender_clone = sender.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(duration).await;
+            let _ = sender_clone.trigger().await;
+        });
     }
 }
 

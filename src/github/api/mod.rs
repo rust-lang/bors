@@ -164,6 +164,7 @@ async fn create_repo_state(
         client,
         config: ArcSwap::new(Arc::new(config)),
         permissions: ArcSwap::new(Arc::new(permissions)),
+        merge_queue_cooldown: std::sync::Mutex::new(None),
     })
 }
 

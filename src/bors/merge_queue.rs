@@ -3,6 +3,7 @@ use octocrab::models::CheckRunId;
 use octocrab::params::checks::{CheckRunConclusion, CheckRunOutput, CheckRunStatus};
 use std::future::Future;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::mpsc;
 use tracing::Instrument;
 
@@ -14,7 +15,7 @@ use crate::bors::comment::{
 use crate::bors::{PullRequestStatus, RepositoryState};
 use crate::database::{BuildStatus, MergeableState, PullRequestModel};
 use crate::github::api::client::GithubRepositoryClient;
-use crate::github::api::operations::ForcePush;
+use crate::github::api::operations::{BranchUpdateError, ForcePush};
 use crate::github::{CommitSha, MergeError, PullRequest};
 use crate::utils::sort_queue::sort_queue_prs;
 
@@ -58,12 +59,21 @@ pub(super) const AUTO_BRANCH_NAME: &str = "automation/bors/auto";
 // The name of the check run seen in the GitHub UI.
 pub(super) const AUTO_BUILD_CHECK_RUN_NAME: &str = "Bors auto build";
 
-pub async fn merge_queue_tick(ctx: Arc<BorsContext>) -> anyhow::Result<()> {
+pub async fn merge_queue_tick(
+    ctx: Arc<BorsContext>,
+    sender: &MergeQueueSender,
+) -> anyhow::Result<()> {
     let repos: Vec<Arc<RepositoryState>> =
         ctx.repositories.read().unwrap().values().cloned().collect();
 
     for repo in repos {
         let repo_name = repo.repository();
+
+        if repo.is_in_cooldown() {
+            tracing::info!("Repository {repo_name} is in cooldown, skipping merge queue");
+            continue;
+        }
+
         let repo_db = match ctx.db.repo_db(repo_name).await? {
             Some(repo) => repo,
             None => {
@@ -112,15 +122,52 @@ pub async fn merge_queue_tick(ctx: Arc<BorsContext>) -> anyhow::Result<()> {
                         Ok(()) => {
                             tracing::info!("Auto build succeeded and merged for PR {pr_num}");
 
-                            ctx.db
+                            match ctx
+                                .db
                                 .set_pr_status(&pr.repository, pr.number, PullRequestStatus::Merged)
-                                .await?;
+                                .await
+                            {
+                                Ok(()) => {}
+                                Err(error) => {
+                                    tracing::error!(
+                                        "Failed to update PR status to merged: {:?}",
+                                        error
+                                    );
+                                    repo.set_cooldown(Duration::from_secs(60), sender);
+                                    continue;
+                                }
+                            }
                         }
                         Err(error) => {
-                            tracing::error!(
-                                "Failed to push PR {pr_num} to base branch: {:?}",
-                                error
-                            );
+                            match error {
+                                BranchUpdateError::FastForwardConflict { branch } => {
+                                    // Likely a transient GitHub error where the base branch has not been
+                                    // updated yet.
+                                    tracing::warn!(
+                                        "Fast-forward conflict when pushing PR {pr_num} to {branch}"
+                                    );
+                                    repo.set_cooldown(Duration::from_secs(5), sender);
+                                    continue;
+                                }
+                                BranchUpdateError::ValidationFailed {
+                                    ref branch,
+                                    ref message,
+                                } => {
+                                    // Indicates an error such as a protected branch, invalid SHA, incorrect format, or
+                                    // insufficient permissions.
+                                    tracing::error!(
+                                        "Validation failed when pushing PR {pr_num} to {branch}: {message}"
+                                    );
+                                    repo.set_cooldown(Duration::from_secs(10), sender);
+                                    continue;
+                                }
+                                _ => {
+                                    tracing::error!(
+                                        "Failed to push PR {pr_num} to base branch: {:?}",
+                                        error
+                                    );
+                                }
+                            }
 
                             if let Some(check_run_id) = auto_build.check_run_id {
                                 if let Err(error) = repo
@@ -134,21 +181,29 @@ pub async fn merge_queue_tick(ctx: Arc<BorsContext>) -> anyhow::Result<()> {
                                     .await
                                 {
                                     tracing::error!(
-                                        "Could not update check run {check_run_id}: {error:?}"
+                                        "Could not update check run {check_run_id} to completed: {error:?}"
                                     );
                                 }
                             }
 
-                            ctx.db
+                            match ctx
+                                .db
                                 .update_build_status(auto_build, BuildStatus::Failure)
-                                .await?;
+                                .await
+                            {
+                                Ok(_) => (),
+                                Err(error) => {
+                                    tracing::error!("Failed to update build status: {:?}", error);
+                                    repo.set_cooldown(Duration::from_secs(60), sender);
+                                    continue;
+                                }
+                            }
 
                             let comment = auto_build_push_failed_comment(&error.to_string());
                             repo.client.post_comment(pr.number, comment).await?;
                         }
                     };
 
-                    // Break to give GitHub time to update the base branch.
                     continue;
                 }
                 // Build in progress - stop queue. We can only have one PR being built
@@ -190,10 +245,7 @@ pub async fn merge_queue_tick(ctx: Arc<BorsContext>) -> anyhow::Result<()> {
             ) => {
                 tracing::info!("Unexpected merge conflict for PR {pr_num}: {error:?}");
                 repo.client
-                    .post_comment(
-                        pr.number,
-                        merge_conflict_comment(&gh_pr.head.sha.to_string()),
-                    )
+                    .post_comment(pr.number, merge_conflict_comment(gh_pr.head.sha.as_ref()))
                     .await?;
             }
             Err(AutoBuildStartError::FailedToPush(merge_sha, error)) => {
@@ -252,7 +304,7 @@ pub async fn merge_queue_tick(ctx: Arc<BorsContext>) -> anyhow::Result<()> {
                     tracing::error!("Failed to reset {AUTO_BRANCH_NAME}: {push_error:?}");
                 }
 
-                return Err(error);
+                continue;
             }
         }
     }
@@ -310,7 +362,9 @@ async fn start_auto_build(
             client
                 .set_branch_to_sha(AUTO_BRANCH_NAME, &merge_sha, ForcePush::Yes)
                 .await
-                .map_err(|error| AutoBuildStartError::FailedToPush(merge_sha.clone(), error))?;
+                .map_err(|error| {
+                    AutoBuildStartError::FailedToPush(merge_sha.clone(), error.into())
+                })?;
 
             // 3. Record the build in the database
             let build_id = ctx
@@ -366,12 +420,12 @@ async fn start_auto_build(
         }
         Ok(MergeResult::Conflict) => {
             ctx.db
-                .update_pr_mergeable_state(&pr, MergeableState::HasConflicts)
+                .update_pr_mergeable_state(pr, MergeableState::HasConflicts)
                 .await
                 .map_err(AutoBuildStartError::FailedToMarkAsConflicted)?;
-            return Err(AutoBuildStartError::MergeConflicts(anyhow!(
+            Err(AutoBuildStartError::MergeConflicts(anyhow!(
                 "Merge conflict detected between PR head and base branch"
-            )));
+            )))
         }
         Err(error) => Err(AutoBuildStartError::FailedToMerge(error)),
     }
@@ -412,6 +466,7 @@ async fn attempt_merge(
 pub fn start_merge_queue(ctx: Arc<BorsContext>) -> (MergeQueueSender, impl Future<Output = ()>) {
     let (tx, mut rx) = mpsc::channel::<MergeQueueEvent>(10);
     let sender = MergeQueueSender { inner: tx };
+    let sender_clone = sender.clone();
 
     let fut = async move {
         while let Some(event) = rx.recv().await {
@@ -419,7 +474,9 @@ pub fn start_merge_queue(ctx: Arc<BorsContext>) -> (MergeQueueSender, impl Futur
                 MergeQueueEvent::Trigger => {
                     let span = tracing::info_span!("MergeQueue");
                     tracing::debug!("Processing merge queue");
-                    if let Err(error) = merge_queue_tick(ctx.clone()).instrument(span.clone()).await
+                    if let Err(error) = merge_queue_tick(ctx.clone(), &sender_clone)
+                        .instrument(span.clone())
+                        .await
                     {
                         // In tests, we want to panic on all errors.
                         #[cfg(test)]

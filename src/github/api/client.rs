@@ -11,7 +11,8 @@ use crate::bors::{Comment, WorkflowRun};
 use crate::config::{CONFIG_FILE_PATH, RepositoryConfig};
 use crate::database::WorkflowStatus;
 use crate::github::api::operations::{
-    ForcePush, MergeError, create_check_run, merge_branches, set_branch_to_commit, update_check_run,
+    BranchUpdateError, ForcePush, MergeError, create_check_run, merge_branches,
+    set_branch_to_commit, update_check_run,
 };
 use crate::github::{CommitSha, GithubRepoName, PullRequest, PullRequestNumber};
 use crate::utils::timing::{measure_network_request, perform_network_request_with_retry};
@@ -146,11 +147,8 @@ impl GithubRepositoryClient {
         branch: &str,
         sha: &CommitSha,
         force: ForcePush,
-    ) -> anyhow::Result<()> {
-        perform_network_request_with_retry("set_branch_to_sha", || async {
-            Ok(set_branch_to_commit(self, branch.to_string(), sha, force).await?)
-        })
-        .await?
+    ) -> Result<(), BranchUpdateError> {
+        set_branch_to_commit(self, branch.to_string(), sha, force).await
     }
 
     /// Merge `head` into `base`. Returns the SHA of the merge commit.

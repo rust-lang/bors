@@ -136,6 +136,12 @@ async fn create_branch(
 pub enum BranchUpdateError {
     #[error("Branch {0} was not found")]
     BranchNotFound(String),
+    #[error(
+        "Fast-forward conflict when updating branch {branch}: the branch has been updated since the base was computed"
+    )]
+    FastForwardConflict { branch: String },
+    #[error("Validation failed when updating branch {branch}: {message}")]
+    ValidationFailed { branch: String, message: String },
     #[error("IO error")]
     IOError(#[from] octocrab::Error),
     #[error("Unknown error: {0}")]
@@ -169,15 +175,28 @@ async fn update_branch(
         .await?;
 
     let status = res.status();
+    let response_body = repo.client().body_to_string(res).await;
     tracing::trace!(
         "Updating branch response: status={}, text={:?}",
         status,
-        repo.client().body_to_string(res).await
+        response_body
     );
 
     match status {
         StatusCode::OK => Ok(()),
-        _ => Err(BranchUpdateError::BranchNotFound(branch_name)),
+        StatusCode::CONFLICT => Err(BranchUpdateError::FastForwardConflict {
+            branch: branch_name,
+        }),
+        StatusCode::UNPROCESSABLE_ENTITY => Err(BranchUpdateError::ValidationFailed {
+            branch: branch_name,
+            message: response_body.unwrap_or_default(),
+        }),
+        StatusCode::NOT_FOUND => Err(BranchUpdateError::BranchNotFound(branch_name)),
+        _ => Err(BranchUpdateError::Custom(format!(
+            "Unexpected status {}: {}",
+            status,
+            response_body.unwrap_or_default()
+        ))),
     }
 }
 
