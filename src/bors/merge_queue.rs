@@ -9,12 +9,13 @@ use tracing::Instrument;
 use crate::BorsContext;
 use crate::bors::comment::{
     auto_build_push_failed_comment, auto_build_started_comment, auto_build_succeeded_comment,
+    merge_conflict_comment, push_to_auto_branch_failed_comment,
 };
 use crate::bors::{PullRequestStatus, RepositoryState};
 use crate::database::{BuildStatus, MergeableState, PullRequestModel};
 use crate::github::api::client::GithubRepositoryClient;
 use crate::github::api::operations::ForcePush;
-use crate::github::{CommitSha, MergeError};
+use crate::github::{CommitSha, MergeError, PullRequest};
 use crate::utils::sort_queue::sort_queue_prs;
 
 enum MergeResult {
@@ -162,26 +163,96 @@ pub async fn merge_queue_tick(ctx: Arc<BorsContext>) -> anyhow::Result<()> {
             }
         }
 
+        let gh_pr = repo.client.get_pull_request(pr.number).await?;
+        let base_sha = repo.client.get_branch_sha(&pr.base_branch).await?;
+
         // No build exists for this PR - start a new auto build.
-        match start_auto_build(&repo, &ctx, &pr).await {
-            Ok(true) => {
+        match start_auto_build(&repo, &ctx, &pr, &gh_pr, base_sha.clone()).await {
+            Ok(merge_sha) => {
                 tracing::info!("Starting auto build for PR {pr_num}");
-                continue;
-            }
-            Ok(false) => {
-                tracing::debug!(
-                    "Failed to start auto build for PR {pr_num} due to unexpected merge conflict"
-                );
-                ctx.db
-                    .update_pr_mergeable_state(&pr, MergeableState::HasConflicts)
+                repo.client
+                    .post_comment(
+                        pr.number,
+                        auto_build_started_comment(&gh_pr.head.sha, &merge_sha),
+                    )
                     .await?;
                 continue;
             }
-            Err(error) => {
-                tracing::error!("Error starting auto build for PR {pr_num}: {:?}", error);
-                // Unexpected error - the PR will remain in the queue for a retry. This is most
-                // likely a transient GitHub error.
-                continue;
+            Err(AutoBuildStartError::FailedToMerge(error)) => {
+                tracing::error!(
+                    "Failed to merge PR {pr_num} (head: {}) with base SHA {base_sha} on {AUTO_MERGE_BRANCH_NAME}: {error:?}",
+                    gh_pr.head.sha,
+                );
+            }
+            Err(
+                AutoBuildStartError::MergeConflicts(error)
+                | AutoBuildStartError::FailedToMarkAsConflicted(error),
+            ) => {
+                tracing::info!("Unexpected merge conflict for PR {pr_num}: {error:?}");
+                repo.client
+                    .post_comment(
+                        pr.number,
+                        merge_conflict_comment(&gh_pr.head.sha.to_string()),
+                    )
+                    .await?;
+            }
+            Err(AutoBuildStartError::FailedToPush(merge_sha, error)) => {
+                tracing::error!("Failed to push auto build commit for PR {pr_num}: {error:?}");
+
+                repo.client
+                    .post_comment(
+                        pr.number,
+                        push_to_auto_branch_failed_comment(
+                            &merge_sha,
+                            AUTO_BRANCH_NAME,
+                            &error.to_string(),
+                        ),
+                    )
+                    .await?;
+            }
+            Err(AutoBuildStartError::FailedToRecordBuild(merge_sha, error)) => {
+                tracing::error!("Failed to record build in database for PR {pr_num}: {error:?}");
+
+                // Get and cancel any workflows running on the (untracked) merge commit.
+                //
+                // If workflow cancellation fails, we still continue with branch reset since this
+                // is not critical.
+                if let Ok(workflow_runs) =
+                    repo.client.get_workflow_runs_for_commit(&merge_sha).await
+                {
+                    let pending_workflow_ids: Vec<octocrab::models::RunId> = workflow_runs
+                        .iter()
+                        .filter(|w| w.status == "in_progress" || w.status == "queued")
+                        .map(|w| w.id)
+                        .collect();
+
+                    if !pending_workflow_ids.is_empty() {
+                        tracing::info!(
+                            "Cancelling {} orphaned workflows for merge SHA {}",
+                            pending_workflow_ids.len(),
+                            merge_sha
+                        );
+                        if let Err(cancel_error) =
+                            repo.client.cancel_workflows(&pending_workflow_ids).await
+                        {
+                            tracing::error!(
+                                "Failed to cancel orphaned workflows: {cancel_error:?}"
+                            );
+                        }
+                    }
+                }
+
+                // Reset `AUTO_BRANCH_NAME` back to base branch to ensure no orphaned merge commit
+                // remains on the branch.
+                if let Err(push_error) = repo
+                    .client
+                    .set_branch_to_sha(AUTO_BRANCH_NAME, &base_sha, ForcePush::Yes)
+                    .await
+                {
+                    tracing::error!("Failed to reset {AUTO_BRANCH_NAME}: {push_error:?}");
+                }
+
+                return Err(error);
             }
         }
     }
@@ -192,16 +263,29 @@ pub async fn merge_queue_tick(ctx: Arc<BorsContext>) -> anyhow::Result<()> {
     Ok(())
 }
 
+#[must_use]
+pub enum AutoBuildStartError {
+    /// Failed to merge the PR into the base branch.
+    FailedToMerge(anyhow::Error),
+    /// Failed to merge PR into the base branch due to merge conflicts.
+    MergeConflicts(anyhow::Error),
+    /// It was not possible to mark the PR as having merge conflicts.
+    FailedToMarkAsConflicted(anyhow::Error),
+    /// Failed to force push the merge commit to `AUTO_BRANCH_NAME`.
+    FailedToPush(CommitSha, anyhow::Error),
+    /// Failed to record build in the database.
+    FailedToRecordBuild(CommitSha, anyhow::Error),
+}
+
 /// Starts a new auto build for a pull request.
 async fn start_auto_build(
     repo: &Arc<RepositoryState>,
     ctx: &Arc<BorsContext>,
     pr: &PullRequestModel,
-) -> anyhow::Result<bool> {
+    gh_pr: &PullRequest,
+    base_sha: CommitSha,
+) -> anyhow::Result<CommitSha, AutoBuildStartError> {
     let client = &repo.client;
-
-    let gh_pr = client.get_pull_request(pr.number).await?;
-    let base_sha = client.get_branch_sha(&pr.base_branch).await?;
 
     let auto_merge_commit_message = format!(
         "Auto merge of #{} - {}, r={}\n\n{}\n\n{}",
@@ -219,13 +303,14 @@ async fn start_auto_build(
         &base_sha,
         &auto_merge_commit_message,
     )
-    .await?
+    .await
     {
-        MergeResult::Success(merge_sha) => {
+        Ok(MergeResult::Success(merge_sha)) => {
             // 2. Push merge commit to `AUTO_BRANCH_NAME` where CI runs
             client
                 .set_branch_to_sha(AUTO_BRANCH_NAME, &merge_sha, ForcePush::Yes)
-                .await?;
+                .await
+                .map_err(|error| AutoBuildStartError::FailedToPush(merge_sha.clone(), error))?;
 
             // 3. Record the build in the database
             let build_id = ctx
@@ -236,7 +321,10 @@ async fn start_auto_build(
                     merge_sha.clone(),
                     base_sha,
                 )
-                .await?;
+                .await
+                .map_err(|error| {
+                    AutoBuildStartError::FailedToRecordBuild(merge_sha.clone(), error)
+                })?;
 
             // 4. Set GitHub check run to pending on PR head
             match client
@@ -256,27 +344,36 @@ async fn start_auto_build(
                 .await
             {
                 Ok(check_run) => {
-                    tracing::info!(
-                        "Created check run {} for build {build_id}",
-                        check_run.id.into_inner()
-                    );
-                    ctx.db
+                    if let Err(error) = ctx
+                        .db
                         .update_build_check_run_id(build_id, check_run.id.into_inner() as i64)
-                        .await?;
+                        .await
+                    {
+                        tracing::error!(
+                            "Failed to update check run for build {build_id}: {error:?}"
+                        );
+                    };
                 }
                 Err(error) => {
-                    // Check runs aren't critical, don't block progress if they fail
-                    tracing::error!("Cannot create check run: {error:?}");
+                    tracing::error!(
+                        "Failed to create check run on sha {}: {error:?}",
+                        gh_pr.head.sha
+                    );
                 }
             }
 
-            // 5. Post status comment
-            let comment = auto_build_started_comment(&gh_pr.head.sha, &merge_sha);
-            client.post_comment(pr.number, comment).await?;
-
-            Ok(true)
+            Ok(merge_sha)
         }
-        MergeResult::Conflict => Ok(false),
+        Ok(MergeResult::Conflict) => {
+            ctx.db
+                .update_pr_mergeable_state(&pr, MergeableState::HasConflicts)
+                .await
+                .map_err(AutoBuildStartError::FailedToMarkAsConflicted)?;
+            return Err(AutoBuildStartError::MergeConflicts(anyhow!(
+                "Merge conflict detected between PR head and base branch"
+            )));
+        }
+        Err(error) => Err(AutoBuildStartError::FailedToMerge(error)),
     }
 }
 

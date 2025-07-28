@@ -335,3 +335,13 @@ pub fn auto_build_push_failed_comment(error: &str) -> Comment {
         ":eyes: Test was successful, but fast-forwarding failed: {error}"
     ))
 }
+
+pub fn push_to_auto_branch_failed_comment(
+    merge_sha: &CommitSha,
+    auto_branch: &str,
+    error: &str,
+) -> Comment {
+    Comment::new(format!(
+        ":x: Auto build failed to start: merged commit `{merge_sha}` but failed to push to `{auto_branch}`: {error}"
+    ))
+}

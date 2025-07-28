@@ -19,6 +19,13 @@ use futures::TryStreamExt;
 use octocrab::models::workflows::Job;
 use serde::de::DeserializeOwned;
 
+#[derive(serde::Deserialize, Debug)]
+pub struct WorkflowRunResponse {
+    pub id: RunId,
+    pub status: String,
+    pub conclusion: Option<String>,
+}
+
 /// Provides access to a single app installation (repository) using the GitHub API.
 pub struct GithubRepositoryClient {
     app: App,
@@ -199,13 +206,6 @@ impl GithubRepositoryClient {
         check_suite_id: CheckSuiteId,
     ) -> anyhow::Result<Vec<WorkflowRun>> {
         #[derive(serde::Deserialize, Debug)]
-        struct WorkflowRunResponse {
-            id: RunId,
-            status: String,
-            conclusion: Option<String>,
-        }
-
-        #[derive(serde::Deserialize, Debug)]
         struct WorkflowRunsResponse {
             workflow_runs: Vec<WorkflowRunResponse>,
         }
@@ -287,6 +287,27 @@ impl GithubRepositoryClient {
             Ok(())
         })
         .await
+    }
+
+    /// Get workflow runs for a specific commit SHA.
+    pub async fn get_workflow_runs_for_commit(
+        &self,
+        commit_sha: &CommitSha,
+    ) -> anyhow::Result<Vec<WorkflowRunResponse>> {
+        #[derive(serde::Deserialize, Debug)]
+        struct WorkflowRunsResponse {
+            workflow_runs: Vec<WorkflowRunResponse>,
+        }
+
+        perform_network_request_with_retry("get_workflow_runs_for_commit", || async {
+            let response: WorkflowRunsResponse = self
+                .get_request(&format!("actions/runs?head_sha={}", commit_sha.0))
+                .await
+                .context("Cannot fetch workflow runs for commit")?;
+
+            Ok(response.workflow_runs)
+        })
+        .await?
     }
 
     /// Add a set of labels to a PR.
