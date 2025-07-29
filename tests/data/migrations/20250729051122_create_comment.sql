@@ -1,5 +1,5 @@
 INSERT INTO
-    comment (repository, pr_number, label, node_id)
+    comment (repository, pr_number, tag, node_id)
 VALUES
     (
         'rust-lang/bors',

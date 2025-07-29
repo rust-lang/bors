@@ -1,5 +1,5 @@
 use crate::PgDbClient;
-use crate::bors::comment::{CommentLabel, build_failed_comment, try_build_succeeded_comment};
+use crate::bors::comment::{CommentTag, build_failed_comment, try_build_succeeded_comment};
 use crate::bors::event::{WorkflowRunCompleted, WorkflowRunStarted};
 use crate::bors::handlers::TRY_BRANCH_NAME;
 use crate::bors::handlers::is_bors_observed_branch;
@@ -287,7 +287,7 @@ async fn maybe_complete_build(
 
     // Hide "Try build started" comments that are now outdated
     let outdated = db
-        .get_comments(repo.repository(), pr.number, CommentLabel::TryBuildStarted)
+        .get_comments(repo.repository(), pr.number, CommentTag::TryBuildStarted)
         .await?;
     for comment in outdated {
         repo.client

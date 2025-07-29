@@ -1,6 +1,6 @@
 use sqlx::PgPool;
 
-use crate::bors::comment::CommentLabel;
+use crate::bors::comment::CommentTag;
 use crate::bors::{PullRequestStatus, RollupMode};
 use crate::database::operations::{get_merge_queue_prs, update_pr_auto_build_id};
 use crate::database::{
@@ -333,7 +333,7 @@ impl PgDbClient {
         &self,
         repo: &GithubRepoName,
         pr_number: PullRequestNumber,
-        label: CommentLabel,
+        label: CommentTag,
     ) -> anyhow::Result<Vec<CommentModel>> {
         get_comments(&self.pool, repo, pr_number, label).await
     }
@@ -342,7 +342,7 @@ impl PgDbClient {
         &self,
         repo: &GithubRepoName,
         pr_number: PullRequestNumber,
-        label: CommentLabel,
+        label: CommentTag,
         node_id: &str,
     ) -> anyhow::Result<()> {
         insert_comment(&self.pool, repo, pr_number, label, node_id).await

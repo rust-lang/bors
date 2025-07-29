@@ -4,7 +4,7 @@ use sqlx::postgres::PgExecutor;
 
 use crate::bors::PullRequestStatus;
 use crate::bors::RollupMode;
-use crate::bors::comment::CommentLabel;
+use crate::bors::comment::CommentTag;
 use crate::database::BuildStatus;
 use crate::database::RepoModel;
 use crate::database::WorkflowModel;
@@ -1043,7 +1043,7 @@ pub(crate) async fn get_comments(
     executor: impl PgExecutor<'_>,
     repo: &GithubRepoName,
     pr_number: PullRequestNumber,
-    label: CommentLabel,
+    tag: CommentTag,
 ) -> anyhow::Result<Vec<CommentModel>> {
     measure_db_query("get_comments", || async {
         let comments = sqlx::query_as!(
@@ -1053,17 +1053,17 @@ pub(crate) async fn get_comments(
                 id,
                 repository as "repository: GithubRepoName",
                 pr_number as "pr_number: i64",
-                label as "label: CommentLabel",
+                tag as "tag: CommentTag",
                 node_id,
                 created_at as "created_at: DateTime<Utc>"
             FROM comment
             WHERE repository = $1
               AND pr_number = $2
-              AND label = $3
-        "#,
+              AND tag = $3
+            "#,
             repo as &GithubRepoName,
             pr_number.0 as i32,
-            label as CommentLabel,
+            tag as CommentTag,
         )
         .fetch_all(executor)
         .await?;
@@ -1076,22 +1076,21 @@ pub(crate) async fn insert_comment(
     executor: impl PgExecutor<'_>,
     repo: &GithubRepoName,
     pr_number: PullRequestNumber,
-    label: CommentLabel,
+    tag: CommentTag,
     node_id: &str,
 ) -> anyhow::Result<()> {
     measure_db_query("insert_comment", || async {
-        sqlx::query_scalar!(
+        sqlx::query!(
             r#"
-            INSERT INTO comment (repository, pr_number, label, node_id)
+            INSERT INTO comment (repository, pr_number, tag, node_id)
             VALUES ($1, $2, $3, $4)
-            RETURNING id
-        "#,
+            "#,
             repo as &GithubRepoName,
             pr_number.0 as i32,
-            label as CommentLabel,
+            tag as CommentTag,
             node_id
         )
-        .fetch_one(executor)
+        .execute(executor)
         .await?;
         Ok(())
     })

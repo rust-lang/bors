@@ -26,26 +26,26 @@ pub enum CommentMetadata {
     TryBuildCompleted { merge_sha: String },
 }
 
-/// A label for a comment, used to identify the comment.
+/// A tag for a comment, used to identify the comment.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub enum CommentLabel {
+pub enum CommentTag {
     TryBuildStarted,
 }
 
-impl Display for CommentLabel {
+impl Display for CommentTag {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            CommentLabel::TryBuildStarted => f.write_str("TryBuildStarted"),
+            CommentTag::TryBuildStarted => f.write_str("TryBuildStarted"),
         }
     }
 }
 
-impl FromStr for CommentLabel {
+impl FromStr for CommentTag {
     type Err = anyhow::Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "TryBuildStarted" => Ok(CommentLabel::TryBuildStarted),
+            "TryBuildStarted" => Ok(CommentTag::TryBuildStarted),
             _ => Err(anyhow::anyhow!("Unknown comment label: {}", s)),
         }
     }
