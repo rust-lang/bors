@@ -1,5 +1,5 @@
 use crate::PgDbClient;
-use crate::bors::comment::{build_failed_comment, try_build_succeeded_comment};
+use crate::bors::comment::{CommentLabel, build_failed_comment, try_build_succeeded_comment};
 use crate::bors::event::{WorkflowRunCompleted, WorkflowRunStarted};
 use crate::bors::handlers::TRY_BRANCH_NAME;
 use crate::bors::handlers::is_bors_observed_branch;
@@ -8,7 +8,7 @@ use crate::bors::merge_queue::AUTO_BRANCH_NAME;
 use crate::bors::merge_queue::MergeQueueSender;
 use crate::bors::{FailedWorkflowRun, RepositoryState, WorkflowRun};
 use crate::database::{BuildModel, BuildStatus, PullRequestModel, WorkflowModel, WorkflowStatus};
-use crate::github::api::client::GithubRepositoryClient;
+use crate::github::api::client::{GithubRepositoryClient, MinimizeCommentReason};
 use crate::github::{CommitSha, LabelTrigger};
 use octocrab::models::CheckRunId;
 use octocrab::models::workflows::{Conclusion, Job, Status};
@@ -283,6 +283,17 @@ async fn maybe_complete_build(
 
     if let Some(comment) = comment_opt {
         repo.client.post_comment(pr_num, comment).await?;
+    }
+
+    // Hide "Try build started" comments that are now outdated
+    let outdated = db
+        .get_comments(repo.repository(), pr.number, CommentLabel::TryBuildStarted)
+        .await?;
+    for comment in outdated {
+        repo.client
+            .minimize_comment(&comment.node_id, MinimizeCommentReason::Outdated)
+            .await?;
+        db.delete_comment(&comment).await?;
     }
 
     Ok(())

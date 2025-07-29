@@ -5,9 +5,9 @@ use super::{PullRequestData, deny_request};
 use crate::PgDbClient;
 use crate::bors::RepositoryState;
 use crate::bors::command::{CommandPrefix, Parent};
-use crate::bors::comment::no_try_build_in_progress_comment;
 use crate::bors::comment::try_build_cancelled_comment;
 use crate::bors::comment::try_build_cancelled_with_failed_workflow_cancel_comment;
+use crate::bors::comment::{CommentLabel, no_try_build_in_progress_comment};
 use crate::bors::comment::{
     cant_find_last_parent_comment, merge_conflict_comment, try_build_started_comment,
 };
@@ -127,7 +127,8 @@ pub(super) async fn command_try_build(
                 }
             }
 
-            repo.client
+            let comment = repo
+                .client
                 .post_comment(
                     pr.number(),
                     try_build_started_comment(
@@ -138,6 +139,13 @@ pub(super) async fn command_try_build(
                     ),
                 )
                 .await?;
+            db.insert_comment(
+                repo.repository(),
+                pr.number(),
+                CommentLabel::TryBuildStarted,
+                &comment.node_id,
+            )
+            .await?;
         }
         MergeResult::Conflict => {
             repo.client
