@@ -578,8 +578,8 @@ mod tests {
     #[sqlx::test]
     async fn merge_queue_sequential_order(pool: sqlx::PgPool) {
         let gh = run_merge_queue_test(pool, async |tester| {
-            let pr2 = tester.open_pr(default_repo_name(), false).await?;
-            let pr3 = tester.open_pr(default_repo_name(), false).await?;
+            let pr2 = tester.open_pr(default_repo_name(), |_| {}).await?;
+            let pr3 = tester.open_pr(default_repo_name(), |_| {}).await?;
 
             tester.post_comment("@bors r+").await?;
             tester
@@ -634,8 +634,8 @@ mod tests {
     #[sqlx::test]
     async fn merge_queue_priority_order(pool: sqlx::PgPool) {
         let gh = run_merge_queue_test(pool, async |tester| {
-            let pr2 = tester.open_pr(default_repo_name(), false).await?;
-            let pr3 = tester.open_pr(default_repo_name(), false).await?;
+            let pr2 = tester.open_pr(default_repo_name(), |_| {}).await?;
+            let pr3 = tester.open_pr(default_repo_name(), |_| {}).await?;
 
             tester.post_comment("@bors r+").await?;
             tester

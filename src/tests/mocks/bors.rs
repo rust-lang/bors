@@ -466,10 +466,13 @@ impl BorsTester {
             .await
     }
 
-    pub async fn open_pr(
+    /// Creates a new PR and sends a webhook about its creation.
+    /// If you want to set some non-default properties on the PR,
+    /// use the `modify_pr` callback, to avoid race conditions with the webhook being sent.
+    pub async fn open_pr<F: FnOnce(&mut PullRequest)>(
         &mut self,
         repo_name: GithubRepoName,
-        is_draft: bool,
+        modify_pr: F,
     ) -> anyhow::Result<PullRequest> {
         let number = {
             let repo = self.github.get_repo(&repo_name);
@@ -477,12 +480,8 @@ impl BorsTester {
             repo.pull_requests.keys().max().copied().unwrap_or(0) + 1
         };
 
-        let pr = PullRequest::new(
-            repo_name.clone(),
-            number,
-            User::default_pr_author(),
-            is_draft,
-        );
+        let mut pr = PullRequest::new(repo_name.clone(), number, User::default_pr_author());
+        modify_pr(&mut pr);
 
         // Add the PR to the repository
         {

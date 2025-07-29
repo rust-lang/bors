@@ -60,7 +60,7 @@ pub struct PullRequest {
 }
 
 impl PullRequest {
-    pub fn new(repo: GithubRepoName, number: u64, author: User, is_draft: bool) -> Self {
+    pub fn new(repo: GithubRepoName, number: u64, author: User) -> Self {
         Self {
             number: PullRequestNumber(number),
             repo,
@@ -71,11 +71,7 @@ impl PullRequest {
             author,
             base_branch: Branch::default(),
             mergeable_state: MergeableState::Clean,
-            status: if is_draft {
-                PullRequestStatus::Draft
-            } else {
-                PullRequestStatus::Open
-            },
+            status: PullRequestStatus::Open,
             merged_at: None,
             closed_at: None,
             assignees: Vec::new(),
@@ -94,7 +90,6 @@ impl Default for PullRequest {
             default_repo_name(),
             default_pr_number(),
             User::default_pr_author(),
-            false,
         )
     }
 }
