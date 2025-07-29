@@ -406,7 +406,7 @@ mod tests {
             tester.workflow_full_failure(tester.try_branch()).await?;
             insta::assert_snapshot!(
                 tester.get_comment().await?,
-                @":broken_heart: Test failed ([Workflow1](https://github.com/rust-lang/borstest/actions/runs/1))"
+                @":broken_heart: Test for merge-0-pr-1 failed: [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1)"
             );
             Ok(())
         })
@@ -438,7 +438,7 @@ mod tests {
             insta::assert_snapshot!(
                 tester.get_comment().await?,
                 @r"
-            :broken_heart: Test failed ([Workflow1](https://github.com/rust-lang/borstest/actions/runs/1)). Failed jobs:
+            :broken_heart: Test for merge-0-pr-1 failed: [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1). Failed jobs:
 
             - `Job 42` ([web logs](https://github.com/job-logs/42), [extended logs](https://triage.rust-lang.org/gha-logs/rust-lang/borstest/42))
             - `Job 50` ([web logs](https://github.com/job-logs/50), [extended logs](https://triage.rust-lang.org/gha-logs/rust-lang/borstest/50))

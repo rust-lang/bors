@@ -5,7 +5,6 @@ use std::time::Duration;
 
 use crate::bors::FailedWorkflowRun;
 use crate::bors::command::CommandPrefix;
-use crate::database::BuildModel;
 use crate::github::GithubRepoName;
 use crate::utils::text::pluralize;
 use crate::{
@@ -49,7 +48,7 @@ impl Comment {
 pub fn try_build_succeeded_comment(
     workflows: &[WorkflowModel],
     commit_sha: CommitSha,
-    build: &BuildModel,
+    parent_sha: CommitSha,
 ) -> Comment {
     use std::fmt::Write;
 
@@ -65,8 +64,7 @@ pub fn try_build_succeeded_comment(
     }
     writeln!(
         text,
-        "Build commit: {commit_sha} (`{commit_sha}`, parent: `{}`)",
-        build.parent
+        "Build commit: {commit_sha} (`{commit_sha}`, parent: `{parent_sha}`)",
     )
     .unwrap();
 
@@ -103,16 +101,17 @@ pub fn try_build_cancelled_comment(workflow_urls: impl Iterator<Item = String>) 
 
 pub fn build_failed_comment(
     repo: &GithubRepoName,
+    commit_sha: CommitSha,
     failed_workflows: Vec<FailedWorkflowRun>,
 ) -> Comment {
     use std::fmt::Write;
 
-    let mut msg = ":broken_heart: Test failed".to_string();
+    let mut msg = format!(":broken_heart: Test for {commit_sha} failed");
     let mut workflow_links = failed_workflows
         .iter()
         .map(|w| format!("[{}]({})", w.workflow_run.name, w.workflow_run.url));
     if !failed_workflows.is_empty() {
-        write!(msg, " ({})", workflow_links.join(", ")).unwrap();
+        write!(msg, ": {}", workflow_links.join(", ")).unwrap();
 
         let mut failed_jobs: Vec<Job> = failed_workflows
             .into_iter()

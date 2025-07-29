@@ -8,8 +8,8 @@ use crate::bors::merge_queue::AUTO_BRANCH_NAME;
 use crate::bors::merge_queue::MergeQueueSender;
 use crate::bors::{FailedWorkflowRun, RepositoryState, WorkflowRun};
 use crate::database::{BuildModel, BuildStatus, PullRequestModel, WorkflowModel, WorkflowStatus};
-use crate::github::LabelTrigger;
 use crate::github::api::client::GithubRepositoryClient;
+use crate::github::{CommitSha, LabelTrigger};
 use octocrab::models::CheckRunId;
 use octocrab::models::workflows::{Conclusion, Job, Status};
 use octocrab::params::checks::CheckRunConclusion;
@@ -246,7 +246,7 @@ async fn maybe_complete_build(
             Some(try_build_succeeded_comment(
                 &db_workflow_runs,
                 payload.commit_sha,
-                &build,
+                CommitSha(build.parent.clone()),
             ))
         } else {
             // Merge queue will post the build succeeded comment
@@ -274,7 +274,11 @@ async fn maybe_complete_build(
             })
         }
 
-        Some(build_failed_comment(repo.repository(), workflow_runs))
+        Some(build_failed_comment(
+            repo.repository(),
+            payload.commit_sha,
+            workflow_runs,
+        ))
     };
 
     if let Some(comment) = comment_opt {
@@ -610,7 +614,7 @@ mod tests {
             tester.workflow_event(WorkflowEvent::failure(w2)).await?;
             insta::assert_snapshot!(
                 tester.get_comment().await?,
-                @":broken_heart: Test failed ([Workflow1](https://github.com/rust-lang/borstest/actions/runs/1), [Workflow1](https://github.com/rust-lang/borstest/actions/runs/2))"
+                @":broken_heart: Test for merge-0-pr-1 failed: [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1), [Workflow1](https://github.com/rust-lang/borstest/actions/runs/2)"
             );
             Ok(())
         })
@@ -750,7 +754,7 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
                 }).await?;
                 insta::assert_snapshot!(
                     tester.get_comment().await?,
-                    @":broken_heart: Test failed ([Workflow1](https://github.com/rust-lang/borstest/actions/runs/1))"
+                    @":broken_heart: Test for merge-0-pr-1 failed: [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1)"
                 );
 
                 Ok(())
