@@ -86,9 +86,17 @@ impl GitHubMockServer {
         .unwrap()
     }
 
-    pub async fn get_comment(&mut self, repo: GithubRepoName, pr: u64) -> anyhow::Result<Comment> {
-        let repo = self.repos.get_mut(&repo).expect("Repository not found");
+    pub async fn get_comment(
+        &mut self,
+        repo_name: GithubRepoName,
+        pr: u64,
+    ) -> anyhow::Result<Comment> {
+        let repo = self
+            .repos
+            .get_mut(&repo_name)
+            .unwrap_or_else(|| panic!("Repository `{repo_name}` not found"));
         let comment = repo.get_comment(pr).await;
+        eprintln!("Received comment on {repo_name}#{pr}: {}", comment.content);
         Ok(comment)
     }
 
