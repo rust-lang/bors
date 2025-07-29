@@ -137,14 +137,15 @@ pub(super) async fn command_try_build(
                         cancelled_workflow_urls,
                     ),
                 )
-                .await
+                .await?;
         }
         MergeResult::Conflict => {
             repo.client
                 .post_comment(pr.number(), merge_conflict_comment(&pr.github.head.name))
-                .await
+                .await?;
         }
     }
+    Ok(())
 }
 
 /// Cancels a previously running try build and returns a list of cancelled workflow URLs.

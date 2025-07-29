@@ -296,7 +296,8 @@ async fn notify_of_tree_closed(
                 priority
             )),
         )
-        .await
+        .await?;
+    Ok(())
 }
 
 async fn notify_of_tree_open(
@@ -308,7 +309,8 @@ async fn notify_of_tree_open(
             pr_number,
             Comment::new("Tree is now open for merging".to_string()),
         )
-        .await
+        .await?;
+    Ok(())
 }
 
 async fn notify_of_unapproval(
@@ -324,7 +326,8 @@ async fn notify_of_unapproval(
 
     repo.client
         .post_comment(pr.number(), Comment::new(comment))
-        .await
+        .await?;
+    Ok(())
 }
 
 async fn notify_of_approval(
@@ -343,7 +346,8 @@ async fn notify_of_approval(
                 approver,
             ),
         )
-        .await
+        .await?;
+    Ok(())
 }
 
 async fn notify_of_delegation(
@@ -359,7 +363,8 @@ async fn notify_of_delegation(
         DelegatedPermission::Review => delegate_comment(delegatee, delegator, bot_prefix),
     };
 
-    repo.client.post_comment(pr_number, comment).await
+    repo.client.post_comment(pr_number, comment).await?;
+    Ok(())
 }
 
 #[cfg(test)]

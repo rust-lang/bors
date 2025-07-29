@@ -593,7 +593,8 @@ async fn deny_request(
                 author.username, permission_type
             )),
         )
-        .await
+        .await?;
+    Ok(())
 }
 
 /// Check if a user has specified permission or has been delegated.

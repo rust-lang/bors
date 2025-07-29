@@ -122,14 +122,13 @@ impl GithubRepositoryClient {
         &self,
         pr: PullRequestNumber,
         comment: Comment,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<octocrab::models::issues::Comment> {
         perform_network_request_with_retry("post_comment", || async {
             self.client
                 .issues(&self.repository().owner, &self.repository().name)
                 .create_comment(pr.0, comment.render())
                 .await
-                .with_context(|| format!("Cannot post comment to {}", self.format_pr(pr)))?;
-            Ok(())
+                .with_context(|| format!("Cannot post comment to {}", self.format_pr(pr)))
         })
         .await?
     }
