@@ -1,6 +1,8 @@
 use itertools::Itertools;
 use octocrab::models::workflows::Job;
 use serde::Serialize;
+use std::fmt::Display;
+use std::str::FromStr;
 use std::time::Duration;
 
 use crate::bors::FailedWorkflowRun;
@@ -22,6 +24,31 @@ pub struct Comment {
 #[serde(tag = "type")]
 pub enum CommentMetadata {
     TryBuildCompleted { merge_sha: String },
+}
+
+/// A label for a comment, used to identify the comment.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum CommentLabel {
+    TryBuildStarted,
+}
+
+impl Display for CommentLabel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CommentLabel::TryBuildStarted => f.write_str("TryBuildStarted"),
+        }
+    }
+}
+
+impl FromStr for CommentLabel {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "TryBuildStarted" => Ok(CommentLabel::TryBuildStarted),
+            _ => Err(anyhow::anyhow!("Unknown comment label: {}", s)),
+        }
+    }
 }
 
 impl Comment {
