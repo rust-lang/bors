@@ -1,24 +1,25 @@
 use sqlx::PgPool;
 
+use crate::bors::comment::CommentLabel;
 use crate::bors::{PullRequestStatus, RollupMode};
 use crate::database::operations::{get_merge_queue_prs, update_pr_auto_build_id};
 use crate::database::{
-    BuildModel, BuildStatus, PullRequestModel, RepoModel, TreeState, WorkflowModel, WorkflowStatus,
-    WorkflowType,
+    BuildModel, BuildStatus, CommentModel, PullRequestModel, RepoModel, TreeState, WorkflowModel,
+    WorkflowStatus, WorkflowType,
 };
 use crate::github::PullRequestNumber;
 use crate::github::{CommitSha, GithubRepoName};
 
 use super::operations::{
     approve_pull_request, create_build, create_pull_request, create_workflow,
-    delegate_pull_request, find_build, find_pr_by_build, get_nonclosed_pull_requests,
-    get_nonclosed_pull_requests_by_base_branch, get_pending_builds,
+    delegate_pull_request, delete_comment, find_build, find_pr_by_build, get_comments,
+    get_nonclosed_pull_requests, get_nonclosed_pull_requests_by_base_branch, get_pending_builds,
     get_prs_with_unknown_mergeable_state, get_pull_request, get_repository, get_repository_by_name,
-    get_workflow_urls_for_build, get_workflows_for_build, insert_repo_if_not_exists,
-    set_pr_assignees, set_pr_priority, set_pr_rollup, set_pr_status, unapprove_pull_request,
-    undelegate_pull_request, update_build_check_run_id, update_build_status,
-    update_mergeable_states_by_base_branch, update_pr_mergeable_state, update_pr_try_build_id,
-    update_workflow_status, upsert_pull_request, upsert_repository,
+    get_workflow_urls_for_build, get_workflows_for_build, insert_comment,
+    insert_repo_if_not_exists, set_pr_assignees, set_pr_priority, set_pr_rollup, set_pr_status,
+    unapprove_pull_request, undelegate_pull_request, update_build_check_run_id,
+    update_build_status, update_mergeable_states_by_base_branch, update_pr_mergeable_state,
+    update_pr_try_build_id, update_workflow_status, upsert_pull_request, upsert_repository,
 };
 use super::{ApprovalInfo, DelegatedPermission, MergeableState, RunId, UpsertPullRequestParams};
 
@@ -326,5 +327,28 @@ impl PgDbClient {
         tree_priority: Option<u32>,
     ) -> anyhow::Result<Vec<PullRequestModel>> {
         get_merge_queue_prs(&self.pool, repo, tree_priority.map(|p| p as i32)).await
+    }
+
+    pub async fn get_comments(
+        &self,
+        repo: &GithubRepoName,
+        pr_number: PullRequestNumber,
+        label: CommentLabel,
+    ) -> anyhow::Result<Vec<CommentModel>> {
+        get_comments(&self.pool, repo, pr_number, label).await
+    }
+
+    pub async fn insert_comment(
+        &self,
+        repo: &GithubRepoName,
+        pr_number: PullRequestNumber,
+        label: CommentLabel,
+        node_id: &str,
+    ) -> anyhow::Result<()> {
+        insert_comment(&self.pool, repo, pr_number, label, node_id).await
+    }
+
+    pub async fn delete_comment(&self, comment: &CommentModel) -> anyhow::Result<()> {
+        delete_comment(&self.pool, comment.id).await
     }
 }

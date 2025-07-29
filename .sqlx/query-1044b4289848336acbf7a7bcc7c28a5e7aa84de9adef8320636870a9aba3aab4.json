@@ -1,0 +1,54 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                id,\n                repository as \"repository: GithubRepoName\",\n                pr_number as \"pr_number: i64\",\n                label as \"label: CommentLabel\",\n                node_id,\n                created_at as \"created_at: DateTime<Utc>\"\n            FROM comment\n            WHERE repository = $1\n              AND pr_number = $2\n              AND label = $3\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "repository: GithubRepoName",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "pr_number: i64",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "label: CommentLabel",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "node_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "created_at: DateTime<Utc>",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "1044b4289848336acbf7a7bcc7c28a5e7aa84de9adef8320636870a9aba3aab4"
+}

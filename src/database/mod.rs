@@ -4,6 +4,7 @@ use std::{
     str::FromStr,
 };
 
+use crate::bors::comment::CommentLabel;
 use crate::{
     bors::{PullRequestStatus, RollupMode},
     github::{GithubRepoName, PullRequest, PullRequestNumber},
@@ -509,4 +510,41 @@ pub struct RepoModel {
     /// State of the repository tree (open or closed with priority threshold).
     pub tree_state: TreeState,
     pub created_at: DateTime<Utc>,
+}
+
+/// Represents a comment that will be minimized later.
+pub struct CommentModel {
+    pub id: PrimaryKey,
+    /// The GitHub repository this comment belongs to.
+    pub repository: GithubRepoName,
+    /// The pull request number this comment is associated with.
+    pub pr_number: PullRequestNumber,
+    /// The label of the comment.
+    pub label: CommentLabel,
+    /// The node id of the comment in GitHub.
+    pub node_id: String,
+    pub created_at: DateTime<Utc>,
+}
+
+impl sqlx::Type<sqlx::Postgres> for CommentLabel {
+    fn type_info() -> sqlx::postgres::PgTypeInfo {
+        <String as sqlx::Type<sqlx::Postgres>>::type_info()
+    }
+}
+
+impl sqlx::Encode<'_, sqlx::Postgres> for CommentLabel {
+    fn encode_by_ref(
+        &self,
+        buf: &mut sqlx::postgres::PgArgumentBuffer,
+    ) -> Result<sqlx::encode::IsNull, BoxDynError> {
+        <String as sqlx::Encode<sqlx::Postgres>>::encode(self.to_string(), buf)
+    }
+}
+
+impl sqlx::Decode<'_, sqlx::Postgres> for CommentLabel {
+    fn decode(value: sqlx::postgres::PgValueRef<'_>) -> Result<Self, BoxDynError> {
+        <String as sqlx::Decode<sqlx::Postgres>>::decode(value)?
+            .parse()
+            .map_err(anyhow::Error::into_boxed_dyn_error)
+    }
 }
