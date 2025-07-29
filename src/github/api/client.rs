@@ -3,6 +3,7 @@ use octocrab::Octocrab;
 use octocrab::models::checks::CheckRun;
 use octocrab::models::{App, CheckRunId, CheckSuiteId, RunId};
 use octocrab::params::checks::{CheckRunConclusion, CheckRunOutput, CheckRunStatus};
+use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use tracing::log;
 
@@ -382,6 +383,81 @@ impl GithubRepositoryClient {
     fn format_pr(&self, pr: PullRequestNumber) -> String {
         format!("{}/{}", self.repository(), pr)
     }
+}
+
+/// GraphQL APIs
+impl GithubRepositoryClient {
+    async fn graphql<T, V>(&self, query: &str, variables: V) -> anyhow::Result<T>
+    where
+        T: DeserializeOwned,
+        V: Serialize,
+    {
+        #[derive(Serialize)]
+        struct Payload<'a, V> {
+            query: &'a str,
+            variables: V,
+        }
+
+        let response = self
+            .client
+            .graphql::<T>(&Payload { query, variables })
+            .await
+            .context("GraphQL request failed")?;
+        Ok(response)
+    }
+
+    /// Minimizes a comment on an Issue, Commit, Pull Request, or Gist.
+    ///
+    /// GitHub Docs: <https://docs.github.com/en/graphql/reference/mutations#minimizecomment>
+    pub async fn minimize_comment(
+        &self,
+        node_id: &str,
+        reason: MinimizeCommentReason,
+    ) -> anyhow::Result<()> {
+        const QUERY: &str = "mutation($node_id: ID!, $reason: ReportedContentClassifiers!) {
+            minimizeComment(input: {subjectId: $node_id, classifier: $reason}) {
+                __typename
+            }
+        }";
+
+        #[derive(Serialize)]
+        struct Variables<'a> {
+            node_id: &'a str,
+            reason: MinimizeCommentReason,
+        }
+
+        #[derive(Deserialize)]
+        struct Output {}
+
+        tracing::debug!(node_id, ?reason, "Minimizing comment");
+        measure_network_request("minimize_comment", || async {
+            self.graphql::<Output, Variables>(QUERY, Variables { node_id, reason })
+                .await
+                .context("Failed to minimize comment")?;
+            Ok(())
+        })
+        .await
+    }
+}
+
+/// The reasons a piece of content can be reported or minimized.
+///
+/// GitHub Docs: <https://docs.github.com/en/graphql/reference/enums#reportedcontentclassifiers>
+#[derive(Debug, Copy, Clone, Serialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum MinimizeCommentReason {
+    /// An abusive or harassing piece of content.
+    Abuse,
+    /// A duplicated piece of content.
+    Duplicate,
+    /// An irrelevant piece of content.
+    OffTopic,
+    /// An outdated piece of content.
+    Outdated,
+    /// The content has been resolved.
+    Resolved,
+    /// A spammy piece of content.
+    Spam,
 }
 
 #[cfg(test)]
