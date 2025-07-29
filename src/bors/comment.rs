@@ -125,6 +125,11 @@ pub fn build_failed_comment(
 
             let max_jobs_to_show = 5;
             for job in failed_jobs.iter().take(max_jobs_to_show) {
+                // Ignore this special conclusion job, as it's not very useful to show its error
+                if job.name == "bors build finished" {
+                    continue;
+                }
+
                 let logs_url = job.html_url.to_string();
                 let extended_logs_url = format!(
                     "https://triage.rust-lang.org/gha-logs/{}/{}/{}",
