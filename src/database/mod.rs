@@ -537,14 +537,18 @@ impl sqlx::Encode<'_, sqlx::Postgres> for CommentTag {
         &self,
         buf: &mut sqlx::postgres::PgArgumentBuffer,
     ) -> Result<sqlx::encode::IsNull, BoxDynError> {
-        <String as sqlx::Encode<sqlx::Postgres>>::encode(self.to_string(), buf)
+        let tag = match self {
+            CommentTag::TryBuildStarted => "TryBuildStarted",
+        };
+        <&str as sqlx::Encode<sqlx::Postgres>>::encode(tag, buf)
     }
 }
 
 impl sqlx::Decode<'_, sqlx::Postgres> for CommentTag {
     fn decode(value: sqlx::postgres::PgValueRef<'_>) -> Result<Self, BoxDynError> {
-        <String as sqlx::Decode<sqlx::Postgres>>::decode(value)?
-            .parse()
-            .map_err(anyhow::Error::into_boxed_dyn_error)
+        match <&str as sqlx::Decode<sqlx::Postgres>>::decode(value)? {
+            "TryBuildStarted" => Ok(CommentTag::TryBuildStarted),
+            tag => Err(format!("Unknown comment tag: {}", tag).into()),
+        }
     }
 }

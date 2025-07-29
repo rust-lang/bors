@@ -1,8 +1,6 @@
 use itertools::Itertools;
 use octocrab::models::workflows::Job;
 use serde::Serialize;
-use std::fmt::Display;
-use std::str::FromStr;
 use std::time::Duration;
 
 use crate::bors::FailedWorkflowRun;
@@ -30,25 +28,6 @@ pub enum CommentMetadata {
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum CommentTag {
     TryBuildStarted,
-}
-
-impl Display for CommentTag {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            CommentTag::TryBuildStarted => f.write_str("TryBuildStarted"),
-        }
-    }
-}
-
-impl FromStr for CommentTag {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "TryBuildStarted" => Ok(CommentTag::TryBuildStarted),
-            _ => Err(anyhow::anyhow!("Unknown comment label: {}", s)),
-        }
-    }
 }
 
 impl Comment {
