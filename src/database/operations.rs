@@ -1039,13 +1039,13 @@ pub(crate) async fn get_merge_queue_prs(
     .await
 }
 
-pub(crate) async fn get_comments(
+pub(crate) async fn get_tagged_bot_comments(
     executor: impl PgExecutor<'_>,
     repo: &GithubRepoName,
     pr_number: PullRequestNumber,
     tag: CommentTag,
 ) -> anyhow::Result<Vec<CommentModel>> {
-    measure_db_query("get_comments", || async {
+    measure_db_query("get_tagged_bot_comments", || async {
         let comments = sqlx::query_as!(
             CommentModel,
             r#"
@@ -1072,14 +1072,14 @@ pub(crate) async fn get_comments(
     .await
 }
 
-pub(crate) async fn insert_comment(
+pub(crate) async fn record_tagged_bot_comment(
     executor: impl PgExecutor<'_>,
     repo: &GithubRepoName,
     pr_number: PullRequestNumber,
     tag: CommentTag,
     node_id: &str,
 ) -> anyhow::Result<()> {
-    measure_db_query("insert_comment", || async {
+    measure_db_query("record_tagged_bot_comment", || async {
         sqlx::query!(
             r#"
             INSERT INTO comment (repository, pr_number, tag, node_id)
@@ -1097,8 +1097,8 @@ pub(crate) async fn insert_comment(
     .await
 }
 
-pub(crate) async fn delete_comment(executor: impl PgExecutor<'_>, id: i32) -> anyhow::Result<()> {
-    measure_db_query("delete_comment", || async {
+pub(crate) async fn delete_tagged_bot_comment(executor: impl PgExecutor<'_>, id: i32) -> anyhow::Result<()> {
+    measure_db_query("delete_tagged_bot_comment", || async {
         sqlx::query!("DELETE FROM comment WHERE id = $1", id)
             .execute(executor)
             .await?;

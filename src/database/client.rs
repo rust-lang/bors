@@ -12,10 +12,10 @@ use crate::github::{CommitSha, GithubRepoName};
 
 use super::operations::{
     approve_pull_request, create_build, create_pull_request, create_workflow,
-    delegate_pull_request, delete_comment, find_build, find_pr_by_build, get_comments,
+    delegate_pull_request, delete_tagged_bot_comment, find_build, find_pr_by_build, get_tagged_bot_comments,
     get_nonclosed_pull_requests, get_nonclosed_pull_requests_by_base_branch, get_pending_builds,
     get_prs_with_unknown_mergeable_state, get_pull_request, get_repository, get_repository_by_name,
-    get_workflow_urls_for_build, get_workflows_for_build, insert_comment,
+    get_workflow_urls_for_build, get_workflows_for_build, record_tagged_bot_comment,
     insert_repo_if_not_exists, set_pr_assignees, set_pr_priority, set_pr_rollup, set_pr_status,
     unapprove_pull_request, undelegate_pull_request, update_build_check_run_id,
     update_build_status, update_mergeable_states_by_base_branch, update_pr_mergeable_state,
@@ -329,26 +329,26 @@ impl PgDbClient {
         get_merge_queue_prs(&self.pool, repo, tree_priority.map(|p| p as i32)).await
     }
 
-    pub async fn get_comments(
+    pub async fn get_tagged_bot_comments(
         &self,
         repo: &GithubRepoName,
         pr_number: PullRequestNumber,
         label: CommentTag,
     ) -> anyhow::Result<Vec<CommentModel>> {
-        get_comments(&self.pool, repo, pr_number, label).await
+        get_tagged_bot_comments(&self.pool, repo, pr_number, label).await
     }
 
-    pub async fn insert_comment(
+    pub async fn record_tagged_bot_comment(
         &self,
         repo: &GithubRepoName,
         pr_number: PullRequestNumber,
         label: CommentTag,
         node_id: &str,
     ) -> anyhow::Result<()> {
-        insert_comment(&self.pool, repo, pr_number, label, node_id).await
+        record_tagged_bot_comment(&self.pool, repo, pr_number, label, node_id).await
     }
 
-    pub async fn delete_comment(&self, comment: &CommentModel) -> anyhow::Result<()> {
-        delete_comment(&self.pool, comment.id).await
+    pub async fn delete_tagged_bot_comment(&self, comment: &CommentModel) -> anyhow::Result<()> {
+        delete_tagged_bot_comment(&self.pool, comment.id).await
     }
 }

@@ -287,13 +287,13 @@ async fn maybe_complete_build(
 
     // Hide "Try build started" comments that are now outdated
     let outdated = db
-        .get_comments(repo.repository(), pr.number, CommentTag::TryBuildStarted)
+        .get_tagged_bot_comments(repo.repository(), pr.number, CommentTag::TryBuildStarted)
         .await?;
     for comment in outdated {
         repo.client
             .minimize_comment(&comment.node_id, MinimizeCommentReason::Outdated)
             .await?;
-        db.delete_comment(&comment).await?;
+        db.delete_tagged_bot_comment(&comment).await?;
     }
 
     Ok(())

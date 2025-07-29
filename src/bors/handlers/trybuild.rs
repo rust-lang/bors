@@ -139,7 +139,7 @@ pub(super) async fn command_try_build(
                     ),
                 )
                 .await?;
-            db.insert_comment(
+            db.record_tagged_bot_comment(
                 repo.repository(),
                 pr.number(),
                 CommentTag::TryBuildStarted,
