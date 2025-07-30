@@ -9,38 +9,24 @@ use wiremock::{Mock, Request, ResponseTemplate};
 
 use crate::TeamApiClient;
 use crate::github::GithubRepoName;
+
 use crate::tests::mocks::github::GitHubMockServer;
 use crate::tests::mocks::permissions::TeamApiMockServer;
+use crate::tests::mocks::repository::{Repo, default_repo_name};
+use crate::tests::mocks::user::User;
 
-pub use bors::BorsBuilder;
-pub use bors::BorsTester;
-pub use bors::default_cmd_prefix;
-pub use bors::run_test;
-pub use comment::Comment;
-pub use permissions::Permissions;
-pub use pull_request::default_pr_number;
-pub use repository::Branch;
-pub use repository::Repo;
-pub use repository::default_branch_name;
-pub use repository::default_repo_name;
-pub use user::User;
-pub use workflow::WorkflowEvent;
-pub use workflow::WorkflowJob;
-pub use workflow::WorkflowRunData;
-
-mod app;
-pub mod bors;
-mod comment;
-mod github;
-mod permissions;
-mod pull_request;
-mod repository;
-mod user;
-mod workflow;
+pub mod app;
+pub mod comment;
+pub mod github;
+pub mod permissions;
+pub mod pull_request;
+pub mod repository;
+pub mod user;
+pub mod workflow;
 
 /// Represents the state of GitHub.
 pub struct GitHubState {
-    repos: HashMap<GithubRepoName, Arc<Mutex<Repo>>>,
+    pub(super) repos: HashMap<GithubRepoName, Arc<Mutex<Repo>>>,
 }
 
 impl GitHubState {
@@ -117,7 +103,7 @@ impl Default for GitHubState {
 }
 
 pub struct ExternalHttpMock {
-    gh_server: GitHubMockServer,
+    pub(super) gh_server: GitHubMockServer,
     team_api_server: TeamApiMockServer,
 }
 

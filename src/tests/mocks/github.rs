@@ -6,10 +6,9 @@ use wiremock::MockServer;
 
 use crate::create_github_client;
 use crate::github::GithubRepoName;
-use crate::tests::mocks::GitHubState;
 use crate::tests::mocks::app::{AppHandler, default_app_id};
-use crate::tests::mocks::comment::Comment;
 use crate::tests::mocks::repository::{mock_repo, mock_repo_list};
+use crate::tests::{Comment, GitHubState};
 
 /// Represents the state of a simulated GH repo.
 pub struct GitHubRepoState {

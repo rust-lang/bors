@@ -453,14 +453,14 @@ mod tests {
     use crate::github::server::{ServerState, ServerStateRef};
     use crate::github::webhook::GitHubWebhook;
     use crate::github::webhook::WebhookSecret;
-    use crate::tests::io::load_test_file;
-    use crate::tests::mocks::default_cmd_prefix;
-    use crate::tests::webhook::{TEST_WEBHOOK_SECRET, create_webhook_request};
+    use crate::tests::default_cmd_prefix;
+    use crate::tests::load_test_file;
+    use crate::tests::{TEST_WEBHOOK_SECRET, create_webhook_request};
 
     #[tokio::test]
     async fn installation_suspend() {
         assert!(matches!(
-            check_webhook("webhook/installation-suspend.json", "installation",).await,
+            check_webhook("webhook/installation-suspend.json", "installation").await,
             Ok(GitHubWebhook(BorsEvent::Global(
                 BorsGlobalEvent::InstallationsChanged
             )))
@@ -470,7 +470,7 @@ mod tests {
     #[tokio::test]
     async fn installation_unsuspend() {
         assert!(matches!(
-            check_webhook("webhook/installation-unsuspend.json", "installation",).await,
+            check_webhook("webhook/installation-unsuspend.json", "installation").await,
             Ok(GitHubWebhook(BorsEvent::Global(
                 BorsGlobalEvent::InstallationsChanged
             )))

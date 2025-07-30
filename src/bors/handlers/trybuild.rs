@@ -371,7 +371,7 @@ mod tests {
     use crate::database::{BuildStatus, WorkflowStatus};
     use crate::github::CommitSha;
     use crate::tests::BorsTester;
-    use crate::tests::mocks::{
+    use crate::tests::{
         BorsBuilder, Comment, GitHubState, User, WorkflowEvent, WorkflowJob, WorkflowRunData,
         default_pr_number, default_repo_name, run_test,
     };

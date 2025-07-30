@@ -16,7 +16,7 @@ use crate::github::GithubRepoName;
 use crate::github::api::client::GithubRepositoryClient;
 use crate::permissions::UserPermissions;
 #[cfg(test)]
-use crate::tests::util::TestSyncMarker;
+use crate::tests::TestSyncMarker;
 
 mod command;
 pub mod comment;

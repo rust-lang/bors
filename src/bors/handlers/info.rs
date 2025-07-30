@@ -72,7 +72,7 @@ pub(super) async fn command_info(
 
 #[cfg(test)]
 mod tests {
-    use crate::tests::mocks::{WorkflowEvent, WorkflowRunData, run_test};
+    use crate::tests::{WorkflowEvent, WorkflowRunData, run_test};
 
     #[sqlx::test]
     async fn info_for_unapproved_pr(pool: sqlx::PgPool) {

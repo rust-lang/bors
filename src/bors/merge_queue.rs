@@ -357,10 +357,7 @@ mod tests {
         },
         database::{BuildStatus, WorkflowStatus, operations::get_all_workflows},
         github::CommitSha,
-        tests::{
-            BorsTester,
-            mocks::{BorsBuilder, Comment, GitHubState, WorkflowEvent, default_repo_name},
-        },
+        tests::{BorsBuilder, BorsTester, Comment, GitHubState, WorkflowEvent, default_repo_name},
     };
 
     fn gh_state_with_merge_queue() -> GitHubState {

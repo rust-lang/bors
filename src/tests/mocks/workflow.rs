@@ -1,7 +1,7 @@
 use crate::database::WorkflowStatus;
 use crate::github::GithubRepoName;
-use crate::tests::mocks::default_repo_name;
-use crate::tests::mocks::repository::{Branch, GitHubRepository};
+use crate::tests::mocks::repository::GitHubRepository;
+use crate::tests::{Branch, default_repo_name};
 use chrono::{DateTime, Utc};
 use octocrab::models::{CheckSuiteId, JobId, RunId, WorkflowId};
 use serde::Serialize;

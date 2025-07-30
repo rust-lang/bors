@@ -79,7 +79,7 @@ You can use the following commands:
 
 #[cfg(test)]
 mod tests {
-    use crate::tests::mocks::run_test;
+    use crate::tests::run_test;
 
     #[sqlx::test]
     async fn help_command(pool: sqlx::PgPool) {

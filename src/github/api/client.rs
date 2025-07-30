@@ -389,9 +389,9 @@ mod tests {
     use crate::github::GithubRepoName;
     use crate::github::api::load_repositories;
     use crate::permissions::PermissionType;
-    use crate::tests::mocks::Permissions;
-    use crate::tests::mocks::{ExternalHttpMock, Repo};
-    use crate::tests::mocks::{GitHubState, User};
+    use crate::tests::Permissions;
+    use crate::tests::{ExternalHttpMock, Repo};
+    use crate::tests::{GitHubState, User};
     use octocrab::models::UserId;
     use parking_lot::Mutex;
     use std::sync::Arc;

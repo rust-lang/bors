@@ -640,7 +640,7 @@ async fn unapprove_pr(
 
 #[cfg(test)]
 mod tests {
-    use crate::tests::mocks::{Comment, User, run_test};
+    use crate::tests::{Comment, User, run_test};
 
     #[sqlx::test]
     async fn ignore_bot_comment(pool: sqlx::PgPool) {

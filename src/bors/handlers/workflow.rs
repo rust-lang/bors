@@ -457,7 +457,7 @@ mod tests {
     use crate::database::operations::get_all_workflows;
     use crate::database::{BuildStatus, WorkflowStatus};
     use crate::tests::BorsTester;
-    use crate::tests::mocks::{
+    use crate::tests::{
         BorsBuilder, Branch, GitHubState, WorkflowEvent, WorkflowRunData, default_pr_number,
         run_test,
     };

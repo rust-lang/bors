@@ -289,10 +289,10 @@ mod tests {
     use crate::bors::PullRequestStatus;
     use crate::bors::merge_queue::AUTO_BUILD_CHECK_RUN_NAME;
     use crate::tests::BorsTester;
-    use crate::tests::mocks::{BorsBuilder, GitHubState, default_pr_number};
+    use crate::tests::{BorsBuilder, GitHubState, default_pr_number};
     use crate::{
         database::{MergeableState, OctocrabMergeableState},
-        tests::mocks::{User, default_branch_name, default_repo_name, run_test},
+        tests::{User, default_branch_name, default_repo_name, run_test},
     };
 
     fn gh_state_with_merge_queue() -> GitHubState {

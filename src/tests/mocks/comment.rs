@@ -6,9 +6,10 @@ use serde::Serialize;
 use url::Url;
 
 use crate::github::GithubRepoName;
+use crate::tests::mocks::User;
 use crate::tests::mocks::repository::GitHubRepository;
-use crate::tests::mocks::user::{GitHubUser, User};
-use crate::tests::mocks::{Repo, default_pr_number, default_repo_name};
+use crate::tests::mocks::user::GitHubUser;
+use crate::tests::{Repo, default_pr_number, default_repo_name};
 
 #[derive(Clone, Debug)]
 pub struct Comment {
@@ -188,7 +189,7 @@ impl From<Comment> for GitHubComment {
     }
 }
 
-// Copied from octocrab, since its version if #[non_exhaustive]
+// Copied from octocrab, since its version is #[non_exhaustive]
 #[derive(Serialize)]
 struct GitHubPullRequestLink {
     url: Url,

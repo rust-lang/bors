@@ -16,7 +16,7 @@ pub(super) async fn command_ping(
 
 #[cfg(test)]
 mod tests {
-    use crate::tests::mocks::run_test;
+    use crate::tests::run_test;
 
     #[sqlx::test]
     async fn ping_command(pool: sqlx::PgPool) {
