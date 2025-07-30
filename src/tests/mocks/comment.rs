@@ -15,7 +15,8 @@ pub struct Comment {
     pub pr_ident: PrIdentifier,
     pub author: User,
     pub content: String,
-    pub comment_id: u64,
+    pub id: Option<u64>,
+    pub node_id: Option<String>,
 }
 
 impl Comment {
@@ -24,7 +25,8 @@ impl Comment {
             pr_ident: id.into(),
             author: User::default_pr_author(),
             content: content.to_string(),
-            comment_id: 1, // comment_id will be updated by the mock server
+            id: None,
+            node_id: None,
         }
     }
 
@@ -32,9 +34,10 @@ impl Comment {
         Self { author, ..self }
     }
 
-    pub fn with_id(self, id: u64) -> Self {
+    pub fn with_ids(self, id: u64, node_id: String) -> Self {
         Self {
-            comment_id: id,
+            id: Some(id),
+            node_id: Some(node_id),
             ..self
         }
     }
@@ -61,11 +64,13 @@ impl From<Comment> for GitHubIssueCommentEventPayload {
         let time = Utc::now();
         let html_url = format!(
             "https://github.com/{}/pull/{}#issuecomment-{}",
-            value.pr_ident.repo, value.pr_ident.number, value.comment_id
+            value.pr_ident.repo,
+            value.pr_ident.number,
+            value.id.unwrap()
         );
         let url = Url::parse(&html_url).unwrap();
         Self {
-            repository: value.pr_ident.repo.into(),
+            repository: value.pr_ident.repo.clone().into(),
             action: IssueCommentEventAction::Created,
             issue: GitHubIssue {
                 id: IssueId(1),
@@ -98,18 +103,7 @@ impl From<Comment> for GitHubIssueCommentEventPayload {
                 created_at: time,
                 updated_at: time,
             },
-            comment: GitHubComment {
-                id: CommentId(value.comment_id),
-                node_id: value.comment_id.to_string(),
-                url: url.clone(),
-                html_url: url,
-                body: Some(value.content.clone()),
-                body_text: Some(value.content.clone()),
-                body_html: Some(value.content.clone()),
-                user: value.author.into(),
-                created_at: time,
-                author_association: "OWNER".to_string(),
-            },
+            comment: value.into(),
             changes: None,
         }
     }
@@ -164,12 +158,14 @@ impl From<Comment> for GitHubComment {
         let time = Utc::now();
         let html_url = format!(
             "https://github.com/{}/pull/{}#issuecomment-{}",
-            value.pr_ident.repo, value.pr_ident.number, value.comment_id
+            value.pr_ident.repo,
+            value.pr_ident.number,
+            value.id.unwrap()
         );
         let url = Url::parse(&html_url).unwrap();
         Self {
-            id: CommentId(value.comment_id),
-            node_id: value.comment_id.to_string(),
+            id: CommentId(value.id.unwrap()),
+            node_id: value.node_id.unwrap(),
             url: url.clone(),
             html_url: url,
             body: Some(value.content.clone()),

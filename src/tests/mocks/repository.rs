@@ -7,7 +7,7 @@ use crate::github::GithubRepoName;
 use crate::permissions::PermissionType;
 use crate::tests::mocks::dynamic_mock_req;
 use crate::tests::mocks::pull_request::{PullRequest, mock_pull_requests};
-use crate::tests::{Comment, GitHubState, Permissions, WorkflowJob, WorkflowRunData};
+use crate::tests::{GitHubState, Permissions, WorkflowJob, WorkflowRunData};
 use base64::Engine;
 use chrono::{DateTime, Utc};
 use octocrab::models::repos::Object;
@@ -16,7 +16,6 @@ use octocrab::models::workflows::{Conclusion, Status, Step};
 use octocrab::models::{CheckSuiteId, JobId, RunId};
 use parking_lot::Mutex;
 use serde::Serialize;
-use tokio::sync::mpsc::Sender;
 use url::Url;
 use wiremock::{
     Mock, MockServer, Request, ResponseTemplate,
@@ -271,12 +270,8 @@ pub async fn mock_repo_list(github: &GitHubState, mock_server: &MockServer) {
         .await;
 }
 
-pub async fn mock_repo(
-    repo: Arc<Mutex<Repo>>,
-    comments_tx: Sender<Comment>,
-    mock_server: &MockServer,
-) {
-    mock_pull_requests(repo.clone(), comments_tx, mock_server).await;
+pub async fn mock_repo(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
+    mock_pull_requests(repo.clone(), mock_server).await;
     mock_branches(repo.clone(), mock_server).await;
     mock_cancel_workflow(repo.clone(), mock_server).await;
     mock_check_runs(repo.clone(), mock_server).await;

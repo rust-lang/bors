@@ -308,7 +308,7 @@ mod tests {
         run_test(pool, async |tester: &mut BorsTester| {
             tester.post_comment("@bors r+").await?;
             tester.expect_comments((), 1).await;
-            let branch = tester.create_branch("beta").clone();
+            let branch = tester.create_branch("beta").await;
             tester
                 .edit_pr((), |pr| {
                     pr.base_branch = branch;
@@ -347,7 +347,7 @@ mod tests {
     #[sqlx::test]
     async fn edit_pr_do_nothing_when_not_approved(pool: sqlx::PgPool) {
         run_test(pool, async |tester: &mut BorsTester| {
-            let branch = tester.create_branch("beta").clone();
+            let branch = tester.create_branch("beta").await;
             tester
                 .edit_pr((), |pr| {
                     pr.base_branch = branch;
@@ -409,7 +409,7 @@ mod tests {
     #[sqlx::test]
     async fn update_base_branch_on_pr_edited(pool: sqlx::PgPool) {
         run_test(pool, async |tester: &mut BorsTester| {
-            let branch = tester.create_branch("foo").clone();
+            let branch = tester.create_branch("foo").await;
             tester
                 .edit_pr((), |pr| {
                     pr.base_branch = branch;
@@ -545,7 +545,7 @@ mod tests {
     #[sqlx::test]
     async fn mergeable_queue_processes_pr_base_change(pool: sqlx::PgPool) {
         run_test(pool, async |tester: &mut BorsTester| {
-            let branch = tester.create_branch("beta").clone();
+            let branch = tester.create_branch("beta").await;
             tester
                 .edit_pr((), |pr| {
                     pr.base_branch = branch;
@@ -555,7 +555,9 @@ mod tests {
             tester
                 .wait_for_pr((), |pr| pr.mergeable_state == MergeableState::Unknown)
                 .await?;
-            tester.modify_pr_state((), |pr| pr.mergeable_state = OctocrabMergeableState::Dirty);
+            tester
+                .modify_pr_state((), |pr| pr.mergeable_state = OctocrabMergeableState::Dirty)
+                .await;
             tester
                 .wait_for_pr((), |pr| pr.mergeable_state == MergeableState::HasConflicts)
                 .await?;
@@ -574,9 +576,11 @@ mod tests {
                     pr.mergeable_state == MergeableState::Unknown
                 })
                 .await?;
-            tester.modify_pr_state(pr.number, |pr| {
-                pr.mergeable_state = OctocrabMergeableState::Dirty
-            });
+            tester
+                .modify_pr_state(pr.number, |pr| {
+                    pr.mergeable_state = OctocrabMergeableState::Dirty
+                })
+                .await;
             tester
                 .wait_for_pr(pr.number, |pr| {
                     pr.mergeable_state == MergeableState::HasConflicts
@@ -608,16 +612,20 @@ mod tests {
     #[sqlx::test]
     async fn enqueue_prs_on_pr_reopened(pool: sqlx::PgPool) {
         run_test(pool, async |tester: &mut BorsTester| {
-            tester.modify_pr_state((), |pr| {
-                pr.mergeable_state = OctocrabMergeableState::Unknown;
-            });
+            tester
+                .modify_pr_state((), |pr| {
+                    pr.mergeable_state = OctocrabMergeableState::Unknown;
+                })
+                .await;
             tester.reopen_pr(()).await?;
             tester
                 .wait_for_pr((), |pr| pr.mergeable_state == MergeableState::Unknown)
                 .await?;
-            tester.modify_pr_state((), |pr| {
-                pr.mergeable_state = OctocrabMergeableState::Dirty;
-            });
+            tester
+                .modify_pr_state((), |pr| {
+                    pr.mergeable_state = OctocrabMergeableState::Dirty;
+                })
+                .await;
             tester
                 .wait_for_pr((), |pr| pr.mergeable_state == MergeableState::HasConflicts)
                 .await?;
@@ -633,7 +641,9 @@ mod tests {
             tester
                 .wait_for_pr((), |pr| pr.mergeable_state == MergeableState::Unknown)
                 .await?;
-            tester.modify_pr_state((), |pr| pr.mergeable_state = OctocrabMergeableState::Dirty);
+            tester
+                .modify_pr_state((), |pr| pr.mergeable_state = OctocrabMergeableState::Dirty)
+                .await;
             tester
                 .wait_for_pr((), |pr| pr.mergeable_state == MergeableState::HasConflicts)
                 .await?;
@@ -652,7 +662,7 @@ mod tests {
                 tester.process_merge_queue().await;
                 tester.expect_comments((), 1).await;
                 tester.wait_for_pr((), |pr| pr.auto_build.is_some()).await?;
-                tester.workflow_start(tester.auto_branch()).await?;
+                tester.workflow_start(tester.auto_branch().await).await?;
                 tester.push_to_pr(()).await?;
                 insta::assert_snapshot!(tester.get_comment(()).await?, @r"
                 :warning: A new commit `pr-1-commit-1` was pushed to the branch, the
@@ -672,14 +682,14 @@ mod tests {
         BorsBuilder::new(pool)
             .github(gh_state_with_merge_queue())
             .run_test(async |tester: &mut BorsTester| {
-                tester.default_repo().lock().workflow_cancel_error = true;
+                tester.default_repo().await.lock().workflow_cancel_error = true;
                 tester.post_comment("@bors r+").await?;
                 tester.expect_comments((), 1).await;
                 tester.process_merge_queue().await;
                 tester.expect_comments((), 1).await;
                 tester.wait_for_pr((), |pr| pr.auto_build.is_some()).await?;
 
-                tester.workflow_start(tester.auto_branch()).await?;
+                tester.workflow_start(tester.auto_branch().await).await?;
                 tester.push_to_pr(()).await?;
                 insta::assert_snapshot!(tester.get_comment(()).await?, @r"
                 :warning: A new commit `pr-1-commit-1` was pushed to the branch, the
@@ -701,18 +711,20 @@ mod tests {
                 tester.expect_comments((), 1).await;
                 tester.process_merge_queue().await;
                 tester.expect_comments((), 1).await;
-                tester.workflow_start(tester.auto_branch()).await?;
+                tester.workflow_start(tester.auto_branch().await).await?;
 
                 let prev_commit = &tester.get_pr(()).await.get_gh_pr().head_sha;
                 tester.push_to_pr(()).await?;
                 tester.expect_comments((), 1).await;
-                tester.expect_check_run(
-                    prev_commit,
-                    AUTO_BUILD_CHECK_RUN_NAME,
-                    AUTO_BUILD_CHECK_RUN_NAME,
-                    CheckRunStatus::Completed,
-                    Some(CheckRunConclusion::Cancelled),
-                );
+                tester
+                    .expect_check_run(
+                        prev_commit,
+                        AUTO_BUILD_CHECK_RUN_NAME,
+                        AUTO_BUILD_CHECK_RUN_NAME,
+                        CheckRunStatus::Completed,
+                        Some(CheckRunConclusion::Cancelled),
+                    )
+                    .await;
                 Ok(())
             })
             .await;

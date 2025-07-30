@@ -1321,7 +1321,7 @@ merge_queue_enabled = true
                 tester.process_merge_queue().await;
                 tester.expect_comments((), 1).await;
                 tester.wait_for_pr((), |pr| pr.auto_build.is_some()).await?;
-                tester.workflow_start(tester.auto_branch()).await?;
+                tester.workflow_start(tester.auto_branch().await).await?;
                 tester.post_comment("@bors r-").await?;
                 insta::assert_snapshot!(tester.get_comment(()).await?, @r"
                 Commit pr-1-sha has been unapproved.
@@ -1344,7 +1344,7 @@ merge_queue_enabled = true
 "#,
             ))
             .run_test(async |tester: &mut BorsTester| {
-                tester.default_repo().lock().workflow_cancel_error = true;
+                tester.default_repo().await.lock().workflow_cancel_error = true;
                 tester.post_comment("@bors r+").await?;
                 tester.expect_comments((), 1).await;
                 tester.process_merge_queue().await;
@@ -1352,7 +1352,7 @@ merge_queue_enabled = true
                 tester
                     .wait_for_pr((), |pr| pr.auto_build.is_some())
                     .await?;
-                tester.workflow_start(tester.auto_branch()).await?;
+                tester.workflow_start(tester.auto_branch().await).await?;
                 tester.post_comment("@bors r-").await?;
                 insta::assert_snapshot!(tester.get_comment(()).await?, @r"
                 Commit pr-1-sha has been unapproved.
@@ -1378,16 +1378,18 @@ merge_queue_enabled = true
                 tester.process_merge_queue().await;
                 tester.expect_comments((), 1).await;
                 tester.wait_for_pr((), |pr| pr.auto_build.is_some()).await?;
-                tester.workflow_start(tester.auto_branch()).await?;
+                tester.workflow_start(tester.auto_branch().await).await?;
                 tester.post_comment("@bors r-").await?;
                 tester.expect_comments((), 1).await;
-                tester.expect_check_run(
-                    &tester.get_pr(()).await.get_gh_pr().head_sha,
-                    AUTO_BUILD_CHECK_RUN_NAME,
-                    AUTO_BUILD_CHECK_RUN_NAME,
-                    CheckRunStatus::Completed,
-                    Some(CheckRunConclusion::Cancelled),
-                );
+                tester
+                    .expect_check_run(
+                        &tester.get_pr(()).await.get_gh_pr().head_sha,
+                        AUTO_BUILD_CHECK_RUN_NAME,
+                        AUTO_BUILD_CHECK_RUN_NAME,
+                        CheckRunStatus::Completed,
+                        Some(CheckRunConclusion::Cancelled),
+                    )
+                    .await;
                 Ok(())
             })
             .await;

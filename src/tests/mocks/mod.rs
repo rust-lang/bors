@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::ops::Deref;
 use std::sync::Arc;
 
 use octocrab::Octocrab;
@@ -9,9 +10,10 @@ use wiremock::{Mock, Request, ResponseTemplate};
 
 use crate::TeamApiClient;
 use crate::github::GithubRepoName;
-
+use crate::tests::Comment;
 use crate::tests::mocks::github::GitHubMockServer;
 use crate::tests::mocks::permissions::TeamApiMockServer;
+use crate::tests::mocks::pull_request::{CommentMsg, PrIdentifier};
 use crate::tests::mocks::repository::{Repo, default_repo_name};
 use crate::tests::mocks::user::User;
 
@@ -91,6 +93,40 @@ impl GitHubState {
 
         assert_eq!(workflows, expected);
     }
+
+    pub async fn get_comment<Id: Into<PrIdentifier>>(&mut self, id: Id) -> anyhow::Result<Comment> {
+        let id = id.into();
+        let repo = self
+            .repos
+            .get_mut(&id.repo)
+            .unwrap_or_else(|| panic!("Repository `{}` not found", id.repo));
+        // We need to avoid holding the repo lock here, otherwise the mocking code in
+        // `repository.rs` could not lock the repo and send the comment to a PR.
+        let comment_rx = {
+            let repo = repo.lock();
+            let pr = repo
+                .pull_requests
+                .get(&id.number)
+                .expect("Pull request not found");
+            pr.comment_queue_rx.clone()
+        };
+        let comment = comment_rx
+            .lock()
+            .await
+            .recv()
+            .await
+            .expect("Channel was closed while waiting for a comment");
+        let comment = match comment {
+            CommentMsg::Comment(comment) => comment,
+            CommentMsg::Close => unreachable!(),
+        };
+
+        eprintln!(
+            "Received comment on {}#{}: {}",
+            id.repo, id.number, comment.content
+        );
+        Ok(comment)
+    }
 }
 
 impl Default for GitHubState {
@@ -108,9 +144,9 @@ pub struct ExternalHttpMock {
 }
 
 impl ExternalHttpMock {
-    pub async fn start(github: Arc<Mutex<GitHubState>>) -> Self {
+    pub async fn start(github: Arc<tokio::sync::Mutex<GitHubState>>) -> Self {
         let gh_server = GitHubMockServer::start(github.clone()).await;
-        let team_api_server = TeamApiMockServer::start(&github.lock()).await;
+        let team_api_server = TeamApiMockServer::start(github.lock().await.deref()).await;
         Self {
             gh_server,
             team_api_server,

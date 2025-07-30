@@ -15,7 +15,7 @@ use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::SystemTime;
-use tokio::sync::mpsc::Sender;
+use tokio::sync::mpsc::{Receiver, Sender};
 use url::Url;
 use wiremock::{
     Mock, MockServer, Request, ResponseTemplate,
@@ -81,6 +81,11 @@ impl From<()> for PrIdentifier {
     }
 }
 
+pub enum CommentMsg {
+    Comment(Comment),
+    Close,
+}
+
 #[derive(Clone, Debug)]
 pub struct PullRequest {
     pub number: PullRequestNumber,
@@ -99,10 +104,15 @@ pub struct PullRequest {
     pub description: String,
     pub title: String,
     pub labels: Vec<String>,
+    pub comment_queue_tx: Sender<CommentMsg>,
+    pub comment_queue_rx: Arc<tokio::sync::Mutex<Receiver<CommentMsg>>>,
 }
 
 impl PullRequest {
     pub fn new(repo: GithubRepoName, number: u64, author: User) -> Self {
+        // The size of the buffer is load-bearing, if we receive too many comments, the test harness
+        // could deadlock.
+        let (comment_queue_tx, comment_queue_rx) = tokio::sync::mpsc::channel(100);
         Self {
             number: PullRequestNumber(number),
             repo,
@@ -120,6 +130,8 @@ impl PullRequest {
             description: format!("Description of PR {number}"),
             title: format!("Title of PR {number}"),
             labels: Vec::new(),
+            comment_queue_tx,
+            comment_queue_rx: Arc::new(tokio::sync::Mutex::new(comment_queue_rx)),
         }
     }
 }
@@ -137,9 +149,16 @@ impl Default for PullRequest {
 }
 
 impl PullRequest {
-    pub fn next_comment_id(&mut self) -> u64 {
+    /// Return a numeric ID and a node ID for the next comment to be created.
+    pub fn next_comment_ids(&mut self) -> (u64, String) {
         self.comment_counter += 1;
-        self.comment_counter
+        (
+            self.comment_counter,
+            format!(
+                "comment-{}_{}-{}",
+                self.repo, self.number, self.comment_counter
+            ),
+        )
     }
 
     pub fn merge_pr(&mut self) {
@@ -166,11 +185,7 @@ impl PullRequest {
     }
 }
 
-pub async fn mock_pull_requests(
-    repo: Arc<Mutex<Repo>>,
-    comments_tx: Sender<Comment>,
-    mock_server: &MockServer,
-) {
+pub async fn mock_pull_requests(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
     let repo_name = repo.lock().name.clone();
     let repo_clone = repo.clone();
 
@@ -212,7 +227,7 @@ pub async fn mock_pull_requests(
     .mount(mock_server)
     .await;
 
-    mock_pr_comments(repo.clone(), comments_tx.clone(), mock_server).await;
+    mock_pr_comments(repo.clone(), mock_server).await;
 
     let prs = repo.lock().pull_requests.clone();
     for &pr_number in prs.keys() {
@@ -220,11 +235,7 @@ pub async fn mock_pull_requests(
     }
 }
 
-async fn mock_pr_comments(
-    repo: Arc<Mutex<Repo>>,
-    comments_tx: Sender<Comment>,
-    mock_server: &MockServer,
-) {
+async fn mock_pr_comments(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
     let repo_name = repo.lock().name.clone();
     let repo_name_clone = repo_name.clone();
     dynamic_mock_req(
@@ -238,17 +249,21 @@ async fn mock_pr_comments(
 
             let comment_payload: CommentCreatePayload = req.body_json().unwrap();
             let mut repo = repo.lock();
-            let pr = repo.pull_requests.get_mut(&pr_number).unwrap();
-            let comment_id = pr.next_comment_id();
+            let pr = repo.pull_requests.get_mut(&pr_number).unwrap_or_else(|| {
+                panic!("Received a comment for a non-existing PR {repo_name_clone}/{pr_number}")
+            });
+            let (id, node_id) = pr.next_comment_ids();
 
             let comment = Comment::new((repo_name_clone.clone(), pr_number), &comment_payload.body)
                 .with_author(User::bors_bot())
-                .with_id(comment_id);
+                .with_ids(id, node_id);
 
             // We cannot use `tx.blocking_send()`, because this function is actually called
             // from within an async task, but it is not async, so we also cannot use
             // `tx.send()`.
-            comments_tx.try_send(comment.clone()).unwrap();
+            pr.comment_queue_tx
+                .try_send(CommentMsg::Comment(comment.clone()))
+                .unwrap();
             ResponseTemplate::new(201).set_body_json(GitHubComment::from(comment))
         },
         "POST",
@@ -364,6 +379,8 @@ impl From<PullRequest> for GitHubPullRequest {
             description,
             title,
             labels,
+            comment_queue_tx: _,
+            comment_queue_rx: _,
         } = pr;
         GitHubPullRequest {
             user: author.clone().into(),

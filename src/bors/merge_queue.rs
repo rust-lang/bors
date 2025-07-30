@@ -391,7 +391,7 @@ mod tests {
         run_merge_queue_test(pool.clone(), async |tester: &mut BorsTester| {
             start_auto_build(tester).await?;
             tester
-                .workflow_event(WorkflowEvent::started(tester.auto_branch()))
+                .workflow_event(WorkflowEvent::started(tester.auto_branch().await))
                 .await?;
             Ok(())
         })
@@ -405,13 +405,15 @@ mod tests {
     async fn auto_workflow_check_run_created(pool: sqlx::PgPool) {
         run_merge_queue_test(pool, async |tester: &mut BorsTester| {
             start_auto_build(tester).await?;
-            tester.expect_check_run(
-                &tester.get_pr(()).await.get_gh_pr().head_sha,
-                AUTO_BUILD_CHECK_RUN_NAME,
-                AUTO_BUILD_CHECK_RUN_NAME,
-                CheckRunStatus::InProgress,
-                None,
-            );
+            tester
+                .expect_check_run(
+                    &tester.get_pr(()).await.get_gh_pr().head_sha,
+                    AUTO_BUILD_CHECK_RUN_NAME,
+                    AUTO_BUILD_CHECK_RUN_NAME,
+                    CheckRunStatus::InProgress,
+                    None,
+                )
+                .await;
             Ok(())
         })
         .await;
@@ -436,7 +438,9 @@ mod tests {
     async fn auto_build_insert_into_db(pool: sqlx::PgPool) {
         run_merge_queue_test(pool, async |tester: &mut BorsTester| {
             start_auto_build(tester).await?;
-            tester.workflow_full_success(tester.auto_branch()).await?;
+            tester
+                .workflow_full_success(tester.auto_branch().await)
+                .await?;
             tester.expect_comments((), 1).await;
             assert!(
                 tester
@@ -444,7 +448,7 @@ mod tests {
                     .find_build(
                         &default_repo_name(),
                         AUTO_BRANCH_NAME.to_string(),
-                        CommitSha(tester.auto_branch().get_sha().to_string()),
+                        CommitSha(tester.auto_branch().await.get_sha().to_string()),
                     )
                     .await?
                     .is_some()
@@ -458,7 +462,7 @@ mod tests {
     async fn auto_build_success_comment(pool: sqlx::PgPool) {
         run_merge_queue_test(pool, async |tester: &mut BorsTester| {
             start_auto_build(tester).await?;
-            tester.workflow_full_success(tester.auto_branch()).await?;
+            tester.workflow_full_success(tester.auto_branch().await).await?;
             insta::assert_snapshot!(
                 tester.get_comment(()).await?,
                 @r"
@@ -476,7 +480,9 @@ mod tests {
     async fn auto_build_succeeds_and_merges_in_db(pool: sqlx::PgPool) {
         run_merge_queue_test(pool, async |tester: &mut BorsTester| {
             start_auto_build(tester).await?;
-            tester.workflow_full_success(tester.auto_branch()).await?;
+            tester
+                .workflow_full_success(tester.auto_branch().await)
+                .await?;
             tester.expect_comments((), 1).await;
             tester
                 .wait_for_pr((), |pr| {
@@ -495,10 +501,12 @@ mod tests {
     async fn auto_build_push_fail_comment(pool: sqlx::PgPool) {
         run_merge_queue_test(pool, async |tester: &mut BorsTester| {
             start_auto_build(tester).await?;
-            tester.workflow_full_success(tester.auto_branch()).await?;
+            tester
+                .workflow_full_success(tester.auto_branch().await)
+                .await?;
             tester.expect_comments((), 1).await;
 
-            tester.default_repo().lock().push_error = true;
+            tester.default_repo().await.lock().push_error = true;
 
             tester.process_merge_queue().await;
             insta::assert_snapshot!(
@@ -514,20 +522,24 @@ mod tests {
     async fn auto_build_push_fail_updates_check_run(pool: sqlx::PgPool) {
         run_merge_queue_test(pool, async |tester: &mut BorsTester| {
             start_auto_build(tester).await?;
-            tester.workflow_full_success(tester.auto_branch()).await?;
+            tester
+                .workflow_full_success(tester.auto_branch().await)
+                .await?;
             tester.expect_comments((), 1).await;
 
-            tester.default_repo().lock().push_error = true;
+            tester.default_repo().await.lock().push_error = true;
 
             tester.process_merge_queue().await;
             tester.expect_comments((), 1).await;
-            tester.expect_check_run(
-                &tester.get_pr(()).await.get_gh_pr().head_sha,
-                AUTO_BUILD_CHECK_RUN_NAME,
-                AUTO_BUILD_CHECK_RUN_NAME,
-                CheckRunStatus::Completed,
-                Some(CheckRunConclusion::Failure),
-            );
+            tester
+                .expect_check_run(
+                    &tester.get_pr(()).await.get_gh_pr().head_sha,
+                    AUTO_BUILD_CHECK_RUN_NAME,
+                    AUTO_BUILD_CHECK_RUN_NAME,
+                    CheckRunStatus::Completed,
+                    Some(CheckRunConclusion::Failure),
+                )
+                .await;
             Ok(())
         })
         .await;
@@ -537,10 +549,12 @@ mod tests {
     async fn auto_build_push_fail_in_db(pool: sqlx::PgPool) {
         run_merge_queue_test(pool, async |tester: &mut BorsTester| {
             start_auto_build(tester).await?;
-            tester.workflow_full_success(tester.auto_branch()).await?;
+            tester
+                .workflow_full_success(tester.auto_branch().await)
+                .await?;
             tester.expect_comments((), 1).await;
 
-            tester.default_repo().lock().push_error = true;
+            tester.default_repo().await.lock().push_error = true;
 
             tester.process_merge_queue().await;
             tester.expect_comments((), 1).await;
@@ -558,7 +572,9 @@ mod tests {
     async fn auto_build_branch_history(pool: sqlx::PgPool) {
         let gh = run_merge_queue_test(pool, async |tester: &mut BorsTester| {
             start_auto_build(tester).await?;
-            tester.workflow_full_success(tester.auto_branch()).await?;
+            tester
+                .workflow_full_success(tester.auto_branch().await)
+                .await?;
             tester.expect_comments((), 1).await;
             Ok(())
         })
@@ -592,17 +608,23 @@ mod tests {
 
             tester.process_merge_queue().await;
             tester.expect_comments((), 1).await;
-            tester.workflow_full_success(tester.auto_branch()).await?;
+            tester
+                .workflow_full_success(tester.auto_branch().await)
+                .await?;
             tester.expect_comments((), 1).await;
 
             tester.process_merge_queue().await;
             tester.expect_comments(pr2.number, 1).await;
-            tester.workflow_full_success(tester.auto_branch()).await?;
+            tester
+                .workflow_full_success(tester.auto_branch().await)
+                .await?;
             tester.expect_comments(pr2.number, 1).await;
 
             tester.process_merge_queue().await;
             tester.expect_comments(pr3.number, 1).await;
-            tester.workflow_full_success(tester.auto_branch()).await?;
+            tester
+                .workflow_full_success(tester.auto_branch().await)
+                .await?;
             tester.expect_comments(pr3.number, 1).await;
 
             Ok(())
@@ -636,17 +658,23 @@ mod tests {
 
             tester.process_merge_queue().await;
             tester.expect_comments((), 1).await;
-            tester.workflow_full_success(tester.auto_branch()).await?;
+            tester
+                .workflow_full_success(tester.auto_branch().await)
+                .await?;
             tester.expect_comments((), 1).await;
 
             tester.process_merge_queue().await;
             tester.expect_comments(pr3.number, 1).await;
-            tester.workflow_full_success(tester.auto_branch()).await?;
+            tester
+                .workflow_full_success(tester.auto_branch().await)
+                .await?;
             tester.expect_comments(pr3.number, 1).await;
 
             tester.process_merge_queue().await;
             tester.expect_comments(pr2.number, 1).await;
-            tester.workflow_full_success(tester.auto_branch()).await?;
+            tester
+                .workflow_full_success(tester.auto_branch().await)
+                .await?;
             tester.expect_comments(pr2.number, 1).await;
 
             Ok(())

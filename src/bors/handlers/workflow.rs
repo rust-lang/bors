@@ -505,7 +505,7 @@ mod tests {
             tester.post_comment("@bors try").await?;
             tester.expect_comments((), 1).await;
             tester
-                .workflow_event(WorkflowEvent::started(tester.try_branch()))
+                .workflow_event(WorkflowEvent::started(tester.try_branch().await))
                 .await?;
             Ok(())
         })
@@ -520,7 +520,7 @@ mod tests {
             tester.post_comment("@bors try").await?;
             tester.expect_comments((), 1).await;
 
-            let workflow = WorkflowRunData::from(tester.try_branch());
+            let workflow = WorkflowRunData::from(tester.try_branch().await);
             tester
                 .workflow_event(WorkflowEvent::started(workflow.clone()))
                 .await?;
@@ -540,12 +540,13 @@ mod tests {
             tester.post_comment("@bors try").await?;
             tester.expect_comments((), 1).await;
 
-            let w1 = WorkflowRunData::from(tester.try_branch()).with_run_id(1);
-            let w2 = WorkflowRunData::from(tester.try_branch()).with_run_id(2);
+            let w1 = WorkflowRunData::from(tester.try_branch().await).with_run_id(1);
+            let w2 = WorkflowRunData::from(tester.try_branch().await).with_run_id(2);
 
             // Let the GH mock know about the existence of the second workflow
             tester
                 .default_repo()
+                .await
                 .lock()
                 .update_workflow_run(w2.clone(), WorkflowStatus::Pending);
             // Finish w1 while w2 is not yet in the DB
@@ -575,8 +576,8 @@ mod tests {
             tester.post_comment("@bors try").await?;
             tester.expect_comments((), 1).await;
 
-            let w1 = WorkflowRunData::from(tester.try_branch()).with_run_id(1);
-            let w2 = WorkflowRunData::from(tester.try_branch()).with_run_id(2);
+            let w1 = WorkflowRunData::from(tester.try_branch().await).with_run_id(1);
+            let w2 = WorkflowRunData::from(tester.try_branch().await).with_run_id(2);
             tester.workflow_start(w1.clone()).await?;
             tester.workflow_start(w2.clone()).await?;
 
@@ -605,8 +606,8 @@ mod tests {
             tester.post_comment("@bors try").await?;
             tester.expect_comments((), 1).await;
 
-            let w1 = WorkflowRunData::from(tester.try_branch()).with_run_id(1);
-            let w2 = WorkflowRunData::from(tester.try_branch()).with_run_id(2);
+            let w1 = WorkflowRunData::from(tester.try_branch().await).with_run_id(1);
+            let w2 = WorkflowRunData::from(tester.try_branch().await).with_run_id(2);
             tester.workflow_start(w1.clone()).await?;
             tester.workflow_start(w2.clone()).await?;
 
@@ -630,15 +631,19 @@ mod tests {
                 tester.process_merge_queue().await;
                 tester.expect_comments((), 1).await;
 
-                tester.workflow_full_success(tester.auto_branch()).await?;
+                tester
+                    .workflow_full_success(tester.auto_branch().await)
+                    .await?;
                 tester.expect_comments((), 1).await;
-                tester.expect_check_run(
-                    &tester.get_pr(()).await.get_gh_pr().head_sha,
-                    AUTO_BUILD_CHECK_RUN_NAME,
-                    AUTO_BUILD_CHECK_RUN_NAME,
-                    CheckRunStatus::Completed,
-                    Some(CheckRunConclusion::Success),
-                );
+                tester
+                    .expect_check_run(
+                        &tester.get_pr(()).await.get_gh_pr().head_sha,
+                        AUTO_BUILD_CHECK_RUN_NAME,
+                        AUTO_BUILD_CHECK_RUN_NAME,
+                        CheckRunStatus::Completed,
+                        Some(CheckRunConclusion::Success),
+                    )
+                    .await;
                 Ok(())
             })
             .await;
@@ -664,7 +669,9 @@ auto_build_succeeded = ["+foo", "+bar", "-baz"]
                 tester.expect_comments((), 1).await;
 
                 tester.get_pr(()).await.expect_added_labels(&[]);
-                tester.workflow_full_success(tester.auto_branch()).await?;
+                tester
+                    .workflow_full_success(tester.auto_branch().await)
+                    .await?;
                 tester.expect_comments((), 1).await;
 
                 tester
@@ -697,7 +704,9 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
                 tester.expect_comments((), 1).await;
 
                 tester.get_pr(()).await.expect_added_labels(&[]);
-                tester.workflow_full_failure(tester.auto_branch()).await?;
+                tester
+                    .workflow_full_failure(tester.auto_branch().await)
+                    .await?;
                 tester.expect_comments((), 1).await;
 
                 tester
@@ -721,7 +730,9 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
                 tester.process_merge_queue().await;
                 tester.expect_comments((), 1).await;
 
-                tester.workflow_full_failure(tester.auto_branch()).await?;
+                tester
+                    .workflow_full_failure(tester.auto_branch().await)
+                    .await?;
                 tester.expect_comments((), 1).await;
 
                 Ok(())
@@ -741,7 +752,7 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
 
                 tester.get_pr(()).await.expect_added_labels(&[]);
 
-                tester.workflow_full_failure(tester.auto_branch()).await?;
+                tester.workflow_full_failure(tester.auto_branch().await).await?;
                 tester.wait_for_pr((), |pr| {
                     pr.auto_build.as_ref().unwrap().status == BuildStatus::Failure
                 }).await?;
@@ -765,15 +776,19 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
                 tester.process_merge_queue().await;
                 tester.expect_comments((), 1).await;
 
-                tester.workflow_full_failure(tester.auto_branch()).await?;
+                tester
+                    .workflow_full_failure(tester.auto_branch().await)
+                    .await?;
                 tester.expect_comments((), 1).await;
-                tester.expect_check_run(
-                    &tester.get_pr(()).await.get_gh_pr().head_sha,
-                    AUTO_BUILD_CHECK_RUN_NAME,
-                    AUTO_BUILD_CHECK_RUN_NAME,
-                    CheckRunStatus::Completed,
-                    Some(CheckRunConclusion::Failure),
-                );
+                tester
+                    .expect_check_run(
+                        &tester.get_pr(()).await.get_gh_pr().head_sha,
+                        AUTO_BUILD_CHECK_RUN_NAME,
+                        AUTO_BUILD_CHECK_RUN_NAME,
+                        CheckRunStatus::Completed,
+                        Some(CheckRunConclusion::Failure),
+                    )
+                    .await;
                 Ok(())
             })
             .await;

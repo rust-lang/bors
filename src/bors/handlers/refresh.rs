@@ -313,13 +313,15 @@ timeout = 3600
                 .await;
                 tester.expect_comments((), 1).await;
 
-                tester.expect_check_run(
-                    &tester.get_pr(()).await.get_gh_pr().head_sha,
-                    TRY_BUILD_CHECK_RUN_NAME,
-                    "Bors try build",
-                    CheckRunStatus::Completed,
-                    Some(CheckRunConclusion::TimedOut),
-                );
+                tester
+                    .expect_check_run(
+                        &tester.get_pr(()).await.get_gh_pr().head_sha,
+                        TRY_BUILD_CHECK_RUN_NAME,
+                        "Bors try build",
+                        CheckRunStatus::Completed,
+                        Some(CheckRunConclusion::TimedOut),
+                    )
+                    .await;
 
                 Ok(())
             })
@@ -333,7 +335,7 @@ timeout = 3600
             .run_test(async |tester: &mut BorsTester| {
                 tester.post_comment("@bors try").await?;
                 tester.expect_comments((), 1).await;
-                tester.workflow_start(tester.try_branch()).await?;
+                tester.workflow_start(tester.try_branch().await).await?;
 
                 with_mocked_time(Duration::from_secs(4000), async {
                     tester.cancel_timed_out_builds().await;
@@ -357,7 +359,9 @@ timeout = 3600
             tester
                 .wait_for_pr((), |pr| pr.mergeable_state == MergeableState::Unknown)
                 .await?;
-            tester.modify_pr_state((), |pr| pr.mergeable_state = OctocrabMergeableState::Dirty);
+            tester
+                .modify_pr_state((), |pr| pr.mergeable_state = OctocrabMergeableState::Dirty)
+                .await;
             tester.update_mergeability_status().await;
             tester
                 .wait_for_pr((), |pr| pr.mergeable_state == MergeableState::HasConflicts)
