@@ -215,9 +215,7 @@ mod tests {
     use crate::bors::handlers::refresh::MOCK_TIME;
     use crate::bors::handlers::trybuild::TRY_BUILD_CHECK_RUN_NAME;
     use crate::database::{MergeableState, OctocrabMergeableState};
-    use crate::tests::{
-        BorsBuilder, BorsTester, GitHubState, default_pr_number, default_repo_name, run_test,
-    };
+    use crate::tests::{BorsBuilder, BorsTester, GitHubState, default_repo_name, run_test};
     use chrono::Utc;
     use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
     use std::future::Future;
@@ -359,11 +357,7 @@ timeout = 3600
             tester
                 .wait_for_pr((), |pr| pr.mergeable_state == MergeableState::Unknown)
                 .await?;
-            tester
-                .default_repo()
-                .lock()
-                .get_pr_mut(default_pr_number())
-                .mergeable_state = OctocrabMergeableState::Dirty;
+            tester.modify_pr_state((), |pr| pr.mergeable_state = OctocrabMergeableState::Dirty);
             tester.update_mergeability_status().await;
             tester
                 .wait_for_pr((), |pr| pr.mergeable_state == MergeableState::HasConflicts)

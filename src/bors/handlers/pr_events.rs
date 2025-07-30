@@ -289,7 +289,7 @@ mod tests {
     use crate::bors::PullRequestStatus;
     use crate::bors::merge_queue::AUTO_BUILD_CHECK_RUN_NAME;
     use crate::tests::BorsTester;
-    use crate::tests::{BorsBuilder, GitHubState, default_pr_number};
+    use crate::tests::{BorsBuilder, GitHubState};
     use crate::{
         database::{MergeableState, OctocrabMergeableState},
         tests::{User, default_branch_name, default_repo_name, run_test},
@@ -365,7 +365,7 @@ mod tests {
         run_test(pool, async |tester: &mut BorsTester| {
             tester.post_comment("@bors r+").await?;
             tester.expect_comments((), 1).await;
-            tester.push_to_pr(default_pr_number()).await?;
+            tester.push_to_pr(()).await?;
 
             insta::assert_snapshot!(
                 tester.get_comment(()).await?,
@@ -383,7 +383,7 @@ mod tests {
     #[sqlx::test]
     async fn push_to_pr_do_nothing_when_not_approved(pool: sqlx::PgPool) {
         run_test(pool, async |tester: &mut BorsTester| {
-            tester.push_to_pr(default_pr_number()).await?;
+            tester.push_to_pr(()).await?;
 
             // No comment should be posted
             Ok(())
@@ -415,9 +415,7 @@ mod tests {
                     pr.base_branch = branch;
                 })
                 .await?;
-            tester
-                .wait_for_pr(default_pr_number(), |pr| pr.base_branch == "foo")
-                .await?;
+            tester.wait_for_pr((), |pr| pr.base_branch == "foo").await?;
             Ok(())
         })
         .await;
@@ -613,7 +611,7 @@ mod tests {
             tester.modify_pr_state((), |pr| {
                 pr.mergeable_state = OctocrabMergeableState::Unknown;
             });
-            tester.reopen_pr(default_pr_number()).await?;
+            tester.reopen_pr(()).await?;
             tester
                 .wait_for_pr((), |pr| pr.mergeable_state == MergeableState::Unknown)
                 .await?;
@@ -655,7 +653,7 @@ mod tests {
                 tester.expect_comments((), 1).await;
                 tester.wait_for_pr((), |pr| pr.auto_build.is_some()).await?;
                 tester.workflow_start(tester.auto_branch()).await?;
-                tester.push_to_pr(default_pr_number()).await?;
+                tester.push_to_pr(()).await?;
                 insta::assert_snapshot!(tester.get_comment(()).await?, @r"
                 :warning: A new commit `pr-1-commit-1` was pushed to the branch, the
                 PR will need to be re-approved.
@@ -682,7 +680,7 @@ mod tests {
                 tester.wait_for_pr((), |pr| pr.auto_build.is_some()).await?;
 
                 tester.workflow_start(tester.auto_branch()).await?;
-                tester.push_to_pr(default_pr_number()).await?;
+                tester.push_to_pr(()).await?;
                 insta::assert_snapshot!(tester.get_comment(()).await?, @r"
                 :warning: A new commit `pr-1-commit-1` was pushed to the branch, the
                 PR will need to be re-approved.
@@ -706,7 +704,7 @@ mod tests {
                 tester.workflow_start(tester.auto_branch()).await?;
 
                 let prev_commit = &tester.get_pr(()).await.get_gh_pr().head_sha;
-                tester.push_to_pr(default_pr_number()).await?;
+                tester.push_to_pr(()).await?;
                 tester.expect_comments((), 1).await;
                 tester.expect_check_run(
                     prev_commit,

@@ -48,7 +48,6 @@ pub use mocks::ExternalHttpMock;
 pub use mocks::GitHubState;
 pub use mocks::comment::Comment;
 pub use mocks::permissions::Permissions;
-pub use mocks::pull_request::default_pr_number;
 pub use mocks::repository::{Branch, Repo, default_branch_name, default_repo_name};
 pub use mocks::user::User;
 pub use mocks::workflow::{WorkflowEvent, WorkflowJob, WorkflowRunData};
@@ -895,8 +894,7 @@ impl PullRequestProxy {
     #[track_caller]
     pub fn expect_approved_by(&self, approved_by: &str) -> &Self {
         assert_eq!(self.require_db_pr().approver(), Some(approved_by));
-        self.gh_pr.check_added_labels(&["approved"]);
-        self
+        self.expect_added_labels(&["approved"])
     }
 
     #[track_caller]
@@ -932,6 +930,30 @@ impl PullRequestProxy {
             self.require_db_pr().try_build.as_ref().unwrap().status,
             BuildStatus::Cancelled
         );
+    }
+
+    #[track_caller]
+    pub fn expect_added_labels(&self, labels: &[&str]) -> &Self {
+        let added_labels = self
+            .gh_pr
+            .labels_added_by_bors
+            .iter()
+            .map(|s| s.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(&added_labels, labels);
+        self
+    }
+
+    #[track_caller]
+    pub fn expect_removed_labels(&self, labels: &[&str]) -> &Self {
+        let removed_labels = self
+            .gh_pr
+            .labels_removed_by_bors
+            .iter()
+            .map(|s| s.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(&removed_labels, labels);
+        self
     }
 
     #[track_caller]

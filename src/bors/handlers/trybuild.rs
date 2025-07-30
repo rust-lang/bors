@@ -373,7 +373,7 @@ mod tests {
     use crate::tests::BorsTester;
     use crate::tests::{
         BorsBuilder, Comment, GitHubState, User, WorkflowEvent, WorkflowJob, WorkflowRunData,
-        default_pr_number, default_repo_name, run_test,
+        default_repo_name, run_test,
     };
     use octocrab::models::JobId;
     use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
@@ -962,10 +962,11 @@ try = ["+foo", "+bar", "-baz"]
 
                 To cancel the try build, run the command `@bors try cancel`.
                 ");
-                let repo = tester.default_repo();
-                let pr = repo.lock().get_pr(default_pr_number()).clone();
-                pr.check_added_labels(&["foo", "bar"]);
-                pr.check_removed_labels(&["baz"]);
+                tester
+                    .get_pr(())
+                    .await
+                    .expect_added_labels(&["foo", "bar"])
+                    .expect_removed_labels(&["baz"]);
                 Ok(())
             })
             .await;
@@ -987,15 +988,14 @@ try_succeeded = ["+foo", "+bar", "-baz"]
 
                 To cancel the try build, run the command `@bors try cancel`.
                 ");
-                let repo = tester.default_repo();
-                repo.lock()
-                    .get_pr(default_pr_number())
-                    .check_added_labels(&[]);
+                tester.get_pr(()).await.expect_added_labels(&[]);
                 tester.workflow_full_success(tester.try_branch()).await?;
                 tester.expect_comments((), 1).await;
-                let pr = repo.lock().get_pr(default_pr_number()).clone();
-                pr.check_added_labels(&["foo", "bar"]);
-                pr.check_removed_labels(&["baz"]);
+                tester
+                    .get_pr(())
+                    .await
+                    .expect_added_labels(&["foo", "bar"])
+                    .expect_removed_labels(&["baz"]);
                 Ok(())
             })
             .await;
@@ -1017,15 +1017,14 @@ try_failed = ["+foo", "+bar", "-baz"]
 
                 To cancel the try build, run the command `@bors try cancel`.
                 ");
-                let repo = tester.default_repo();
-                repo.lock()
-                    .get_pr(default_pr_number())
-                    .check_added_labels(&[]);
+                tester.get_pr(()).await.expect_added_labels(&[]);
                 tester.workflow_full_failure(tester.try_branch()).await?;
                 tester.expect_comments((), 1).await;
-                let pr = repo.lock().get_pr(default_pr_number()).clone();
-                pr.check_added_labels(&["foo", "bar"]);
-                pr.check_removed_labels(&["baz"]);
+                tester
+                    .get_pr(())
+                    .await
+                    .expect_added_labels(&["foo", "bar"])
+                    .expect_removed_labels(&["baz"]);
                 Ok(())
             })
             .await;

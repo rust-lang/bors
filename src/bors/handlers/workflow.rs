@@ -458,8 +458,7 @@ mod tests {
     use crate::database::{BuildStatus, WorkflowStatus};
     use crate::tests::BorsTester;
     use crate::tests::{
-        BorsBuilder, Branch, GitHubState, WorkflowEvent, WorkflowRunData, default_pr_number,
-        run_test,
+        BorsBuilder, Branch, GitHubState, WorkflowEvent, WorkflowRunData, run_test,
     };
 
     fn gh_state_with_merge_queue() -> GitHubState {
@@ -664,16 +663,15 @@ auto_build_succeeded = ["+foo", "+bar", "-baz"]
                 tester.process_merge_queue().await;
                 tester.expect_comments((), 1).await;
 
-                let repo = tester.default_repo();
-                repo.lock()
-                    .get_pr(default_pr_number())
-                    .check_added_labels(&[]);
+                tester.get_pr(()).await.expect_added_labels(&[]);
                 tester.workflow_full_success(tester.auto_branch()).await?;
                 tester.expect_comments((), 1).await;
 
-                let pr = repo.lock().get_pr(default_pr_number()).clone();
-                pr.check_added_labels(&["foo", "bar"]);
-                pr.check_removed_labels(&["baz"]);
+                tester
+                    .get_pr(())
+                    .await
+                    .expect_added_labels(&["foo", "bar"])
+                    .expect_removed_labels(&["baz"]);
                 Ok(())
             })
             .await;
@@ -698,17 +696,15 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
                 tester.process_merge_queue().await;
                 tester.expect_comments((), 1).await;
 
-                let repo = tester.default_repo();
-                repo.lock()
-                    .get_pr(default_pr_number())
-                    .check_added_labels(&[]);
-
+                tester.get_pr(()).await.expect_added_labels(&[]);
                 tester.workflow_full_failure(tester.auto_branch()).await?;
                 tester.expect_comments((), 1).await;
 
-                let pr = repo.lock().get_pr(default_pr_number()).clone();
-                pr.check_added_labels(&["foo", "bar"]);
-                pr.check_removed_labels(&["baz"]);
+                tester
+                    .get_pr(())
+                    .await
+                    .expect_added_labels(&["foo", "bar"])
+                    .expect_removed_labels(&["baz"]);
 
                 Ok(())
             })
@@ -743,10 +739,7 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
                 tester.process_merge_queue().await;
                 tester.expect_comments((), 1).await;
 
-                let repo = tester.default_repo();
-                repo.lock()
-                    .get_pr(default_pr_number())
-                    .check_added_labels(&[]);
+                tester.get_pr(()).await.expect_added_labels(&[]);
 
                 tester.workflow_full_failure(tester.auto_branch()).await?;
                 tester.wait_for_pr((), |pr| {

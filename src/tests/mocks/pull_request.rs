@@ -137,24 +137,6 @@ impl Default for PullRequest {
 }
 
 impl PullRequest {
-    pub fn check_added_labels(&self, labels: &[&str]) {
-        let added_labels = self
-            .labels_added_by_bors
-            .iter()
-            .map(|s| s.as_str())
-            .collect::<Vec<_>>();
-        assert_eq!(&added_labels, labels);
-    }
-
-    pub fn check_removed_labels(&self, labels: &[&str]) {
-        let removed_labels = self
-            .labels_removed_by_bors
-            .iter()
-            .map(|s| s.as_str())
-            .collect::<Vec<_>>();
-        assert_eq!(&removed_labels, labels);
-    }
-
     pub fn next_comment_id(&mut self) -> u64 {
         self.comment_counter += 1;
         self.comment_counter
