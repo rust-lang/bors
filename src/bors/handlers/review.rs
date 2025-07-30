@@ -375,8 +375,7 @@ mod tests {
             handlers::{TRY_BRANCH_NAME, trybuild::TRY_MERGE_BRANCH_NAME},
         },
         tests::{
-            BorsBuilder, Comment, GitHubState, Permissions, User, default_pr_number,
-            default_repo_name, run_test,
+            BorsBuilder, Comment, GitHubState, Permissions, User, default_repo_name, run_test,
         },
     };
 

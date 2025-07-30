@@ -281,6 +281,23 @@ impl BorsTester {
         repo.branches.last_mut().unwrap().clone()
     }
 
+    /// Modifies an existing branch on the default repository.
+    pub fn modify_branch<F: FnOnce(&mut Branch)>(&mut self, name: &str, func: F) {
+        let repo = self
+            .github
+            .lock()
+            .repos
+            .get(&default_repo_name())
+            .unwrap()
+            .clone();
+        let mut repo = repo.lock();
+
+        let branch = repo
+            .get_branch_by_name(name)
+            .expect("Branch does not exist");
+        func(branch);
+    }
+
     pub fn get_branch(&self, name: &str) -> Branch {
         self.github
             .lock()
