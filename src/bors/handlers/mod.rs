@@ -640,7 +640,7 @@ async fn unapprove_pr(
 
 #[cfg(test)]
 mod tests {
-    use crate::tests::{BorsTester, Comment, User, run_test};
+    use crate::tests::{BorsTester, Comment, User, default_repo_name, run_test};
 
     #[sqlx::test]
     async fn ignore_bot_comment(pool: sqlx::PgPool) {
@@ -657,7 +657,9 @@ mod tests {
     #[sqlx::test]
     async fn do_not_load_pr_on_unrelated_comment(pool: sqlx::PgPool) {
         run_test(pool, async |tester: &mut BorsTester| {
-            tester.default_repo().await.lock().pull_request_error = true;
+            tester
+                .modify_repo(&default_repo_name(), |repo| repo.pull_request_error = true)
+                .await;
             tester.post_comment("no command").await?;
             Ok(())
         })

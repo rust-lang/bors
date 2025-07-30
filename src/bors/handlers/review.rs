@@ -1344,7 +1344,7 @@ merge_queue_enabled = true
 "#,
             ))
             .run_test(async |tester: &mut BorsTester| {
-                tester.default_repo().await.lock().workflow_cancel_error = true;
+                tester.modify_repo(&default_repo_name(), |pr| pr.workflow_cancel_error = true).await;
                 tester.post_comment("@bors r+").await?;
                 tester.expect_comments((), 1).await;
                 tester.process_merge_queue().await;

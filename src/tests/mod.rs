@@ -219,6 +219,13 @@ impl BorsTester {
         self.github.lock().await.get_repo(name)
     }
 
+    /// Modifies the given repo state in the GitHub mock (**without sending a webhook**).
+    pub async fn modify_repo<F: FnOnce(&mut Repo)>(&mut self, repo: &GithubRepoName, func: F) {
+        let repo = self.github.lock().await.get_repo(repo);
+        let mut repo = repo.lock();
+        func(&mut repo)
+    }
+
     /// Get a PR proxy that can be used to assert various things about the PR.
     pub async fn get_pr<Id: Into<PrIdentifier>>(&self, id: Id) -> PullRequestProxy {
         let id = id.into();

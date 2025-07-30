@@ -506,7 +506,9 @@ mod tests {
                 .await?;
             tester.expect_comments((), 1).await;
 
-            tester.default_repo().await.lock().push_error = true;
+            tester
+                .modify_repo(&default_repo_name(), |repo| repo.push_error = true)
+                .await;
 
             tester.process_merge_queue().await;
             insta::assert_snapshot!(
@@ -527,7 +529,9 @@ mod tests {
                 .await?;
             tester.expect_comments((), 1).await;
 
-            tester.default_repo().await.lock().push_error = true;
+            tester
+                .modify_repo(&default_repo_name(), |repo| repo.push_error = true)
+                .await;
 
             tester.process_merge_queue().await;
             tester.expect_comments((), 1).await;
@@ -554,7 +558,9 @@ mod tests {
                 .await?;
             tester.expect_comments((), 1).await;
 
-            tester.default_repo().await.lock().push_error = true;
+            tester
+                .modify_repo(&default_repo_name(), |repo| repo.push_error = true)
+                .await;
 
             tester.process_merge_queue().await;
             tester.expect_comments((), 1).await;

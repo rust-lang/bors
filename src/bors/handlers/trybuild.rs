@@ -433,7 +433,7 @@ mod tests {
                 status: WorkflowStatus::Success,
             });
 
-            tester.default_repo().await.lock().update_workflow_run(workflow.clone(), WorkflowStatus::Pending);
+            tester.modify_repo(&default_repo_name(), |repo| repo.update_workflow_run(workflow.clone(), WorkflowStatus::Pending)).await;
             tester.workflow_full_failure(workflow).await?;
             insta::assert_snapshot!(
                 tester.get_comment(()).await?,
@@ -865,7 +865,7 @@ try-job: Bar
     #[sqlx::test]
     async fn try_cancel_error(pool: sqlx::PgPool) {
         run_test(pool, async |tester: &mut BorsTester| {
-            tester.default_repo().await.lock().workflow_cancel_error = true;
+            tester.modify_repo(&default_repo_name(), |repo| repo.workflow_cancel_error = true).await;
             tester.post_comment("@bors try").await?;
             tester.expect_comments((), 1).await;
             tester
@@ -888,7 +888,11 @@ try-job: Bar
     #[sqlx::test]
     async fn try_cancel_cancel_in_db(pool: sqlx::PgPool) {
         run_test(pool, async |tester: &mut BorsTester| {
-            tester.default_repo().await.lock().workflow_cancel_error = true;
+            tester
+                .modify_repo(&default_repo_name(), |repo| {
+                    repo.workflow_cancel_error = true
+                })
+                .await;
             tester.post_comment("@bors try").await?;
             tester.expect_comments((), 1).await;
             tester.post_comment("@bors try cancel").await?;
@@ -912,10 +916,10 @@ try-job: Bar
             let w3 = WorkflowRunData::from(branch).with_run_id(3);
             for workflow in [&w1, &w2, &w3] {
                 tester
-                    .default_repo()
-                    .await
-                    .lock()
-                    .update_workflow_run(workflow.clone(), WorkflowStatus::Pending);
+                    .modify_repo(&default_repo_name(), |repo| {
+                        repo.update_workflow_run(workflow.clone(), WorkflowStatus::Pending)
+                    })
+                    .await;
             }
 
             tester.workflow_full_success(w1).await?;

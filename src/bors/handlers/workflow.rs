@@ -456,10 +456,10 @@ mod tests {
     use crate::bors::merge_queue::AUTO_BUILD_CHECK_RUN_NAME;
     use crate::database::operations::get_all_workflows;
     use crate::database::{BuildStatus, WorkflowStatus};
-    use crate::tests::BorsTester;
     use crate::tests::{
         BorsBuilder, Branch, GitHubState, WorkflowEvent, WorkflowRunData, run_test,
     };
+    use crate::tests::{BorsTester, default_repo_name};
 
     fn gh_state_with_merge_queue() -> GitHubState {
         GitHubState::default().with_default_config(
@@ -545,10 +545,11 @@ mod tests {
 
             // Let the GH mock know about the existence of the second workflow
             tester
-                .default_repo()
-                .await
-                .lock()
-                .update_workflow_run(w2.clone(), WorkflowStatus::Pending);
+                .modify_repo(&default_repo_name(), |repo| {
+                    repo.update_workflow_run(w2.clone(), WorkflowStatus::Pending)
+                })
+                .await;
+
             // Finish w1 while w2 is not yet in the DB
             tester.workflow_full_success(w1).await?;
             tester.workflow_full_success(w2).await?;
