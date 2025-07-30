@@ -472,7 +472,7 @@ mod tests {
 
     #[sqlx::test]
     async fn workflow_started_unknown_build(pool: sqlx::PgPool) {
-        run_test(pool.clone(), async |tester| {
+        run_test(pool.clone(), async |tester: &mut BorsTester| {
             tester
                 .workflow_event(WorkflowEvent::started(Branch::new(
                     "unknown",
@@ -487,7 +487,7 @@ mod tests {
 
     #[sqlx::test]
     async fn workflow_completed_unknown_build(pool: sqlx::PgPool) {
-        run_test(pool.clone(), async |tester| {
+        run_test(pool.clone(), async |tester: &mut BorsTester| {
             tester
                 .workflow_event(WorkflowEvent::success(Branch::new(
                     "unknown",
@@ -502,9 +502,9 @@ mod tests {
 
     #[sqlx::test]
     async fn try_workflow_started(pool: sqlx::PgPool) {
-        run_test(pool.clone(), async |tester| {
+        run_test(pool.clone(), async |tester: &mut BorsTester| {
             tester.post_comment("@bors try").await?;
-            tester.expect_comments(1).await;
+            tester.expect_comments((), 1).await;
             tester
                 .workflow_event(WorkflowEvent::started(tester.try_branch()))
                 .await?;
@@ -517,9 +517,9 @@ mod tests {
 
     #[sqlx::test]
     async fn try_workflow_start_twice(pool: sqlx::PgPool) {
-        run_test(pool.clone(), async |tester| {
+        run_test(pool.clone(), async |tester: &mut BorsTester| {
             tester.post_comment("@bors try").await?;
-            tester.expect_comments(1).await;
+            tester.expect_comments((), 1).await;
 
             let workflow = WorkflowRunData::from(tester.try_branch());
             tester
@@ -539,7 +539,7 @@ mod tests {
     async fn try_success_multiple_workflows_per_suite_1(pool: sqlx::PgPool) {
         run_test(pool, async |tester: &mut BorsTester| {
             tester.post_comment("@bors try").await?;
-            tester.expect_comments(1).await;
+            tester.expect_comments((), 1).await;
 
             let w1 = WorkflowRunData::from(tester.try_branch()).with_run_id(1);
             let w2 = WorkflowRunData::from(tester.try_branch()).with_run_id(2);
@@ -554,7 +554,7 @@ mod tests {
             tester.workflow_full_success(w2).await?;
 
             insta::assert_snapshot!(
-                tester.get_comment().await?,
+                tester.get_comment(()).await?,
                 @r#"
             :sunny: Try build successful
             - [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1) :white_check_mark:
@@ -574,7 +574,7 @@ mod tests {
     async fn try_success_multiple_workflows_per_suite_2(pool: sqlx::PgPool) {
         run_test(pool, async |tester: &mut BorsTester| {
             tester.post_comment("@bors try").await?;
-            tester.expect_comments(1).await;
+            tester.expect_comments((), 1).await;
 
             let w1 = WorkflowRunData::from(tester.try_branch()).with_run_id(1);
             let w2 = WorkflowRunData::from(tester.try_branch()).with_run_id(2);
@@ -584,7 +584,7 @@ mod tests {
             tester.workflow_event(WorkflowEvent::success(w1)).await?;
             tester.workflow_event(WorkflowEvent::success(w2)).await?;
             insta::assert_snapshot!(
-                tester.get_comment().await?,
+                tester.get_comment(()).await?,
                 @r#"
             :sunny: Try build successful
             - [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1) :white_check_mark:
@@ -604,7 +604,7 @@ mod tests {
     async fn try_failure_multiple_workflows_early(pool: sqlx::PgPool) {
         run_test(pool, async |tester: &mut BorsTester| {
             tester.post_comment("@bors try").await?;
-            tester.expect_comments(1).await;
+            tester.expect_comments((), 1).await;
 
             let w1 = WorkflowRunData::from(tester.try_branch()).with_run_id(1);
             let w2 = WorkflowRunData::from(tester.try_branch()).with_run_id(2);
@@ -613,7 +613,7 @@ mod tests {
 
             tester.workflow_event(WorkflowEvent::failure(w2)).await?;
             insta::assert_snapshot!(
-                tester.get_comment().await?,
+                tester.get_comment(()).await?,
                 @":broken_heart: Test for merge-0-pr-1 failed: [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1), [Workflow1](https://github.com/rust-lang/borstest/actions/runs/2)"
             );
             Ok(())
@@ -625,16 +625,16 @@ mod tests {
     async fn auto_build_success_updates_check_run(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
             .github(gh_state_with_merge_queue())
-            .run_test(async |tester| {
+            .run_test(async |tester: &mut BorsTester| {
                 tester.post_comment("@bors r+").await?;
-                tester.expect_comments(1).await;
+                tester.expect_comments((), 1).await;
                 tester.process_merge_queue().await;
-                tester.expect_comments(1).await;
+                tester.expect_comments((), 1).await;
 
                 tester.workflow_full_success(tester.auto_branch()).await?;
-                tester.expect_comments(1).await;
+                tester.expect_comments((), 1).await;
                 tester.expect_check_run(
-                    &tester.default_pr().await.get_gh_pr().head_sha,
+                    &tester.get_pr(()).await.get_gh_pr().head_sha,
                     AUTO_BUILD_CHECK_RUN_NAME,
                     AUTO_BUILD_CHECK_RUN_NAME,
                     CheckRunStatus::Completed,
@@ -658,18 +658,18 @@ auto_build_succeeded = ["+foo", "+bar", "-baz"]
 
         BorsBuilder::new(pool)
             .github(github)
-            .run_test(async |tester| {
+            .run_test(async |tester: &mut BorsTester| {
                 tester.post_comment("@bors r+").await?;
-                tester.expect_comments(1).await;
+                tester.expect_comments((), 1).await;
                 tester.process_merge_queue().await;
-                tester.expect_comments(1).await;
+                tester.expect_comments((), 1).await;
 
                 let repo = tester.default_repo();
                 repo.lock()
                     .get_pr(default_pr_number())
                     .check_added_labels(&[]);
                 tester.workflow_full_success(tester.auto_branch()).await?;
-                tester.expect_comments(1).await;
+                tester.expect_comments((), 1).await;
 
                 let pr = repo.lock().get_pr(default_pr_number()).clone();
                 pr.check_added_labels(&["foo", "bar"]);
@@ -692,11 +692,11 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
 
         BorsBuilder::new(pool)
             .github(github)
-            .run_test(async |tester| {
+            .run_test(async |tester: &mut BorsTester| {
                 tester.post_comment("@bors r+").await?;
-                tester.expect_comments(1).await;
+                tester.expect_comments((), 1).await;
                 tester.process_merge_queue().await;
-                tester.expect_comments(1).await;
+                tester.expect_comments((), 1).await;
 
                 let repo = tester.default_repo();
                 repo.lock()
@@ -704,7 +704,7 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
                     .check_added_labels(&[]);
 
                 tester.workflow_full_failure(tester.auto_branch()).await?;
-                tester.expect_comments(1).await;
+                tester.expect_comments((), 1).await;
 
                 let pr = repo.lock().get_pr(default_pr_number()).clone();
                 pr.check_added_labels(&["foo", "bar"]);
@@ -719,14 +719,14 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
     async fn auto_build_fails_in_db(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
             .github(gh_state_with_merge_queue())
-            .run_test(async |tester| {
+            .run_test(async |tester: &mut BorsTester| {
                 tester.post_comment("@bors r+").await?;
-                tester.expect_comments(1).await;
+                tester.expect_comments((), 1).await;
                 tester.process_merge_queue().await;
-                tester.expect_comments(1).await;
+                tester.expect_comments((), 1).await;
 
                 tester.workflow_full_failure(tester.auto_branch()).await?;
-                tester.expect_comments(1).await;
+                tester.expect_comments((), 1).await;
 
                 Ok(())
             })
@@ -737,11 +737,11 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
     async fn auto_build_failed_comment(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
             .github(gh_state_with_merge_queue())
-            .run_test(async |tester| {
+            .run_test(async |tester: &mut BorsTester| {
                 tester.post_comment("@bors r+").await?;
-                tester.expect_comments(1).await;
+                tester.expect_comments((), 1).await;
                 tester.process_merge_queue().await;
-                tester.expect_comments(1).await;
+                tester.expect_comments((), 1).await;
 
                 let repo = tester.default_repo();
                 repo.lock()
@@ -749,11 +749,11 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
                     .check_added_labels(&[]);
 
                 tester.workflow_full_failure(tester.auto_branch()).await?;
-                tester.wait_for_default_pr(|pr| {
+                tester.wait_for_pr((), |pr| {
                     pr.auto_build.as_ref().unwrap().status == BuildStatus::Failure
                 }).await?;
                 insta::assert_snapshot!(
-                    tester.get_comment().await?,
+                    tester.get_comment(()).await?,
                     @":broken_heart: Test for merge-0-pr-1 failed: [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1)"
                 );
 
@@ -766,16 +766,16 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
     async fn auto_build_failure_updates_check_run(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
             .github(gh_state_with_merge_queue())
-            .run_test(async |tester| {
+            .run_test(async |tester: &mut BorsTester| {
                 tester.post_comment("@bors r+").await?;
-                tester.expect_comments(1).await;
+                tester.expect_comments((), 1).await;
                 tester.process_merge_queue().await;
-                tester.expect_comments(1).await;
+                tester.expect_comments((), 1).await;
 
                 tester.workflow_full_failure(tester.auto_branch()).await?;
-                tester.expect_comments(1).await;
+                tester.expect_comments((), 1).await;
                 tester.expect_check_run(
-                    &tester.default_pr().await.get_gh_pr().head_sha,
+                    &tester.get_pr(()).await.get_gh_pr().head_sha,
                     AUTO_BUILD_CHECK_RUN_NAME,
                     AUTO_BUILD_CHECK_RUN_NAME,
                     CheckRunStatus::Completed,

@@ -640,11 +640,11 @@ async fn unapprove_pr(
 
 #[cfg(test)]
 mod tests {
-    use crate::tests::{Comment, User, run_test};
+    use crate::tests::{BorsTester, Comment, User, run_test};
 
     #[sqlx::test]
     async fn ignore_bot_comment(pool: sqlx::PgPool) {
-        run_test(pool, async |tester| {
+        run_test(pool, async |tester: &mut BorsTester| {
             tester
                 .post_comment(Comment::from("@bors ping").with_author(User::bors_bot()))
                 .await?;
@@ -656,7 +656,7 @@ mod tests {
 
     #[sqlx::test]
     async fn do_not_load_pr_on_unrelated_comment(pool: sqlx::PgPool) {
-        run_test(pool, async |tester| {
+        run_test(pool, async |tester: &mut BorsTester| {
             tester.default_repo().lock().pull_request_error = true;
             tester.post_comment("no command").await?;
             Ok(())
@@ -666,9 +666,9 @@ mod tests {
 
     #[sqlx::test]
     async fn unknown_command(pool: sqlx::PgPool) {
-        run_test(pool, async |tester| {
+        run_test(pool, async |tester: &mut BorsTester| {
             tester.post_comment(Comment::from("@bors foo")).await?;
-            insta::assert_snapshot!(tester.get_comment().await?, @r#"Unknown command "foo". Run `@bors help` to see available commands."#);
+            insta::assert_snapshot!(tester.get_comment(()).await?, @r#"Unknown command "foo". Run `@bors help` to see available commands."#);
             Ok(())
         })
         .await;

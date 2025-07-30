@@ -20,8 +20,9 @@ use tower::Service;
 use crate::bors::merge_queue::MergeQueueSender;
 use crate::bors::mergeable_queue::MergeableQueueSender;
 use crate::bors::{
-    CommandPrefix, RollupMode, WAIT_FOR_MERGE_QUEUE, WAIT_FOR_MERGEABILITY_STATUS_REFRESH,
-    WAIT_FOR_PR_STATUS_REFRESH, WAIT_FOR_REFRESH_PENDING_BUILDS, WAIT_FOR_WORKFLOW_STARTED,
+    CommandPrefix, PullRequestStatus, RollupMode, WAIT_FOR_MERGE_QUEUE,
+    WAIT_FOR_MERGEABILITY_STATUS_REFRESH, WAIT_FOR_PR_STATUS_REFRESH,
+    WAIT_FOR_REFRESH_PENDING_BUILDS, WAIT_FOR_WORKFLOW_STARTED,
 };
 use crate::database::{
     BuildStatus, DelegatedPermission, OctocrabMergeableState, PullRequestModel, WorkflowStatus,
@@ -34,7 +35,8 @@ use crate::{
 
 use crate::tests::mocks::comment::GitHubIssueCommentEventPayload;
 use crate::tests::mocks::pull_request::{
-    GitHubPullRequestEventPayload, GitHubPushEventPayload, PullRequest, PullRequestChangeEvent,
+    GitHubPullRequestEventPayload, GitHubPushEventPayload, PrIdentifier, PullRequest,
+    PullRequestChangeEvent,
 };
 use crate::tests::mocks::workflow::{
     GitHubWorkflowEventPayload, TestWorkflowStatus, WorkflowEventKind,
@@ -211,64 +213,52 @@ impl BorsTester {
     }
 
     pub fn default_repo(&self) -> Arc<Mutex<Repo>> {
-        self.github.lock().get_repo(&default_repo_name())
+        self.get_repo(&default_repo_name())
     }
 
-    pub async fn default_pr(&self) -> PullRequestProxy {
-        let pr = self
-            .default_repo()
-            .lock()
-            .get_pr(default_pr_number())
-            .clone();
+    pub fn get_repo(&self, name: &GithubRepoName) -> Arc<Mutex<Repo>> {
+        self.github.lock().get_repo(name)
+    }
+
+    /// Get a PR proxy that can be used to assert various things about the PR.
+    pub async fn get_pr<Id: Into<PrIdentifier>>(&self, id: Id) -> PullRequestProxy {
+        let id = id.into();
+        let pr = self.get_repo(&id.repo).lock().get_pr(id.number).clone();
         PullRequestProxy::new(self, pr).await
     }
 
-    pub async fn pr_db(
+    async fn try_get_pr_from_db<Id: Into<PrIdentifier>>(
         &self,
-        repo: GithubRepoName,
-        number: u64,
+        id: Id,
     ) -> anyhow::Result<Option<PullRequestModel>> {
+        let id = id.into();
         self.db()
-            .get_pull_request(&repo, PullRequestNumber(number))
+            .get_pull_request(&id.repo, PullRequestNumber(id.number))
             .await
-    }
-
-    /// Get a PR from the database for the default repo.
-    pub async fn get_pr_from_db(&self, pr_number: u64) -> PullRequestModel {
-        self.pr_db(default_repo_name(), pr_number)
-            .await
-            .unwrap()
-            .expect("PR should exist in database")
     }
 
     /// Wait until a pull request is in the database and satisfies a given condition.
     ///
     /// This is a convenience wrapper around `wait_for` that simplifies checking for PR conditions.
-    pub async fn wait_for_pr<F>(
+    pub async fn wait_for_pr<F, Id: Into<PrIdentifier>>(
         &self,
-        repo: GithubRepoName,
-        pr_number: u64,
+        id: Id,
         condition: F,
     ) -> anyhow::Result<()>
     where
         F: Fn(&PullRequestModel) -> bool,
     {
-        self.wait_for(|| async {
-            let Some(pr) = self.pr_db(repo.clone(), pr_number).await? else {
-                return Ok(false);
-            };
-            Ok(condition(&pr))
+        let id = id.into();
+        self.wait_for(|| {
+            let id = id.clone();
+            async {
+                let Some(pr) = self.try_get_pr_from_db(id).await? else {
+                    return Ok(false);
+                };
+                Ok(condition(&pr))
+            }
         })
         .await
-    }
-
-    /// Wait until the default pull request is in the database and satisfies a given condition.
-    pub async fn wait_for_default_pr<F>(&self, condition: F) -> anyhow::Result<()>
-    where
-        F: Fn(&PullRequestModel) -> bool,
-    {
-        self.wait_for_pr(default_repo_name(), default_pr_number(), condition)
-            .await
     }
 
     /// Creates a branch and returns a **copy** of it.
@@ -322,28 +312,9 @@ impl BorsTester {
         self.get_branch("automation/bors/auto")
     }
 
-    /// Wait until the next bot comment is received on the default repo and the default PR.
-    pub async fn get_comment(&mut self) -> anyhow::Result<String> {
-        Ok(self
-            .http_mock
-            .gh_server
-            .get_comment(Repo::default().name, default_pr_number())
-            .await?
-            .content)
-    }
-
-    /// Wait until the next bot comment is received on the specified PR and consume it.
-    pub async fn expect_comment_on_pr(
-        &mut self,
-        repo: GithubRepoName,
-        pr: u64,
-    ) -> anyhow::Result<String> {
-        Ok(self
-            .http_mock
-            .gh_server
-            .get_comment(repo, pr)
-            .await?
-            .content)
+    /// Wait until the next bot comment is received on the specified repo and PR.
+    pub async fn get_comment<Id: Into<PrIdentifier>>(&mut self, id: Id) -> anyhow::Result<String> {
+        Ok(self.http_mock.gh_server.get_comment(id).await?.content)
     }
 
     //-- Generation of GitHub events --//
@@ -515,44 +486,40 @@ impl BorsTester {
         Ok(pr)
     }
 
-    pub async fn reopen_pr(
+    /// Modifies the given PR state in the GitHub mock (**without sending a webhook**)
+    /// and returns a copy of it.
+    pub fn modify_pr_state<Id: Into<PrIdentifier>, F: FnOnce(&mut PullRequest)>(
         &mut self,
-        repo_name: GithubRepoName,
-        pr_number: u64,
-    ) -> anyhow::Result<()> {
-        let pr = {
-            let repo = self.github.lock().get_repo(&repo_name);
-            let mut repo = repo.lock();
-            let pr = repo
-                .pull_requests
-                .get_mut(&pr_number)
-                .expect("PR must exist before being reopened");
-            pr.reopen_pr();
-            pr.clone()
-        };
+        id: Id,
+        func: F,
+    ) -> PullRequest {
+        let id = id.into();
+        let repo = self.github.lock().get_repo(&id.repo);
+        let mut repo = repo.lock();
+        let pr = repo
+            .pull_requests
+            .get_mut(&id.number)
+            .expect("PR must exist");
+        func(pr);
+        pr.clone()
+    }
+
+    pub async fn reopen_pr<Id: Into<PrIdentifier>>(&mut self, id: Id) -> anyhow::Result<()> {
+        let id = id.into();
+        let pr = self.modify_pr_state(id, |pr| pr.reopen_pr());
         self.send_webhook(
             "pull_request",
-            GitHubPullRequestEventPayload::new(pr.clone(), "reopened", None),
+            GitHubPullRequestEventPayload::new(pr, "reopened", None),
         )
         .await?;
         Ok(())
     }
 
-    pub async fn set_pr_status_closed(
+    pub async fn set_pr_status_closed<Id: Into<PrIdentifier>>(
         &mut self,
-        repo_name: GithubRepoName,
-        pr_number: u64,
+        id: Id,
     ) -> anyhow::Result<()> {
-        let pr = {
-            let repo = self.github.lock().get_repo(&repo_name);
-            let mut repo = repo.lock();
-            let pr = repo
-                .pull_requests
-                .get_mut(&pr_number)
-                .expect("PR must be opened before closing it");
-            pr.close_pr();
-            pr.clone()
-        };
+        let pr = self.modify_pr_state(id, |pr| pr.close_pr());
         self.send_webhook(
             "pull_request",
             GitHubPullRequestEventPayload::new(pr.clone(), "closed", None),
@@ -561,70 +528,40 @@ impl BorsTester {
         Ok(())
     }
 
-    pub async fn set_pr_status_draft(
+    pub async fn set_pr_status_draft<Id: Into<PrIdentifier>>(
         &mut self,
-        repo_name: GithubRepoName,
-        pr_number: u64,
+        id: Id,
     ) -> anyhow::Result<()> {
-        let pr = {
-            let repo = self.github.lock().get_repo(&repo_name);
-            let mut repo = repo.lock();
-            let pr = repo
-                .pull_requests
-                .get_mut(&pr_number)
-                .expect("PR must exist before being converted to draft");
-            pr.convert_to_draft();
-            pr.clone()
-        };
+        let pr = self.modify_pr_state(id, |pr| pr.convert_to_draft());
         self.send_webhook(
             "pull_request",
-            GitHubPullRequestEventPayload::new(pr.clone(), "converted_to_draft", None),
+            GitHubPullRequestEventPayload::new(pr, "converted_to_draft", None),
         )
         .await?;
         Ok(())
     }
 
-    pub async fn set_pr_status_ready_for_review(
+    pub async fn set_pr_status_ready_for_review<Id: Into<PrIdentifier>>(
         &mut self,
-        repo_name: GithubRepoName,
-        pr_number: u64,
+        id: Id,
     ) -> anyhow::Result<()> {
-        let pr = {
-            let repo = self.github.lock().get_repo(&repo_name);
-            let mut repo = repo.lock();
-            let pr = repo
-                .pull_requests
-                .get_mut(&pr_number)
-                .expect("PR must exist before being ready for review");
-            pr.ready_for_review();
-            pr.clone()
-        };
+        let pr = self.modify_pr_state(id, |pr| pr.ready_for_review());
         self.send_webhook(
             "pull_request",
-            GitHubPullRequestEventPayload::new(pr.clone(), "ready_for_review", None),
+            GitHubPullRequestEventPayload::new(pr, "ready_for_review", None),
         )
         .await?;
         Ok(())
     }
 
-    pub async fn set_pr_status_merged(
+    pub async fn set_pr_status_merged<Id: Into<PrIdentifier>>(
         &mut self,
-        repo_name: GithubRepoName,
-        pr_number: u64,
+        id: Id,
     ) -> anyhow::Result<()> {
-        let pr = {
-            let repo = self.github.lock().get_repo(&repo_name);
-            let mut repo = repo.lock();
-            let pr = repo
-                .pull_requests
-                .get_mut(&pr_number)
-                .expect("PR must be opened before being merged");
-            pr.merge_pr();
-            pr.clone()
-        };
+        let pr = self.modify_pr_state(id, |pr| pr.merge_pr());
         self.send_webhook(
             "pull_request",
-            GitHubPullRequestEventPayload::new(pr.clone(), "closed", None),
+            GitHubPullRequestEventPayload::new(pr, "closed", None),
         )
         .await?;
         Ok(())
@@ -632,20 +569,20 @@ impl BorsTester {
 
     /// Perform an arbitrary modification of the given PR, and then send the "edited" PR webhook
     /// to bors.
-    pub async fn edit_pr<F>(
+    pub async fn edit_pr<Id: Into<PrIdentifier>, F>(
         &mut self,
-        repo: GithubRepoName,
-        pr_number: u64,
+        id: Id,
         func: F,
     ) -> anyhow::Result<()>
     where
         F: FnOnce(&mut PullRequest),
     {
-        let repo = self.github.lock().get_repo(&repo);
+        let id = id.into();
+        let repo = self.github.lock().get_repo(&id.repo);
 
         let (pr, changes) = {
             let mut repo = repo.lock();
-            let pr = repo.get_pr_mut(pr_number);
+            let pr = repo.get_pr_mut(id.number);
             let base_before = pr.base_branch.clone();
             func(pr);
 
@@ -662,18 +599,19 @@ impl BorsTester {
         self.pull_request_edited(pr, changes).await
     }
 
-    pub async fn push_to_pr(&mut self, repo: GithubRepoName, pr_number: u64) -> anyhow::Result<()> {
+    pub async fn push_to_pr<Id: Into<PrIdentifier>>(&mut self, id: Id) -> anyhow::Result<()> {
+        let id = id.into();
         let pr = {
-            let repo = self.github.lock().get_repo(&repo);
+            let repo = self.github.lock().get_repo(&id.repo);
             let mut repo = repo.lock();
 
             let counter = repo.get_next_pr_push_counter();
 
             let pr = repo
                 .pull_requests
-                .get_mut(&pr_number)
+                .get_mut(&id.number)
                 .expect("PR must be initialized before pushing to it");
-            pr.head_sha = format!("pr-{pr_number}-commit-{counter}");
+            pr.head_sha = format!("pr-{}-commit-{counter}", id.number);
             pr.mergeable_state = OctocrabMergeableState::Unknown;
             pr.clone()
         };
@@ -685,24 +623,12 @@ impl BorsTester {
         .await
     }
 
-    pub async fn assign_pr(
+    pub async fn assign_pr<Id: Into<PrIdentifier>>(
         &mut self,
-        repo: GithubRepoName,
-        pr_number: u64,
+        id: Id,
         assignee: User,
     ) -> anyhow::Result<()> {
-        let pr = {
-            let repo = self.github.lock().get_repo(&repo);
-            let mut repo = repo.lock();
-
-            let pr = repo
-                .pull_requests
-                .get_mut(&pr_number)
-                .expect("PR must be initialized before assigning to it");
-            pr.assignees.push(assignee.clone());
-            pr.clone()
-        };
-
+        let pr = self.modify_pr_state(id, |pr| pr.assignees.push(assignee.clone()));
         self.send_webhook(
             "pull_request",
             GitHubPullRequestEventPayload::new(pr, "assigned", None),
@@ -710,24 +636,12 @@ impl BorsTester {
         .await
     }
 
-    pub async fn unassign_pr(
+    pub async fn unassign_pr<Id: Into<PrIdentifier>>(
         &mut self,
-        repo: GithubRepoName,
-        pr_number: u64,
+        id: Id,
         assignee: User,
     ) -> anyhow::Result<()> {
-        let pr = {
-            let repo = self.github.lock().get_repo(&repo);
-            let mut repo = repo.lock();
-
-            let pr = repo
-                .pull_requests
-                .get_mut(&pr_number)
-                .expect("PR must be initialized before unassigning from it");
-            pr.assignees.retain(|a| a != &assignee);
-            pr.clone()
-        };
-
+        let pr = self.modify_pr_state(id, |pr| pr.assignees.retain(|a| a != &assignee));
         self.send_webhook(
             "pull_request",
             GitHubPullRequestEventPayload::new(pr, "unassigned", None),
@@ -737,9 +651,11 @@ impl BorsTester {
 
     //-- Test assertions --//
     /// Expect that `count` comments will be received, without checking their contents.
-    pub async fn expect_comments(&mut self, count: u64) {
+    pub async fn expect_comments<Id: Into<PrIdentifier>>(&mut self, id: Id, count: u64) {
+        let id = id.into();
         for i in 0..count {
-            self.get_comment()
+            let id = id.clone();
+            self.get_comment(id)
                 .await
                 .unwrap_or_else(|_| panic!("Failed to get comment #{i}"));
         }
@@ -937,7 +853,7 @@ pub struct PullRequestProxy {
 impl PullRequestProxy {
     async fn new(tester: &BorsTester, gh_pr: PullRequest) -> Self {
         let db_pr = tester
-            .pr_db(gh_pr.repo.clone(), gh_pr.number.0)
+            .try_get_pr_from_db((gh_pr.repo.clone(), gh_pr.number.0))
             .await
             .unwrap();
         Self { gh_pr, db_pr }
@@ -945,6 +861,12 @@ impl PullRequestProxy {
 
     pub fn get_gh_pr(&self) -> PullRequest {
         self.gh_pr.clone()
+    }
+
+    #[track_caller]
+    pub fn expect_status(&self, status: PullRequestStatus) -> &Self {
+        assert_eq!(self.require_db_pr().pr_status, status);
+        self
     }
 
     #[track_caller]

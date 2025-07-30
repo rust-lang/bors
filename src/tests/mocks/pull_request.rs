@@ -26,6 +26,61 @@ pub fn default_pr_number() -> u64 {
     1
 }
 
+/// Helper struct for uniquely identifying a pull request.
+/// Used to reduce boilerplate in tests.
+///
+/// Can be created from:
+/// - `()`, which uses the default repo and default PR number.
+/// - A PR number, which uses the default repository.
+/// - A tuple (<repo-name>, <PR number>).
+#[derive(Clone, Debug)]
+pub struct PrIdentifier {
+    pub repo: GithubRepoName,
+    pub number: u64,
+}
+
+impl Default for PrIdentifier {
+    fn default() -> Self {
+        Self {
+            repo: default_repo_name(),
+            number: default_pr_number(),
+        }
+    }
+}
+
+impl From<u64> for PrIdentifier {
+    fn from(number: u64) -> Self {
+        Self {
+            repo: default_repo_name(),
+            number,
+        }
+    }
+}
+
+impl From<PullRequestNumber> for PrIdentifier {
+    fn from(value: PullRequestNumber) -> Self {
+        value.0.into()
+    }
+}
+
+impl From<(GithubRepoName, u64)> for PrIdentifier {
+    fn from(value: (GithubRepoName, u64)) -> Self {
+        Self {
+            repo: value.0,
+            number: value.1,
+        }
+    }
+}
+
+impl From<()> for PrIdentifier {
+    fn from(_: ()) -> Self {
+        Self {
+            repo: default_repo_name(),
+            number: default_pr_number(),
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct PullRequest {
     pub number: PullRequestNumber,
@@ -204,7 +259,7 @@ async fn mock_pr_comments(
             let pr = repo.pull_requests.get_mut(&pr_number).unwrap();
             let comment_id = pr.next_comment_id();
 
-            let comment = Comment::new(repo_name_clone.clone(), pr_number, &comment_payload.body)
+            let comment = Comment::new((repo_name_clone.clone(), pr_number), &comment_payload.body)
                 .with_author(User::bors_bot())
                 .with_id(comment_id);
 

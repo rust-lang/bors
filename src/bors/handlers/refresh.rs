@@ -215,7 +215,9 @@ mod tests {
     use crate::bors::handlers::refresh::MOCK_TIME;
     use crate::bors::handlers::trybuild::TRY_BUILD_CHECK_RUN_NAME;
     use crate::database::{MergeableState, OctocrabMergeableState};
-    use crate::tests::{BorsBuilder, GitHubState, default_pr_number, default_repo_name, run_test};
+    use crate::tests::{
+        BorsBuilder, BorsTester, GitHubState, default_pr_number, default_repo_name, run_test,
+    };
     use chrono::Utc;
     use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
     use std::future::Future;
@@ -224,7 +226,7 @@ mod tests {
 
     #[sqlx::test]
     async fn refresh_no_builds(pool: sqlx::PgPool) {
-        run_test(pool, async |tester| {
+        run_test(pool, async |tester: &mut BorsTester| {
             tester.cancel_timed_out_builds().await;
             Ok(())
         })
@@ -233,7 +235,7 @@ mod tests {
 
     #[sqlx::test]
     async fn refresh_pr_state(pool: sqlx::PgPool) {
-        run_test(pool, async |tester| {
+        run_test(pool, async |tester: &mut BorsTester| {
             tester.refresh_prs().await;
             Ok(())
         })
@@ -252,9 +254,9 @@ timeout = 3600
     async fn refresh_do_nothing_before_timeout(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
             .github(gh_state_with_long_timeout())
-            .run_test(async |tester| {
+            .run_test(async |tester: &mut BorsTester| {
                 tester.post_comment("@bors try").await?;
-                tester.expect_comments(1).await;
+                tester.expect_comments((), 1).await;
                 with_mocked_time(Duration::from_secs(10), async {
                     tester.cancel_timed_out_builds().await;
                 })
@@ -268,9 +270,9 @@ timeout = 3600
     async fn refresh_cancel_build_after_timeout(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
             .github(gh_state_with_long_timeout())
-            .run_test(async |tester| {
+            .run_test(async |tester: &mut BorsTester| {
                 tester.post_comment("@bors try").await?;
-                tester.expect_comments(1).await;
+                tester.expect_comments((), 1).await;
                 with_mocked_time(Duration::from_secs(4000), async {
                     assert_eq!(
                         tester
@@ -284,7 +286,7 @@ timeout = 3600
                     tester.cancel_timed_out_builds().await;
                 })
                 .await;
-                insta::assert_snapshot!(tester.get_comment().await?, @":boom: Test timed out after `3600`s");
+                insta::assert_snapshot!(tester.get_comment(()).await?, @":boom: Test timed out after `3600`s");
                 assert_eq!(
                     tester
                         .db()
@@ -303,18 +305,18 @@ timeout = 3600
     async fn refresh_cancel_build_updates_check_run(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
             .github(gh_state_with_long_timeout())
-            .run_test(async |tester| {
+            .run_test(async |tester: &mut BorsTester| {
                 tester.post_comment("@bors try").await?;
-                tester.expect_comments(1).await;
+                tester.expect_comments((), 1).await;
 
                 with_mocked_time(Duration::from_secs(4000), async {
                     tester.cancel_timed_out_builds().await;
                 })
                 .await;
-                tester.expect_comments(1).await;
+                tester.expect_comments((), 1).await;
 
                 tester.expect_check_run(
-                    &tester.default_pr().await.get_gh_pr().head_sha,
+                    &tester.get_pr(()).await.get_gh_pr().head_sha,
                     TRY_BUILD_CHECK_RUN_NAME,
                     "Bors try build",
                     CheckRunStatus::Completed,
@@ -330,16 +332,16 @@ timeout = 3600
     async fn refresh_cancel_workflow_after_timeout(pool: sqlx::PgPool) {
         let gh = BorsBuilder::new(pool)
             .github(gh_state_with_long_timeout())
-            .run_test(async |tester| {
+            .run_test(async |tester: &mut BorsTester| {
                 tester.post_comment("@bors try").await?;
-                tester.expect_comments(1).await;
+                tester.expect_comments((), 1).await;
                 tester.workflow_start(tester.try_branch()).await?;
 
                 with_mocked_time(Duration::from_secs(4000), async {
                     tester.cancel_timed_out_builds().await;
                 })
                 .await;
-                tester.expect_comments(1).await;
+                tester.expect_comments((), 1).await;
                 Ok(())
             })
             .await;
@@ -348,14 +350,14 @@ timeout = 3600
 
     #[sqlx::test]
     async fn refresh_enqueues_unknown_mergeable_prs(pool: sqlx::PgPool) {
-        run_test(pool, async |tester| {
+        run_test(pool, async |tester: &mut BorsTester| {
             tester
-                .edit_pr(default_repo_name(), default_pr_number(), |pr| {
+                .edit_pr((), |pr| {
                     pr.mergeable_state = OctocrabMergeableState::Unknown
                 })
                 .await?;
             tester
-                .wait_for_default_pr(|pr| pr.mergeable_state == MergeableState::Unknown)
+                .wait_for_pr((), |pr| pr.mergeable_state == MergeableState::Unknown)
                 .await?;
             tester
                 .default_repo()
@@ -364,7 +366,7 @@ timeout = 3600
                 .mergeable_state = OctocrabMergeableState::Dirty;
             tester.update_mergeability_status().await;
             tester
-                .wait_for_default_pr(|pr| pr.mergeable_state == MergeableState::HasConflicts)
+                .wait_for_pr((), |pr| pr.mergeable_state == MergeableState::HasConflicts)
                 .await?;
             Ok(())
         })
@@ -373,17 +375,17 @@ timeout = 3600
 
     #[sqlx::test]
     async fn refresh_new_pr(pool: sqlx::PgPool) {
-        run_test(pool, async |tester| {
+        run_test(pool, async |tester: &mut BorsTester| {
             let pr = tester
-                .with_blocked_webhooks(async |tester| {
+                .with_blocked_webhooks(async |tester: &mut BorsTester| {
                     tester.open_pr(default_repo_name(), |_| {}).await
                 })
                 .await?;
             tester.refresh_prs().await;
-            assert_eq!(
-                tester.get_pr_from_db(pr.number.0).await.pr_status,
-                PullRequestStatus::Open
-            );
+            tester
+                .get_pr(pr.number)
+                .await
+                .expect_status(PullRequestStatus::Open);
             Ok(())
         })
         .await;
@@ -391,23 +393,19 @@ timeout = 3600
 
     #[sqlx::test]
     async fn refresh_pr_with_status_closed(pool: sqlx::PgPool) {
-        run_test(pool, async |tester| {
+        run_test(pool, async |tester: &mut BorsTester| {
             let pr = tester.open_pr(default_repo_name(), |_| {}).await?;
+            tester.wait_for_pr(pr.number, |_| true).await?;
             tester
-                .wait_for_pr(default_repo_name(), pr.number.0, |_| true)
-                .await?;
-            tester
-                .with_blocked_webhooks(async |tester| {
-                    tester
-                        .set_pr_status_closed(default_repo_name(), pr.number.0)
-                        .await
+                .with_blocked_webhooks(async |tester: &mut BorsTester| {
+                    tester.set_pr_status_closed(pr.number).await
                 })
                 .await?;
             tester.refresh_prs().await;
-            assert_eq!(
-                tester.get_pr_from_db(pr.number.0).await.pr_status,
-                PullRequestStatus::Closed
-            );
+            tester
+                .get_pr(pr.number)
+                .await
+                .expect_status(PullRequestStatus::Closed);
             Ok(())
         })
         .await;
@@ -415,21 +413,19 @@ timeout = 3600
 
     #[sqlx::test]
     async fn refresh_pr_with_status_draft(pool: sqlx::PgPool) {
-        run_test(pool, async |tester| {
+        run_test(pool, async |tester: &mut BorsTester| {
             let pr = tester.open_pr(default_repo_name(), |_| {}).await?;
             tester
-                .with_blocked_webhooks(async |tester| {
-                    tester
-                        .set_pr_status_draft(default_repo_name(), pr.number.0)
-                        .await
+                .with_blocked_webhooks(async |tester: &mut BorsTester| {
+                    tester.set_pr_status_draft(pr.number).await
                 })
                 .await?;
 
             tester.refresh_prs().await;
-            assert_eq!(
-                tester.get_pr_from_db(pr.number.0).await.pr_status,
-                PullRequestStatus::Draft
-            );
+            tester
+                .get_pr(pr.number)
+                .await
+                .expect_status(PullRequestStatus::Draft);
             Ok(())
         })
         .await;

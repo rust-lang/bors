@@ -7,6 +7,7 @@ use wiremock::MockServer;
 use crate::create_github_client;
 use crate::github::GithubRepoName;
 use crate::tests::mocks::app::{AppHandler, default_app_id};
+use crate::tests::mocks::pull_request::PrIdentifier;
 use crate::tests::mocks::repository::{mock_repo, mock_repo_list};
 use crate::tests::{Comment, GitHubState};
 
@@ -25,7 +26,11 @@ impl GitHubRepoState {
     /// `pending_comments`, to be picked up later.
     async fn get_comment(&mut self, pr: u64) -> Comment {
         // First, try to resolve the comment from the pending comment list
-        if let Some(index) = self.pending_comments.iter().position(|c| c.pr == pr) {
+        if let Some(index) = self
+            .pending_comments
+            .iter()
+            .position(|c| c.pr_ident.number == pr)
+        {
             return self.pending_comments.remove(index);
         }
         // If it is not there, wait until some comment is received
@@ -36,12 +41,12 @@ impl GitHubRepoState {
                 .await
                 .expect("Channel was closed while waiting for a comment");
 
-            if comment.pr == pr {
+            if comment.pr_ident.number == pr {
                 return comment;
             }
             tracing::warn!(
                 "Received comment for PR {}, while expected for PR {pr}",
-                comment.pr
+                comment.pr_ident.number
             );
             self.pending_comments.push(comment);
         }
@@ -88,17 +93,17 @@ impl GitHubMockServer {
         .unwrap()
     }
 
-    pub async fn get_comment(
-        &mut self,
-        repo_name: GithubRepoName,
-        pr: u64,
-    ) -> anyhow::Result<Comment> {
+    pub async fn get_comment<Id: Into<PrIdentifier>>(&mut self, id: Id) -> anyhow::Result<Comment> {
+        let id = id.into();
         let repo = self
             .repos
-            .get_mut(&repo_name)
-            .unwrap_or_else(|| panic!("Repository `{repo_name}` not found"));
-        let comment = repo.get_comment(pr).await;
-        eprintln!("Received comment on {repo_name}#{pr}: {}", comment.content);
+            .get_mut(&id.repo)
+            .unwrap_or_else(|| panic!("Repository `{}` not found", id.repo));
+        let comment = repo.get_comment(id.number).await;
+        eprintln!(
+            "Received comment on {}#{}: {}",
+            id.repo, id.number, comment.content
+        );
         Ok(comment)
     }
 

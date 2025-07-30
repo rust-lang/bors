@@ -380,15 +380,15 @@ mod tests {
 
     async fn start_auto_build(tester: &mut BorsTester) -> anyhow::Result<()> {
         tester.post_comment("@bors r+").await?;
-        tester.expect_comments(1).await;
+        tester.expect_comments((), 1).await;
         tester.process_merge_queue().await;
-        tester.expect_comments(1).await;
+        tester.expect_comments((), 1).await;
         Ok(())
     }
 
     #[sqlx::test]
     async fn auto_workflow_started(pool: sqlx::PgPool) {
-        run_merge_queue_test(pool.clone(), async |tester| {
+        run_merge_queue_test(pool.clone(), async |tester: &mut BorsTester| {
             start_auto_build(tester).await?;
             tester
                 .workflow_event(WorkflowEvent::started(tester.auto_branch()))
@@ -403,10 +403,10 @@ mod tests {
 
     #[sqlx::test]
     async fn auto_workflow_check_run_created(pool: sqlx::PgPool) {
-        run_merge_queue_test(pool, async |tester| {
+        run_merge_queue_test(pool, async |tester: &mut BorsTester| {
             start_auto_build(tester).await?;
             tester.expect_check_run(
-                &tester.default_pr().await.get_gh_pr().head_sha,
+                &tester.get_pr(()).await.get_gh_pr().head_sha,
                 AUTO_BUILD_CHECK_RUN_NAME,
                 AUTO_BUILD_CHECK_RUN_NAME,
                 CheckRunStatus::InProgress,
@@ -419,12 +419,12 @@ mod tests {
 
     #[sqlx::test]
     async fn auto_build_started_comment(pool: sqlx::PgPool) {
-        run_merge_queue_test(pool, async |tester| {
+        run_merge_queue_test(pool, async |tester: &mut BorsTester| {
             tester.post_comment("@bors r+").await?;
-            tester.expect_comments(1).await;
+            tester.expect_comments((), 1).await;
             tester.process_merge_queue().await;
             insta::assert_snapshot!(
-                tester.get_comment().await?,
+                tester.get_comment(()).await?,
                 @":hourglass: Testing commit pr-1-sha with merge merge-0-pr-1..."
             );
             Ok(())
@@ -434,10 +434,10 @@ mod tests {
 
     #[sqlx::test]
     async fn auto_build_insert_into_db(pool: sqlx::PgPool) {
-        run_merge_queue_test(pool, async |tester| {
+        run_merge_queue_test(pool, async |tester: &mut BorsTester| {
             start_auto_build(tester).await?;
             tester.workflow_full_success(tester.auto_branch()).await?;
-            tester.expect_comments(1).await;
+            tester.expect_comments((), 1).await;
             assert!(
                 tester
                     .db()
@@ -456,11 +456,11 @@ mod tests {
 
     #[sqlx::test]
     async fn auto_build_success_comment(pool: sqlx::PgPool) {
-        run_merge_queue_test(pool, async |tester| {
+        run_merge_queue_test(pool, async |tester: &mut BorsTester| {
             start_auto_build(tester).await?;
             tester.workflow_full_success(tester.auto_branch()).await?;
             insta::assert_snapshot!(
-                tester.get_comment().await?,
+                tester.get_comment(()).await?,
                 @r"
             :sunny: Test successful - [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1)
             Approved by: `default-user`
@@ -474,17 +474,17 @@ mod tests {
 
     #[sqlx::test]
     async fn auto_build_succeeds_and_merges_in_db(pool: sqlx::PgPool) {
-        run_merge_queue_test(pool, async |tester| {
+        run_merge_queue_test(pool, async |tester: &mut BorsTester| {
             start_auto_build(tester).await?;
             tester.workflow_full_success(tester.auto_branch()).await?;
-            tester.expect_comments(1).await;
+            tester.expect_comments((), 1).await;
             tester
-                .wait_for_default_pr(|pr| {
+                .wait_for_pr((), |pr| {
                     pr.auto_build.as_ref().unwrap().status == BuildStatus::Success
                 })
                 .await?;
             tester
-                .wait_for_default_pr(|pr| pr.pr_status == PullRequestStatus::Merged)
+                .wait_for_pr((), |pr| pr.pr_status == PullRequestStatus::Merged)
                 .await?;
             Ok(())
         })
@@ -493,16 +493,16 @@ mod tests {
 
     #[sqlx::test]
     async fn auto_build_push_fail_comment(pool: sqlx::PgPool) {
-        run_merge_queue_test(pool, async |tester| {
+        run_merge_queue_test(pool, async |tester: &mut BorsTester| {
             start_auto_build(tester).await?;
             tester.workflow_full_success(tester.auto_branch()).await?;
-            tester.expect_comments(1).await;
+            tester.expect_comments((), 1).await;
 
             tester.default_repo().lock().push_error = true;
 
             tester.process_merge_queue().await;
             insta::assert_snapshot!(
-                tester.get_comment().await?,
+                tester.get_comment(()).await?,
                 @":eyes: Test was successful, but fast-forwarding failed: IO error"
             );
             Ok(())
@@ -512,17 +512,17 @@ mod tests {
 
     #[sqlx::test]
     async fn auto_build_push_fail_updates_check_run(pool: sqlx::PgPool) {
-        run_merge_queue_test(pool, async |tester| {
+        run_merge_queue_test(pool, async |tester: &mut BorsTester| {
             start_auto_build(tester).await?;
             tester.workflow_full_success(tester.auto_branch()).await?;
-            tester.expect_comments(1).await;
+            tester.expect_comments((), 1).await;
 
             tester.default_repo().lock().push_error = true;
 
             tester.process_merge_queue().await;
-            tester.expect_comments(1).await;
+            tester.expect_comments((), 1).await;
             tester.expect_check_run(
-                &tester.default_pr().await.get_gh_pr().head_sha,
+                &tester.get_pr(()).await.get_gh_pr().head_sha,
                 AUTO_BUILD_CHECK_RUN_NAME,
                 AUTO_BUILD_CHECK_RUN_NAME,
                 CheckRunStatus::Completed,
@@ -535,17 +535,17 @@ mod tests {
 
     #[sqlx::test]
     async fn auto_build_push_fail_in_db(pool: sqlx::PgPool) {
-        run_merge_queue_test(pool, async |tester| {
+        run_merge_queue_test(pool, async |tester: &mut BorsTester| {
             start_auto_build(tester).await?;
             tester.workflow_full_success(tester.auto_branch()).await?;
-            tester.expect_comments(1).await;
+            tester.expect_comments((), 1).await;
 
             tester.default_repo().lock().push_error = true;
 
             tester.process_merge_queue().await;
-            tester.expect_comments(1).await;
+            tester.expect_comments((), 1).await;
             tester
-                .wait_for_default_pr(|pr| {
+                .wait_for_pr((), |pr| {
                     pr.auto_build.as_ref().unwrap().status == BuildStatus::Failure
                 })
                 .await?;
@@ -556,10 +556,10 @@ mod tests {
 
     #[sqlx::test]
     async fn auto_build_branch_history(pool: sqlx::PgPool) {
-        let gh = run_merge_queue_test(pool, async |tester| {
+        let gh = run_merge_queue_test(pool, async |tester: &mut BorsTester| {
             start_auto_build(tester).await?;
             tester.workflow_full_success(tester.auto_branch()).await?;
-            tester.expect_comments(1).await;
+            tester.expect_comments((), 1).await;
             Ok(())
         })
         .await;
@@ -574,48 +574,36 @@ mod tests {
 
     #[sqlx::test]
     async fn merge_queue_sequential_order(pool: sqlx::PgPool) {
-        let gh = run_merge_queue_test(pool, async |tester| {
+        let gh = run_merge_queue_test(pool, async |tester: &mut BorsTester| {
             let pr2 = tester.open_pr(default_repo_name(), |_| {}).await?;
             let pr3 = tester.open_pr(default_repo_name(), |_| {}).await?;
 
             tester.post_comment("@bors r+").await?;
             tester
-                .post_comment(Comment::pr(pr2.number.0, "@bors r+"))
+                .post_comment(Comment::new(pr2.number, "@bors r+"))
                 .await?;
             tester
-                .post_comment(Comment::pr(pr3.number.0, "@bors r+"))
+                .post_comment(Comment::new(pr3.number, "@bors r+"))
                 .await?;
 
-            tester.expect_comments(1).await;
-            tester
-                .expect_comment_on_pr(default_repo_name(), pr2.number.0)
-                .await?;
-            tester
-                .expect_comment_on_pr(default_repo_name(), pr3.number.0)
-                .await?;
+            tester.expect_comments((), 1).await;
+            tester.expect_comments(pr2.number, 1).await;
+            tester.expect_comments(pr3.number, 1).await;
 
             tester.process_merge_queue().await;
-            tester.expect_comments(1).await;
+            tester.expect_comments((), 1).await;
             tester.workflow_full_success(tester.auto_branch()).await?;
-            tester.expect_comments(1).await;
+            tester.expect_comments((), 1).await;
 
             tester.process_merge_queue().await;
-            tester
-                .expect_comment_on_pr(default_repo_name(), pr2.number.0)
-                .await?;
+            tester.expect_comments(pr2.number, 1).await;
             tester.workflow_full_success(tester.auto_branch()).await?;
-            tester
-                .expect_comment_on_pr(default_repo_name(), pr2.number.0)
-                .await?;
+            tester.expect_comments(pr2.number, 1).await;
 
             tester.process_merge_queue().await;
-            tester
-                .expect_comment_on_pr(default_repo_name(), pr3.number.0)
-                .await?;
+            tester.expect_comments(pr3.number, 1).await;
             tester.workflow_full_success(tester.auto_branch()).await?;
-            tester
-                .expect_comment_on_pr(default_repo_name(), pr3.number.0)
-                .await?;
+            tester.expect_comments(pr3.number, 1).await;
 
             Ok(())
         })
@@ -630,48 +618,36 @@ mod tests {
 
     #[sqlx::test]
     async fn merge_queue_priority_order(pool: sqlx::PgPool) {
-        let gh = run_merge_queue_test(pool, async |tester| {
+        let gh = run_merge_queue_test(pool, async |tester: &mut BorsTester| {
             let pr2 = tester.open_pr(default_repo_name(), |_| {}).await?;
             let pr3 = tester.open_pr(default_repo_name(), |_| {}).await?;
 
             tester.post_comment("@bors r+").await?;
             tester
-                .post_comment(Comment::pr(pr2.number.0, "@bors r+"))
+                .post_comment(Comment::new(pr2.number, "@bors r+"))
                 .await?;
             tester
-                .post_comment(Comment::pr(pr3.number.0, "@bors r+ p=3"))
+                .post_comment(Comment::new(pr3.number, "@bors r+ p=3"))
                 .await?;
 
-            tester.expect_comments(1).await;
-            tester
-                .expect_comment_on_pr(default_repo_name(), pr2.number.0)
-                .await?;
-            tester
-                .expect_comment_on_pr(default_repo_name(), pr3.number.0)
-                .await?;
+            tester.expect_comments((), 1).await;
+            tester.expect_comments(pr2.number, 1).await;
+            tester.expect_comments(pr3.number, 1).await;
 
             tester.process_merge_queue().await;
-            tester.expect_comments(1).await;
+            tester.expect_comments((), 1).await;
             tester.workflow_full_success(tester.auto_branch()).await?;
-            tester.expect_comments(1).await;
+            tester.expect_comments((), 1).await;
 
             tester.process_merge_queue().await;
-            tester
-                .expect_comment_on_pr(default_repo_name(), pr3.number.0)
-                .await?;
+            tester.expect_comments(pr3.number, 1).await;
             tester.workflow_full_success(tester.auto_branch()).await?;
-            tester
-                .expect_comment_on_pr(default_repo_name(), pr3.number.0)
-                .await?;
+            tester.expect_comments(pr3.number, 1).await;
 
             tester.process_merge_queue().await;
-            tester
-                .expect_comment_on_pr(default_repo_name(), pr2.number.0)
-                .await?;
+            tester.expect_comments(pr2.number, 1).await;
             tester.workflow_full_success(tester.auto_branch()).await?;
-            tester
-                .expect_comment_on_pr(default_repo_name(), pr2.number.0)
-                .await?;
+            tester.expect_comments(pr2.number, 1).await;
 
             Ok(())
         })

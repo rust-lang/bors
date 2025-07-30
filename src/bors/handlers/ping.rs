@@ -16,13 +16,13 @@ pub(super) async fn command_ping(
 
 #[cfg(test)]
 mod tests {
-    use crate::tests::run_test;
+    use crate::tests::{BorsTester, run_test};
 
     #[sqlx::test]
     async fn ping_command(pool: sqlx::PgPool) {
-        run_test(pool, async |tester| {
+        run_test(pool, async |tester: &mut BorsTester| {
             tester.post_comment("@bors ping").await?;
-            assert_eq!(tester.get_comment().await?, "Pong 🏓!");
+            assert_eq!(tester.get_comment(()).await?, "Pong 🏓!");
             Ok(())
         })
         .await;

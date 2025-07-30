@@ -5,34 +5,27 @@ use octocrab::models::{Author, CommentId, IssueId, IssueState, Label};
 use serde::Serialize;
 use url::Url;
 
-use crate::github::GithubRepoName;
 use crate::tests::mocks::User;
+use crate::tests::mocks::pull_request::PrIdentifier;
 use crate::tests::mocks::repository::GitHubRepository;
 use crate::tests::mocks::user::GitHubUser;
-use crate::tests::{Repo, default_pr_number, default_repo_name};
 
 #[derive(Clone, Debug)]
 pub struct Comment {
-    pub repo: GithubRepoName,
-    pub pr: u64,
+    pub pr_ident: PrIdentifier,
     pub author: User,
     pub content: String,
     pub comment_id: u64,
 }
 
 impl Comment {
-    pub fn new(repo: GithubRepoName, pr: u64, content: &str) -> Self {
+    pub fn new<Id: Into<PrIdentifier>>(id: Id, content: &str) -> Self {
         Self {
-            repo,
-            pr,
+            pr_ident: id.into(),
             author: User::default_pr_author(),
             content: content.to_string(),
             comment_id: 1, // comment_id will be updated by the mock server
         }
-    }
-
-    pub fn pr(pr: u64, content: &str) -> Self {
-        Self::new(default_repo_name(), pr, content)
     }
 
     pub fn with_author(self, author: User) -> Self {
@@ -49,7 +42,7 @@ impl Comment {
 
 impl<'a> From<&'a str> for Comment {
     fn from(value: &'a str) -> Self {
-        Comment::new(Repo::default().name, default_pr_number(), value)
+        Comment::new(PrIdentifier::default(), value)
     }
 }
 
@@ -68,11 +61,11 @@ impl From<Comment> for GitHubIssueCommentEventPayload {
         let time = Utc::now();
         let html_url = format!(
             "https://github.com/{}/pull/{}#issuecomment-{}",
-            value.repo, value.pr, value.comment_id
+            value.pr_ident.repo, value.pr_ident.number, value.comment_id
         );
         let url = Url::parse(&html_url).unwrap();
         Self {
-            repository: value.repo.into(),
+            repository: value.pr_ident.repo.into(),
             action: IssueCommentEventAction::Created,
             issue: GitHubIssue {
                 id: IssueId(1),
@@ -83,10 +76,10 @@ impl From<Comment> for GitHubIssueCommentEventPayload {
                 comments_url: url.clone(),
                 events_url: url.clone(),
                 html_url: url.clone(),
-                number: value.pr,
+                number: value.pr_ident.number,
                 state: IssueState::Open,
                 state_reason: None,
-                title: format!("PR #{}", value.pr),
+                title: format!("PR #{}", value.pr_ident.number),
                 body: None,
                 body_text: None,
                 body_html: None,
@@ -171,7 +164,7 @@ impl From<Comment> for GitHubComment {
         let time = Utc::now();
         let html_url = format!(
             "https://github.com/{}/pull/{}#issuecomment-{}",
-            value.repo, value.pr, value.comment_id
+            value.pr_ident.repo, value.pr_ident.number, value.comment_id
         );
         let url = Url::parse(&html_url).unwrap();
         Self {
