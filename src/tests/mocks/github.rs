@@ -1,13 +1,16 @@
+use graphql_parser::query::{Definition, Document, OperationDefinition, Selection};
 use octocrab::Octocrab;
-use std::ops::Deref;
+use std::collections::HashMap;
 use std::sync::Arc;
-use wiremock::MockServer;
+use wiremock::{MockServer, Request, ResponseTemplate};
 
 use crate::create_github_client;
+use crate::github::api::client::MinimizeCommentReason;
 use crate::tests::GitHubState;
 use crate::tests::mocks::app::{AppHandler, default_app_id};
 use crate::tests::mocks::pull_request::CommentMsg;
 use crate::tests::mocks::repository::{mock_repo, mock_repo_list};
+use crate::tests::mocks::{MinimizedComment, dynamic_mock_req};
 
 pub struct GitHubMockServer {
     mock_server: MockServer,
@@ -17,12 +20,17 @@ pub struct GitHubMockServer {
 impl GitHubMockServer {
     pub async fn start(github: Arc<tokio::sync::Mutex<GitHubState>>) -> Self {
         let mock_server = MockServer::start().await;
-        mock_repo_list(github.lock().await.deref(), &mock_server).await;
 
-        // Repositories are mocked separately to make it easier to
-        // pass comm. channels to them.
-        for repo in github.lock().await.repos.values() {
-            mock_repo(repo.clone(), &mock_server).await;
+        {
+            let gh_locked = github.lock().await;
+            mock_repo_list(&gh_locked, &mock_server).await;
+            mock_graphql(github.clone(), &mock_server).await;
+
+            // Repositories are mocked separately to make it easier to
+            // pass comm. channels to them.
+            for repo in gh_locked.repos.values() {
+                mock_repo(repo.clone(), &mock_server).await;
+            }
         }
 
         AppHandler::default().mount(&mock_server).await;
@@ -83,6 +91,65 @@ impl GitHubMockServer {
             }
         }
     }
+}
+
+async fn mock_graphql(github: Arc<tokio::sync::Mutex<GitHubState>>, mock_server: &MockServer) {
+    dynamic_mock_req(
+        move |request: &Request, []: [&str; 0]| {
+            #[derive(serde::Deserialize)]
+            struct GraphQlRequest {
+                query: String,
+                variables: serde_json::Value,
+            }
+
+            // Do some basic parsing of GraphQL. We only support the small subset of operations
+            // used by bors.
+            let body: GraphQlRequest = request.body_json().unwrap();
+            let query: Document<&str> =
+                graphql_parser::parse_query(&body.query).expect("Could not parse GraphQL query");
+            let definition = query.definitions.into_iter().next().unwrap();
+            let mutation = match definition {
+                Definition::Operation(OperationDefinition::Mutation(mutation)) => mutation,
+                _ => panic!("Unexpected GraphQL query: {}", body.query),
+            };
+            let selection = mutation.selection_set.items.into_iter().next().unwrap();
+            let operation = match selection {
+                Selection::Field(field) => field,
+                _ => panic!("Unexpected GraphQL selection"),
+            };
+            if operation.name == "minimizeComment" {
+                #[derive(serde::Deserialize)]
+                struct Variables {
+                    node_id: String,
+                    reason: MinimizeCommentReason,
+                }
+
+                let github = github.clone();
+                let data: Variables = serde_json::from_value(body.variables).unwrap();
+
+                // We have to use e.g. `blocking_lock` to lock from a sync function.
+                // It has to happen in a separate thread though.
+                std::thread::spawn(move || {
+                    github
+                        .blocking_lock()
+                        .add_minimized_comment(MinimizedComment {
+                            node_id: data.node_id,
+                            reason: data.reason,
+                        });
+                })
+                .join()
+                .unwrap();
+            } else {
+                panic!("Unexpected operation {}", operation.name);
+            }
+
+            ResponseTemplate::new(200).set_body_json(HashMap::<String, String>::new())
+        },
+        "POST",
+        "^/graphql$".to_string(),
+    )
+    .mount(mock_server)
+    .await;
 }
 
 const GITHUB_MOCK_PRIVATE_KEY: &str = r###"-----BEGIN PRIVATE KEY-----

@@ -43,6 +43,7 @@ use crate::tests::mocks::workflow::{
 };
 
 // Public re-exports for use in tests
+use crate::github::api::client::MinimizeCommentReason;
 pub use io::load_test_file;
 pub use mocks::ExternalHttpMock;
 pub use mocks::GitHubState;
@@ -346,11 +347,13 @@ impl BorsTester {
 
     /// Wait until the next bot comment is received on the specified repo and PR.
     pub async fn get_comment<Id: Into<PrIdentifier>>(&mut self, id: Id) -> anyhow::Result<String> {
-        Ok(self.github.lock().await.get_comment(id).await?.content)
+        Ok(GitHubState::get_comment(self.github.clone(), id)
+            .await?
+            .content)
     }
 
     //-- Generation of GitHub events --//
-    pub async fn post_comment<C: Into<Comment>>(&mut self, comment: C) -> anyhow::Result<()> {
+    pub async fn post_comment<C: Into<Comment>>(&mut self, comment: C) -> anyhow::Result<Comment> {
         let comment = comment.into();
 
         // Allocate comment IDs
@@ -361,7 +364,8 @@ impl BorsTester {
             .next_comment_ids();
         let comment = comment.with_ids(id, node_id);
 
-        self.webhook_comment(comment).await
+        self.webhook_comment(comment.clone()).await?;
+        Ok(comment)
     }
 
     pub async fn cancel_timed_out_builds(&self) {
@@ -706,6 +710,14 @@ impl BorsTester {
                 .await
                 .unwrap_or_else(|_| panic!("Failed to get comment #{i}"));
         }
+    }
+
+    /// Assert that the given comment has been minimized.
+    pub async fn expect_minimized_comment(&self, comment: &Comment, reason: MinimizeCommentReason) {
+        self.github
+            .lock()
+            .await
+            .check_minimized_comment(comment, reason);
     }
 
     pub async fn expect_check_run(

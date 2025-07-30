@@ -258,7 +258,8 @@ async fn notify_of_edited_pr(
 PR will need to be re-approved."#,
             )),
         )
-        .await
+        .await?;
+    Ok(())
 }
 
 async fn notify_of_pushed_pr(
@@ -279,7 +280,8 @@ PR will need to be re-approved."#,
 
     repo.client
         .post_comment(pr_number, Comment::new(comment))
-        .await
+        .await?;
+    Ok(())
 }
 
 #[cfg(test)]

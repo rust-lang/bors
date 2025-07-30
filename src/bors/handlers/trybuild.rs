@@ -5,9 +5,9 @@ use super::{PullRequestData, deny_request};
 use crate::PgDbClient;
 use crate::bors::RepositoryState;
 use crate::bors::command::{CommandPrefix, Parent};
-use crate::bors::comment::no_try_build_in_progress_comment;
 use crate::bors::comment::try_build_cancelled_comment;
 use crate::bors::comment::try_build_cancelled_with_failed_workflow_cancel_comment;
+use crate::bors::comment::{CommentTag, no_try_build_in_progress_comment};
 use crate::bors::comment::{
     cant_find_last_parent_comment, merge_conflict_comment, try_build_started_comment,
 };
@@ -127,7 +127,8 @@ pub(super) async fn command_try_build(
                 }
             }
 
-            repo.client
+            let comment = repo
+                .client
                 .post_comment(
                     pr.number(),
                     try_build_started_comment(
@@ -137,14 +138,22 @@ pub(super) async fn command_try_build(
                         cancelled_workflow_urls,
                     ),
                 )
-                .await
+                .await?;
+            db.record_tagged_bot_comment(
+                repo.repository(),
+                pr.number(),
+                CommentTag::TryBuildStarted,
+                &comment.node_id,
+            )
+            .await?;
         }
         MergeResult::Conflict => {
             repo.client
                 .post_comment(pr.number(), merge_conflict_comment(&pr.github.head.name))
-                .await
+                .await?;
         }
     }
+    Ok(())
 }
 
 /// Cancels a previously running try build and returns a list of cancelled workflow URLs.
@@ -370,6 +379,7 @@ mod tests {
     use crate::database::operations::get_all_workflows;
     use crate::database::{BuildStatus, WorkflowStatus};
     use crate::github::CommitSha;
+    use crate::github::api::client::MinimizeCommentReason;
     use crate::tests::BorsTester;
     use crate::tests::{
         BorsBuilder, Comment, GitHubState, User, WorkflowEvent, WorkflowJob, WorkflowRunData,
@@ -1167,6 +1177,42 @@ try_failed = ["+foo", "+bar", "-baz"]
                     None,
                 )
                 .await;
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn minimize_try_build_started_comment_after_success(pool: sqlx::PgPool) {
+        run_test(pool, async |tester: &mut BorsTester| {
+            let comment = tester.post_comment("@bors try").await?;
+            tester.expect_comments((), 1).await;
+            tester
+                .workflow_full_success(tester.try_branch().await)
+                .await?;
+            tester.expect_comments((), 1).await;
+            tester
+                .expect_minimized_comment(&comment, MinimizeCommentReason::Outdated)
+                .await;
+
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn minimize_try_build_started_comment_after_failure(pool: sqlx::PgPool) {
+        run_test(pool, async |tester: &mut BorsTester| {
+            let comment = tester.post_comment("@bors try").await?;
+            tester.expect_comments((), 1).await;
+            tester
+                .workflow_full_failure(tester.try_branch().await)
+                .await?;
+            tester.expect_comments((), 1).await;
+            tester
+                .expect_minimized_comment(&comment, MinimizeCommentReason::Outdated)
+                .await;
+
             Ok(())
         })
         .await;

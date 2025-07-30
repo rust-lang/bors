@@ -4,6 +4,7 @@ use sqlx::postgres::PgExecutor;
 
 use crate::bors::PullRequestStatus;
 use crate::bors::RollupMode;
+use crate::bors::comment::CommentTag;
 use crate::database::BuildStatus;
 use crate::database::RepoModel;
 use crate::database::WorkflowModel;
@@ -16,6 +17,7 @@ use super::ApprovalInfo;
 use super::ApprovalStatus;
 use super::Assignees;
 use super::BuildModel;
+use super::CommentModel;
 use super::DelegatedPermission;
 use super::MergeableState;
 use super::PullRequestModel;
@@ -1033,6 +1035,77 @@ pub(crate) async fn get_merge_queue_prs(
         .fetch_all(executor)
         .await?;
         Ok(records)
+    })
+    .await
+}
+
+pub(crate) async fn get_tagged_bot_comments(
+    executor: impl PgExecutor<'_>,
+    repo: &GithubRepoName,
+    pr_number: PullRequestNumber,
+    tag: CommentTag,
+) -> anyhow::Result<Vec<CommentModel>> {
+    measure_db_query("get_tagged_bot_comments", || async {
+        let comments = sqlx::query_as!(
+            CommentModel,
+            r#"
+            SELECT
+                id,
+                repository as "repository: GithubRepoName",
+                pr_number as "pr_number: i64",
+                tag as "tag: CommentTag",
+                node_id,
+                created_at as "created_at: DateTime<Utc>"
+            FROM comment
+            WHERE repository = $1
+              AND pr_number = $2
+              AND tag = $3
+            "#,
+            repo as &GithubRepoName,
+            pr_number.0 as i32,
+            tag as CommentTag,
+        )
+        .fetch_all(executor)
+        .await?;
+        Ok(comments)
+    })
+    .await
+}
+
+pub(crate) async fn record_tagged_bot_comment(
+    executor: impl PgExecutor<'_>,
+    repo: &GithubRepoName,
+    pr_number: PullRequestNumber,
+    tag: CommentTag,
+    node_id: &str,
+) -> anyhow::Result<()> {
+    measure_db_query("record_tagged_bot_comment", || async {
+        sqlx::query!(
+            r#"
+            INSERT INTO comment (repository, pr_number, tag, node_id)
+            VALUES ($1, $2, $3, $4)
+            "#,
+            repo as &GithubRepoName,
+            pr_number.0 as i32,
+            tag as CommentTag,
+            node_id
+        )
+        .execute(executor)
+        .await?;
+        Ok(())
+    })
+    .await
+}
+
+pub(crate) async fn delete_tagged_bot_comment(
+    executor: impl PgExecutor<'_>,
+    id: i32,
+) -> anyhow::Result<()> {
+    measure_db_query("delete_tagged_bot_comment", || async {
+        sqlx::query!("DELETE FROM comment WHERE id = $1", id)
+            .execute(executor)
+            .await?;
+        Ok(())
     })
     .await
 }

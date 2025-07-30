@@ -24,6 +24,12 @@ pub enum CommentMetadata {
     TryBuildCompleted { merge_sha: String },
 }
 
+/// A tag for a comment, used to identify the comment.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum CommentTag {
+    TryBuildStarted,
+}
+
 impl Comment {
     pub fn new(text: String) -> Self {
         Self {

@@ -3,6 +3,7 @@ use octocrab::Octocrab;
 use octocrab::models::checks::CheckRun;
 use octocrab::models::{App, CheckRunId, CheckSuiteId, RunId};
 use octocrab::params::checks::{CheckRunConclusion, CheckRunOutput, CheckRunStatus};
+use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use tracing::log;
 
@@ -121,14 +122,13 @@ impl GithubRepositoryClient {
         &self,
         pr: PullRequestNumber,
         comment: Comment,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<octocrab::models::issues::Comment> {
         perform_network_request_with_retry("post_comment", || async {
             self.client
                 .issues(&self.repository().owner, &self.repository().name)
                 .create_comment(pr.0, comment.render())
                 .await
-                .with_context(|| format!("Cannot post comment to {}", self.format_pr(pr)))?;
-            Ok(())
+                .with_context(|| format!("Cannot post comment to {}", self.format_pr(pr)))
         })
         .await?
     }
@@ -384,6 +384,81 @@ impl GithubRepositoryClient {
     }
 }
 
+/// GraphQL APIs
+impl GithubRepositoryClient {
+    async fn graphql<T, V>(&self, query: &str, variables: V) -> anyhow::Result<T>
+    where
+        T: DeserializeOwned,
+        V: Serialize,
+    {
+        #[derive(Serialize)]
+        struct Payload<'a, V> {
+            query: &'a str,
+            variables: V,
+        }
+
+        let response = self
+            .client
+            .graphql::<T>(&Payload { query, variables })
+            .await
+            .context("GraphQL request failed")?;
+        Ok(response)
+    }
+
+    /// Minimizes a comment on an Issue, Commit, Pull Request, or Gist.
+    ///
+    /// GitHub Docs: <https://docs.github.com/en/graphql/reference/mutations#minimizecomment>
+    pub async fn minimize_comment(
+        &self,
+        node_id: &str,
+        reason: MinimizeCommentReason,
+    ) -> anyhow::Result<()> {
+        const QUERY: &str = "mutation($node_id: ID!, $reason: ReportedContentClassifiers!) {
+            minimizeComment(input: {subjectId: $node_id, classifier: $reason}) {
+                __typename
+            }
+        }";
+
+        #[derive(Serialize)]
+        struct Variables<'a> {
+            node_id: &'a str,
+            reason: MinimizeCommentReason,
+        }
+
+        #[derive(Deserialize)]
+        struct Output {}
+
+        tracing::debug!(node_id, ?reason, "Minimizing comment");
+        measure_network_request("minimize_comment", || async {
+            self.graphql::<Output, Variables>(QUERY, Variables { node_id, reason })
+                .await
+                .context("Failed to minimize comment")?;
+            Ok(())
+        })
+        .await
+    }
+}
+
+/// The reasons a piece of content can be reported or minimized.
+///
+/// GitHub Docs: <https://docs.github.com/en/graphql/reference/enums#reportedcontentclassifiers>
+#[derive(Debug, Copy, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum MinimizeCommentReason {
+    /// An abusive or harassing piece of content.
+    Abuse,
+    /// A duplicated piece of content.
+    Duplicate,
+    /// An irrelevant piece of content.
+    OffTopic,
+    /// An outdated piece of content.
+    Outdated,
+    /// The content has been resolved.
+    Resolved,
+    /// A spammy piece of content.
+    Spam,
+}
+
 #[cfg(test)]
 mod tests {
     use crate::github::GithubRepoName;
@@ -398,7 +473,7 @@ mod tests {
     #[tokio::test]
     async fn load_installed_repos() {
         let mock = ExternalHttpMock::start(Arc::new(tokio::sync::Mutex::new(
-            GitHubState::new()
+            GitHubState::default()
                 .with_repo(
                     Repo::new(
                         GithubRepoName::new("foo", "bar"),
@@ -417,7 +492,7 @@ mod tests {
         let client = mock.github_client();
         let team_api_client = mock.team_api_client();
         let mut repos = load_repositories(&client, &team_api_client).await.unwrap();
-        assert_eq!(repos.len(), 2);
+        assert_eq!(repos.len(), 3);
 
         let repo = repos
             .remove(&GithubRepoName::new("foo", "bar"))

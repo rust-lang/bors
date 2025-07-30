@@ -1,14 +1,13 @@
 use crate::PgDbClient;
-use crate::bors::comment::{build_failed_comment, try_build_succeeded_comment};
+use crate::bors::comment::{CommentTag, build_failed_comment, try_build_succeeded_comment};
 use crate::bors::event::{WorkflowRunCompleted, WorkflowRunStarted};
-use crate::bors::handlers::TRY_BRANCH_NAME;
-use crate::bors::handlers::is_bors_observed_branch;
+use crate::bors::handlers::get_build_type;
 use crate::bors::handlers::labels::handle_label_trigger;
-use crate::bors::merge_queue::AUTO_BRANCH_NAME;
+use crate::bors::handlers::{BuildType, is_bors_observed_branch};
 use crate::bors::merge_queue::MergeQueueSender;
 use crate::bors::{FailedWorkflowRun, RepositoryState, WorkflowRun};
 use crate::database::{BuildModel, BuildStatus, PullRequestModel, WorkflowModel, WorkflowStatus};
-use crate::github::api::client::GithubRepositoryClient;
+use crate::github::api::client::{GithubRepositoryClient, MinimizeCommentReason};
 use crate::github::{CommitSha, LabelTrigger};
 use octocrab::models::CheckRunId;
 use octocrab::models::workflows::{Conclusion, Job, Status};
@@ -109,9 +108,9 @@ async fn maybe_complete_build(
     payload: WorkflowRunCompleted,
     merge_queue_tx: &MergeQueueSender,
 ) -> anyhow::Result<()> {
-    if !is_bors_observed_branch(&payload.branch) {
+    let Some(build_type) = get_build_type(&payload.branch) else {
         return Ok(());
-    }
+    };
 
     let Some(build) = db
         .find_build(
@@ -188,29 +187,27 @@ async fn maybe_complete_build(
         .any(|check| matches!(check.status, WorkflowStatus::Failure));
     let build_succeeded = !has_failure;
     let pr_num = pr.number;
-    let branch = payload.branch.as_str();
 
     let status = if build_succeeded {
         BuildStatus::Success
     } else {
         BuildStatus::Failure
     };
-    let trigger = match branch {
-        TRY_BRANCH_NAME => {
+    let trigger = match build_type {
+        BuildType::Try => {
             if build_succeeded {
                 LabelTrigger::TryBuildSucceeded
             } else {
                 LabelTrigger::TryBuildFailed
             }
         }
-        AUTO_BRANCH_NAME => {
+        BuildType::Auto => {
             if build_succeeded {
                 LabelTrigger::AutoBuildSucceeded
             } else {
                 LabelTrigger::AutoBuildFailed
             }
         }
-        _ => unreachable!("Branch should be bors observed branch"),
     };
 
     db.update_build_status(&build, status).await?;
@@ -233,7 +230,7 @@ async fn maybe_complete_build(
     }
 
     // Trigger merge queue when an auto build completes
-    if payload.branch == AUTO_BRANCH_NAME {
+    if build_type == BuildType::Auto {
         merge_queue_tx.trigger().await?;
     }
 
@@ -242,7 +239,7 @@ async fn maybe_complete_build(
     let comment_opt = if build_succeeded {
         tracing::info!("Build succeeded for PR {pr_num}");
 
-        if branch == TRY_BRANCH_NAME {
+        if build_type == BuildType::Try {
             Some(try_build_succeeded_comment(
                 &db_workflow_runs,
                 payload.commit_sha,
@@ -280,6 +277,19 @@ async fn maybe_complete_build(
             workflow_runs,
         ))
     };
+
+    if build_type == BuildType::Try {
+        // Hide "Try build started" comments that are now outdated
+        let outdated = db
+            .get_tagged_bot_comments(repo.repository(), pr.number, CommentTag::TryBuildStarted)
+            .await?;
+        for comment in outdated {
+            repo.client
+                .minimize_comment(&comment.node_id, MinimizeCommentReason::Outdated)
+                .await?;
+            db.delete_tagged_bot_comment(&comment).await?;
+        }
+    }
 
     if let Some(comment) = comment_opt {
         repo.client.post_comment(pr_num, comment).await?;

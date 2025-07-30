@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO comment (repository, pr_number, tag, node_id)\n            VALUES ($1, $2, $3, $4)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "6bb7558f15546f6b11396411a4b0461b25d20350e99cd55e8f0bc2bca2177134"
+}
