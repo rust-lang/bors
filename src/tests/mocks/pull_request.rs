@@ -5,15 +5,17 @@ use super::{
     repository::GitHubRepository,
     user::GitHubUser,
 };
-use crate::tests::mocks::repository::PullRequest;
+use crate::github::PullRequestNumber;
+use crate::tests::Branch;
 use crate::{bors::PullRequestStatus, github::GithubRepoName};
 use chrono::{DateTime, Utc};
 use octocrab::models::LabelId;
-use octocrab::models::pulls::MergeableState as OctocrabMergeableState;
+use octocrab::models::pulls::{MergeableState as OctocrabMergeableState, MergeableState};
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tokio::sync::mpsc::Sender;
+use std::time::SystemTime;
+use tokio::sync::mpsc::{Receiver, Sender};
 use url::Url;
 use wiremock::{
     Mock, MockServer, Request, ResponseTemplate,
@@ -24,11 +26,166 @@ pub fn default_pr_number() -> u64 {
     1
 }
 
-pub async fn mock_pull_requests(
-    repo: Arc<Mutex<Repo>>,
-    comments_tx: Sender<Comment>,
-    mock_server: &MockServer,
-) {
+/// Helper struct for uniquely identifying a pull request.
+/// Used to reduce boilerplate in tests.
+///
+/// Can be created from:
+/// - `()`, which uses the default repo and default PR number.
+/// - A PR number, which uses the default repository.
+/// - A tuple (<repo-name>, <PR number>).
+#[derive(Clone, Debug)]
+pub struct PrIdentifier {
+    pub repo: GithubRepoName,
+    pub number: u64,
+}
+
+impl Default for PrIdentifier {
+    fn default() -> Self {
+        Self {
+            repo: default_repo_name(),
+            number: default_pr_number(),
+        }
+    }
+}
+
+impl From<u64> for PrIdentifier {
+    fn from(number: u64) -> Self {
+        Self {
+            repo: default_repo_name(),
+            number,
+        }
+    }
+}
+
+impl From<PullRequestNumber> for PrIdentifier {
+    fn from(value: PullRequestNumber) -> Self {
+        value.0.into()
+    }
+}
+
+impl From<(GithubRepoName, u64)> for PrIdentifier {
+    fn from(value: (GithubRepoName, u64)) -> Self {
+        Self {
+            repo: value.0,
+            number: value.1,
+        }
+    }
+}
+
+impl From<()> for PrIdentifier {
+    fn from(_: ()) -> Self {
+        Self {
+            repo: default_repo_name(),
+            number: default_pr_number(),
+        }
+    }
+}
+
+pub enum CommentMsg {
+    Comment(Comment),
+    Close,
+}
+
+#[derive(Clone, Debug)]
+pub struct PullRequest {
+    pub number: PullRequestNumber,
+    pub repo: GithubRepoName,
+    pub labels_added_by_bors: Vec<String>,
+    pub labels_removed_by_bors: Vec<String>,
+    pub comment_counter: u64,
+    pub head_sha: String,
+    pub author: User,
+    pub base_branch: Branch,
+    pub mergeable_state: MergeableState,
+    pub status: PullRequestStatus,
+    pub merged_at: Option<DateTime<Utc>>,
+    pub closed_at: Option<DateTime<Utc>>,
+    pub assignees: Vec<User>,
+    pub description: String,
+    pub title: String,
+    pub labels: Vec<String>,
+    pub comment_queue_tx: Sender<CommentMsg>,
+    pub comment_queue_rx: Arc<tokio::sync::Mutex<Receiver<CommentMsg>>>,
+}
+
+impl PullRequest {
+    pub fn new(repo: GithubRepoName, number: u64, author: User) -> Self {
+        // The size of the buffer is load-bearing, if we receive too many comments, the test harness
+        // could deadlock.
+        let (comment_queue_tx, comment_queue_rx) = tokio::sync::mpsc::channel(100);
+        Self {
+            number: PullRequestNumber(number),
+            repo,
+            labels_added_by_bors: Vec::new(),
+            labels_removed_by_bors: Vec::new(),
+            comment_counter: 0,
+            head_sha: format!("pr-{number}-sha"),
+            author,
+            base_branch: Branch::default(),
+            mergeable_state: MergeableState::Clean,
+            status: PullRequestStatus::Open,
+            merged_at: None,
+            closed_at: None,
+            assignees: Vec::new(),
+            description: format!("Description of PR {number}"),
+            title: format!("Title of PR {number}"),
+            labels: Vec::new(),
+            comment_queue_tx,
+            comment_queue_rx: Arc::new(tokio::sync::Mutex::new(comment_queue_rx)),
+        }
+    }
+}
+
+/// Creates a default pull request with number set to
+/// [default_pr_number].
+impl Default for PullRequest {
+    fn default() -> Self {
+        Self::new(
+            default_repo_name(),
+            default_pr_number(),
+            User::default_pr_author(),
+        )
+    }
+}
+
+impl PullRequest {
+    /// Return a numeric ID and a node ID for the next comment to be created.
+    pub fn next_comment_ids(&mut self) -> (u64, String) {
+        self.comment_counter += 1;
+        (
+            self.comment_counter,
+            format!(
+                "comment-{}_{}-{}",
+                self.repo, self.number, self.comment_counter
+            ),
+        )
+    }
+
+    pub fn merge_pr(&mut self) {
+        self.merged_at = Some(SystemTime::now().into());
+        self.status = PullRequestStatus::Merged;
+    }
+
+    pub fn close_pr(&mut self) {
+        self.closed_at = Some(SystemTime::now().into());
+        self.status = PullRequestStatus::Closed;
+    }
+
+    pub fn reopen_pr(&mut self) {
+        self.closed_at = None;
+        self.status = PullRequestStatus::Open;
+    }
+
+    pub fn ready_for_review(&mut self) {
+        self.status = PullRequestStatus::Open;
+    }
+
+    pub fn convert_to_draft(&mut self) {
+        self.status = PullRequestStatus::Draft;
+    }
+}
+
+pub async fn mock_pull_requests(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
     let repo_name = repo.lock().name.clone();
     let repo_clone = repo.clone();
 
@@ -70,7 +227,7 @@ pub async fn mock_pull_requests(
     .mount(mock_server)
     .await;
 
-    mock_pr_comments(repo.clone(), comments_tx.clone(), mock_server).await;
+    mock_pr_comments(repo.clone(), mock_server).await;
 
     let prs = repo.lock().pull_requests.clone();
     for &pr_number in prs.keys() {
@@ -78,11 +235,7 @@ pub async fn mock_pull_requests(
     }
 }
 
-async fn mock_pr_comments(
-    repo: Arc<Mutex<Repo>>,
-    comments_tx: Sender<Comment>,
-    mock_server: &MockServer,
-) {
+async fn mock_pr_comments(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
     let repo_name = repo.lock().name.clone();
     let repo_name_clone = repo_name.clone();
     dynamic_mock_req(
@@ -96,17 +249,21 @@ async fn mock_pr_comments(
 
             let comment_payload: CommentCreatePayload = req.body_json().unwrap();
             let mut repo = repo.lock();
-            let pr = repo.pull_requests.get_mut(&pr_number).unwrap();
-            let comment_id = pr.next_comment_id();
+            let pr = repo.pull_requests.get_mut(&pr_number).unwrap_or_else(|| {
+                panic!("Received a comment for a non-existing PR {repo_name_clone}/{pr_number}")
+            });
+            let (id, node_id) = pr.next_comment_ids();
 
-            let comment = Comment::new(repo_name_clone.clone(), pr_number, &comment_payload.body)
+            let comment = Comment::new((repo_name_clone.clone(), pr_number), &comment_payload.body)
                 .with_author(User::bors_bot())
-                .with_id(comment_id);
+                .with_ids(id, node_id);
 
             // We cannot use `tx.blocking_send()`, because this function is actually called
             // from within an async task, but it is not async, so we also cannot use
             // `tx.send()`.
-            comments_tx.try_send(comment.clone()).unwrap();
+            pr.comment_queue_tx
+                .try_send(CommentMsg::Comment(comment.clone()))
+                .unwrap();
             ResponseTemplate::new(201).set_body_json(GitHubComment::from(comment))
         },
         "POST",
@@ -222,6 +379,8 @@ impl From<PullRequest> for GitHubPullRequest {
             description,
             title,
             labels,
+            comment_queue_tx: _,
+            comment_queue_rx: _,
         } = pr;
         GitHubPullRequest {
             user: author.clone().into(),
@@ -283,8 +442,9 @@ struct GitHubBase {
     ref_field: String,
     sha: String,
 }
+
 #[derive(Serialize)]
-pub(super) struct GitHubPullRequestEventPayload {
+pub struct GitHubPullRequestEventPayload {
     action: String,
     pull_request: GitHubPullRequest,
     changes: Option<GitHubPullRequestChanges>,

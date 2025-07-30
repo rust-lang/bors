@@ -1,4 +1,4 @@
-use crate::tests::mocks::User;
+use crate::tests::User;
 use serde::Serialize;
 use url::Url;
 use wiremock::{

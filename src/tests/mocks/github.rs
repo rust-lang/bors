@@ -1,80 +1,36 @@
 use octocrab::Octocrab;
-use std::collections::HashMap;
+use std::ops::Deref;
+use std::sync::Arc;
 use wiremock::MockServer;
 
 use crate::create_github_client;
-use crate::github::GithubRepoName;
-use crate::tests::mocks::GitHubState;
+use crate::tests::GitHubState;
 use crate::tests::mocks::app::{AppHandler, default_app_id};
-use crate::tests::mocks::comment::Comment;
+use crate::tests::mocks::pull_request::CommentMsg;
 use crate::tests::mocks::repository::{mock_repo, mock_repo_list};
-
-/// Represents the state of a simulated GH repo.
-pub struct GitHubRepoState {
-    // We store comments from all PRs inside a single queue, because
-    // we don't necessarily know beforehand which PRs will receive comments.
-    comments_queue: tokio::sync::mpsc::Receiver<Comment>,
-    // We need a local queue to avoid skipping comments received out of order.
-    pending_comments: Vec<Comment>,
-}
-
-impl GitHubRepoState {
-    /// Wait until a comment from the given pull request was received.
-    /// If a comment from a different PR is received, it is inserted into
-    /// `pending_comments`, to be picked up later.
-    async fn get_comment(&mut self, pr: u64) -> Comment {
-        // First, try to resolve the comment from the pending comment list
-        if let Some(index) = self.pending_comments.iter().position(|c| c.pr == pr) {
-            return self.pending_comments.remove(index);
-        }
-        // If it is not there, wait until some comment is received
-        loop {
-            let comment = self
-                .comments_queue
-                .recv()
-                .await
-                .expect("Channel was closed while waiting for a comment");
-
-            if comment.pr == pr {
-                return comment;
-            }
-            tracing::warn!(
-                "Received comment for PR {}, while expected for PR {pr}",
-                comment.pr
-            );
-            self.pending_comments.push(comment);
-        }
-    }
-}
 
 pub struct GitHubMockServer {
     mock_server: MockServer,
-    repos: HashMap<GithubRepoName, GitHubRepoState>,
+    github: Arc<tokio::sync::Mutex<GitHubState>>,
 }
 
 impl GitHubMockServer {
-    pub async fn start(github: &GitHubState) -> Self {
+    pub async fn start(github: Arc<tokio::sync::Mutex<GitHubState>>) -> Self {
         let mock_server = MockServer::start().await;
-        mock_repo_list(github, &mock_server).await;
+        mock_repo_list(github.lock().await.deref(), &mock_server).await;
 
         // Repositories are mocked separately to make it easier to
         // pass comm. channels to them.
-        let mut repos = HashMap::default();
-        for (name, repo) in &github.repos {
-            let (comments_tx, comments_rx) = tokio::sync::mpsc::channel(1024);
-            mock_repo(repo.clone(), comments_tx, &mock_server).await;
-            repos.insert(
-                name.clone(),
-                GitHubRepoState {
-                    comments_queue: comments_rx,
-                    pending_comments: Default::default(),
-                },
-            );
+        for repo in github.lock().await.repos.values() {
+            mock_repo(repo.clone(), &mock_server).await;
         }
 
         AppHandler::default().mount(&mock_server).await;
 
-        Self { mock_server, repos }
+        Self {
+            mock_server,
+            github,
+        }
     }
 
     pub fn client(&self) -> Octocrab {
@@ -86,40 +42,44 @@ impl GitHubMockServer {
         .unwrap()
     }
 
-    pub async fn get_comment(
-        &mut self,
-        repo_name: GithubRepoName,
-        pr: u64,
-    ) -> anyhow::Result<Comment> {
-        let repo = self
-            .repos
-            .get_mut(&repo_name)
-            .unwrap_or_else(|| panic!("Repository `{repo_name}` not found"));
-        let comment = repo.get_comment(pr).await;
-        eprintln!("Received comment on {repo_name}#{pr}: {}", comment.content);
-        Ok(comment)
-    }
-
     /// Make sure that there are no leftover events left in the queues.
-    pub async fn assert_empty_queues(mut self) {
+    pub async fn assert_empty_queues(self) {
         // This will remove all mocks and thus also any leftover
         // channel senders, so that we can be sure below that the `recv`
         // call will not block indefinitely.
         self.mock_server.reset().await;
         drop(self.mock_server);
 
-        for (name, repo) in self.repos.iter_mut() {
-            if !repo.pending_comments.is_empty() {
-                panic!(
-                    "Expected that {name} won't have any received comments, but it has {:?}",
-                    repo.pending_comments
-                );
-            }
-            // Make sure that the queue has been closed and nothing is in it.
-            if let Some(comment) = repo.comments_queue.recv().await {
-                panic!(
-                    "Expected that {name} won't have any received comments, but it has {comment:?}"
-                );
+        for (name, repo) in self.github.lock().await.repos.iter_mut() {
+            let prs = repo
+                .lock()
+                .pull_requests
+                .values()
+                .cloned()
+                .collect::<Vec<_>>();
+            for pr in prs {
+                // Send close message
+                pr.comment_queue_tx.send(CommentMsg::Close).await.unwrap();
+
+                // Make sure that the close message is received, and nothing before it.
+                let msg = pr
+                    .comment_queue_rx
+                    .lock()
+                    .await
+                    .recv()
+                    .await
+                    .expect("Empty comment queue");
+                match msg {
+                    CommentMsg::Comment(comment) => {
+                        panic!(
+                            "Expected that PR {name}#{} won't have any further received comments, but it received {comment:?}",
+                            pr.number
+                        );
+                    }
+                    CommentMsg::Close => {
+                        // The queue was correctly empty
+                    }
+                };
             }
         }
     }

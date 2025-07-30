@@ -289,10 +289,10 @@ mod tests {
     use crate::bors::PullRequestStatus;
     use crate::bors::merge_queue::AUTO_BUILD_CHECK_RUN_NAME;
     use crate::tests::BorsTester;
-    use crate::tests::mocks::{BorsBuilder, GitHubState, default_pr_number};
+    use crate::tests::{BorsBuilder, GitHubState};
     use crate::{
         database::{MergeableState, OctocrabMergeableState},
-        tests::mocks::{User, default_branch_name, default_repo_name, run_test},
+        tests::{User, default_branch_name, default_repo_name, run_test},
     };
 
     fn gh_state_with_merge_queue() -> GitHubState {
@@ -305,24 +305,24 @@ mod tests {
 
     #[sqlx::test]
     async fn unapprove_on_base_edited(pool: sqlx::PgPool) {
-        run_test(pool, async |tester| {
+        run_test(pool, async |tester: &mut BorsTester| {
             tester.post_comment("@bors r+").await?;
-            tester.expect_comments(1).await;
-            let branch = tester.create_branch("beta").clone();
+            tester.expect_comments((), 1).await;
+            let branch = tester.create_branch("beta").await;
             tester
-                .edit_pr(default_repo_name(), default_pr_number(), |pr| {
+                .edit_pr((), |pr| {
                     pr.base_branch = branch;
                 })
                 .await?;
 
             insta::assert_snapshot!(
-                tester.get_comment().await?,
+                tester.get_comment(()).await?,
                 @r"
             :warning: The base branch changed to `beta`, and the
             PR will need to be re-approved.
             "
             );
-            tester.default_pr().await.expect_unapproved();
+            tester.get_pr(()).await.expect_unapproved();
             Ok(())
         })
         .await;
@@ -330,15 +330,13 @@ mod tests {
 
     #[sqlx::test]
     async fn edit_pr_do_nothing_when_base_not_edited(pool: sqlx::PgPool) {
-        run_test(pool, async |tester| {
+        run_test(pool, async |tester: &mut BorsTester| {
             tester.post_comment("@bors r+").await?;
-            tester.expect_comments(1).await;
-            tester
-                .edit_pr(default_repo_name(), default_pr_number(), |_| {})
-                .await?;
+            tester.expect_comments((), 1).await;
+            tester.edit_pr((), |_| {}).await?;
 
             tester
-                .default_pr()
+                .get_pr(())
                 .await
                 .expect_approved_by(&User::default_pr_author().name);
             Ok(())
@@ -348,10 +346,10 @@ mod tests {
 
     #[sqlx::test]
     async fn edit_pr_do_nothing_when_not_approved(pool: sqlx::PgPool) {
-        run_test(pool, async |tester| {
-            let branch = tester.create_branch("beta").clone();
+        run_test(pool, async |tester: &mut BorsTester| {
+            let branch = tester.create_branch("beta").await;
             tester
-                .edit_pr(default_repo_name(), default_pr_number(), |pr| {
+                .edit_pr((), |pr| {
                     pr.base_branch = branch;
                 })
                 .await?;
@@ -364,21 +362,19 @@ mod tests {
 
     #[sqlx::test]
     async fn unapprove_on_push(pool: sqlx::PgPool) {
-        run_test(pool, async |tester| {
+        run_test(pool, async |tester: &mut BorsTester| {
             tester.post_comment("@bors r+").await?;
-            tester.expect_comments(1).await;
-            tester
-                .push_to_pr(default_repo_name(), default_pr_number())
-                .await?;
+            tester.expect_comments((), 1).await;
+            tester.push_to_pr(()).await?;
 
             insta::assert_snapshot!(
-                tester.get_comment().await?,
+                tester.get_comment(()).await?,
                 @r"
             :warning: A new commit `pr-1-commit-1` was pushed to the branch, the
             PR will need to be re-approved.
             "
             );
-            tester.default_pr().await.expect_unapproved();
+            tester.get_pr(()).await.expect_unapproved();
             Ok(())
         })
         .await;
@@ -386,10 +382,8 @@ mod tests {
 
     #[sqlx::test]
     async fn push_to_pr_do_nothing_when_not_approved(pool: sqlx::PgPool) {
-        run_test(pool, async |tester| {
-            tester
-                .push_to_pr(default_repo_name(), default_pr_number())
-                .await?;
+        run_test(pool, async |tester: &mut BorsTester| {
+            tester.push_to_pr(()).await?;
 
             // No comment should be posted
             Ok(())
@@ -399,10 +393,10 @@ mod tests {
 
     #[sqlx::test]
     async fn store_base_branch_on_pr_opened(pool: sqlx::PgPool) {
-        run_test(pool, async |tester| {
+        run_test(pool, async |tester: &mut BorsTester| {
             let pr = tester.open_pr(default_repo_name(), |_| {}).await?;
             tester
-                .wait_for_pr(default_repo_name(), pr.number.0, |pr| {
+                .wait_for_pr(pr.number, |pr| {
                     pr.base_branch == *default_branch_name()
                         && pr.pr_status == PullRequestStatus::Open
                 })
@@ -414,18 +408,14 @@ mod tests {
 
     #[sqlx::test]
     async fn update_base_branch_on_pr_edited(pool: sqlx::PgPool) {
-        run_test(pool, async |tester| {
-            let branch = tester.create_branch("foo").clone();
+        run_test(pool, async |tester: &mut BorsTester| {
+            let branch = tester.create_branch("foo").await;
             tester
-                .edit_pr(default_repo_name(), default_pr_number(), |pr| {
+                .edit_pr((), |pr| {
                     pr.base_branch = branch;
                 })
                 .await?;
-            tester
-                .wait_for_pr(default_repo_name(), default_pr_number(), |pr| {
-                    pr.base_branch == "foo"
-                })
-                .await?;
+            tester.wait_for_pr((), |pr| pr.base_branch == "foo").await?;
             Ok(())
         })
         .await;
@@ -433,14 +423,14 @@ mod tests {
 
     #[sqlx::test]
     async fn update_mergeable_state_on_pr_edited(pool: sqlx::PgPool) {
-        run_test(pool, async |tester| {
+        run_test(pool, async |tester: &mut BorsTester| {
             tester
-                .edit_pr(default_repo_name(), default_pr_number(), |pr| {
+                .edit_pr((), |pr| {
                     pr.mergeable_state = OctocrabMergeableState::Dirty;
                 })
                 .await?;
             tester
-                .wait_for_default_pr(|pr| pr.mergeable_state == MergeableState::HasConflicts)
+                .wait_for_pr((), |pr| pr.mergeable_state == MergeableState::HasConflicts)
                 .await?;
             Ok(())
         })
@@ -449,26 +439,18 @@ mod tests {
 
     #[sqlx::test]
     async fn open_close_and_reopen_pr(pool: sqlx::PgPool) {
-        run_test(pool, async |tester| {
+        run_test(pool, async |tester: &mut BorsTester| {
             let pr = tester.open_pr(default_repo_name(), |_| {}).await?;
             tester
-                .wait_for_pr(default_repo_name(), pr.number.0, |pr| {
-                    pr.pr_status == PullRequestStatus::Open
-                })
+                .wait_for_pr(pr.number, |pr| pr.pr_status == PullRequestStatus::Open)
                 .await?;
+            tester.set_pr_status_closed(pr.number).await?;
             tester
-                .set_pr_status_closed(default_repo_name(), pr.number.0)
+                .wait_for_pr(pr.number, |pr| pr.pr_status == PullRequestStatus::Closed)
                 .await?;
+            tester.reopen_pr(pr.number).await?;
             tester
-                .wait_for_pr(default_repo_name(), pr.number.0, |pr| {
-                    pr.pr_status == PullRequestStatus::Closed
-                })
-                .await?;
-            tester.reopen_pr(default_repo_name(), pr.number.0).await?;
-            tester
-                .wait_for_pr(default_repo_name(), pr.number.0, |pr| {
-                    pr.pr_status == PullRequestStatus::Open
-                })
+                .wait_for_pr(pr.number, |pr| pr.pr_status == PullRequestStatus::Open)
                 .await?;
             Ok(())
         })
@@ -484,17 +466,11 @@ mod tests {
                 })
                 .await?;
             tester
-                .wait_for_pr(default_repo_name(), pr.number.0, |pr| {
-                    pr.pr_status == PullRequestStatus::Draft
-                })
+                .wait_for_pr(pr.number, |pr| pr.pr_status == PullRequestStatus::Draft)
                 .await?;
+            tester.set_pr_status_ready_for_review(pr.number).await?;
             tester
-                .set_pr_status_ready_for_review(default_repo_name(), pr.number.0)
-                .await?;
-            tester
-                .wait_for_pr(default_repo_name(), pr.number.0, |pr| {
-                    pr.pr_status == PullRequestStatus::Open
-                })
+                .wait_for_pr(pr.number, |pr| pr.pr_status == PullRequestStatus::Open)
                 .await?;
             Ok(())
         })
@@ -503,20 +479,14 @@ mod tests {
 
     #[sqlx::test]
     async fn open_pr_and_convert_to_draft(pool: sqlx::PgPool) {
-        run_test(pool, async |tester| {
+        run_test(pool, async |tester: &mut BorsTester| {
             let pr = tester.open_pr(default_repo_name(), |_| {}).await?;
             tester
-                .wait_for_pr(default_repo_name(), pr.number.0, |pr| {
-                    pr.pr_status == PullRequestStatus::Open
-                })
+                .wait_for_pr(pr.number, |pr| pr.pr_status == PullRequestStatus::Open)
                 .await?;
+            tester.set_pr_status_draft(pr.number).await?;
             tester
-                .set_pr_status_draft(default_repo_name(), pr.number.0)
-                .await?;
-            tester
-                .wait_for_pr(default_repo_name(), pr.number.0, |pr| {
-                    pr.pr_status == PullRequestStatus::Draft
-                })
+                .wait_for_pr(pr.number, |pr| pr.pr_status == PullRequestStatus::Draft)
                 .await?;
             Ok(())
         })
@@ -525,20 +495,14 @@ mod tests {
 
     #[sqlx::test]
     async fn assign_pr_updates_assignees(pool: sqlx::PgPool) {
-        run_test(pool, async |tester| {
+        run_test(pool, async |tester: &mut BorsTester| {
             let pr = tester.open_pr(default_repo_name(), |_| {}).await?;
             tester
-                .wait_for_pr(default_repo_name(), pr.number.0, |pr| {
-                    pr.assignees.is_empty()
-                })
+                .wait_for_pr(pr.number, |pr| pr.assignees.is_empty())
                 .await?;
+            tester.assign_pr(pr.number, User::reviewer()).await?;
             tester
-                .assign_pr(default_repo_name(), pr.number.0, User::reviewer())
-                .await?;
-            tester
-                .wait_for_pr(default_repo_name(), pr.number.0, |pr| {
-                    pr.assignees == vec![User::reviewer().name]
-                })
+                .wait_for_pr(pr.number, |pr| pr.assignees == vec![User::reviewer().name])
                 .await?;
             Ok(())
         })
@@ -547,23 +511,15 @@ mod tests {
 
     #[sqlx::test]
     async fn unassign_pr_updates_assignees(pool: sqlx::PgPool) {
-        run_test(pool, async |tester| {
+        run_test(pool, async |tester: &mut BorsTester| {
             let pr = tester.open_pr(default_repo_name(), |_| {}).await?;
+            tester.assign_pr(pr.number, User::reviewer()).await?;
             tester
-                .assign_pr(default_repo_name(), pr.number.0, User::reviewer())
+                .wait_for_pr(pr.number, |pr| pr.assignees == vec![User::reviewer().name])
                 .await?;
+            tester.unassign_pr(pr.number, User::reviewer()).await?;
             tester
-                .wait_for_pr(default_repo_name(), pr.number.0, |pr| {
-                    pr.assignees == vec![User::reviewer().name]
-                })
-                .await?;
-            tester
-                .unassign_pr(default_repo_name(), pr.number.0, User::reviewer())
-                .await?;
-            tester
-                .wait_for_pr(default_repo_name(), pr.number.0, |pr| {
-                    pr.assignees.is_empty()
-                })
+                .wait_for_pr(pr.number, |pr| pr.assignees.is_empty())
                 .await?;
             Ok(())
         })
@@ -572,20 +528,14 @@ mod tests {
 
     #[sqlx::test]
     async fn open_and_merge_pr(pool: sqlx::PgPool) {
-        run_test(pool, async |tester| {
+        run_test(pool, async |tester: &mut BorsTester| {
             let pr = tester.open_pr(default_repo_name(), |_| {}).await?;
             tester
-                .wait_for_pr(default_repo_name(), pr.number.0, |pr| {
-                    pr.pr_status == PullRequestStatus::Open
-                })
+                .wait_for_pr(pr.number, |pr| pr.pr_status == PullRequestStatus::Open)
                 .await?;
+            tester.set_pr_status_merged(pr.number).await?;
             tester
-                .set_pr_status_merged(default_repo_name(), pr.number.0)
-                .await?;
-            tester
-                .wait_for_pr(default_repo_name(), pr.number.0, |pr| {
-                    pr.pr_status == PullRequestStatus::Merged
-                })
+                .wait_for_pr(pr.number, |pr| pr.pr_status == PullRequestStatus::Merged)
                 .await?;
             Ok(())
         })
@@ -594,24 +544,22 @@ mod tests {
 
     #[sqlx::test]
     async fn mergeable_queue_processes_pr_base_change(pool: sqlx::PgPool) {
-        run_test(pool, async |tester| {
-            let branch = tester.create_branch("beta").clone();
+        run_test(pool, async |tester: &mut BorsTester| {
+            let branch = tester.create_branch("beta").await;
             tester
-                .edit_pr(default_repo_name(), default_pr_number(), |pr| {
+                .edit_pr((), |pr| {
                     pr.base_branch = branch;
                     pr.mergeable_state = OctocrabMergeableState::Unknown;
                 })
                 .await?;
             tester
-                .wait_for_default_pr(|pr| pr.mergeable_state == MergeableState::Unknown)
+                .wait_for_pr((), |pr| pr.mergeable_state == MergeableState::Unknown)
                 .await?;
             tester
-                .default_repo()
-                .lock()
-                .get_pr_mut(default_pr_number())
-                .mergeable_state = OctocrabMergeableState::Dirty;
+                .modify_pr_state((), |pr| pr.mergeable_state = OctocrabMergeableState::Dirty)
+                .await;
             tester
-                .wait_for_default_pr(|pr| pr.mergeable_state == MergeableState::HasConflicts)
+                .wait_for_pr((), |pr| pr.mergeable_state == MergeableState::HasConflicts)
                 .await?;
             Ok(())
         })
@@ -620,21 +568,21 @@ mod tests {
 
     #[sqlx::test]
     async fn enqueue_prs_on_push_to_branch(pool: sqlx::PgPool) {
-        run_test(pool, async |tester| {
+        run_test(pool, async |tester: &mut BorsTester| {
             let pr = tester.open_pr(default_repo_name(), |_| {}).await?;
             tester.push_to_branch(default_branch_name()).await?;
             tester
-                .wait_for_pr(default_repo_name(), pr.number.0, |pr| {
+                .wait_for_pr(pr.number, |pr| {
                     pr.mergeable_state == MergeableState::Unknown
                 })
                 .await?;
             tester
-                .default_repo()
-                .lock()
-                .get_pr_mut(pr.number.0)
-                .mergeable_state = OctocrabMergeableState::Dirty;
+                .modify_pr_state(pr.number, |pr| {
+                    pr.mergeable_state = OctocrabMergeableState::Dirty
+                })
+                .await;
             tester
-                .wait_for_pr(default_repo_name(), pr.number.0, |pr| {
+                .wait_for_pr(pr.number, |pr| {
                     pr.mergeable_state == MergeableState::HasConflicts
                 })
                 .await?;
@@ -652,7 +600,7 @@ mod tests {
                 })
                 .await?;
             tester
-                .wait_for_pr(default_repo_name(), pr.number.0, |pr| {
+                .wait_for_pr(pr.number, |pr| {
                     pr.mergeable_state == MergeableState::HasConflicts
                 })
                 .await?;
@@ -663,25 +611,23 @@ mod tests {
 
     #[sqlx::test]
     async fn enqueue_prs_on_pr_reopened(pool: sqlx::PgPool) {
-        run_test(pool, async |tester| {
+        run_test(pool, async |tester: &mut BorsTester| {
             tester
-                .default_repo()
-                .lock()
-                .get_pr_mut(default_pr_number())
-                .mergeable_state = OctocrabMergeableState::Unknown;
+                .modify_pr_state((), |pr| {
+                    pr.mergeable_state = OctocrabMergeableState::Unknown;
+                })
+                .await;
+            tester.reopen_pr(()).await?;
             tester
-                .reopen_pr(default_repo_name(), default_pr_number())
+                .wait_for_pr((), |pr| pr.mergeable_state == MergeableState::Unknown)
                 .await?;
             tester
-                .wait_for_default_pr(|pr| pr.mergeable_state == MergeableState::Unknown)
-                .await?;
+                .modify_pr_state((), |pr| {
+                    pr.mergeable_state = OctocrabMergeableState::Dirty;
+                })
+                .await;
             tester
-                .default_repo()
-                .lock()
-                .get_pr_mut(default_pr_number())
-                .mergeable_state = OctocrabMergeableState::Dirty;
-            tester
-                .wait_for_default_pr(|pr| pr.mergeable_state == MergeableState::HasConflicts)
+                .wait_for_pr((), |pr| pr.mergeable_state == MergeableState::HasConflicts)
                 .await?;
             Ok(())
         })
@@ -690,20 +636,16 @@ mod tests {
 
     #[sqlx::test]
     async fn enqueue_prs_on_push_to_pr(pool: sqlx::PgPool) {
-        run_test(pool, async |tester| {
+        run_test(pool, async |tester: &mut BorsTester| {
+            tester.push_to_pr(()).await?;
             tester
-                .push_to_pr(default_repo_name(), default_pr_number())
+                .wait_for_pr((), |pr| pr.mergeable_state == MergeableState::Unknown)
                 .await?;
             tester
-                .wait_for_default_pr(|pr| pr.mergeable_state == MergeableState::Unknown)
-                .await?;
+                .modify_pr_state((), |pr| pr.mergeable_state = OctocrabMergeableState::Dirty)
+                .await;
             tester
-                .default_repo()
-                .lock()
-                .get_pr_mut(default_pr_number())
-                .mergeable_state = OctocrabMergeableState::Dirty;
-            tester
-                .wait_for_default_pr(|pr| pr.mergeable_state == MergeableState::HasConflicts)
+                .wait_for_pr((), |pr| pr.mergeable_state == MergeableState::HasConflicts)
                 .await?;
             Ok(())
         })
@@ -714,19 +656,15 @@ mod tests {
     async fn cancel_pending_auto_build_on_push_comment(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
             .github(gh_state_with_merge_queue())
-            .run_test(async |tester| {
+            .run_test(async |tester: &mut BorsTester| {
                 tester.post_comment("@bors r+").await?;
-                tester.expect_comments(1).await;
+                tester.expect_comments((), 1).await;
                 tester.process_merge_queue().await;
-                tester.expect_comments(1).await;
-                tester
-                    .wait_for_default_pr(|pr| pr.auto_build.is_some())
-                    .await?;
-                tester.workflow_start(tester.auto_branch()).await?;
-                tester
-                    .push_to_pr(default_repo_name(), default_pr_number())
-                    .await?;
-                insta::assert_snapshot!(tester.get_comment().await?, @r"
+                tester.expect_comments((), 1).await;
+                tester.wait_for_pr((), |pr| pr.auto_build.is_some()).await?;
+                tester.workflow_start(tester.auto_branch().await).await?;
+                tester.push_to_pr(()).await?;
+                insta::assert_snapshot!(tester.get_comment(()).await?, @r"
                 :warning: A new commit `pr-1-commit-1` was pushed to the branch, the
                 PR will need to be re-approved.
 
@@ -743,21 +681,21 @@ mod tests {
     async fn cancel_pending_auto_build_on_push_error_comment(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
             .github(gh_state_with_merge_queue())
-            .run_test(async |tester| {
-                tester.default_repo().lock().workflow_cancel_error = true;
+            .run_test(async |tester: &mut BorsTester| {
+                tester
+                    .modify_repo(&default_repo_name(), |repo| {
+                        repo.workflow_cancel_error = true
+                    })
+                    .await;
                 tester.post_comment("@bors r+").await?;
-                tester.expect_comments(1).await;
+                tester.expect_comments((), 1).await;
                 tester.process_merge_queue().await;
-                tester.expect_comments(1).await;
-                tester
-                    .wait_for_default_pr(|pr| pr.auto_build.is_some())
-                    .await?;
+                tester.expect_comments((), 1).await;
+                tester.wait_for_pr((), |pr| pr.auto_build.is_some()).await?;
 
-                tester.workflow_start(tester.auto_branch()).await?;
-                tester
-                    .push_to_pr(default_repo_name(), default_pr_number())
-                    .await?;
-                insta::assert_snapshot!(tester.get_comment().await?, @r"
+                tester.workflow_start(tester.auto_branch().await).await?;
+                tester.push_to_pr(()).await?;
+                insta::assert_snapshot!(tester.get_comment(()).await?, @r"
                 :warning: A new commit `pr-1-commit-1` was pushed to the branch, the
                 PR will need to be re-approved.
 
@@ -772,25 +710,25 @@ mod tests {
     async fn cancel_pending_auto_build_on_push_updates_check_run(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
             .github(gh_state_with_merge_queue())
-            .run_test(async |tester| {
+            .run_test(async |tester: &mut BorsTester| {
                 tester.post_comment("@bors r+").await?;
-                tester.expect_comments(1).await;
+                tester.expect_comments((), 1).await;
                 tester.process_merge_queue().await;
-                tester.expect_comments(1).await;
-                tester.workflow_start(tester.auto_branch()).await?;
+                tester.expect_comments((), 1).await;
+                tester.workflow_start(tester.auto_branch().await).await?;
 
-                let prev_commit = &tester.default_pr().await.get_gh_pr().head_sha;
+                let prev_commit = &tester.get_pr(()).await.get_gh_pr().head_sha;
+                tester.push_to_pr(()).await?;
+                tester.expect_comments((), 1).await;
                 tester
-                    .push_to_pr(default_repo_name(), default_pr_number())
-                    .await?;
-                tester.expect_comments(1).await;
-                tester.expect_check_run(
-                    prev_commit,
-                    AUTO_BUILD_CHECK_RUN_NAME,
-                    AUTO_BUILD_CHECK_RUN_NAME,
-                    CheckRunStatus::Completed,
-                    Some(CheckRunConclusion::Cancelled),
-                );
+                    .expect_check_run(
+                        prev_commit,
+                        AUTO_BUILD_CHECK_RUN_NAME,
+                        AUTO_BUILD_CHECK_RUN_NAME,
+                        CheckRunStatus::Completed,
+                        Some(CheckRunConclusion::Cancelled),
+                    )
+                    .await;
                 Ok(())
             })
             .await;

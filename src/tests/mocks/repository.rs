@@ -1,26 +1,21 @@
+use std::collections::HashMap;
 use std::sync::Arc;
-use std::{collections::HashMap, time::SystemTime};
 
 use super::user::{GitHubUser, User};
-use crate::bors::PullRequestStatus;
 use crate::database::WorkflowStatus;
-use crate::github::{GithubRepoName, PullRequestNumber};
+use crate::github::GithubRepoName;
 use crate::permissions::PermissionType;
-use crate::tests::mocks::comment::Comment;
-use crate::tests::mocks::permissions::Permissions;
-use crate::tests::mocks::pull_request::mock_pull_requests;
-use crate::tests::mocks::workflow::WorkflowJob;
-use crate::tests::mocks::{GitHubState, WorkflowRunData, default_pr_number, dynamic_mock_req};
+use crate::tests::mocks::dynamic_mock_req;
+use crate::tests::mocks::pull_request::{PullRequest, mock_pull_requests};
+use crate::tests::{GitHubState, Permissions, WorkflowJob, WorkflowRunData};
 use base64::Engine;
 use chrono::{DateTime, Utc};
-use octocrab::models::pulls::MergeableState;
 use octocrab::models::repos::Object;
 use octocrab::models::repos::Object::Commit;
 use octocrab::models::workflows::{Conclusion, Status, Step};
 use octocrab::models::{CheckSuiteId, JobId, RunId};
 use parking_lot::Mutex;
 use serde::Serialize;
-use tokio::sync::mpsc::Sender;
 use url::Url;
 use wiremock::{
     Mock, MockServer, Request, ResponseTemplate,
@@ -37,109 +32,6 @@ pub struct CheckRunData {
     pub summary: String,
     pub text: String,
     pub external_id: String,
-}
-
-#[derive(Clone, Debug)]
-pub struct PullRequest {
-    pub number: PullRequestNumber,
-    pub repo: GithubRepoName,
-    pub labels_added_by_bors: Vec<String>,
-    pub labels_removed_by_bors: Vec<String>,
-    pub comment_counter: u64,
-    pub head_sha: String,
-    pub author: User,
-    pub base_branch: Branch,
-    pub mergeable_state: MergeableState,
-    pub status: PullRequestStatus,
-    pub merged_at: Option<DateTime<Utc>>,
-    pub closed_at: Option<DateTime<Utc>>,
-    pub assignees: Vec<User>,
-    pub description: String,
-    pub title: String,
-    pub labels: Vec<String>,
-}
-
-impl PullRequest {
-    pub fn new(repo: GithubRepoName, number: u64, author: User) -> Self {
-        Self {
-            number: PullRequestNumber(number),
-            repo,
-            labels_added_by_bors: Vec::new(),
-            labels_removed_by_bors: Vec::new(),
-            comment_counter: 0,
-            head_sha: format!("pr-{number}-sha"),
-            author,
-            base_branch: Branch::default(),
-            mergeable_state: MergeableState::Clean,
-            status: PullRequestStatus::Open,
-            merged_at: None,
-            closed_at: None,
-            assignees: Vec::new(),
-            description: format!("Description of PR {number}"),
-            title: format!("Title of PR {number}"),
-            labels: Vec::new(),
-        }
-    }
-}
-
-/// Creates a default pull request with number set to
-/// [default_pr_number].
-impl Default for PullRequest {
-    fn default() -> Self {
-        Self::new(
-            default_repo_name(),
-            default_pr_number(),
-            User::default_pr_author(),
-        )
-    }
-}
-
-impl PullRequest {
-    pub fn check_added_labels(&self, labels: &[&str]) {
-        let added_labels = self
-            .labels_added_by_bors
-            .iter()
-            .map(|s| s.as_str())
-            .collect::<Vec<_>>();
-        assert_eq!(&added_labels, labels);
-    }
-
-    pub fn check_removed_labels(&self, labels: &[&str]) {
-        let removed_labels = self
-            .labels_removed_by_bors
-            .iter()
-            .map(|s| s.as_str())
-            .collect::<Vec<_>>();
-        assert_eq!(&removed_labels, labels);
-    }
-
-    pub fn next_comment_id(&mut self) -> u64 {
-        self.comment_counter += 1;
-        self.comment_counter
-    }
-
-    pub fn merge_pr(&mut self) {
-        self.merged_at = Some(SystemTime::now().into());
-        self.status = PullRequestStatus::Merged;
-    }
-
-    pub fn close_pr(&mut self) {
-        self.closed_at = Some(SystemTime::now().into());
-        self.status = PullRequestStatus::Closed;
-    }
-
-    pub fn reopen_pr(&mut self) {
-        self.closed_at = None;
-        self.status = PullRequestStatus::Open;
-    }
-
-    pub fn ready_for_review(&mut self) {
-        self.status = PullRequestStatus::Open;
-    }
-
-    pub fn convert_to_draft(&mut self) {
-        self.status = PullRequestStatus::Draft;
-    }
 }
 
 #[derive(Clone)]
@@ -378,12 +270,8 @@ pub async fn mock_repo_list(github: &GitHubState, mock_server: &MockServer) {
         .await;
 }
 
-pub async fn mock_repo(
-    repo: Arc<Mutex<Repo>>,
-    comments_tx: Sender<Comment>,
-    mock_server: &MockServer,
-) {
-    mock_pull_requests(repo.clone(), comments_tx, mock_server).await;
+pub async fn mock_repo(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
+    mock_pull_requests(repo.clone(), mock_server).await;
     mock_branches(repo.clone(), mock_server).await;
     mock_cancel_workflow(repo.clone(), mock_server).await;
     mock_check_runs(repo.clone(), mock_server).await;

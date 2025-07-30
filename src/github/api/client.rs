@@ -389,15 +389,16 @@ mod tests {
     use crate::github::GithubRepoName;
     use crate::github::api::load_repositories;
     use crate::permissions::PermissionType;
-    use crate::tests::mocks::Permissions;
-    use crate::tests::mocks::{ExternalHttpMock, Repo};
-    use crate::tests::mocks::{GitHubState, User};
+    use crate::tests::Permissions;
+    use crate::tests::{ExternalHttpMock, Repo};
+    use crate::tests::{GitHubState, User};
     use octocrab::models::UserId;
+    use std::sync::Arc;
 
     #[tokio::test]
     async fn load_installed_repos() {
-        let mock = ExternalHttpMock::start(
-            &GitHubState::new()
+        let mock = ExternalHttpMock::start(Arc::new(tokio::sync::Mutex::new(
+            GitHubState::new()
                 .with_repo(
                     Repo::new(
                         GithubRepoName::new("foo", "bar"),
@@ -411,7 +412,7 @@ mod tests {
                     Permissions::empty(),
                     "".to_string(),
                 )),
-        )
+        )))
         .await;
         let client = mock.github_client();
         let team_api_client = mock.team_api_client();

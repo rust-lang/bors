@@ -7,8 +7,8 @@ use wiremock::matchers::path;
 use wiremock::{Mock, MockServer, ResponseTemplate, matchers::method};
 
 use crate::TeamApiClient;
-use crate::tests::mocks::repository::Repo;
-use crate::tests::mocks::{GitHubState, User};
+use crate::tests::mocks::Repo;
+use crate::tests::{GitHubState, User};
 
 #[derive(Clone)]
 pub struct Permissions {
