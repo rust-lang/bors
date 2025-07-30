@@ -1,7 +1,6 @@
 use anyhow::Context;
 use axum::Router;
-use parking_lot::lock_api::MappedMutexGuard;
-use parking_lot::{Mutex, MutexGuard, RawMutex};
+use parking_lot::Mutex;
 use serde::Serialize;
 use sqlx::PgPool;
 use std::collections::HashMap;
@@ -126,7 +125,7 @@ pub async fn run_test<F: AsyncFnOnce(&mut BorsTester) -> anyhow::Result<()>>(
 pub struct BorsTester {
     app: Router,
     http_mock: ExternalHttpMock,
-    github: GitHubState,
+    github: Arc<Mutex<GitHubState>>,
     db: Arc<PgDbClient>,
     mergeable_queue_tx: MergeableQueueSender,
     merge_queue_tx: MergeQueueSender,
@@ -138,7 +137,8 @@ pub struct BorsTester {
 
 impl BorsTester {
     async fn new(pool: PgPool, github: GitHubState) -> (Self, JoinHandle<()>) {
-        let mock = ExternalHttpMock::start(&github).await;
+        let github = Arc::new(Mutex::new(github));
+        let mock = ExternalHttpMock::start(github.clone()).await;
         let db = Arc::new(PgDbClient::new(pool));
 
         let loaded_repos = load_repositories(&mock.github_client(), &mock.team_api_client())
@@ -202,7 +202,7 @@ impl BorsTester {
     }
 
     pub fn default_repo(&self) -> Arc<Mutex<Repo>> {
-        self.github.get_repo(&default_repo_name())
+        self.github.lock().get_repo(&default_repo_name())
     }
 
     pub async fn default_pr(&self) -> PullRequestProxy {
@@ -262,25 +262,29 @@ impl BorsTester {
             .await
     }
 
-    pub fn create_branch(&mut self, name: &str) -> MappedMutexGuard<RawMutex, Branch> {
-        // We cannot clone the Arc, otherwise it won't work
-        let repo = self.github.repos.get(&default_repo_name()).unwrap();
+    /// Creates a branch and returns a **copy** of it.
+    pub fn create_branch(&mut self, name: &str) -> Branch {
+        let repo = self
+            .github
+            .lock()
+            .repos
+            .get(&default_repo_name())
+            .unwrap()
+            .clone();
         let mut repo = repo.lock();
 
-        // Polonius where art thou :/
-        if repo.get_branch_by_name(name).is_some() {
-            MutexGuard::map(repo, |repo| repo.get_branch_by_name(name).unwrap())
-        } else {
-            MutexGuard::map(repo, move |repo| {
-                repo.branches
-                    .push(Branch::new(name, &format!("{name}-initial")));
-                repo.branches.last_mut().unwrap()
-            })
-        }
+        assert!(
+            repo.get_branch_by_name(name).is_none(),
+            "Branch {name} already exists"
+        );
+        repo.branches
+            .push(Branch::new(name, &format!("{name}-initial")));
+        repo.branches.last_mut().unwrap().clone()
     }
 
     pub fn get_branch(&self, name: &str) -> Branch {
         self.github
+            .lock()
             .default_repo()
             .lock()
             .get_branch_by_name(name)
@@ -290,6 +294,7 @@ impl BorsTester {
 
     pub fn get_branch_commit_message(&self, branch: &Branch) -> String {
         self.github
+            .lock()
             .default_repo()
             .lock()
             .get_commit_message(branch.get_sha())
@@ -405,7 +410,10 @@ impl BorsTester {
     pub async fn workflow_event(&mut self, event: WorkflowEvent) -> anyhow::Result<()> {
         // Update the status of the workflow in the GitHub state mock
         {
-            let repo = self.github.get_repo(&event.workflow.repository.clone());
+            let repo = self
+                .github
+                .lock()
+                .get_repo(&event.workflow.repository.clone());
             let mut repo = repo.lock();
             let status = match &event.event {
                 WorkflowEventKind::Started => WorkflowStatus::Pending,
@@ -475,7 +483,7 @@ impl BorsTester {
         modify_pr: F,
     ) -> anyhow::Result<PullRequest> {
         let number = {
-            let repo = self.github.get_repo(&repo_name);
+            let repo = self.github.lock().get_repo(&repo_name);
             let repo = repo.lock();
             repo.pull_requests.keys().max().copied().unwrap_or(0) + 1
         };
@@ -485,7 +493,7 @@ impl BorsTester {
 
         // Add the PR to the repository
         {
-            let repo = self.github.get_repo(&repo_name);
+            let repo = self.github.lock().get_repo(&repo_name);
             let mut repo = repo.lock();
             repo.pull_requests.insert(number, pr.clone());
         }
@@ -504,7 +512,7 @@ impl BorsTester {
         pr_number: u64,
     ) -> anyhow::Result<()> {
         let pr = {
-            let repo = self.github.get_repo(&repo_name);
+            let repo = self.github.lock().get_repo(&repo_name);
             let mut repo = repo.lock();
             let pr = repo
                 .pull_requests
@@ -527,7 +535,7 @@ impl BorsTester {
         pr_number: u64,
     ) -> anyhow::Result<()> {
         let pr = {
-            let repo = self.github.get_repo(&repo_name);
+            let repo = self.github.lock().get_repo(&repo_name);
             let mut repo = repo.lock();
             let pr = repo
                 .pull_requests
@@ -550,7 +558,7 @@ impl BorsTester {
         pr_number: u64,
     ) -> anyhow::Result<()> {
         let pr = {
-            let repo = self.github.get_repo(&repo_name);
+            let repo = self.github.lock().get_repo(&repo_name);
             let mut repo = repo.lock();
             let pr = repo
                 .pull_requests
@@ -573,7 +581,7 @@ impl BorsTester {
         pr_number: u64,
     ) -> anyhow::Result<()> {
         let pr = {
-            let repo = self.github.get_repo(&repo_name);
+            let repo = self.github.lock().get_repo(&repo_name);
             let mut repo = repo.lock();
             let pr = repo
                 .pull_requests
@@ -596,7 +604,7 @@ impl BorsTester {
         pr_number: u64,
     ) -> anyhow::Result<()> {
         let pr = {
-            let repo = self.github.get_repo(&repo_name);
+            let repo = self.github.lock().get_repo(&repo_name);
             let mut repo = repo.lock();
             let pr = repo
                 .pull_requests
@@ -624,7 +632,7 @@ impl BorsTester {
     where
         F: FnOnce(&mut PullRequest),
     {
-        let repo = self.github.get_repo(&repo);
+        let repo = self.github.lock().get_repo(&repo);
 
         let (pr, changes) = {
             let mut repo = repo.lock();
@@ -647,7 +655,7 @@ impl BorsTester {
 
     pub async fn push_to_pr(&mut self, repo: GithubRepoName, pr_number: u64) -> anyhow::Result<()> {
         let pr = {
-            let repo = self.github.get_repo(&repo);
+            let repo = self.github.lock().get_repo(&repo);
             let mut repo = repo.lock();
 
             let counter = repo.get_next_pr_push_counter();
@@ -675,7 +683,7 @@ impl BorsTester {
         assignee: User,
     ) -> anyhow::Result<()> {
         let pr = {
-            let repo = self.github.get_repo(&repo);
+            let repo = self.github.lock().get_repo(&repo);
             let mut repo = repo.lock();
 
             let pr = repo
@@ -700,7 +708,7 @@ impl BorsTester {
         assignee: User,
     ) -> anyhow::Result<()> {
         let pr = {
-            let repo = self.github.get_repo(&repo);
+            let repo = self.github.lock().get_repo(&repo);
             let mut repo = repo.lock();
 
             let pr = repo
@@ -905,7 +913,7 @@ impl BorsTester {
         };
         // Flush any local queues
         self.http_mock.gh_server.assert_empty_queues().await;
-        Ok(self.github)
+        Ok(Arc::into_inner(self.github).unwrap().into_inner())
     }
 }
 

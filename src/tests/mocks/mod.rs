@@ -122,9 +122,9 @@ pub struct ExternalHttpMock {
 }
 
 impl ExternalHttpMock {
-    pub async fn start(github: &GitHubState) -> Self {
-        let gh_server = GitHubMockServer::start(github).await;
-        let team_api_server = TeamApiMockServer::start(github).await;
+    pub async fn start(github: Arc<Mutex<GitHubState>>) -> Self {
+        let gh_server = GitHubMockServer::start(github.clone()).await;
+        let team_api_server = TeamApiMockServer::start(&github.lock()).await;
         Self {
             gh_server,
             team_api_server,

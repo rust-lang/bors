@@ -1,5 +1,7 @@
 use octocrab::Octocrab;
+use parking_lot::Mutex;
 use std::collections::HashMap;
+use std::sync::Arc;
 use wiremock::MockServer;
 
 use crate::create_github_client;
@@ -53,13 +55,14 @@ pub struct GitHubMockServer {
 }
 
 impl GitHubMockServer {
-    pub async fn start(github: &GitHubState) -> Self {
+    pub async fn start(github: Arc<Mutex<GitHubState>>) -> Self {
         let mock_server = MockServer::start().await;
-        mock_repo_list(github, &mock_server).await;
+        mock_repo_list(&github.lock(), &mock_server).await;
 
         // Repositories are mocked separately to make it easier to
         // pass comm. channels to them.
         let mut repos = HashMap::default();
+        let github = github.lock();
         for (name, repo) in &github.repos {
             let (comments_tx, comments_rx) = tokio::sync::mpsc::channel(1024);
             mock_repo(repo.clone(), comments_tx, &mock_server).await;
