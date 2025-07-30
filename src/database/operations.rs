@@ -1097,7 +1097,10 @@ pub(crate) async fn record_tagged_bot_comment(
     .await
 }
 
-pub(crate) async fn delete_tagged_bot_comment(executor: impl PgExecutor<'_>, id: i32) -> anyhow::Result<()> {
+pub(crate) async fn delete_tagged_bot_comment(
+    executor: impl PgExecutor<'_>,
+    id: i32,
+) -> anyhow::Result<()> {
     measure_db_query("delete_tagged_bot_comment", || async {
         sqlx::query!("DELETE FROM comment WHERE id = $1", id)
             .execute(executor)

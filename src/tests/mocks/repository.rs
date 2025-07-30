@@ -277,7 +277,7 @@ pub async fn mock_repo(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
     mock_check_runs(repo.clone(), mock_server).await;
     mock_workflow_runs(repo.clone(), mock_server).await;
     mock_workflow_jobs(repo.clone(), mock_server).await;
-    mock_config(repo, mock_server).await;
+    mock_config(repo.clone(), mock_server).await;
 }
 
 async fn mock_branches(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {

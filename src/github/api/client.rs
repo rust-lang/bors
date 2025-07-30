@@ -442,7 +442,7 @@ impl GithubRepositoryClient {
 /// The reasons a piece of content can be reported or minimized.
 ///
 /// GitHub Docs: <https://docs.github.com/en/graphql/reference/enums#reportedcontentclassifiers>
-#[derive(Debug, Copy, Clone, Serialize)]
+#[derive(Debug, Copy, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum MinimizeCommentReason {
     /// An abusive or harassing piece of content.
@@ -473,7 +473,7 @@ mod tests {
     #[tokio::test]
     async fn load_installed_repos() {
         let mock = ExternalHttpMock::start(Arc::new(tokio::sync::Mutex::new(
-            GitHubState::new()
+            GitHubState::default()
                 .with_repo(
                     Repo::new(
                         GithubRepoName::new("foo", "bar"),
@@ -492,7 +492,7 @@ mod tests {
         let client = mock.github_client();
         let team_api_client = mock.team_api_client();
         let mut repos = load_repositories(&client, &team_api_client).await.unwrap();
-        assert_eq!(repos.len(), 2);
+        assert_eq!(repos.len(), 3);
 
         let repo = repos
             .remove(&GithubRepoName::new("foo", "bar"))

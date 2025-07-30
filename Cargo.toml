@@ -70,6 +70,7 @@ regex = "1"
 parking_lot = "0.12"
 thread_local = "1"
 sqlparser = { version = "0.58", features = ["visitor"] }
+graphql-parser = "0.4"
 
 [profile.release]
 debug = 1

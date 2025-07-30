@@ -574,6 +574,23 @@ fn is_bors_observed_branch(branch: &str) -> bool {
     branch == TRY_BRANCH_NAME || branch == AUTO_BRANCH_NAME
 }
 
+#[derive(PartialEq, Eq, Copy, Clone, Debug)]
+pub enum BuildType {
+    Try,
+    Auto,
+}
+
+/// Get the build type based on the branch where it happened.
+pub fn get_build_type(branch: &str) -> Option<BuildType> {
+    if branch == TRY_BRANCH_NAME {
+        Some(BuildType::Try)
+    } else if branch == AUTO_BRANCH_NAME {
+        Some(BuildType::Auto)
+    } else {
+        None
+    }
+}
+
 /// Deny permission for a request.
 async fn deny_request(
     repo: &RepositoryState,
