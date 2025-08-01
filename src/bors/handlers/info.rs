@@ -1,8 +1,7 @@
-use crate::bors::Comment;
 use crate::bors::RepositoryState;
+use crate::bors::comment::info_comment;
 use crate::bors::handlers::PullRequestData;
 use crate::database::PgDbClient;
-use crate::database::{ApprovalStatus, MergeableState};
 use std::sync::Arc;
 
 pub(super) async fn command_info(
@@ -10,63 +9,9 @@ pub(super) async fn command_info(
     pr: &PullRequestData,
     db: Arc<PgDbClient>,
 ) -> anyhow::Result<()> {
-    use std::fmt::Write;
-
-    let mut message = format!("## Status of PR `{}`\n", pr.number());
-
-    // Approval info
-    if let ApprovalStatus::Approved(info) = &pr.db.approval_status {
-        writeln!(message, "- Approved by: `{}`", info.approver)?;
-    } else {
-        writeln!(message, "- Not Approved")?;
-    }
-
-    // Priority info
-    if let Some(priority) = pr.db.priority {
-        writeln!(message, "- Priority: {priority}")?;
-    } else {
-        writeln!(message, "- Priority: unset")?;
-    }
-
-    // Mergeability state
-    writeln!(
-        message,
-        "- Mergeable: {}",
-        match pr.db.mergeable_state {
-            MergeableState::Mergeable => "yes",
-            MergeableState::HasConflicts => "no",
-            MergeableState::Unknown => "unknown",
-        }
-    )?;
-
-    // Try build status
-    if let Some(try_build) = &pr.db.try_build {
-        writeln!(message, "- Try build is in progress")?;
-
-        if let Ok(urls) = db.get_workflow_urls_for_build(try_build).await {
-            message.extend(
-                urls.into_iter()
-                    .map(|url| format!("\t- Workflow URL: {url}")),
-            );
-        }
-    }
-
-    // Auto build status
-    if let Some(auto_build) = &pr.db.auto_build {
-        writeln!(message, "- Auto build is in progress")?;
-
-        if let Ok(urls) = db.get_workflow_urls_for_build(auto_build).await {
-            message.extend(
-                urls.into_iter()
-                    .map(|url| format!("\t- Workflow URL: {url}")),
-            );
-        }
-    }
-
     repo.client
-        .post_comment(pr.number(), Comment::new(message))
+        .post_comment(pr.number(), info_comment(&pr.db, db).await)
         .await?;
-
     Ok(())
 }
 

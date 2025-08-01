@@ -88,7 +88,7 @@ impl FromStr for RollupMode {
 ///
 /// When modifying commands, remember to also update:
 /// - `templates/help.html` (HTML help page)
-/// - `src/bors/handlers/help.rs` (the `@bors help` command output)
+/// - [`crate::bors::comment::help_comment`] (the `@bors help` command output)
 #[derive(Debug, PartialEq)]
 pub enum BorsCommand {
     /// Approve a commit.

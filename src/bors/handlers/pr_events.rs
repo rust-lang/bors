@@ -1,4 +1,5 @@
 use crate::PgDbClient;
+use crate::bors::comment::{edited_pr_comment, pushed_pr_comment};
 use crate::bors::event::{
     PullRequestAssigned, PullRequestClosed, PullRequestConvertedToDraft, PullRequestEdited,
     PullRequestMerged, PullRequestOpened, PullRequestPushed, PullRequestReadyForReview,
@@ -7,7 +8,7 @@ use crate::bors::event::{
 use crate::bors::handlers::unapprove_pr;
 use crate::bors::handlers::workflow::{AutoBuildCancelReason, maybe_cancel_auto_build};
 use crate::bors::mergeable_queue::MergeableQueueSender;
-use crate::bors::{Comment, PullRequestStatus, RepositoryState};
+use crate::bors::{PullRequestStatus, RepositoryState};
 use crate::database::MergeableState;
 use crate::github::{CommitSha, PullRequestNumber};
 use crate::utils::text::pluralize;
@@ -251,13 +252,7 @@ async fn notify_of_edited_pr(
     base_name: &str,
 ) -> anyhow::Result<()> {
     repo.client
-        .post_comment(
-            pr_number,
-            Comment::new(format!(
-                r#":warning: The base branch changed to `{base_name}`, and the
-PR will need to be re-approved."#,
-            )),
-        )
+        .post_comment(pr_number, edited_pr_comment(base_name))
         .await?;
     Ok(())
 }
@@ -268,18 +263,8 @@ async fn notify_of_pushed_pr(
     head_sha: CommitSha,
     cancel_message: Option<String>,
 ) -> anyhow::Result<()> {
-    let mut comment = format!(
-        r#":warning: A new commit `{}` was pushed to the branch, the
-PR will need to be re-approved."#,
-        head_sha
-    );
-
-    if let Some(message) = cancel_message {
-        comment.push_str(&format!("\n\n{message}"));
-    }
-
     repo.client
-        .post_comment(pr_number, Comment::new(comment))
+        .post_comment(pr_number, pushed_pr_comment(&head_sha, cancel_message))
         .await?;
     Ok(())
 }

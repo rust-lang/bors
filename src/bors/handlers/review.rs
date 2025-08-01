@@ -5,7 +5,8 @@ use crate::bors::command::RollupMode;
 use crate::bors::command::{Approver, CommandPrefix};
 use crate::bors::comment::{
     approve_blocking_labels_present, approve_non_open_pr_comment, approve_wip_title,
-    approved_comment, delegate_comment, delegate_try_builds_comment, unapprove_non_open_pr_comment,
+    approved_comment, delegate_comment, delegate_try_builds_comment, tree_closed_comment,
+    tree_open_comment, unapproval_comment, unapprove_non_open_pr_comment,
 };
 use crate::bors::handlers::labels::handle_label_trigger;
 use crate::bors::handlers::workflow::{AutoBuildCancelReason, maybe_cancel_auto_build};
@@ -289,13 +290,7 @@ async fn notify_of_tree_closed(
     priority: u32,
 ) -> anyhow::Result<()> {
     repo.client
-        .post_comment(
-            pr_number,
-            Comment::new(format!(
-                "Tree closed for PRs with priority less than {}",
-                priority
-            )),
-        )
+        .post_comment(pr_number, tree_closed_comment(priority))
         .await?;
     Ok(())
 }
@@ -305,10 +300,7 @@ async fn notify_of_tree_open(
     pr_number: PullRequestNumber,
 ) -> anyhow::Result<()> {
     repo.client
-        .post_comment(
-            pr_number,
-            Comment::new("Tree is now open for merging".to_string()),
-        )
+        .post_comment(pr_number, tree_open_comment())
         .await?;
     Ok(())
 }
@@ -318,14 +310,11 @@ async fn notify_of_unapproval(
     pr: &PullRequestData,
     cancel_message: Option<String>,
 ) -> anyhow::Result<()> {
-    let mut comment = format!("Commit {} has been unapproved.", pr.github.head.sha);
-
-    if let Some(message) = cancel_message {
-        comment.push_str(&format!("\n\n{message}"));
-    }
-
     repo.client
-        .post_comment(pr.number(), Comment::new(comment))
+        .post_comment(
+            pr.number(),
+            unapproval_comment(&pr.github.head.sha, cancel_message),
+        )
         .await?;
     Ok(())
 }

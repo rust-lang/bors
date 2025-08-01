@@ -2,6 +2,9 @@ use std::sync::Arc;
 
 use super::mergeable_queue::MergeableQueueSender;
 use crate::bors::command::{BorsCommand, CommandParseError};
+use crate::bors::comment::{
+    exec_command_failed_comment, insufficient_privileges_comment, parse_command_failed_comment,
+};
 use crate::bors::event::{BorsGlobalEvent, BorsRepositoryEvent, PullRequestComment};
 use crate::bors::handlers::help::command_help;
 use crate::bors::handlers::info::command_info;
@@ -20,7 +23,7 @@ use crate::bors::handlers::review::{
 use crate::bors::handlers::trybuild::{TRY_BRANCH_NAME, command_try_build, command_try_cancel};
 use crate::bors::handlers::workflow::{handle_workflow_completed, handle_workflow_started};
 use crate::bors::merge_queue::{AUTO_BRANCH_NAME, MergeQueueSender};
-use crate::bors::{BorsContext, CommandPrefix, Comment, RepositoryState};
+use crate::bors::{BorsContext, CommandPrefix, RepositoryState};
 use crate::database::{DelegatedPermission, PullRequestModel};
 use crate::github::{GithubUser, LabelTrigger, PullRequest, PullRequestNumber};
 use crate::permissions::PermissionType;
@@ -87,12 +90,7 @@ pub async fn handle_bors_repository_event(
                     .await
             {
                 repo.client
-                    .post_comment(
-                        pr_number,
-                        Comment::new(
-                            ":x: Encountered an error while executing command".to_string(),
-                        ),
-                    )
+                    .post_comment(pr_number, exec_command_failed_comment())
                     .await
                     .context("Cannot send comment reacting to an error")?;
                 return Err(error.context("Cannot perform command"));
@@ -334,8 +332,6 @@ async fn handle_comment(
     comment: PullRequestComment,
     merge_queue_tx: MergeQueueSender,
 ) -> anyhow::Result<()> {
-    use std::fmt::Write;
-
     let pr_number = comment.pr_number;
     let mut commands = ctx.parser.parse_commands(&comment.text);
 
@@ -505,32 +501,12 @@ async fn handle_comment(
                 }
             }
             Err(error) => {
-                let mut message = match error {
-                    CommandParseError::MissingCommand => "Missing command.".to_string(),
-                    CommandParseError::UnknownCommand(command) => {
-                        format!(r#"Unknown command "{command}"."#)
-                    }
-                    CommandParseError::MissingArgValue { arg } => {
-                        format!(r#"Unknown value for argument "{arg}"."#)
-                    }
-                    CommandParseError::UnknownArg(arg) => {
-                        format!(r#"Unknown argument "{arg}"."#)
-                    }
-                    CommandParseError::DuplicateArg(arg) => {
-                        format!(r#"Argument "{arg}" found multiple times."#)
-                    }
-                    CommandParseError::ValidationError(error) => {
-                        format!("Invalid command: {error}.")
-                    }
-                };
-                writeln!(
-                    message,
-                    " Run `{} help` to see available commands.",
-                    ctx.parser.prefix()
-                )?;
-                tracing::warn!("{}", message);
+                tracing::warn!("{:?}", error);
                 repo.client
-                    .post_comment(pr_github.number, Comment::new(message))
+                    .post_comment(
+                        pr_github.number,
+                        parse_command_failed_comment(&error, ctx.parser.prefix()),
+                    )
                     .await
                     .context("Could not reply to PR comment")?;
             }
@@ -605,10 +581,7 @@ async fn deny_request(
     repo.client
         .post_comment(
             pr_number,
-            Comment::new(format!(
-                "@{}: :key: Insufficient privileges: not in {} users",
-                author.username, permission_type
-            )),
+            insufficient_privileges_comment(&author.username, permission_type),
         )
         .await?;
     Ok(())

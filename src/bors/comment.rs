@@ -1,11 +1,14 @@
 use itertools::Itertools;
 use octocrab::models::workflows::Job;
 use serde::Serialize;
+use std::sync::Arc;
 use std::time::Duration;
 
 use crate::bors::FailedWorkflowRun;
-use crate::bors::command::CommandPrefix;
+use crate::bors::command::{BorsCommand, CommandParseError, CommandPrefix};
+use crate::database::{ApprovalStatus, MergeableState, PgDbClient, PullRequestModel};
 use crate::github::GithubRepoName;
+use crate::permissions::PermissionType;
 use crate::utils::text::pluralize;
 use crate::{
     database::{WorkflowModel, WorkflowStatus},
@@ -31,7 +34,7 @@ pub enum CommentTag {
 }
 
 impl Comment {
-    pub fn new(text: String) -> Self {
+    fn new(text: String) -> Self {
         Self {
             text,
             metadata: None,
@@ -49,6 +52,209 @@ impl Comment {
             self.text.clone()
         }
     }
+}
+
+/// Format the bors command help in Markdown format.
+pub fn help_comment() -> Comment {
+    // The help is generated manually to have a nicer structure.
+    // We do a no-op destructuring of `BorsCommand` to make it harder to modify help in case new
+    // commands are added though.
+    match BorsCommand::Ping {
+        BorsCommand::Approve {
+            approver: _,
+            rollup: _,
+            priority: _,
+        } => {}
+        BorsCommand::Unapprove => {}
+        BorsCommand::Help => {}
+        BorsCommand::Ping => {}
+        BorsCommand::Try { parent: _, jobs: _ } => {}
+        BorsCommand::TryCancel => {}
+        BorsCommand::SetPriority(_) => {}
+        BorsCommand::Info => {}
+        BorsCommand::SetDelegate(_) => {}
+        BorsCommand::Undelegate => {}
+        BorsCommand::SetRollupMode(_) => {}
+        BorsCommand::OpenTree => {}
+        BorsCommand::TreeClosed(_) => {}
+    }
+
+    Comment::new(r#"
+You can use the following commands:
+
+## PR management
+- `r+ [p=<priority>] [rollup=<never|iffy|maybe|always>]`: Approve this PR on your behalf
+    - Optionally, you can specify the `<priority>` of the PR and if it is eligible for rollups (`<rollup>)`.
+- `r=<user> [p=<priority>] [rollup=<never|iffy|maybe|always>]`: Approve this PR on behalf of `<user>`
+    - Optionally, you can specify the `<priority>` of the PR and if it is eligible for rollups (`<rollup>)`.
+    - You can pass a comma-separated list of GitHub usernames.
+- `r-`: Unapprove this PR
+- `p=<priority>` or `priority=<priority>`: Set the priority of this PR
+- `rollup=<never|iffy|maybe|always>`: Set the rollup status of the PR
+- `rollup`: Short for `rollup=always`
+- `rollup-`: Short for `rollup=maybe`
+- `delegate=<try|review>`: Delegate permissions for running try builds or approving to the PR author
+    - `try` allows the PR author to start try builds.
+    - `review` allows the PR author to both start try builds and approve the PR.
+- `delegate+`: Delegate approval permissions to the PR author
+    - Shortcut for `delegate=review`
+- `delegate-`: Remove any previously granted permission delegation
+- `try [parent=<parent>] [jobs=<jobs>]`: Start a try build.
+    - Optionally, you can specify a `<parent>` SHA with which will the PR be merged. You can specify `parent=last` to use the same parent SHA as the previous try build.
+    - Optionally, you can select a comma-separated list of CI `<jobs>` to run in the try build.
+- `try cancel`: Cancel a running try build
+- `info`: Get information about the current PR
+
+## Repository management
+- `treeclosed=<priority>`: Close the tree for PRs with priority less than `<priority>`
+- `treeclosed-` or `treeopen`: Open the repository tree for merging
+
+## Meta commands
+- `ping`: Check if the bot is alive
+- `help`: Print this help message
+"#.to_string())
+}
+
+pub async fn info_comment(pr: &PullRequestModel, db: Arc<PgDbClient>) -> Comment {
+    use std::fmt::Write;
+
+    let mut message = format!("## Status of PR `{}`\n", pr.number);
+
+    // Approval info
+    if let ApprovalStatus::Approved(info) = &pr.approval_status {
+        writeln!(message, "- Approved by: `{}`", info.approver).unwrap();
+    } else {
+        writeln!(message, "- Not Approved").unwrap();
+    }
+
+    // Priority info
+    if let Some(priority) = pr.priority {
+        writeln!(message, "- Priority: {priority}").unwrap();
+    } else {
+        writeln!(message, "- Priority: unset").unwrap();
+    }
+
+    // Mergeability state
+    writeln!(
+        message,
+        "- Mergeable: {}",
+        match pr.mergeable_state {
+            MergeableState::Mergeable => "yes",
+            MergeableState::HasConflicts => "no",
+            MergeableState::Unknown => "unknown",
+        }
+    ).unwrap();
+
+    // Try build status
+    if let Some(try_build) = &pr.try_build {
+        writeln!(message, "- Try build is in progress").unwrap();
+
+        if let Ok(urls) = db.get_workflow_urls_for_build(try_build).await {
+            message.extend(
+                urls.into_iter()
+                    .map(|url| format!("\t- Workflow URL: {url}")),
+            );
+        }
+    }
+
+    // Auto build status
+    if let Some(auto_build) = &pr.auto_build {
+        writeln!(message, "- Auto build is in progress").unwrap();
+
+        if let Ok(urls) = db.get_workflow_urls_for_build(auto_build).await {
+            message.extend(
+                urls.into_iter()
+                    .map(|url| format!("\t- Workflow URL: {url}")),
+            );
+        }
+    }
+    Comment::new(message)
+}
+
+pub fn exec_command_failed_comment() -> Comment {
+    Comment::new(":x: Encountered an error while executing command".to_string())
+}
+
+pub fn parse_command_failed_comment(
+    error: &CommandParseError,
+    bot_prefix: &CommandPrefix,
+) -> Comment {
+    use std::fmt::Write;
+
+    let mut message = match error {
+        CommandParseError::MissingCommand => "Missing command.".to_string(),
+        CommandParseError::UnknownCommand(command) => {
+            format!(r#"Unknown command "{command}"."#)
+        }
+        CommandParseError::MissingArgValue { arg } => {
+            format!(r#"Unknown value for argument "{arg}"."#)
+        }
+        CommandParseError::UnknownArg(arg) => {
+            format!(r#"Unknown argument "{arg}"."#)
+        }
+        CommandParseError::DuplicateArg(arg) => {
+            format!(r#"Argument "{arg}" found multiple times."#)
+        }
+        CommandParseError::ValidationError(error) => {
+            format!("Invalid command: {error}.")
+        }
+    };
+    writeln!(
+        message,
+        " Run `{} help` to see available commands.",
+        bot_prefix
+    )
+    .unwrap();
+    Comment::new(message)
+}
+
+pub fn insufficient_privileges_comment(username: &str, permission_type: PermissionType) -> Comment {
+    Comment::new(format!(
+        "@{}: :key: Insufficient privileges: not in {} users",
+        username, permission_type
+    ))
+}
+
+pub fn pong_message() -> Comment {
+    Comment::new("Pong 🏓!".to_string())
+}
+
+pub fn edited_pr_comment(base_name: &str) -> Comment {
+    Comment::new(format!(
+        r#":warning: The base branch changed to `{base_name}`, and the
+PR will need to be re-approved."#,
+    ))
+}
+
+pub fn pushed_pr_comment(head_sha: &CommitSha, cancel_message: Option<String>) -> Comment {
+    let mut comment = format!(
+        r#":warning: A new commit `{}` was pushed to the branch, the
+PR will need to be re-approved."#,
+        head_sha
+    );
+    if let Some(message) = cancel_message {
+        comment.push_str(&format!("\n\n{message}"));
+    }
+    Comment::new(comment)
+}
+
+pub fn tree_closed_comment(priority: u32) -> Comment {
+    Comment::new(format!(
+        "Tree closed for PRs with priority less than {}",
+        priority
+    ))
+}
+
+pub fn tree_open_comment() -> Comment {
+    Comment::new("Tree is now open for merging".to_string())
+}
+
+pub fn unapproval_comment(head_sha: &CommitSha, cancel_message: Option<String>) -> Comment {
+    let mut comment = format!("Commit {} has been unapproved.", head_sha);
+    if let Some(message) = cancel_message {
+        comment.push_str(&format!("\n\n{message}"));
+    }
+    Comment::new(comment)
 }
 
 pub fn try_build_succeeded_comment(
