@@ -301,12 +301,11 @@ pub fn try_build_cancelled_with_failed_workflow_cancel_comment() -> Comment {
 }
 
 pub fn try_build_cancelled_comment(workflow_urls: impl Iterator<Item = String>) -> Comment {
-    let mut try_build_cancelled_comment =
-        r#"Try build cancelled. Cancelled workflows:"#.to_string();
+    let mut comment = String::from("Try build cancelled. Cancelled workflows:");
     for url in workflow_urls {
-        try_build_cancelled_comment += format!("\n- {}", url).as_str();
+        write!(comment, "\n- {}", url).unwrap();
     }
-    Comment::new(try_build_cancelled_comment)
+    Comment::new(comment)
 }
 
 pub fn build_failed_comment(
@@ -511,7 +510,6 @@ fn list_workflows_status(workflows: &[WorkflowModel]) -> String {
                 }
             )
         })
-        .collect::<Vec<_>>()
         .join("\n")
 }
 
@@ -531,7 +529,6 @@ pub fn auto_build_succeeded_comment(
     let urls = workflows
         .iter()
         .map(|w| format!("[{}]({})", w.name, w.url))
-        .collect::<Vec<_>>()
         .join(", ");
 
     Comment::new(format!(
