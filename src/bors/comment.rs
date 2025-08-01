@@ -1,6 +1,7 @@
 use itertools::Itertools;
 use octocrab::models::workflows::Job;
 use serde::Serialize;
+use std::fmt::Write;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -34,9 +35,9 @@ pub enum CommentTag {
 }
 
 impl Comment {
-    fn new(text: String) -> Self {
+    fn new(text: impl Into<String>) -> Self {
         Self {
-            text,
+            text: text.into(),
             metadata: None,
         }
     }
@@ -79,7 +80,8 @@ pub fn help_comment() -> Comment {
         BorsCommand::TreeClosed(_) => {}
     }
 
-    Comment::new(r#"
+    Comment::new(
+        r#"
 You can use the following commands:
 
 ## PR management
@@ -112,12 +114,11 @@ You can use the following commands:
 ## Meta commands
 - `ping`: Check if the bot is alive
 - `help`: Print this help message
-"#.to_string())
+"#,
+    )
 }
 
 pub async fn info_comment(pr: &PullRequestModel, db: Arc<PgDbClient>) -> Comment {
-    use std::fmt::Write;
-
     let mut message = format!("## Status of PR `{}`\n", pr.number);
 
     // Approval info
@@ -143,7 +144,8 @@ pub async fn info_comment(pr: &PullRequestModel, db: Arc<PgDbClient>) -> Comment
             MergeableState::HasConflicts => "no",
             MergeableState::Unknown => "unknown",
         }
-    ).unwrap();
+    )
+    .unwrap();
 
     // Try build status
     if let Some(try_build) = &pr.try_build {
@@ -172,15 +174,13 @@ pub async fn info_comment(pr: &PullRequestModel, db: Arc<PgDbClient>) -> Comment
 }
 
 pub fn exec_command_failed_comment() -> Comment {
-    Comment::new(":x: Encountered an error while executing command".to_string())
+    Comment::new(":x: Encountered an error while executing command")
 }
 
 pub fn parse_command_failed_comment(
     error: &CommandParseError,
     bot_prefix: &CommandPrefix,
 ) -> Comment {
-    use std::fmt::Write;
-
     let mut message = match error {
         CommandParseError::MissingCommand => "Missing command.".to_string(),
         CommandParseError::UnknownCommand(command) => {
@@ -216,7 +216,7 @@ pub fn insufficient_privileges_comment(username: &str, permission_type: Permissi
 }
 
 pub fn pong_message() -> Comment {
-    Comment::new("Pong 🏓!".to_string())
+    Comment::new("Pong 🏓!")
 }
 
 pub fn edited_pr_comment(base_name: &str) -> Comment {
@@ -246,7 +246,7 @@ pub fn tree_closed_comment(priority: u32) -> Comment {
 }
 
 pub fn tree_open_comment() -> Comment {
-    Comment::new("Tree is now open for merging".to_string())
+    Comment::new("Tree is now open for merging")
 }
 
 pub fn unapproval_comment(head_sha: &CommitSha, cancel_message: Option<String>) -> Comment {
@@ -262,8 +262,6 @@ pub fn try_build_succeeded_comment(
     commit_sha: CommitSha,
     parent_sha: CommitSha,
 ) -> Comment {
-    use std::fmt::Write;
-
     let mut text = String::from(":sunny: Try build successful");
 
     // If there is only a single workflow (the common case), compress the output
@@ -289,17 +287,17 @@ pub fn try_build_succeeded_comment(
 }
 
 pub fn cant_find_last_parent_comment() -> Comment {
-    Comment::new(":exclamation: There was no previous build. Please set an explicit parent or remove the `parent=last` argument to use the default parent.".to_string())
+    Comment::new(
+        ":exclamation: There was no previous build. Please set an explicit parent or remove the `parent=last` argument to use the default parent.",
+    )
 }
 
 pub fn no_try_build_in_progress_comment() -> Comment {
-    Comment::new(":exclamation: There is currently no try build in progress.".to_string())
+    Comment::new(":exclamation: There is currently no try build in progress.")
 }
 
 pub fn try_build_cancelled_with_failed_workflow_cancel_comment() -> Comment {
-    Comment::new(
-        "Try build was cancelled. It was not possible to cancel some workflows.".to_string(),
-    )
+    Comment::new("Try build was cancelled. It was not possible to cancel some workflows.")
 }
 
 pub fn try_build_cancelled_comment(workflow_urls: impl Iterator<Item = String>) -> Comment {
@@ -316,8 +314,6 @@ pub fn build_failed_comment(
     commit_sha: CommitSha,
     failed_workflows: Vec<FailedWorkflowRun>,
 ) -> Comment {
-    use std::fmt::Write;
-
     let mut msg = format!(":broken_heart: Test for {commit_sha} failed");
     let mut workflow_links = failed_workflows
         .iter()
@@ -376,7 +372,6 @@ pub fn try_build_started_comment(
     bot_prefix: &CommandPrefix,
     cancelled_workflow_urls: Vec<String>,
 ) -> Comment {
-    use std::fmt::Write;
     let mut msg = format!(":hourglass: Trying commit {head_sha} with merge {merge_sha}…\n\n");
 
     if !cancelled_workflow_urls.is_empty() {
@@ -447,11 +442,11 @@ It is now in the [queue]({web_url}/queue/{}) for this repository.
 }
 
 pub fn approve_non_open_pr_comment() -> Comment {
-    Comment::new(":clipboard: Only open, non-draft PRs can be approved.".to_string())
+    Comment::new(":clipboard: Only open, non-draft PRs can be approved.")
 }
 
 pub fn unapprove_non_open_pr_comment() -> Comment {
-    Comment::new(":clipboard: Only unclosed PRs can be unapproved.".to_string())
+    Comment::new(":clipboard: Only unclosed PRs can be unapproved.")
 }
 
 pub fn approve_wip_title(keyword: &str) -> Comment {
