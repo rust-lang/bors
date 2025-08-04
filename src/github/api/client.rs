@@ -12,13 +12,21 @@ use crate::bors::{Comment, WorkflowRun};
 use crate::config::{CONFIG_FILE_PATH, RepositoryConfig};
 use crate::database::WorkflowStatus;
 use crate::github::api::operations::{
-    ForcePush, MergeError, create_check_run, merge_branches, set_branch_to_commit, update_check_run,
+    BranchUpdateError, ForcePush, MergeError, create_check_run, merge_branches,
+    set_branch_to_commit, update_check_run,
 };
 use crate::github::{CommitSha, GithubRepoName, PullRequest, PullRequestNumber};
 use crate::utils::timing::{measure_network_request, perform_network_request_with_retry};
 use futures::TryStreamExt;
 use octocrab::models::workflows::Job;
 use serde::de::DeserializeOwned;
+
+#[derive(serde::Deserialize, Debug)]
+pub struct WorkflowRunResponse {
+    pub id: RunId,
+    pub status: String,
+    pub conclusion: Option<String>,
+}
 
 /// Provides access to a single app installation (repository) using the GitHub API.
 pub struct GithubRepositoryClient {
@@ -139,11 +147,8 @@ impl GithubRepositoryClient {
         branch: &str,
         sha: &CommitSha,
         force: ForcePush,
-    ) -> anyhow::Result<()> {
-        perform_network_request_with_retry("set_branch_to_sha", || async {
-            Ok(set_branch_to_commit(self, branch.to_string(), sha, force).await?)
-        })
-        .await?
+    ) -> Result<(), BranchUpdateError> {
+        set_branch_to_commit(self, branch.to_string(), sha, force).await
     }
 
     /// Merge `head` into `base`. Returns the SHA of the merge commit.
@@ -198,13 +203,6 @@ impl GithubRepositoryClient {
         &self,
         check_suite_id: CheckSuiteId,
     ) -> anyhow::Result<Vec<WorkflowRun>> {
-        #[derive(serde::Deserialize, Debug)]
-        struct WorkflowRunResponse {
-            id: RunId,
-            status: String,
-            conclusion: Option<String>,
-        }
-
         #[derive(serde::Deserialize, Debug)]
         struct WorkflowRunsResponse {
             workflow_runs: Vec<WorkflowRunResponse>,
@@ -287,6 +285,27 @@ impl GithubRepositoryClient {
             Ok(())
         })
         .await
+    }
+
+    /// Get workflow runs for a specific commit SHA.
+    pub async fn get_workflow_runs_for_commit(
+        &self,
+        commit_sha: &CommitSha,
+    ) -> anyhow::Result<Vec<WorkflowRunResponse>> {
+        #[derive(serde::Deserialize, Debug)]
+        struct WorkflowRunsResponse {
+            workflow_runs: Vec<WorkflowRunResponse>,
+        }
+
+        perform_network_request_with_retry("get_workflow_runs_for_commit", || async {
+            let response: WorkflowRunsResponse = self
+                .get_request(&format!("actions/runs?head_sha={}", commit_sha.0))
+                .await
+                .context("Cannot fetch workflow runs for commit")?;
+
+            Ok(response.workflow_runs)
+        })
+        .await?
     }
 
     /// Add a set of labels to a PR.
