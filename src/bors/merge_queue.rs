@@ -151,31 +151,7 @@ async fn process_repository(
                             .await?;
                     }
                     Err(error) => {
-                        tracing::error!("Failed to push PR {pr_num} to base branch: {:?}", error);
-
-                        if let Some(check_run_id) = auto_build.check_run_id {
-                            if let Err(error) = repo
-                                .client
-                                .update_check_run(
-                                    CheckRunId(check_run_id as u64),
-                                    CheckRunStatus::Completed,
-                                    Some(CheckRunConclusion::Failure),
-                                    None,
-                                )
-                                .await
-                            {
-                                tracing::error!(
-                                    "Could not update check run {check_run_id}: {error:?}"
-                                );
-                            }
-                        }
-
-                        ctx.db
-                            .update_build_status(auto_build, BuildStatus::Failure)
-                            .await?;
-
-                        let comment = auto_build_push_failed_comment(&error.to_string());
-                        repo.client.post_comment(pr.number, comment).await?;
+                        handle_push_failure(&repo, ctx, auto_build, pr.number, &error).await?;
                     }
                 };
 
@@ -193,6 +169,44 @@ async fn process_repository(
             }
         }
     }
+
+    Ok(())
+}
+
+async fn handle_push_failure(
+    repo: &Arc<RepositoryState>,
+    ctx: &Arc<BorsContext>,
+    auto_build: &crate::database::BuildModel,
+    pr_number: crate::github::PullRequestNumber,
+    error: &anyhow::Error,
+) -> anyhow::Result<()> {
+    tracing::error!(
+        "Failed to push PR {} to base branch: {:?}",
+        pr_number,
+        error
+    );
+
+    if let Some(check_run_id) = auto_build.check_run_id {
+        if let Err(error) = repo
+            .client
+            .update_check_run(
+                CheckRunId(check_run_id as u64),
+                CheckRunStatus::Completed,
+                Some(CheckRunConclusion::Failure),
+                None,
+            )
+            .await
+        {
+            tracing::error!("Could not update check run {check_run_id}: {error:?}");
+        }
+    }
+
+    ctx.db
+        .update_build_status(auto_build, BuildStatus::Failure)
+        .await?;
+
+    let comment = auto_build_push_failed_comment(&error.to_string());
+    repo.client.post_comment(pr_number, comment).await?;
 
     Ok(())
 }
