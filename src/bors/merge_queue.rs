@@ -229,7 +229,7 @@ async fn start_auto_build(
     );
 
     // 1. Merge PR head with base branch on `AUTO_MERGE_BRANCH_NAME`
-    match attempt_merge(
+    let merge_sha = match attempt_merge(
         &repo.client,
         &gh_pr.head.sha,
         &base_sha,
@@ -237,63 +237,62 @@ async fn start_auto_build(
     )
     .await?
     {
-        MergeResult::Success(merge_sha) => {
-            // 2. Push merge commit to `AUTO_BRANCH_NAME` where CI runs
-            client
-                .set_branch_to_sha(AUTO_BRANCH_NAME, &merge_sha, ForcePush::Yes)
+        MergeResult::Conflict => return Ok(false),
+        MergeResult::Success(merge_sha) => merge_sha,
+    };
+
+    // 2. Push merge commit to `AUTO_BRANCH_NAME` where CI runs
+    client
+        .set_branch_to_sha(AUTO_BRANCH_NAME, &merge_sha, ForcePush::Yes)
+        .await?;
+
+    // 3. Record the build in the database
+    let build_id = ctx
+        .db
+        .attach_auto_build(
+            &pr,
+            AUTO_BRANCH_NAME.to_string(),
+            merge_sha.clone(),
+            base_sha,
+        )
+        .await?;
+
+    // 4. Set GitHub check run to pending on PR head
+    match client
+        .create_check_run(
+            AUTO_BUILD_CHECK_RUN_NAME,
+            &gh_pr.head.sha,
+            CheckRunStatus::InProgress,
+            CheckRunOutput {
+                title: AUTO_BUILD_CHECK_RUN_NAME.to_string(),
+                summary: "".to_string(),
+                text: None,
+                annotations: vec![],
+                images: vec![],
+            },
+            &build_id.to_string(),
+        )
+        .await
+    {
+        Ok(check_run) => {
+            tracing::info!(
+                "Created check run {} for build {build_id}",
+                check_run.id.into_inner()
+            );
+            ctx.db
+                .update_build_check_run_id(build_id, check_run.id.into_inner() as i64)
                 .await?;
-
-            // 3. Record the build in the database
-            let build_id = ctx
-                .db
-                .attach_auto_build(
-                    &pr,
-                    AUTO_BRANCH_NAME.to_string(),
-                    merge_sha.clone(),
-                    base_sha,
-                )
-                .await?;
-
-            // 4. Set GitHub check run to pending on PR head
-            match client
-                .create_check_run(
-                    AUTO_BUILD_CHECK_RUN_NAME,
-                    &gh_pr.head.sha,
-                    CheckRunStatus::InProgress,
-                    CheckRunOutput {
-                        title: AUTO_BUILD_CHECK_RUN_NAME.to_string(),
-                        summary: "".to_string(),
-                        text: None,
-                        annotations: vec![],
-                        images: vec![],
-                    },
-                    &build_id.to_string(),
-                )
-                .await
-            {
-                Ok(check_run) => {
-                    tracing::info!(
-                        "Created check run {} for build {build_id}",
-                        check_run.id.into_inner()
-                    );
-                    ctx.db
-                        .update_build_check_run_id(build_id, check_run.id.into_inner() as i64)
-                        .await?;
-                }
-                Err(error) => {
-                    // Check runs aren't critical, don't block progress if they fail
-                    tracing::error!("Cannot create check run: {error:?}");
-                }
-            }
-
-            // 5. Post status comment
-            let comment = auto_build_started_comment(&gh_pr.head.sha, &merge_sha);
-            client.post_comment(pr.number, comment).await?;
-
-            Ok(true)
         }
-        MergeResult::Conflict => Ok(false),
+        Err(error) => {
+            tracing::error!("Failed to create check run: {error:?}");
+        }
     }
+
+    // 5. Post status comment
+    let comment = auto_build_started_comment(&gh_pr.head.sha, &merge_sha);
+    client.post_comment(pr.number, comment).await?;
+
+    Ok(true)
 }
 
 /// Attempts to merge the given head SHA with base SHA via `AUTO_MERGE_BRANCH_NAME`.
