@@ -102,24 +102,21 @@ async fn process_repository(
     for pr in prs {
         let pr_num = pr.number;
 
-        let auto_build = match &pr.auto_build {
-            Some(auto_build) => auto_build,
-            None => {
-                // No build exists for this PR - start a new auto build.
-                match start_auto_build(&repo, ctx, pr).await {
-                    Ok(true) => {
-                        tracing::info!("Starting auto build for PR {pr_num}");
-                        break;
-                    }
-                    Ok(false) => {
-                        tracing::debug!("Failed to start auto build for PR {pr_num}");
-                        continue;
-                    }
-                    Err(error) => {
-                        // Unexpected error - the PR will remain in the "queue" for a retry.
-                        tracing::error!("Error starting auto build for PR {pr_num}: {:?}", error);
-                        continue;
-                    }
+        let Some(auto_build) = &pr.auto_build else {
+            // No build exists for this PR - start a new auto build.
+            match start_auto_build(&repo, ctx, pr).await {
+                Ok(true) => {
+                    tracing::info!("Starting auto build for PR {pr_num}");
+                    break;
+                }
+                Ok(false) => {
+                    tracing::debug!("Failed to start auto build for PR {pr_num}");
+                    continue;
+                }
+                Err(error) => {
+                    // Unexpected error - the PR will remain in the "queue" for a retry.
+                    tracing::error!("Error starting auto build for PR {pr_num}: {:?}", error);
+                    continue;
                 }
             }
         };
