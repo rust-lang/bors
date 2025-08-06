@@ -63,8 +63,8 @@ pub async fn merge_queue_tick(ctx: Arc<BorsContext>) -> anyhow::Result<()> {
 
     for repo in repos {
         let repo_name = repo.repository().to_string();
-        if let Err(error) = process_repository(repo, &ctx).await {
-            tracing::error!("Error processing repository {}: {:?}", repo_name, error);
+        if let Err(error) = process_repository(&repo, &ctx).await {
+            tracing::error!("Error processing repository {repo_name}: {error:?}");
         }
     }
 
@@ -74,10 +74,7 @@ pub async fn merge_queue_tick(ctx: Arc<BorsContext>) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn process_repository(
-    repo: Arc<RepositoryState>,
-    ctx: &Arc<BorsContext>,
-) -> anyhow::Result<()> {
+async fn process_repository(repo: &RepositoryState, ctx: &BorsContext) -> anyhow::Result<()> {
     if !repo.config.load().merge_queue_enabled {
         return Ok(());
     }
@@ -104,7 +101,7 @@ async fn process_repository(
 
         let Some(auto_build) = &pr.auto_build else {
             // No build exists for this PR - start a new auto build.
-            match start_auto_build(&repo, ctx, pr).await {
+            match start_auto_build(repo, ctx, pr).await {
                 Ok(true) => {
                     tracing::info!("Starting auto build for PR {pr_num}");
                     break;
@@ -140,7 +137,7 @@ async fn process_repository(
                     .set_branch_to_sha(&pr.base_branch, &commit_sha, ForcePush::No)
                     .await
                 {
-                    handle_push_failure(&repo, ctx, auto_build, pr.number, &error).await?;
+                    handle_push_failure(repo, ctx, auto_build, pr.number, &error).await?;
                 } else {
                     tracing::info!("Auto build succeeded and merged for PR {pr_num}");
 
@@ -168,8 +165,8 @@ async fn process_repository(
 }
 
 async fn handle_push_failure(
-    repo: &Arc<RepositoryState>,
-    ctx: &Arc<BorsContext>,
+    repo: &RepositoryState,
+    ctx: &BorsContext,
     auto_build: &crate::database::BuildModel,
     pr_number: crate::github::PullRequestNumber,
     error: &anyhow::Error,
@@ -207,8 +204,8 @@ async fn handle_push_failure(
 
 /// Starts a new auto build for a pull request.
 async fn start_auto_build(
-    repo: &Arc<RepositoryState>,
-    ctx: &Arc<BorsContext>,
+    repo: &RepositoryState,
+    ctx: &BorsContext,
     pr: PullRequestModel,
 ) -> anyhow::Result<bool> {
     let client = &repo.client;
