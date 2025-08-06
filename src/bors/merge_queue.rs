@@ -138,22 +138,19 @@ async fn process_repository(
                 );
                 repo.client.post_comment(pr.number, comment).await?;
 
-                match repo
+                if let Err(error) = repo
                     .client
                     .set_branch_to_sha(&pr.base_branch, &commit_sha, ForcePush::No)
                     .await
                 {
-                    Ok(()) => {
-                        tracing::info!("Auto build succeeded and merged for PR {pr_num}");
+                    handle_push_failure(&repo, ctx, auto_build, pr.number, &error).await?;
+                } else {
+                    tracing::info!("Auto build succeeded and merged for PR {pr_num}");
 
-                        ctx.db
-                            .set_pr_status(&pr.repository, pr.number, PullRequestStatus::Merged)
-                            .await?;
-                    }
-                    Err(error) => {
-                        handle_push_failure(&repo, ctx, auto_build, pr.number, &error).await?;
-                    }
-                };
+                    ctx.db
+                        .set_pr_status(&pr.repository, pr.number, PullRequestStatus::Merged)
+                        .await?;
+                }
 
                 // Break to give GitHub time to update the base branch.
                 break;
