@@ -15,7 +15,7 @@ use crate::github::api::operations::{
     ForcePush, MergeError, create_check_run, merge_branches, set_branch_to_commit, update_check_run,
 };
 use crate::github::{CommitSha, GithubRepoName, PullRequest, PullRequestNumber};
-use crate::utils::timing::{measure_network_request, perform_network_request_with_retry};
+use crate::utils::timing::retry_on_timeout;
 use futures::TryStreamExt;
 use octocrab::models::workflows::Job;
 use serde::de::DeserializeOwned;
@@ -56,7 +56,7 @@ impl GithubRepositoryClient {
     /// Loads repository configuration from a file located at `[CONFIG_FILE_PATH]` in the main
     /// branch.
     pub async fn load_config(&self) -> anyhow::Result<RepositoryConfig> {
-        perform_network_request_with_retry("load_config", || async {
+        retry_on_timeout("load_config", || async {
             let mut response = self
                 .client
                 .repos(&self.repo_name.owner, &self.repo_name.name)
@@ -89,7 +89,7 @@ impl GithubRepositoryClient {
 
     /// Return the current SHA of the given branch.
     pub async fn get_branch_sha(&self, name: &str) -> anyhow::Result<CommitSha> {
-        perform_network_request_with_retry("get_branch_sha", || async {
+        retry_on_timeout("get_branch_sha", || async {
             // https://docs.github.com/en/rest/branches/branches?apiVersion=2022-11-28#get-a-branch
             let branch: octocrab::models::repos::Branch = self
                 .get_request(&format!("branches/{name}"))
@@ -102,7 +102,7 @@ impl GithubRepositoryClient {
 
     /// Resolve a pull request from this repository by it's number.
     pub async fn get_pull_request(&self, pr: PullRequestNumber) -> anyhow::Result<PullRequest> {
-        perform_network_request_with_retry("get_pull_request", || async {
+        retry_on_timeout("get_pull_request", || async {
             let pr = self
                 .client
                 .pulls(self.repository().owner(), self.repository().name())
@@ -123,7 +123,7 @@ impl GithubRepositoryClient {
         pr: PullRequestNumber,
         comment: Comment,
     ) -> anyhow::Result<octocrab::models::issues::Comment> {
-        perform_network_request_with_retry("post_comment", || async {
+        retry_on_timeout("post_comment", || async {
             self.client
                 .issues(&self.repository().owner, &self.repository().name)
                 .create_comment(pr.0, comment.render())
@@ -140,7 +140,7 @@ impl GithubRepositoryClient {
         sha: &CommitSha,
         force: ForcePush,
     ) -> anyhow::Result<()> {
-        perform_network_request_with_retry("set_branch_to_sha", || async {
+        retry_on_timeout("set_branch_to_sha", || async {
             Ok(set_branch_to_commit(self, branch.to_string(), sha, force).await?)
         })
         .await?
@@ -153,7 +153,7 @@ impl GithubRepositoryClient {
         head: &CommitSha,
         commit_message: &str,
     ) -> Result<CommitSha, MergeError> {
-        perform_network_request_with_retry("merge_branches", || async {
+        retry_on_timeout("merge_branches", || async {
             merge_branches(self, base, head, commit_message).await
         })
         .await
@@ -169,12 +169,15 @@ impl GithubRepositoryClient {
         output: CheckRunOutput,
         external_id: &str,
     ) -> anyhow::Result<CheckRun> {
-        measure_network_request("create_check_run", || async {
-            create_check_run(self, name, head_sha, status, output, external_id)
-                .await
-                .context("Cannot create check run")
+        retry_on_timeout("create_check_run", || {
+            let output = output.clone();
+            async {
+                create_check_run(self, name, head_sha, status, output, external_id)
+                    .await
+                    .context("Cannot create check run")
+            }
         })
-        .await
+        .await?
     }
 
     /// Update a check run with the given check run ID.
@@ -184,12 +187,12 @@ impl GithubRepositoryClient {
         status: CheckRunStatus,
         conclusion: Option<CheckRunConclusion>,
     ) -> anyhow::Result<CheckRun> {
-        measure_network_request("update_check_run", || async {
+        retry_on_timeout("update_check_run", || async {
             update_check_run(self, check_run_id, status, conclusion)
                 .await
                 .context("Cannot update check run")
         })
-        .await
+        .await?
     }
 
     /// Find all workflows attached to a specific check suite.
@@ -209,7 +212,7 @@ impl GithubRepositoryClient {
             workflow_runs: Vec<WorkflowRunResponse>,
         }
 
-        perform_network_request_with_retry("get_workflows_for_check_suite", || async {
+        retry_on_timeout("get_workflows_for_check_suite", || async {
             // We use a manual query, because octocrab currently doesn't allow filtering by
             // check_suite_id when listing workflow runs.
             // Note: we don't handle paging here, as we don't expect to get more than 30 workflows
@@ -272,7 +275,7 @@ impl GithubRepositoryClient {
 
     /// Cancels Github Actions workflows.
     pub async fn cancel_workflows(&self, run_ids: &[RunId]) -> anyhow::Result<()> {
-        measure_network_request("cancel_workflows", || async {
+        retry_on_timeout("cancel_workflows", || async {
             let actions = self.client.actions();
 
             // Cancel all workflows in parallel
@@ -285,12 +288,12 @@ impl GithubRepositoryClient {
 
             Ok(())
         })
-        .await
+        .await?
     }
 
     /// Add a set of labels to a PR.
     pub async fn add_labels(&self, pr: PullRequestNumber, labels: &[String]) -> anyhow::Result<()> {
-        perform_network_request_with_retry("add_labels", || async {
+        retry_on_timeout("add_labels", || async {
             let client = self
                 .client
                 .issues(self.repository().owner(), self.repository().name());
@@ -312,7 +315,7 @@ impl GithubRepositoryClient {
         pr: PullRequestNumber,
         labels: &[String],
     ) -> anyhow::Result<()> {
-        perform_network_request_with_retry("remove_labels", || async {
+        retry_on_timeout("remove_labels", || async {
             let client = self
                 .client
                 .issues(self.repository().owner(), self.repository().name());
@@ -428,13 +431,13 @@ impl GithubRepositoryClient {
         struct Output {}
 
         tracing::debug!(node_id, ?reason, "Minimizing comment");
-        measure_network_request("minimize_comment", || async {
+        retry_on_timeout("minimize_comment", || async {
             self.graphql::<Output, Variables>(QUERY, Variables { node_id, reason })
                 .await
                 .context("Failed to minimize comment")?;
             Ok(())
         })
-        .await
+        .await?
     }
 }
 

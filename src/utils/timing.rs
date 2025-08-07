@@ -1,26 +1,24 @@
-use anyhow::anyhow;
 use std::time::{Duration, Instant};
 use tokio::time;
-use tracing::trace;
 
 use crate::github::api::{DEFAULT_REQUEST_TIMEOUT, DEFAULT_RETRY_COUNT};
 
 const DEFAULT_BACKOFF_TIME: Duration = Duration::from_secs(1);
 
-// Measures the duration of an async operation and logs it using tracing.
+/// Measure the duration of an async operation and logs it using tracing.
 pub async fn measure_operation<T, F, Fut>(operation_name: &str, f: F) -> T
 where
     F: FnOnce() -> Fut,
-    Fut: std::future::Future<Output = T>,
+    Fut: Future<Output = T>,
 {
     let start = Instant::now();
 
-    trace!(operation = operation_name, "Starting operation");
+    tracing::trace!(operation = operation_name, "Starting operation");
 
     let result = f().await;
     let duration = start.elapsed();
 
-    trace!(
+    tracing::trace!(
         operation = operation_name,
         duration_ms = format!("{:.2}", duration.as_secs_f64() * 1000.0),
         "Operation completed"
@@ -29,35 +27,25 @@ where
     result
 }
 
-// Measures the duration of a database query and logs it using tracing.
+/// Measures the duration of a database query and logs it using tracing.
 pub async fn measure_db_query<T, F, Fut>(query_name: &str, f: F) -> T
 where
     F: FnOnce() -> Fut,
-    Fut: std::future::Future<Output = T>,
+    Fut: Future<Output = T>,
 {
     measure_operation(&format!("db_query:{query_name}"), f).await
 }
 
-// Measures the duration of a network request and logs it using tracing.
-pub async fn measure_network_request<T, F, Fut>(request_name: &str, f: F) -> T
-where
-    F: FnOnce() -> Fut,
-    Fut: std::future::Future<Output = T>,
-{
-    measure_operation(&format!("network_request:{request_name}"), f).await
-}
-
-// Measures the duration of an async operation and retries it if it fails.
-pub async fn perform_network_request_with_retry<T, F, Fut>(
-    request_name: &str,
-    f: F,
-) -> anyhow::Result<T>
+/// Performs an async operation while checking for a timeout.
+/// If a timeout happens, retries the operation several times.
+///
+/// Returns an `Err` if the operation timed out several times in a row.
+pub async fn retry_on_timeout<T, F, Fut>(operation_name: &str, f: F) -> anyhow::Result<T>
 where
     F: Fn() -> Fut,
-    Fut: std::future::Future<Output = T>,
+    Fut: Future<Output = T>,
 {
-    let operation_name: &str = &format!("network_request:{request_name}");
-    trace!(operation = operation_name, "Starting operation");
+    tracing::trace!(operation = operation_name, "Starting operation");
 
     for attempt in 0..=DEFAULT_RETRY_COUNT {
         let start = Instant::now();
@@ -65,7 +53,7 @@ where
         match time::timeout(DEFAULT_REQUEST_TIMEOUT, f()).await {
             Ok(result) => {
                 let duration = start.elapsed();
-                trace!(
+                tracing::trace!(
                     operation = operation_name,
                     attempt = attempt,
                     duration_ms = format!("{:.2}", duration.as_secs_f64() * 1000.0),
@@ -74,13 +62,13 @@ where
                 return Ok(result);
             }
             Err(_) => {
-                trace!(
+                tracing::debug!(
                     operation = operation_name,
                     attempt = attempt,
                     "Operation timed out"
                 );
                 if attempt < DEFAULT_RETRY_COUNT {
-                    trace!(
+                    tracing::trace!(
                         operation = operation_name,
                         attempt = attempt + 1,
                         "Retrying operation..."
@@ -92,15 +80,13 @@ where
         time::sleep(DEFAULT_BACKOFF_TIME).await;
     }
 
-    trace!(
+    tracing::trace!(
         operation = operation_name,
         retries = DEFAULT_RETRY_COUNT,
         "Operation failed after all retries"
     );
-    Err(anyhow!(
-        "Operation '{}' timed out after {} retries",
-        operation_name,
-        DEFAULT_RETRY_COUNT
+    Err(anyhow::anyhow!(
+        "Operation '{operation_name}' timed out after {DEFAULT_RETRY_COUNT} retries",
     ))
 }
 
@@ -118,7 +104,7 @@ mod tests {
             42
         }
 
-        let result = perform_network_request_with_retry("test_op", sample_operation).await;
+        let result = retry_on_timeout("test_op", sample_operation).await;
         assert_eq!(result.unwrap_or_default(), 42);
     }
 
@@ -130,7 +116,7 @@ mod tests {
             Err("test error".to_string())
         }
 
-        let result = perform_network_request_with_retry("error_test", failing_operation)
+        let result = retry_on_timeout("error_test", failing_operation)
             .await
             .unwrap_or(Ok(0));
         assert!(result.is_err());
