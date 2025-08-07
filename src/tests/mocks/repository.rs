@@ -22,6 +22,13 @@ use wiremock::{
     matchers::{method, path},
 };
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum BranchPushError {
+    Conflict,
+    ValidationFailed,
+    NetworkError,
+}
+
 #[derive(Clone, Debug)]
 pub struct CheckRunData {
     pub name: String,
@@ -55,8 +62,8 @@ pub struct Repo {
     pub check_runs: Vec<CheckRunData>,
     /// Cause pull request fetch to fail.
     pub pull_request_error: bool,
-    // Cause branch push to fail.
-    pub push_error: bool,
+    /// Cause branch push to fail.
+    pub push_error: Option<BranchPushError>,
     pub pr_push_counter: u64,
 }
 
@@ -73,7 +80,7 @@ impl Repo {
             workflow_cancel_error: false,
             workflow_runs: vec![],
             pull_request_error: false,
-            push_error: false,
+            push_error: None,
             pr_push_counter: 0,
             check_runs: vec![],
         }
@@ -388,16 +395,25 @@ async fn mock_update_branch(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
         move |req: &Request, [branch_name]: [&str; 1]| {
             let mut repo = repo.lock();
 
+            if let Some(push_error) = &repo.push_error {
+                return match push_error {
+                    BranchPushError::Conflict => {
+                        ResponseTemplate::new(409).set_body_string("Conflict")
+                    }
+                    BranchPushError::ValidationFailed => ResponseTemplate::new(422)
+                        .set_body_string("Validation failed, or the endpoint has been spammed."),
+                    BranchPushError::NetworkError => {
+                        ResponseTemplate::new(500).set_body_string("Network error")
+                    }
+                };
+            }
+
             #[derive(serde::Deserialize)]
             struct SetRefRequest {
                 sha: String,
             }
 
             let data: SetRefRequest = req.body_json().unwrap();
-
-            if repo.push_error {
-                return ResponseTemplate::new(500).set_body_string("Push error");
-            }
 
             let sha = data.sha;
             match repo.get_branch_by_name(branch_name) {

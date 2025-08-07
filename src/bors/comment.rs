@@ -342,6 +342,6 @@ Pushing {merge_sha} to `{base_ref}`..."#
 
 pub fn auto_build_push_failed_comment(error: &str) -> Comment {
     Comment::new(format!(
-        ":eyes: Test was successful, but fast-forwarding failed: {error}"
+        ":eyes: Tests passed, but fast-forwarding failed: {error}"
     ))
 }
