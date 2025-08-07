@@ -2,7 +2,7 @@ use anyhow::Context;
 use octocrab::Octocrab;
 use octocrab::models::checks::CheckRun;
 use octocrab::models::{App, CheckRunId, CheckSuiteId, RunId};
-use octocrab::params::checks::{CheckRunConclusion, CheckRunOutput, CheckRunStatus};
+use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use tracing::log;
@@ -456,6 +456,13 @@ pub enum MinimizeCommentReason {
     Resolved,
     /// A spammy piece of content.
     Spam,
+}
+
+/// We have our own version to make it `Clone`, in order for retried requests to work.
+#[derive(serde::Serialize, Clone)]
+pub struct CheckRunOutput {
+    pub title: String,
+    pub summary: String,
 }
 
 #[cfg(test)]

@@ -1,6 +1,6 @@
 use anyhow::anyhow;
 use octocrab::models::CheckRunId;
-use octocrab::params::checks::{CheckRunConclusion, CheckRunOutput, CheckRunStatus};
+use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
 use std::future::Future;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -12,7 +12,7 @@ use crate::bors::comment::{
 };
 use crate::bors::{PullRequestStatus, RepositoryState};
 use crate::database::{BuildStatus, PullRequestModel};
-use crate::github::api::client::GithubRepositoryClient;
+use crate::github::api::client::{CheckRunOutput, GithubRepositoryClient};
 use crate::github::api::operations::ForcePush;
 use crate::github::{CommitSha, MergeError};
 use crate::utils::sort_queue::sort_queue_prs;
@@ -259,9 +259,6 @@ async fn start_auto_build(
             CheckRunOutput {
                 title: AUTO_BUILD_CHECK_RUN_NAME.to_string(),
                 summary: "".to_string(),
-                text: None,
-                annotations: vec![],
-                images: vec![],
             },
             &build_id.to_string(),
         )
@@ -277,6 +274,7 @@ async fn start_auto_build(
                 .await?;
         }
         Err(error) => {
+            // Check runs aren't critical, don't block progress if they fail
             tracing::error!("Failed to create check run: {error:?}");
         }
     }
