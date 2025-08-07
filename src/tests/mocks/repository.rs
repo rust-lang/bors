@@ -26,7 +26,7 @@ use wiremock::{
 pub enum BranchPushError {
     Conflict,
     ValidationFailed,
-    NetworkError,
+    InternalServerError,
 }
 
 #[derive(Clone, Debug)]
@@ -402,8 +402,8 @@ async fn mock_update_branch(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
                     }
                     BranchPushError::ValidationFailed => ResponseTemplate::new(422)
                         .set_body_string("Validation failed, or the endpoint has been spammed."),
-                    BranchPushError::NetworkError => {
-                        ResponseTemplate::new(500).set_body_string("Network error")
+                    BranchPushError::InternalServerError => {
+                        ResponseTemplate::new(500).set_body_string("Internal server error")
                     }
                 };
             }

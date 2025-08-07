@@ -741,7 +741,7 @@ mod tests {
             tester.expect_comments((), 1).await;
             tester
                 .modify_repo(&default_repo_name(), |repo| {
-                    repo.push_error = Some(BranchPushError::NetworkError)
+                    repo.push_error = Some(BranchPushError::InternalServerError)
                 })
                 .await;
             tester.process_merge_queue().await;
