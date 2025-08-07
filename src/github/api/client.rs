@@ -183,10 +183,9 @@ impl GithubRepositoryClient {
         check_run_id: CheckRunId,
         status: CheckRunStatus,
         conclusion: Option<CheckRunConclusion>,
-        output: Option<CheckRunOutput>,
     ) -> anyhow::Result<CheckRun> {
         measure_network_request("update_check_run", || async {
-            update_check_run(self, check_run_id, status, conclusion, output)
+            update_check_run(self, check_run_id, status, conclusion)
                 .await
                 .context("Cannot update check run")
         })

@@ -184,7 +184,6 @@ async fn handle_push_failure(
                 CheckRunId(check_run_id as u64),
                 CheckRunStatus::Completed,
                 Some(CheckRunConclusion::Failure),
-                None,
             )
             .await
         {

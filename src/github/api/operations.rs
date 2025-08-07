@@ -204,7 +204,6 @@ pub async fn update_check_run(
     check_run_id: CheckRunId,
     status: CheckRunStatus,
     conclusion: Option<CheckRunConclusion>,
-    output: Option<CheckRunOutput>,
 ) -> Result<CheckRun, octocrab::Error> {
     let checks = repo
         .client()
@@ -214,10 +213,6 @@ pub async fn update_check_run(
 
     if let Some(conclusion) = conclusion {
         request = request.conclusion(conclusion);
-    }
-
-    if let Some(output) = output {
-        request = request.output(output);
     }
 
     request.send().await
