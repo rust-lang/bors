@@ -65,9 +65,11 @@ pub struct RetryMethod {
 }
 
 impl RetryMethod {
-    pub fn no_retry_on_error() -> Self {
+    /// Do not attempt any retries.
+    pub fn no_retry() -> Self {
         let mut method = Self::default();
         method.retry_on_error = false;
+        method.max_retry_count = 1;
         method
     }
 }
@@ -115,6 +117,10 @@ impl<E: Into<anyhow::Error>> From<RetryableOpError<E>> for anyhow::Error {
 ///
 /// The caller can explicitly specify which errors should be retried and which shouldn't.
 /// By default, all errors will be turned into `ShouldRetry::Yes` due to a blanket impl.
+///
+/// This function uses rather complicated generic parameters and bounds to allow callers to
+/// automatically convert errors to `ShouldRetry` without doing it manually everywhere.
+/// If you hit an inference error, you might want to return e.g. `anyhow::Ok(...)` from `func`.
 pub async fn perform_retryable<T, E, R, F, Fut>(
     operation_name: &str,
     retry_method: RetryMethod,
