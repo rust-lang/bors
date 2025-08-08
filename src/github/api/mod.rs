@@ -20,8 +20,6 @@ pub(crate) mod operations;
 
 pub const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 
-pub const DEFAULT_RETRY_COUNT: u32 = 5;
-
 pub fn create_github_client(
     app_id: AppId,
     github_url: String,
