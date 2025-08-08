@@ -136,8 +136,8 @@ async fn create_branch(
 pub enum BranchUpdateError {
     #[error("Branch {0} was not found")]
     BranchNotFound(String),
-    #[error("IO error")]
-    IOError(#[from] octocrab::Error),
+    #[error("Octocrab error: {0}")]
+    OctocrabError(#[from] octocrab::Error),
     #[error("Unknown error: {0}")]
     Custom(String),
 }

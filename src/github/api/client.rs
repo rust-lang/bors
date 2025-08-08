@@ -15,7 +15,7 @@ use crate::github::api::operations::{
     ForcePush, MergeError, create_check_run, merge_branches, set_branch_to_commit, update_check_run,
 };
 use crate::github::{CommitSha, GithubRepoName, PullRequest, PullRequestNumber};
-use crate::utils::timing::retry_on_timeout;
+use crate::utils::timing::{RetryMethod, RetryableOpError, ShouldRetry, perform_retryable};
 use futures::TryStreamExt;
 use octocrab::models::workflows::Job;
 use serde::de::DeserializeOwned;
@@ -56,53 +56,65 @@ impl GithubRepositoryClient {
     /// Loads repository configuration from a file located at `[CONFIG_FILE_PATH]` in the main
     /// branch.
     pub async fn load_config(&self) -> anyhow::Result<RepositoryConfig> {
-        retry_on_timeout("load_config", || async {
-            let mut response = self
-                .client
-                .repos(&self.repo_name.owner, &self.repo_name.name)
-                .get_content()
-                .path(CONFIG_FILE_PATH)
-                .send()
-                .await
-                .map_err(|error| {
-                    anyhow::anyhow!(
-                        "Could not fetch {CONFIG_FILE_PATH} from {}: {error:?}",
-                        self.repo_name
-                    )
-                })?;
-
-            response
-                .take_items()
-                .into_iter()
-                .next()
-                .and_then(|content| content.decoded_content())
-                .ok_or_else(|| anyhow::anyhow!("Configuration file not found"))
-                .and_then(|content| {
-                    let config: RepositoryConfig = toml::from_str(&content).map_err(|error| {
-                        anyhow::anyhow!("Could not deserialize repository config: {error:?}")
+        let config = perform_retryable::<RepositoryConfig, anyhow::Error, _, _, _>(
+            "load_config",
+            RetryMethod::default(),
+            || async {
+                let mut response = self
+                    .client
+                    .repos(&self.repo_name.owner, &self.repo_name.name)
+                    .get_content()
+                    .path(CONFIG_FILE_PATH)
+                    .send()
+                    .await
+                    .map_err(|error| {
+                        anyhow::anyhow!(
+                            "Could not fetch {CONFIG_FILE_PATH} from {}: {error:?}",
+                            self.repo_name
+                        )
                     })?;
-                    Ok(config)
-                })
-        })
-        .await?
+
+                response
+                    .take_items()
+                    .into_iter()
+                    .next()
+                    .and_then(|content| content.decoded_content())
+                    .ok_or_else(|| anyhow::anyhow!("Configuration file not found"))
+                    .and_then(|content| {
+                        let config: RepositoryConfig =
+                            toml::from_str(&content).map_err(|error| {
+                                anyhow::anyhow!(
+                                    "Could not deserialize repository config: {error:?}"
+                                )
+                            })?;
+                        Ok(config)
+                    })
+                    // If the config can't be found or parsed, there is no need for retrying at this
+                    // moment
+                    .map_err(ShouldRetry::No)
+            },
+        )
+        .await?;
+        Ok(config)
     }
 
     /// Return the current SHA of the given branch.
     pub async fn get_branch_sha(&self, name: &str) -> anyhow::Result<CommitSha> {
-        retry_on_timeout("get_branch_sha", || async {
+        let commit_sha = perform_retryable("get_branch_sha", RetryMethod::default(), || async {
             // https://docs.github.com/en/rest/branches/branches?apiVersion=2022-11-28#get-a-branch
             let branch: octocrab::models::repos::Branch = self
                 .get_request(&format!("branches/{name}"))
                 .await
                 .context("Cannot deserialize branch")?;
-            Ok(CommitSha(branch.commit.sha))
+            anyhow::Ok(CommitSha(branch.commit.sha))
         })
-        .await?
+        .await?;
+        Ok(commit_sha)
     }
 
     /// Resolve a pull request from this repository by it's number.
     pub async fn get_pull_request(&self, pr: PullRequestNumber) -> anyhow::Result<PullRequest> {
-        retry_on_timeout("get_pull_request", || async {
+        let prs = perform_retryable("get_pull_request", RetryMethod::default(), || async {
             let pr = self
                 .client
                 .pulls(self.repository().owner(), self.repository().name())
@@ -111,9 +123,10 @@ impl GithubRepositoryClient {
                 .map_err(|error| {
                     anyhow::anyhow!("Could not get PR {}/{}: {error:?}", self.repository(), pr.0)
                 })?;
-            Ok(pr.into())
+            anyhow::Ok(PullRequest::from(pr))
         })
-        .await?
+        .await?;
+        Ok(prs)
     }
 
     /// Post a comment to the pull request with the given number.
@@ -123,14 +136,15 @@ impl GithubRepositoryClient {
         pr: PullRequestNumber,
         comment: Comment,
     ) -> anyhow::Result<octocrab::models::issues::Comment> {
-        retry_on_timeout("post_comment", || async {
+        let comment = perform_retryable("post_comment", RetryMethod::default(), || async {
             self.client
                 .issues(&self.repository().owner, &self.repository().name)
                 .create_comment(pr.0, comment.render())
                 .await
                 .with_context(|| format!("Cannot post comment to {}", self.format_pr(pr)))
         })
-        .await?
+        .await?;
+        Ok(comment)
     }
 
     /// Set the given branch to a commit with the given `sha`.
@@ -140,10 +154,12 @@ impl GithubRepositoryClient {
         sha: &CommitSha,
         force: ForcePush,
     ) -> anyhow::Result<()> {
-        retry_on_timeout("set_branch_to_sha", || async {
-            Ok(set_branch_to_commit(self, branch.to_string(), sha, force).await?)
+        perform_retryable("set_branch_to_sha", RetryMethod::default(), || async {
+            set_branch_to_commit(self, branch.to_string(), sha, force).await?;
+            anyhow::Ok(())
         })
-        .await?
+        .await?;
+        Ok(())
     }
 
     /// Merge `head` into `base`. Returns the SHA of the merge commit.
@@ -153,11 +169,21 @@ impl GithubRepositoryClient {
         head: &CommitSha,
         commit_message: &str,
     ) -> Result<CommitSha, MergeError> {
-        retry_on_timeout("merge_branches", || async {
-            merge_branches(self, base, head, commit_message).await
+        perform_retryable("merge_branches", RetryMethod::default(), || async {
+            merge_branches(self, base, head, commit_message)
+                .await
+                .map_err(|e| match e {
+                    error @ (MergeError::AlreadyMerged
+                    | MergeError::Conflict
+                    | MergeError::NotFound) => ShouldRetry::No(error),
+                    error => ShouldRetry::Yes(error),
+                })
         })
         .await
-        .map_err(|_| MergeError::Timeout)?
+        .map_err(|error| match error {
+            RetryableOpError::Err(error) => error,
+            RetryableOpError::AllAttemptsExhausted(_) => MergeError::Timeout,
+        })
     }
 
     /// Create a check run for the given commit.
@@ -169,7 +195,7 @@ impl GithubRepositoryClient {
         output: CheckRunOutput,
         external_id: &str,
     ) -> anyhow::Result<CheckRun> {
-        retry_on_timeout("create_check_run", || {
+        let check_run = perform_retryable("create_check_run", RetryMethod::no_retry(), || {
             let output = output.clone();
             async {
                 create_check_run(self, name, head_sha, status, output, external_id)
@@ -177,7 +203,8 @@ impl GithubRepositoryClient {
                     .context("Cannot create check run")
             }
         })
-        .await?
+        .await?;
+        Ok(check_run)
     }
 
     /// Update a check run with the given check run ID.
@@ -187,12 +214,13 @@ impl GithubRepositoryClient {
         status: CheckRunStatus,
         conclusion: Option<CheckRunConclusion>,
     ) -> anyhow::Result<CheckRun> {
-        retry_on_timeout("update_check_run", || async {
+        let check_run = perform_retryable("update_check_run", RetryMethod::no_retry(), || async {
             update_check_run(self, check_run_id, status, conclusion)
                 .await
                 .context("Cannot update check run")
         })
-        .await?
+        .await?;
+        Ok(check_run)
     }
 
     /// Find all workflows attached to a specific check suite.
@@ -212,7 +240,7 @@ impl GithubRepositoryClient {
             workflow_runs: Vec<WorkflowRunResponse>,
         }
 
-        retry_on_timeout("get_workflows_for_check_suite", || async {
+        let runs = perform_retryable("get_workflows_for_check_suite", RetryMethod::default(), || async {
             // We use a manual query, because octocrab currently doesn't allow filtering by
             // check_suite_id when listing workflow runs.
             // Note: we don't handle paging here, as we don't expect to get more than 30 workflows
@@ -237,7 +265,7 @@ impl GithubRepositoryClient {
                 }
             }
 
-            let runs = response
+            let runs: Vec<WorkflowRun> = response
                 .workflow_runs
                 .into_iter()
                 .map(|run| WorkflowRun {
@@ -245,37 +273,46 @@ impl GithubRepositoryClient {
                     status: get_status(&run),
                 })
                 .collect();
-            Ok(runs)
+            anyhow::Ok(runs)
         })
-        .await?
+        .await?;
+        Ok(runs)
     }
 
     /// Find all jobs for the latest execution of a workflow run with the given ID.
     pub async fn get_jobs_for_workflow_run(&self, run_id: RunId) -> anyhow::Result<Vec<Job>> {
-        let response = self
-            .client
-            .workflows(&self.repo_name.owner, &self.repo_name.name)
-            .list_jobs(run_id)
-            .per_page(100)
-            .send()
-            .await?;
+        let jobs = perform_retryable(
+            "get_jobs_for_workflow_run",
+            RetryMethod::no_retry(),
+            || async {
+                let response = self
+                    .client
+                    .workflows(&self.repo_name.owner, &self.repo_name.name)
+                    .list_jobs(run_id)
+                    .per_page(100)
+                    .send()
+                    .await?;
 
-        let mut jobs = Vec::with_capacity(
-            response
-                .total_count
-                .map(|v| v as usize)
-                .unwrap_or(response.items.len()),
-        );
-        let mut stream = std::pin::pin!(response.into_stream(&self.client));
-        while let Some(job) = stream.try_next().await? {
-            jobs.push(job);
-        }
+                let mut jobs = Vec::with_capacity(
+                    response
+                        .total_count
+                        .map(|v| v as usize)
+                        .unwrap_or(response.items.len()),
+                );
+                let mut stream = std::pin::pin!(response.into_stream(&self.client));
+                while let Some(job) = stream.try_next().await? {
+                    jobs.push(job);
+                }
+                anyhow::Ok(jobs)
+            },
+        )
+        .await?;
         Ok(jobs)
     }
 
     /// Cancels Github Actions workflows.
     pub async fn cancel_workflows(&self, run_ids: &[RunId]) -> anyhow::Result<()> {
-        retry_on_timeout("cancel_workflows", || async {
+        perform_retryable("cancel_workflows", RetryMethod::no_retry(), || async {
             let actions = self.client.actions();
 
             // Cancel all workflows in parallel
@@ -286,27 +323,29 @@ impl GithubRepositoryClient {
             .into_iter()
             .collect::<Result<Vec<_>, _>>()?;
 
-            Ok(())
+            anyhow::Ok(())
         })
-        .await?
+        .await?;
+        Ok(())
     }
 
     /// Add a set of labels to a PR.
     pub async fn add_labels(&self, pr: PullRequestNumber, labels: &[String]) -> anyhow::Result<()> {
-        retry_on_timeout("add_labels", || async {
-            let client = self
-                .client
-                .issues(self.repository().owner(), self.repository().name());
+        perform_retryable("add_labels", RetryMethod::default(), || async {
             if !labels.is_empty() {
+                let client = self
+                    .client
+                    .issues(self.repository().owner(), self.repository().name());
                 client
                     .add_labels(pr.0, labels)
                     .await
                     .context("Cannot add label(s) to PR")?;
             }
 
-            Ok(())
+            anyhow::Ok(())
         })
-        .await?
+        .await?;
+        Ok(())
     }
 
     /// Remove a set of labels from a PR.
@@ -315,7 +354,7 @@ impl GithubRepositoryClient {
         pr: PullRequestNumber,
         labels: &[String],
     ) -> anyhow::Result<()> {
-        retry_on_timeout("remove_labels", || async {
+        perform_retryable("remove_labels", RetryMethod::default(), || async {
             let client = self
                 .client
                 .issues(self.repository().owner(), self.repository().name());
@@ -342,30 +381,39 @@ impl GithubRepositoryClient {
                 })
                 .collect::<Result<Vec<_>, _>>()
                 .context("Cannot remove label(s) from PR")?;
-            Ok(())
+            anyhow::Ok(())
         })
-        .await?
+        .await?;
+        Ok(())
     }
 
     pub async fn fetch_nonclosed_pull_requests(&self) -> anyhow::Result<Vec<PullRequest>> {
-        let stream = self
-            .client
-            .pulls(self.repo_name.owner(), self.repo_name.name())
-            .list()
-            .state(octocrab::params::State::Open)
-            .per_page(100)
-            .send()
-            .await
-            .map_err(|error| {
-                anyhow::anyhow!("Could not fetch PRs from {}: {error:?}", self.repo_name)
-            })?
-            .into_stream(&self.client);
+        let prs = perform_retryable(
+            "fetch_nonclosed_pull_requests",
+            RetryMethod::default(),
+            || async {
+                let stream = self
+                    .client
+                    .pulls(self.repo_name.owner(), self.repo_name.name())
+                    .list()
+                    .state(octocrab::params::State::Open)
+                    .per_page(100)
+                    .send()
+                    .await
+                    .map_err(|error| {
+                        anyhow::anyhow!("Could not fetch PRs from {}: {error:?}", self.repo_name)
+                    })?
+                    .into_stream(&self.client);
 
-        let mut stream = std::pin::pin!(stream);
-        let mut prs = Vec::new();
-        while let Some(pr) = stream.try_next().await? {
-            prs.push(pr.into());
-        }
+                let mut stream = std::pin::pin!(stream);
+                let mut prs = Vec::new();
+                while let Some(pr) = stream.try_next().await? {
+                    prs.push(pr.into());
+                }
+                anyhow::Ok(prs)
+            },
+        )
+        .await?;
         Ok(prs)
     }
 
@@ -431,13 +479,14 @@ impl GithubRepositoryClient {
         struct Output {}
 
         tracing::debug!(node_id, ?reason, "Minimizing comment");
-        retry_on_timeout("minimize_comment", || async {
+        perform_retryable("minimize_comment", RetryMethod::default(), || async {
             self.graphql::<Output, Variables>(QUERY, Variables { node_id, reason })
                 .await
                 .context("Failed to minimize comment")?;
-            Ok(())
+            anyhow::Ok(())
         })
-        .await?
+        .await?;
+        Ok(())
     }
 }
 
