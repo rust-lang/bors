@@ -14,7 +14,7 @@ use crate::bors::comment::{
 use crate::bors::handlers::labels::handle_label_trigger;
 use crate::bors::handlers::workflow::{CancelBuildError, cancel_build};
 use crate::database::{BuildModel, BuildStatus, PullRequestModel};
-use crate::github::api::client::GithubRepositoryClient;
+use crate::github::api::client::{CheckRunOutput, GithubRepositoryClient};
 use crate::github::api::operations::ForcePush;
 use crate::github::{CommitSha, GithubUser, LabelTrigger, MergeError, PullRequestNumber};
 use crate::permissions::PermissionType;
@@ -22,7 +22,6 @@ use crate::utils::text::suppress_github_mentions;
 use anyhow::{Context, anyhow};
 use itertools::Itertools;
 use octocrab::params::checks::CheckRunConclusion;
-use octocrab::params::checks::CheckRunOutput;
 use octocrab::params::checks::CheckRunStatus;
 use tracing::log;
 
@@ -109,9 +108,6 @@ pub(super) async fn command_try_build(
                     CheckRunOutput {
                         title: "Bors try build".to_string(),
                         summary: "".to_string(),
-                        text: None,
-                        annotations: vec![],
-                        images: vec![],
                     },
                     &build_id.to_string(),
                 )
