@@ -13,7 +13,7 @@ jobs:
       DATABASE_URL: postgres://bors:bors@localhost:5432/bors
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Start containers
         run: docker compose up -d --wait
@@ -50,7 +50,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - uses: docker/setup-buildx-action@v3
       - name: Build the Docker image
         uses: docker/build-push-action@v6
