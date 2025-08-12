@@ -100,7 +100,7 @@ pub fn try_build_cancelled_comment(workflow_urls: impl Iterator<Item = String>) 
     let mut try_build_cancelled_comment =
         r#"Try build cancelled. Cancelled workflows:"#.to_string();
     for url in workflow_urls {
-        try_build_cancelled_comment += format!("\n- {}", url).as_str();
+        try_build_cancelled_comment += format!("\n- {url}").as_str();
     }
     Comment::new(try_build_cancelled_comment)
 }
@@ -316,8 +316,7 @@ fn list_workflows_status(workflows: &[WorkflowModel]) -> String {
 
 pub fn auto_build_started_comment(head_sha: &CommitSha, merge_sha: &CommitSha) -> Comment {
     Comment::new(format!(
-        ":hourglass: Testing commit {} with merge {}...",
-        head_sha, merge_sha
+        ":hourglass: Testing commit {head_sha} with merge {merge_sha}..."
     ))
 }
 

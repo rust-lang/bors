@@ -292,8 +292,7 @@ async fn notify_of_tree_closed(
         .post_comment(
             pr_number,
             Comment::new(format!(
-                "Tree closed for PRs with priority less than {}",
-                priority
+                "Tree closed for PRs with priority less than {priority}"
             )),
         )
         .await?;

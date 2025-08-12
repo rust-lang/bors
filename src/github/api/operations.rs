@@ -1,12 +1,12 @@
 use http::StatusCode;
 use octocrab::models::CheckRunId;
 use octocrab::models::checks::CheckRun;
-use octocrab::params::checks::{CheckRunConclusion, CheckRunOutput, CheckRunStatus};
+use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
 use octocrab::params::repos::Reference;
 use thiserror::Error;
 
 use crate::github::CommitSha;
-use crate::github::api::client::GithubRepositoryClient;
+use crate::github::api::client::{CheckRunOutput, GithubRepositoryClient};
 
 #[derive(Copy, Clone)]
 pub enum ForcePush {
@@ -137,7 +137,7 @@ pub enum BranchUpdateError {
     #[error("Branch {0} was not found")]
     BranchNotFound(String),
     #[error("IO error")]
-    IOError(#[from] octocrab::Error),
+    OctocrabError(#[from] octocrab::Error),
     #[error("Unknown error: {0}")]
     Custom(String),
 }
@@ -194,9 +194,22 @@ pub async fn create_check_run(
         .create_check_run(name, head_sha.to_string())
         .external_id(external_id)
         .status(status)
-        .output(output)
+        .output(output.into())
         .send()
         .await
+}
+
+impl From<CheckRunOutput> for octocrab::params::checks::CheckRunOutput {
+    fn from(value: CheckRunOutput) -> Self {
+        let CheckRunOutput { title, summary } = value;
+        Self {
+            title,
+            summary,
+            text: None,
+            annotations: vec![],
+            images: vec![],
+        }
+    }
 }
 
 pub async fn update_check_run(
@@ -204,7 +217,6 @@ pub async fn update_check_run(
     check_run_id: CheckRunId,
     status: CheckRunStatus,
     conclusion: Option<CheckRunConclusion>,
-    output: Option<CheckRunOutput>,
 ) -> Result<CheckRun, octocrab::Error> {
     let checks = repo
         .client()
@@ -214,10 +226,6 @@ pub async fn update_check_run(
 
     if let Some(conclusion) = conclusion {
         request = request.conclusion(conclusion);
-    }
-
-    if let Some(output) = output {
-        request = request.output(output);
     }
 
     request.send().await

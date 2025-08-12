@@ -222,7 +222,7 @@ async fn maybe_complete_build(
 
         if let Err(error) = repo
             .client
-            .update_check_run(CheckRunId(check_run_id as u64), status, conclusion, None)
+            .update_check_run(CheckRunId(check_run_id as u64), status, conclusion)
             .await
         {
             tracing::error!("Could not update check run {check_run_id}: {error:?}");
@@ -375,7 +375,6 @@ pub async fn cancel_build(
                 CheckRunId(check_run_id as u64),
                 CheckRunStatus::Completed,
                 Some(check_run_conclusion),
-                None,
             )
             .await
         {

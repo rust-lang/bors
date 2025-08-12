@@ -671,10 +671,9 @@ async fn mock_check_runs(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
                     name: data.name,
                     head_sha: data.head_sha,
                     url: format!(
-                        "https://api.github.com/repos/{}/check-runs/{}",
-                        repo_name, check_run_id
+                        "https://api.github.com/repos/{repo_name}/check-runs/{check_run_id}"
                     ),
-                    html_url: format!("https://github.com/{}/runs/{}", repo_name, check_run_id),
+                    html_url: format!("https://github.com/{repo_name}/runs/{check_run_id}"),
                     details_url: None,
                     status: data.status,
                     conclusion: None,
@@ -687,8 +686,7 @@ async fn mock_check_runs(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
                         text: data.output.text,
                         annotations_count: 0,
                         annotations_url: format!(
-                            "https://api.github.com/repos/{}/check-runs/{}/annotations",
-                            repo_name, check_run_id
+                            "https://api.github.com/repos/{repo_name}/check-runs/{check_run_id}/annotations"
                         ),
                     },
                     pull_requests: vec![],
@@ -702,8 +700,7 @@ async fn mock_check_runs(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
 
     Mock::given(method("PATCH"))
         .and(wiremock::matchers::path_regex(format!(
-            r"/repos/{}/check-runs/\d+",
-            repo_name
+            r"/repos/{repo_name}/check-runs/\d+"
         )))
         .respond_with({
             let repo = repo.clone();
@@ -718,7 +715,7 @@ async fn mock_check_runs(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
                 let path = request.url.path();
                 let check_run_id = path
                     .split('/')
-                    .last()
+                    .next_back()
                     .and_then(|s| s.parse::<u64>().ok())
                     .unwrap();
 
@@ -736,10 +733,9 @@ async fn mock_check_runs(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
                     name: check_run.name.clone(),
                     head_sha: check_run.head_sha.clone(),
                     url: format!(
-                        "https://api.github.com/repos/{}/check-runs/{}",
-                        repo_name, check_run_id
+                        "https://api.github.com/repos/{repo_name}/check-runs/{check_run_id}"
                     ),
-                    html_url: format!("https://github.com/{}/runs/{}", repo_name, check_run_id),
+                    html_url: format!("https://github.com/{repo_name}/runs/{check_run_id}"),
                     details_url: None,
                     status: check_run.status.clone(),
                     conclusion: check_run.conclusion.clone(),
@@ -756,8 +752,7 @@ async fn mock_check_runs(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
                         text: Some(check_run.text.clone()),
                         annotations_count: 0,
                         annotations_url: format!(
-                            "https://api.github.com/repos/{}/check-runs/{}/annotations",
-                            repo_name, check_run_id
+                            "https://api.github.com/repos/{repo_name}/check-runs/{check_run_id}/annotations"
                         ),
                     },
                     pull_requests: vec![],
@@ -792,7 +787,7 @@ impl From<GithubRepoName> for GitHubRepository {
             id: 1,
             name: value.name().to_string(),
             owner: GitHubUser::new(value.owner(), 1001),
-            url: format!("https://github.com/{}", value).parse().unwrap(),
+            url: format!("https://github.com/{value}").parse().unwrap(),
         }
     }
 }
