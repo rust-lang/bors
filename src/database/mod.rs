@@ -205,8 +205,7 @@ impl<'r> sqlx::Decode<'r, sqlx::Postgres> for ApprovalStatus {
             }
             (None, None) => Ok(ApprovalStatus::NotApproved),
             (approver, sha) => Err(format!(
-                "Inconsistent approval state: approver={:?}, sha={:?}",
-                approver, sha
+                "Inconsistent approval state: approver={approver:?}, sha={sha:?}"
             )
             .into()),
         }
@@ -252,7 +251,7 @@ impl fmt::Display for DelegatedPermission {
             DelegatedPermission::Try => "try",
             DelegatedPermission::Review => "review",
         };
-        write!(f, "{}", s)
+        write!(f, "{s}")
     }
 }
 
@@ -548,7 +547,7 @@ impl sqlx::Decode<'_, sqlx::Postgres> for CommentTag {
     fn decode(value: sqlx::postgres::PgValueRef<'_>) -> Result<Self, BoxDynError> {
         match <&str as sqlx::Decode<sqlx::Postgres>>::decode(value)? {
             "TryBuildStarted" => Ok(CommentTag::TryBuildStarted),
-            tag => Err(format!("Unknown comment tag: {}", tag).into()),
+            tag => Err(format!("Unknown comment tag: {tag}").into()),
         }
     }
 }

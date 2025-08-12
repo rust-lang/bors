@@ -269,9 +269,8 @@ async fn notify_of_pushed_pr(
     cancel_message: Option<String>,
 ) -> anyhow::Result<()> {
     let mut comment = format!(
-        r#":warning: A new commit `{}` was pushed to the branch, the
-PR will need to be re-approved."#,
-        head_sha
+        r#":warning: A new commit `{head_sha}` was pushed to the branch, the
+PR will need to be re-approved."#
     );
 
     if let Some(message) = cancel_message {

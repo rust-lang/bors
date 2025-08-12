@@ -67,10 +67,11 @@ pub struct RetryMethod {
 impl RetryMethod {
     /// Do not attempt any retries.
     pub fn no_retry() -> Self {
-        let mut method = Self::default();
-        method.retry_on_error = false;
-        method.max_retry_count = 1;
-        method
+        Self {
+            retry_on_error: false,
+            max_retry_count: 1,
+            ..Default::default()
+        }
     }
 }
 

@@ -142,7 +142,7 @@ fn get_test_data_path(migration_path: &Path) -> PathBuf {
     let root = env!("CARGO_MANIFEST_DIR");
     PathBuf::from(root)
         .join("tests/data/migrations")
-        .join(format!("{}.sql", migration_name))
+        .join(format!("{migration_name}.sql"))
 }
 
 #[test]
@@ -154,10 +154,8 @@ fn check_migrations_have_sample_data() {
 
         assert!(
             test_data_path.exists(),
-            "Migration {:?} does not have an associated test data file at {:?}.
-            Add a test data file there that fills some test data into the database after that migration is applied.",
-            migration_path,
-            test_data_path
+            "Migration {migration_path:?} does not have an associated test data file at {test_data_path:?}.
+            Add a test data file there that fills some test data into the database after that migration is applied."
         );
     }
 }
@@ -170,11 +168,11 @@ async fn apply_migrations_with_test_data(pool: PgPool) -> sqlx::Result<()> {
 
     for migration_path in migrations {
         let migration_sql = std::fs::read_to_string(&migration_path)
-            .unwrap_or_else(|_| panic!("Failed to read migration file: {:?}", migration_path));
+            .unwrap_or_else(|_| panic!("Failed to read migration file: {migration_path:?}"));
 
         pool.execute(&*migration_sql)
             .await
-            .unwrap_or_else(|e| panic!("Failed to apply migration {:?}: {}", migration_path, e));
+            .unwrap_or_else(|e| panic!("Failed to apply migration {migration_path:?}: {e}"));
 
         let test_data_path = get_test_data_path(&migration_path);
         let test_data = std::fs::read_to_string(&test_data_path).unwrap_or_else(|error| {
@@ -185,10 +183,7 @@ async fn apply_migrations_with_test_data(pool: PgPool) -> sqlx::Result<()> {
         });
 
         pool.execute(&*test_data).await.unwrap_or_else(|e| {
-            panic!(
-                "Failed to apply migration test data {:?}: {}",
-                test_data_path, e
-            )
+            panic!("Failed to apply migration test data {test_data_path:?}: {e}")
         });
     }
 

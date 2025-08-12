@@ -360,7 +360,7 @@ fn create_merge_commit_message(pr: &PullRequestData, merge_type: MergeType) -> S
     match merge_type {
         MergeType::Try { try_jobs } => {
             for job in try_jobs {
-                message.push_str(&format!("\n{CUSTOM_TRY_JOB_PREFIX} {}", job));
+                message.push_str(&format!("\n{CUSTOM_TRY_JOB_PREFIX} {job}"));
             }
         }
     }

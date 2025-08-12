@@ -63,7 +63,7 @@ impl fmt::Display for RollupMode {
             RollupMode::Never => "never",
             RollupMode::Maybe => "maybe",
         };
-        write!(f, "{}", s)
+        write!(f, "{s}")
     }
 }
 
