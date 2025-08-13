@@ -1,6 +1,5 @@
 use anyhow::anyhow;
-use octocrab::models::CheckRunId;
-use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
+use octocrab::params::checks::CheckRunStatus;
 use std::future::Future;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -177,20 +176,6 @@ async fn handle_push_failure(
         error
     );
 
-    if let Some(check_run_id) = auto_build.check_run_id {
-        if let Err(error) = repo
-            .client
-            .update_check_run(
-                CheckRunId(check_run_id as u64),
-                CheckRunStatus::Completed,
-                Some(CheckRunConclusion::Failure),
-            )
-            .await
-        {
-            tracing::error!("Could not update check run {check_run_id}: {error:?}");
-        }
-    }
-
     ctx.db
         .update_build_status(auto_build, BuildStatus::Failure)
         .await?;
@@ -356,7 +341,7 @@ pub fn start_merge_queue(ctx: Arc<BorsContext>) -> (MergeQueueSender, impl Futur
 #[cfg(test)]
 mod tests {
 
-    use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
+    use octocrab::params::checks::CheckRunStatus;
     use sqlx::PgPool;
 
     use crate::{
@@ -524,35 +509,6 @@ mod tests {
                 tester.get_comment(()).await?,
                 @":eyes: Test was successful, but fast-forwarding failed: IO error"
             );
-            Ok(())
-        })
-        .await;
-    }
-
-    #[sqlx::test]
-    async fn auto_build_push_fail_updates_check_run(pool: sqlx::PgPool) {
-        run_merge_queue_test(pool, async |tester: &mut BorsTester| {
-            start_auto_build(tester).await?;
-            tester
-                .workflow_full_success(tester.auto_branch().await)
-                .await?;
-            tester.expect_comments((), 1).await;
-
-            tester
-                .modify_repo(&default_repo_name(), |repo| repo.push_error = true)
-                .await;
-
-            tester.process_merge_queue().await;
-            tester.expect_comments((), 1).await;
-            tester
-                .expect_check_run(
-                    &tester.get_pr(()).await.get_gh_pr().head_sha,
-                    AUTO_BUILD_CHECK_RUN_NAME,
-                    AUTO_BUILD_CHECK_RUN_NAME,
-                    CheckRunStatus::Completed,
-                    Some(CheckRunConclusion::Failure),
-                )
-                .await;
             Ok(())
         })
         .await;
