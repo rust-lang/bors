@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::num::NonZeroU64;
 use std::sync::Arc;
-use std::u64;
 
 use super::user::{GitHubUser, User};
 use crate::database::WorkflowStatus;
