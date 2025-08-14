@@ -49,7 +49,9 @@ pub use mocks::ExternalHttpMock;
 pub use mocks::GitHubState;
 pub use mocks::comment::Comment;
 pub use mocks::permissions::Permissions;
-pub use mocks::repository::{Branch, Repo, default_branch_name, default_repo_name};
+pub use mocks::repository::{
+    Branch, BranchPushBehaviour, BranchPushError, Repo, default_branch_name, default_repo_name,
+};
 pub use mocks::user::User;
 pub use mocks::workflow::{WorkflowEvent, WorkflowJob, WorkflowRunData};
 pub use util::TestSyncMarker;

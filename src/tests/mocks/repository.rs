@@ -1,5 +1,7 @@
 use std::collections::HashMap;
+use std::num::NonZeroU64;
 use std::sync::Arc;
+use std::u64;
 
 use super::user::{GitHubUser, User};
 use crate::database::WorkflowStatus;
@@ -40,6 +42,42 @@ pub struct WorkflowRun {
     status: WorkflowStatus,
 }
 
+#[derive(Clone, Debug)]
+pub enum BranchPushError {
+    Conflict,
+    ValidationFailed,
+    InternalServerError,
+}
+
+#[derive(Clone, Debug)]
+pub struct BranchPushBehaviour {
+    pub error: Option<(BranchPushError, NonZeroU64)>,
+}
+
+impl BranchPushBehaviour {
+    pub fn success() -> Self {
+        Self { error: None }
+    }
+
+    pub fn always_fail(error_type: BranchPushError) -> Self {
+        Self {
+            error: Some((error_type, NonZeroU64::new(u64::MAX).unwrap())),
+        }
+    }
+
+    pub fn fail_after(count: u64, error_type: BranchPushError) -> Self {
+        Self {
+            error: NonZeroU64::new(count).map(|remaining| (error_type, remaining)),
+        }
+    }
+}
+
+impl Default for BranchPushBehaviour {
+    fn default() -> Self {
+        Self::success()
+    }
+}
+
 #[derive(Clone)]
 pub struct Repo {
     pub name: GithubRepoName,
@@ -55,8 +93,8 @@ pub struct Repo {
     pub check_runs: Vec<CheckRunData>,
     /// Cause pull request fetch to fail.
     pub pull_request_error: bool,
-    // Cause branch push to fail.
-    pub push_error: bool,
+    /// Push error failure/success behaviour.
+    pub push_behaviour: BranchPushBehaviour,
     pub pr_push_counter: u64,
 }
 
@@ -73,9 +111,9 @@ impl Repo {
             workflow_cancel_error: false,
             workflow_runs: vec![],
             pull_request_error: false,
-            push_error: false,
             pr_push_counter: 0,
             check_runs: vec![],
+            push_behaviour: BranchPushBehaviour::default(),
         }
     }
 
@@ -395,8 +433,27 @@ async fn mock_update_branch(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
 
             let data: SetRefRequest = req.body_json().unwrap();
 
-            if repo.push_error {
-                return ResponseTemplate::new(500).set_body_string("Push error");
+            if let Some((error_type, remaining)) = &mut repo.push_behaviour.error {
+                let (message, status) = match error_type {
+                    BranchPushError::Conflict => ("Conflict", 409),
+                    BranchPushError::ValidationFailed => {
+                        ("Validation failed, or the endpoint has been spammed.", 422)
+                    }
+                    BranchPushError::InternalServerError => ("Internal server error", 500),
+                };
+
+                let current = remaining.get();
+                if current == 1 {
+                    repo.push_behaviour.error = None;
+                } else {
+                    *remaining = NonZeroU64::new(current - 1).unwrap();
+                }
+
+                return ResponseTemplate::new(status).set_body_json(serde_json::json!({
+                    "message": message,
+                    "status": status.to_string(),
+                    "documentation_url": "https://docs.github.com/rest/git/refs#update-a-reference",
+                }));
             }
 
             let sha = data.sha;

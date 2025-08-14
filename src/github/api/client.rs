@@ -12,7 +12,8 @@ use crate::bors::{Comment, WorkflowRun};
 use crate::config::{CONFIG_FILE_PATH, RepositoryConfig};
 use crate::database::WorkflowStatus;
 use crate::github::api::operations::{
-    ForcePush, MergeError, create_check_run, merge_branches, set_branch_to_commit, update_check_run,
+    BranchUpdateError, ForcePush, MergeError, create_check_run, merge_branches,
+    set_branch_to_commit, update_check_run,
 };
 use crate::github::{CommitSha, GithubRepoName, PullRequest, PullRequestNumber};
 use crate::utils::timing::{RetryMethod, RetryableOpError, ShouldRetry, perform_retryable};
@@ -153,13 +154,22 @@ impl GithubRepositoryClient {
         branch: &str,
         sha: &CommitSha,
         force: ForcePush,
-    ) -> anyhow::Result<()> {
+    ) -> Result<(), crate::github::api::operations::BranchUpdateError> {
         perform_retryable("set_branch_to_sha", RetryMethod::default(), || async {
-            set_branch_to_commit(self, branch.to_string(), sha, force).await?;
-            anyhow::Ok(())
+            set_branch_to_commit(self, branch.to_string(), sha, force)
+                .await
+                .map_err(|e| match e {
+                    error @ (BranchUpdateError::Conflict(_)
+                    | BranchUpdateError::ValidationFailed(_)
+                    | BranchUpdateError::BranchNotFound(_)) => ShouldRetry::No(error),
+                    error => ShouldRetry::Yes(error),
+                })
         })
-        .await?;
-        Ok(())
+        .await
+        .map_err(|error| match error {
+            RetryableOpError::Err(error) => error,
+            RetryableOpError::AllAttemptsExhausted(_) => BranchUpdateError::Timeout,
+        })
     }
 
     /// Merge `head` into `base`. Returns the SHA of the merge commit.

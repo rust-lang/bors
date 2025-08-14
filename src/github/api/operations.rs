@@ -136,6 +136,12 @@ async fn create_branch(
 pub enum BranchUpdateError {
     #[error("Branch {0} was not found")]
     BranchNotFound(String),
+    #[error("Conflict while updating branch {0}")]
+    Conflict(String),
+    #[error("Validation failed for branch {0}")]
+    ValidationFailed(String),
+    #[error("Request timed out")]
+    Timeout,
     #[error("IO error")]
     OctocrabError(#[from] octocrab::Error),
     #[error("Unknown error: {0}")]
@@ -177,7 +183,12 @@ async fn update_branch(
 
     match status {
         StatusCode::OK => Ok(()),
-        _ => Err(BranchUpdateError::BranchNotFound(branch_name)),
+        StatusCode::NOT_FOUND => Err(BranchUpdateError::BranchNotFound(branch_name)),
+        StatusCode::CONFLICT => Err(BranchUpdateError::Conflict(branch_name)),
+        StatusCode::UNPROCESSABLE_ENTITY => Err(BranchUpdateError::ValidationFailed(branch_name)),
+        _ => Err(BranchUpdateError::Custom(format!(
+            "Unexpected status {status} for branch {branch_name}",
+        ))),
     }
 }
 
