@@ -636,10 +636,7 @@ mod tests {
         BorsBuilder::new(pool)
             .github(gh_state_with_merge_queue())
             .run_test(async |tester: &mut BorsTester| {
-                tester.post_comment("@bors r+").await?;
-                tester.expect_comments((), 1).await;
-                tester.process_merge_queue().await;
-                tester.expect_comments((), 1).await;
+                tester.start_auto_build(()).await?;
 
                 tester
                     .workflow_full_success(tester.auto_branch().await)
@@ -673,10 +670,7 @@ auto_build_succeeded = ["+foo", "+bar", "-baz"]
         BorsBuilder::new(pool)
             .github(github)
             .run_test(async |tester: &mut BorsTester| {
-                tester.post_comment("@bors r+").await?;
-                tester.expect_comments((), 1).await;
-                tester.process_merge_queue().await;
-                tester.expect_comments((), 1).await;
+                tester.start_auto_build(()).await?;
 
                 tester.get_pr(()).await.expect_added_labels(&[]);
                 tester
@@ -708,10 +702,7 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
         BorsBuilder::new(pool)
             .github(github)
             .run_test(async |tester: &mut BorsTester| {
-                tester.post_comment("@bors r+").await?;
-                tester.expect_comments((), 1).await;
-                tester.process_merge_queue().await;
-                tester.expect_comments((), 1).await;
+                tester.start_auto_build(()).await?;
 
                 tester.get_pr(()).await.expect_added_labels(&[]);
                 tester
@@ -735,10 +726,7 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
         BorsBuilder::new(pool)
             .github(gh_state_with_merge_queue())
             .run_test(async |tester: &mut BorsTester| {
-                tester.post_comment("@bors r+").await?;
-                tester.expect_comments((), 1).await;
-                tester.process_merge_queue().await;
-                tester.expect_comments((), 1).await;
+                tester.start_auto_build(()).await?;
 
                 tester
                     .workflow_full_failure(tester.auto_branch().await)
@@ -755,10 +743,7 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
         BorsBuilder::new(pool)
             .github(gh_state_with_merge_queue())
             .run_test(async |tester: &mut BorsTester| {
-                tester.post_comment("@bors r+").await?;
-                tester.expect_comments((), 1).await;
-                tester.process_merge_queue().await;
-                tester.expect_comments((), 1).await;
+                tester.start_auto_build(()).await?;
 
                 tester.get_pr(()).await.expect_added_labels(&[]);
 
@@ -781,10 +766,7 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
         BorsBuilder::new(pool)
             .github(gh_state_with_merge_queue())
             .run_test(async |tester: &mut BorsTester| {
-                tester.post_comment("@bors r+").await?;
-                tester.expect_comments((), 1).await;
-                tester.process_merge_queue().await;
-                tester.expect_comments((), 1).await;
+                tester.start_auto_build(()).await?;
 
                 tester
                     .workflow_full_failure(tester.auto_branch().await)

@@ -49,7 +49,9 @@ pub use mocks::ExternalHttpMock;
 pub use mocks::GitHubState;
 pub use mocks::comment::Comment;
 pub use mocks::permissions::Permissions;
-pub use mocks::repository::{Branch, Repo, default_branch_name, default_repo_name};
+pub use mocks::repository::{
+    Branch, BranchPushBehaviour, BranchPushError, Repo, default_branch_name, default_repo_name,
+};
 pub use mocks::user::User;
 pub use mocks::workflow::{WorkflowEvent, WorkflowJob, WorkflowRunData};
 pub use util::TestSyncMarker;
@@ -698,6 +700,18 @@ impl BorsTester {
             GitHubPullRequestEventPayload::new(pr, "unassigned", None),
         )
         .await
+    }
+
+    /// Approves and starts an auto build.
+    /// This does not guarantee a build will start for **this** PR.
+    pub async fn start_auto_build<Id: Into<PrIdentifier>>(&mut self, id: Id) -> anyhow::Result<()> {
+        let id = id.into();
+        self.post_comment(Comment::new(id.number, "@bors r+"))
+            .await?;
+        self.expect_comments(id.clone(), 1).await;
+        self.process_merge_queue().await;
+        self.expect_comments(id, 1).await;
+        Ok(())
     }
 
     //-- Test assertions --//

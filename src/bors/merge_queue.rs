@@ -1,6 +1,5 @@
 use anyhow::anyhow;
-use octocrab::models::CheckRunId;
-use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
+use octocrab::params::checks::CheckRunStatus;
 use std::future::Future;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -13,7 +12,7 @@ use crate::bors::comment::{
 use crate::bors::{PullRequestStatus, RepositoryState};
 use crate::database::{BuildStatus, PullRequestModel};
 use crate::github::api::client::{CheckRunOutput, GithubRepositoryClient};
-use crate::github::api::operations::ForcePush;
+use crate::github::api::operations::{BranchUpdateError, ForcePush};
 use crate::github::{CommitSha, MergeError};
 use crate::utils::sort_queue::sort_queue_prs;
 
@@ -137,7 +136,27 @@ async fn process_repository(repo: &RepositoryState, ctx: &BorsContext) -> anyhow
                     .set_branch_to_sha(&pr.base_branch, &commit_sha, ForcePush::No)
                     .await
                 {
-                    handle_push_failure(repo, ctx, auto_build, pr.number, &error).await?;
+                    tracing::error!(
+                        "Failed to fast-forward base branch for PR {pr_num}: {error:?}"
+                    );
+
+                    let comment = match &error {
+                        BranchUpdateError::Conflict(branch_name) => auto_build_push_failed_comment(
+                            &format!("this PR has conflicts with the `{branch_name}` branch"),
+                        ),
+                        BranchUpdateError::ValidationFailed(branch_name) => {
+                            auto_build_push_failed_comment(&format!(
+                                "this PR is behind the `{branch_name}` branch"
+                            ))
+                        }
+                        error => auto_build_push_failed_comment(&error.to_string()),
+                    };
+
+                    ctx.db
+                        .update_build_status(auto_build, BuildStatus::Failure)
+                        .await?;
+
+                    repo.client.post_comment(pr_num, comment).await?;
                 } else {
                     tracing::info!("Auto build succeeded and merged for PR {pr_num}");
 
@@ -160,43 +179,6 @@ async fn process_repository(repo: &RepositoryState, ctx: &BorsContext) -> anyhow
             }
         }
     }
-
-    Ok(())
-}
-
-async fn handle_push_failure(
-    repo: &RepositoryState,
-    ctx: &BorsContext,
-    auto_build: &crate::database::BuildModel,
-    pr_number: crate::github::PullRequestNumber,
-    error: &anyhow::Error,
-) -> anyhow::Result<()> {
-    tracing::error!(
-        "Failed to push PR {} to base branch: {:?}",
-        pr_number,
-        error
-    );
-
-    if let Some(check_run_id) = auto_build.check_run_id {
-        if let Err(error) = repo
-            .client
-            .update_check_run(
-                CheckRunId(check_run_id as u64),
-                CheckRunStatus::Completed,
-                Some(CheckRunConclusion::Failure),
-            )
-            .await
-        {
-            tracing::error!("Could not update check run {check_run_id}: {error:?}");
-        }
-    }
-
-    ctx.db
-        .update_build_status(auto_build, BuildStatus::Failure)
-        .await?;
-
-    let comment = auto_build_push_failed_comment(&error.to_string());
-    repo.client.post_comment(pr_number, comment).await?;
 
     Ok(())
 }
@@ -356,7 +338,7 @@ pub fn start_merge_queue(ctx: Arc<BorsContext>) -> (MergeQueueSender, impl Futur
 #[cfg(test)]
 mod tests {
 
-    use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
+    use octocrab::params::checks::CheckRunStatus;
     use sqlx::PgPool;
 
     use crate::{
@@ -366,7 +348,10 @@ mod tests {
         },
         database::{BuildStatus, WorkflowStatus, operations::get_all_workflows},
         github::CommitSha,
-        tests::{BorsBuilder, BorsTester, Comment, GitHubState, WorkflowEvent, default_repo_name},
+        tests::{
+            BorsBuilder, BorsTester, BranchPushBehaviour, BranchPushError, Comment, GitHubState,
+            WorkflowEvent, default_repo_name,
+        },
     };
 
     fn gh_state_with_merge_queue() -> GitHubState {
@@ -387,18 +372,10 @@ mod tests {
             .await
     }
 
-    async fn start_auto_build(tester: &mut BorsTester) -> anyhow::Result<()> {
-        tester.post_comment("@bors r+").await?;
-        tester.expect_comments((), 1).await;
-        tester.process_merge_queue().await;
-        tester.expect_comments((), 1).await;
-        Ok(())
-    }
-
     #[sqlx::test]
     async fn auto_workflow_started(pool: sqlx::PgPool) {
         run_merge_queue_test(pool.clone(), async |tester: &mut BorsTester| {
-            start_auto_build(tester).await?;
+            tester.start_auto_build(()).await?;
             tester
                 .workflow_event(WorkflowEvent::started(tester.auto_branch().await))
                 .await?;
@@ -413,7 +390,7 @@ mod tests {
     #[sqlx::test]
     async fn auto_workflow_check_run_created(pool: sqlx::PgPool) {
         run_merge_queue_test(pool, async |tester: &mut BorsTester| {
-            start_auto_build(tester).await?;
+            tester.start_auto_build(()).await?;
             tester
                 .expect_check_run(
                     &tester.get_pr(()).await.get_gh_pr().head_sha,
@@ -446,7 +423,7 @@ mod tests {
     #[sqlx::test]
     async fn auto_build_insert_into_db(pool: sqlx::PgPool) {
         run_merge_queue_test(pool, async |tester: &mut BorsTester| {
-            start_auto_build(tester).await?;
+            tester.start_auto_build(()).await?;
             tester
                 .workflow_full_success(tester.auto_branch().await)
                 .await?;
@@ -470,7 +447,7 @@ mod tests {
     #[sqlx::test]
     async fn auto_build_success_comment(pool: sqlx::PgPool) {
         run_merge_queue_test(pool, async |tester: &mut BorsTester| {
-            start_auto_build(tester).await?;
+            tester.start_auto_build(()).await?;
             tester.workflow_full_success(tester.auto_branch().await).await?;
             insta::assert_snapshot!(
                 tester.get_comment(()).await?,
@@ -488,7 +465,7 @@ mod tests {
     #[sqlx::test]
     async fn auto_build_succeeds_and_merges_in_db(pool: sqlx::PgPool) {
         run_merge_queue_test(pool, async |tester: &mut BorsTester| {
-            start_auto_build(tester).await?;
+            tester.start_auto_build(()).await?;
             tester
                 .workflow_full_success(tester.auto_branch().await)
                 .await?;
@@ -507,86 +484,9 @@ mod tests {
     }
 
     #[sqlx::test]
-    async fn auto_build_push_fail_comment(pool: sqlx::PgPool) {
-        run_merge_queue_test(pool, async |tester: &mut BorsTester| {
-            start_auto_build(tester).await?;
-            tester
-                .workflow_full_success(tester.auto_branch().await)
-                .await?;
-            tester.expect_comments((), 1).await;
-
-            tester
-                .modify_repo(&default_repo_name(), |repo| repo.push_error = true)
-                .await;
-
-            tester.process_merge_queue().await;
-            insta::assert_snapshot!(
-                tester.get_comment(()).await?,
-                @":eyes: Test was successful, but fast-forwarding failed: IO error"
-            );
-            Ok(())
-        })
-        .await;
-    }
-
-    #[sqlx::test]
-    async fn auto_build_push_fail_updates_check_run(pool: sqlx::PgPool) {
-        run_merge_queue_test(pool, async |tester: &mut BorsTester| {
-            start_auto_build(tester).await?;
-            tester
-                .workflow_full_success(tester.auto_branch().await)
-                .await?;
-            tester.expect_comments((), 1).await;
-
-            tester
-                .modify_repo(&default_repo_name(), |repo| repo.push_error = true)
-                .await;
-
-            tester.process_merge_queue().await;
-            tester.expect_comments((), 1).await;
-            tester
-                .expect_check_run(
-                    &tester.get_pr(()).await.get_gh_pr().head_sha,
-                    AUTO_BUILD_CHECK_RUN_NAME,
-                    AUTO_BUILD_CHECK_RUN_NAME,
-                    CheckRunStatus::Completed,
-                    Some(CheckRunConclusion::Failure),
-                )
-                .await;
-            Ok(())
-        })
-        .await;
-    }
-
-    #[sqlx::test]
-    async fn auto_build_push_fail_in_db(pool: sqlx::PgPool) {
-        run_merge_queue_test(pool, async |tester: &mut BorsTester| {
-            start_auto_build(tester).await?;
-            tester
-                .workflow_full_success(tester.auto_branch().await)
-                .await?;
-            tester.expect_comments((), 1).await;
-
-            tester
-                .modify_repo(&default_repo_name(), |repo| repo.push_error = true)
-                .await;
-
-            tester.process_merge_queue().await;
-            tester.expect_comments((), 1).await;
-            tester
-                .wait_for_pr((), |pr| {
-                    pr.auto_build.as_ref().unwrap().status == BuildStatus::Failure
-                })
-                .await?;
-            Ok(())
-        })
-        .await;
-    }
-
-    #[sqlx::test]
     async fn auto_build_branch_history(pool: sqlx::PgPool) {
         let gh = run_merge_queue_test(pool, async |tester: &mut BorsTester| {
-            start_auto_build(tester).await?;
+            tester.start_auto_build(()).await?;
             tester
                 .workflow_full_success(tester.auto_branch().await)
                 .await?;
@@ -609,34 +509,19 @@ mod tests {
             let pr2 = tester.open_pr(default_repo_name(), |_| {}).await?;
             let pr3 = tester.open_pr(default_repo_name(), |_| {}).await?;
 
-            tester.post_comment("@bors r+").await?;
-            tester
-                .post_comment(Comment::new(pr2.number, "@bors r+"))
-                .await?;
-            tester
-                .post_comment(Comment::new(pr3.number, "@bors r+"))
-                .await?;
-
-            tester.expect_comments((), 1).await;
-            tester.expect_comments(pr2.number, 1).await;
-            tester.expect_comments(pr3.number, 1).await;
-
-            tester.process_merge_queue().await;
-            tester.expect_comments((), 1).await;
+            tester.start_auto_build(()).await?;
             tester
                 .workflow_full_success(tester.auto_branch().await)
                 .await?;
             tester.expect_comments((), 1).await;
 
-            tester.process_merge_queue().await;
-            tester.expect_comments(pr2.number, 1).await;
+            tester.start_auto_build(pr2.number).await?;
             tester
                 .workflow_full_success(tester.auto_branch().await)
                 .await?;
             tester.expect_comments(pr2.number, 1).await;
 
-            tester.process_merge_queue().await;
-            tester.expect_comments(pr3.number, 1).await;
+            tester.start_auto_build(pr3.number).await?;
             tester
                 .workflow_full_success(tester.auto_branch().await)
                 .await?;
@@ -701,5 +586,129 @@ mod tests {
             "main",
             &["main-sha1", "merge-0-pr-1", "merge-1-pr-3", "merge-2-pr-2"],
         );
+    }
+
+    #[sqlx::test]
+    async fn auto_build_push_conflict_comment(pool: sqlx::PgPool) {
+        run_merge_queue_test(pool, async |tester: &mut BorsTester| {
+               tester.start_auto_build(()).await?;
+               tester
+                   .workflow_full_success(tester.auto_branch().await)
+                   .await?;
+               tester.expect_comments((), 1).await;
+               tester
+                   .modify_repo(&default_repo_name(), |repo| {
+                       repo.push_behaviour = BranchPushBehaviour::always_fail(BranchPushError::Conflict)
+                   })
+                   .await;
+               tester.process_merge_queue().await;
+               insta::assert_snapshot!(
+                   tester.get_comment(()).await?,
+                   @":eyes: Test was successful, but fast-forwarding failed: this PR has conflicts with the `main` branch"
+               );
+               Ok(())
+           })
+           .await;
+    }
+
+    #[sqlx::test]
+    async fn auto_build_push_validation_failed_comment(pool: sqlx::PgPool) {
+        run_merge_queue_test(pool, async |tester: &mut BorsTester| {
+               tester.start_auto_build(()).await?;
+               tester
+                   .workflow_full_success(tester.auto_branch().await)
+                   .await?;
+               tester.expect_comments((), 1).await;
+               tester
+                   .modify_repo(&default_repo_name(), |repo| {
+                       repo.push_behaviour = BranchPushBehaviour::always_fail(BranchPushError::ValidationFailed)
+                   })
+                   .await;
+               tester.process_merge_queue().await;
+               insta::assert_snapshot!(
+                   tester.get_comment(()).await?,
+                   @":eyes: Test was successful, but fast-forwarding failed: this PR is behind the `main` branch"
+               );
+               Ok(())
+           })
+           .await;
+    }
+
+    #[sqlx::test]
+    async fn auto_build_push_error_details_failed_comment(pool: sqlx::PgPool) {
+        run_merge_queue_test(pool, async |tester: &mut BorsTester| {
+            tester.start_auto_build(()).await?;
+            tester
+                .workflow_full_success(tester.auto_branch().await)
+                .await?;
+            tester.expect_comments((), 1).await;
+            tester
+                .modify_repo(&default_repo_name(), |repo| {
+                    repo.push_behaviour =
+                        BranchPushBehaviour::always_fail(BranchPushError::InternalServerError)
+                })
+                .await;
+            tester.process_merge_queue().await;
+            insta::assert_snapshot!(
+                tester.get_comment(()).await?,
+                @":eyes: Test was successful, but fast-forwarding failed: IO error"
+            );
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn auto_build_push_error_fails_in_db(pool: sqlx::PgPool) {
+        run_merge_queue_test(pool, async |tester: &mut BorsTester| {
+            tester.start_auto_build(()).await?;
+            tester
+                .workflow_full_success(tester.auto_branch().await)
+                .await?;
+            tester.expect_comments((), 1).await;
+            tester
+                .modify_repo(&default_repo_name(), |repo| {
+                    repo.push_behaviour =
+                        BranchPushBehaviour::always_fail(BranchPushError::Conflict)
+                })
+                .await;
+            tester.process_merge_queue().await;
+            tester.expect_comments((), 1).await;
+            tester
+                .wait_for_pr((), |pr| {
+                    pr.auto_build.as_ref().unwrap().status == BuildStatus::Failure
+                })
+                .await?;
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn auto_build_push_error_retry_recovers_and_merges(pool: sqlx::PgPool) {
+        run_merge_queue_test(pool, async |tester: &mut BorsTester| {
+            tester.start_auto_build(()).await?;
+            tester
+                .workflow_full_success(tester.auto_branch().await)
+                .await?;
+            tester.expect_comments((), 1).await;
+            tester
+                .modify_repo(&default_repo_name(), |repo| {
+                    repo.push_behaviour =
+                        BranchPushBehaviour::fail_after(1, BranchPushError::InternalServerError)
+                })
+                .await;
+            tester.process_merge_queue().await;
+            tester
+                .wait_for_pr((), |pr| {
+                    pr.auto_build.as_ref().unwrap().status == BuildStatus::Success
+                })
+                .await?;
+            tester
+                .wait_for_pr((), |pr| pr.pr_status == PullRequestStatus::Merged)
+                .await?;
+            Ok(())
+        })
+        .await;
     }
 }
