@@ -1,4 +1,5 @@
 use anyhow::anyhow;
+use octocrab::models::checks::CheckRun;
 use octocrab::params::checks::CheckRunStatus;
 use std::future::Future;
 use std::sync::Arc;
@@ -232,6 +233,9 @@ async fn start_auto_build(
         )
         .await?;
 
+    // After this point, this function will always return Ok,
+    // since the auto build has been started and recorded in the DB.
+
     // 4. Set GitHub check run to pending on PR head
     match client
         .create_check_run(
@@ -246,17 +250,18 @@ async fn start_auto_build(
         )
         .await
     {
-        Ok(check_run) => {
-            tracing::info!(
-                "Created check run {} for build {build_id}",
-                check_run.id.into_inner()
-            );
-            ctx.db
-                .update_build_check_run_id(build_id, check_run.id.into_inner() as i64)
-                .await?;
+        Ok(CheckRun { id, .. }) => {
+            tracing::info!("Created check run {id} for build {build_id}");
+
+            if let Err(error) = ctx
+                .db
+                .update_build_check_run_id(build_id, id.into_inner() as i64)
+                .await
+            {
+                tracing::error!("Failed to update database with build check run id {id}: {error:?}",)
+            };
         }
         Err(error) => {
-            // Check runs aren't critical, don't block progress if they fail
             tracing::error!("Failed to create check run: {error:?}");
         }
     }
