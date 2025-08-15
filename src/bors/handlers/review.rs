@@ -1320,10 +1320,7 @@ merge_queue_enabled = true
 "#,
             ))
             .run_test(async |tester: &mut BorsTester| {
-                tester.post_comment("@bors r+").await?;
-                tester.expect_comments((), 1).await;
-                tester.process_merge_queue().await;
-                tester.expect_comments((), 1).await;
+                tester.start_auto_build(()).await?;
                 tester.wait_for_pr((), |pr| pr.auto_build.is_some()).await?;
                 tester.workflow_start(tester.auto_branch().await).await?;
                 tester.post_comment("@bors r-").await?;
@@ -1349,10 +1346,7 @@ merge_queue_enabled = true
             ))
             .run_test(async |tester: &mut BorsTester| {
                 tester.modify_repo(&default_repo_name(), |pr| pr.workflow_cancel_error = true).await;
-                tester.post_comment("@bors r+").await?;
-                tester.expect_comments((), 1).await;
-                tester.process_merge_queue().await;
-                tester.expect_comments((), 1).await;
+                tester.start_auto_build(()).await?;
                 tester
                     .wait_for_pr((), |pr| pr.auto_build.is_some())
                     .await?;
@@ -1377,10 +1371,7 @@ merge_queue_enabled = true
 "#,
             ))
             .run_test(async |tester: &mut BorsTester| {
-                tester.post_comment("@bors r+").await?;
-                tester.expect_comments((), 1).await;
-                tester.process_merge_queue().await;
-                tester.expect_comments((), 1).await;
+                tester.start_auto_build(()).await?;
                 tester.wait_for_pr((), |pr| pr.auto_build.is_some()).await?;
                 tester.workflow_start(tester.auto_branch().await).await?;
                 tester.post_comment("@bors r-").await?;

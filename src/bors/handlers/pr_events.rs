@@ -658,10 +658,7 @@ mod tests {
         BorsBuilder::new(pool)
             .github(gh_state_with_merge_queue())
             .run_test(async |tester: &mut BorsTester| {
-                tester.post_comment("@bors r+").await?;
-                tester.expect_comments((), 1).await;
-                tester.process_merge_queue().await;
-                tester.expect_comments((), 1).await;
+                tester.start_auto_build(()).await?;
                 tester.wait_for_pr((), |pr| pr.auto_build.is_some()).await?;
                 tester.workflow_start(tester.auto_branch().await).await?;
                 tester.push_to_pr(()).await?;
@@ -688,10 +685,7 @@ mod tests {
                         repo.workflow_cancel_error = true
                     })
                     .await;
-                tester.post_comment("@bors r+").await?;
-                tester.expect_comments((), 1).await;
-                tester.process_merge_queue().await;
-                tester.expect_comments((), 1).await;
+                tester.start_auto_build(()).await?;
                 tester.wait_for_pr((), |pr| pr.auto_build.is_some()).await?;
 
                 tester.workflow_start(tester.auto_branch().await).await?;
@@ -712,10 +706,7 @@ mod tests {
         BorsBuilder::new(pool)
             .github(gh_state_with_merge_queue())
             .run_test(async |tester: &mut BorsTester| {
-                tester.post_comment("@bors r+").await?;
-                tester.expect_comments((), 1).await;
-                tester.process_merge_queue().await;
-                tester.expect_comments((), 1).await;
+                tester.start_auto_build(()).await?;
                 tester.workflow_start(tester.auto_branch().await).await?;
 
                 let prev_commit = &tester.get_pr(()).await.get_gh_pr().head_sha;
