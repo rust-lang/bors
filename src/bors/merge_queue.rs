@@ -9,9 +9,10 @@ use tracing::Instrument;
 use crate::BorsContext;
 use crate::bors::comment::{
     auto_build_push_failed_comment, auto_build_started_comment, auto_build_succeeded_comment,
+    merge_conflict_comment,
 };
 use crate::bors::{PullRequestStatus, RepositoryState};
-use crate::database::{BuildStatus, PullRequestModel};
+use crate::database::{BuildStatus, MergeableState, PullRequestModel};
 use crate::github::api::client::{CheckRunOutput, GithubRepositoryClient};
 use crate::github::api::operations::{BranchUpdateError, ForcePush};
 use crate::github::{CommitSha, MergeError};
@@ -101,19 +102,38 @@ async fn process_repository(repo: &RepositoryState, ctx: &BorsContext) -> anyhow
 
         let Some(auto_build) = &pr.auto_build else {
             // No build exists for this PR - start a new auto build.
-            match start_auto_build(repo, ctx, pr).await {
-                Ok(true) => {
+            match start_auto_build(repo, ctx, &pr).await {
+                Ok(()) => {
                     tracing::info!("Starting auto build for PR {pr_num}");
                     break;
                 }
-                Ok(false) => {
-                    tracing::debug!("Failed to start auto build for PR {pr_num}");
+                Err(StartAutoBuildError::MergeConflict) => {
+                    let gh_pr = repo.client.get_pull_request(pr.number).await?;
+
+                    tracing::debug!(
+                        "Failed to start auto build for PR {pr_num} due to merge conflict"
+                    );
+
+                    ctx.db
+                        .update_pr_mergeable_state(&pr, MergeableState::HasConflicts)
+                        .await?;
+                    repo.client
+                        .post_comment(pr.number, merge_conflict_comment(&gh_pr.head.name))
+                        .await?;
                     continue;
                 }
-                Err(error) => {
-                    // Unexpected error - the PR will remain in the "queue" for a retry.
-                    tracing::error!("Error starting auto build for PR {pr_num}: {:?}", error);
+                Err(StartAutoBuildError::GitHubError(error)) => {
+                    tracing::debug!(
+                        "Failed to start auto build for PR {pr_num} due to a GitHub error: {error:?}"
+                    );
+                    // TODO: Remove the PR from the queue (somehow...)
                     continue;
+                }
+                Err(StartAutoBuildError::DatabaseError(error)) => {
+                    tracing::debug!(
+                        "Failed to start auto build for PR {pr_num} due to database error: {error:?}"
+                    );
+                    break;
                 }
             }
         };
@@ -184,16 +204,32 @@ async fn process_repository(repo: &RepositoryState, ctx: &BorsContext) -> anyhow
     Ok(())
 }
 
+#[must_use]
+pub enum StartAutoBuildError {
+    /// Merge conflict between PR head and base branch.
+    MergeConflict,
+    /// Failed to perform required database operation.
+    DatabaseError(anyhow::Error),
+    /// GitHub API error.
+    GitHubError(anyhow::Error),
+}
+
 /// Starts a new auto build for a pull request.
 async fn start_auto_build(
     repo: &RepositoryState,
     ctx: &BorsContext,
-    pr: PullRequestModel,
-) -> anyhow::Result<bool> {
+    pr: &PullRequestModel,
+) -> anyhow::Result<(), StartAutoBuildError> {
     let client = &repo.client;
 
-    let gh_pr = client.get_pull_request(pr.number).await?;
-    let base_sha = client.get_branch_sha(&pr.base_branch).await?;
+    let gh_pr = client
+        .get_pull_request(pr.number)
+        .await
+        .map_err(StartAutoBuildError::GitHubError)?;
+    let base_sha = client
+        .get_branch_sha(&pr.base_branch)
+        .await
+        .map_err(StartAutoBuildError::GitHubError)?;
 
     let auto_merge_commit_message = format!(
         "Auto merge of #{} - {}, r={}\n\n{}\n\n{}",
@@ -211,27 +247,32 @@ async fn start_auto_build(
         &base_sha,
         &auto_merge_commit_message,
     )
-    .await?
+    .await
     {
-        MergeResult::Conflict => return Ok(false),
-        MergeResult::Success(merge_sha) => merge_sha,
+        Ok(MergeResult::Success(merge_sha)) => merge_sha,
+        Ok(MergeResult::Conflict) => {
+            return Err(StartAutoBuildError::MergeConflict);
+        }
+        Err(error) => return Err(StartAutoBuildError::GitHubError(error)),
     };
 
     // 2. Push merge commit to `AUTO_BRANCH_NAME` where CI runs
     client
         .set_branch_to_sha(AUTO_BRANCH_NAME, &merge_sha, ForcePush::Yes)
-        .await?;
+        .await
+        .map_err(|e| StartAutoBuildError::GitHubError(e.into()))?;
 
     // 3. Record the build in the database
     let build_id = ctx
         .db
         .attach_auto_build(
-            &pr,
+            pr,
             AUTO_BRANCH_NAME.to_string(),
             merge_sha.clone(),
             base_sha,
         )
-        .await?;
+        .await
+        .map_err(StartAutoBuildError::DatabaseError)?;
 
     // After this point, this function will always return Ok,
     // since the auto build has been started and recorded in the DB.
@@ -268,9 +309,14 @@ async fn start_auto_build(
 
     // 5. Post status comment
     let comment = auto_build_started_comment(&gh_pr.head.sha, &merge_sha);
-    client.post_comment(pr.number, comment).await?;
+    if let Err(error) = client.post_comment(pr.number, comment).await {
+        tracing::error!(
+            "Failed to post auto build started comment on PR {}: {error:?}",
+            pr.number
+        );
+    };
 
-    Ok(true)
+    Ok(())
 }
 
 /// Attempts to merge the given head SHA with base SHA via `AUTO_MERGE_BRANCH_NAME`.
@@ -351,7 +397,7 @@ mod tests {
             PullRequestStatus,
             merge_queue::{AUTO_BRANCH_NAME, AUTO_BUILD_CHECK_RUN_NAME, AUTO_MERGE_BRANCH_NAME},
         },
-        database::{BuildStatus, WorkflowStatus, operations::get_all_workflows},
+        database::{BuildStatus, MergeableState, WorkflowStatus, operations::get_all_workflows},
         github::CommitSha,
         tests::{
             BorsBuilder, BorsTester, BranchPushBehaviour, BranchPushError, Comment, GitHubState,
@@ -599,7 +645,8 @@ mod tests {
                tester.start_auto_build(()).await?;
                tester
                    .workflow_full_success(tester.auto_branch().await)
-                   .await?;
+                   .await
+?;
                tester.expect_comments((), 1).await;
                tester
                    .modify_repo(&default_repo_name(), |repo| {
@@ -622,7 +669,8 @@ mod tests {
                tester.start_auto_build(()).await?;
                tester
                    .workflow_full_success(tester.auto_branch().await)
-                   .await?;
+                   .await
+?;
                tester.expect_comments((), 1).await;
                tester
                    .modify_repo(&default_repo_name(), |repo| {
@@ -711,6 +759,74 @@ mod tests {
                 .await?;
             tester
                 .wait_for_pr((), |pr| pr.pr_status == PullRequestStatus::Merged)
+                .await?;
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn auto_build_start_merge_conflict_comment(pool: sqlx::PgPool) {
+        run_merge_queue_test(pool, async |tester: &mut BorsTester| {
+            tester.create_branch(AUTO_MERGE_BRANCH_NAME).await;
+            tester
+                .modify_branch(AUTO_MERGE_BRANCH_NAME, |branch| {
+                    branch.merge_conflict = true;
+                })
+                .await;
+            tester.post_comment("@bors r+").await?;
+            tester.expect_comments((), 1).await;
+            tester.process_merge_queue().await;
+            insta::assert_snapshot!(
+                tester.get_comment(()).await?,
+                @r#"
+            :lock: Merge conflict
+
+            This pull request and the master branch diverged in a way that cannot
+             be automatically merged. Please rebase on top of the latest master
+             branch, and let the reviewer approve again.
+
+            <details><summary>How do I rebase?</summary>
+
+            Assuming `self` is your fork and `upstream` is this repository,
+             you can resolve the conflict following these steps:
+
+            1. `git checkout pr-1` *(switch to your branch)*
+            2. `git fetch upstream master` *(retrieve the latest master)*
+            3. `git rebase upstream/master -p` *(rebase on top of it)*
+            4. Follow the on-screen instruction to resolve conflicts (check `git status` if you got lost).
+            5. `git push self pr-1 --force-with-lease` *(update this PR)*
+
+            You may also read
+             [*Git Rebasing to Resolve Conflicts* by Drew Blessing](http://blessing.io/git/git-rebase/open-source/2015/08/23/git-rebasing-to-resolve-conflicts.html)
+             for a short tutorial.
+
+            Please avoid the ["**Resolve conflicts**" button](https://help.github.com/articles/resolving-a-merge-conflict-on-github/) on GitHub.
+             It uses `git merge` instead of `git rebase` which makes the PR commit history more difficult to read.
+
+            Sometimes step 4 will complete without asking for resolution. This is usually due to difference between how `Cargo.lock` conflict is
+            handled during merge and rebase. This is normal, and you should still perform step 5 to update this PR.
+
+            </details>
+            "#
+            );
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn auto_build_start_merge_conflict_in_db(pool: sqlx::PgPool) {
+        run_merge_queue_test(pool, async |tester: &mut BorsTester| {
+            tester.create_branch(AUTO_MERGE_BRANCH_NAME).await;
+            tester
+                .modify_branch(AUTO_MERGE_BRANCH_NAME, |branch| {
+                    branch.merge_conflict = true;
+                })
+                .await;
+            tester.start_auto_build(()).await?;
+            tester
+                .wait_for_pr((), |pr| pr.mergeable_state == MergeableState::HasConflicts)
                 .await?;
             Ok(())
         })
