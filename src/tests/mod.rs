@@ -706,7 +706,7 @@ impl BorsTester {
     /// This does not guarantee a build will start for **this** PR.
     pub async fn start_auto_build<Id: Into<PrIdentifier>>(&mut self, id: Id) -> anyhow::Result<()> {
         let id = id.into();
-        self.post_comment(Comment::new(id.number, &"@bors r+"))
+        self.post_comment(Comment::new(id.number, "@bors r+"))
             .await?;
         self.expect_comments(id.clone(), 1).await;
         self.process_merge_queue().await;
