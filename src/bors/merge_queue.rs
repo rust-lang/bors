@@ -126,8 +126,7 @@ async fn process_repository(repo: &RepositoryState, ctx: &BorsContext) -> anyhow
                     tracing::debug!(
                         "Failed to start auto build for PR {pr_num} due to a GitHub error: {error:?}"
                     );
-                    // TODO: Remove the PR from the queue (somehow...)
-                    continue;
+                    break;
                 }
                 Err(StartAutoBuildError::DatabaseError(error)) => {
                     tracing::debug!(
