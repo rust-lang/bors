@@ -115,7 +115,7 @@ async fn process_repository(repo: &RepositoryState, ctx: &BorsContext) -> anyhow
                     );
 
                     ctx.db
-                        .update_pr_mergeable_state(&pr, MergeableState::HasConflicts)
+                        .update_pr_mergeable_state(&pr, MergeableState::Unknown)
                         .await?;
                     repo.client
                         .post_comment(pr.number, merge_conflict_comment(&gh_pr.head.name))
@@ -825,7 +825,7 @@ mod tests {
                 .await;
             tester.start_auto_build(()).await?;
             tester
-                .wait_for_pr((), |pr| pr.mergeable_state == MergeableState::HasConflicts)
+                .wait_for_pr((), |pr| pr.mergeable_state == MergeableState::Unknown)
                 .await?;
             Ok(())
         })
