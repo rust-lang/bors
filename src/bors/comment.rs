@@ -1,5 +1,5 @@
 use itertools::Itertools;
-use octocrab::models::workflows::Job;
+use octocrab::models::workflows::{Conclusion, Job};
 use serde::Serialize;
 use std::time::Duration;
 
@@ -122,6 +122,9 @@ pub fn build_failed_comment(
         let mut failed_jobs: Vec<Job> = failed_workflows
             .into_iter()
             .flat_map(|w| w.failed_jobs)
+            // When multiple jobs are executed and one fails, the rest is cancelled.
+            // But showing the cancelled jobs as failed is not very useful, so we filter them out
+            .filter(|j| j.conclusion != Some(Conclusion::Cancelled))
             .collect();
         failed_jobs.sort_by(|l, r| l.name.cmp(&r.name));
 
