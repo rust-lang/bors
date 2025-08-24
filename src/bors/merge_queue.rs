@@ -12,10 +12,10 @@ use crate::bors::comment::{
     merge_conflict_comment,
 };
 use crate::bors::{PullRequestStatus, RepositoryState};
-use crate::database::{BuildStatus, MergeableState, PullRequestModel};
+use crate::database::{BuildStatus, MergeableState, OctocrabMergeableState, PullRequestModel};
 use crate::github::api::client::{CheckRunOutput, GithubRepositoryClient};
 use crate::github::api::operations::{BranchUpdateError, ForcePush};
-use crate::github::{CommitSha, MergeError};
+use crate::github::{CommitSha, MergeError, PullRequest};
 use crate::utils::sort_queue::sort_queue_prs;
 
 enum MergeResult {
@@ -122,6 +122,10 @@ async fn process_repository(repo: &RepositoryState, ctx: &BorsContext) -> anyhow
                         .await?;
                     continue;
                 }
+                Err(StartAutoBuildError::SanityCheckFailed(error)) => {
+                    tracing::info!("Sanity check failed for PR {pr_num}: {error:?}");
+                    break;
+                }
                 Err(StartAutoBuildError::GitHubError(error)) => {
                     tracing::debug!(
                         "Failed to start auto build for PR {pr_num} due to a GitHub error: {error:?}"
@@ -211,6 +215,23 @@ pub enum StartAutoBuildError {
     DatabaseError(anyhow::Error),
     /// GitHub API error.
     GitHubError(anyhow::Error),
+    /// Sanity checks failed - PR state doesn't match requirements.
+    SanityCheckFailed(anyhow::Error),
+}
+
+async fn verify_pr_state(gh_pr: &PullRequest, pr: &PullRequestModel) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        gh_pr.mergeable_state == OctocrabMergeableState::Clean,
+        "PR not mergeable"
+    );
+    anyhow::ensure!(gh_pr.status == PullRequestStatus::Open, "PR not opened");
+    anyhow::ensure!(
+        pr.approved_sha()
+            .map(|sha| gh_pr.head.sha == CommitSha(sha.to_string()))
+            .unwrap_or(false),
+        "PR head sha doesn't match approved sha",
+    );
+    Ok(())
 }
 
 /// Starts a new auto build for a pull request.
@@ -225,10 +246,12 @@ async fn start_auto_build(
         .get_pull_request(pr.number)
         .await
         .map_err(StartAutoBuildError::GitHubError)?;
-    let base_sha = client
-        .get_branch_sha(&pr.base_branch)
+    let base_sha = gh_pr.base.sha.clone();
+    let head_sha = gh_pr.head.sha.clone();
+
+    verify_pr_state(&gh_pr, pr)
         .await
-        .map_err(StartAutoBuildError::GitHubError)?;
+        .map_err(StartAutoBuildError::SanityCheckFailed)?;
 
     let auto_merge_commit_message = format!(
         "Auto merge of #{} - {}, r={}\n\n{}\n\n{}",
@@ -240,20 +263,14 @@ async fn start_auto_build(
     );
 
     // 1. Merge PR head with base branch on `AUTO_MERGE_BRANCH_NAME`
-    let merge_sha = match attempt_merge(
-        &repo.client,
-        &gh_pr.head.sha,
-        &base_sha,
-        &auto_merge_commit_message,
-    )
-    .await
-    {
-        Ok(MergeResult::Success(merge_sha)) => merge_sha,
-        Ok(MergeResult::Conflict) => {
-            return Err(StartAutoBuildError::MergeConflict);
-        }
-        Err(error) => return Err(StartAutoBuildError::GitHubError(error)),
-    };
+    let merge_sha =
+        match attempt_merge(client, &head_sha, &base_sha, &auto_merge_commit_message).await {
+            Ok(MergeResult::Success(merge_sha)) => merge_sha,
+            Ok(MergeResult::Conflict) => {
+                return Err(StartAutoBuildError::MergeConflict);
+            }
+            Err(error) => return Err(StartAutoBuildError::GitHubError(error)),
+        };
 
     // 2. Push merge commit to `AUTO_BRANCH_NAME` where CI runs
     client
@@ -280,7 +297,7 @@ async fn start_auto_build(
     match client
         .create_check_run(
             AUTO_BUILD_CHECK_RUN_NAME,
-            &gh_pr.head.sha,
+            &head_sha,
             CheckRunStatus::InProgress,
             CheckRunOutput {
                 title: AUTO_BUILD_CHECK_RUN_NAME.to_string(),
@@ -307,7 +324,7 @@ async fn start_auto_build(
     }
 
     // 5. Post status comment
-    let comment = auto_build_started_comment(&gh_pr.head.sha, &merge_sha);
+    let comment = auto_build_started_comment(&head_sha, &merge_sha);
     if let Err(error) = client.post_comment(pr.number, comment).await {
         tracing::error!(
             "Failed to post auto build started comment on PR {}: {error:?}",
@@ -396,7 +413,10 @@ mod tests {
             PullRequestStatus,
             merge_queue::{AUTO_BRANCH_NAME, AUTO_BUILD_CHECK_RUN_NAME, AUTO_MERGE_BRANCH_NAME},
         },
-        database::{BuildStatus, MergeableState, WorkflowStatus, operations::get_all_workflows},
+        database::{
+            BuildStatus, MergeableState, OctocrabMergeableState, WorkflowStatus,
+            operations::get_all_workflows,
+        },
         github::CommitSha,
         tests::{
             BorsBuilder, BorsTester, BranchPushBehaviour, BranchPushError, Comment, GitHubState,
@@ -827,6 +847,92 @@ mod tests {
             tester
                 .wait_for_pr((), |pr| pr.mergeable_state == MergeableState::Unknown)
                 .await?;
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn auto_build_mergeable_state_sanity_check_fails(pool: sqlx::PgPool) {
+        run_merge_queue_test(pool, async |tester: &mut BorsTester| {
+            let pr = tester.open_pr(default_repo_name(), |_| {}).await?;
+            tester
+                .post_comment(Comment::new(pr.number, "@bors r+"))
+                .await?;
+            tester.expect_comments(pr.number, 1).await;
+            tester
+                .modify_pr_state(pr.number, |pr| {
+                    pr.mergeable_state = OctocrabMergeableState::Dirty;
+                })
+                .await;
+            tester.process_merge_queue().await;
+            tester
+                .wait_for_pr(pr.number, |pr| pr.auto_build.is_none())
+                .await?;
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn auto_build_status_sanity_check_fails(pool: sqlx::PgPool) {
+        run_merge_queue_test(pool, async |tester: &mut BorsTester| {
+            let pr = tester.open_pr(default_repo_name(), |_| {}).await?;
+            tester
+                .post_comment(Comment::new(pr.number, "@bors r+"))
+                .await?;
+            tester.expect_comments(pr.number, 1).await;
+            tester.modify_pr_state(pr.number, |pr| pr.close_pr()).await;
+            tester.process_merge_queue().await;
+            tester
+                .wait_for_pr(pr.number, |pr| pr.auto_build.is_none())
+                .await?;
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn auto_build_sha_mismatch_sanity_check_fails(pool: sqlx::PgPool) {
+        run_merge_queue_test(pool, async |tester: &mut BorsTester| {
+            let pr = tester.open_pr(default_repo_name(), |_| {}).await?;
+            tester
+                .post_comment(Comment::new(pr.number, "@bors r+"))
+                .await?;
+            tester.expect_comments(pr.number, 1).await;
+            tester
+                .edit_pr(pr.number, |pr| {
+                    pr.head_sha = "different-sha".to_string();
+                })
+                .await?;
+            tester.process_merge_queue().await;
+            tester
+                .wait_for_pr(pr.number, |pr| pr.auto_build.is_none())
+                .await?;
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn auto_build_sanity_check_recovers(pool: sqlx::PgPool) {
+        run_merge_queue_test(pool, async |tester: &mut BorsTester| {
+            let pr = tester.open_pr(default_repo_name(), |_| {}).await?;
+            tester
+                .post_comment(Comment::new(pr.number, "@bors r+"))
+                .await?;
+            tester.expect_comments(pr.number, 1).await;
+            tester.modify_pr_state(pr.number, |pr| pr.close_pr()).await;
+            tester.process_merge_queue().await;
+            tester
+                .wait_for_pr(pr.number, |pr| pr.auto_build.is_none())
+                .await?;
+            tester.modify_pr_state(pr.number, |pr| pr.open_pr()).await;
+            tester.process_merge_queue().await;
+            tester
+                .wait_for_pr(pr.number, |pr| pr.auto_build.is_some())
+                .await?;
+            tester.expect_comments(pr.number, 1).await;
             Ok(())
         })
         .await;
