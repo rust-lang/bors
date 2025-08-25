@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 pub(super) async fn command_info(
     repo: Arc<RepositoryState>,
-    pr: &PullRequestData,
+    pr: PullRequestData<'_>,
     db: Arc<PgDbClient>,
 ) -> anyhow::Result<()> {
     use std::fmt::Write;

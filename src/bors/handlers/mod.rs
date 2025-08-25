@@ -316,13 +316,14 @@ where
     Ok(())
 }
 
-struct PullRequestData {
-    github: PullRequest,
-    db: PullRequestModel,
+#[derive(Copy, Clone)]
+pub struct PullRequestData<'a> {
+    pub github: &'a PullRequest,
+    pub db: &'a PullRequestModel,
 }
 
-impl PullRequestData {
-    fn number(&self) -> PullRequestNumber {
+impl PullRequestData<'_> {
+    pub fn number(&self) -> PullRequestNumber {
         self.db.number
     }
 }
@@ -379,8 +380,8 @@ async fn handle_comment(
                     .with_context(|| format!("Cannot upsert PR {pr_number} into the database"))?;
 
                 let pr = PullRequestData {
-                    github: pr_github.clone(),
-                    db: pr_db,
+                    github: &pr_github,
+                    db: &pr_db,
                 };
 
                 let repo = Arc::clone(&repo);
@@ -396,7 +397,7 @@ async fn handle_comment(
                             ctx.clone(),
                             repo,
                             database,
-                            &pr,
+                            pr,
                             &comment.author,
                             &approver,
                             priority,
@@ -408,7 +409,7 @@ async fn handle_comment(
                     }
                     BorsCommand::OpenTree => {
                         let span = tracing::info_span!("TreeOpen");
-                        command_open_tree(repo, database, &pr, &comment.author, &merge_queue_tx)
+                        command_open_tree(repo, database, pr, &comment.author, &merge_queue_tx)
                             .instrument(span)
                             .await
                     }
@@ -417,7 +418,7 @@ async fn handle_comment(
                         command_close_tree(
                             repo,
                             database,
-                            &pr,
+                            pr,
                             &comment.author,
                             priority,
                             &comment.html_url,
@@ -428,13 +429,13 @@ async fn handle_comment(
                     }
                     BorsCommand::Unapprove => {
                         let span = tracing::info_span!("Unapprove");
-                        command_unapprove(repo, database, &pr, &comment.author)
+                        command_unapprove(repo, database, pr, &comment.author)
                             .instrument(span)
                             .await
                     }
                     BorsCommand::SetPriority(priority) => {
                         let span = tracing::info_span!("Priority");
-                        command_set_priority(repo, database, &pr, &comment.author, priority)
+                        command_set_priority(repo, database, pr, &comment.author, priority)
                             .instrument(span)
                             .await
                     }
@@ -443,7 +444,7 @@ async fn handle_comment(
                         command_delegate(
                             repo,
                             database,
-                            &pr,
+                            pr,
                             &comment.author,
                             delegate_type,
                             ctx.parser.prefix(),
@@ -453,7 +454,7 @@ async fn handle_comment(
                     }
                     BorsCommand::Undelegate => {
                         let span = tracing::info_span!("Undelegate");
-                        command_undelegate(repo, database, &pr, &comment.author)
+                        command_undelegate(repo, database, pr, &comment.author)
                             .instrument(span)
                             .await
                     }
@@ -474,7 +475,7 @@ async fn handle_comment(
                         command_try_build(
                             repo,
                             database,
-                            &pr,
+                            pr,
                             &comment.author,
                             parent,
                             jobs,
@@ -485,17 +486,17 @@ async fn handle_comment(
                     }
                     BorsCommand::TryCancel => {
                         let span = tracing::info_span!("Cancel try");
-                        command_try_cancel(repo, database, &pr, &comment.author)
+                        command_try_cancel(repo, database, pr, &comment.author)
                             .instrument(span)
                             .await
                     }
                     BorsCommand::Info => {
                         let span = tracing::info_span!("Info");
-                        command_info(repo, &pr, database).instrument(span).await
+                        command_info(repo, pr, database).instrument(span).await
                     }
                     BorsCommand::SetRollupMode(rollup) => {
                         let span = tracing::info_span!("Rollup");
-                        command_set_rollup(repo, database, &pr, &comment.author, rollup)
+                        command_set_rollup(repo, database, pr, &comment.author, rollup)
                             .instrument(span)
                             .await
                     }
@@ -618,7 +619,7 @@ async fn deny_request(
 async fn has_permission(
     repo_state: &RepositoryState,
     user: &GithubUser,
-    pr: &PullRequestData,
+    pr: PullRequestData<'_>,
     permission: PermissionType,
 ) -> anyhow::Result<bool> {
     if repo_state

@@ -7,6 +7,7 @@ pub use command::RollupMode;
 pub use comment::Comment;
 pub use context::BorsContext;
 pub use handlers::{handle_bors_global_event, handle_bors_repository_event};
+use itertools::Itertools;
 use octocrab::models::RunId;
 use octocrab::models::workflows::Job;
 use serde::Serialize;
@@ -17,6 +18,7 @@ use crate::github::api::client::GithubRepositoryClient;
 use crate::permissions::UserPermissions;
 #[cfg(test)]
 use crate::tests::TestSyncMarker;
+use crate::utils::text::suppress_github_mentions;
 
 mod command;
 pub mod comment;
@@ -104,4 +106,62 @@ impl FromStr for PullRequestStatus {
             status => Err(format!("Invalid PR status {status}")),
         }
     }
+}
+
+/// Prefix used to specify custom try jobs in PR descriptions.
+pub const CUSTOM_TRY_JOB_PREFIX: &str = "try-job:";
+
+#[derive(Debug, Clone)]
+pub enum MergeType {
+    Try { try_jobs: Vec<String> },
+    Auto,
+}
+
+pub fn create_merge_commit_message(pr: handlers::PullRequestData, merge_type: MergeType) -> String {
+    let pr_number = pr.number();
+
+    let reviewer = match &merge_type {
+        MergeType::Try { .. } => "<try>",
+        MergeType::Auto => pr.db.approver().unwrap_or("<unknown>"),
+    };
+
+    let mut pr_description = suppress_github_mentions(&pr.github.message);
+    match &merge_type {
+        // Strip all PR text for try builds, to avoid useless issue pings on the repository.
+        // Only keep any lines starting with `CUSTOM_TRY_JOB_PREFIX`.
+        MergeType::Try { try_jobs } => {
+            // If we do not have any custom try jobs, keep the ones that might be in the PR
+            // description.
+            pr_description = if try_jobs.is_empty() {
+                pr_description
+                    .lines()
+                    .map(|l| l.trim())
+                    .filter(|l| l.starts_with(CUSTOM_TRY_JOB_PREFIX))
+                    .join("\n")
+            } else {
+                // If we do have custom jobs, ignore the original description completely
+                String::new()
+            };
+        }
+        MergeType::Auto => {}
+    };
+
+    let mut message = format!(
+        r#"Auto merge of #{pr_number} - {pr_label}, r={reviewer}
+{pr_title}
+
+{pr_description}"#,
+        pr_label = pr.github.head_label,
+        pr_title = pr.github.title,
+    );
+
+    match merge_type {
+        MergeType::Try { try_jobs } => {
+            for job in try_jobs {
+                message.push_str(&format!("\n{CUSTOM_TRY_JOB_PREFIX} {job}"));
+            }
+        }
+        MergeType::Auto => {}
+    }
+    message
 }

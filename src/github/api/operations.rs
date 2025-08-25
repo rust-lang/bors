@@ -30,6 +30,12 @@ pub enum MergeError {
     Timeout,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MergeResult {
+    Success(CommitSha),
+    Conflict,
+}
+
 #[derive(serde::Serialize)]
 struct MergeRequest<'a, 'b, 'c> {
     base: &'a str,
@@ -240,4 +246,42 @@ pub async fn update_check_run(
     }
 
     request.send().await
+}
+
+/// Attempts to merge a head commit into a base commit using a specified branch.
+pub async fn attempt_merge(
+    client: &GithubRepositoryClient,
+    branch_name: &str,
+    head_sha: &CommitSha,
+    base_sha: &CommitSha,
+    merge_message: &str,
+) -> anyhow::Result<MergeResult> {
+    tracing::debug!("Attempting to merge with base SHA {base_sha} using branch {branch_name}");
+
+    // Reset the merge branch to point to base branch
+    client
+        .set_branch_to_sha(branch_name, base_sha, ForcePush::Yes)
+        .await
+        .map_err(|error| {
+            anyhow::anyhow!(
+                "Cannot set merge branch {branch_name} to {}: {error:?}",
+                base_sha.0
+            )
+        })?;
+
+    // then merge PR head commit into the merge branch.
+    match client
+        .merge_branches(branch_name, head_sha, merge_message)
+        .await
+    {
+        Ok(merge_sha) => {
+            tracing::debug!("Merge successful, SHA: {merge_sha}");
+            Ok(MergeResult::Success(merge_sha))
+        }
+        Err(MergeError::Conflict) => {
+            tracing::warn!("Merge conflict");
+            Ok(MergeResult::Conflict)
+        }
+        Err(error) => Err(error.into()),
+    }
 }

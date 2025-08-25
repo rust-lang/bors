@@ -1,4 +1,3 @@
-use anyhow::anyhow;
 use octocrab::models::checks::CheckRun;
 use octocrab::params::checks::CheckRunStatus;
 use std::future::Future;
@@ -13,15 +12,13 @@ use crate::bors::comment::{
 };
 use crate::bors::{PullRequestStatus, RepositoryState};
 use crate::database::{BuildStatus, MergeableState, OctocrabMergeableState, PullRequestModel};
-use crate::github::api::client::{CheckRunOutput, GithubRepositoryClient};
+use crate::github::api::client::CheckRunOutput;
 use crate::github::api::operations::{BranchUpdateError, ForcePush};
-use crate::github::{CommitSha, MergeError, PullRequest};
+use crate::github::{CommitSha, PullRequest};
+use crate::github::{MergeResult, attempt_merge};
 use crate::utils::sort_queue::sort_queue_prs;
 
-enum MergeResult {
-    Success(CommitSha),
-    Conflict,
-}
+use super::{MergeType, create_merge_commit_message};
 
 #[derive(Debug)]
 enum MergeQueueEvent {
@@ -258,24 +255,27 @@ async fn start_auto_build(
         .await
         .map_err(StartAutoBuildError::SanityCheckFailed)?;
 
-    let auto_merge_commit_message = format!(
-        "Auto merge of #{} - {}, r={}\n\n{}\n\n{}",
-        pr.number,
-        gh_pr.head_label,
-        pr.approver().unwrap_or("<unknown>"),
-        pr.title,
-        gh_pr.message
-    );
+    let pr_data = super::handlers::PullRequestData {
+        db: pr,
+        github: &gh_pr,
+    };
+
+    let auto_merge_commit_message = create_merge_commit_message(pr_data, MergeType::Auto);
 
     // 1. Merge PR head with base branch on `AUTO_MERGE_BRANCH_NAME`
-    let merge_sha =
-        match attempt_merge(client, &head_sha, &base_sha, &auto_merge_commit_message).await {
-            Ok(MergeResult::Success(merge_sha)) => merge_sha,
-            Ok(MergeResult::Conflict) => {
-                return Err(StartAutoBuildError::MergeConflict);
-            }
-            Err(error) => return Err(StartAutoBuildError::GitHubError(error)),
-        };
+    let merge_sha = match attempt_merge(
+        client,
+        AUTO_MERGE_BRANCH_NAME,
+        &head_sha,
+        &base_sha,
+        &auto_merge_commit_message,
+    )
+    .await
+    {
+        Ok(MergeResult::Success(merge_sha)) => merge_sha,
+        Ok(MergeResult::Conflict) => return Err(StartAutoBuildError::MergeConflict),
+        Err(error) => return Err(StartAutoBuildError::GitHubError(error)),
+    };
 
     // 2. Push merge commit to `AUTO_BRANCH_NAME` where CI runs
     client
@@ -338,38 +338,6 @@ async fn start_auto_build(
     };
 
     Ok(())
-}
-
-/// Attempts to merge the given head SHA with base SHA via `AUTO_MERGE_BRANCH_NAME`.
-async fn attempt_merge(
-    client: &GithubRepositoryClient,
-    head_sha: &CommitSha,
-    base_sha: &CommitSha,
-    merge_message: &str,
-) -> anyhow::Result<MergeResult> {
-    tracing::debug!("Attempting to merge with base SHA {base_sha}");
-
-    // Reset auto merge branch to point to base branch
-    client
-        .set_branch_to_sha(AUTO_MERGE_BRANCH_NAME, base_sha, ForcePush::Yes)
-        .await
-        .map_err(|error| anyhow!("Cannot set auto merge branch to {}: {error:?}", base_sha.0))?;
-
-    // then merge PR head commit into auto merge branch.
-    match client
-        .merge_branches(AUTO_MERGE_BRANCH_NAME, head_sha, merge_message)
-        .await
-    {
-        Ok(merge_sha) => {
-            tracing::debug!("Merge successful, SHA: {merge_sha}");
-            Ok(MergeResult::Success(merge_sha))
-        }
-        Err(MergeError::Conflict) => {
-            tracing::warn!("Merge conflict");
-            Ok(MergeResult::Conflict)
-        }
-        Err(error) => Err(error.into()),
-    }
 }
 
 pub fn start_merge_queue(ctx: Arc<BorsContext>) -> (MergeQueueSender, impl Future<Output = ()>) {
