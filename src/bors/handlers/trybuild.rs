@@ -44,7 +44,7 @@ pub(super) const TRY_BUILD_CHECK_RUN_NAME: &str = "Bors try build";
 pub(super) async fn command_try_build(
     repo: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
-    pr: &PullRequestData,
+    pr: PullRequestData<'_>,
     author: &GithubUser,
     parent: Option<Parent>,
     jobs: Vec<String>,
@@ -64,7 +64,7 @@ pub(super) async fn command_try_build(
         return Ok(());
     };
 
-    let base_sha = match get_base_sha(&pr.db, parent) {
+    let base_sha = match get_base_sha(pr.db, parent) {
         Some(base_sha) => base_sha,
         None => repo
             .client
@@ -74,7 +74,7 @@ pub(super) async fn command_try_build(
     };
 
     // Try to cancel any previously running try build workflows
-    let cancelled_workflow_urls = if let Some(build) = get_pending_build(&pr.db) {
+    let cancelled_workflow_urls = if let Some(build) = get_pending_build(pr.db) {
         cancel_previous_try_build(repo, &db, build).await?
     } else {
         vec![]
@@ -92,7 +92,7 @@ pub(super) async fn command_try_build(
         MergeResult::Success(merge_sha) => {
             // If the merge was succesful, run CI with merged commit
             let build_id =
-                run_try_build(&repo.client, &db, &pr.db, merge_sha.clone(), base_sha).await?;
+                run_try_build(&repo.client, &db, pr.db, merge_sha.clone(), base_sha).await?;
 
             handle_label_trigger(repo, pr.number(), LabelTrigger::TryBuildStarted).await?;
 
@@ -214,7 +214,7 @@ fn get_base_sha(pr_model: &PullRequestModel, parent: Option<Parent>) -> Option<C
 pub(super) async fn command_try_cancel(
     repo: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
-    pr: &PullRequestData,
+    pr: PullRequestData<'_>,
     author: &GithubUser,
 ) -> anyhow::Result<()> {
     let repo = repo.as_ref();
@@ -224,7 +224,7 @@ pub(super) async fn command_try_cancel(
     }
 
     let pr_number: PullRequestNumber = pr.number();
-    let Some(build) = get_pending_build(&pr.db) else {
+    let Some(build) = get_pending_build(pr.db) else {
         tracing::info!("No try build found when trying to cancel a try build");
         repo.client
             .post_comment(pr_number, no_try_build_in_progress_comment())

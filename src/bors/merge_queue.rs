@@ -256,11 +256,11 @@ async fn start_auto_build(
         .map_err(StartAutoBuildError::SanityCheckFailed)?;
 
     let pr_data = super::handlers::PullRequestData {
-        db: pr.clone(),
-        github: gh_pr.clone(),
+        db: pr,
+        github: &gh_pr,
     };
 
-    let auto_merge_commit_message = create_merge_commit_message(&pr_data, MergeType::Auto);
+    let auto_merge_commit_message = create_merge_commit_message(pr_data, MergeType::Auto);
 
     // 1. Merge PR head with base branch on `AUTO_MERGE_BRANCH_NAME`
     let merge_sha = match attempt_merge(

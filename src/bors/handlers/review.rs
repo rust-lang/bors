@@ -28,7 +28,7 @@ pub(super) async fn command_approve(
     ctx: Arc<BorsContext>,
     repo_state: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
-    pr: &PullRequestData,
+    pr: PullRequestData<'_>,
     author: &GithubUser,
     approver: &Approver,
     priority: Option<u32>,
@@ -58,7 +58,7 @@ pub(super) async fn command_approve(
         sha: pr.github.head.sha.to_string(),
     };
 
-    db.approve(&pr.db, approval_info, priority, rollup).await?;
+    db.approve(pr.db, approval_info, priority, rollup).await?;
     handle_label_trigger(&repo_state, pr.number(), LabelTrigger::Approved).await?;
 
     merge_queue_tx.trigger().await?;
@@ -73,7 +73,7 @@ const WIP_KEYWORDS: &[&str] = &["wip", "[do not merge]"];
 /// Returns `Ok(Some(comment))` if it **cannot** be approved; the comment should be sent to the
 /// pull request.
 async fn check_pr_approval_validity(
-    pr: &PullRequestData,
+    pr: PullRequestData<'_>,
     repo: &RepositoryState,
 ) -> anyhow::Result<Option<Comment>> {
     // Check PR status
@@ -113,7 +113,7 @@ async fn check_pr_approval_validity(
 pub(super) async fn command_unapprove(
     repo_state: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
-    pr: &PullRequestData,
+    pr: PullRequestData<'_>,
     author: &GithubUser,
 ) -> anyhow::Result<()> {
     let pr_num = pr.number();
@@ -138,11 +138,11 @@ pub(super) async fn command_unapprove(
     let auto_build_cancel_message = maybe_cancel_auto_build(
         &repo_state.client,
         &db,
-        &pr.db,
+        pr.db,
         AutoBuildCancelReason::Unapproval,
     )
     .await?;
-    unapprove_pr(&repo_state, &db, &pr.db).await?;
+    unapprove_pr(&repo_state, &db, pr.db).await?;
     notify_of_unapproval(&repo_state, pr, auto_build_cancel_message).await?;
 
     Ok(())
@@ -153,7 +153,7 @@ pub(super) async fn command_unapprove(
 pub(super) async fn command_set_priority(
     repo_state: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
-    pr: &PullRequestData,
+    pr: PullRequestData<'_>,
     author: &GithubUser,
     priority: u32,
 ) -> anyhow::Result<()> {
@@ -161,14 +161,14 @@ pub(super) async fn command_set_priority(
         deny_request(&repo_state, pr.number(), author, PermissionType::Review).await?;
         return Ok(());
     };
-    db.set_priority(&pr.db, priority).await
+    db.set_priority(pr.db, priority).await
 }
 
 /// Delegate permissions of a pull request to its author.
 pub(super) async fn command_delegate(
     repo_state: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
-    pr: &PullRequestData,
+    pr: PullRequestData<'_>,
     author: &GithubUser,
     delegated_permission: DelegatedPermission,
     bot_prefix: &CommandPrefix,
@@ -183,7 +183,7 @@ pub(super) async fn command_delegate(
         return Ok(());
     }
 
-    db.delegate(&pr.db, delegated_permission).await?;
+    db.delegate(pr.db, delegated_permission).await?;
     notify_of_delegation(
         &repo_state,
         pr.number(),
@@ -199,7 +199,7 @@ pub(super) async fn command_delegate(
 pub(super) async fn command_undelegate(
     repo_state: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
-    pr: &PullRequestData,
+    pr: PullRequestData<'_>,
     author: &GithubUser,
 ) -> anyhow::Result<()> {
     tracing::info!("Undelegating PR {} approval", pr.number());
@@ -207,7 +207,7 @@ pub(super) async fn command_undelegate(
         deny_request(&repo_state, pr.number(), author, PermissionType::Review).await?;
         return Ok(());
     }
-    db.undelegate(&pr.db).await
+    db.undelegate(pr.db).await
 }
 
 /// Set the rollup of a pull request.
@@ -215,7 +215,7 @@ pub(super) async fn command_undelegate(
 pub(super) async fn command_set_rollup(
     repo_state: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
-    pr: &PullRequestData,
+    pr: PullRequestData<'_>,
     author: &GithubUser,
     rollup: RollupMode,
 ) -> anyhow::Result<()> {
@@ -223,13 +223,13 @@ pub(super) async fn command_set_rollup(
         deny_request(&repo_state, pr.number(), author, PermissionType::Review).await?;
         return Ok(());
     }
-    db.set_rollup(&pr.db, rollup).await
+    db.set_rollup(pr.db, rollup).await
 }
 
 pub(super) async fn command_close_tree(
     repo_state: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
-    pr: &PullRequestData,
+    pr: PullRequestData<'_>,
     author: &GithubUser,
     priority: u32,
     comment_url: &str,
@@ -255,7 +255,7 @@ pub(super) async fn command_close_tree(
 pub(super) async fn command_open_tree(
     repo_state: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
-    pr: &PullRequestData,
+    pr: PullRequestData<'_>,
     author: &GithubUser,
     merge_queue_tx: &MergeQueueSender,
 ) -> anyhow::Result<()> {
@@ -314,7 +314,7 @@ async fn notify_of_tree_open(
 
 async fn notify_of_unapproval(
     repo: &RepositoryState,
-    pr: &PullRequestData,
+    pr: PullRequestData<'_>,
     cancel_message: Option<String>,
 ) -> anyhow::Result<()> {
     let mut comment = format!("Commit {} has been unapproved.", pr.github.head.sha);
@@ -332,7 +332,7 @@ async fn notify_of_unapproval(
 async fn notify_of_approval(
     ctx: Arc<BorsContext>,
     repo: &RepositoryState,
-    pr: &PullRequestData,
+    pr: PullRequestData<'_>,
     approver: &str,
 ) -> anyhow::Result<()> {
     repo.client

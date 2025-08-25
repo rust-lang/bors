@@ -117,10 +117,7 @@ pub enum MergeType {
     Auto,
 }
 
-pub fn create_merge_commit_message(
-    pr: &handlers::PullRequestData,
-    merge_type: MergeType,
-) -> String {
+pub fn create_merge_commit_message(pr: handlers::PullRequestData, merge_type: MergeType) -> String {
     let pr_number = pr.number();
 
     let reviewer = match &merge_type {
