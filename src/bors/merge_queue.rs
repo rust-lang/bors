@@ -220,17 +220,19 @@ pub enum StartAutoBuildError {
 }
 
 async fn verify_pr_state(gh_pr: &PullRequest, pr: &PullRequestModel) -> anyhow::Result<()> {
+    let approved_sha = pr
+        .approved_sha()
+        .ok_or_else(|| anyhow::anyhow!("PR is not approved"))?;
+
+    anyhow::ensure!(
+        gh_pr.head.sha == CommitSha(approved_sha.to_string()),
+        "PR head SHA does not match approved SHA"
+    );
     anyhow::ensure!(
         gh_pr.mergeable_state == OctocrabMergeableState::Clean,
         "PR not mergeable"
     );
     anyhow::ensure!(gh_pr.status == PullRequestStatus::Open, "PR not opened");
-    anyhow::ensure!(
-        pr.approved_sha()
-            .map(|sha| gh_pr.head.sha == CommitSha(sha.to_string()))
-            .unwrap_or(false),
-        "PR head sha doesn't match approved sha",
-    );
     Ok(())
 }
 
