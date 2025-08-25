@@ -12,7 +12,7 @@ mod labels;
 pub mod server;
 mod webhook;
 
-pub use api::operations::MergeError;
+pub use api::operations::{MergeResult, attempt_merge};
 pub use error::AppError;
 pub use labels::{LabelModification, LabelTrigger};
 pub use webhook::WebhookSecret;

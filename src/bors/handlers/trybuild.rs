@@ -16,7 +16,8 @@ use crate::bors::handlers::workflow::{CancelBuildError, cancel_build};
 use crate::database::{BuildModel, BuildStatus, PullRequestModel};
 use crate::github::api::client::{CheckRunOutput, GithubRepositoryClient};
 use crate::github::api::operations::ForcePush;
-use crate::github::{CommitSha, GithubUser, LabelTrigger, MergeError, PullRequestNumber};
+use crate::github::{CommitSha, GithubUser, LabelTrigger, PullRequestNumber};
+use crate::github::{MergeResult, attempt_merge};
 use crate::permissions::PermissionType;
 use crate::utils::text::suppress_github_mentions;
 use anyhow::{Context, anyhow};
@@ -83,6 +84,7 @@ pub(super) async fn command_try_build(
 
     match attempt_merge(
         &repo.client,
+        TRY_MERGE_BRANCH_NAME,
         &pr.github.head.sha,
         &base_sha,
         &create_merge_commit_message(pr, MergeType::Try { try_jobs: jobs }),
@@ -176,39 +178,6 @@ async fn cancel_previous_try_build(
     }
 }
 
-async fn attempt_merge(
-    client: &GithubRepositoryClient,
-    head_sha: &CommitSha,
-    base_sha: &CommitSha,
-    merge_message: &str,
-) -> anyhow::Result<MergeResult> {
-    tracing::debug!("Attempting to merge with base SHA {base_sha}");
-
-    // First set the try branch to our base commit (either the selected parent or the main branch).
-    client
-        .set_branch_to_sha(TRY_MERGE_BRANCH_NAME, base_sha, ForcePush::Yes)
-        .await
-        .map_err(|error| anyhow!("Cannot set try merge branch to {}: {error:?}", base_sha.0))?;
-
-    // Then merge the PR commit into the try branch
-    match client
-        .merge_branches(TRY_MERGE_BRANCH_NAME, head_sha, merge_message)
-        .await
-    {
-        Ok(merge_sha) => {
-            tracing::debug!("Merge successful, SHA: {merge_sha}");
-
-            Ok(MergeResult::Success(merge_sha))
-        }
-        Err(MergeError::Conflict) => {
-            tracing::warn!("Merge conflict");
-
-            Ok(MergeResult::Conflict)
-        }
-        Err(error) => Err(error.into()),
-    }
-}
-
 async fn run_try_build(
     client: &GithubRepositoryClient,
     db: &PgDbClient,
@@ -227,11 +196,6 @@ async fn run_try_build(
 
     tracing::info!("Try build started");
     Ok(build_id)
-}
-
-enum MergeResult {
-    Success(CommitSha),
-    Conflict,
 }
 
 fn get_base_sha(pr_model: &PullRequestModel, parent: Option<Parent>) -> Option<CommitSha> {
