@@ -3,7 +3,6 @@ use std::sync::Arc;
 use super::has_permission;
 use super::{PullRequestData, deny_request};
 use crate::PgDbClient;
-use crate::bors::RepositoryState;
 use crate::bors::command::{CommandPrefix, Parent};
 use crate::bors::comment::try_build_cancelled_comment;
 use crate::bors::comment::try_build_cancelled_with_failed_workflow_cancel_comment;
@@ -13,15 +12,14 @@ use crate::bors::comment::{
 };
 use crate::bors::handlers::labels::handle_label_trigger;
 use crate::bors::handlers::workflow::{CancelBuildError, cancel_build};
+use crate::bors::{MergeType, RepositoryState, create_merge_commit_message};
 use crate::database::{BuildModel, BuildStatus, PullRequestModel};
 use crate::github::api::client::{CheckRunOutput, GithubRepositoryClient};
 use crate::github::api::operations::ForcePush;
 use crate::github::{CommitSha, GithubUser, LabelTrigger, PullRequestNumber};
 use crate::github::{MergeResult, attempt_merge};
 use crate::permissions::PermissionType;
-use crate::utils::text::suppress_github_mentions;
 use anyhow::{Context, anyhow};
-use itertools::Itertools;
 use octocrab::params::checks::CheckRunConclusion;
 use octocrab::params::checks::CheckRunStatus;
 use tracing::log;
@@ -276,59 +274,6 @@ fn get_pending_build(pr: &PullRequestModel) -> Option<&BuildModel> {
     pr.try_build
         .as_ref()
         .and_then(|b| (b.status == BuildStatus::Pending).then_some(b))
-}
-
-/// Prefix used to specify custom try jobs in PR descriptions.
-const CUSTOM_TRY_JOB_PREFIX: &str = "try-job:";
-
-enum MergeType {
-    Try { try_jobs: Vec<String> },
-}
-
-fn create_merge_commit_message(pr: &PullRequestData, merge_type: MergeType) -> String {
-    let pr_number = pr.number();
-
-    let reviewer = match &merge_type {
-        MergeType::Try { .. } => "<try>",
-    };
-
-    let mut pr_description = suppress_github_mentions(&pr.github.message);
-    match &merge_type {
-        // Strip all PR text for try builds, to avoid useless issue pings on the repository.
-        // Only keep any lines starting with `CUSTOM_TRY_JOB_PREFIX`.
-        MergeType::Try { try_jobs } => {
-            // If we do not have any custom try jobs, keep the ones that might be in the PR
-            // description.
-            pr_description = if try_jobs.is_empty() {
-                pr_description
-                    .lines()
-                    .map(|l| l.trim())
-                    .filter(|l| l.starts_with(CUSTOM_TRY_JOB_PREFIX))
-                    .join("\n")
-            } else {
-                // If we do have custom jobs, ignore the original description completely
-                String::new()
-            };
-        }
-    };
-
-    let mut message = format!(
-        r#"Auto merge of #{pr_number} - {pr_label}, r={reviewer}
-{pr_title}
-
-{pr_description}"#,
-        pr_label = pr.github.head_label,
-        pr_title = pr.github.title,
-    );
-
-    match merge_type {
-        MergeType::Try { try_jobs } => {
-            for job in try_jobs {
-                message.push_str(&format!("\n{CUSTOM_TRY_JOB_PREFIX} {job}"));
-            }
-        }
-    }
-    message
 }
 
 #[cfg(test)]

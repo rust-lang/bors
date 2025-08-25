@@ -18,6 +18,8 @@ use crate::github::{CommitSha, PullRequest};
 use crate::github::{MergeResult, attempt_merge};
 use crate::utils::sort_queue::sort_queue_prs;
 
+use super::{MergeType, create_merge_commit_message};
+
 #[derive(Debug)]
 enum MergeQueueEvent {
     Trigger,
@@ -253,14 +255,12 @@ async fn start_auto_build(
         .await
         .map_err(StartAutoBuildError::SanityCheckFailed)?;
 
-    let auto_merge_commit_message = format!(
-        "Auto merge of #{} - {}, r={}\n\n{}\n\n{}",
-        pr.number,
-        gh_pr.head_label,
-        pr.approver().unwrap_or("<unknown>"),
-        pr.title,
-        gh_pr.message
-    );
+    let pr_data = super::handlers::PullRequestData {
+        db: pr.clone(),
+        github: gh_pr.clone(),
+    };
+
+    let auto_merge_commit_message = create_merge_commit_message(&pr_data, MergeType::Auto);
 
     // 1. Merge PR head with base branch on `AUTO_MERGE_BRANCH_NAME`
     let merge_sha = match attempt_merge(

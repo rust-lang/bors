@@ -316,13 +316,13 @@ where
     Ok(())
 }
 
-struct PullRequestData {
-    github: PullRequest,
-    db: PullRequestModel,
+pub struct PullRequestData {
+    pub github: PullRequest,
+    pub db: PullRequestModel,
 }
 
 impl PullRequestData {
-    fn number(&self) -> PullRequestNumber {
+    pub fn number(&self) -> PullRequestNumber {
         self.db.number
     }
 }
