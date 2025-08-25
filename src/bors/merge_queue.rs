@@ -248,7 +248,10 @@ async fn start_auto_build(
         .get_pull_request(pr.number)
         .await
         .map_err(StartAutoBuildError::GitHubError)?;
-    let base_sha = gh_pr.base.sha.clone();
+    let base_sha = client
+        .get_branch_sha(&pr.base_branch)
+        .await
+        .map_err(StartAutoBuildError::GitHubError)?;
     let head_sha = gh_pr.head.sha.clone();
 
     verify_pr_state(&gh_pr, pr)
