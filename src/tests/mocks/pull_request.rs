@@ -171,6 +171,11 @@ impl PullRequest {
         self.status = PullRequestStatus::Closed;
     }
 
+    pub fn open_pr(&mut self) {
+        self.status = PullRequestStatus::Open;
+        self.closed_at = None;
+    }
+
     pub fn reopen_pr(&mut self) {
         self.closed_at = None;
         self.status = PullRequestStatus::Open;
