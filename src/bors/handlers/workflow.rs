@@ -195,23 +195,23 @@ async fn maybe_complete_build(
     };
     let trigger = match build_type {
         BuildType::Try => {
-            if build_succeeded {
-                LabelTrigger::TryBuildSucceeded
+            if !build_succeeded {
+                Some(LabelTrigger::TryBuildFailed)
             } else {
-                LabelTrigger::TryBuildFailed
+                None
             }
         }
-        BuildType::Auto => {
-            if build_succeeded {
-                LabelTrigger::AutoBuildSucceeded
-            } else {
-                LabelTrigger::AutoBuildFailed
-            }
-        }
+        BuildType::Auto => Some(if build_succeeded {
+            LabelTrigger::AutoBuildSucceeded
+        } else {
+            LabelTrigger::AutoBuildFailed
+        }),
     };
 
     db.update_build_status(&build, status).await?;
-    handle_label_trigger(repo, pr_num, trigger).await?;
+    if let Some(trigger) = trigger {
+        handle_label_trigger(repo, pr_num, trigger).await?;
+    }
 
     if let Some(check_run_id) = build.check_run_id {
         let (status, conclusion) = if build_succeeded {

@@ -70,8 +70,6 @@ where
     enum Trigger {
         Approved,
         Unapproved,
-        Try,
-        TrySucceeded,
         TryFailed,
         AutoBuildSucceeded,
         AutoBuildFailed,
@@ -82,8 +80,6 @@ where
             match value {
                 Trigger::Approved => LabelTrigger::Approved,
                 Trigger::Unapproved => LabelTrigger::Unapproved,
-                Trigger::Try => LabelTrigger::TryBuildStarted,
-                Trigger::TrySucceeded => LabelTrigger::TryBuildSucceeded,
                 Trigger::TryFailed => LabelTrigger::TryBuildFailed,
                 Trigger::AutoBuildSucceeded => LabelTrigger::AutoBuildSucceeded,
                 Trigger::AutoBuildFailed => LabelTrigger::AutoBuildFailed,
@@ -211,8 +207,7 @@ mod tests {
     fn deserialize_labels() {
         let content = r#"[labels]
 approved = ["+approved"]
-try = ["+foo", "-bar"]
-try_succeeded = ["+foobar", "+foo", "+baz"]
+unapproved = ["-approved"]
 try_failed = []
 auto_build_succeeded = ["+foobar", "-foo"]
 auto_build_failed = ["+bar", "+baz"]
@@ -228,25 +223,6 @@ auto_build_failed = ["+bar", "+baz"]
             Unapproved: [
                 Remove(
                     "approved",
-                ),
-            ],
-            TryBuildStarted: [
-                Add(
-                    "foo",
-                ),
-                Remove(
-                    "bar",
-                ),
-            ],
-            TryBuildSucceeded: [
-                Add(
-                    "foobar",
-                ),
-                Add(
-                    "foo",
-                ),
-                Add(
-                    "baz",
                 ),
             ],
             TryBuildFailed: [],
@@ -274,7 +250,7 @@ auto_build_failed = ["+bar", "+baz"]
     #[should_panic(expected = "Label modification must start with `+` or `-`")]
     fn deserialize_labels_missing_prefix() {
         let content = r#"[labels]
-try = ["foo"]
+approved = ["foo"]
 "#;
         load_config(content);
     }

@@ -10,13 +10,12 @@ use crate::bors::comment::{CommentTag, no_try_build_in_progress_comment};
 use crate::bors::comment::{
     cant_find_last_parent_comment, merge_conflict_comment, try_build_started_comment,
 };
-use crate::bors::handlers::labels::handle_label_trigger;
 use crate::bors::handlers::workflow::{CancelBuildError, cancel_build};
 use crate::bors::{MergeType, RepositoryState, create_merge_commit_message};
 use crate::database::{BuildModel, BuildStatus, PullRequestModel};
 use crate::github::api::client::{CheckRunOutput, GithubRepositoryClient};
 use crate::github::api::operations::ForcePush;
-use crate::github::{CommitSha, GithubUser, LabelTrigger, PullRequestNumber};
+use crate::github::{CommitSha, GithubUser, PullRequestNumber};
 use crate::github::{MergeResult, attempt_merge};
 use crate::permissions::PermissionType;
 use anyhow::{Context, anyhow};
@@ -99,8 +98,6 @@ pub(super) async fn command_try_build(
             // If the merge was succesful, run CI with merged commit
             let build_id =
                 run_try_build(&repo.client, &db, pr.db, merge_sha.clone(), base_sha).await?;
-
-            handle_label_trigger(repo, pr.number(), LabelTrigger::TryBuildStarted).await?;
 
             // Create a check run to track the try build status in GitHub's UI.
             // This gets added to the PR's head SHA so GitHub shows UI in the checks tab and
@@ -872,63 +869,6 @@ try-job: Bar
         })
         .await;
         assert_eq!(get_all_workflows(&pool).await.unwrap().len(), 0);
-    }
-
-    #[sqlx::test]
-    async fn try_build_start_modify_labels(pool: sqlx::PgPool) {
-        BorsBuilder::new(pool)
-            .github(GitHubState::default().with_default_config(
-                r#"
-[labels]
-try = ["+foo", "+bar", "-baz"]
-"#,
-            ))
-            .run_test(async |tester: &mut BorsTester| {
-                tester.post_comment("@bors try").await?;
-                insta::assert_snapshot!(tester.get_comment_text(()).await?, @r"
-                :hourglass: Trying commit pr-1-sha with merge merge-0-pr-1…
-
-                To cancel the try build, run the command `@bors try cancel`.
-                ");
-                tester
-                    .get_pr_copy(())
-                    .await
-                    .expect_added_labels(&["foo", "bar"])
-                    .expect_removed_labels(&["baz"]);
-                Ok(())
-            })
-            .await;
-    }
-
-    #[sqlx::test]
-    async fn try_build_succeeded_modify_labels(pool: sqlx::PgPool) {
-        BorsBuilder::new(pool)
-            .github(GitHubState::default().with_default_config(
-                r#"
-[labels]
-try_succeeded = ["+foo", "+bar", "-baz"]
-"#,
-            ))
-            .run_test(async |tester: &mut BorsTester| {
-                tester.post_comment("@bors try").await?;
-                insta::assert_snapshot!(tester.get_comment_text(()).await?, @r"
-                :hourglass: Trying commit pr-1-sha with merge merge-0-pr-1…
-
-                To cancel the try build, run the command `@bors try cancel`.
-                ");
-                tester.get_pr_copy(()).await.expect_added_labels(&[]);
-                tester
-                    .workflow_full_success(tester.try_branch().await)
-                    .await?;
-                tester.expect_comments((), 1).await;
-                tester
-                    .get_pr_copy(())
-                    .await
-                    .expect_added_labels(&["foo", "bar"])
-                    .expect_removed_labels(&["baz"]);
-                Ok(())
-            })
-            .await;
     }
 
     #[sqlx::test]
