@@ -1,7 +1,3 @@
-use std::collections::HashMap;
-use std::ops::Deref;
-use std::sync::Arc;
-
 use crate::TeamApiClient;
 use crate::github::GithubRepoName;
 use crate::github::api::client::HideCommentReason;
@@ -18,7 +14,6 @@ use std::collections::HashMap;
 use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::time::error::Elapsed;
 use wiremock::matchers::{method, path_regex};
 use wiremock::{Mock, Request, ResponseTemplate};
 

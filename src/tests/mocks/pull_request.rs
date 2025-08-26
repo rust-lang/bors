@@ -13,7 +13,7 @@ use octocrab::models::LabelId;
 use octocrab::models::pulls::{MergeableState as OctocrabMergeableState, MergeableState};
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
-use std::fmt::{Display, Formatter, Write};
+use std::fmt::{Display, Formatter};
 use std::sync::Arc;
 use std::time::SystemTime;
 use tokio::sync::mpsc::{Receiver, Sender};

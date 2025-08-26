@@ -109,8 +109,7 @@ mod tests {
     #[sqlx::test]
     async fn info_for_approved_pr(pool: sqlx::PgPool) {
         run_test(pool, async |tester: &mut BorsTester| {
-            tester.post_comment("@bors r+").await?;
-            tester.expect_comments((), 1).await;
+            tester.approve(()).await?;
 
             tester.post_comment("@bors info").await?;
             insta::assert_snapshot!(

@@ -493,8 +493,7 @@ mod tests {
     #[sqlx::test]
     async fn unapprove_lacking_permissions(pool: sqlx::PgPool) {
         run_test(pool, async |tester: &mut BorsTester| {
-            tester.post_comment("@bors r+").await?;
-            tester.expect_comments((), 1).await;
+            tester.approve(()).await?;
             tester
                 .post_comment(Comment::from("@bors r-").with_author(User::unprivileged()))
                 .await?;
@@ -515,8 +514,7 @@ mod tests {
     #[sqlx::test]
     async fn unapprove_merged_pr(pool: sqlx::PgPool) {
         run_test(pool, async |tester: &mut BorsTester| {
-            tester.post_comment("@bors r+").await?;
-            tester.expect_comments((), 1).await;
+            tester.approve(()).await?;
             tester.set_pr_status_closed(()).await?;
             tester.post_comment("@bors r-").await?;
             insta::assert_snapshot!(
@@ -581,8 +579,7 @@ mod tests {
             tester.post_comment("@bors p=5").await?;
             tester.wait_for_pr((), |pr| pr.priority == Some(5)).await?;
 
-            tester.post_comment("@bors r+").await?;
-            tester.expect_comments((), 1).await;
+            tester.approve(()).await?;
 
             tester.get_pr_copy(()).await.expect_priority(Some(5));
 
@@ -706,8 +703,7 @@ mod tests {
                     .await?;
                 tester.expect_comments((), 1).await;
 
-                tester.post_comment("@bors r+").await?;
-                tester.expect_comments((), 1).await;
+                tester.approve(()).await?;
 
                 tester
                     .get_pr_copy(())
@@ -830,8 +826,7 @@ mod tests {
                     .await?;
                 tester.expect_comments((), 1).await;
 
-                tester.post_comment("@bors r+").await?;
-                tester.expect_comments((), 1).await;
+                tester.approve(()).await?;
                 tester
                     .get_pr_copy(())
                     .await
@@ -1029,8 +1024,7 @@ mod tests {
                 .wait_for_pr((), |pr| pr.rollup == Some(RollupMode::Always))
                 .await?;
 
-            tester.post_comment("@bors r+").await?;
-            tester.expect_comments((), 1).await;
+            tester.approve(()).await?;
 
             tester
                 .get_pr_copy(())
@@ -1069,8 +1063,7 @@ mod tests {
     async fn approve_store_sha(pool: sqlx::PgPool) {
         run_test(pool, async |tester: &mut BorsTester| {
             let pr = tester.get_pr_copy(()).await.get_gh_pr();
-            tester.post_comment("@bors r+").await?;
-            tester.expect_comments((), 1).await;
+            tester.approve(()).await?;
 
             tester
                 .get_pr_copy(())
@@ -1086,8 +1079,7 @@ mod tests {
     async fn reapproved_pr_uses_latest_sha(pool: sqlx::PgPool) {
         run_test(pool, async |tester: &mut BorsTester| {
             let pr = tester.get_pr_copy(()).await.get_gh_pr();
-            tester.post_comment("@bors r+").await?;
-            tester.expect_comments((), 1).await;
+            tester.approve(()).await?;
 
             tester
                 .get_pr_copy(())
@@ -1100,8 +1092,7 @@ mod tests {
 
             tester.expect_comments((), 1).await;
 
-            tester.post_comment("@bors r+").await?;
-            tester.expect_comments((), 1).await;
+            tester.approve(()).await?;
 
             tester
                 .get_pr_copy(())
@@ -1326,8 +1317,9 @@ labels_blocking_approval = ["proposed-final-comment-period", "final-comment-peri
     #[sqlx::test]
     async fn unapprove_running_auto_build_pr_comment(pool: sqlx::PgPool) {
         run_test(pool, async |tester: &mut BorsTester| {
+            tester.approve(()).await?;
             tester.start_auto_build(()).await?;
-            tester.wait_for_pr((), |pr| pr.auto_build.is_some()).await?;
+            tester.get_pr_copy(()).await.expect_auto_build(|_| true);
             tester.workflow_start(tester.auto_branch().await).await?;
             tester.post_comment("@bors r-").await?;
             insta::assert_snapshot!(tester.get_comment_text(()).await?, @r"
@@ -1345,28 +1337,32 @@ labels_blocking_approval = ["proposed-final-comment-period", "final-comment-peri
     #[sqlx::test]
     async fn unapprove_running_auto_build_pr_failed_comment(pool: sqlx::PgPool) {
         run_test(pool, async |tester: &mut BorsTester| {
-                tester.modify_repo(&default_repo_name(), |pr| pr.workflow_cancel_error = true).await;
-                tester.start_auto_build(()).await?;
-                tester
-                    .wait_for_pr((), |pr| pr.auto_build.is_some())
-                    .await?;
-                tester.workflow_start(tester.auto_branch().await).await?;
-                tester.post_comment("@bors r-").await?;
-                insta::assert_snapshot!(tester.get_comment_text(()).await?, @r"
-                Commit pr-1-sha has been unapproved.
+            tester
+                .modify_repo(&default_repo_name(), |pr| pr.workflow_cancel_error = true)
+                .await;
 
-                Auto build cancelled due to unapproval. It was not possible to cancel some workflows.
-                ");
-                Ok(())
-            })
-            .await;
+            tester.approve(()).await?;
+            tester.start_auto_build(()).await?;
+            tester.get_pr_copy(()).await.expect_auto_build(|_| true);
+            tester.workflow_start(tester.auto_branch().await).await?;
+            tester.post_comment("@bors r-").await?;
+            insta::assert_snapshot!(tester.get_comment_text(()).await?, @r"
+            Commit pr-1-sha has been unapproved.
+
+            Auto build cancelled due to unapproval. It was not possible to cancel some workflows.
+            ");
+            Ok(())
+        })
+        .await;
     }
 
     #[sqlx::test]
     async fn unapprove_running_auto_build_updates_check_run(pool: sqlx::PgPool) {
         run_test(pool, async |tester: &mut BorsTester| {
+            tester.approve(()).await?;
             tester.start_auto_build(()).await?;
-            tester.wait_for_pr((), |pr| pr.auto_build.is_some()).await?;
+            tester.get_pr_copy(()).await.expect_auto_build(|_| true);
+
             tester.workflow_start(tester.auto_branch().await).await?;
             tester.post_comment("@bors r-").await?;
             tester.expect_comments((), 1).await;

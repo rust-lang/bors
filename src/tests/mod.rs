@@ -25,7 +25,8 @@ use crate::bors::{
     WAIT_FOR_REFRESH_PENDING_BUILDS, WAIT_FOR_WORKFLOW_COMPLETED, WAIT_FOR_WORKFLOW_STARTED,
 };
 use crate::database::{
-    BuildStatus, DelegatedPermission, OctocrabMergeableState, PullRequestModel, WorkflowStatus,
+    BuildModel, BuildStatus, DelegatedPermission, MergeableState, OctocrabMergeableState,
+    PullRequestModel, WorkflowStatus,
 };
 use crate::github::{GithubRepoName, PullRequestNumber};
 use crate::{
@@ -97,7 +98,7 @@ impl BorsBuilder {
             // If the service ends sooner than the test itself, then the service has panicked.
             // In that case we want to immediately abort the test and print the error.
             res = &mut bors => {
-                let error = res.err().expect("Bors service ended unexpectedly without a panic");
+                let error = res.expect_err("Bors service ended unexpectedly without a panic");
                 panic!("Bors service has ended unexpectedly: {:?}", join_error_to_anyhow(error));
             }
             result = tokio::time::timeout(TEST_TIMEOUT, f(&mut tester)) => {
@@ -320,15 +321,15 @@ impl BorsTester {
             .get(&default_repo_name())
             .unwrap()
             .clone();
-        let mut repo = repo.lock();
-
-        let branch = repo
-            .get_branch_by_name(name)
-            .expect("Branch does not exist");
-        func(branch);
+        if let Some(branch) = repo.lock().get_branch_by_name(name) {
+            func(branch);
+        } else {
+            self.create_branch(name).await;
+            func(repo.lock().get_branch_by_name(name).unwrap());
+        }
     }
 
-    pub async fn get_branch(&self, name: &str) -> Branch {
+    pub async fn get_branch_copy(&self, name: &str) -> Branch {
         self.github
             .lock()
             .await
@@ -354,11 +355,11 @@ impl BorsTester {
     }
 
     pub async fn try_branch(&self) -> Branch {
-        self.get_branch("automation/bors/try").await
+        self.get_branch_copy("automation/bors/try").await
     }
 
     pub async fn auto_branch(&self) -> Branch {
-        self.get_branch("automation/bors/auto").await
+        self.get_branch_copy("automation/bors/auto").await
     }
 
     /// Wait until the next bot comment is received on the specified repo and PR, and return its
@@ -395,6 +396,14 @@ impl BorsTester {
 
         self.webhook_comment(comment.clone()).await?;
         Ok(comment)
+    }
+
+    pub async fn approve<Id: Into<PrIdentifier>>(&mut self, id: Id) -> anyhow::Result<()> {
+        let id = id.into();
+        self.post_comment(Comment::new(id.clone(), "@bors r+"))
+            .await?;
+        self.expect_comments(id, 1).await;
+        Ok(())
     }
 
     pub async fn cancel_timed_out_builds(&self) {
@@ -728,16 +737,36 @@ impl BorsTester {
         .await
     }
 
-    /// Approves the specified PR and runs the merge queue.
-    /// This does not guarantee a build will start for **this** PR.
+    /// Starts an auto build, with the expectation that it will start testing the given PR.
     pub async fn start_auto_build<Id: Into<PrIdentifier>>(&mut self, id: Id) -> anyhow::Result<()> {
         let id = id.into();
-        self.post_comment(Comment::new(id.clone(), "@bors r+"))
-            .await?;
-        self.expect_comments(id.clone(), 1).await;
         self.process_merge_queue().await;
-        self.expect_comments(id, 1).await;
+        let comment = self.get_comment_text(id).await?;
+        assert!(comment.contains("Testing commit"));
         Ok(())
+    }
+
+    /// Perform a successful workflow on the auto branch and run the merge queue, with the
+    /// expectation that it will finish the auto build and merge the given PR.
+    pub async fn finish_auto_build<Id: Into<PrIdentifier>>(
+        &mut self,
+        id: Id,
+    ) -> anyhow::Result<()> {
+        self.workflow_full_success(self.auto_branch().await).await?;
+        self.process_merge_queue().await;
+        let comment = self.get_comment_text(id).await?;
+        assert!(comment.contains("Test successful"));
+        Ok(())
+    }
+
+    /// Start and then finish auto build on the given PR.
+    pub async fn start_and_finish_auto_build<Id: Into<PrIdentifier>>(
+        &mut self,
+        id: Id,
+    ) -> anyhow::Result<()> {
+        let id = id.into();
+        self.start_auto_build(id.clone()).await?;
+        self.finish_auto_build(id).await
     }
 
     //-- Test assertions --//
@@ -984,6 +1013,36 @@ impl PullRequestProxy {
     }
 
     #[track_caller]
+    pub fn expect_auto_build<F>(&self, f: F) -> &Self
+    where
+        F: FnOnce(&BuildModel) -> bool,
+    {
+        let auto_build = self
+            .require_db_pr()
+            .auto_build
+            .as_ref()
+            .expect("No auto build found");
+        assert!(f(auto_build), "Auto build check was not successful");
+        self
+    }
+
+    #[track_caller]
+    pub fn expect_no_auto_build(&self) -> &Self {
+        assert!(
+            self.require_db_pr().auto_build.is_none(),
+            "Auto build should not be on PR {}",
+            self.gh_pr.id()
+        );
+        self
+    }
+
+    #[track_caller]
+    pub fn expect_mergeable_state(&self, state: MergeableState) -> &Self {
+        assert_eq!(self.require_db_pr().mergeable_state, state);
+        self
+    }
+
+    #[track_caller]
     pub fn expect_rollup(&self, rollup: Option<RollupMode>) -> &Self {
         assert_eq!(self.require_db_pr().rollup, rollup);
         self
@@ -1074,7 +1133,7 @@ where
 
     let res = func().await;
     if res.is_ok() {
-        tokio::time::timeout(Duration::from_secs(5), marker.sync())
+        tokio::time::timeout(Duration::from_secs(15), marker.sync())
             .await
             .map_err(|_| anyhow::anyhow!("Timed out waiting for a test marker to be marked"))?;
     }

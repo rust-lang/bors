@@ -64,7 +64,7 @@ impl BranchPushBehaviour {
         }
     }
 
-    pub fn fail_after(count: u64, error_type: BranchPushError) -> Self {
+    pub fn fail_n_times(error_type: BranchPushError, count: u64) -> Self {
         Self {
             error: NonZeroU64::new(count).map(|remaining| (error_type, remaining)),
         }
