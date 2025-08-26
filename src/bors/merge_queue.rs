@@ -183,7 +183,6 @@ async fn process_repository(repo: &RepositoryState, ctx: &BorsContext) -> anyhow
                     &commit_sha,
                     &pr.base_branch,
                 );
-                repo.client.post_comment(pr.number, comment).await?;
 
                 if let Err(error) = repo
                     .client
@@ -217,6 +216,8 @@ async fn process_repository(repo: &RepositoryState, ctx: &BorsContext) -> anyhow
                     ctx.db
                         .set_pr_status(&pr.repository, pr.number, PullRequestStatus::Merged)
                         .await?;
+
+                    repo.client.post_comment(pr.number, comment).await?;
                 }
 
                 // Break to give GitHub time to update the base branch.
