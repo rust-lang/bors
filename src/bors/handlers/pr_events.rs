@@ -62,7 +62,14 @@ pub(super) async fn handle_push_to_pull_request(
     )
     .await?;
 
-    if !pr_model.is_approved() {
+    // If we have an approved PR with a failed build, there's not much point in sending this warning
+    if !pr_model.is_approved()
+        || pr_model
+            .auto_build
+            .as_ref()
+            .map(|b| b.status.is_failure())
+            .unwrap_or(false)
+    {
         return Ok(());
     }
 
@@ -390,6 +397,24 @@ mod tests {
             Ok(())
         })
         .await;
+    }
+
+    #[sqlx::test]
+    async fn push_to_pr_do_nothing_when_build_failed(pool: sqlx::PgPool) {
+        BorsBuilder::new(pool)
+            .github(gh_state_with_merge_queue())
+            .run_test(async |tester: &mut BorsTester| {
+                tester.start_auto_build(()).await?;
+                tester
+                    .workflow_full_failure(tester.auto_branch().await)
+                    .await?;
+                tester.expect_comments((), 1).await;
+                tester.push_to_pr(()).await?;
+
+                // No comment should be posted
+                Ok(())
+            })
+            .await;
     }
 
     #[sqlx::test]
