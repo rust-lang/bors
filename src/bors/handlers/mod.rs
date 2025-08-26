@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use super::mergeable_queue::MergeableQueueSender;
 use crate::bors::command::{BorsCommand, CommandParseError};
+use crate::bors::comment::CommentTag;
 use crate::bors::event::{BorsGlobalEvent, BorsRepositoryEvent, PullRequestComment};
 use crate::bors::handlers::help::command_help;
 use crate::bors::handlers::info::command_info;
@@ -22,6 +23,7 @@ use crate::bors::handlers::workflow::{handle_workflow_completed, handle_workflow
 use crate::bors::merge_queue::{AUTO_BRANCH_NAME, MergeQueueSender};
 use crate::bors::{BorsContext, CommandPrefix, Comment, RepositoryState};
 use crate::database::{DelegatedPermission, PullRequestModel};
+use crate::github::api::client::HideCommentReason;
 use crate::github::{GithubUser, LabelTrigger, PullRequest, PullRequestNumber};
 use crate::permissions::PermissionType;
 use crate::{CommandParser, PgDbClient, TeamApiClient, load_repositories};
@@ -657,6 +659,24 @@ async fn unapprove_pr(
     handle_label_trigger(repo_state, pr.number, LabelTrigger::Unapproved).await
 }
 
+/// Hide all previous "Try build started" comments on the given PR.
+async fn hide_try_build_started_comments(
+    repo: &RepositoryState,
+    db: &PgDbClient,
+    pr: &PullRequestModel,
+) -> anyhow::Result<()> {
+    let outdated = db
+        .get_tagged_bot_comments(repo.repository(), pr.number, CommentTag::TryBuildStarted)
+        .await?;
+    for comment in outdated {
+        repo.client
+            .hide_comment(&comment.node_id, HideCommentReason::Outdated)
+            .await?;
+        db.delete_tagged_bot_comment(&comment).await?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use crate::tests::{BorsTester, Comment, User, default_repo_name, run_test};
@@ -689,7 +709,7 @@ mod tests {
     async fn unknown_command(pool: sqlx::PgPool) {
         run_test(pool, async |tester: &mut BorsTester| {
             tester.post_comment(Comment::from("@bors foo")).await?;
-            insta::assert_snapshot!(tester.get_comment(()).await?, @r#"Unknown command "foo". Run `@bors help` to see available commands."#);
+            insta::assert_snapshot!(tester.get_comment_text(()).await?, @r#"Unknown command "foo". Run `@bors help` to see available commands."#);
             Ok(())
         })
         .await;

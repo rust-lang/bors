@@ -465,13 +465,13 @@ impl GithubRepositoryClient {
         Ok(response)
     }
 
-    /// Minimizes a comment on an Issue, Commit, Pull Request, or Gist.
+    /// Hides a comment on an Issue, Commit, Pull Request, or Gist.
     ///
     /// GitHub Docs: <https://docs.github.com/en/graphql/reference/mutations#minimizecomment>
-    pub async fn minimize_comment(
+    pub async fn hide_comment(
         &self,
         node_id: &str,
-        reason: MinimizeCommentReason,
+        reason: HideCommentReason,
     ) -> anyhow::Result<()> {
         const QUERY: &str = "mutation($node_id: ID!, $reason: ReportedContentClassifiers!) {
             minimizeComment(input: {subjectId: $node_id, classifier: $reason}) {
@@ -482,17 +482,17 @@ impl GithubRepositoryClient {
         #[derive(Serialize)]
         struct Variables<'a> {
             node_id: &'a str,
-            reason: MinimizeCommentReason,
+            reason: HideCommentReason,
         }
 
         #[derive(Deserialize)]
         struct Output {}
 
-        tracing::debug!(node_id, ?reason, "Minimizing comment");
-        perform_retryable("minimize_comment", RetryMethod::default(), || async {
+        tracing::debug!(node_id, ?reason, "Hiding comment");
+        perform_retryable("hide_comment", RetryMethod::default(), || async {
             self.graphql::<Output, Variables>(QUERY, Variables { node_id, reason })
                 .await
-                .context("Failed to minimize comment")?;
+                .context("Failed to hide comment")?;
             anyhow::Ok(())
         })
         .await?;
@@ -500,12 +500,12 @@ impl GithubRepositoryClient {
     }
 }
 
-/// The reasons a piece of content can be reported or minimized.
+/// The reasons a piece of content can be reported or hidden.
 ///
 /// GitHub Docs: <https://docs.github.com/en/graphql/reference/enums#reportedcontentclassifiers>
 #[derive(Debug, Copy, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-pub enum MinimizeCommentReason {
+pub enum HideCommentReason {
     /// An abusive or harassing piece of content.
     Abuse,
     /// A duplicated piece of content.

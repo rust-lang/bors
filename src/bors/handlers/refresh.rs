@@ -284,7 +284,7 @@ timeout = 3600
                     tester.cancel_timed_out_builds().await;
                 })
                 .await;
-                insta::assert_snapshot!(tester.get_comment(()).await?, @":boom: Test timed out after `3600`s");
+                insta::assert_snapshot!(tester.get_comment_text(()).await?, @":boom: Test timed out after `3600`s");
                 assert_eq!(
                     tester
                         .db()
@@ -315,7 +315,7 @@ timeout = 3600
 
                 tester
                     .expect_check_run(
-                        &tester.get_pr(()).await.get_gh_pr().head_sha,
+                        &tester.get_pr_copy(()).await.get_gh_pr().head_sha,
                         TRY_BUILD_CHECK_RUN_NAME,
                         "Bors try build",
                         CheckRunStatus::Completed,
@@ -381,7 +381,7 @@ timeout = 3600
                 .await?;
             tester.refresh_prs().await;
             tester
-                .get_pr(pr.number)
+                .get_pr_copy(pr.number)
                 .await
                 .expect_status(PullRequestStatus::Open);
             Ok(())
@@ -401,7 +401,7 @@ timeout = 3600
                 .await?;
             tester.refresh_prs().await;
             tester
-                .get_pr(pr.number)
+                .get_pr_copy(pr.number)
                 .await
                 .expect_status(PullRequestStatus::Closed);
             Ok(())
@@ -421,7 +421,7 @@ timeout = 3600
 
             tester.refresh_prs().await;
             tester
-                .get_pr(pr.number)
+                .get_pr_copy(pr.number)
                 .await
                 .expect_status(PullRequestStatus::Draft);
             Ok(())

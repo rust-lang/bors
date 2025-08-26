@@ -43,7 +43,7 @@ use crate::tests::mocks::workflow::{
 };
 
 // Public re-exports for use in tests
-use crate::github::api::client::MinimizeCommentReason;
+use crate::github::api::client::HideCommentReason;
 pub use io::load_test_file;
 pub use mocks::ExternalHttpMock;
 pub use mocks::GitHubState;
@@ -230,7 +230,7 @@ impl BorsTester {
     }
 
     /// Get a PR proxy that can be used to assert various things about the PR.
-    pub async fn get_pr<Id: Into<PrIdentifier>>(&self, id: Id) -> PullRequestProxy {
+    pub async fn get_pr_copy<Id: Into<PrIdentifier>>(&self, id: Id) -> PullRequestProxy {
         let id = id.into();
         let pr = self
             .get_repo(&id.repo)
@@ -347,11 +347,20 @@ impl BorsTester {
         self.get_branch("automation/bors/auto").await
     }
 
-    /// Wait until the next bot comment is received on the specified repo and PR.
-    pub async fn get_comment<Id: Into<PrIdentifier>>(&mut self, id: Id) -> anyhow::Result<String> {
+    /// Wait until the next bot comment is received on the specified repo and PR, and return its
+    /// text.
+    pub async fn get_comment_text<Id: Into<PrIdentifier>>(
+        &mut self,
+        id: Id,
+    ) -> anyhow::Result<String> {
         Ok(GitHubState::get_comment(self.github.clone(), id)
             .await?
             .content)
+    }
+
+    /// Wait until the next bot comment is received on the specified repo and PR, and return it.
+    pub async fn get_comment<Id: Into<PrIdentifier>>(&mut self, id: Id) -> anyhow::Result<Comment> {
+        GitHubState::get_comment(self.github.clone(), id).await
     }
 
     //-- Generation of GitHub events --//
@@ -360,9 +369,12 @@ impl BorsTester {
 
         // Allocate comment IDs
         let (id, node_id) = self
-            .get_pr(comment.pr_ident.clone())
+            .github
+            .lock()
             .await
-            .gh_pr
+            .get_repo(&comment.pr_ident.repo)
+            .lock()
+            .get_pr_mut(comment.pr_ident.number)
             .next_comment_ids();
         let comment = comment.with_ids(id, node_id);
 
@@ -720,18 +732,18 @@ impl BorsTester {
         let id = id.into();
         for i in 0..count {
             let id = id.clone();
-            self.get_comment(id)
+            self.get_comment_text(id)
                 .await
                 .unwrap_or_else(|_| panic!("Failed to get comment #{i}"));
         }
     }
 
-    /// Assert that the given comment has been minimized.
-    pub async fn expect_minimized_comment(&self, comment: &Comment, reason: MinimizeCommentReason) {
+    /// Assert that the given comment has been hidden.
+    pub async fn expect_hidden_comment(&self, comment: &Comment, reason: HideCommentReason) {
         self.github
             .lock()
             .await
-            .check_minimized_comment(comment, reason);
+            .check_hidden_comment(comment, reason);
     }
 
     pub async fn expect_check_run(
@@ -797,7 +809,7 @@ impl BorsTester {
     ///
     /// This method is useful if you execute a command that produces no comment as an output
     /// and you need to wait until it has been processed by bors.
-    /// Prefer using [BorsTester::expect_comments] or [BorsTester::get_comment] to synchronize
+    /// Prefer using [BorsTester::expect_comments] or [BorsTester::get_comment_text] to synchronize
     /// if you are waiting for a comment to be posted to a PR.
     pub async fn wait_for<F, Fut>(&self, condition: F) -> anyhow::Result<()>
     where

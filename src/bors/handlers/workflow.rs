@@ -1,13 +1,13 @@
 use crate::PgDbClient;
-use crate::bors::comment::{CommentTag, build_failed_comment, try_build_succeeded_comment};
+use crate::bors::comment::{build_failed_comment, try_build_succeeded_comment};
 use crate::bors::event::{WorkflowRunCompleted, WorkflowRunStarted};
-use crate::bors::handlers::get_build_type;
 use crate::bors::handlers::labels::handle_label_trigger;
 use crate::bors::handlers::{BuildType, is_bors_observed_branch};
+use crate::bors::handlers::{get_build_type, hide_try_build_started_comments};
 use crate::bors::merge_queue::MergeQueueSender;
 use crate::bors::{FailedWorkflowRun, RepositoryState, WorkflowRun};
 use crate::database::{BuildModel, BuildStatus, PullRequestModel, WorkflowModel, WorkflowStatus};
-use crate::github::api::client::{GithubRepositoryClient, MinimizeCommentReason};
+use crate::github::api::client::GithubRepositoryClient;
 use crate::github::{CommitSha, LabelTrigger};
 use octocrab::models::CheckRunId;
 use octocrab::models::workflows::{Conclusion, Job, Status};
@@ -279,16 +279,7 @@ async fn maybe_complete_build(
     };
 
     if build_type == BuildType::Try {
-        // Hide "Try build started" comments that are now outdated
-        let outdated = db
-            .get_tagged_bot_comments(repo.repository(), pr.number, CommentTag::TryBuildStarted)
-            .await?;
-        for comment in outdated {
-            repo.client
-                .minimize_comment(&comment.node_id, MinimizeCommentReason::Outdated)
-                .await?;
-            db.delete_tagged_bot_comment(&comment).await?;
-        }
+        hide_try_build_started_comments(repo, db, &pr).await?;
     }
 
     if let Some(comment) = comment_opt {
@@ -564,7 +555,7 @@ mod tests {
             tester.workflow_full_success(w2).await?;
 
             insta::assert_snapshot!(
-                tester.get_comment(()).await?,
+                tester.get_comment_text(()).await?,
                 @r#"
             :sunny: Try build successful
             - [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1) :white_check_mark:
@@ -594,7 +585,7 @@ mod tests {
             tester.workflow_event(WorkflowEvent::success(w1)).await?;
             tester.workflow_event(WorkflowEvent::success(w2)).await?;
             insta::assert_snapshot!(
-                tester.get_comment(()).await?,
+                tester.get_comment_text(()).await?,
                 @r#"
             :sunny: Try build successful
             - [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1) :white_check_mark:
@@ -623,7 +614,7 @@ mod tests {
 
             tester.workflow_event(WorkflowEvent::failure(w2)).await?;
             insta::assert_snapshot!(
-                tester.get_comment(()).await?,
+                tester.get_comment_text(()).await?,
                 @":broken_heart: Test for merge-0-pr-1 failed: [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1), [Workflow1](https://github.com/rust-lang/borstest/actions/runs/2)"
             );
             Ok(())
@@ -644,7 +635,7 @@ mod tests {
                 tester.expect_comments((), 1).await;
                 tester
                     .expect_check_run(
-                        &tester.get_pr(()).await.get_gh_pr().head_sha,
+                        &tester.get_pr_copy(()).await.get_gh_pr().head_sha,
                         AUTO_BUILD_CHECK_RUN_NAME,
                         AUTO_BUILD_CHECK_RUN_NAME,
                         CheckRunStatus::Completed,
@@ -672,14 +663,14 @@ auto_build_succeeded = ["+foo", "+bar", "-baz"]
             .run_test(async |tester: &mut BorsTester| {
                 tester.start_auto_build(()).await?;
 
-                tester.get_pr(()).await.expect_added_labels(&[]);
+                tester.get_pr_copy(()).await.expect_added_labels(&[]);
                 tester
                     .workflow_full_success(tester.auto_branch().await)
                     .await?;
                 tester.expect_comments((), 1).await;
 
                 tester
-                    .get_pr(())
+                    .get_pr_copy(())
                     .await
                     .expect_added_labels(&["foo", "bar"])
                     .expect_removed_labels(&["baz"]);
@@ -704,14 +695,14 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
             .run_test(async |tester: &mut BorsTester| {
                 tester.start_auto_build(()).await?;
 
-                tester.get_pr(()).await.expect_added_labels(&[]);
+                tester.get_pr_copy(()).await.expect_added_labels(&[]);
                 tester
                     .workflow_full_failure(tester.auto_branch().await)
                     .await?;
                 tester.expect_comments((), 1).await;
 
                 tester
-                    .get_pr(())
+                    .get_pr_copy(())
                     .await
                     .expect_added_labels(&["foo", "bar"])
                     .expect_removed_labels(&["baz"]);
@@ -745,14 +736,14 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
             .run_test(async |tester: &mut BorsTester| {
                 tester.start_auto_build(()).await?;
 
-                tester.get_pr(()).await.expect_added_labels(&[]);
+                tester.get_pr_copy(()).await.expect_added_labels(&[]);
 
                 tester.workflow_full_failure(tester.auto_branch().await).await?;
                 tester.wait_for_pr((), |pr| {
                     pr.auto_build.as_ref().unwrap().status == BuildStatus::Failure
                 }).await?;
                 insta::assert_snapshot!(
-                    tester.get_comment(()).await?,
+                    tester.get_comment_text(()).await?,
                     @":broken_heart: Test for merge-0-pr-1 failed: [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1)"
                 );
 
@@ -774,7 +765,7 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
                 tester.expect_comments((), 1).await;
                 tester
                     .expect_check_run(
-                        &tester.get_pr(()).await.get_gh_pr().head_sha,
+                        &tester.get_pr_copy(()).await.get_gh_pr().head_sha,
                         AUTO_BUILD_CHECK_RUN_NAME,
                         AUTO_BUILD_CHECK_RUN_NAME,
                         CheckRunStatus::Completed,

@@ -436,7 +436,7 @@ mod tests {
             tester.start_auto_build(()).await?;
             tester
                 .expect_check_run(
-                    &tester.get_pr(()).await.get_gh_pr().head_sha,
+                    &tester.get_pr_copy(()).await.get_gh_pr().head_sha,
                     AUTO_BUILD_CHECK_RUN_NAME,
                     AUTO_BUILD_CHECK_RUN_NAME,
                     CheckRunStatus::InProgress,
@@ -455,7 +455,7 @@ mod tests {
             tester.expect_comments((), 1).await;
             tester.process_merge_queue().await;
             insta::assert_snapshot!(
-                tester.get_comment(()).await?,
+                tester.get_comment_text(()).await?,
                 @":hourglass: Testing commit pr-1-sha with merge merge-0-pr-1..."
             );
             Ok(())
@@ -493,7 +493,7 @@ mod tests {
             tester.start_auto_build(()).await?;
             tester.workflow_full_success(tester.auto_branch().await).await?;
             insta::assert_snapshot!(
-                tester.get_comment(()).await?,
+                tester.get_comment_text(()).await?,
                 @r"
             :sunny: Test successful - [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1)
             Approved by: `default-user`
@@ -647,7 +647,7 @@ mod tests {
                    .await;
                tester.process_merge_queue().await;
                insta::assert_snapshot!(
-                   tester.get_comment(()).await?,
+                   tester.get_comment_text(()).await?,
                    @":eyes: Test was successful, but fast-forwarding failed: this PR has conflicts with the `main` branch"
                );
                Ok(())
@@ -671,7 +671,7 @@ mod tests {
                    .await;
                tester.process_merge_queue().await;
                insta::assert_snapshot!(
-                   tester.get_comment(()).await?,
+                   tester.get_comment_text(()).await?,
                    @":eyes: Test was successful, but fast-forwarding failed: this PR is behind the `main` branch"
                );
                Ok(())
@@ -695,7 +695,7 @@ mod tests {
                 .await;
             tester.process_merge_queue().await;
             insta::assert_snapshot!(
-                tester.get_comment(()).await?,
+                tester.get_comment_text(()).await?,
                 @":eyes: Test was successful, but fast-forwarding failed: IO error"
             );
             Ok(())
@@ -770,7 +770,7 @@ mod tests {
             tester.expect_comments((), 1).await;
             tester.process_merge_queue().await;
             insta::assert_snapshot!(
-                tester.get_comment(()).await?,
+                tester.get_comment_text(()).await?,
                 @r#"
             :lock: Merge conflict
 
