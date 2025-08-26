@@ -5,6 +5,7 @@ use crate::tests::{Branch, default_repo_name};
 use chrono::{DateTime, Utc};
 use octocrab::models::{CheckSuiteId, JobId, RunId, WorkflowId};
 use serde::Serialize;
+use std::time::Duration;
 use url::Url;
 
 #[derive(Clone)]
@@ -59,6 +60,8 @@ pub struct WorkflowRunData {
     pub head_branch: String,
     pub jobs: Vec<WorkflowJob>,
     head_sha: String,
+    /// How long did the workflow run for?
+    duration: Duration,
 }
 
 impl WorkflowRunData {
@@ -71,6 +74,7 @@ impl WorkflowRunData {
             head_branch: branch.get_name().to_string(),
             jobs: vec![],
             head_sha: branch.get_sha().to_string(),
+            duration: Duration::from_secs(3600),
         }
     }
 
@@ -86,6 +90,10 @@ impl WorkflowRunData {
             check_suite_id: CheckSuiteId(check_suite_id),
             ..self
         }
+    }
+
+    pub fn with_duration(self, duration: Duration) -> Self {
+        Self { duration, ..self }
     }
 }
 
@@ -118,6 +126,10 @@ impl From<WorkflowEvent> for GitHubWorkflowEventPayload {
         )
         .parse()
         .unwrap();
+
+        let completed_at = Utc::now();
+        let created_at = completed_at - workflow.duration;
+
         Self {
             action: match &event {
                 WorkflowEventKind::Started => "requested",
@@ -138,8 +150,8 @@ impl From<WorkflowEvent> for GitHubWorkflowEventPayload {
                     WorkflowEventKind::Started => None,
                     WorkflowEventKind::Completed { status } => Some(status),
                 },
-                created_at: Default::default(),
-                updated_at: Default::default(),
+                created_at,
+                updated_at: completed_at,
                 url: url.clone(),
                 html_url: url.clone(),
                 jobs_url: url.clone(),

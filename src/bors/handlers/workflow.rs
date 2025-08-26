@@ -74,39 +74,53 @@ pub(super) async fn handle_workflow_completed(
         return Ok(());
     }
 
+    let mut error_context = None;
     if let Some(running_time) = payload.running_time {
-        let running_time_as_duration =
+        let running_time =
             chrono::Duration::to_std(&running_time).unwrap_or(Duration::from_secs(0));
         if let Some(min_ci_time) = repo.config.load().min_ci_time {
-            if running_time_as_duration < min_ci_time {
-                payload.status = WorkflowStatus::Failure;
+            if running_time < min_ci_time {
                 tracing::warn!(
-                    "Workflow running time is less than the minimum CI duration: {:?} < {:?}",
-                    running_time_as_duration,
-                    min_ci_time
+                    "Workflow running time is less than the minimum CI duration: workflow time ({}s) < min time ({}s). Marking it as a failure",
+                    running_time.as_secs_f64(),
+                    min_ci_time.as_secs_f64()
                 );
+                payload.status = WorkflowStatus::Failure;
+                error_context = Some(format!(
+                    "A workflow was considered to be a failure because it took only `{}s`. The minimum duration for CI workflows is configured to be `{}s`.",
+                    running_time.as_secs_f64(),
+                    min_ci_time.as_secs_f64()
+                ))
             }
         }
-    } else {
-        tracing::warn!("Running time is not available.");
     }
 
     tracing::info!("Updating status of workflow to {:?}", payload.status);
     db.update_workflow_status(*payload.run_id, payload.status)
         .await?;
 
-    maybe_complete_build(repo.as_ref(), db.as_ref(), payload, merge_queue_tx).await
+    maybe_complete_build(
+        repo.as_ref(),
+        db.as_ref(),
+        payload,
+        merge_queue_tx,
+        error_context,
+    )
+    .await
 }
 
 /// Attempt to complete a pending build after a workflow run has been completed.
 /// We assume that the status of the completed workflow run has already been updated in the
 /// database.
 /// We also assume that there is only a single check suite attached to a single build of a commit.
+///
+/// `error_context` is an additional message that should be added to a comment if the build failed.
 async fn maybe_complete_build(
     repo: &RepositoryState,
     db: &PgDbClient,
     payload: WorkflowRunCompleted,
     merge_queue_tx: &MergeQueueSender,
+    error_context: Option<String>,
 ) -> anyhow::Result<()> {
     let Some(build_type) = get_build_type(&payload.branch) else {
         return Ok(());
@@ -275,6 +289,7 @@ async fn maybe_complete_build(
             repo.repository(),
             payload.commit_sha,
             workflow_runs,
+            error_context,
         ))
     };
 
@@ -449,6 +464,7 @@ fn auto_build_cancelled_msg(
 #[cfg(test)]
 mod tests {
     use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
+    use std::time::Duration;
 
     use crate::bors::merge_queue::AUTO_BUILD_CHECK_RUN_NAME;
     use crate::database::operations::get_all_workflows;
@@ -769,6 +785,63 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
                         Some(CheckRunConclusion::Failure),
                     )
                     .await;
+                Ok(())
+            })
+            .await;
+    }
+
+    #[sqlx::test]
+    async fn min_ci_time_mark_too_short_workflow_as_failed(pool: sqlx::PgPool) {
+        BorsBuilder::new(pool)
+            .github(GitHubState::default().with_default_config(
+                r#"
+min_ci_time = 10
+"#,
+            ))
+            .run_test(async |tester: &mut BorsTester| {
+                tester.post_comment("@bors try").await?;
+                tester.expect_comments((), 1).await;
+
+                // Too short workflow, it should be marked as a failure
+                tester
+                    .workflow_full_success(
+                        WorkflowRunData::from(tester.try_branch().await)
+                            .with_duration(Duration::from_secs(1)),
+                    )
+                    .await?;
+                insta::assert_snapshot!(tester.get_comment_text(()).await?, @r"
+                :broken_heart: Test for merge-0-pr-1 failed: [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1)
+                A workflow was considered to be a failure because it took only `1s`. The minimum duration for CI workflows is configured to be `10s`.
+                ");
+                Ok(())
+            })
+            .await;
+    }
+
+    #[sqlx::test]
+    async fn min_ci_time_ignore_long_enough_workflow(pool: sqlx::PgPool) {
+        BorsBuilder::new(pool)
+            .github(GitHubState::default().with_default_config(
+                r#"
+min_ci_time = 20
+"#,
+            ))
+            .run_test(async |tester: &mut BorsTester| {
+                tester.post_comment("@bors try").await?;
+                tester.expect_comments((), 1).await;
+
+                tester
+                    .workflow_full_success(
+                        WorkflowRunData::from(tester.try_branch().await)
+                            .with_duration(Duration::from_secs(100)),
+                    )
+                    .await?;
+                insta::assert_snapshot!(tester.get_comment_text(()).await?, @r#"
+                :sunny: Try build successful ([Workflow1](https://github.com/rust-lang/borstest/actions/runs/1))
+                Build commit: merge-0-pr-1 (`merge-0-pr-1`, parent: `main-sha1`)
+
+                <!-- homu: {"type":"TryBuildCompleted","merge_sha":"merge-0-pr-1"} -->
+                "#);
                 Ok(())
             })
             .await;
