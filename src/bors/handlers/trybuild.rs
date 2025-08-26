@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
-use super::has_permission;
 use super::{PullRequestData, deny_request};
+use super::{has_permission, hide_try_build_started_comments};
 use crate::PgDbClient;
 use crate::bors::command::{CommandPrefix, Parent};
 use crate::bors::comment::try_build_cancelled_comment;
@@ -75,7 +75,13 @@ pub(super) async fn command_try_build(
 
     // Try to cancel any previously running try build workflows
     let cancelled_workflow_urls = if let Some(build) = get_pending_build(pr.db) {
-        cancel_previous_try_build(repo, &db, build).await?
+        let res = cancel_previous_try_build(repo, &db, build).await?;
+        // Also try to hide previous "Try build started" comments that weren't hidden yet
+        if let Err(error) = hide_try_build_started_comments(repo, &db, pr.db).await {
+            tracing::error!("Failed to hide previous try build started comment(s): {error:?}");
+        }
+
+        res
     } else {
         vec![]
     };
@@ -1113,6 +1119,24 @@ try_failed = ["+foo", "+bar", "-baz"]
             tester
                 .workflow_full_failure(tester.try_branch().await)
                 .await?;
+            tester.expect_comments((), 1).await;
+            tester
+                .expect_hidden_comment(&comment, HideCommentReason::Outdated)
+                .await;
+
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn hide_try_build_started_comment_after_restart(pool: sqlx::PgPool) {
+        run_test(pool, async |tester: &mut BorsTester| {
+            tester.post_comment("@bors try").await?;
+            let comment = tester.get_comment(()).await?;
+
+            // Hide the previous "Try build started" comment when we restart the build
+            tester.post_comment("@bors try").await?;
             tester.expect_comments((), 1).await;
             tester
                 .expect_hidden_comment(&comment, HideCommentReason::Outdated)
