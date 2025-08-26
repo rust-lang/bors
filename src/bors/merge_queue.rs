@@ -341,7 +341,7 @@ async fn start_auto_build(
 }
 
 pub fn start_merge_queue(ctx: Arc<BorsContext>) -> (MergeQueueSender, impl Future<Output = ()>) {
-    let (tx, mut rx) = mpsc::channel::<MergeQueueEvent>(10);
+    let (tx, mut rx) = mpsc::channel::<MergeQueueEvent>(1024);
     let sender = MergeQueueSender { inner: tx };
 
     let fut = async move {
