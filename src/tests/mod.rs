@@ -22,7 +22,7 @@ use crate::bors::mergeable_queue::MergeableQueueSender;
 use crate::bors::{
     CommandPrefix, PullRequestStatus, RollupMode, WAIT_FOR_MERGE_QUEUE,
     WAIT_FOR_MERGEABILITY_STATUS_REFRESH, WAIT_FOR_PR_STATUS_REFRESH,
-    WAIT_FOR_REFRESH_PENDING_BUILDS, WAIT_FOR_WORKFLOW_STARTED,
+    WAIT_FOR_REFRESH_PENDING_BUILDS, WAIT_FOR_WORKFLOW_COMPLETED, WAIT_FOR_WORKFLOW_STARTED,
 };
 use crate::database::{
     BuildStatus, DelegatedPermission, OctocrabMergeableState, PullRequestModel, WorkflowStatus,
@@ -466,7 +466,12 @@ impl BorsTester {
             };
             repo.update_workflow_run(event.workflow.clone(), status);
         }
-        self.webhook_workflow(event).await
+        let marker = match &event.event {
+            WorkflowEventKind::Started => &WAIT_FOR_WORKFLOW_STARTED,
+            WorkflowEventKind::Completed { .. } => &WAIT_FOR_WORKFLOW_COMPLETED,
+        };
+
+        wait_for_marker(async || self.webhook_workflow(event).await, marker).await
     }
 
     /// Start a workflow and wait until the workflow has been handled by bors.
@@ -474,11 +479,7 @@ impl BorsTester {
         &mut self,
         workflow: W,
     ) -> anyhow::Result<()> {
-        wait_for_marker(
-            async || self.workflow_event(WorkflowEvent::started(workflow)).await,
-            &WAIT_FOR_WORKFLOW_STARTED,
-        )
-        .await
+        self.workflow_event(WorkflowEvent::started(workflow)).await
     }
 
     /// Performs all necessary events to complete a single workflow (start, success/fail).

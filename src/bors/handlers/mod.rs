@@ -122,6 +122,9 @@ pub async fn handle_bors_repository_event(
             handle_workflow_completed(repo, db, payload, &merge_queue_tx)
                 .instrument(span.clone())
                 .await?;
+
+            #[cfg(test)]
+            super::WAIT_FOR_WORKFLOW_COMPLETED.mark();
         }
         BorsRepositoryEvent::PullRequestEdited(payload) => {
             let span =
