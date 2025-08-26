@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use crate::TeamApiClient;
 use crate::github::GithubRepoName;
-use crate::github::api::client::MinimizeCommentReason;
+use crate::github::api::client::HideCommentReason;
 use crate::tests::Comment;
 use crate::tests::mocks::github::GitHubMockServer;
 use crate::tests::mocks::permissions::TeamApiMockServer;
@@ -27,15 +27,15 @@ pub mod user;
 pub mod workflow;
 
 #[derive(Debug)]
-pub struct MinimizedComment {
+pub struct HiddenComment {
     pub node_id: String,
-    pub reason: MinimizeCommentReason,
+    pub reason: HideCommentReason,
 }
 
 /// Represents the state of GitHub.
 pub struct GitHubState {
     pub(super) repos: HashMap<GithubRepoName, Arc<Mutex<Repo>>>,
-    minimized_comments: Vec<MinimizedComment>,
+    hidden_comments: Vec<HiddenComment>,
 }
 
 impl GitHubState {
@@ -70,8 +70,8 @@ impl GitHubState {
         self
     }
 
-    pub fn add_minimized_comment(&mut self, comment: MinimizedComment) {
-        self.minimized_comments.push(comment);
+    pub fn add_hidden_comment(&mut self, comment: HiddenComment) {
+        self.hidden_comments.push(comment);
     }
 
     pub fn check_sha_history(&self, repo: GithubRepoName, branch: &str, expected_shas: &[&str]) {
@@ -141,13 +141,13 @@ impl GitHubState {
         Ok(comment)
     }
 
-    pub fn check_minimized_comment(&self, comment: &Comment, reason: MinimizeCommentReason) {
+    pub fn check_hidden_comment(&self, comment: &Comment, reason: HideCommentReason) {
         assert!(
-            self.minimized_comments
+            self.hidden_comments
                 .iter()
                 .any(|c| &c.node_id == comment.node_id.as_ref().unwrap() && c.reason == reason),
-            "Comment {comment:?} was not minimized with reason {reason:?}.\nMinized comments: {:?}",
-            self.minimized_comments
+            "Comment {comment:?} was not hidden with reason {reason:?}.\nHidden comments: {:?}",
+            self.hidden_comments
         );
     }
 }
@@ -157,7 +157,7 @@ impl Default for GitHubState {
         let repo = Repo::default();
         Self {
             repos: HashMap::from([(repo.name.clone(), Arc::new(Mutex::new(repo)))]),
-            minimized_comments: Default::default(),
+            hidden_comments: Default::default(),
         }
     }
 }

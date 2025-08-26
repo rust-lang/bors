@@ -43,7 +43,7 @@ use crate::tests::mocks::workflow::{
 };
 
 // Public re-exports for use in tests
-use crate::github::api::client::MinimizeCommentReason;
+use crate::github::api::client::HideCommentReason;
 pub use io::load_test_file;
 pub use mocks::ExternalHttpMock;
 pub use mocks::GitHubState;
@@ -726,12 +726,12 @@ impl BorsTester {
         }
     }
 
-    /// Assert that the given comment has been minimized.
-    pub async fn expect_minimized_comment(&self, comment: &Comment, reason: MinimizeCommentReason) {
+    /// Assert that the given comment has been hidden.
+    pub async fn expect_hidden_comment(&self, comment: &Comment, reason: HideCommentReason) {
         self.github
             .lock()
             .await
-            .check_minimized_comment(comment, reason);
+            .check_hidden_comment(comment, reason);
     }
 
     pub async fn expect_check_run(

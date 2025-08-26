@@ -511,7 +511,7 @@ pub struct RepoModel {
     pub created_at: DateTime<Utc>,
 }
 
-/// Represents a tagged comment made by the bors GitHub app that can be later minimized.
+/// Represents a tagged comment made by the bors GitHub app that can be later hidden.
 pub struct CommentModel {
     pub id: PrimaryKey,
     /// The GitHub repository this comment belongs to.

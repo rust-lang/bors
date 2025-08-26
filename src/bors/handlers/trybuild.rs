@@ -284,7 +284,7 @@ mod tests {
     use crate::database::operations::get_all_workflows;
     use crate::database::{BuildStatus, WorkflowStatus};
     use crate::github::CommitSha;
-    use crate::github::api::client::MinimizeCommentReason;
+    use crate::github::api::client::HideCommentReason;
     use crate::tests::BorsTester;
     use crate::tests::{
         BorsBuilder, Comment, GitHubState, User, WorkflowEvent, WorkflowJob, WorkflowRunData,
@@ -1088,7 +1088,7 @@ try_failed = ["+foo", "+bar", "-baz"]
     }
 
     #[sqlx::test]
-    async fn minimize_try_build_started_comment_after_success(pool: sqlx::PgPool) {
+    async fn hide_try_build_started_comment_after_success(pool: sqlx::PgPool) {
         run_test(pool, async |tester: &mut BorsTester| {
             let comment = tester.post_comment("@bors try").await?;
             tester.expect_comments((), 1).await;
@@ -1097,7 +1097,7 @@ try_failed = ["+foo", "+bar", "-baz"]
                 .await?;
             tester.expect_comments((), 1).await;
             tester
-                .expect_minimized_comment(&comment, MinimizeCommentReason::Outdated)
+                .expect_hidden_comment(&comment, HideCommentReason::Outdated)
                 .await;
 
             Ok(())
@@ -1106,7 +1106,7 @@ try_failed = ["+foo", "+bar", "-baz"]
     }
 
     #[sqlx::test]
-    async fn minimize_try_build_started_comment_after_failure(pool: sqlx::PgPool) {
+    async fn hide_try_build_started_comment_after_failure(pool: sqlx::PgPool) {
         run_test(pool, async |tester: &mut BorsTester| {
             let comment = tester.post_comment("@bors try").await?;
             tester.expect_comments((), 1).await;
@@ -1115,7 +1115,7 @@ try_failed = ["+foo", "+bar", "-baz"]
                 .await?;
             tester.expect_comments((), 1).await;
             tester
-                .expect_minimized_comment(&comment, MinimizeCommentReason::Outdated)
+                .expect_hidden_comment(&comment, HideCommentReason::Outdated)
                 .await;
 
             Ok(())

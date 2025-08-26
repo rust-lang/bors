@@ -7,7 +7,7 @@ use crate::bors::handlers::{BuildType, is_bors_observed_branch};
 use crate::bors::merge_queue::MergeQueueSender;
 use crate::bors::{FailedWorkflowRun, RepositoryState, WorkflowRun};
 use crate::database::{BuildModel, BuildStatus, PullRequestModel, WorkflowModel, WorkflowStatus};
-use crate::github::api::client::{GithubRepositoryClient, MinimizeCommentReason};
+use crate::github::api::client::{GithubRepositoryClient, HideCommentReason};
 use crate::github::{CommitSha, LabelTrigger};
 use octocrab::models::CheckRunId;
 use octocrab::models::workflows::{Conclusion, Job, Status};
@@ -285,7 +285,7 @@ async fn maybe_complete_build(
             .await?;
         for comment in outdated {
             repo.client
-                .minimize_comment(&comment.node_id, MinimizeCommentReason::Outdated)
+                .hide_comment(&comment.node_id, HideCommentReason::Outdated)
                 .await?;
             db.delete_tagged_bot_comment(&comment).await?;
         }
