@@ -245,7 +245,7 @@ async fn maybe_complete_build(
 
     // Trigger merge queue when an auto build completes
     if build_type == BuildType::Auto {
-        merge_queue_tx.trigger().await?;
+        merge_queue_tx.notify().await?;
     }
 
     db_workflow_runs.sort_by(|a, b| a.name.cmp(&b.name));
@@ -635,6 +635,7 @@ mod tests {
             tester
                 .workflow_full_success(tester.auto_branch().await)
                 .await?;
+            tester.process_merge_queue().await;
             tester.expect_comments((), 1).await;
             tester
                 .expect_check_run(
@@ -670,6 +671,7 @@ auto_build_succeeded = ["+foo", "+bar", "-baz"]
                 tester
                     .workflow_full_success(tester.auto_branch().await)
                     .await?;
+                tester.process_merge_queue().await;
                 tester.expect_comments((), 1).await;
 
                 tester

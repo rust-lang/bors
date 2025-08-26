@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use octocrab::models::checks::CheckRun;
 use octocrab::params::checks::CheckRunStatus;
 use std::future::Future;
@@ -22,7 +23,17 @@ use super::{MergeType, create_merge_commit_message};
 
 #[derive(Debug)]
 enum MergeQueueEvent {
-    Trigger,
+    /// Directly run the merge queue.
+    /// Should only be used in tests.
+    #[cfg(test)]
+    PerformTick,
+    /// Check if enough time has passed (or notify was called) for the merge queue to run.
+    /// If yes, performs a single merge queue tick.
+    MaybePerformTick,
+    /// Tells the merge queue that some interesting event has happened and it should thus run
+    /// soon(er).
+    Notify,
+    /// Shutdown the merge queue.
     Shutdown,
 }
 
@@ -32,13 +43,35 @@ pub struct MergeQueueSender {
 }
 
 impl MergeQueueSender {
-    pub async fn trigger(&self) -> Result<(), mpsc::error::SendError<()>> {
+    /// Run the merge queue.
+    /// Only allowed in tests.
+    #[cfg(test)]
+    pub async fn perform_tick(&self) -> Result<(), mpsc::error::SendError<()>> {
         self.inner
-            .send(MergeQueueEvent::Trigger)
+            .send(MergeQueueEvent::PerformTick)
             .await
             .map_err(|_| mpsc::error::SendError(()))
     }
 
+    /// Try to run the merge queue, if a notify has happened since the last tick, or if enough time
+    /// has passed.
+    pub async fn maybe_perform_tick(&self) -> Result<(), mpsc::error::SendError<()>> {
+        self.inner
+            .send(MergeQueueEvent::MaybePerformTick)
+            .await
+            .map_err(|_| mpsc::error::SendError(()))
+    }
+
+    /// Tells the merge queue that some interesting event has happened, and it should thus run
+    /// sooner than.
+    pub async fn notify(&self) -> Result<(), mpsc::error::SendError<()>> {
+        self.inner
+            .send(MergeQueueEvent::Notify)
+            .await
+            .map_err(|_| mpsc::error::SendError(()))
+    }
+
+    /// Shutdown the merge queue.
     pub fn shutdown(&self) {
         let _ = self.inner.try_send(MergeQueueEvent::Shutdown);
     }
@@ -55,6 +88,9 @@ pub(super) const AUTO_BRANCH_NAME: &str = "automation/bors/auto";
 // The name of the check run seen in the GitHub UI.
 pub(super) const AUTO_BUILD_CHECK_RUN_NAME: &str = "Bors auto build";
 
+/// Process the merge queue.
+/// Try to finish and merge a successful auto build, if any.
+/// If there is a PR ready to be merged, starts an auto build for it.
 pub async fn merge_queue_tick(ctx: Arc<BorsContext>) -> anyhow::Result<()> {
     let repos: Vec<Arc<RepositoryState>> =
         ctx.repositories.read().unwrap().values().cloned().collect();
@@ -62,12 +98,9 @@ pub async fn merge_queue_tick(ctx: Arc<BorsContext>) -> anyhow::Result<()> {
     for repo in repos {
         let repo_name = repo.repository().to_string();
         if let Err(error) = process_repository(&repo, &ctx).await {
-            tracing::error!("Error processing repository {repo_name}: {error:?}");
+            tracing::error!("Error running merge queue for {repo_name}: {error:?}");
         }
     }
-
-    #[cfg(test)]
-    crate::bors::WAIT_FOR_MERGE_QUEUE.mark();
 
     Ok(())
 }
@@ -340,29 +373,70 @@ async fn start_auto_build(
     Ok(())
 }
 
-pub fn start_merge_queue(ctx: Arc<BorsContext>) -> (MergeQueueSender, impl Future<Output = ()>) {
+/// Starts the background merge queue loop.
+///
+/// It receives events on the sender that it returns, and acts based on them.
+/// It reacts to the following events:
+/// - When `MaybePerformTick` is received, the queue checks if it has been notified.
+///     - If yes, the merge queue runs a tick.
+///     - If not, but `max_interval` has elapsed since the last tick, the merge queue runs a tick.
+///     - Otherwise nothing happens.
+/// - When `Notify` is performed, the queue stores the information that it has been notified, and
+///   it will run on the next `MaybePerformTick` event.
+/// - When `Shutdown` is received, the merge queue ends.
+/// - When `PerformTick` is received, the merge queue tick runs. This is only used in tests.
+///
+/// This design is used to both ensure that the queue does not run too often (e.g. if there are
+/// transient networking/database failures) nor too rarely.
+pub fn start_merge_queue(
+    ctx: Arc<BorsContext>,
+    max_interval: chrono::Duration,
+) -> (MergeQueueSender, impl Future<Output = ()>) {
     let (tx, mut rx) = mpsc::channel::<MergeQueueEvent>(1024);
     let sender = MergeQueueSender { inner: tx };
 
+    let mut notified = false;
+    let mut last_executed_at = Utc::now() - max_interval;
+
     let fut = async move {
+        async fn run_tick(
+            ctx: &Arc<BorsContext>,
+            notified: &mut bool,
+            last_executed_at: &mut DateTime<Utc>,
+        ) {
+            *notified = false;
+            *last_executed_at = Utc::now();
+
+            let span = tracing::info_span!("MergeQueue");
+            tracing::debug!("Processing merge queue");
+            if let Err(error) = merge_queue_tick(ctx.clone()).instrument(span.clone()).await {
+                // In tests, we want to panic on all errors.
+                #[cfg(test)]
+                {
+                    panic!("Merge queue handler failed: {error:?}");
+                }
+                #[cfg(not(test))]
+                {
+                    use crate::utils::logging::LogError;
+                    span.log_error(error);
+                }
+            }
+        }
+
         while let Some(event) = rx.recv().await {
             match event {
-                MergeQueueEvent::Trigger => {
-                    let span = tracing::info_span!("MergeQueue");
-                    tracing::debug!("Processing merge queue");
-                    if let Err(error) = merge_queue_tick(ctx.clone()).instrument(span.clone()).await
-                    {
-                        // In tests, we want to panic on all errors.
-                        #[cfg(test)]
-                        {
-                            panic!("Merge queue handler failed: {error:?}");
-                        }
-                        #[cfg(not(test))]
-                        {
-                            use crate::utils::logging::LogError;
-                            span.log_error(error);
-                        }
+                #[cfg(test)]
+                MergeQueueEvent::PerformTick => {
+                    run_tick(&ctx, &mut notified, &mut last_executed_at).await;
+                    crate::bors::WAIT_FOR_MERGE_QUEUE.mark();
+                }
+                MergeQueueEvent::MaybePerformTick => {
+                    if notified || (Utc::now() - last_executed_at) >= max_interval {
+                        run_tick(&ctx, &mut notified, &mut last_executed_at).await;
                     }
+                }
+                MergeQueueEvent::Notify => {
+                    notified = true;
                 }
                 MergeQueueEvent::Shutdown => {
                     tracing::debug!("Merge queue received shutdown signal");

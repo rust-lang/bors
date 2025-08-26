@@ -32,8 +32,12 @@ const MERGEABILITY_STATUS_INTERVAL: Duration = Duration::from_secs(60 * 10);
 /// How often should the bot synchronize PR state.
 const PR_STATE_PERIODIC_REFRESH: Duration = Duration::from_secs(60 * 10);
 
-/// How often should the bot process the merge queue.
-const MERGE_QUEUE_INTERVAL: Duration = Duration::from_secs(30);
+/// How often should the bot try to process the merge queue.
+/// It won't actually be executed more often than `MERGE_QUEUE_MAX_INTERVAL`.
+const MERGE_QUEUE_CHECK_INTERVAL: Duration = Duration::from_secs(5);
+
+/// Longest duration between two ticks of the merge queue.
+const MERGE_QUEUE_MAX_INTERVAL: Duration = Duration::from_secs(30);
 
 #[derive(clap::Parser)]
 struct Opts {
@@ -151,7 +155,12 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
         global_tx,
         bors_process,
         ..
-    } = create_bors_process(ctx, client, team_api);
+    } = create_bors_process(
+        ctx,
+        client,
+        team_api,
+        chrono::Duration::from_std(MERGE_QUEUE_MAX_INTERVAL).unwrap(),
+    );
 
     let refresh_tx = global_tx.clone();
 
@@ -180,7 +189,7 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
         let mut refresh_pending_builds = make_interval(PENDING_BUILDS_REFRESH_INTERVAL);
         let mut mergeability_status_refresh = make_interval(MERGEABILITY_STATUS_INTERVAL);
         let mut prs_interval = make_interval(PR_STATE_PERIODIC_REFRESH);
-        let mut merge_queue_interval = make_interval(MERGE_QUEUE_INTERVAL);
+        let mut merge_queue_interval = make_interval(MERGE_QUEUE_CHECK_INTERVAL);
         loop {
             tokio::select! {
                 _ = config_refresh.tick() => {

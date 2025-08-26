@@ -182,7 +182,12 @@ impl BorsTester {
             mergeable_queue_tx,
             merge_queue_tx,
             bors_process,
-        } = create_bors_process(ctx, mock.github_client(), mock.team_api_client());
+        } = create_bors_process(
+            ctx,
+            mock.github_client(),
+            mock.team_api_client(),
+            chrono::Duration::seconds(1),
+        );
 
         let state = ServerState::new(
             repository_tx,
@@ -434,10 +439,7 @@ impl BorsTester {
         // Wait until the merge queue processing is fully handled
         wait_for_marker(
             async || {
-                self.global_tx
-                    .send(BorsGlobalEvent::ProcessMergeQueue)
-                    .await
-                    .unwrap();
+                self.merge_queue_tx.perform_tick().await.unwrap();
                 Ok(())
             },
             &WAIT_FOR_MERGE_QUEUE,
@@ -466,6 +468,7 @@ impl BorsTester {
             };
             repo.update_workflow_run(event.workflow.clone(), status);
         }
+
         let marker = match &event.event {
             WorkflowEventKind::Started => &WAIT_FOR_WORKFLOW_STARTED,
             WorkflowEventKind::Completed { .. } => &WAIT_FOR_WORKFLOW_COMPLETED,

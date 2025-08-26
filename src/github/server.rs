@@ -212,6 +212,7 @@ pub fn create_bors_process(
     ctx: BorsContext,
     gh_client: Octocrab,
     team_api: TeamApiClient,
+    merge_queue_max_interval: chrono::Duration,
 ) -> BorsProcess {
     let (repository_tx, repository_rx) = mpsc::channel::<BorsRepositoryEvent>(1024);
     let (global_tx, global_rx) = mpsc::channel::<BorsGlobalEvent>(1024);
@@ -220,7 +221,8 @@ pub fn create_bors_process(
 
     let ctx = Arc::new(ctx);
 
-    let (merge_queue_tx, merge_queue_fut) = start_merge_queue(ctx.clone());
+    let (merge_queue_tx, merge_queue_fut) =
+        start_merge_queue(ctx.clone(), merge_queue_max_interval);
     let merge_queue_tx2 = merge_queue_tx.clone();
 
     let service = async move {
