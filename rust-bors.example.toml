@@ -10,14 +10,15 @@ merge_queue_enabled = true
 # Labels that should be set on a PR after an event happens.
 # "+<label>" adds the label, while "-<label>" removes the label after the event.
 # Supported events:
-# - try: Try build has started
-# - try_succeeded: Try build has finished
+# - approved: A PR was approved
+# - unapproved: A PR was unapproved
 # - try_failed: Try build has failed
+# - auto_build_succeeded: Auto build has succeeded, the PR was merged
+# - auto_build_failed: Auto build has failed
 # (Optional)
 [labels]
 approved = ["+approved"]
-try = ["+foo", "-bar"]
-try_succeeded = ["+foobar", "+foo", "+baz"]
+unapproved = ["-approved"]
 try_failed = []
 auto_build_succeeded = ["+foo", "+bar"]
 auto_build_failed = ["+foo", "+bar"]
