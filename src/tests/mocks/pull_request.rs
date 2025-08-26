@@ -233,11 +233,7 @@ pub async fn mock_pull_requests(repo: Arc<Mutex<Repo>>, mock_server: &MockServer
     .await;
 
     mock_pr_comments(repo.clone(), mock_server).await;
-
-    let prs = repo.lock().pull_requests.clone();
-    for &pr_number in prs.keys() {
-        mock_pr_labels(repo.clone(), repo_name.clone(), pr_number, mock_server).await;
-    }
+    mock_pr_labels(repo.clone(), repo_name.clone(), mock_server).await;
 }
 
 async fn mock_pr_comments(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
@@ -281,16 +277,14 @@ async fn mock_pr_comments(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
 async fn mock_pr_labels(
     repo: Arc<Mutex<Repo>>,
     repo_name: GithubRepoName,
-    pr_number: u64,
     mock_server: &MockServer,
 ) {
     let repo2 = repo.clone();
     // Add label(s)
-    Mock::given(method("POST"))
-        .and(path(format!(
-            "/repos/{repo_name}/issues/{pr_number}/labels",
-        )))
-        .respond_with(move |req: &Request| {
+    dynamic_mock_req(
+        move |req: &Request, [pr_number]: [&str; 1]| {
+            let pr_number: u64 = pr_number.parse().unwrap();
+
             #[derive(serde::Deserialize)]
             struct CreateLabelsPayload {
                 labels: Vec<String>,
@@ -318,13 +312,18 @@ async fn mock_pr_labels(
                 })
                 .collect();
             ResponseTemplate::new(200).set_body_json(labels)
-        })
-        .mount(mock_server)
-        .await;
+        },
+        "POST",
+        format!("^/repos/{repo_name}/issues/([0-9]+)/labels$"),
+    )
+    .mount(mock_server)
+    .await;
 
-    // Remove label
+    // Remove label(s)
     dynamic_mock_req(
-        move |_req: &Request, [label_name]: [&str; 1]| {
+        move |_req: &Request, [pr_number, label_name]: [&str; 2]| {
+            let pr_number: u64 = pr_number.parse().unwrap();
+
             let mut repo = repo2.lock();
             let Some(pr) = repo.pull_requests.get_mut(&pr_number) else {
                 return ResponseTemplate::new(404);
@@ -334,7 +333,7 @@ async fn mock_pr_labels(
             ResponseTemplate::new(200).set_body_json::<&[GitHubLabel]>(&[])
         },
         "DELETE",
-        format!("/repos/{repo_name}/issues/{pr_number}/labels/(.*)"),
+        format!("/repos/{repo_name}/issues/([0-9]+)/labels/(.*)"),
     )
     .mount(mock_server)
     .await;
