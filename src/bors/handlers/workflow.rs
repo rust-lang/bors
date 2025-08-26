@@ -635,7 +635,7 @@ mod tests {
                 tester.expect_comments((), 1).await;
                 tester
                     .expect_check_run(
-                        &tester.get_pr(()).await.get_gh_pr().head_sha,
+                        &tester.get_pr_copy(()).await.get_gh_pr().head_sha,
                         AUTO_BUILD_CHECK_RUN_NAME,
                         AUTO_BUILD_CHECK_RUN_NAME,
                         CheckRunStatus::Completed,
@@ -663,14 +663,14 @@ auto_build_succeeded = ["+foo", "+bar", "-baz"]
             .run_test(async |tester: &mut BorsTester| {
                 tester.start_auto_build(()).await?;
 
-                tester.get_pr(()).await.expect_added_labels(&[]);
+                tester.get_pr_copy(()).await.expect_added_labels(&[]);
                 tester
                     .workflow_full_success(tester.auto_branch().await)
                     .await?;
                 tester.expect_comments((), 1).await;
 
                 tester
-                    .get_pr(())
+                    .get_pr_copy(())
                     .await
                     .expect_added_labels(&["foo", "bar"])
                     .expect_removed_labels(&["baz"]);
@@ -695,14 +695,14 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
             .run_test(async |tester: &mut BorsTester| {
                 tester.start_auto_build(()).await?;
 
-                tester.get_pr(()).await.expect_added_labels(&[]);
+                tester.get_pr_copy(()).await.expect_added_labels(&[]);
                 tester
                     .workflow_full_failure(tester.auto_branch().await)
                     .await?;
                 tester.expect_comments((), 1).await;
 
                 tester
-                    .get_pr(())
+                    .get_pr_copy(())
                     .await
                     .expect_added_labels(&["foo", "bar"])
                     .expect_removed_labels(&["baz"]);
@@ -736,7 +736,7 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
             .run_test(async |tester: &mut BorsTester| {
                 tester.start_auto_build(()).await?;
 
-                tester.get_pr(()).await.expect_added_labels(&[]);
+                tester.get_pr_copy(()).await.expect_added_labels(&[]);
 
                 tester.workflow_full_failure(tester.auto_branch().await).await?;
                 tester.wait_for_pr((), |pr| {
@@ -765,7 +765,7 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
                 tester.expect_comments((), 1).await;
                 tester
                     .expect_check_run(
-                        &tester.get_pr(()).await.get_gh_pr().head_sha,
+                        &tester.get_pr_copy(()).await.get_gh_pr().head_sha,
                         AUTO_BUILD_CHECK_RUN_NAME,
                         AUTO_BUILD_CHECK_RUN_NAME,
                         CheckRunStatus::Completed,

@@ -436,7 +436,7 @@ mod tests {
             tester.start_auto_build(()).await?;
             tester
                 .expect_check_run(
-                    &tester.get_pr(()).await.get_gh_pr().head_sha,
+                    &tester.get_pr_copy(()).await.get_gh_pr().head_sha,
                     AUTO_BUILD_CHECK_RUN_NAME,
                     AUTO_BUILD_CHECK_RUN_NAME,
                     CheckRunStatus::InProgress,

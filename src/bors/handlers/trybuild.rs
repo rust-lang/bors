@@ -813,7 +813,7 @@ try-job: Bar
             tester.post_comment("@bors try cancel").await?;
             tester.expect_comments((), 1).await;
 
-            tester.get_pr(()).await.expect_try_build_cancelled();
+            tester.get_pr_copy(()).await.expect_try_build_cancelled();
             Ok(())
         })
         .await;
@@ -885,7 +885,7 @@ try = ["+foo", "+bar", "-baz"]
                 To cancel the try build, run the command `@bors try cancel`.
                 ");
                 tester
-                    .get_pr(())
+                    .get_pr_copy(())
                     .await
                     .expect_added_labels(&["foo", "bar"])
                     .expect_removed_labels(&["baz"]);
@@ -910,13 +910,13 @@ try_succeeded = ["+foo", "+bar", "-baz"]
 
                 To cancel the try build, run the command `@bors try cancel`.
                 ");
-                tester.get_pr(()).await.expect_added_labels(&[]);
+                tester.get_pr_copy(()).await.expect_added_labels(&[]);
                 tester
                     .workflow_full_success(tester.try_branch().await)
                     .await?;
                 tester.expect_comments((), 1).await;
                 tester
-                    .get_pr(())
+                    .get_pr_copy(())
                     .await
                     .expect_added_labels(&["foo", "bar"])
                     .expect_removed_labels(&["baz"]);
@@ -941,13 +941,13 @@ try_failed = ["+foo", "+bar", "-baz"]
 
                 To cancel the try build, run the command `@bors try cancel`.
                 ");
-                tester.get_pr(()).await.expect_added_labels(&[]);
+                tester.get_pr_copy(()).await.expect_added_labels(&[]);
                 tester
                     .workflow_full_failure(tester.try_branch().await)
                     .await?;
                 tester.expect_comments((), 1).await;
                 tester
-                    .get_pr(())
+                    .get_pr_copy(())
                     .await
                     .expect_added_labels(&["foo", "bar"])
                     .expect_removed_labels(&["baz"]);
@@ -964,7 +964,7 @@ try_failed = ["+foo", "+bar", "-baz"]
 
             tester
                 .expect_check_run(
-                    &tester.get_pr(()).await.get_gh_pr().head_sha,
+                    &tester.get_pr_copy(()).await.get_gh_pr().head_sha,
                     TRY_BUILD_CHECK_RUN_NAME,
                     "Bors try build",
                     CheckRunStatus::InProgress,
@@ -990,7 +990,7 @@ try_failed = ["+foo", "+bar", "-baz"]
 
             tester
                 .expect_check_run(
-                    &tester.get_pr(()).await.get_gh_pr().head_sha,
+                    &tester.get_pr_copy(()).await.get_gh_pr().head_sha,
                     TRY_BUILD_CHECK_RUN_NAME,
                     "Bors try build",
                     CheckRunStatus::Completed,
@@ -1016,7 +1016,7 @@ try_failed = ["+foo", "+bar", "-baz"]
 
             tester
                 .expect_check_run(
-                    &tester.get_pr(()).await.get_gh_pr().head_sha,
+                    &tester.get_pr_copy(()).await.get_gh_pr().head_sha,
                     TRY_BUILD_CHECK_RUN_NAME,
                     "Bors try build",
                     CheckRunStatus::Completed,
@@ -1040,7 +1040,7 @@ try_failed = ["+foo", "+bar", "-baz"]
 
             tester
                 .expect_check_run(
-                    &tester.get_pr(()).await.get_gh_pr().head_sha,
+                    &tester.get_pr_copy(()).await.get_gh_pr().head_sha,
                     TRY_BUILD_CHECK_RUN_NAME,
                     "Bors try build",
                     CheckRunStatus::Completed,
@@ -1059,7 +1059,7 @@ try_failed = ["+foo", "+bar", "-baz"]
             tester.post_comment("@bors try").await?;
             tester.expect_comments((), 1).await;
 
-            let prev_sha = tester.get_pr(()).await.get_gh_pr().head_sha;
+            let prev_sha = tester.get_pr_copy(()).await.get_gh_pr().head_sha;
             tester.push_to_pr(()).await?;
             tester.post_comment("@bors try").await?;
             tester.expect_comments((), 1).await;
@@ -1075,7 +1075,7 @@ try_failed = ["+foo", "+bar", "-baz"]
                 .await;
             tester
                 .expect_check_run(
-                    &tester.get_pr(()).await.get_gh_pr().head_sha,
+                    &tester.get_pr_copy(()).await.get_gh_pr().head_sha,
                     TRY_BUILD_CHECK_RUN_NAME,
                     "Bors try build",
                     CheckRunStatus::InProgress,
@@ -1090,8 +1090,8 @@ try_failed = ["+foo", "+bar", "-baz"]
     #[sqlx::test]
     async fn hide_try_build_started_comment_after_success(pool: sqlx::PgPool) {
         run_test(pool, async |tester: &mut BorsTester| {
-            let comment = tester.post_comment("@bors try").await?;
-            tester.expect_comments((), 1).await;
+            tester.post_comment("@bors try").await?;
+            let comment = tester.get_comment(()).await?;
             tester
                 .workflow_full_success(tester.try_branch().await)
                 .await?;
@@ -1108,8 +1108,8 @@ try_failed = ["+foo", "+bar", "-baz"]
     #[sqlx::test]
     async fn hide_try_build_started_comment_after_failure(pool: sqlx::PgPool) {
         run_test(pool, async |tester: &mut BorsTester| {
-            let comment = tester.post_comment("@bors try").await?;
-            tester.expect_comments((), 1).await;
+            tester.post_comment("@bors try").await?;
+            let comment = tester.get_comment(()).await?;
             tester
                 .workflow_full_failure(tester.try_branch().await)
                 .await?;

@@ -230,7 +230,7 @@ impl BorsTester {
     }
 
     /// Get a PR proxy that can be used to assert various things about the PR.
-    pub async fn get_pr<Id: Into<PrIdentifier>>(&self, id: Id) -> PullRequestProxy {
+    pub async fn get_pr_copy<Id: Into<PrIdentifier>>(&self, id: Id) -> PullRequestProxy {
         let id = id.into();
         let pr = self
             .get_repo(&id.repo)
@@ -358,15 +358,23 @@ impl BorsTester {
             .content)
     }
 
+    /// Wait until the next bot comment is received on the specified repo and PR, and return it.
+    pub async fn get_comment<Id: Into<PrIdentifier>>(&mut self, id: Id) -> anyhow::Result<Comment> {
+        GitHubState::get_comment(self.github.clone(), id).await
+    }
+
     //-- Generation of GitHub events --//
     pub async fn post_comment<C: Into<Comment>>(&mut self, comment: C) -> anyhow::Result<Comment> {
         let comment = comment.into();
 
         // Allocate comment IDs
         let (id, node_id) = self
-            .get_pr(comment.pr_ident.clone())
+            .github
+            .lock()
             .await
-            .gh_pr
+            .get_repo(&comment.pr_ident.repo)
+            .lock()
+            .get_pr_mut(comment.pr_ident.number)
             .next_comment_ids();
         let comment = comment.with_ids(id, node_id);
 

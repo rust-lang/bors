@@ -323,7 +323,7 @@ mod tests {
             PR will need to be re-approved.
             "
             );
-            tester.get_pr(()).await.expect_unapproved();
+            tester.get_pr_copy(()).await.expect_unapproved();
             Ok(())
         })
         .await;
@@ -337,7 +337,7 @@ mod tests {
             tester.edit_pr((), |_| {}).await?;
 
             tester
-                .get_pr(())
+                .get_pr_copy(())
                 .await
                 .expect_approved_by(&User::default_pr_author().name);
             Ok(())
@@ -375,7 +375,7 @@ mod tests {
             PR will need to be re-approved.
             "
             );
-            tester.get_pr(()).await.expect_unapproved();
+            tester.get_pr_copy(()).await.expect_unapproved();
             Ok(())
         })
         .await;
@@ -709,7 +709,7 @@ mod tests {
                 tester.start_auto_build(()).await?;
                 tester.workflow_start(tester.auto_branch().await).await?;
 
-                let prev_commit = &tester.get_pr(()).await.get_gh_pr().head_sha;
+                let prev_commit = &tester.get_pr_copy(()).await.get_gh_pr().head_sha;
                 tester.push_to_pr(()).await?;
                 tester.expect_comments((), 1).await;
                 tester
