@@ -412,7 +412,12 @@ pub(crate) async fn unapprove_pull_request(
 ) -> anyhow::Result<()> {
     measure_db_query("unapprove_pull_request", || async {
         sqlx::query!(
-            "UPDATE pull_request SET approved_by = NULL, approved_sha = NULL WHERE id = $1",
+            r#"
+                UPDATE pull_request
+                SET approved_by = NULL,
+                    approved_sha = NULL,
+                    auto_build_id = NULL
+                WHERE id = $1"#,
             pr_id
         )
         .execute(executor)

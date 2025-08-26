@@ -404,33 +404,30 @@ pub async fn maybe_cancel_auto_build(
     pr: &PullRequestModel,
     reason: AutoBuildCancelReason,
 ) -> anyhow::Result<Option<String>> {
-    let mut auto_build_cancel_message: Option<String> = None;
-    if let Some(auto_build) = &pr.auto_build {
-        if auto_build.status != BuildStatus::Pending {
-            return Ok(None);
-        }
-
-        tracing::info!("Cancelling auto build {auto_build:?}");
-
-        match cancel_build(client, db, auto_build, CheckRunConclusion::Cancelled).await {
-            Ok(workflows) => {
-                tracing::info!("Auto build cancelled");
-                let workflow_urls = workflows.into_iter().map(|w| w.url).collect();
-                auto_build_cancel_message =
-                    Some(auto_build_cancelled_msg(reason, Some(workflow_urls)));
-            }
-            Err(CancelBuildError::FailedToMarkBuildAsCancelled(error)) => return Err(error),
-            Err(CancelBuildError::FailedToCancelWorkflows(error)) => {
-                tracing::error!(
-                    "Could not cancel workflows for auto build with SHA {}: {error:?}",
-                    auto_build.commit_sha
-                );
-
-                auto_build_cancel_message = Some(auto_build_cancelled_msg(reason, None));
-            }
-        };
+    let Some(auto_build) = &pr.auto_build else {
+        return Ok(None);
+    };
+    if auto_build.status != BuildStatus::Pending {
+        return Ok(None);
     }
-    Ok(auto_build_cancel_message)
+
+    tracing::info!("Cancelling auto build {auto_build:?}");
+
+    match cancel_build(client, db, auto_build, CheckRunConclusion::Cancelled).await {
+        Ok(workflows) => {
+            tracing::info!("Auto build cancelled");
+            let workflow_urls = workflows.into_iter().map(|w| w.url).collect();
+            Ok(Some(auto_build_cancelled_msg(reason, Some(workflow_urls))))
+        }
+        Err(CancelBuildError::FailedToMarkBuildAsCancelled(error)) => Err(error),
+        Err(CancelBuildError::FailedToCancelWorkflows(error)) => {
+            tracing::error!(
+                "Could not cancel workflows for auto build with SHA {}: {error:?}",
+                auto_build.commit_sha
+            );
+            Ok(Some(auto_build_cancelled_msg(reason, None)))
+        }
+    }
 }
 
 /// If `workflow_urls` is `None`, it was not possible to cancel workflows.

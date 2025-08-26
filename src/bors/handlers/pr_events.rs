@@ -62,25 +62,29 @@ pub(super) async fn handle_push_to_pull_request(
     )
     .await?;
 
-    // If we have an approved PR with a failed build, there's not much point in sending this warning
-    if !pr_model.is_approved()
-        || pr_model
-            .auto_build
-            .as_ref()
-            .map(|b| b.status.is_failure())
-            .unwrap_or(false)
-    {
+    if !pr_model.is_approved() {
         return Ok(());
     }
 
+    let had_failed_build = pr_model
+        .auto_build
+        .as_ref()
+        .map(|b| b.status.is_failure())
+        .unwrap_or(false);
     unapprove_pr(&repo_state, &db, &pr_model).await?;
-    notify_of_pushed_pr(
-        &repo_state,
-        pr_number,
-        pr.head.sha.clone(),
-        auto_build_cancel_message,
-    )
-    .await
+
+    // If we had an approved PR with a failed build, there's not much point in sending this warning
+    if !had_failed_build {
+        notify_of_pushed_pr(
+            &repo_state,
+            pr_number,
+            pr.head.sha.clone(),
+            auto_build_cancel_message,
+        )
+        .await
+    } else {
+        Ok(())
+    }
 }
 
 pub(super) async fn handle_pull_request_opened(
@@ -411,7 +415,10 @@ mod tests {
                 tester.expect_comments((), 1).await;
                 tester.push_to_pr(()).await?;
 
-                // No comment should be posted
+                // No comment should be posted, but the PR should still be unapproved
+                tester
+                    .wait_for_pr((), |pr| !pr.is_approved() && pr.auto_build.is_none())
+                    .await?;
                 Ok(())
             })
             .await;
