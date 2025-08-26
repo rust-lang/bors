@@ -379,8 +379,8 @@ pub fn start_merge_queue(ctx: Arc<BorsContext>) -> (MergeQueueSender, impl Futur
 mod tests {
 
     use octocrab::params::checks::CheckRunStatus;
-    use sqlx::PgPool;
 
+    use crate::tests::{BorsBuilder, GitHubState, run_test};
     use crate::{
         bors::{
             PullRequestStatus,
@@ -392,32 +392,39 @@ mod tests {
         },
         github::CommitSha,
         tests::{
-            BorsBuilder, BorsTester, BranchPushBehaviour, BranchPushError, Comment, GitHubState,
-            WorkflowEvent, default_repo_name,
+            BorsTester, BranchPushBehaviour, BranchPushError, Comment, WorkflowEvent,
+            default_repo_name,
         },
     };
 
-    fn gh_state_with_merge_queue() -> GitHubState {
-        GitHubState::default().with_default_config(
-            r#"
-      merge_queue_enabled = true
-      "#,
-        )
-    }
-
-    pub async fn run_merge_queue_test<F: AsyncFnOnce(&mut BorsTester) -> anyhow::Result<()>>(
-        pool: PgPool,
-        f: F,
-    ) -> GitHubState {
+    #[sqlx::test]
+    async fn disabled_merge_queue(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
-            .github(gh_state_with_merge_queue())
-            .run_test(f)
-            .await
+            .github(GitHubState::default().with_default_config(
+                r#"
+merge_queue_enabled = false
+"#,
+            ))
+            .run_test(async |tester: &mut BorsTester| {
+                tester.post_comment("@bors r+").await?;
+                tester.expect_comments((), 1).await;
+                tester.process_merge_queue().await;
+                // Check that no comments were sent and no builds were started
+                assert!(
+                    tester
+                        .db()
+                        .get_pending_builds(&default_repo_name())
+                        .await?
+                        .is_empty()
+                );
+                Ok(())
+            })
+            .await;
     }
 
     #[sqlx::test]
     async fn auto_workflow_started(pool: sqlx::PgPool) {
-        run_merge_queue_test(pool.clone(), async |tester: &mut BorsTester| {
+        run_test(pool.clone(), async |tester: &mut BorsTester| {
             tester.start_auto_build(()).await?;
             tester
                 .workflow_event(WorkflowEvent::started(tester.auto_branch().await))
@@ -432,7 +439,7 @@ mod tests {
 
     #[sqlx::test]
     async fn auto_workflow_check_run_created(pool: sqlx::PgPool) {
-        run_merge_queue_test(pool, async |tester: &mut BorsTester| {
+        run_test(pool, async |tester: &mut BorsTester| {
             tester.start_auto_build(()).await?;
             tester
                 .expect_check_run(
@@ -450,7 +457,7 @@ mod tests {
 
     #[sqlx::test]
     async fn auto_build_started_comment(pool: sqlx::PgPool) {
-        run_merge_queue_test(pool, async |tester: &mut BorsTester| {
+        run_test(pool, async |tester: &mut BorsTester| {
             tester.post_comment("@bors r+").await?;
             tester.expect_comments((), 1).await;
             tester.process_merge_queue().await;
@@ -465,7 +472,7 @@ mod tests {
 
     #[sqlx::test]
     async fn auto_build_insert_into_db(pool: sqlx::PgPool) {
-        run_merge_queue_test(pool, async |tester: &mut BorsTester| {
+        run_test(pool, async |tester: &mut BorsTester| {
             tester.start_auto_build(()).await?;
             tester
                 .workflow_full_success(tester.auto_branch().await)
@@ -489,7 +496,7 @@ mod tests {
 
     #[sqlx::test]
     async fn auto_build_success_comment(pool: sqlx::PgPool) {
-        run_merge_queue_test(pool, async |tester: &mut BorsTester| {
+        run_test(pool, async |tester: &mut BorsTester| {
             tester.start_auto_build(()).await?;
             tester.workflow_full_success(tester.auto_branch().await).await?;
             insta::assert_snapshot!(
@@ -507,7 +514,7 @@ mod tests {
 
     #[sqlx::test]
     async fn auto_build_succeeds_and_merges_in_db(pool: sqlx::PgPool) {
-        run_merge_queue_test(pool, async |tester: &mut BorsTester| {
+        run_test(pool, async |tester: &mut BorsTester| {
             tester.start_auto_build(()).await?;
             tester
                 .workflow_full_success(tester.auto_branch().await)
@@ -528,7 +535,7 @@ mod tests {
 
     #[sqlx::test]
     async fn auto_build_branch_history(pool: sqlx::PgPool) {
-        let gh = run_merge_queue_test(pool, async |tester: &mut BorsTester| {
+        let gh = run_test(pool, async |tester: &mut BorsTester| {
             tester.start_auto_build(()).await?;
             tester
                 .workflow_full_success(tester.auto_branch().await)
@@ -548,7 +555,7 @@ mod tests {
 
     #[sqlx::test]
     async fn merge_queue_sequential_order(pool: sqlx::PgPool) {
-        let gh = run_merge_queue_test(pool, async |tester: &mut BorsTester| {
+        let gh = run_test(pool, async |tester: &mut BorsTester| {
             let pr2 = tester.open_pr(default_repo_name(), |_| {}).await?;
             let pr3 = tester.open_pr(default_repo_name(), |_| {}).await?;
 
@@ -583,7 +590,7 @@ mod tests {
 
     #[sqlx::test]
     async fn merge_queue_priority_order(pool: sqlx::PgPool) {
-        let gh = run_merge_queue_test(pool, async |tester: &mut BorsTester| {
+        let gh = run_test(pool, async |tester: &mut BorsTester| {
             let pr2 = tester.open_pr(default_repo_name(), |_| {}).await?;
             let pr3 = tester.open_pr(default_repo_name(), |_| {}).await?;
 
@@ -633,7 +640,7 @@ mod tests {
 
     #[sqlx::test]
     async fn auto_build_push_conflict_comment(pool: sqlx::PgPool) {
-        run_merge_queue_test(pool, async |tester: &mut BorsTester| {
+        run_test(pool, async |tester: &mut BorsTester| {
                tester.start_auto_build(()).await?;
                tester
                    .workflow_full_success(tester.auto_branch().await)
@@ -657,7 +664,7 @@ mod tests {
 
     #[sqlx::test]
     async fn auto_build_push_validation_failed_comment(pool: sqlx::PgPool) {
-        run_merge_queue_test(pool, async |tester: &mut BorsTester| {
+        run_test(pool, async |tester: &mut BorsTester| {
                tester.start_auto_build(()).await?;
                tester
                    .workflow_full_success(tester.auto_branch().await)
@@ -681,7 +688,7 @@ mod tests {
 
     #[sqlx::test]
     async fn auto_build_push_error_details_failed_comment(pool: sqlx::PgPool) {
-        run_merge_queue_test(pool, async |tester: &mut BorsTester| {
+        run_test(pool, async |tester: &mut BorsTester| {
             tester.start_auto_build(()).await?;
             tester
                 .workflow_full_success(tester.auto_branch().await)
@@ -705,7 +712,7 @@ mod tests {
 
     #[sqlx::test]
     async fn auto_build_push_error_fails_in_db(pool: sqlx::PgPool) {
-        run_merge_queue_test(pool, async |tester: &mut BorsTester| {
+        run_test(pool, async |tester: &mut BorsTester| {
             tester.start_auto_build(()).await?;
             tester
                 .workflow_full_success(tester.auto_branch().await)
@@ -731,7 +738,7 @@ mod tests {
 
     #[sqlx::test]
     async fn auto_build_push_error_retry_recovers_and_merges(pool: sqlx::PgPool) {
-        run_merge_queue_test(pool, async |tester: &mut BorsTester| {
+        run_test(pool, async |tester: &mut BorsTester| {
             tester.start_auto_build(()).await?;
             tester
                 .workflow_full_success(tester.auto_branch().await)
@@ -759,7 +766,7 @@ mod tests {
 
     #[sqlx::test]
     async fn auto_build_start_merge_conflict_comment(pool: sqlx::PgPool) {
-        run_merge_queue_test(pool, async |tester: &mut BorsTester| {
+        run_test(pool, async |tester: &mut BorsTester| {
             tester.create_branch(AUTO_MERGE_BRANCH_NAME).await;
             tester
                 .modify_branch(AUTO_MERGE_BRANCH_NAME, |branch| {
@@ -809,7 +816,7 @@ mod tests {
 
     #[sqlx::test]
     async fn auto_build_start_merge_conflict_in_db(pool: sqlx::PgPool) {
-        run_merge_queue_test(pool, async |tester: &mut BorsTester| {
+        run_test(pool, async |tester: &mut BorsTester| {
             tester.create_branch(AUTO_MERGE_BRANCH_NAME).await;
             tester
                 .modify_branch(AUTO_MERGE_BRANCH_NAME, |branch| {
@@ -827,7 +834,7 @@ mod tests {
 
     #[sqlx::test]
     async fn auto_build_mergeable_state_sanity_check_fails(pool: sqlx::PgPool) {
-        run_merge_queue_test(pool, async |tester: &mut BorsTester| {
+        run_test(pool, async |tester: &mut BorsTester| {
             let pr = tester.open_pr(default_repo_name(), |_| {}).await?;
             tester
                 .post_comment(Comment::new(pr.number, "@bors r+"))
@@ -849,7 +856,7 @@ mod tests {
 
     #[sqlx::test]
     async fn auto_build_status_sanity_check_fails(pool: sqlx::PgPool) {
-        run_merge_queue_test(pool, async |tester: &mut BorsTester| {
+        run_test(pool, async |tester: &mut BorsTester| {
             let pr = tester.open_pr(default_repo_name(), |_| {}).await?;
             tester
                 .post_comment(Comment::new(pr.number, "@bors r+"))
@@ -867,7 +874,7 @@ mod tests {
 
     #[sqlx::test]
     async fn auto_build_sha_mismatch_sanity_check_fails(pool: sqlx::PgPool) {
-        run_merge_queue_test(pool, async |tester: &mut BorsTester| {
+        run_test(pool, async |tester: &mut BorsTester| {
             let pr = tester.open_pr(default_repo_name(), |_| {}).await?;
             tester
                 .post_comment(Comment::new(pr.number, "@bors r+"))
@@ -889,7 +896,7 @@ mod tests {
 
     #[sqlx::test]
     async fn auto_build_sanity_check_recovers(pool: sqlx::PgPool) {
-        run_merge_queue_test(pool, async |tester: &mut BorsTester| {
+        run_test(pool, async |tester: &mut BorsTester| {
             let pr = tester.open_pr(default_repo_name(), |_| {}).await?;
             tester
                 .post_comment(Comment::new(pr.number, "@bors r+"))

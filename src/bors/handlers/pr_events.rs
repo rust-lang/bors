@@ -301,19 +301,10 @@ mod tests {
     use crate::bors::PullRequestStatus;
     use crate::bors::merge_queue::AUTO_BUILD_CHECK_RUN_NAME;
     use crate::tests::BorsTester;
-    use crate::tests::{BorsBuilder, GitHubState};
     use crate::{
         database::{MergeableState, OctocrabMergeableState},
         tests::{User, default_branch_name, default_repo_name, run_test},
     };
-
-    fn gh_state_with_merge_queue() -> GitHubState {
-        GitHubState::default().with_default_config(
-            r#"
-      merge_queue_enabled = true
-      "#,
-        )
-    }
 
     #[sqlx::test]
     async fn unapprove_on_base_edited(pool: sqlx::PgPool) {
@@ -687,14 +678,12 @@ mod tests {
 
     #[sqlx::test]
     async fn cancel_pending_auto_build_on_push_comment(pool: sqlx::PgPool) {
-        BorsBuilder::new(pool)
-            .github(gh_state_with_merge_queue())
-            .run_test(async |tester: &mut BorsTester| {
-                tester.start_auto_build(()).await?;
-                tester.wait_for_pr((), |pr| pr.auto_build.is_some()).await?;
-                tester.workflow_start(tester.auto_branch().await).await?;
-                tester.push_to_pr(()).await?;
-                insta::assert_snapshot!(tester.get_comment_text(()).await?, @r"
+        run_test(pool, async |tester: &mut BorsTester| {
+            tester.start_auto_build(()).await?;
+            tester.wait_for_pr((), |pr| pr.auto_build.is_some()).await?;
+            tester.workflow_start(tester.auto_branch().await).await?;
+            tester.push_to_pr(()).await?;
+            insta::assert_snapshot!(tester.get_comment_text(()).await?, @r"
                 :warning: A new commit `pr-1-commit-1` was pushed to the branch, the
                 PR will need to be re-approved.
 
@@ -702,59 +691,55 @@ mod tests {
 
                 - https://github.com/rust-lang/borstest/actions/runs/1
                 ");
-                Ok(())
-            })
-            .await;
+            Ok(())
+        })
+        .await;
     }
 
     #[sqlx::test]
     async fn cancel_pending_auto_build_on_push_error_comment(pool: sqlx::PgPool) {
-        BorsBuilder::new(pool)
-            .github(gh_state_with_merge_queue())
-            .run_test(async |tester: &mut BorsTester| {
-                tester
-                    .modify_repo(&default_repo_name(), |repo| {
-                        repo.workflow_cancel_error = true
-                    })
-                    .await;
-                tester.start_auto_build(()).await?;
-                tester.wait_for_pr((), |pr| pr.auto_build.is_some()).await?;
+        run_test(pool, async |tester: &mut BorsTester| {
+            tester
+                .modify_repo(&default_repo_name(), |repo| {
+                    repo.workflow_cancel_error = true
+                })
+                .await;
+            tester.start_auto_build(()).await?;
+            tester.wait_for_pr((), |pr| pr.auto_build.is_some()).await?;
 
-                tester.workflow_start(tester.auto_branch().await).await?;
-                tester.push_to_pr(()).await?;
-                insta::assert_snapshot!(tester.get_comment_text(()).await?, @r"
+            tester.workflow_start(tester.auto_branch().await).await?;
+            tester.push_to_pr(()).await?;
+            insta::assert_snapshot!(tester.get_comment_text(()).await?, @r"
                 :warning: A new commit `pr-1-commit-1` was pushed to the branch, the
                 PR will need to be re-approved.
 
                 Auto build cancelled due to push. It was not possible to cancel some workflows.
                 ");
-                Ok(())
-            })
-            .await;
+            Ok(())
+        })
+        .await;
     }
 
     #[sqlx::test]
     async fn cancel_pending_auto_build_on_push_updates_check_run(pool: sqlx::PgPool) {
-        BorsBuilder::new(pool)
-            .github(gh_state_with_merge_queue())
-            .run_test(async |tester: &mut BorsTester| {
-                tester.start_auto_build(()).await?;
-                tester.workflow_start(tester.auto_branch().await).await?;
+        run_test(pool, async |tester: &mut BorsTester| {
+            tester.start_auto_build(()).await?;
+            tester.workflow_start(tester.auto_branch().await).await?;
 
-                let prev_commit = &tester.get_pr_copy(()).await.get_gh_pr().head_sha;
-                tester.push_to_pr(()).await?;
-                tester.expect_comments((), 1).await;
-                tester
-                    .expect_check_run(
-                        prev_commit,
-                        AUTO_BUILD_CHECK_RUN_NAME,
-                        AUTO_BUILD_CHECK_RUN_NAME,
-                        CheckRunStatus::Completed,
-                        Some(CheckRunConclusion::Cancelled),
-                    )
-                    .await;
-                Ok(())
-            })
-            .await;
+            let prev_commit = &tester.get_pr_copy(()).await.get_gh_pr().head_sha;
+            tester.push_to_pr(()).await?;
+            tester.expect_comments((), 1).await;
+            tester
+                .expect_check_run(
+                    prev_commit,
+                    AUTO_BUILD_CHECK_RUN_NAME,
+                    AUTO_BUILD_CHECK_RUN_NAME,
+                    CheckRunStatus::Completed,
+                    Some(CheckRunConclusion::Cancelled),
+                )
+                .await;
+            Ok(())
+        })
+        .await;
     }
 }

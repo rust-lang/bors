@@ -1325,38 +1325,26 @@ labels_blocking_approval = ["proposed-final-comment-period", "final-comment-peri
 
     #[sqlx::test]
     async fn unapprove_running_auto_build_pr_comment(pool: sqlx::PgPool) {
-        BorsBuilder::new(pool)
-            .github(GitHubState::default().with_default_config(
-                r#"
-merge_queue_enabled = true
-"#,
-            ))
-            .run_test(async |tester: &mut BorsTester| {
-                tester.start_auto_build(()).await?;
-                tester.wait_for_pr((), |pr| pr.auto_build.is_some()).await?;
-                tester.workflow_start(tester.auto_branch().await).await?;
-                tester.post_comment("@bors r-").await?;
-                insta::assert_snapshot!(tester.get_comment_text(()).await?, @r"
+        run_test(pool, async |tester: &mut BorsTester| {
+            tester.start_auto_build(()).await?;
+            tester.wait_for_pr((), |pr| pr.auto_build.is_some()).await?;
+            tester.workflow_start(tester.auto_branch().await).await?;
+            tester.post_comment("@bors r-").await?;
+            insta::assert_snapshot!(tester.get_comment_text(()).await?, @r"
                 Commit pr-1-sha has been unapproved.
 
                 Auto build cancelled due to unapproval. Cancelled workflows:
 
                 - https://github.com/rust-lang/borstest/actions/runs/1
                 ");
-                Ok(())
-            })
-            .await;
+            Ok(())
+        })
+        .await;
     }
 
     #[sqlx::test]
     async fn unapprove_running_auto_build_pr_failed_comment(pool: sqlx::PgPool) {
-        BorsBuilder::new(pool)
-            .github(GitHubState::default().with_default_config(
-                r#"
-merge_queue_enabled = true
-"#,
-            ))
-            .run_test(async |tester: &mut BorsTester| {
+        run_test(pool, async |tester: &mut BorsTester| {
                 tester.modify_repo(&default_repo_name(), |pr| pr.workflow_cancel_error = true).await;
                 tester.start_auto_build(()).await?;
                 tester
@@ -1376,29 +1364,23 @@ merge_queue_enabled = true
 
     #[sqlx::test]
     async fn unapprove_running_auto_build_updates_check_run(pool: sqlx::PgPool) {
-        BorsBuilder::new(pool)
-            .github(GitHubState::default().with_default_config(
-                r#"
-merge_queue_enabled = true
-"#,
-            ))
-            .run_test(async |tester: &mut BorsTester| {
-                tester.start_auto_build(()).await?;
-                tester.wait_for_pr((), |pr| pr.auto_build.is_some()).await?;
-                tester.workflow_start(tester.auto_branch().await).await?;
-                tester.post_comment("@bors r-").await?;
-                tester.expect_comments((), 1).await;
-                tester
-                    .expect_check_run(
-                        &tester.get_pr_copy(()).await.get_gh_pr().head_sha,
-                        AUTO_BUILD_CHECK_RUN_NAME,
-                        AUTO_BUILD_CHECK_RUN_NAME,
-                        CheckRunStatus::Completed,
-                        Some(CheckRunConclusion::Cancelled),
-                    )
-                    .await;
-                Ok(())
-            })
-            .await;
+        run_test(pool, async |tester: &mut BorsTester| {
+            tester.start_auto_build(()).await?;
+            tester.wait_for_pr((), |pr| pr.auto_build.is_some()).await?;
+            tester.workflow_start(tester.auto_branch().await).await?;
+            tester.post_comment("@bors r-").await?;
+            tester.expect_comments((), 1).await;
+            tester
+                .expect_check_run(
+                    &tester.get_pr_copy(()).await.get_gh_pr().head_sha,
+                    AUTO_BUILD_CHECK_RUN_NAME,
+                    AUTO_BUILD_CHECK_RUN_NAME,
+                    CheckRunStatus::Completed,
+                    Some(CheckRunConclusion::Cancelled),
+                )
+                .await;
+            Ok(())
+        })
+        .await;
     }
 }

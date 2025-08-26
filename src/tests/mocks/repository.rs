@@ -201,6 +201,7 @@ impl Default for Repo {
     fn default() -> Self {
         let config = r#"
 timeout = 3600
+merge_queue_enabled = true
 
 # Set labels on PR approvals
 [labels]
