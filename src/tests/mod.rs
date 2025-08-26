@@ -113,7 +113,7 @@ impl BorsBuilder {
                         Err(error) => {
                             panic!(
                                 "Test has failed: {error:?}\n\nBors service error:\n{:?}",
-                                gh_state.err().unwrap()
+                                gh_state.err()
                             );
                         }
                     },
@@ -382,15 +382,16 @@ impl BorsTester {
         let comment = comment.into();
 
         // Allocate comment IDs
-        let (id, node_id) = self
-            .github
-            .lock()
-            .await
-            .get_repo(&comment.pr_ident.repo)
-            .lock()
-            .get_pr_mut(comment.pr_ident.number)
-            .next_comment_ids();
-        let comment = comment.with_ids(id, node_id);
+        let comment = {
+            let gh = self.github.lock().await;
+            let repo = gh.get_repo(&comment.pr_ident.repo);
+            let mut repo = repo.lock();
+            let pr = repo.get_pr_mut(comment.pr_ident.number);
+            let (id, node_id) = pr.next_comment_ids();
+            let comment = comment.with_ids(id, node_id);
+            pr.add_comment_to_history(comment.clone());
+            comment
+        };
 
         self.webhook_comment(comment.clone()).await?;
         Ok(comment)

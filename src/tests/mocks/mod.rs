@@ -14,6 +14,11 @@ use crate::tests::mocks::user::User;
 use octocrab::Octocrab;
 use parking_lot::Mutex;
 use regex::Regex;
+use std::collections::HashMap;
+use std::ops::Deref;
+use std::sync::Arc;
+use std::time::Duration;
+use tokio::time::error::Elapsed;
 use wiremock::matchers::{method, path_regex};
 use wiremock::{Mock, Request, ResponseTemplate};
 
@@ -107,6 +112,8 @@ impl GitHubState {
         state: Arc<tokio::sync::Mutex<Self>>,
         id: Id,
     ) -> anyhow::Result<Comment> {
+        use std::fmt::Write;
+
         let id = id.into();
         // We need to avoid holding the GH state and repo lock here, otherwise the mocking code
         // could not lock the repo and send the comment (or other information) to a PR.
@@ -123,16 +130,58 @@ impl GitHubState {
                 .expect("Pull request not found");
             pr.comment_queue_rx.clone()
         };
-        let comment = comment_rx
-            .lock()
-            .await
-            .recv()
-            .await
-            .expect("Channel was closed while waiting for a comment");
+        let mut guard = comment_rx.lock().await;
+
+        // Timeout individual comment reads to give better error messages than if the whole test
+        // times out.
+        let comment = match tokio::time::timeout(Duration::from_secs(2), guard.recv()).await {
+            Ok(comment) => comment,
+            Err(_) => {
+                let mut comment_history = String::new();
+
+                let mut gh_state = state.lock().await;
+                let repo = gh_state
+                    .repos
+                    .get_mut(&id.repo)
+                    .unwrap_or_else(|| panic!("Repository `{}` not found", id.repo));
+                let repo = repo.lock();
+                let pr = repo
+                    .pull_requests
+                    .get(&id.number)
+                    .expect("Pull request not found");
+                for comment in &pr.comment_history {
+                    writeln!(
+                        comment_history,
+                        "[{}]: {}",
+                        comment.author.name, comment.content
+                    )
+                    .unwrap();
+                }
+
+                return Err(anyhow::anyhow!(
+                    "Timed out waiting for a comment on {id}. Comment history:\n{comment_history}"
+                ));
+            }
+        };
+        let comment = comment.expect("Channel was closed while waiting for a comment");
         let comment = match comment {
             CommentMsg::Comment(comment) => comment,
             CommentMsg::Close => unreachable!(),
         };
+
+        {
+            let mut gh_state = state.lock().await;
+            let repo = gh_state
+                .repos
+                .get_mut(&id.repo)
+                .unwrap_or_else(|| panic!("Repository `{}` not found", id.repo));
+            let mut repo = repo.lock();
+            let pr = repo
+                .pull_requests
+                .get_mut(&id.number)
+                .expect("Pull request not found");
+            pr.add_comment_to_history(comment.clone());
+        }
 
         eprintln!(
             "Received comment on {}#{}: {}",

@@ -13,6 +13,7 @@ use octocrab::models::LabelId;
 use octocrab::models::pulls::{MergeableState as OctocrabMergeableState, MergeableState};
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
+use std::fmt::{Display, Formatter, Write};
 use std::sync::Arc;
 use std::time::SystemTime;
 use tokio::sync::mpsc::{Receiver, Sender};
@@ -37,6 +38,13 @@ pub fn default_pr_number() -> u64 {
 pub struct PrIdentifier {
     pub repo: GithubRepoName,
     pub number: u64,
+}
+
+impl Display for PrIdentifier {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let PrIdentifier { repo, number } = self;
+        f.write_fmt(format_args!("{repo}#{number}"))
+    }
 }
 
 impl Default for PrIdentifier {
@@ -106,6 +114,7 @@ pub struct PullRequest {
     pub labels: Vec<String>,
     pub comment_queue_tx: Sender<CommentMsg>,
     pub comment_queue_rx: Arc<tokio::sync::Mutex<Receiver<CommentMsg>>>,
+    pub comment_history: Vec<Comment>,
 }
 
 impl PullRequest {
@@ -132,6 +141,7 @@ impl PullRequest {
             labels: Vec::new(),
             comment_queue_tx,
             comment_queue_rx: Arc::new(tokio::sync::Mutex::new(comment_queue_rx)),
+            comment_history: Vec::new(),
         }
     }
 }
@@ -149,6 +159,13 @@ impl Default for PullRequest {
 }
 
 impl PullRequest {
+    pub fn id(&self) -> PrIdentifier {
+        PrIdentifier {
+            repo: self.repo.clone(),
+            number: self.number.0,
+        }
+    }
+
     /// Return a numeric ID and a node ID for the next comment to be created.
     pub fn next_comment_ids(&mut self) -> (u64, String) {
         self.comment_counter += 1;
@@ -187,6 +204,10 @@ impl PullRequest {
 
     pub fn convert_to_draft(&mut self) {
         self.status = PullRequestStatus::Draft;
+    }
+
+    pub fn add_comment_to_history(&mut self, comment: Comment) {
+        self.comment_history.push(comment);
     }
 }
 
@@ -385,6 +406,7 @@ impl From<PullRequest> for GitHubPullRequest {
             labels,
             comment_queue_tx: _,
             comment_queue_rx: _,
+            comment_history: _,
         } = pr;
         GitHubPullRequest {
             user: author.clone().into(),
