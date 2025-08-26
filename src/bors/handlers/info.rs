@@ -1,8 +1,8 @@
 use crate::bors::Comment;
 use crate::bors::RepositoryState;
 use crate::bors::handlers::PullRequestData;
-use crate::database::PgDbClient;
 use crate::database::{ApprovalStatus, MergeableState};
+use crate::database::{BuildStatus, PgDbClient};
 use std::sync::Arc;
 
 pub(super) async fn command_info(
@@ -40,7 +40,9 @@ pub(super) async fn command_info(
     )?;
 
     // Try build status
-    if let Some(try_build) = &pr.db.try_build {
+    if let Some(try_build) = &pr.db.try_build
+        && try_build.status == BuildStatus::Pending
+    {
         writeln!(message, "- Try build is in progress")?;
 
         if let Ok(urls) = db.get_workflow_urls_for_build(try_build).await {
@@ -53,7 +55,19 @@ pub(super) async fn command_info(
 
     // Auto build status
     if let Some(auto_build) = &pr.db.auto_build {
-        writeln!(message, "- Auto build is in progress")?;
+        write!(message, "- Auto build ")?;
+
+        match auto_build.status {
+            BuildStatus::Pending => {
+                writeln!(message, "is in progress")?;
+            }
+            BuildStatus::Failure | BuildStatus::Cancelled | BuildStatus::Timeouted => {
+                writeln!(message, "has failed")?;
+            }
+            BuildStatus::Success => {
+                writeln!(message, "was successful")?;
+            }
+        }
 
         if let Ok(urls) = db.get_workflow_urls_for_build(auto_build).await {
             message.extend(
