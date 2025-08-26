@@ -14,7 +14,7 @@ use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc::Sender;
-use tokio::task::JoinHandle;
+use tokio::task::{JoinError, JoinHandle};
 use tower::Service;
 
 use crate::bors::merge_queue::MergeQueueSender;
@@ -91,31 +91,40 @@ impl BorsBuilder {
     ) -> GitHubState {
         // We return `tester` and `bors` separately, so that we can finish `bors`
         // even if `f` returns an error or times out, for better error propagation.
-        let (mut tester, bors) = BorsTester::new(self.pool, self.github).await;
+        let (mut tester, mut bors) = BorsTester::new(self.pool, self.github).await;
 
-        let result = tokio::time::timeout(TEST_TIMEOUT, f(&mut tester)).await;
-        let gh_state = tester.finish(bors).await;
+        tokio::select! {
+            // If the service ends sooner than the test itself, then the service has panicked.
+            // In that case we want to immediately abort the test and print the error.
+            res = &mut bors => {
+                let error = res.err().expect("Bors service ended unexpectedly without a panic");
+                panic!("Bors service has ended unexpectedly: {:?}", join_error_to_anyhow(error));
+            }
+            result = tokio::time::timeout(TEST_TIMEOUT, f(&mut tester)) => {
+                let gh_state = tester.finish(bors).await;
 
-        match result {
-            Ok(res) => match res {
-                Ok(_) => gh_state
-                    .context("Bors service has failed")
-                    // This makes the error nicer
-                    .map_err(|e| e.to_string())
-                    .unwrap(),
-                Err(error) => {
-                    panic!(
-                        "Test has failed: {error:?}\n\nBors service error:\n{:?}",
-                        gh_state.err().unwrap()
-                    );
+                match result {
+                    Ok(res) => match res {
+                        Ok(_) => gh_state
+                            .context("Bors service has failed")
+                            // This makes the error nicer
+                            .map_err(|e| e.to_string())
+                            .unwrap(),
+                        Err(error) => {
+                            panic!(
+                                "Test has failed: {error:?}\n\nBors service error:\n{:?}",
+                                gh_state.err().unwrap()
+                            );
+                        }
+                    },
+                    Err(_) => {
+                        panic!(
+                            "Test has timeouted after {}s\n\nBors service error:\n{:?}",
+                            TEST_TIMEOUT.as_secs(),
+                            gh_state.err()
+                        );
+                    }
                 }
-            },
-            Err(_) => {
-                panic!(
-                    "Test has timeouted after {}s\n\nBors service error:\n{:?}",
-                    TEST_TIMEOUT.as_secs(),
-                    gh_state.err()
-                );
             }
         }
     }
@@ -918,22 +927,7 @@ impl BorsTester {
         // Wait until all events are handled in the bors service
         match tokio::time::timeout(Duration::from_secs(5), bors).await {
             Ok(Ok(_)) => {}
-            Ok(Err(error)) => {
-                // Try to produce a nicer error message, because JoinError internally prints the
-                // panic payload with Debug impl instead of Display impl, which mangles backtraces.
-                let panic = error.into_panic();
-                if let Some(s) = panic.downcast_ref::<String>() {
-                    return Err(anyhow::anyhow!("{s}"));
-                }
-
-                if let Some(s) = panic.downcast_ref::<&'static str>() {
-                    return Err(anyhow::anyhow!("{s}"));
-                }
-
-                return Err(anyhow::anyhow!(
-                    "Bors service has panicked with an unknown error"
-                ));
-            }
+            Ok(Err(error)) => return Err(join_error_to_anyhow(error)),
             Err(_) => {
                 return Err(anyhow::anyhow!(
                     "Timed out waiting for bors service to shutdown. Maybe you forgot to close some channel senders?"
@@ -943,6 +937,21 @@ impl BorsTester {
         // Flush any local queues
         self.http_mock.gh_server.assert_empty_queues().await;
         Ok(Arc::into_inner(self.github).unwrap().into_inner())
+    }
+}
+
+/// Try to produce a nicer error message from a failed tokio Task
+/// Normally, JoinError internally prints the
+/// panic payload with Debug impl instead of Display impl, which mangles backtraces from anyhow
+/// errors.
+fn join_error_to_anyhow(error: JoinError) -> anyhow::Error {
+    let panic = error.into_panic();
+    if let Some(s) = panic.downcast_ref::<String>() {
+        anyhow::anyhow!("{s}")
+    } else if let Some(s) = panic.downcast_ref::<&'static str>() {
+        anyhow::anyhow!("{s}")
+    } else {
+        anyhow::anyhow!("Unknown error")
     }
 }
 
