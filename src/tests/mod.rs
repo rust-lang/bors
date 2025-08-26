@@ -59,7 +59,7 @@ pub use webhook::{TEST_WEBHOOK_SECRET, create_webhook_request};
 
 /// How long should we wait before we timeout a test.
 /// You can increase this if you want to do interactive debugging.
-const TEST_TIMEOUT: Duration = Duration::from_secs(100);
+const TEST_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub fn default_cmd_prefix() -> CommandPrefix {
     "@bors".to_string().into()
@@ -105,14 +105,14 @@ impl BorsBuilder {
                     .unwrap(),
                 Err(error) => {
                     panic!(
-                        "Test has failed: {error:?}\n\nBors service error: {:?}",
-                        gh_state.err()
+                        "Test has failed: {error:?}\n\nBors service error:\n{:?}",
+                        gh_state.err().unwrap()
                     );
                 }
             },
             Err(_) => {
                 panic!(
-                    "Test has timeouted after {}s\n\nBors service error: {:?}",
+                    "Test has timeouted after {}s\n\nBors service error:\n{:?}",
                     TEST_TIMEOUT.as_secs(),
                     gh_state.err()
                 );
@@ -917,7 +917,23 @@ impl BorsTester {
         self.mergeable_queue_tx.shutdown();
         // Wait until all events are handled in the bors service
         match tokio::time::timeout(Duration::from_secs(5), bors).await {
-            Ok(res) => res?,
+            Ok(Ok(_)) => {}
+            Ok(Err(error)) => {
+                // Try to produce a nicer error message, because JoinError internally prints the
+                // panic payload with Debug impl instead of Display impl, which mangles backtraces.
+                let panic = error.into_panic();
+                if let Some(s) = panic.downcast_ref::<String>() {
+                    return Err(anyhow::anyhow!("{s}"));
+                }
+
+                if let Some(s) = panic.downcast_ref::<&'static str>() {
+                    return Err(anyhow::anyhow!("{s}"));
+                }
+
+                return Err(anyhow::anyhow!(
+                    "Bors service has panicked with an unknown error"
+                ));
+            }
             Err(_) => {
                 return Err(anyhow::anyhow!(
                     "Timed out waiting for bors service to shutdown. Maybe you forgot to close some channel senders?"
