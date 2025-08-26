@@ -109,6 +109,7 @@ pub fn build_failed_comment(
     repo: &GithubRepoName,
     commit_sha: CommitSha,
     failed_workflows: Vec<FailedWorkflowRun>,
+    error_context: Option<String>,
 ) -> Comment {
     use std::fmt::Write;
 
@@ -162,6 +163,10 @@ pub fn build_failed_comment(
                 .unwrap();
             }
         }
+    }
+
+    if let Some(error_context) = error_context {
+        writeln!(msg, "\n{error_context}").unwrap();
     }
 
     Comment::new(msg)
