@@ -287,6 +287,15 @@ pub enum BuildStatus {
     Timeouted,
 }
 
+impl BuildStatus {
+    pub fn is_failure(&self) -> bool {
+        match self {
+            BuildStatus::Failure | BuildStatus::Cancelled | BuildStatus::Timeouted => true,
+            BuildStatus::Pending | BuildStatus::Success => false,
+        }
+    }
+}
+
 impl Display for BuildStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {

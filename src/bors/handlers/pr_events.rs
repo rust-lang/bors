@@ -66,14 +66,25 @@ pub(super) async fn handle_push_to_pull_request(
         return Ok(());
     }
 
+    let had_failed_build = pr_model
+        .auto_build
+        .as_ref()
+        .map(|b| b.status.is_failure())
+        .unwrap_or(false);
     unapprove_pr(&repo_state, &db, &pr_model).await?;
-    notify_of_pushed_pr(
-        &repo_state,
-        pr_number,
-        pr.head.sha.clone(),
-        auto_build_cancel_message,
-    )
-    .await
+
+    // If we had an approved PR with a failed build, there's not much point in sending this warning
+    if !had_failed_build {
+        notify_of_pushed_pr(
+            &repo_state,
+            pr_number,
+            pr.head.sha.clone(),
+            auto_build_cancel_message,
+        )
+        .await
+    } else {
+        Ok(())
+    }
 }
 
 pub(super) async fn handle_pull_request_opened(
@@ -390,6 +401,27 @@ mod tests {
             Ok(())
         })
         .await;
+    }
+
+    #[sqlx::test]
+    async fn push_to_pr_do_nothing_when_build_failed(pool: sqlx::PgPool) {
+        BorsBuilder::new(pool)
+            .github(gh_state_with_merge_queue())
+            .run_test(async |tester: &mut BorsTester| {
+                tester.start_auto_build(()).await?;
+                tester
+                    .workflow_full_failure(tester.auto_branch().await)
+                    .await?;
+                tester.expect_comments((), 1).await;
+                tester.push_to_pr(()).await?;
+
+                // No comment should be posted, but the PR should still be unapproved
+                tester
+                    .wait_for_pr((), |pr| !pr.is_approved() && pr.auto_build.is_none())
+                    .await?;
+                Ok(())
+            })
+            .await;
     }
 
     #[sqlx::test]

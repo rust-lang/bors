@@ -45,6 +45,7 @@ impl PgDbClient {
         approve_pull_request(&self.pool, pr.id, approval_info, priority, rollup).await
     }
 
+    /// Unapprove a pull request and remove its auto build status, if there is any attached.
     pub async fn unapprove(&self, pr: &PullRequestModel) -> anyhow::Result<()> {
         unapprove_pull_request(&self.pool, pr.id).await
     }
