@@ -347,8 +347,12 @@ impl BorsTester {
         self.get_branch("automation/bors/auto").await
     }
 
-    /// Wait until the next bot comment is received on the specified repo and PR.
-    pub async fn get_comment<Id: Into<PrIdentifier>>(&mut self, id: Id) -> anyhow::Result<String> {
+    /// Wait until the next bot comment is received on the specified repo and PR, and return its
+    /// text.
+    pub async fn get_comment_text<Id: Into<PrIdentifier>>(
+        &mut self,
+        id: Id,
+    ) -> anyhow::Result<String> {
         Ok(GitHubState::get_comment(self.github.clone(), id)
             .await?
             .content)
@@ -720,7 +724,7 @@ impl BorsTester {
         let id = id.into();
         for i in 0..count {
             let id = id.clone();
-            self.get_comment(id)
+            self.get_comment_text(id)
                 .await
                 .unwrap_or_else(|_| panic!("Failed to get comment #{i}"));
         }
@@ -797,7 +801,7 @@ impl BorsTester {
     ///
     /// This method is useful if you execute a command that produces no comment as an output
     /// and you need to wait until it has been processed by bors.
-    /// Prefer using [BorsTester::expect_comments] or [BorsTester::get_comment] to synchronize
+    /// Prefer using [BorsTester::expect_comments] or [BorsTester::get_comment_text] to synchronize
     /// if you are waiting for a comment to be posted to a PR.
     pub async fn wait_for<F, Fut>(&self, condition: F) -> anyhow::Result<()>
     where

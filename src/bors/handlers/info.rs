@@ -79,7 +79,7 @@ mod tests {
         run_test(pool, async |tester: &mut BorsTester| {
             tester.post_comment("@bors info").await?;
             insta::assert_snapshot!(
-                tester.get_comment(()).await?,
+                tester.get_comment_text(()).await?,
                 @r"
             ## Status of PR `1`
             - Not Approved
@@ -100,7 +100,7 @@ mod tests {
 
             tester.post_comment("@bors info").await?;
             insta::assert_snapshot!(
-                tester.get_comment(()).await?,
+                tester.get_comment_text(()).await?,
                 @r"
             ## Status of PR `1`
             - Approved by: `default-user`
@@ -121,7 +121,7 @@ mod tests {
 
             tester.post_comment("@bors info").await?;
             insta::assert_snapshot!(
-                tester.get_comment(()).await?,
+                tester.get_comment_text(()).await?,
                 @r"
             ## Status of PR `1`
             - Not Approved
@@ -142,7 +142,7 @@ mod tests {
 
             tester.post_comment("@bors info").await?;
             insta::assert_snapshot!(
-                tester.get_comment(()).await?,
+                tester.get_comment_text(()).await?,
                 @r"
             ## Status of PR `1`
             - Not Approved
@@ -173,7 +173,7 @@ mod tests {
 
             tester.post_comment("@bors info").await?;
             insta::assert_snapshot!(
-                tester.get_comment(()).await?,
+                tester.get_comment_text(()).await?,
                 @r"
             ## Status of PR `1`
             - Approved by: `default-user`

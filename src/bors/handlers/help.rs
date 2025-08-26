@@ -85,7 +85,7 @@ mod tests {
     async fn help_command(pool: sqlx::PgPool) {
         run_test(pool, async |tester: &mut BorsTester| {
             tester.post_comment("@bors help").await?;
-            insta::assert_snapshot!(tester.get_comment(()).await?, @r"
+            insta::assert_snapshot!(tester.get_comment_text(()).await?, @r"
             You can use the following commands:
 
             ## PR management

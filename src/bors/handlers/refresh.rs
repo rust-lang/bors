@@ -284,7 +284,7 @@ timeout = 3600
                     tester.cancel_timed_out_builds().await;
                 })
                 .await;
-                insta::assert_snapshot!(tester.get_comment(()).await?, @":boom: Test timed out after `3600`s");
+                insta::assert_snapshot!(tester.get_comment_text(()).await?, @":boom: Test timed out after `3600`s");
                 assert_eq!(
                     tester
                         .db()

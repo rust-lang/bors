@@ -709,7 +709,7 @@ mod tests {
     async fn unknown_command(pool: sqlx::PgPool) {
         run_test(pool, async |tester: &mut BorsTester| {
             tester.post_comment(Comment::from("@bors foo")).await?;
-            insta::assert_snapshot!(tester.get_comment(()).await?, @r#"Unknown command "foo". Run `@bors help` to see available commands."#);
+            insta::assert_snapshot!(tester.get_comment_text(()).await?, @r#"Unknown command "foo". Run `@bors help` to see available commands."#);
             Ok(())
         })
         .await;

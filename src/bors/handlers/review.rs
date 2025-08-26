@@ -388,7 +388,7 @@ mod tests {
         run_test(pool, async |tester: &mut BorsTester| {
             tester.post_comment("@bors r+").await?;
             insta::assert_snapshot!(
-                tester.get_comment(()).await?,
+                tester.get_comment_text(()).await?,
                 @r"
             :pushpin: Commit pr-1-sha has been approved by `default-user`
 
@@ -414,7 +414,7 @@ mod tests {
                 .post_comment(format!(r#"@bors r={approve_user}"#).as_str())
                 .await?;
             insta::assert_snapshot!(
-                tester.get_comment(()).await?,
+                tester.get_comment_text(()).await?,
                 @r"
             :pushpin: Commit pr-1-sha has been approved by `user1`
 
@@ -435,7 +435,7 @@ mod tests {
                 .post_comment(Comment::from("@bors try").with_author(User::unprivileged()))
                 .await?;
             insta::assert_snapshot!(
-                tester.get_comment(()).await?,
+                tester.get_comment_text(()).await?,
                 @"@unprivileged-user: :key: Insufficient privileges: not in try users"
             );
             Ok(())
@@ -451,7 +451,7 @@ mod tests {
                 .await?;
             tester.post_comment("@bors p=2").await?;
             insta::assert_snapshot!(
-                tester.get_comment(()).await?,
+                tester.get_comment_text(()).await?,
                 @"@unprivileged-user: :key: Insufficient privileges: not in review users"
             );
             Ok(())
@@ -464,7 +464,7 @@ mod tests {
         run_test(pool, async |tester: &mut BorsTester| {
             tester.post_comment("@bors r+").await?;
             insta::assert_snapshot!(
-                tester.get_comment(()).await?,
+                tester.get_comment_text(()).await?,
                 @r"
             :pushpin: Commit pr-1-sha has been approved by `default-user`
 
@@ -477,7 +477,7 @@ mod tests {
                 .expect_approved_by(&User::default_pr_author().name);
             tester.post_comment("@bors r-").await?;
             insta::assert_snapshot!(
-                tester.get_comment(()).await?,
+                tester.get_comment_text(()).await?,
                 @"Commit pr-1-sha has been unapproved."
             );
 
@@ -496,7 +496,7 @@ mod tests {
                 .post_comment(Comment::from("@bors r-").with_author(User::unprivileged()))
                 .await?;
             insta::assert_snapshot!(
-                tester.get_comment(()).await?,
+                tester.get_comment_text(()).await?,
                 @"@unprivileged-user: :key: Insufficient privileges: not in review users"
             );
 
@@ -517,7 +517,7 @@ mod tests {
             tester.set_pr_status_closed(()).await?;
             tester.post_comment("@bors r-").await?;
             insta::assert_snapshot!(
-                tester.get_comment(()).await?,
+                tester.get_comment_text(()).await?,
                 @":clipboard: Only unclosed PRs can be unapproved."
             );
 
@@ -609,7 +609,7 @@ mod tests {
         run_test(pool, async |tester: &mut BorsTester| {
             tester.post_comment("@bors treeclosed=5").await?;
             insta::assert_snapshot!(
-                tester.get_comment(()).await?,
+                tester.get_comment_text(()).await?,
                 @"Tree closed for PRs with priority less than 5"
             );
 
@@ -640,7 +640,7 @@ mod tests {
             .run_test(async |tester: &mut BorsTester| {
                 tester.post_comment("@bors treeclosed=5").await?;
                 insta::assert_snapshot!(
-                    tester.get_comment(()).await?,
+                    tester.get_comment_text(()).await?,
                     @"@default-user: :key: Insufficient privileges: not in review users"
                 );
                 Ok(())
@@ -659,7 +659,7 @@ mod tests {
             .run_test(async |tester: &mut BorsTester| {
                 tester.post_comment("@bors r+").await?;
                 insta::assert_snapshot!(
-                    tester.get_comment(()).await?,
+                    tester.get_comment_text(()).await?,
                     @"@default-user: :key: Insufficient privileges: not in review users"
                 );
                 Ok(())
@@ -676,7 +676,7 @@ mod tests {
                     .post_comment(review_comment("@bors delegate+"))
                     .await?;
                 insta::assert_snapshot!(
-                    tester.get_comment(()).await?,
+                    tester.get_comment_text(()).await?,
                     @r#"
                 :v: @default-user, you can now approve this pull request!
 
@@ -763,7 +763,7 @@ mod tests {
             .run_test(async |tester: &mut BorsTester| {
                 tester.post_comment("@bors delegate+").await?;
                 insta::assert_snapshot!(
-                    tester.get_comment(()).await?,
+                    tester.get_comment_text(()).await?,
                     @"@default-user: :key: Insufficient privileges: not in review users"
                 );
                 Ok(())
@@ -874,7 +874,7 @@ mod tests {
                     .post_comment(Comment::from("@bors delegate+").with_author(User::try_user()))
                     .await?;
                 insta::assert_snapshot!(
-                    tester.get_comment(()).await?,
+                    tester.get_comment_text(()).await?,
                     @"@user-with-try-privileges: :key: Insufficient privileges: not in review users"
                 );
                 Ok(())
@@ -1110,7 +1110,7 @@ mod tests {
                     .post_comment(review_comment("@bors delegate=try"))
                     .await?;
                 insta::assert_snapshot!(
-                    tester.get_comment(()).await?,
+                    tester.get_comment_text(()).await?,
                     @r"
                 :v: @default-user, you can now perform try builds on this pull request!
 
@@ -1137,7 +1137,7 @@ mod tests {
                 tester.expect_comments((), 1).await;
 
                 tester.post_comment("@bors try").await?;
-                insta::assert_snapshot!(tester.get_comment(()).await?, @r"
+                insta::assert_snapshot!(tester.get_comment_text(()).await?, @r"
                 :hourglass: Trying commit pr-1-sha with merge merge-0-pr-1…
 
                 To cancel the try build, run the command `@bors try cancel`.
@@ -1164,7 +1164,7 @@ mod tests {
 
                 tester.post_comment("@bors r+").await?;
                 insta::assert_snapshot!(
-                    tester.get_comment(()).await?,
+                    tester.get_comment_text(()).await?,
                     @"@default-user: :key: Insufficient privileges: not in review users"
                 );
                 tester.get_pr(()).await.expect_unapproved();
@@ -1204,7 +1204,7 @@ mod tests {
                 .set_pr_status_draft(())
                 .await?;
             tester.post_comment("@bors r+").await?;
-            insta::assert_snapshot!(tester.get_comment(()).await?, @":clipboard: Only open, non-draft PRs can be approved.");
+            insta::assert_snapshot!(tester.get_comment_text(()).await?, @":clipboard: Only open, non-draft PRs can be approved.");
             tester.get_pr(()).await.expect_unapproved();
             Ok(())
         })
@@ -1218,7 +1218,7 @@ mod tests {
                 .set_pr_status_closed(())
                 .await?;
             tester.post_comment("@bors r+").await?;
-            insta::assert_snapshot!(tester.get_comment(()).await?, @":clipboard: Only open, non-draft PRs can be approved.");
+            insta::assert_snapshot!(tester.get_comment_text(()).await?, @":clipboard: Only open, non-draft PRs can be approved.");
             tester.get_pr(()).await.expect_unapproved();
             Ok(())
         })
@@ -1232,7 +1232,7 @@ mod tests {
                 .set_pr_status_merged(())
                 .await?;
             tester.post_comment("@bors r+").await?;
-            insta::assert_snapshot!(tester.get_comment(()).await?, @":clipboard: Only open, non-draft PRs can be approved.");
+            insta::assert_snapshot!(tester.get_comment_text(()).await?, @":clipboard: Only open, non-draft PRs can be approved.");
             tester.get_pr(()).await.expect_unapproved();
             Ok(())
         })
@@ -1248,7 +1248,7 @@ mod tests {
                 })
                 .await?;
             tester.post_comment("@bors r+").await?;
-            insta::assert_snapshot!(tester.get_comment(()).await?, @r"
+            insta::assert_snapshot!(tester.get_comment_text(()).await?, @r"
             :clipboard: Looks like this PR is still in progress, ignoring approval.
 
             Hint: Remove **[do not merge]** from this PR's title when it is ready for review.
@@ -1277,7 +1277,7 @@ labels_blocking_approval = ["proposed-final-comment-period"]
                     })
                     .await?;
                 tester.post_comment("@bors r+").await?;
-                insta::assert_snapshot!(tester.get_comment(()).await?, @":clipboard: This PR cannot be approved because it currently has the following label: `proposed-final-comment-period`.");
+                insta::assert_snapshot!(tester.get_comment_text(()).await?, @":clipboard: This PR cannot be approved because it currently has the following label: `proposed-final-comment-period`.");
                 tester.get_pr(()).await.expect_unapproved();
                 Ok(())
             })
@@ -1304,7 +1304,7 @@ labels_blocking_approval = ["proposed-final-comment-period", "final-comment-peri
                     })
                     .await?;
                 tester.post_comment("@bors r+").await?;
-                insta::assert_snapshot!(tester.get_comment(()).await?, @":clipboard: This PR cannot be approved because it currently has the following labels: `proposed-final-comment-period`, `final-comment-period`.");
+                insta::assert_snapshot!(tester.get_comment_text(()).await?, @":clipboard: This PR cannot be approved because it currently has the following labels: `proposed-final-comment-period`, `final-comment-period`.");
                 tester.get_pr(()).await.expect_unapproved();
                 Ok(())
             })
@@ -1324,7 +1324,7 @@ merge_queue_enabled = true
                 tester.wait_for_pr((), |pr| pr.auto_build.is_some()).await?;
                 tester.workflow_start(tester.auto_branch().await).await?;
                 tester.post_comment("@bors r-").await?;
-                insta::assert_snapshot!(tester.get_comment(()).await?, @r"
+                insta::assert_snapshot!(tester.get_comment_text(()).await?, @r"
                 Commit pr-1-sha has been unapproved.
 
                 Auto build cancelled due to unapproval. Cancelled workflows:
@@ -1352,7 +1352,7 @@ merge_queue_enabled = true
                     .await?;
                 tester.workflow_start(tester.auto_branch().await).await?;
                 tester.post_comment("@bors r-").await?;
-                insta::assert_snapshot!(tester.get_comment(()).await?, @r"
+                insta::assert_snapshot!(tester.get_comment_text(()).await?, @r"
                 Commit pr-1-sha has been unapproved.
 
                 Auto build cancelled due to unapproval. It was not possible to cancel some workflows.
