@@ -6,7 +6,7 @@ use crate::bors::event::{
 };
 use crate::bors::handlers::unapprove_pr;
 use crate::bors::handlers::workflow::{AutoBuildCancelReason, maybe_cancel_auto_build};
-use crate::bors::mergeable_queue::MergeableQueueSender;
+use crate::bors::mergeability_queue::MergeabilityQueueSender;
 use crate::bors::{Comment, PullRequestStatus, RepositoryState};
 use crate::database::MergeableState;
 use crate::github::{CommitSha, PullRequestNumber};
@@ -16,7 +16,7 @@ use std::sync::Arc;
 pub(super) async fn handle_pull_request_edited(
     repo_state: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
-    mergeable_queue: MergeableQueueSender,
+    mergeability_queue: MergeabilityQueueSender,
     payload: PullRequestEdited,
 ) -> anyhow::Result<()> {
     let pr = &payload.pull_request;
@@ -30,7 +30,7 @@ pub(super) async fn handle_pull_request_edited(
         return Ok(());
     };
 
-    mergeable_queue.enqueue_pr(pr_model.repository.clone(), pr_number);
+    mergeability_queue.enqueue_pr(pr_model.repository.clone(), pr_number);
 
     if !pr_model.is_approved() {
         return Ok(());
@@ -43,7 +43,7 @@ pub(super) async fn handle_pull_request_edited(
 pub(super) async fn handle_push_to_pull_request(
     repo_state: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
-    mergeable_queue: MergeableQueueSender,
+    mergeability_queue: MergeabilityQueueSender,
     payload: PullRequestPushed,
 ) -> anyhow::Result<()> {
     let pr = &payload.pull_request;
@@ -52,7 +52,7 @@ pub(super) async fn handle_push_to_pull_request(
         .upsert_pull_request(repo_state.repository(), pr.clone().into())
         .await?;
 
-    mergeable_queue.enqueue_pr(repo_state.repository().clone(), pr_number);
+    mergeability_queue.enqueue_pr(repo_state.repository().clone(), pr_number);
 
     let auto_build_cancel_message = maybe_cancel_auto_build(
         &repo_state.client,
@@ -90,7 +90,7 @@ pub(super) async fn handle_push_to_pull_request(
 pub(super) async fn handle_pull_request_opened(
     repo_state: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
-    mergeable_queue: MergeableQueueSender,
+    mergeability_queue: MergeabilityQueueSender,
     payload: PullRequestOpened,
 ) -> anyhow::Result<()> {
     let pr_status = if payload.draft {
@@ -115,7 +115,7 @@ pub(super) async fn handle_pull_request_opened(
     )
     .await?;
 
-    mergeable_queue.enqueue_pr(repo_state.repository().clone(), payload.pull_request.number);
+    mergeability_queue.enqueue_pr(repo_state.repository().clone(), payload.pull_request.number);
 
     Ok(())
 }
@@ -149,7 +149,7 @@ pub(super) async fn handle_pull_request_merged(
 pub(super) async fn handle_pull_request_reopened(
     repo_state: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
-    mergeable_queue: MergeableQueueSender,
+    mergeability_queue: MergeabilityQueueSender,
     payload: PullRequestReopened,
 ) -> anyhow::Result<()> {
     let pr = &payload.pull_request;
@@ -157,7 +157,7 @@ pub(super) async fn handle_pull_request_reopened(
     db.upsert_pull_request(repo_state.repository(), pr.clone().into())
         .await?;
 
-    mergeable_queue.enqueue_pr(repo_state.repository().clone(), pr_number);
+    mergeability_queue.enqueue_pr(repo_state.repository().clone(), pr_number);
 
     Ok(())
 }
@@ -229,7 +229,7 @@ pub(super) async fn handle_pull_request_ready_for_review(
 pub(super) async fn handle_push_to_branch(
     repo_state: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
-    mergeable_queue: MergeableQueueSender,
+    mergeability_queue: MergeabilityQueueSender,
     payload: PushToBranch,
 ) -> anyhow::Result<()> {
     let rows = db
@@ -245,13 +245,14 @@ pub(super) async fn handle_push_to_branch(
 
     if !affected_prs.is_empty() {
         tracing::info!(
-            "Adding {rows} {} to the mergeable queue due to a new commit pushed to base branch `{}`",
-            pluralize("PR", rows as usize),
+            "Adding {} {} to the mergeability queue due to a new commit pushed to base branch `{}`",
+            affected_prs.len(),
+            pluralize("PR", affected_prs.len()),
             payload.branch
         );
 
         for pr in affected_prs {
-            mergeable_queue.enqueue_pr(repo_state.repository().clone(), pr.number);
+            mergeability_queue.enqueue_pr(repo_state.repository().clone(), pr.number);
         }
     }
 
@@ -444,7 +445,7 @@ mod tests {
     }
 
     #[sqlx::test]
-    async fn update_mergeable_state_on_pr_edited(pool: sqlx::PgPool) {
+    async fn update_mergeability_state_on_pr_edited(pool: sqlx::PgPool) {
         run_test(pool, async |tester: &mut BorsTester| {
             tester
                 .edit_pr((), |pr| {
@@ -565,7 +566,7 @@ mod tests {
     }
 
     #[sqlx::test]
-    async fn mergeable_queue_processes_pr_base_change(pool: sqlx::PgPool) {
+    async fn mergeability_queue_processes_pr_base_change(pool: sqlx::PgPool) {
         run_test(pool, async |tester: &mut BorsTester| {
             let branch = tester.create_branch("beta").await;
             tester

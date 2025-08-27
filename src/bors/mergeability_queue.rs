@@ -42,7 +42,7 @@ impl std::fmt::Display for QueuedPullRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct MergeableQueueItem {
+pub struct MergeabilityQueueItem {
     pub pull_request: QueuedPullRequest,
     pub attempt: u32,
 }
@@ -50,7 +50,7 @@ pub struct MergeableQueueItem {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 enum QueueMessage {
     Shutdown,
-    Item(MergeableQueueItem),
+    Item(MergeabilityQueueItem),
 }
 
 #[derive(PartialEq, Eq)]
@@ -81,29 +81,29 @@ struct SharedInner {
 }
 
 #[derive(Clone)]
-pub struct MergeableQueueSender {
+pub struct MergeabilityQueueSender {
     inner: Arc<SharedInner>,
 }
 
-pub struct MergeableQueueReceiver {
+pub struct MergeabilityQueueReceiver {
     inner: Arc<SharedInner>,
 }
 
-pub fn create_mergeable_queue() -> (MergeableQueueSender, MergeableQueueReceiver) {
+pub fn create_mergeability_queue() -> (MergeabilityQueueSender, MergeabilityQueueReceiver) {
     let shared = Arc::new(SharedInner {
         queue: Mutex::new(BinaryHeap::new()),
         notify: Notify::new(),
     });
 
     (
-        MergeableQueueSender {
+        MergeabilityQueueSender {
             inner: shared.clone(),
         },
-        MergeableQueueReceiver { inner: shared },
+        MergeabilityQueueReceiver { inner: shared },
     )
 }
 
-impl MergeableQueueSender {
+impl MergeabilityQueueSender {
     /// Shutdown the mergeability queue.
     pub fn shutdown(&self) {
         let mut queue = self.inner.queue.lock().unwrap();
@@ -123,7 +123,7 @@ impl MergeableQueueSender {
     /// its mergeability status.
     pub fn enqueue_pr(&self, repo: GithubRepoName, pr_number: PullRequestNumber) {
         self.insert_item(
-            MergeableQueueItem {
+            MergeabilityQueueItem {
                 pull_request: QueuedPullRequest { pr_number, repo },
                 attempt: 1,
             },
@@ -131,7 +131,7 @@ impl MergeableQueueSender {
         );
     }
 
-    fn enqueue_retry_later(&self, queue_item: MergeableQueueItem) {
+    fn enqueue_retry_later(&self, queue_item: MergeabilityQueueItem) {
         // First attempt = BASE_DELAY
         // Second attempt = BASE_DELAY * 2
         // Third attempt = BASE_DELAY * 3
@@ -141,7 +141,7 @@ impl MergeableQueueSender {
         let next_attempt = queue_item.attempt + 1;
 
         self.insert_item(
-            MergeableQueueItem {
+            MergeabilityQueueItem {
                 pull_request: queue_item.pull_request,
                 attempt: next_attempt,
             },
@@ -149,7 +149,7 @@ impl MergeableQueueSender {
         );
     }
 
-    fn insert_item(&self, item: MergeableQueueItem, expiration: Option<Instant>) {
+    fn insert_item(&self, item: MergeabilityQueueItem, expiration: Option<Instant>) {
         let mut queue = self.inner.queue.lock().unwrap();
 
         // Notify when:
@@ -175,16 +175,16 @@ impl MergeableQueueSender {
     }
 }
 
-impl MergeableQueueReceiver {
+impl MergeabilityQueueReceiver {
     /// Get the next item from the queue.
-    pub async fn dequeue(&self) -> Option<(MergeableQueueItem, MergeableQueueSender)> {
+    pub async fn dequeue(&self) -> Option<(MergeabilityQueueItem, MergeabilityQueueSender)> {
         loop {
             match self.peek_inner() {
                 // Item is ready.
                 Ok(QueueMessage::Item(item)) => {
                     break Some((
                         item,
-                        MergeableQueueSender {
+                        MergeabilityQueueSender {
                             inner: self.inner.clone(),
                         },
                     ));
@@ -243,12 +243,12 @@ impl MergeableQueueReceiver {
     }
 }
 
-pub async fn handle_mergeable_queue_item(
+pub async fn check_mergeability(
     ctx: Arc<BorsContext>,
-    mq_tx: MergeableQueueSender,
-    mq_item: MergeableQueueItem,
+    mq_tx: MergeabilityQueueSender,
+    mq_item: MergeabilityQueueItem,
 ) -> anyhow::Result<()> {
-    let MergeableQueueItem {
+    let MergeabilityQueueItem {
         ref pull_request,
         ref attempt,
     } = mq_item;
@@ -317,8 +317,8 @@ pub async fn handle_mergeable_queue_item(
 
 #[cfg(test)]
 mod tests {
-    use crate::bors::mergeable_queue::{
-        MergeableQueueItem, QueuedPullRequest, create_mergeable_queue,
+    use crate::bors::mergeability_queue::{
+        MergeabilityQueueItem, QueuedPullRequest, create_mergeability_queue,
     };
     use crate::github::PullRequestNumber;
     use crate::tests::default_repo_name;
@@ -326,7 +326,7 @@ mod tests {
 
     #[tokio::test]
     async fn order_by_pr_number() {
-        let (tx, rx) = create_mergeable_queue();
+        let (tx, rx) = create_mergeability_queue();
         tx.enqueue_pr(default_repo_name(), 3u64.into());
         tx.enqueue_pr(default_repo_name(), 1u64.into());
         tx.enqueue_pr(default_repo_name(), 2u64.into());
@@ -341,7 +341,7 @@ mod tests {
 
     #[tokio::test]
     async fn immediate_before_delayed() {
-        let (tx, rx) = create_mergeable_queue();
+        let (tx, rx) = create_mergeability_queue();
         tx.enqueue_retry_later(item(5, 1));
         tx.enqueue_pr(default_repo_name(), 1u64.into());
         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -357,7 +357,7 @@ mod tests {
 
     #[tokio::test]
     async fn duplicated_pr() {
-        let (tx, rx) = create_mergeable_queue();
+        let (tx, rx) = create_mergeability_queue();
         // Handle duplicated PRs, still keep ordering by time
         tx.enqueue_retry_later(item(5, 1)); // this attempt will be bumped to 2
         tx.enqueue_pr(default_repo_name(), 5u64.into());
@@ -369,8 +369,8 @@ mod tests {
         }
     }
 
-    fn item(pr_number: u64, attempt: u32) -> MergeableQueueItem {
-        MergeableQueueItem {
+    fn item(pr_number: u64, attempt: u32) -> MergeabilityQueueItem {
+        MergeabilityQueueItem {
             pull_request: QueuedPullRequest {
                 pr_number: PullRequestNumber(pr_number),
                 repo: default_repo_name(),

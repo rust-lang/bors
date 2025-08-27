@@ -284,15 +284,15 @@ pub(crate) async fn get_nonclosed_pull_requests(
     .await
 }
 
-pub(crate) async fn update_pr_mergeable_state(
+pub(crate) async fn update_pr_mergeability_state(
     executor: impl PgExecutor<'_>,
     pr_id: i32,
-    mergeable_state: MergeableState,
+    mergeability_state: MergeableState,
 ) -> anyhow::Result<()> {
-    measure_db_query("update_pr_mergeable_state", || async {
+    measure_db_query("update_pr_mergeability_state", || async {
         sqlx::query!(
             "UPDATE pull_request SET mergeable_state = $1 WHERE id = $2",
-            mergeable_state as _,
+            mergeability_state as _,
             pr_id
         )
         .execute(executor)
@@ -302,7 +302,7 @@ pub(crate) async fn update_pr_mergeable_state(
     .await
 }
 
-pub(crate) async fn get_prs_with_unknown_mergeable_state(
+pub(crate) async fn get_prs_with_unknown_mergeability_state(
     executor: impl PgExecutor<'_>,
     repo: &GithubRepoName,
 ) -> anyhow::Result<Vec<PullRequestModel>> {
@@ -351,7 +351,7 @@ pub(crate) async fn update_mergeable_states_by_base_branch(
     executor: impl PgExecutor<'_>,
     repo: &GithubRepoName,
     base_branch: &str,
-    mergeable_state: MergeableState,
+    mergeability_state: MergeableState,
 ) -> anyhow::Result<u64> {
     measure_db_query("update_mergeable_states_by_base_branch", || async {
         let result = sqlx::query!(
@@ -362,7 +362,7 @@ pub(crate) async fn update_mergeable_states_by_base_branch(
             AND base_branch = $3
             AND status IN ('open', 'draft')
             "#,
-            mergeable_state as _,
+            mergeability_state as _,
             repo as &GithubRepoName,
             base_branch,
         )

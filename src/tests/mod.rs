@@ -18,7 +18,7 @@ use tokio::task::{JoinError, JoinHandle};
 use tower::Service;
 
 use crate::bors::merge_queue::MergeQueueSender;
-use crate::bors::mergeable_queue::MergeableQueueSender;
+use crate::bors::mergeability_queue::MergeabilityQueueSender;
 use crate::bors::{
     CommandPrefix, PullRequestStatus, RollupMode, WAIT_FOR_MERGE_QUEUE,
     WAIT_FOR_MERGEABILITY_STATUS_REFRESH, WAIT_FOR_PR_STATUS_REFRESH,
@@ -150,7 +150,7 @@ pub struct BorsTester {
     http_mock: ExternalHttpMock,
     github: Arc<tokio::sync::Mutex<GitHubState>>,
     db: Arc<PgDbClient>,
-    mergeable_queue_tx: MergeableQueueSender,
+    mergeability_queue_tx: MergeabilityQueueSender,
     merge_queue_tx: MergeQueueSender,
     // Sender for bors global events
     global_tx: Sender<BorsGlobalEvent>,
@@ -189,7 +189,7 @@ impl BorsTester {
         let BorsProcess {
             repository_tx,
             global_tx,
-            mergeable_queue_tx,
+            mergeability_queue_tx,
             merge_queue_tx,
             bors_process,
         } = create_bors_process(
@@ -215,7 +215,7 @@ impl BorsTester {
                 http_mock: mock,
                 github,
                 db,
-                mergeable_queue_tx,
+                mergeability_queue_tx,
                 merge_queue_tx,
                 global_tx,
                 webhooks_active: true,
@@ -953,7 +953,7 @@ impl BorsTester {
         drop(self.app);
         drop(self.global_tx);
         self.merge_queue_tx.shutdown();
-        self.mergeable_queue_tx.shutdown();
+        self.mergeability_queue_tx.shutdown();
         // Wait until all events are handled in the bors service
         match tokio::time::timeout(Duration::from_secs(5), bors).await {
             Ok(Ok(_)) => {}

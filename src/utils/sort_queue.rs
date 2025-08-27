@@ -12,7 +12,7 @@ pub fn sort_queue_prs(mut prs: Vec<PullRequestModel>) -> Vec<PullRequestModel> {
             .then_with(|| a.is_approved().cmp(&b.is_approved()).reverse())
             // 3. Compare build status within approval groups
             .then_with(|| get_status_priority(a).cmp(&get_status_priority(b)))
-            // 4. Compare mergeable state (0 = mergeable, 1 = conflicts/unknown)
+            // 4. Compare mergeability state (0 = mergeable, 1 = conflicts/unknown)
             .then_with(|| get_mergeable_priority(a).cmp(&get_mergeable_priority(b)))
             // 5. Compare priority numbers (higher priority should come first)
             .then_with(|| {

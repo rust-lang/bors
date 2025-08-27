@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use super::mergeable_queue::MergeableQueueSender;
+use super::mergeability_queue::MergeabilityQueueSender;
 use crate::bors::command::{BorsCommand, CommandParseError};
 use crate::bors::comment::CommentTag;
 use crate::bors::event::{BorsGlobalEvent, BorsRepositoryEvent, PullRequestComment};
@@ -12,8 +12,8 @@ use crate::bors::handlers::pr_events::{
     handle_pull_request_assigned, handle_pull_request_unassigned,
 };
 use crate::bors::handlers::refresh::{
-    refresh_pending_builds, reload_repository_config, reload_repository_permissions,
-    reload_unknown_mergeable_prs,
+    refresh_pending_builds, reload_mergeability_status, reload_repository_config,
+    reload_repository_permissions,
 };
 use crate::bors::handlers::review::{
     command_approve, command_close_tree, command_open_tree, command_unapprove,
@@ -52,7 +52,7 @@ mod workflow;
 pub async fn handle_bors_repository_event(
     event: BorsRepositoryEvent,
     ctx: Arc<BorsContext>,
-    mergeable_queue_tx: MergeableQueueSender,
+    mergeability_queue_tx: MergeabilityQueueSender,
     merge_queue_tx: MergeQueueSender,
 ) -> anyhow::Result<()> {
     let db = Arc::clone(&ctx.db);
@@ -130,7 +130,7 @@ pub async fn handle_bors_repository_event(
             let span =
                 tracing::info_span!("Pull request edited", repo = payload.repository.to_string());
 
-            handle_pull_request_edited(repo, db, mergeable_queue_tx, payload)
+            handle_pull_request_edited(repo, db, mergeability_queue_tx, payload)
                 .instrument(span.clone())
                 .await?;
         }
@@ -138,7 +138,7 @@ pub async fn handle_bors_repository_event(
             let span =
                 tracing::info_span!("Pull request pushed", repo = payload.repository.to_string());
 
-            handle_push_to_pull_request(repo, db, mergeable_queue_tx, payload)
+            handle_push_to_pull_request(repo, db, mergeability_queue_tx, payload)
                 .instrument(span.clone())
                 .await?;
         }
@@ -146,7 +146,7 @@ pub async fn handle_bors_repository_event(
             let span =
                 tracing::info_span!("Pull request opened", repo = payload.repository.to_string());
 
-            handle_pull_request_opened(repo, db, mergeable_queue_tx, payload)
+            handle_pull_request_opened(repo, db, mergeability_queue_tx, payload)
                 .instrument(span.clone())
                 .await?;
         }
@@ -172,7 +172,7 @@ pub async fn handle_bors_repository_event(
                 repo = payload.repository.to_string()
             );
 
-            handle_pull_request_reopened(repo, db, mergeable_queue_tx, payload)
+            handle_pull_request_reopened(repo, db, mergeability_queue_tx, payload)
                 .instrument(span.clone())
                 .await?;
         }
@@ -220,7 +220,7 @@ pub async fn handle_bors_repository_event(
             let span =
                 tracing::info_span!("Pushed to branch", repo = payload.repository.to_string());
 
-            handle_push_to_branch(repo, db, mergeable_queue_tx, payload)
+            handle_push_to_branch(repo, db, mergeability_queue_tx, payload)
                 .instrument(span.clone())
                 .await?;
         }
@@ -234,7 +234,7 @@ pub async fn handle_bors_global_event(
     ctx: Arc<BorsContext>,
     gh_client: &Octocrab,
     team_api_client: &TeamApiClient,
-    mergeable_queue_tx: MergeableQueueSender,
+    mergeability_queue_tx: MergeabilityQueueSender,
     merge_queue_tx: MergeQueueSender,
 ) -> anyhow::Result<()> {
     let db = Arc::clone(&ctx.db);
@@ -279,7 +279,8 @@ pub async fn handle_bors_global_event(
             let span = tracing::info_span!("Refresh PR mergeability status");
             for_each_repo(&ctx, |repo| {
                 let span = tracing::info_span!("Repo", repo = repo.repository().to_string());
-                reload_unknown_mergeable_prs(repo, &db, mergeable_queue_tx.clone()).instrument(span)
+                reload_mergeability_status(repo, &db, mergeability_queue_tx.clone())
+                    .instrument(span)
             })
             .instrument(span)
             .await?;

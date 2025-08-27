@@ -10,7 +10,7 @@ use crate::bors::PullRequestStatus;
 use crate::bors::RepositoryState;
 use crate::bors::comment::build_timed_out_comment;
 use crate::bors::handlers::workflow::{CancelBuildError, cancel_build};
-use crate::bors::mergeable_queue::MergeableQueueSender;
+use crate::bors::mergeability_queue::MergeabilityQueueSender;
 use crate::database::{BuildModel, BuildStatus};
 use crate::{PgDbClient, TeamApiClient};
 
@@ -101,13 +101,13 @@ pub async fn reload_repository_permissions(
 
 /// Reloads the mergeability status from GitHub for PRs that have an unknown
 /// mergeability status in the DB.
-pub async fn reload_unknown_mergeable_prs(
+pub async fn reload_mergeability_status(
     repo: Arc<RepositoryState>,
     db: &PgDbClient,
-    mergeable_queue: MergeableQueueSender,
+    mergeability_queue: MergeabilityQueueSender,
 ) -> anyhow::Result<()> {
     let prs = db
-        .get_prs_with_unknown_mergeable_state(repo.repository())
+        .get_prs_with_unknown_mergeability_state(repo.repository())
         .await?;
 
     tracing::info!(
@@ -116,7 +116,7 @@ pub async fn reload_unknown_mergeable_prs(
     );
 
     for pr in prs {
-        mergeable_queue.enqueue_pr(repo.repository().clone(), pr.number);
+        mergeability_queue.enqueue_pr(repo.repository().clone(), pr.number);
     }
 
     Ok(())
