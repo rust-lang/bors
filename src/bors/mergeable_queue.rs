@@ -9,10 +9,9 @@ use tokio::time::timeout;
 
 use super::BorsContext;
 
-/// Delay before processing a mergeable queue item for the first time.
-const BASE_DELAY: Duration = Duration::from_millis(500);
-/// Exponential backoff delay multiplier.
-const BACKOFF_MULTIPLIER: f64 = 2.0;
+/// Base delay before two mergeability check attempts.
+const BASE_DELAY: Duration = Duration::from_secs(5);
+
 /// Max number of mergeable check retries before giving up.
 const MAX_RETRIES: u32 = 5;
 
@@ -115,25 +114,15 @@ impl MergeableQueueSender {
         self.insert_item(
             MergeableQueueItem {
                 pull_request: QueuedPullRequest { pr_number, repo },
-                attempt: 1,
-            },
-            expiration,
-        );
-    }
-
-    pub fn enqueue_now(&self, repo: GithubRepoName, pr_number: PullRequestNumber) {
-        self.insert_item(
-            MergeableQueueItem {
-                pull_request: QueuedPullRequest { pr_number, repo },
-                attempt: 1,
+                attempt: 0,
             },
             None,
         );
     }
 
-    pub fn enqueue_retry(&self, queue_item: MergeableQueueItem) {
+    fn enqueue_retry(&self, queue_item: MergeableQueueItem) {
         let next_attempt = queue_item.attempt + 1;
-        let delay = calculate_exponential_backoff(BASE_DELAY, BACKOFF_MULTIPLIER, next_attempt);
+        let delay = BASE_DELAY * next_attempt;
         let expiration = Some(Instant::now() + delay);
 
         self.insert_item(
@@ -232,16 +221,6 @@ impl MergeableQueueReceiver {
             }
         }
     }
-}
-
-fn calculate_exponential_backoff(
-    base_delay: Duration,
-    backoff_multiplier: f64,
-    attempt: u32,
-) -> Duration {
-    let multiplier = backoff_multiplier.powi(attempt as i32 - 1);
-    let timeout = (base_delay.as_millis() as f64 * multiplier) as u64;
-    Duration::from_millis(timeout)
 }
 
 pub async fn handle_mergeable_queue_item(
