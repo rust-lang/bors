@@ -55,9 +55,8 @@ enum QueueMessage {
 
 #[derive(PartialEq, Eq)]
 struct Item {
-    /// When to process item (None = immediate).
-    /// Reversed to create min-heap for expirations.
-    expiration: Reverse<Option<Instant>>,
+    /// When to process item (None = immediate is ordered before Some).
+    expiration: Option<Instant>,
     inner: QueueMessage,
 }
 
@@ -76,7 +75,8 @@ impl Ord for Item {
 }
 
 struct SharedInner {
-    queue: Mutex<BinaryHeap<Item>>,
+    /// Reversed to create a min-heap (return items that expire the soonest).
+    queue: Mutex<BinaryHeap<Reverse<Item>>>,
     notify: Notify,
 }
 
@@ -109,10 +109,10 @@ impl MergeableQueueSender {
         let mut queue = self.inner.queue.lock().unwrap();
 
         // Send shutdown message
-        queue.push(Item {
-            expiration: Reverse(None),
+        queue.push(Reverse(Item {
+            expiration: None,
             inner: QueueMessage::Shutdown,
-        });
+        }));
 
         // and wake receiver for immediate processing.
         self.inner.notify.notify_one();
@@ -131,7 +131,7 @@ impl MergeableQueueSender {
         );
     }
 
-    fn enqueue_retry(&self, queue_item: MergeableQueueItem) {
+    fn enqueue_retry_later(&self, queue_item: MergeableQueueItem) {
         // First attempt = BASE_DELAY
         // Second attempt = BASE_DELAY * 2
         // Third attempt = BASE_DELAY * 3
@@ -157,17 +157,17 @@ impl MergeableQueueSender {
         let has_earlier_expiration =
             queue
                 .peek()
-                .is_some_and(|head| match (expiration, head.expiration) {
-                    (Some(new_exp), Reverse(Some(head_exp))) => new_exp < head_exp,
+                .is_some_and(|head| match (expiration, head.0.expiration) {
+                    (Some(new_exp), Some(head_exp)) => new_exp < head_exp,
                     _ => false,
                 });
         // 2. The queue was empty before insertion (reader might be waiting)
         let should_notify = queue.is_empty() || expiration.is_none() || has_earlier_expiration;
 
-        queue.push(Item {
-            expiration: Reverse(expiration),
+        queue.push(Reverse(Item {
+            expiration,
             inner: QueueMessage::Item(item),
-        });
+        }));
 
         if should_notify {
             self.inner.notify.notify_one();
@@ -215,26 +215,25 @@ impl MergeableQueueReceiver {
 
         match queue.peek() {
             // Immediate item, ready for processing.
-            Some(Item {
-                expiration: Reverse(None),
-                ..
-            }) => {
-                let item = queue.pop().unwrap().inner;
+            Some(Reverse(Item {
+                expiration: None, ..
+            })) => {
+                let item = queue.pop().unwrap().0.inner;
                 Ok(item)
             }
             // Expiration has passed, ready for processing.
-            Some(Item {
-                expiration: Reverse(Some(expiration)),
+            Some(Reverse(Item {
+                expiration: Some(expiration),
                 ..
-            }) if *expiration <= now => {
-                let item = queue.pop().unwrap().inner;
+            })) if *expiration <= now => {
+                let item = queue.pop().unwrap().0.inner;
                 Ok(item)
             }
-            // Scheduled for future, wait until it's ready.
-            Some(Item {
-                expiration: Reverse(Some(expiration)),
+            // Scheduled for the future, wait until it's ready.
+            Some(Reverse(Item {
+                expiration: Some(expiration),
                 ..
-            }) => {
+            })) => {
                 let wait_time = *expiration - now;
                 Err(Some(wait_time))
             }
@@ -290,7 +289,7 @@ pub async fn handle_mergeable_queue_item(
     if new_mergeable_state == OctocrabMergeableState::Unknown {
         tracing::info!("Mergeability status unknown, scheduling retry.");
 
-        mq_tx.enqueue_retry(mq_item);
+        mq_tx.enqueue_retry_later(mq_item);
 
         return Ok(());
     } else {
@@ -314,4 +313,69 @@ pub async fn handle_mergeable_queue_item(
         .await?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::bors::mergeable_queue::{
+        MergeableQueueItem, QueuedPullRequest, create_mergeable_queue,
+    };
+    use crate::github::PullRequestNumber;
+    use crate::tests::default_repo_name;
+    use std::time::Duration;
+
+    #[tokio::test]
+    async fn order_by_pr_number() {
+        let (tx, rx) = create_mergeable_queue();
+        tx.enqueue_pr(default_repo_name(), 3u64.into());
+        tx.enqueue_pr(default_repo_name(), 1u64.into());
+        tx.enqueue_pr(default_repo_name(), 2u64.into());
+
+        for expected in [1, 2, 3] {
+            assert_eq!(
+                rx.dequeue().await.unwrap().0.pull_request.pr_number.0,
+                expected
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn immediate_before_delayed() {
+        let (tx, rx) = create_mergeable_queue();
+        tx.enqueue_retry_later(item(5, 1));
+        tx.enqueue_pr(default_repo_name(), 1u64.into());
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        tx.enqueue_retry_later(item(10, 1));
+
+        for expected in [1, 5, 10] {
+            assert_eq!(
+                rx.dequeue().await.unwrap().0.pull_request.pr_number.0,
+                expected
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn duplicated_pr() {
+        let (tx, rx) = create_mergeable_queue();
+        // Handle duplicated PRs, still keep ordering by time
+        tx.enqueue_retry_later(item(5, 1)); // this attempt will be bumped to 2
+        tx.enqueue_pr(default_repo_name(), 5u64.into());
+
+        for (pr, attempt) in [(5, 1), (5, 2)] {
+            let item = rx.dequeue().await.unwrap().0;
+            assert_eq!(item.pull_request.pr_number.0, pr);
+            assert_eq!(item.attempt, attempt);
+        }
+    }
+
+    fn item(pr_number: u64, attempt: u32) -> MergeableQueueItem {
+        MergeableQueueItem {
+            pull_request: QueuedPullRequest {
+                pr_number: PullRequestNumber(pr_number),
+                repo: default_repo_name(),
+            },
+            attempt,
+        }
+    }
 }
