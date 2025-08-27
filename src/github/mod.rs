@@ -20,7 +20,7 @@ pub use webhook::WebhookSecret;
 use crate::bors::PullRequestStatus;
 
 /// Unique identifier of a GitHub repository
-#[derive(Debug, PartialEq, Eq, Hash, Clone)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone, PartialOrd, Ord)]
 pub struct GithubRepoName {
     owner: String,
     name: String,

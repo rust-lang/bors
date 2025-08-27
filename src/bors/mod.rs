@@ -26,7 +26,7 @@ mod context;
 pub mod event;
 mod handlers;
 pub mod merge_queue;
-pub mod mergeable_queue;
+pub mod mergeability_queue;
 
 use crate::database::{WorkflowModel, WorkflowStatus};
 pub use command::CommandPrefix;

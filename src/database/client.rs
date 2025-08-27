@@ -13,14 +13,13 @@ use crate::github::{CommitSha, GithubRepoName};
 use super::operations::{
     approve_pull_request, create_build, create_pull_request, create_workflow,
     delegate_pull_request, delete_tagged_bot_comment, find_build, find_pr_by_build,
-    get_nonclosed_pull_requests, get_nonclosed_pull_requests_by_base_branch, get_pending_builds,
-    get_prs_with_unknown_mergeable_state, get_pull_request, get_repository, get_repository_by_name,
-    get_tagged_bot_comments, get_workflow_urls_for_build, get_workflows_for_build,
-    insert_repo_if_not_exists, record_tagged_bot_comment, set_pr_assignees, set_pr_priority,
-    set_pr_rollup, set_pr_status, unapprove_pull_request, undelegate_pull_request,
-    update_build_check_run_id, update_build_status, update_mergeable_states_by_base_branch,
-    update_pr_mergeable_state, update_pr_try_build_id, update_workflow_status, upsert_pull_request,
-    upsert_repository,
+    get_nonclosed_pull_requests, get_pending_builds, get_prs_with_unknown_mergeability_state,
+    get_pull_request, get_repository, get_repository_by_name, get_tagged_bot_comments,
+    get_workflow_urls_for_build, get_workflows_for_build, insert_repo_if_not_exists,
+    record_tagged_bot_comment, set_pr_assignees, set_pr_priority, set_pr_rollup, set_pr_status,
+    unapprove_pull_request, undelegate_pull_request, update_build_check_run_id,
+    update_build_status, update_mergeable_states_by_base_branch, update_pr_mergeability_state,
+    update_pr_try_build_id, update_workflow_status, upsert_pull_request, upsert_repository,
 };
 use super::{ApprovalInfo, DelegatedPermission, MergeableState, RunId, UpsertPullRequestParams};
 
@@ -71,7 +70,7 @@ impl PgDbClient {
         pr: &PullRequestModel,
         mergeable_state: MergeableState,
     ) -> anyhow::Result<()> {
-        update_pr_mergeable_state(&self.pool, pr.id, mergeable_state).await
+        update_pr_mergeability_state(&self.pool, pr.id, mergeable_state).await
     }
 
     pub async fn set_pr_assignees(
@@ -83,13 +82,17 @@ impl PgDbClient {
         set_pr_assignees(&self.pool, repo, pr_number, assignees).await
     }
 
+    /// Sets the mergeability status of all PRs with the given `base_branch` to
+    /// `mergeability_state`.
+    /// Returns the list of updated pull requests targeting this base branch.
     pub async fn update_mergeable_states_by_base_branch(
         &self,
         repo: &GithubRepoName,
         base_branch: &str,
-        mergeable_state: MergeableState,
-    ) -> anyhow::Result<u64> {
-        update_mergeable_states_by_base_branch(&self.pool, repo, base_branch, mergeable_state).await
+        mergeability_state: MergeableState,
+    ) -> anyhow::Result<Vec<PullRequestModel>> {
+        update_mergeable_states_by_base_branch(&self.pool, repo, base_branch, mergeability_state)
+            .await
     }
 
     pub async fn set_rollup(
@@ -117,19 +120,11 @@ impl PgDbClient {
         Ok(pr)
     }
 
-    pub async fn get_nonclosed_pull_requests_by_base_branch(
-        &self,
-        repo: &GithubRepoName,
-        base_branch: &str,
-    ) -> anyhow::Result<Vec<PullRequestModel>> {
-        get_nonclosed_pull_requests_by_base_branch(&self.pool, repo, base_branch).await
-    }
-
-    pub async fn get_prs_with_unknown_mergeable_state(
+    pub async fn get_prs_with_unknown_mergeability_state(
         &self,
         repo: &GithubRepoName,
     ) -> anyhow::Result<Vec<PullRequestModel>> {
-        get_prs_with_unknown_mergeable_state(&self.pool, repo).await
+        get_prs_with_unknown_mergeability_state(&self.pool, repo).await
     }
 
     pub async fn get_nonclosed_pull_requests(
