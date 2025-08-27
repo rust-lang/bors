@@ -14,7 +14,7 @@ use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc::Sender;
-use tokio::task::JoinHandle;
+use tokio::task::{JoinError, JoinHandle};
 use tower::Service;
 
 use crate::bors::merge_queue::MergeQueueSender;
@@ -22,10 +22,11 @@ use crate::bors::mergeable_queue::MergeableQueueSender;
 use crate::bors::{
     CommandPrefix, PullRequestStatus, RollupMode, WAIT_FOR_MERGE_QUEUE,
     WAIT_FOR_MERGEABILITY_STATUS_REFRESH, WAIT_FOR_PR_STATUS_REFRESH,
-    WAIT_FOR_REFRESH_PENDING_BUILDS, WAIT_FOR_WORKFLOW_STARTED,
+    WAIT_FOR_REFRESH_PENDING_BUILDS, WAIT_FOR_WORKFLOW_COMPLETED, WAIT_FOR_WORKFLOW_STARTED,
 };
 use crate::database::{
-    BuildStatus, DelegatedPermission, OctocrabMergeableState, PullRequestModel, WorkflowStatus,
+    BuildModel, BuildStatus, DelegatedPermission, MergeableState, OctocrabMergeableState,
+    PullRequestModel, WorkflowStatus,
 };
 use crate::github::{GithubRepoName, PullRequestNumber};
 use crate::{
@@ -59,7 +60,7 @@ pub use webhook::{TEST_WEBHOOK_SECRET, create_webhook_request};
 
 /// How long should we wait before we timeout a test.
 /// You can increase this if you want to do interactive debugging.
-const TEST_TIMEOUT: Duration = Duration::from_secs(100);
+const TEST_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub fn default_cmd_prefix() -> CommandPrefix {
     "@bors".to_string().into()
@@ -91,31 +92,40 @@ impl BorsBuilder {
     ) -> GitHubState {
         // We return `tester` and `bors` separately, so that we can finish `bors`
         // even if `f` returns an error or times out, for better error propagation.
-        let (mut tester, bors) = BorsTester::new(self.pool, self.github).await;
+        let (mut tester, mut bors) = BorsTester::new(self.pool, self.github).await;
 
-        let result = tokio::time::timeout(TEST_TIMEOUT, f(&mut tester)).await;
-        let gh_state = tester.finish(bors).await;
+        tokio::select! {
+            // If the service ends sooner than the test itself, then the service has panicked.
+            // In that case we want to immediately abort the test and print the error.
+            res = &mut bors => {
+                let error = res.expect_err("Bors service ended unexpectedly without a panic");
+                panic!("Bors service has ended unexpectedly: {:?}", join_error_to_anyhow(error));
+            }
+            result = tokio::time::timeout(TEST_TIMEOUT, f(&mut tester)) => {
+                let gh_state = tester.finish(bors).await;
 
-        match result {
-            Ok(res) => match res {
-                Ok(_) => gh_state
-                    .context("Bors service has failed")
-                    // This makes the error nicer
-                    .map_err(|e| e.to_string())
-                    .unwrap(),
-                Err(error) => {
-                    panic!(
-                        "Test has failed: {error:?}\n\nBors service error: {:?}",
-                        gh_state.err()
-                    );
+                match result {
+                    Ok(res) => match res {
+                        Ok(_) => gh_state
+                            .context("Bors service has failed")
+                            // This makes the error nicer
+                            .map_err(|e| e.to_string())
+                            .unwrap(),
+                        Err(error) => {
+                            panic!(
+                                "Test has failed: {error:?}\n\nBors service error:\n{:?}",
+                                gh_state.err()
+                            );
+                        }
+                    },
+                    Err(_) => {
+                        panic!(
+                            "Test has timeouted after {}s\n\nBors service error:\n{:?}",
+                            TEST_TIMEOUT.as_secs(),
+                            gh_state.err()
+                        );
+                    }
                 }
-            },
-            Err(_) => {
-                panic!(
-                    "Test has timeouted after {}s\n\nBors service error: {:?}",
-                    TEST_TIMEOUT.as_secs(),
-                    gh_state.err()
-                );
             }
         }
     }
@@ -182,7 +192,12 @@ impl BorsTester {
             mergeable_queue_tx,
             merge_queue_tx,
             bors_process,
-        } = create_bors_process(ctx, mock.github_client(), mock.team_api_client());
+        } = create_bors_process(
+            ctx,
+            mock.github_client(),
+            mock.team_api_client(),
+            chrono::Duration::seconds(1),
+        );
 
         let state = ServerState::new(
             repository_tx,
@@ -306,15 +321,15 @@ impl BorsTester {
             .get(&default_repo_name())
             .unwrap()
             .clone();
-        let mut repo = repo.lock();
-
-        let branch = repo
-            .get_branch_by_name(name)
-            .expect("Branch does not exist");
-        func(branch);
+        if let Some(branch) = repo.lock().get_branch_by_name(name) {
+            func(branch);
+        } else {
+            self.create_branch(name).await;
+            func(repo.lock().get_branch_by_name(name).unwrap());
+        }
     }
 
-    pub async fn get_branch(&self, name: &str) -> Branch {
+    pub async fn get_branch_copy(&self, name: &str) -> Branch {
         self.github
             .lock()
             .await
@@ -340,11 +355,11 @@ impl BorsTester {
     }
 
     pub async fn try_branch(&self) -> Branch {
-        self.get_branch("automation/bors/try").await
+        self.get_branch_copy("automation/bors/try").await
     }
 
     pub async fn auto_branch(&self) -> Branch {
-        self.get_branch("automation/bors/auto").await
+        self.get_branch_copy("automation/bors/auto").await
     }
 
     /// Wait until the next bot comment is received on the specified repo and PR, and return its
@@ -368,18 +383,27 @@ impl BorsTester {
         let comment = comment.into();
 
         // Allocate comment IDs
-        let (id, node_id) = self
-            .github
-            .lock()
-            .await
-            .get_repo(&comment.pr_ident.repo)
-            .lock()
-            .get_pr_mut(comment.pr_ident.number)
-            .next_comment_ids();
-        let comment = comment.with_ids(id, node_id);
+        let comment = {
+            let gh = self.github.lock().await;
+            let repo = gh.get_repo(&comment.pr_ident.repo);
+            let mut repo = repo.lock();
+            let pr = repo.get_pr_mut(comment.pr_ident.number);
+            let (id, node_id) = pr.next_comment_ids();
+            let comment = comment.with_ids(id, node_id);
+            pr.add_comment_to_history(comment.clone());
+            comment
+        };
 
         self.webhook_comment(comment.clone()).await?;
         Ok(comment)
+    }
+
+    pub async fn approve<Id: Into<PrIdentifier>>(&mut self, id: Id) -> anyhow::Result<()> {
+        let id = id.into();
+        self.post_comment(Comment::new(id.clone(), "@bors r+"))
+            .await?;
+        self.expect_comments(id, 1).await;
+        Ok(())
     }
 
     pub async fn cancel_timed_out_builds(&self) {
@@ -434,10 +458,7 @@ impl BorsTester {
         // Wait until the merge queue processing is fully handled
         wait_for_marker(
             async || {
-                self.global_tx
-                    .send(BorsGlobalEvent::ProcessMergeQueue)
-                    .await
-                    .unwrap();
+                self.merge_queue_tx.perform_tick().await.unwrap();
                 Ok(())
             },
             &WAIT_FOR_MERGE_QUEUE,
@@ -466,7 +487,13 @@ impl BorsTester {
             };
             repo.update_workflow_run(event.workflow.clone(), status);
         }
-        self.webhook_workflow(event).await
+
+        let marker = match &event.event {
+            WorkflowEventKind::Started => &WAIT_FOR_WORKFLOW_STARTED,
+            WorkflowEventKind::Completed { .. } => &WAIT_FOR_WORKFLOW_COMPLETED,
+        };
+
+        wait_for_marker(async || self.webhook_workflow(event).await, marker).await
     }
 
     /// Start a workflow and wait until the workflow has been handled by bors.
@@ -474,11 +501,7 @@ impl BorsTester {
         &mut self,
         workflow: W,
     ) -> anyhow::Result<()> {
-        wait_for_marker(
-            async || self.workflow_event(WorkflowEvent::started(workflow)).await,
-            &WAIT_FOR_WORKFLOW_STARTED,
-        )
-        .await
+        self.workflow_event(WorkflowEvent::started(workflow)).await
     }
 
     /// Performs all necessary events to complete a single workflow (start, success/fail).
@@ -714,16 +737,36 @@ impl BorsTester {
         .await
     }
 
-    /// Approves the specified PR and runs the merge queue.
-    /// This does not guarantee a build will start for **this** PR.
+    /// Starts an auto build, with the expectation that it will start testing the given PR.
     pub async fn start_auto_build<Id: Into<PrIdentifier>>(&mut self, id: Id) -> anyhow::Result<()> {
         let id = id.into();
-        self.post_comment(Comment::new(id.clone(), "@bors r+"))
-            .await?;
-        self.expect_comments(id.clone(), 1).await;
         self.process_merge_queue().await;
-        self.expect_comments(id, 1).await;
+        let comment = self.get_comment_text(id).await?;
+        assert!(comment.contains("Testing commit"));
         Ok(())
+    }
+
+    /// Perform a successful workflow on the auto branch and run the merge queue, with the
+    /// expectation that it will finish the auto build and merge the given PR.
+    pub async fn finish_auto_build<Id: Into<PrIdentifier>>(
+        &mut self,
+        id: Id,
+    ) -> anyhow::Result<()> {
+        self.workflow_full_success(self.auto_branch().await).await?;
+        self.process_merge_queue().await;
+        let comment = self.get_comment_text(id).await?;
+        assert!(comment.contains("Test successful"));
+        Ok(())
+    }
+
+    /// Start and then finish auto build on the given PR.
+    pub async fn start_and_finish_auto_build<Id: Into<PrIdentifier>>(
+        &mut self,
+        id: Id,
+    ) -> anyhow::Result<()> {
+        let id = id.into();
+        self.start_auto_build(id.clone()).await?;
+        self.finish_auto_build(id).await
     }
 
     //-- Test assertions --//
@@ -913,7 +956,8 @@ impl BorsTester {
         self.mergeable_queue_tx.shutdown();
         // Wait until all events are handled in the bors service
         match tokio::time::timeout(Duration::from_secs(5), bors).await {
-            Ok(res) => res?,
+            Ok(Ok(_)) => {}
+            Ok(Err(error)) => return Err(join_error_to_anyhow(error)),
             Err(_) => {
                 return Err(anyhow::anyhow!(
                     "Timed out waiting for bors service to shutdown. Maybe you forgot to close some channel senders?"
@@ -923,6 +967,21 @@ impl BorsTester {
         // Flush any local queues
         self.http_mock.gh_server.assert_empty_queues().await;
         Ok(Arc::into_inner(self.github).unwrap().into_inner())
+    }
+}
+
+/// Try to produce a nicer error message from a failed tokio Task
+/// Normally, JoinError internally prints the
+/// panic payload with Debug impl instead of Display impl, which mangles backtraces from anyhow
+/// errors.
+fn join_error_to_anyhow(error: JoinError) -> anyhow::Error {
+    let panic = error.into_panic();
+    if let Some(s) = panic.downcast_ref::<String>() {
+        anyhow::anyhow!("{s}")
+    } else if let Some(s) = panic.downcast_ref::<&'static str>() {
+        anyhow::anyhow!("{s}")
+    } else {
+        anyhow::anyhow!("Unknown error")
     }
 }
 
@@ -950,6 +1009,36 @@ impl PullRequestProxy {
     #[track_caller]
     pub fn expect_status(&self, status: PullRequestStatus) -> &Self {
         assert_eq!(self.require_db_pr().pr_status, status);
+        self
+    }
+
+    #[track_caller]
+    pub fn expect_auto_build<F>(&self, f: F) -> &Self
+    where
+        F: FnOnce(&BuildModel) -> bool,
+    {
+        let auto_build = self
+            .require_db_pr()
+            .auto_build
+            .as_ref()
+            .expect("No auto build found");
+        assert!(f(auto_build), "Auto build check was not successful");
+        self
+    }
+
+    #[track_caller]
+    pub fn expect_no_auto_build(&self) -> &Self {
+        assert!(
+            self.require_db_pr().auto_build.is_none(),
+            "Auto build should not be on PR {}",
+            self.gh_pr.id()
+        );
+        self
+    }
+
+    #[track_caller]
+    pub fn expect_mergeable_state(&self, state: MergeableState) -> &Self {
+        assert_eq!(self.require_db_pr().mergeable_state, state);
         self
     }
 
@@ -1044,7 +1133,7 @@ where
 
     let res = func().await;
     if res.is_ok() {
-        tokio::time::timeout(Duration::from_secs(5), marker.sync())
+        tokio::time::timeout(Duration::from_secs(15), marker.sync())
             .await
             .map_err(|_| anyhow::anyhow!("Timed out waiting for a test marker to be marked"))?;
     }

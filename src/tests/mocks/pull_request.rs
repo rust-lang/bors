@@ -13,6 +13,7 @@ use octocrab::models::LabelId;
 use octocrab::models::pulls::{MergeableState as OctocrabMergeableState, MergeableState};
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
+use std::fmt::{Display, Formatter};
 use std::sync::Arc;
 use std::time::SystemTime;
 use tokio::sync::mpsc::{Receiver, Sender};
@@ -37,6 +38,13 @@ pub fn default_pr_number() -> u64 {
 pub struct PrIdentifier {
     pub repo: GithubRepoName,
     pub number: u64,
+}
+
+impl Display for PrIdentifier {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let PrIdentifier { repo, number } = self;
+        f.write_fmt(format_args!("{repo}#{number}"))
+    }
 }
 
 impl Default for PrIdentifier {
@@ -106,6 +114,7 @@ pub struct PullRequest {
     pub labels: Vec<String>,
     pub comment_queue_tx: Sender<CommentMsg>,
     pub comment_queue_rx: Arc<tokio::sync::Mutex<Receiver<CommentMsg>>>,
+    pub comment_history: Vec<Comment>,
 }
 
 impl PullRequest {
@@ -132,6 +141,7 @@ impl PullRequest {
             labels: Vec::new(),
             comment_queue_tx,
             comment_queue_rx: Arc::new(tokio::sync::Mutex::new(comment_queue_rx)),
+            comment_history: Vec::new(),
         }
     }
 }
@@ -149,6 +159,13 @@ impl Default for PullRequest {
 }
 
 impl PullRequest {
+    pub fn id(&self) -> PrIdentifier {
+        PrIdentifier {
+            repo: self.repo.clone(),
+            number: self.number.0,
+        }
+    }
+
     /// Return a numeric ID and a node ID for the next comment to be created.
     pub fn next_comment_ids(&mut self) -> (u64, String) {
         self.comment_counter += 1;
@@ -187,6 +204,10 @@ impl PullRequest {
 
     pub fn convert_to_draft(&mut self) {
         self.status = PullRequestStatus::Draft;
+    }
+
+    pub fn add_comment_to_history(&mut self, comment: Comment) {
+        self.comment_history.push(comment);
     }
 }
 
@@ -233,11 +254,7 @@ pub async fn mock_pull_requests(repo: Arc<Mutex<Repo>>, mock_server: &MockServer
     .await;
 
     mock_pr_comments(repo.clone(), mock_server).await;
-
-    let prs = repo.lock().pull_requests.clone();
-    for &pr_number in prs.keys() {
-        mock_pr_labels(repo.clone(), repo_name.clone(), pr_number, mock_server).await;
-    }
+    mock_pr_labels(repo.clone(), repo_name.clone(), mock_server).await;
 }
 
 async fn mock_pr_comments(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
@@ -281,16 +298,14 @@ async fn mock_pr_comments(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
 async fn mock_pr_labels(
     repo: Arc<Mutex<Repo>>,
     repo_name: GithubRepoName,
-    pr_number: u64,
     mock_server: &MockServer,
 ) {
     let repo2 = repo.clone();
     // Add label(s)
-    Mock::given(method("POST"))
-        .and(path(format!(
-            "/repos/{repo_name}/issues/{pr_number}/labels",
-        )))
-        .respond_with(move |req: &Request| {
+    dynamic_mock_req(
+        move |req: &Request, [pr_number]: [&str; 1]| {
+            let pr_number: u64 = pr_number.parse().unwrap();
+
             #[derive(serde::Deserialize)]
             struct CreateLabelsPayload {
                 labels: Vec<String>,
@@ -318,13 +333,18 @@ async fn mock_pr_labels(
                 })
                 .collect();
             ResponseTemplate::new(200).set_body_json(labels)
-        })
-        .mount(mock_server)
-        .await;
+        },
+        "POST",
+        format!("^/repos/{repo_name}/issues/([0-9]+)/labels$"),
+    )
+    .mount(mock_server)
+    .await;
 
-    // Remove label
+    // Remove label(s)
     dynamic_mock_req(
-        move |_req: &Request, [label_name]: [&str; 1]| {
+        move |_req: &Request, [pr_number, label_name]: [&str; 2]| {
+            let pr_number: u64 = pr_number.parse().unwrap();
+
             let mut repo = repo2.lock();
             let Some(pr) = repo.pull_requests.get_mut(&pr_number) else {
                 return ResponseTemplate::new(404);
@@ -334,7 +354,7 @@ async fn mock_pr_labels(
             ResponseTemplate::new(200).set_body_json::<&[GitHubLabel]>(&[])
         },
         "DELETE",
-        format!("/repos/{repo_name}/issues/{pr_number}/labels/(.*)"),
+        format!("/repos/{repo_name}/issues/([0-9]+)/labels/(.*)"),
     )
     .mount(mock_server)
     .await;
@@ -386,6 +406,7 @@ impl From<PullRequest> for GitHubPullRequest {
             labels,
             comment_queue_tx: _,
             comment_queue_rx: _,
+            comment_history: _,
         } = pr;
         GitHubPullRequest {
             user: author.clone().into(),

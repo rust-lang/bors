@@ -44,6 +44,9 @@ pub static WAIT_FOR_PR_STATUS_REFRESH: TestSyncMarker = TestSyncMarker::new();
 pub static WAIT_FOR_WORKFLOW_STARTED: TestSyncMarker = TestSyncMarker::new();
 
 #[cfg(test)]
+pub static WAIT_FOR_WORKFLOW_COMPLETED: TestSyncMarker = TestSyncMarker::new();
+
+#[cfg(test)]
 pub static WAIT_FOR_MERGE_QUEUE: TestSyncMarker = TestSyncMarker::new();
 
 /// Corresponds to a single execution of a workflow.

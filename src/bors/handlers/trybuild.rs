@@ -584,7 +584,6 @@ try-job: Bar
     #[sqlx::test]
     async fn try_merge_conflict(pool: sqlx::PgPool) {
         run_test(pool, async |tester: &mut BorsTester| {
-            tester.create_branch(TRY_MERGE_BRANCH_NAME).await;
             tester.modify_branch(TRY_MERGE_BRANCH_NAME, |branch| branch.merge_conflict = true).await;
             tester
                 .post_comment("@bors try")

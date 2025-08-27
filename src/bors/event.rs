@@ -72,7 +72,7 @@ pub enum BorsGlobalEvent {
     RefreshPullRequestMergeability,
     /// Periodic event that serves for synchronizing PR state.
     RefreshPullRequestState,
-    /// Process the merge queue.
+    /// Try to process the merge queue.
     ProcessMergeQueue,
 }
 
