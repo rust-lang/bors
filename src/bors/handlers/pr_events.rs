@@ -30,7 +30,7 @@ pub(super) async fn handle_pull_request_edited(
         return Ok(());
     };
 
-    mergeable_queue.enqueue(pr_model.repository.clone(), pr_number);
+    mergeable_queue.enqueue_pr(pr_model.repository.clone(), pr_number);
 
     if !pr_model.is_approved() {
         return Ok(());
@@ -52,7 +52,7 @@ pub(super) async fn handle_push_to_pull_request(
         .upsert_pull_request(repo_state.repository(), pr.clone().into())
         .await?;
 
-    mergeable_queue.enqueue(repo_state.repository().clone(), pr_number);
+    mergeable_queue.enqueue_pr(repo_state.repository().clone(), pr_number);
 
     let auto_build_cancel_message = maybe_cancel_auto_build(
         &repo_state.client,
@@ -115,7 +115,7 @@ pub(super) async fn handle_pull_request_opened(
     )
     .await?;
 
-    mergeable_queue.enqueue(repo_state.repository().clone(), payload.pull_request.number);
+    mergeable_queue.enqueue_pr(repo_state.repository().clone(), payload.pull_request.number);
 
     Ok(())
 }
@@ -157,7 +157,7 @@ pub(super) async fn handle_pull_request_reopened(
     db.upsert_pull_request(repo_state.repository(), pr.clone().into())
         .await?;
 
-    mergeable_queue.enqueue(repo_state.repository().clone(), pr_number);
+    mergeable_queue.enqueue_pr(repo_state.repository().clone(), pr_number);
 
     Ok(())
 }
@@ -249,7 +249,7 @@ pub(super) async fn handle_push_to_branch(
         );
 
         for pr in affected_prs {
-            mergeable_queue.enqueue(repo_state.repository().clone(), pr.number);
+            mergeable_queue.enqueue_pr(repo_state.repository().clone(), pr.number);
         }
     }
 

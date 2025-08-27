@@ -116,7 +116,7 @@ pub async fn reload_unknown_mergeable_prs(
     );
 
     for pr in prs {
-        mergeable_queue.enqueue_now(repo.repository().clone(), pr.number);
+        mergeable_queue.enqueue_pr(repo.repository().clone(), pr.number);
     }
 
     Ok(())

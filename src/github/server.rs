@@ -342,8 +342,12 @@ async fn consume_mergeable_queue(
     while let Some((mq_item, mq_tx)) = mergeable_queue_rx.dequeue().await {
         let ctx = ctx.clone();
 
-        let span = tracing::info_span!("MergeableQueue");
-        tracing::debug!("Received mergeable queue item: {}", mq_item.pull_request);
+        let span = tracing::debug_span!(
+            "Mergeability check",
+            repo = mq_item.pull_request.repo.to_string(),
+            pr = mq_item.pull_request.pr_number.0,
+            attempt = mq_item.attempt
+        );
         if let Err(error) = handle_mergeable_queue_item(ctx, mq_tx, mq_item)
             .instrument(span.clone())
             .await
