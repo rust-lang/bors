@@ -232,15 +232,12 @@ pub(super) async fn handle_push_to_branch(
     mergeability_queue: MergeabilityQueueSender,
     payload: PushToBranch,
 ) -> anyhow::Result<()> {
-    let rows = db
+    let affected_prs = db
         .update_mergeable_states_by_base_branch(
             repo_state.repository(),
             &payload.branch,
             MergeableState::Unknown,
         )
-        .await?;
-    let affected_prs = db
-        .get_nonclosed_pull_requests_by_base_branch(repo_state.repository(), &payload.branch)
         .await?;
 
     if !affected_prs.is_empty() {

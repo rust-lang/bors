@@ -189,55 +189,6 @@ pub(crate) async fn upsert_pull_request(
     .await
 }
 
-/// Uses inclusion rather than negation, which would cause a full table scan,
-/// to leverage the index from PR #246 (https://github.com/rust-lang/bors/pull/246).
-pub(crate) async fn get_nonclosed_pull_requests_by_base_branch(
-    executor: impl PgExecutor<'_>,
-    repo: &GithubRepoName,
-    base_branch: &str,
-) -> anyhow::Result<Vec<PullRequestModel>> {
-    measure_db_query("get_pull_requests_by_base_branch", || async {
-        let records = sqlx::query_as!(
-            PullRequestModel,
-            r#"
-            SELECT
-                pr.id,
-                pr.repository as "repository: GithubRepoName",
-                pr.number as "number!: i64",
-                pr.title,
-                pr.author,
-                pr.assignees as "assignees: Assignees",
-                (
-                    pr.approved_by,
-                    pr.approved_sha
-                ) AS "approval_status!: ApprovalStatus",
-                pr.status as "pr_status: PullRequestStatus",
-                pr.priority,
-                pr.rollup as "rollup: RollupMode",
-                pr.delegated_permission as "delegated_permission: DelegatedPermission",
-                pr.base_branch,
-                pr.mergeable_state as "mergeable_state: MergeableState",
-                pr.created_at as "created_at: DateTime<Utc>",
-                try_build AS "try_build: BuildModel",
-                auto_build AS "auto_build: BuildModel"
-            FROM pull_request as pr
-            LEFT JOIN build AS try_build ON pr.try_build_id = try_build.id
-            LEFT JOIN build AS auto_build ON pr.auto_build_id = auto_build.id
-            WHERE pr.repository = $1
-              AND pr.base_branch = $2
-              AND pr.status IN ('open', 'draft')
-            "#,
-            repo as &GithubRepoName,
-            base_branch
-        )
-        .fetch_all(executor)
-        .await?;
-
-        Ok(records)
-    })
-    .await
-}
-
 pub(crate) async fn get_nonclosed_pull_requests(
     executor: impl PgExecutor<'_>,
     repo: &GithubRepoName,
@@ -352,24 +303,51 @@ pub(crate) async fn update_mergeable_states_by_base_branch(
     repo: &GithubRepoName,
     base_branch: &str,
     mergeability_state: MergeableState,
-) -> anyhow::Result<u64> {
+) -> anyhow::Result<Vec<PullRequestModel>> {
     measure_db_query("update_mergeable_states_by_base_branch", || async {
-        let result = sqlx::query!(
+        let result = sqlx::query_as!(
+            PullRequestModel,
             r#"
-            UPDATE pull_request
-            SET mergeable_state = $1
-            WHERE repository = $2
-            AND base_branch = $3
-            AND status IN ('open', 'draft')
+            WITH pr AS (
+                UPDATE pull_request
+                SET mergeable_state = $1
+                WHERE repository = $2
+                    AND base_branch = $3
+                    AND status IN ('open', 'draft')
+                RETURNING pull_request.*
+            )
+            SELECT
+                pr.id,
+                pr.repository as "repository: GithubRepoName",
+                pr.number as "number!: i64",
+                pr.title,
+                pr.author,
+                pr.assignees as "assignees: Assignees",
+                (
+                    pr.approved_by,
+                    pr.approved_sha
+                ) AS "approval_status!: ApprovalStatus",
+                pr.status as "pr_status: PullRequestStatus",
+                pr.priority,
+                pr.rollup as "rollup: RollupMode",
+                pr.delegated_permission as "delegated_permission: DelegatedPermission",
+                pr.base_branch,
+                pr.mergeable_state as "mergeable_state: MergeableState",
+                pr.created_at as "created_at: DateTime<Utc>",
+                try_build AS "try_build: BuildModel",
+                auto_build AS "auto_build: BuildModel"
+            FROM pr
+            LEFT JOIN build AS try_build ON pr.try_build_id = try_build.id
+            LEFT JOIN build AS auto_build ON pr.auto_build_id = auto_build.id
             "#,
             mergeability_state as _,
             repo as &GithubRepoName,
             base_branch,
         )
-        .execute(executor)
+        .fetch_all(executor)
         .await?;
 
-        Ok(result.rows_affected())
+        Ok(result)
     })
     .await
 }
