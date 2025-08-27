@@ -257,13 +257,19 @@ async fn verify_pr_state(gh_pr: &PullRequest, pr: &PullRequestModel) -> anyhow::
 
     anyhow::ensure!(
         gh_pr.head.sha == CommitSha(approved_sha.to_string()),
-        "PR head SHA does not match approved SHA"
+        "PR head SHA {} does not match approved SHA {approved_sha}",
+        gh_pr.head.sha
     );
     anyhow::ensure!(
         gh_pr.mergeable_state == OctocrabMergeableState::Clean,
-        "PR not mergeable"
+        "PR is not mergeable, mergeability status: {:?}",
+        gh_pr.mergeable_state
     );
-    anyhow::ensure!(gh_pr.status == PullRequestStatus::Open, "PR not opened");
+    anyhow::ensure!(
+        gh_pr.status == PullRequestStatus::Open,
+        "PR is not open, status: {:?}",
+        gh_pr.status
+    );
     Ok(())
 }
 
