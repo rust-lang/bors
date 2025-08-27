@@ -318,7 +318,7 @@ async fn consume_global_events(
         let merge_queue_tx = merge_queue_tx.clone();
 
         let span = tracing::info_span!("GlobalEvent");
-        tracing::debug!("Received global event: {event:?}");
+        tracing::trace!("Received global event: {event:?}");
         if let Err(error) = handle_bors_global_event(
             event,
             ctx,
