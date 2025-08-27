@@ -20,7 +20,11 @@ use tokio::sync::Notify;
 use tokio::time::timeout;
 
 /// Base delay before two mergeability check attempts.
+#[cfg(not(test))]
 const BASE_DELAY: Duration = Duration::from_secs(5);
+
+#[cfg(test)]
+const BASE_DELAY: Duration = Duration::from_millis(500);
 
 /// Max number of mergeable check retries before giving up.
 const MAX_RETRIES: u32 = 5;

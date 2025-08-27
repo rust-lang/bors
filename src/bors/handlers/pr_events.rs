@@ -224,6 +224,8 @@ pub(super) async fn handle_pull_request_ready_for_review(
     .await
 }
 
+/// Handle a push to a branch that is directly in the repo that we're managing (not in a fork).
+/// This is used to handle pushes to base branches.
 pub(super) async fn handle_push_to_branch(
     repo_state: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
@@ -589,20 +591,19 @@ mod tests {
     #[sqlx::test]
     async fn enqueue_prs_on_push_to_branch(pool: sqlx::PgPool) {
         run_test(pool, async |tester: &mut BorsTester| {
-            let pr = tester.open_pr(default_repo_name(), |_| {}).await?;
-            tester.push_to_branch(default_branch_name()).await?;
-            tester
-                .wait_for_pr(pr.number, |pr| {
-                    pr.mergeable_state == MergeableState::Unknown
+            let pr = tester
+                .open_pr(default_repo_name(), |pr| {
+                    pr.mergeable_state = OctocrabMergeableState::Unknown
                 })
                 .await?;
+            tester.push_to_branch(default_branch_name()).await?;
             tester
-                .modify_pr_state(pr.number, |pr| {
+                .modify_pr_state(pr.id(), |pr| {
                     pr.mergeable_state = OctocrabMergeableState::Dirty
                 })
                 .await;
             tester
-                .wait_for_pr(pr.number, |pr| {
+                .wait_for_pr(pr.id(), |pr| {
                     pr.mergeable_state == MergeableState::HasConflicts
                 })
                 .await?;
