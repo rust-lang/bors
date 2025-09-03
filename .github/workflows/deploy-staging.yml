@@ -20,7 +20,7 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v5
         with:
           role-to-assume: arn:aws:iam::392478027976:role/gha-access
           aws-region: us-east-2
