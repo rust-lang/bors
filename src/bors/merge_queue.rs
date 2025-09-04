@@ -820,8 +820,8 @@ merge_queue_enabled = false
                 @r#"
             :lock: Merge conflict
 
-            This pull request and the master branch diverged in a way that cannot
-             be automatically merged. Please rebase on top of the latest master
+            This pull request and the base branch diverged in a way that cannot
+             be automatically merged. Please rebase on top of the latest base
              branch, and let the reviewer approve again.
 
             <details><summary>How do I rebase?</summary>
@@ -830,8 +830,8 @@ merge_queue_enabled = false
              you can resolve the conflict following these steps:
 
             1. `git checkout pr-1` *(switch to your branch)*
-            2. `git fetch upstream master` *(retrieve the latest master)*
-            3. `git rebase upstream/master -p` *(rebase on top of it)*
+            2. `git fetch upstream HEAD` *(retrieve the latest base branch)*
+            3. `git rebase upstream/HEAD -p` *(rebase on top of it)*
             4. Follow the on-screen instruction to resolve conflicts (check `git status` if you got lost).
             5. `git push self pr-1 --force-with-lease` *(update this PR)*
 
