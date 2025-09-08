@@ -89,7 +89,7 @@ mod tests {
             tester.process_merge_queue().await;
             insta::assert_snapshot!(
                 tester.get_comment_text(()).await?,
-                @":hourglass: Testing commit pr-1-sha with merge merge-0-pr-1..."
+                @":hourglass: Testing commit pr-1-sha with merge merge-1-pr-1..."
             );
             Ok(())
         })
