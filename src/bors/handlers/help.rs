@@ -39,6 +39,7 @@ fn format_help() -> &'static str {
         BorsCommand::SetRollupMode(_) => {}
         BorsCommand::OpenTree => {}
         BorsCommand::TreeClosed(_) => {}
+        BorsCommand::Retry => {}
     }
 
     r#"
@@ -65,6 +66,7 @@ You can use the following commands:
     - Optionally, you can specify a `<parent>` SHA with which will the PR be merged. You can specify `parent=last` to use the same parent SHA as the previous try build.
     - Optionally, you can select a comma-separated list of CI `<jobs>` to run in the try build.
 - `try cancel`: Cancel a running try build
+- `retry`: Clear a failed auto build status from an approved PR. This will cause the merge queue to attempt to start a new auto build and retry merging the PR again.
 - `info`: Get information about the current PR
 
 ## Repository management
@@ -109,6 +111,7 @@ mod tests {
                 - Optionally, you can specify a `<parent>` SHA with which will the PR be merged. You can specify `parent=last` to use the same parent SHA as the previous try build.
                 - Optionally, you can select a comma-separated list of CI `<jobs>` to run in the try build.
             - `try cancel`: Cancel a running try build
+            - `retry`: Clear a failed auto build status from an approved PR. This will cause the merge queue to attempt to start a new auto build and retry merging the PR again.
             - `info`: Get information about the current PR
 
             ## Repository management

@@ -78,20 +78,20 @@ pub(super) async fn handle_workflow_completed(
     if let Some(running_time) = payload.running_time {
         let running_time =
             chrono::Duration::to_std(&running_time).unwrap_or(Duration::from_secs(0));
-        if let Some(min_ci_time) = repo.config.load().min_ci_time {
-            if running_time < min_ci_time {
-                tracing::warn!(
-                    "Workflow running time is less than the minimum CI duration: workflow time ({}s) < min time ({}s). Marking it as a failure",
-                    running_time.as_secs_f64(),
-                    min_ci_time.as_secs_f64()
-                );
-                payload.status = WorkflowStatus::Failure;
-                error_context = Some(format!(
-                    "A workflow was considered to be a failure because it took only `{}s`. The minimum duration for CI workflows is configured to be `{}s`.",
-                    running_time.as_secs_f64(),
-                    min_ci_time.as_secs_f64()
-                ))
-            }
+        if let Some(min_ci_time) = repo.config.load().min_ci_time
+            && running_time < min_ci_time
+        {
+            tracing::warn!(
+                "Workflow running time is less than the minimum CI duration: workflow time ({}s) < min time ({}s). Marking it as a failure",
+                running_time.as_secs_f64(),
+                min_ci_time.as_secs_f64()
+            );
+            payload.status = WorkflowStatus::Failure;
+            error_context = Some(format!(
+                "A workflow was considered to be a failure because it took only `{}s`. The minimum duration for CI workflows is configured to be `{}s`.",
+                running_time.as_secs_f64(),
+                min_ci_time.as_secs_f64()
+            ))
         }
     }
 
@@ -375,19 +375,16 @@ pub async fn cancel_build(
         .await
         .map_err(CancelBuildError::FailedToCancelWorkflows)?;
 
-    if let Some(check_run_id) = build.check_run_id {
-        if let Err(error) = client
+    if let Some(check_run_id) = build.check_run_id
+        && let Err(error) = client
             .update_check_run(
                 CheckRunId(check_run_id as u64),
                 CheckRunStatus::Completed,
                 Some(check_run_conclusion),
             )
             .await
-        {
-            tracing::error!(
-                "Could not update check run {check_run_id} for build {build:?}: {error:?}"
-            );
-        }
+    {
+        tracing::error!("Could not update check run {check_run_id} for build {build:?}: {error:?}");
     }
 
     Ok(pending_workflows)

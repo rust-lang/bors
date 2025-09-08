@@ -11,7 +11,7 @@ use crate::github::PullRequestNumber;
 use crate::github::{CommitSha, GithubRepoName};
 
 use super::operations::{
-    approve_pull_request, create_build, create_pull_request, create_workflow,
+    approve_pull_request, clear_auto_build, create_build, create_pull_request, create_workflow,
     delegate_pull_request, delete_tagged_bot_comment, find_build, find_pr_by_build,
     get_nonclosed_pull_requests, get_pending_builds, get_prs_with_unknown_mergeability_state,
     get_pull_request, get_repository, get_repository_by_name, get_tagged_bot_comments,
@@ -47,6 +47,10 @@ impl PgDbClient {
     /// Unapprove a pull request and remove its auto build status, if there is any attached.
     pub async fn unapprove(&self, pr: &PullRequestModel) -> anyhow::Result<()> {
         unapprove_pull_request(&self.pool, pr.id).await
+    }
+
+    pub async fn clear_auto_build(&self, pr: &PullRequestModel) -> anyhow::Result<()> {
+        clear_auto_build(&self.pool, pr.id).await
     }
 
     pub async fn set_priority(&self, pr: &PullRequestModel, priority: u32) -> anyhow::Result<()> {

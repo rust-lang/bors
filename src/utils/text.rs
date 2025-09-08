@@ -15,7 +15,7 @@ pub fn suppress_github_mentions(text: &str) -> String {
 }
 
 /// Pluralizes a piece of text.
-pub fn pluralize(base: &str, count: usize) -> Cow<str> {
+pub fn pluralize(base: &str, count: usize) -> Cow<'_, str> {
     if count == 1 {
         base.into()
     } else {
