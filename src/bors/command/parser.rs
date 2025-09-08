@@ -168,7 +168,7 @@ fn parse_command(input: &str, parsers: &[ParserFn]) -> ParseResult {
     }
 }
 
-fn parse_parts(input: &str) -> Result<Vec<CommandPart>, CommandParseError> {
+fn parse_parts(input: &str) -> Result<Vec<CommandPart<'_>>, CommandParseError> {
     let mut parts = vec![];
     let mut seen_keys = HashSet::new();
 

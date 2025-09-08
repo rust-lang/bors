@@ -103,10 +103,10 @@ async fn health_handler() -> impl IntoResponse {
 
 async fn index_handler(State(state): State<ServerStateRef>) -> impl IntoResponse {
     // If we manage exactly one repo, redirect to its queue page directly
-    if let Some(repo_name) = state.repositories.keys().next() {
-        if state.repositories.len() == 1 {
-            return Redirect::temporary(&format!("/queue/{}", repo_name.name)).into_response();
-        }
+    if let Some(repo_name) = state.repositories.keys().next()
+        && state.repositories.len() == 1
+    {
+        return Redirect::temporary(&format!("/queue/{}", repo_name.name)).into_response();
     }
     help_handler(State(state)).await.into_response()
 }
