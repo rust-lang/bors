@@ -142,6 +142,7 @@ const DEFAULT_PARSERS: &[ParserFn] = &[
     parser_info,
     parser_help,
     parser_ping,
+    parser_retry,
     parser_tree_ops,
 ];
 
@@ -406,6 +407,15 @@ fn parser_rollup(command: &CommandPart<'_>, _parts: &[CommandPart<'_>]) -> Parse
 fn parser_info(command: &CommandPart<'_>, _parts: &[CommandPart<'_>]) -> ParseResult {
     if *command == CommandPart::Bare("info") {
         Some(Ok(BorsCommand::Info))
+    } else {
+        None
+    }
+}
+
+/// Parses `@bors retry`
+fn parser_retry(command: &CommandPart<'_>, _parts: &[CommandPart<'_>]) -> ParseResult {
+    if let CommandPart::Bare("retry") = command {
+        Some(Ok(BorsCommand::Retry))
     } else {
         None
     }
@@ -1193,6 +1203,20 @@ for the crater",
         let cmds = parse_commands("@bors info a");
         assert_eq!(cmds.len(), 1);
         assert!(matches!(cmds[0], Ok(BorsCommand::Info)));
+    }
+
+    #[test]
+    fn parse_retry() {
+        let cmds = parse_commands("@bors retry");
+        assert_eq!(cmds.len(), 1);
+        assert!(matches!(cmds[0], Ok(BorsCommand::Retry)));
+    }
+
+    #[test]
+    fn parse_retry_unknown_arg() {
+        let cmds = parse_commands("@bors retry xyz");
+        assert_eq!(cmds.len(), 1);
+        assert!(matches!(cmds[0], Ok(BorsCommand::Retry)));
     }
 
     #[test]

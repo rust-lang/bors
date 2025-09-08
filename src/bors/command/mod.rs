@@ -129,4 +129,6 @@ pub enum BorsCommand {
     OpenTree,
     /// Set the tree closed with a priority level.
     TreeClosed(Priority),
+    /// Retry a previously run (auto) build.
+    Retry,
 }

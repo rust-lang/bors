@@ -15,6 +15,7 @@ use crate::bors::handlers::refresh::{
     refresh_pending_builds, reload_mergeability_status, reload_repository_config,
     reload_repository_permissions,
 };
+use crate::bors::handlers::retry::command_retry;
 use crate::bors::handlers::review::{
     command_approve, command_close_tree, command_open_tree, command_unapprove,
 };
@@ -44,6 +45,7 @@ mod labels;
 mod ping;
 mod pr_events;
 mod refresh;
+mod retry;
 mod review;
 mod trybuild;
 mod workflow;
@@ -393,6 +395,12 @@ async fn handle_comment(
                 let repo = Arc::clone(&repo);
                 let database = Arc::clone(&database);
                 let result = match command {
+                    BorsCommand::Retry => {
+                        let span = tracing::info_span!("Retry");
+                        command_retry(repo, database, pr, &comment.author, &merge_queue_tx)
+                            .instrument(span)
+                            .await
+                    }
                     BorsCommand::Approve {
                         approver,
                         priority,

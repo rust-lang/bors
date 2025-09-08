@@ -1092,3 +1092,19 @@ pub(crate) async fn delete_tagged_bot_comment(
     })
     .await
 }
+
+pub(crate) async fn clear_auto_build(
+    executor: impl PgExecutor<'_>,
+    pr_id: i32,
+) -> anyhow::Result<()> {
+    measure_db_query("clear_pr_builds", || async {
+        sqlx::query!(
+            "UPDATE pull_request SET auto_build_id = NULL WHERE id = $1",
+            pr_id
+        )
+        .execute(executor)
+        .await?;
+        Ok(())
+    })
+    .await
+}

@@ -381,6 +381,15 @@ impl PullRequestModel {
             ApprovalStatus::NotApproved => None,
         }
     }
+
+    /// Approved but with a failed auto build.
+    pub fn stalled(&self) -> bool {
+        self.is_approved()
+            && self
+                .auto_build
+                .as_ref()
+                .is_some_and(|build| build.status.is_failure())
+    }
 }
 
 /// Describes whether a workflow is a Github Actions workflow or if it's a job from some external
