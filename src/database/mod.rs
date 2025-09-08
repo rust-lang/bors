@@ -383,7 +383,7 @@ impl PullRequestModel {
     }
 
     /// Approved but with a failed auto build.
-    pub fn stalled(&self) -> bool {
+    pub fn is_stalled(&self) -> bool {
         self.is_approved()
             && self
                 .auto_build

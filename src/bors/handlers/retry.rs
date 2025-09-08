@@ -21,7 +21,7 @@ pub(super) async fn command_retry(
 
     let pr_model = pr.db;
 
-    if pr_model.stalled() {
+    if pr_model.is_stalled() {
         db.clear_auto_build(pr_model).await?;
         merge_queue_tx.notify().await?;
     } else {
