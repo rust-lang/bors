@@ -87,7 +87,10 @@ mod tests {
             tester.expect_comments((), 1).await;
             tester.post_comment(Comment::from("@bors retry")).await?;
             tester.process_merge_queue().await;
-            tester.expect_comments((), 1).await;
+            insta::assert_snapshot!(
+                tester.get_comment_text(()).await?,
+                @":hourglass: Testing commit pr-1-sha with merge merge-0-pr-1..."
+            );
             Ok(())
         })
         .await;
