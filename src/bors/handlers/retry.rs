@@ -38,7 +38,7 @@ async fn notify_of_invalid_retry_state(
     repo.client
         .post_comment(
             pr_number,
-            Comment::new(":exclamation: This PR must be approved and have a previously failed auto build to be retried".to_string())
+            Comment::new(":exclamation: You can only retry pull requests that are approved and have a previously failed auto build".to_string())
         )
         .await?;
     Ok(())
@@ -69,7 +69,7 @@ mod tests {
             tester.post_comment(Comment::from("@bors retry")).await?;
             insta::assert_snapshot!(
                 tester.get_comment_text(()).await?,
-                @":exclamation: This PR must be approved and have a previously failed auto build to be retried"
+                @":exclamation: You can only retry pull requests that are approved and have a previously failed auto build"
             );
             Ok(())
         })
