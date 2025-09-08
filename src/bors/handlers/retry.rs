@@ -86,6 +86,7 @@ mod tests {
                 .await?;
             tester.expect_comments((), 1).await;
             tester.post_comment(Comment::from("@bors retry")).await?;
+            tester.wait_for_pr((), |pr| pr.auto_build.is_none()).await?;
             tester.process_merge_queue().await;
             insta::assert_snapshot!(
                 tester.get_comment_text(()).await?,
