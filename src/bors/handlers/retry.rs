@@ -14,8 +14,8 @@ pub(super) async fn command_retry(
     author: &GithubUser,
     merge_queue_tx: &MergeQueueSender,
 ) -> anyhow::Result<()> {
-    if !has_permission(&repo_state, author, pr, PermissionType::Try).await? {
-        deny_request(&repo_state, pr.number(), author, PermissionType::Try).await?;
+    if !has_permission(&repo_state, author, pr, PermissionType::Review).await? {
+        deny_request(&repo_state, pr.number(), author, PermissionType::Review).await?;
         return Ok(());
     }
 
@@ -56,7 +56,7 @@ mod tests {
                 .await?;
             insta::assert_snapshot!(
                 tester.get_comment_text(()).await?,
-                @"@unprivileged-user: :key: Insufficient privileges: not in try users"
+                @"@unprivileged-user: :key: Insufficient privileges: not in review users"
             );
             Ok(())
         })
