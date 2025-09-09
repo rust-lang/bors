@@ -148,9 +148,16 @@ pub async fn handle_bors_repository_event(
             let span =
                 tracing::info_span!("Pull request opened", repo = payload.repository.to_string());
 
-            handle_pull_request_opened(repo, db, mergeability_queue_tx, payload)
-                .instrument(span.clone())
-                .await?;
+            handle_pull_request_opened(
+                repo,
+                db,
+                ctx,
+                mergeability_queue_tx,
+                merge_queue_tx,
+                payload,
+            )
+            .instrument(span.clone())
+            .await?;
         }
         BorsRepositoryEvent::PullRequestClosed(payload) => {
             let span =

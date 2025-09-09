@@ -1,11 +1,15 @@
 use crate::PgDbClient;
 use crate::bors::event::{
-    PullRequestAssigned, PullRequestClosed, PullRequestConvertedToDraft, PullRequestEdited,
-    PullRequestMerged, PullRequestOpened, PullRequestPushed, PullRequestReadyForReview,
-    PullRequestReopened, PullRequestUnassigned, PushToBranch,
+    PullRequestAssigned, PullRequestClosed, PullRequestComment, PullRequestConvertedToDraft,
+    PullRequestEdited, PullRequestMerged, PullRequestOpened, PullRequestPushed,
+    PullRequestReadyForReview, PullRequestReopened, PullRequestUnassigned, PushToBranch,
 };
+
+use crate::bors::BorsContext;
+use crate::bors::handlers::handle_comment;
 use crate::bors::handlers::unapprove_pr;
 use crate::bors::handlers::workflow::{AutoBuildCancelReason, maybe_cancel_auto_build};
+use crate::bors::merge_queue::MergeQueueSender;
 use crate::bors::mergeability_queue::MergeabilityQueueSender;
 use crate::bors::{Comment, PullRequestStatus, RepositoryState};
 use crate::database::MergeableState;
@@ -90,7 +94,9 @@ pub(super) async fn handle_push_to_pull_request(
 pub(super) async fn handle_pull_request_opened(
     repo_state: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
+    ctx: Arc<BorsContext>,
     mergeability_queue: MergeabilityQueueSender,
+    merge_queue_tx: MergeQueueSender,
     payload: PullRequestOpened,
 ) -> anyhow::Result<()> {
     let pr_status = if payload.draft {
@@ -101,8 +107,8 @@ pub(super) async fn handle_pull_request_opened(
     let assignees: Vec<String> = payload
         .pull_request
         .assignees
-        .into_iter()
-        .map(|user| user.username)
+        .iter()
+        .map(|user| user.username.clone())
         .collect();
     db.create_pull_request(
         repo_state.repository(),
@@ -114,6 +120,8 @@ pub(super) async fn handle_pull_request_opened(
         pr_status,
     )
     .await?;
+
+    process_pr_description_commands(&payload, repo_state.clone(), db, ctx, merge_queue_tx).await?;
 
     mergeability_queue.enqueue_pr(repo_state.repository().clone(), payload.pull_request.number);
 
@@ -254,6 +262,30 @@ pub(super) async fn handle_push_to_branch(
     }
 
     Ok(())
+}
+
+async fn process_pr_description_commands(
+    payload: &PullRequestOpened,
+    repo: Arc<RepositoryState>,
+    database: Arc<PgDbClient>,
+    ctx: Arc<BorsContext>,
+    merge_queue_tx: MergeQueueSender,
+) -> anyhow::Result<()> {
+    let pr_description_comment = create_pr_description_comment(payload);
+    handle_comment(repo, database, ctx, pr_description_comment, merge_queue_tx).await
+}
+
+fn create_pr_description_comment(payload: &PullRequestOpened) -> PullRequestComment {
+    PullRequestComment {
+        repository: payload.repository.clone(),
+        author: payload.pull_request.author.clone(),
+        pr_number: payload.pull_request.number,
+        text: payload.pull_request.message.clone(),
+        html_url: format!(
+            "https://github.com/{}/pull/{}",
+            payload.repository, payload.pull_request.number
+        ),
+    }
 }
 
 async fn notify_of_edited_pr(
@@ -739,6 +771,22 @@ mod tests {
                     Some(CheckRunConclusion::Cancelled),
                 )
                 .await;
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn process_bors_commands_in_pr_description(pool: sqlx::PgPool) {
+        run_test(pool, async |tester: &mut BorsTester| {
+            let pr = tester
+                .open_pr(default_repo_name(), |pr| {
+                    pr.description = "@bors p=2".to_string();
+                })
+                .await?;
+            tester
+                .wait_for_pr(pr.number, |pr| pr.priority == Some(2))
+                .await?;
             Ok(())
         })
         .await;
