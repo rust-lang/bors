@@ -37,6 +37,7 @@ pub struct PullRequestStats {
     pub total_count: usize,
     pub approved_count: usize,
     pub rolled_up_count: usize,
+    pub failed_count: usize,
 }
 
 #[derive(Template)]

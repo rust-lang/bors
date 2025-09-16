@@ -150,16 +150,20 @@ async fn queue_handler(
 
     let prs = state.db.get_nonclosed_pull_requests(&repo.name).await?;
 
-    // TODO: add failed count
-    let (approved_count, rolled_up_count) = prs.iter().fold((0, 0), |(approved, rolled_up), pr| {
-        let is_approved = if pr.is_approved() { 1 } else { 0 };
-        let is_rolled_up = if matches!(pr.rollup, Some(RollupMode::Always)) {
-            1
-        } else {
-            0
-        };
-        (approved + is_approved, rolled_up + is_rolled_up)
-    });
+    let (approved_count, rolled_up_count, failed_count) =
+        prs.iter()
+            .fold((0, 0, 0), |(approved, rolled_up, failed), pr| {
+                (
+                    approved + if pr.is_approved() { 1 } else { 0 },
+                    rolled_up
+                        + if matches!(pr.rollup, Some(RollupMode::Always)) {
+                            1
+                        } else {
+                            0
+                        },
+                    failed + if pr.is_failed() { 1 } else { 0 },
+                )
+            });
 
     Ok(HtmlTemplate(QueueTemplate {
         repo_name: repo.name.name().to_string(),
@@ -169,6 +173,7 @@ async fn queue_handler(
             total_count: prs.len(),
             approved_count,
             rolled_up_count,
+            failed_count,
         },
         prs,
     })
