@@ -1,4 +1,4 @@
-use crate::database::{MergeableState::*, PullRequestModel, TreeState};
+use crate::database::{MergeableState::*, PullRequestModel, QueueStatus::*, TreeState};
 use askama::Template;
 use axum::response::{Html, IntoResponse, Response};
 use http::StatusCode;
@@ -36,8 +36,9 @@ pub struct RepositoryView {
 pub struct PullRequestStats {
     pub total_count: usize,
     pub approved_count: usize,
+    pub pending_count: usize,
+    pub stalled_count: usize,
     pub rolled_up_count: usize,
-    pub failed_count: usize,
 }
 
 #[derive(Template)]

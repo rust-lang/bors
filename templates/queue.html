@@ -29,7 +29,8 @@
 
   <p>
     {{ stats.total_count }} total, {{ stats.approved_count }} approved,
-    {{ stats.rolled_up_count }} rolled up, {{ stats.failed_count }} failed
+    {{ stats.pending_count }} pending, {{ stats.stalled_count }} stalled,
+    {{ stats.rolled_up_count }} rolled up
   </p>
 
   <table>
@@ -55,9 +56,15 @@
         {% if let Some(try_build) = pr.try_build %}
         <a href="../results/{{ repo_name }}/{{ pr.number }}">{{ try_build.status }}</a> (try)
         {% else %}
-        {% if pr.is_approved() %}
+        {% match pr.queue_status() %}
+        {% when Approved(_) %}
         approved
-        {% endif %}
+        {% when Pending(_, _) %}
+        pending
+        {% when Stalled(_, _) %}
+        stalled
+        {% when NotApproved %}
+        {% endmatch %}
         {% endif %}
       </td>
       <td>
