@@ -409,21 +409,14 @@ pub async fn maybe_cancel_auto_build(
     pr: &PullRequestModel,
     reason: AutoBuildCancelReason,
 ) -> anyhow::Result<Option<String>> {
-    match pr.queue_status() {
-        QueueStatus::Pending(_, _) => {
-            // Auto build is in progress, proceed with cancellation
-        }
-        _ => {
-            // No pending auto build to cancel
-            return Ok(None);
-        }
-    }
-
-    let auto_build = pr.auto_build.as_ref().unwrap(); // Safe because we matched Pending above
+    let auto_build = match pr.queue_status() {
+        QueueStatus::Pending(_, build) => build,
+        _ => return Ok(None),
+    };
 
     tracing::info!("Cancelling auto build {auto_build:?}");
 
-    match cancel_build(client, db, auto_build, CheckRunConclusion::Cancelled).await {
+    match cancel_build(client, db, &auto_build, CheckRunConclusion::Cancelled).await {
         Ok(workflows) => {
             tracing::info!("Auto build cancelled");
             let workflow_urls = workflows.into_iter().map(|w| w.url).collect();
