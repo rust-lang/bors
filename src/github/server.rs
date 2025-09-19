@@ -156,6 +156,7 @@ async fn queue_handler(
             .fold((0, 0, 0), |(in_queue, failed, rolled_up), pr| {
                 let (in_queue_inc, failed_inc) = match pr.queue_status() {
                     QueueStatus::Approved(..) => (1, 0),
+                    QueueStatus::ReadyForMerge(..) => (1, 0),
                     QueueStatus::Pending(..) => (1, 0),
                     QueueStatus::Stalled(..) => (0, 1),
                     QueueStatus::NotApproved => (0, 0),

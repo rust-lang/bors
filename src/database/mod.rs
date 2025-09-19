@@ -190,6 +190,8 @@ pub enum QueueStatus {
     /// Approved with no auto build started yet or a failed auto build was reset
     /// with `@bors retry`.
     Approved(ApprovalInfo),
+    /// Approved with passing CI.
+    ReadyForMerge(ApprovalInfo, BuildModel),
     NotApproved,
 }
 
@@ -403,7 +405,9 @@ impl PullRequestModel {
                     BuildStatus::Pending => {
                         QueueStatus::Pending(approval_info.clone(), build.clone())
                     }
-                    BuildStatus::Success => QueueStatus::Approved(approval_info.clone()),
+                    BuildStatus::Success => {
+                        QueueStatus::ReadyForMerge(approval_info.clone(), build.clone())
+                    }
                     BuildStatus::Failure | BuildStatus::Cancelled | BuildStatus::Timeouted => {
                         QueueStatus::Stalled(approval_info.clone(), build.clone())
                     }

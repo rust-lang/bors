@@ -142,15 +142,13 @@ async fn process_repository(repo: &RepositoryState, ctx: &BorsContext) -> anyhow
                 tracing::info!("PR {pr_num} has a pending build - blocking queue");
                 break;
             }
-            QueueStatus::Approved(approval_info) => {
-                if let Some(auto_build) = &pr.auto_build {
-                    handle_successful_build(repo, ctx, &pr, auto_build, &approval_info, pr_num)
-                        .await?;
-                } else {
-                    // No build exists for this PR - start a new auto build.
-                    if handle_start_auto_build(repo, ctx, &pr, pr_num).await? {
-                        break;
-                    }
+            QueueStatus::ReadyForMerge(approval_info, auto_build) => {
+                handle_successful_build(repo, ctx, &pr, &auto_build, &approval_info, pr_num)
+                    .await?;
+            }
+            QueueStatus::Approved(..) => {
+                if handle_start_auto_build(repo, ctx, &pr, pr_num).await? {
+                    break;
                 }
             }
         }

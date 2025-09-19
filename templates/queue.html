@@ -58,6 +58,8 @@
         {% match pr.queue_status() %}
         {% when Approved(_) %}
         approved
+        {% when ReadyForMerge(_, _) %}
+        approved
         {% when Pending(_, _) %}
         pending
         {% when Stalled(_, _) %}
