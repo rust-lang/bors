@@ -1045,4 +1045,59 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
         })
         .await;
     }
+
+    #[sqlx::test]
+    async fn finish_auto_build_while_tree_is_closed_1(pool: sqlx::PgPool) {
+        run_test(pool, async |tester: &mut BorsTester| {
+            // Start an auto build with the default priority (0)
+            tester.approve(()).await?;
+            tester.start_auto_build(()).await?;
+
+            // Now close the tree for priority below 100
+            tester.post_comment("@bors treeclosed=100").await?;
+            tester.expect_comments((), 1).await;
+
+            // Then finish the auto build AFTER the tree has been closed and then
+            // run the merge queue
+            tester.finish_auto_build(()).await?;
+
+            // And ensure that the PR was indeed merged
+            tester
+                .get_pr_copy(())
+                .await
+                .expect_status(PullRequestStatus::Merged)
+                .expect_auto_build(|b| b.status == BuildStatus::Success);
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn finish_auto_build_while_tree_is_closed_2(pool: sqlx::PgPool) {
+        run_test(pool, async |tester: &mut BorsTester| {
+            // Start an auto build with the default priority (0)
+            tester.approve(()).await?;
+            tester.start_auto_build(()).await?;
+
+            // Finish the auto build BEFORE the tree has been closed, then close the tree,
+            // and only then run the merge queue
+            tester
+                .workflow_full_success(tester.auto_branch().await)
+                .await?;
+
+            tester.post_comment("@bors treeclosed=100").await?;
+            tester.expect_comments((), 1).await;
+            tester.process_merge_queue().await;
+            tester.expect_comments((), 1).await;
+
+            // And ensure that the PR was indeed merged
+            tester
+                .get_pr_copy(())
+                .await
+                .expect_status(PullRequestStatus::Merged)
+                .expect_auto_build(|b| b.status == BuildStatus::Success);
+            Ok(())
+        })
+        .await;
+    }
 }

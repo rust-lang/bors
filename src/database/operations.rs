@@ -970,7 +970,7 @@ pub(crate) async fn update_build_check_run_id(
 /// Fetches pull requests eligible for merge:
 /// - Only approved PRs that are open and mergeable
 /// - Includes only PRs with pending or successful auto builds
-/// - Excludes PRs that do not meet the tree closure priority threshold (if tree closed)
+/// - Excludes non-pending PRs that do not meet the tree closure priority threshold (if tree closed)
 pub(crate) async fn get_merge_queue_prs(
     executor: impl PgExecutor<'_>,
     repo: &GithubRepoName,
@@ -1007,10 +1007,13 @@ pub(crate) async fn get_merge_queue_prs(
               AND pr.status = 'open'
               AND pr.approved_by IS NOT NULL
               AND pr.mergeable_state = 'mergeable'
-              -- Include only PRs with pending or successful auto builds
-              AND (auto_build.status IS NULL OR auto_build.status IN ('pending', 'success'))
-              -- Tree closure check (if tree_priority is set)
-              AND ($2::int IS NULL OR pr.priority >= $2)
+              AND
+                -- We ALWAYS need to return pending and successful PRs, regardless of tree state
+                auto_build.status IN ('pending', 'success') OR (
+                    -- For PRs without a build status, we check if they pass the tree state
+                    -- priority check, if the tree is closed
+                    auto_build.status IS NULL AND ($2::int IS NULL OR pr.priority >= $2)
+                )
             "#,
             repo as &GithubRepoName,
             tree_priority
