@@ -144,11 +144,8 @@ async fn process_repository(repo: &RepositoryState, ctx: &BorsContext) -> anyhow
             }
             QueueStatus::Approved(approval_info) => {
                 if let Some(auto_build) = &pr.auto_build {
-                    if handle_successful_build(repo, ctx, &pr, auto_build, &approval_info, pr_num)
-                        .await?
-                    {
-                        break;
-                    }
+                    handle_successful_build(repo, ctx, &pr, auto_build, &approval_info, pr_num)
+                        .await?;
                 } else {
                     // No build exists for this PR - start a new auto build.
                     if handle_start_auto_build(repo, ctx, &pr, pr_num).await? {
@@ -163,7 +160,6 @@ async fn process_repository(repo: &RepositoryState, ctx: &BorsContext) -> anyhow
 }
 
 /// Handle a successful auto build by pointing the base branch to the merged commit.
-/// Returns true if the queue should break (success or fatal error), false to continue.
 async fn handle_successful_build(
     repo: &RepositoryState,
     ctx: &BorsContext,
@@ -171,7 +167,7 @@ async fn handle_successful_build(
     auto_build: &BuildModel,
     approval_info: &ApprovalInfo,
     pr_num: PullRequestNumber,
-) -> anyhow::Result<bool> {
+) -> anyhow::Result<()> {
     let commit_sha = CommitSha(auto_build.commit_sha.clone());
     let workflows = ctx.db.get_workflows_for_build(auto_build).await?;
     let comment = auto_build_succeeded_comment(
@@ -210,8 +206,7 @@ async fn handle_successful_build(
         repo.client.post_comment(pr.number, comment).await?;
     }
 
-    // Break to give GitHub time to update the base branch
-    Ok(true)
+    Ok(())
 }
 
 /// Handle starting a new auto build for an approved PR.
