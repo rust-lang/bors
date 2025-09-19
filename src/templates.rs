@@ -35,9 +35,8 @@ pub struct RepositoryView {
 
 pub struct PullRequestStats {
     pub total_count: usize,
-    pub approved_count: usize,
-    pub pending_count: usize,
-    pub stalled_count: usize,
+    pub in_queue_count: usize,
+    pub failed_count: usize,
     pub rolled_up_count: usize,
 }
 

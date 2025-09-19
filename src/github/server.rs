@@ -151,24 +151,22 @@ async fn queue_handler(
 
     let prs = state.db.get_nonclosed_pull_requests(&repo.name).await?;
 
-    let (approved_count, pending_count, stalled_count, rolled_up_count) = prs.iter().fold(
-        (0, 0, 0, 0),
-        |(approved, pending, stalled, rolled_up), pr| {
-            let (approved_inc, pending_inc, stalled_inc) = match pr.queue_status() {
-                QueueStatus::Approved(..) => (1, 0, 0),
-                QueueStatus::Pending(..) => (0, 1, 0),
-                QueueStatus::Stalled(..) => (0, 0, 1),
-                QueueStatus::NotApproved => (0, 0, 0),
-            };
+    let (in_queue_count, failed_count, rolled_up_count) =
+        prs.iter()
+            .fold((0, 0, 0), |(in_queue, failed, rolled_up), pr| {
+                let (in_queue_inc, failed_inc) = match pr.queue_status() {
+                    QueueStatus::Approved(..) => (1, 0),
+                    QueueStatus::Pending(..) => (1, 0),
+                    QueueStatus::Stalled(..) => (0, 1),
+                    QueueStatus::NotApproved => (0, 0),
+                };
 
-            (
-                approved + approved_inc,
-                pending + pending_inc,
-                stalled + stalled_inc,
-                rolled_up + usize::from(matches!(pr.rollup, Some(RollupMode::Always))),
-            )
-        },
-    );
+                (
+                    in_queue + in_queue_inc,
+                    failed + failed_inc,
+                    rolled_up + usize::from(matches!(pr.rollup, Some(RollupMode::Always))),
+                )
+            });
 
     Ok(HtmlTemplate(QueueTemplate {
         repo_name: repo.name.name().to_string(),
@@ -176,9 +174,8 @@ async fn queue_handler(
         tree_state: repo.tree_state,
         stats: PullRequestStats {
             total_count: prs.len(),
-            approved_count,
-            pending_count,
-            stalled_count,
+            in_queue_count,
+            failed_count,
             rolled_up_count,
         },
         prs,
