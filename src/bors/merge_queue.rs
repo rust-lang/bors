@@ -145,6 +145,7 @@ async fn process_repository(repo: &RepositoryState, ctx: &BorsContext) -> anyhow
             QueueStatus::ReadyForMerge(approval_info, auto_build) => {
                 handle_successful_build(repo, ctx, &pr, &auto_build, &approval_info, pr_num)
                     .await?;
+                break;
             }
             QueueStatus::Approved(..) => {
                 if handle_start_auto_build(repo, ctx, &pr, pr_num).await? {
