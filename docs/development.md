@@ -137,12 +137,16 @@ Make sure to also run `cargo sqlx migrate run` to apply the migrations to the da
     The goal is to check that we have a test database with production-like data, so that we can test that applying migrations will not produce errors on a non-empty database.
     - If it doesn't make sense to add any data to the migration (e.g. if the migration only adds an index), put `-- Empty to satisfy migration tests` into the file.
 
-### Generate `.sqlx` directory
+### Regenerate `.sqlx` directory
 ```console
+$ rm -rf .sqlx
 $ cargo sqlx prepare -- --all-targets
+$ git add .sqlx
 ```
 
 After that, you should commit the changes to the `.sqlx` directory.
+
+Make sure to remove the `.sqlx` directory before running the `prepare` command, to ensure that leftover queries are not do not remain committed to the repository.
 
 ## Updating commands
 When modifying commands, make sure to update both:
