@@ -394,7 +394,7 @@ impl PullRequestModel {
 
 /// Describes whether a workflow is a Github Actions workflow or if it's a job from some external
 /// CI.
-#[derive(Debug, PartialEq, sqlx::Type)]
+#[derive(Debug, Clone, PartialEq, sqlx::Type)]
 #[sqlx(type_name = "TEXT")]
 #[sqlx(rename_all = "lowercase")]
 pub enum WorkflowType {

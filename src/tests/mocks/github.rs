@@ -108,40 +108,79 @@ async fn mock_graphql(github: Arc<tokio::sync::Mutex<GitHubState>>, mock_server:
             let query: Document<&str> =
                 graphql_parser::parse_query(&body.query).expect("Could not parse GraphQL query");
             let definition = query.definitions.into_iter().next().unwrap();
-            let mutation = match definition {
-                Definition::Operation(OperationDefinition::Mutation(mutation)) => mutation,
+            let selection_set = match definition {
+                Definition::Operation(OperationDefinition::Mutation(mutation)) => {
+                    mutation.selection_set
+                }
+                Definition::Operation(OperationDefinition::Query(query)) => query.selection_set,
                 _ => panic!("Unexpected GraphQL query: {}", body.query),
             };
-            let selection = mutation.selection_set.items.into_iter().next().unwrap();
+            let selection = selection_set.items.into_iter().next().unwrap();
             let operation = match selection {
                 Selection::Field(field) => field,
                 _ => panic!("Unexpected GraphQL selection"),
             };
-            if operation.name == "minimizeComment" {
-                #[derive(serde::Deserialize)]
-                struct Variables {
-                    node_id: String,
-                    reason: HideCommentReason,
+
+            match operation.name {
+                "minimizeComment" => {
+                    #[derive(serde::Deserialize)]
+                    struct Variables {
+                        node_id: String,
+                        reason: HideCommentReason,
+                    }
+
+                    let github = github.clone();
+                    let data: Variables = serde_json::from_value(body.variables).unwrap();
+
+                    // We have to use e.g. `blocking_lock` to lock from a sync function.
+                    // It has to happen in a separate thread though.
+                    std::thread::spawn(move || {
+                        github.blocking_lock().add_hidden_comment(HiddenComment {
+                            node_id: data.node_id,
+                            reason: data.reason,
+                        });
+                    })
+                    .join()
+                    .unwrap();
+                    ResponseTemplate::new(200).set_body_json(HashMap::<String, String>::new())
                 }
+                "updateComment" => {
+                    #[derive(serde::Deserialize)]
+                    struct Variables {
+                        id: String,
+                        body: String,
+                    }
 
-                let github = github.clone();
-                let data: Variables = serde_json::from_value(body.variables).unwrap();
-
-                // We have to use e.g. `blocking_lock` to lock from a sync function.
-                // It has to happen in a separate thread though.
-                std::thread::spawn(move || {
-                    github.blocking_lock().add_hidden_comment(HiddenComment {
-                        node_id: data.node_id,
-                        reason: data.reason,
+                    let data: Variables = serde_json::from_value(body.variables).unwrap();
+                    let response = serde_json::json!({
+                        "update_comment": {
+                            "comment": {
+                                "id": data.id,
+                                "body": data.body
+                            }
+                        }
                     });
-                })
-                .join()
-                .unwrap();
-            } else {
-                panic!("Unexpected operation {}", operation.name);
-            }
 
-            ResponseTemplate::new(200).set_body_json(HashMap::<String, String>::new())
+                    ResponseTemplate::new(200).set_body_json(response)
+                }
+                "node" => {
+                    #[derive(serde::Deserialize)]
+                    struct Variables {
+                        node_id: String,
+                    }
+
+                    let data: Variables = serde_json::from_value(body.variables).unwrap();
+
+                    let response = serde_json::json!({
+                        "node": {
+                                "__typename": "IssueComment",
+                                "body":format!(":hourglass: Trying commit {} \n To cancel the try build, run the command @bors try cancel`.", data.node_id)
+                        }
+                    });
+                    ResponseTemplate::new(200).set_body_json(response)
+                }
+                _ => panic!("Unexpected GraphQL operation {}", operation.name),
+            }
         },
         "POST",
         "^/graphql$".to_string(),

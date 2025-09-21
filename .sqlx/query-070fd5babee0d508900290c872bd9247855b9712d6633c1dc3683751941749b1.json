@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n                id,\n                repository as \"repository: GithubRepoName\",\n                pr_number as \"pr_number: i64\",\n                tag as \"tag: CommentTag\",\n                node_id,\n                created_at as \"created_at: DateTime<Utc>\"\n            FROM comment\n            WHERE repository = $1\n              AND pr_number = $2\n              AND tag = $3\n            ",
+  "query": "\n            SELECT\n                id,\n                repository as \"repository: GithubRepoName\",\n                pr_number as \"pr_number: i64\",\n                tag as \"tag: CommentTag\",\n                node_id,\n                created_at as \"created_at: DateTime<Utc>\"\n            FROM comment\n            WHERE repository = $1\n              AND pr_number = $2\n              AND tag = $3\n            ORDER BY created_at\n            ",
   "describe": {
     "columns": [
       {
@@ -50,5 +50,5 @@
       false
     ]
   },
-  "hash": "94ce8ab6ef6cb76aa62aaf81c9f4b1751318faf2009b411b6cd616f47a82abf0"
+  "hash": "070fd5babee0d508900290c872bd9247855b9712d6633c1dc3683751941749b1"
 }

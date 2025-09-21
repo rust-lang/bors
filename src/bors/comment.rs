@@ -198,6 +198,14 @@ pub fn try_build_started_comment(
     Comment::new(msg)
 }
 
+pub fn append_workflow_links_to_comment(comment_content: &mut String, workflow_links: Vec<String>) {
+    comment_content.push_str("\n\n**Workflows**:\n\n");
+
+    for link in workflow_links {
+        comment_content.push_str(&format!("- {link}\n"));
+    }
+}
+
 pub fn merge_conflict_comment(branch: &str) -> Comment {
     let message = format!(
         r#":lock: Merge conflict
