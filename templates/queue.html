@@ -28,8 +28,8 @@
   <p><a href="/help">Help page</a></p>
 
   <p>
-    {{ stats.total_count }} total, {{ stats.approved_count }} approved,
-    {{ stats.rolled_up_count }} rolled up
+    {{ stats.total_count }} total, {{ stats.in_queue_count }} in queue,
+    {{ stats.failed_count }} failed, {{ stats.rolled_up_count }} rolled up
   </p>
 
   <table>
@@ -55,9 +55,17 @@
         {% if let Some(try_build) = pr.try_build %}
         <a href="../results/{{ repo_name }}/{{ pr.number }}">{{ try_build.status }}</a> (try)
         {% else %}
-        {% if pr.is_approved() %}
+        {% match pr.queue_status() %}
+        {% when Approved(_) %}
         approved
-        {% endif %}
+        {% when ReadyForMerge(_, _) %}
+        ready for merge
+        {% when Pending(_, _) %}
+        pending
+        {% when Stalled(_, _) %}
+        stalled
+        {% when NotApproved %}
+        {% endmatch %}
         {% endif %}
       </td>
       <td>

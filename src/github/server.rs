@@ -8,6 +8,7 @@ use crate::bors::{
     BorsContext, CommandPrefix, RepositoryState, RollupMode, handle_bors_global_event,
     handle_bors_repository_event,
 };
+use crate::database::QueueStatus;
 use crate::github::webhook::GitHubWebhook;
 use crate::github::webhook::WebhookSecret;
 use crate::templates::{
@@ -150,16 +151,23 @@ async fn queue_handler(
 
     let prs = state.db.get_nonclosed_pull_requests(&repo.name).await?;
 
-    // TODO: add failed count
-    let (approved_count, rolled_up_count) = prs.iter().fold((0, 0), |(approved, rolled_up), pr| {
-        let is_approved = if pr.is_approved() { 1 } else { 0 };
-        let is_rolled_up = if matches!(pr.rollup, Some(RollupMode::Always)) {
-            1
-        } else {
-            0
-        };
-        (approved + is_approved, rolled_up + is_rolled_up)
-    });
+    let (in_queue_count, failed_count, rolled_up_count) =
+        prs.iter()
+            .fold((0, 0, 0), |(in_queue, failed, rolled_up), pr| {
+                let (in_queue_inc, failed_inc) = match pr.queue_status() {
+                    QueueStatus::Approved(..) => (1, 0),
+                    QueueStatus::ReadyForMerge(..) => (1, 0),
+                    QueueStatus::Pending(..) => (1, 0),
+                    QueueStatus::Stalled(..) => (0, 1),
+                    QueueStatus::NotApproved => (0, 0),
+                };
+
+                (
+                    in_queue + in_queue_inc,
+                    failed + failed_inc,
+                    rolled_up + usize::from(matches!(pr.rollup, Some(RollupMode::Always))),
+                )
+            });
 
     Ok(HtmlTemplate(QueueTemplate {
         repo_name: repo.name.name().to_string(),
@@ -167,7 +175,8 @@ async fn queue_handler(
         tree_state: repo.tree_state,
         stats: PullRequestStats {
             total_count: prs.len(),
-            approved_count,
+            in_queue_count,
+            failed_count,
             rolled_up_count,
         },
         prs,

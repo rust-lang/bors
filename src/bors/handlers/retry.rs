@@ -4,6 +4,7 @@ use crate::PgDbClient;
 use crate::bors::handlers::{PullRequestData, deny_request, has_permission};
 use crate::bors::merge_queue::MergeQueueSender;
 use crate::bors::{Comment, RepositoryState};
+use crate::database::QueueStatus;
 use crate::github::{GithubUser, PullRequestNumber};
 use crate::permissions::PermissionType;
 
@@ -21,7 +22,7 @@ pub(super) async fn command_retry(
 
     let pr_model = pr.db;
 
-    if pr_model.is_stalled() {
+    if matches!(pr_model.queue_status(), QueueStatus::Stalled(_, _)) {
         db.clear_auto_build(pr_model).await?;
         merge_queue_tx.notify().await?;
     } else {

@@ -6,7 +6,9 @@ use crate::bors::handlers::{BuildType, is_bors_observed_branch};
 use crate::bors::handlers::{get_build_type, hide_try_build_started_comments};
 use crate::bors::merge_queue::MergeQueueSender;
 use crate::bors::{FailedWorkflowRun, RepositoryState, WorkflowRun};
-use crate::database::{BuildModel, BuildStatus, PullRequestModel, WorkflowModel, WorkflowStatus};
+use crate::database::{
+    BuildModel, BuildStatus, PullRequestModel, QueueStatus, WorkflowModel, WorkflowStatus,
+};
 use crate::github::api::client::GithubRepositoryClient;
 use crate::github::{CommitSha, LabelTrigger};
 use octocrab::models::CheckRunId;
@@ -407,16 +409,14 @@ pub async fn maybe_cancel_auto_build(
     pr: &PullRequestModel,
     reason: AutoBuildCancelReason,
 ) -> anyhow::Result<Option<String>> {
-    let Some(auto_build) = &pr.auto_build else {
-        return Ok(None);
+    let auto_build = match pr.queue_status() {
+        QueueStatus::Pending(_, build) => build,
+        _ => return Ok(None),
     };
-    if auto_build.status != BuildStatus::Pending {
-        return Ok(None);
-    }
 
     tracing::info!("Cancelling auto build {auto_build:?}");
 
-    match cancel_build(client, db, auto_build, CheckRunConclusion::Cancelled).await {
+    match cancel_build(client, db, &auto_build, CheckRunConclusion::Cancelled).await {
         Ok(workflows) => {
             tracing::info!("Auto build cancelled");
             let workflow_urls = workflows.into_iter().map(|w| w.url).collect();
