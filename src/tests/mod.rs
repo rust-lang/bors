@@ -789,7 +789,7 @@ impl BorsTester {
         self.github
             .lock()
             .await
-            .check_comment_was_hidden(&comment.node_id.as_ref().unwrap(), reason);
+            .check_comment_was_hidden(comment.node_id.as_deref().unwrap(), reason);
     }
 
     pub async fn expect_check_run(

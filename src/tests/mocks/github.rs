@@ -143,7 +143,7 @@ async fn mock_graphql(github: Arc<tokio::sync::Mutex<GitHubState>>, mock_server:
                     .unwrap();
                     ResponseTemplate::new(200).set_body_json(HashMap::<String, String>::new())
                 }
-                "updateComment" => {
+                "updateIssueComment" => {
                     #[derive(serde::Deserialize)]
                     struct Variables {
                         id: String,
@@ -152,11 +152,8 @@ async fn mock_graphql(github: Arc<tokio::sync::Mutex<GitHubState>>, mock_server:
 
                     let data: Variables = serde_json::from_value(body.variables).unwrap();
                     let response = serde_json::json!({
-                        "update_comment": {
-                            "comment": {
-                                "id": data.id,
-                                "body": data.body
-                            }
+                        "issueComment": {
+                            "id": data.id,
                         }
                     });
 
@@ -192,9 +189,10 @@ async fn mock_graphql(github: Arc<tokio::sync::Mutex<GitHubState>>, mock_server:
                     .join()
                     .unwrap();
                     let response = serde_json::json!({
-                        "node": {
-                            "__typename": "IssueComment",
-                            "body": comment_text
+                        "data": {
+                            "node": {
+                                "body": comment_text
+                            }
                         }
                     });
                     ResponseTemplate::new(200).set_body_json(response)
