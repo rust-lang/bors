@@ -8,9 +8,9 @@ use crate::create_github_client;
 use crate::github::api::client::HideCommentReason;
 use crate::tests::GitHubState;
 use crate::tests::mocks::app::{AppHandler, default_app_id};
+use crate::tests::mocks::dynamic_mock_req;
 use crate::tests::mocks::pull_request::CommentMsg;
 use crate::tests::mocks::repository::{mock_repo, mock_repo_list};
-use crate::tests::mocks::{HiddenComment, dynamic_mock_req};
 
 pub struct GitHubMockServer {
     mock_server: MockServer,
@@ -135,10 +135,7 @@ async fn mock_graphql(github: Arc<tokio::sync::Mutex<GitHubState>>, mock_server:
                     // We have to use e.g. `blocking_lock` to lock from a sync function.
                     // It has to happen in a separate thread though.
                     std::thread::spawn(move || {
-                        github.blocking_lock().add_hidden_comment(HiddenComment {
-                            node_id: data.node_id,
-                            reason: data.reason,
-                        });
+                        github.blocking_lock().modify_comment(&data.node_id, |c| c.hide_reason = Some(data.reason));
                     })
                     .join()
                     .unwrap();

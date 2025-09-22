@@ -26,16 +26,10 @@ pub mod repository;
 pub mod user;
 pub mod workflow;
 
-#[derive(Debug)]
-pub struct HiddenComment {
-    pub node_id: String,
-    pub reason: HideCommentReason,
-}
-
 /// Represents the state of GitHub.
 pub struct GitHubState {
     pub(super) repos: HashMap<GithubRepoName, Arc<Mutex<Repo>>>,
-    hidden_comments: Vec<HiddenComment>,
+    comments: HashMap<String, Comment>,
 }
 
 impl GitHubState {
@@ -70,8 +64,8 @@ impl GitHubState {
         self
     }
 
-    pub fn add_hidden_comment(&mut self, comment: HiddenComment) {
-        self.hidden_comments.push(comment);
+    pub fn modify_comment<F: FnOnce(&mut Comment)>(&mut self, node_id: &str, func: F) {
+        func(self.comments.get_mut(node_id).unwrap());
     }
 
     pub fn check_sha_history(&self, repo: GithubRepoName, branch: &str, expected_shas: &[&str]) {
@@ -166,16 +160,27 @@ impl GitHubState {
 
         {
             let mut gh_state = state.lock().await;
-            let repo = gh_state
-                .repos
-                .get_mut(&id.repo)
-                .unwrap_or_else(|| panic!("Repository `{}` not found", id.repo));
-            let mut repo = repo.lock();
-            let pr = repo
-                .pull_requests
-                .get_mut(&id.number)
-                .expect("Pull request not found");
-            pr.add_comment_to_history(comment.clone());
+            {
+                let repo = gh_state
+                    .repos
+                    .get_mut(&id.repo)
+                    .unwrap_or_else(|| panic!("Repository `{}` not found", id.repo));
+                let mut repo = repo.lock();
+                let pr = repo
+                    .pull_requests
+                    .get_mut(&id.number)
+                    .expect("Pull request not found");
+                pr.add_comment_to_history(comment.clone());
+            }
+
+            assert_eq!(
+                gh_state.comments.insert(
+                    comment.node_id.clone().expect("Comment without node ID"),
+                    comment.clone()
+                ),
+                None,
+                "Duplicated comment {comment:?}"
+            );
         }
 
         eprintln!(
@@ -185,13 +190,15 @@ impl GitHubState {
         Ok(comment)
     }
 
-    pub fn check_hidden_comment(&self, comment: &Comment, reason: HideCommentReason) {
-        assert!(
-            self.hidden_comments
-                .iter()
-                .any(|c| &c.node_id == comment.node_id.as_ref().unwrap() && c.reason == reason),
-            "Comment {comment:?} was not hidden with reason {reason:?}.\nHidden comments: {:?}",
-            self.hidden_comments
+    pub fn check_comment_was_hidden(&self, node_id: &str, reason: HideCommentReason) {
+        let comment = self
+            .comments
+            .get(node_id)
+            .expect("Comment with node_id {node_id} was not modified through GraphQL");
+        assert_eq!(
+            comment.hide_reason,
+            Some(reason),
+            "Comment {comment:?} was not hidden with reason {reason:?}."
         );
     }
 }
@@ -201,7 +208,7 @@ impl Default for GitHubState {
         let repo = Repo::default();
         Self {
             repos: HashMap::from([(repo.name.clone(), Arc::new(Mutex::new(repo)))]),
-            hidden_comments: Default::default(),
+            comments: Default::default(),
         }
     }
 }
