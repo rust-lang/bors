@@ -135,7 +135,9 @@ async fn mock_graphql(github: Arc<tokio::sync::Mutex<GitHubState>>, mock_server:
                     // We have to use e.g. `blocking_lock` to lock from a sync function.
                     // It has to happen in a separate thread though.
                     std::thread::spawn(move || {
-                        github.blocking_lock().modify_comment(&data.node_id, |c| c.hide_reason = Some(data.reason));
+                        github
+                            .blocking_lock()
+                            .modify_comment(&data.node_id, |c| c.hide_reason = Some(data.reason));
                     })
                     .join()
                     .unwrap();
@@ -158,8 +160,18 @@ async fn mock_graphql(github: Arc<tokio::sync::Mutex<GitHubState>>, mock_server:
                         }
                     });
 
+                    let github = github.clone();
+                    std::thread::spawn(move || {
+                        github
+                            .blocking_lock()
+                            .modify_comment(&data.id, |c| c.content = data.body);
+                    })
+                    .join()
+                    .unwrap();
+
                     ResponseTemplate::new(200).set_body_json(response)
                 }
+                // Get comment content
                 "node" => {
                     #[derive(serde::Deserialize)]
                     struct Variables {
@@ -168,10 +180,21 @@ async fn mock_graphql(github: Arc<tokio::sync::Mutex<GitHubState>>, mock_server:
 
                     let data: Variables = serde_json::from_value(body.variables).unwrap();
 
+                    let github = github.clone();
+                    let comment_text = std::thread::spawn(move || {
+                        github
+                            .blocking_lock()
+                            .get_comment_by_node_id(&data.node_id)
+                            .unwrap()
+                            .content
+                            .clone()
+                    })
+                    .join()
+                    .unwrap();
                     let response = serde_json::json!({
                         "node": {
-                                "__typename": "IssueComment",
-                                "body":format!(":hourglass: Trying commit {} \n To cancel the try build, run the command @bors try cancel`.", data.node_id)
+                            "__typename": "IssueComment",
+                            "body": comment_text
                         }
                     });
                     ResponseTemplate::new(200).set_body_json(response)

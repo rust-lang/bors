@@ -897,6 +897,15 @@ impl BorsTester {
         result
     }
 
+    /// Get a GitHub comment that might have been modified by API calls from bors.
+    pub async fn get_comment_by_node_id(&self, node_id: &str) -> Option<Comment> {
+        self.github
+            .lock()
+            .await
+            .get_comment_by_node_id(node_id)
+            .cloned()
+    }
+
     //-- Internal helper functions --/
     async fn webhook_comment(&mut self, comment: Comment) -> anyhow::Result<()> {
         self.send_webhook(

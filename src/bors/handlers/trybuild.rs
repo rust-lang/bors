@@ -1085,4 +1085,32 @@ try_failed = ["+foo", "+bar", "-baz"]
         })
         .await;
     }
+
+    #[sqlx::test]
+    async fn update_try_build_started_comment_after_workflow_starts(pool: sqlx::PgPool) {
+        run_test(pool, async |tester: &mut BorsTester| {
+            tester.post_comment("@bors try").await?;
+            let comment = tester.get_next_comment(()).await?;
+
+            tester.workflow_start(tester.try_branch().await).await?;
+
+            // Check that the comment text has been updated with a link to the started workflow
+            let updated_comment = tester
+                .get_comment_by_node_id(&comment.node_id.unwrap())
+                .await
+                .unwrap();
+            insta::assert_snapshot!(updated_comment.content, @r"
+            :hourglass: Trying commit pr-1-sha with merge merge-0-pr-1…
+
+            To cancel the try build, run the command `@bors try cancel`.
+
+            **Workflows**:
+
+            - https://github.com/rust-lang/borstest/actions/runs/1
+            ");
+
+            Ok(())
+        })
+        .await;
+    }
 }

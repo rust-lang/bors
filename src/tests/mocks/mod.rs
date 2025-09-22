@@ -190,6 +190,10 @@ impl GitHubState {
         Ok(comment)
     }
 
+    pub fn get_comment_by_node_id(&self, node_id: &str) -> Option<&Comment> {
+        self.comments.get(node_id)
+    }
+
     pub fn check_comment_was_hidden(&self, node_id: &str, reason: HideCommentReason) {
         let comment = self
             .comments
