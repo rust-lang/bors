@@ -1,5 +1,8 @@
+use super::trybuild::TRY_BRANCH_NAME;
 use crate::PgDbClient;
-use crate::bors::comment::{build_failed_comment, try_build_succeeded_comment};
+use crate::bors::comment::{
+    CommentTag, append_workflow_links_to_comment, build_failed_comment, try_build_succeeded_comment,
+};
 use crate::bors::event::{WorkflowRunCompleted, WorkflowRunStarted};
 use crate::bors::handlers::labels::handle_label_trigger;
 use crate::bors::handlers::{BuildType, is_bors_observed_branch};
@@ -19,6 +22,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 pub(super) async fn handle_workflow_started(
+    repo: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
     payload: WorkflowRunStarted,
 ) -> anyhow::Result<()> {
@@ -55,13 +59,52 @@ pub(super) async fn handle_workflow_started(
     tracing::info!("Storing workflow started into DB");
     db.create_workflow(
         &build,
-        payload.name,
-        payload.url,
+        payload.name.clone(),
+        payload.url.clone(),
         payload.run_id.into(),
-        payload.workflow_type,
+        payload.workflow_type.clone(),
         WorkflowStatus::Pending,
     )
     .await?;
+
+    if build.branch == TRY_BRANCH_NAME {
+        add_workflow_links_to_try_build_start_comment(repo, db, &build, payload).await?;
+    }
+
+    Ok(())
+}
+
+async fn add_workflow_links_to_try_build_start_comment(
+    repo: Arc<RepositoryState>,
+    db: Arc<PgDbClient>,
+    build: &BuildModel,
+    payload: WorkflowRunStarted,
+) -> anyhow::Result<()> {
+    let Some(pr) = db.find_pr_by_build(build).await? else {
+        tracing::warn!("PR for build not found");
+        return Ok(());
+    };
+    let comments = db
+        .get_tagged_bot_comments(&payload.repository, pr.number, CommentTag::TryBuildStarted)
+        .await?;
+
+    let Some(try_build_comment) = comments.last() else {
+        tracing::warn!("No try build comment found for PR");
+        return Ok(());
+    };
+
+    let workflows = db.get_workflow_urls_for_build(build).await?;
+
+    let mut comment_content = repo
+        .client
+        .get_comment_content(&try_build_comment.node_id)
+        .await?;
+
+    append_workflow_links_to_comment(&mut comment_content, workflows);
+
+    repo.client
+        .update_comment_content(&try_build_comment.node_id, &comment_content)
+        .await?;
 
     Ok(())
 }
@@ -110,7 +153,6 @@ pub(super) async fn handle_workflow_completed(
     )
     .await
 }
-
 /// Attempt to complete a pending build after a workflow run has been completed.
 /// We assume that the status of the completed workflow run has already been updated in the
 /// database.
@@ -553,7 +595,7 @@ mod tests {
             tester.workflow_full_success(w2).await?;
 
             insta::assert_snapshot!(
-                tester.get_comment_text(()).await?,
+                tester.get_next_comment_text(()).await?,
                 @r#"
             :sunny: Try build successful
             - [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1) :white_check_mark:
@@ -583,7 +625,7 @@ mod tests {
             tester.workflow_event(WorkflowEvent::success(w1)).await?;
             tester.workflow_event(WorkflowEvent::success(w2)).await?;
             insta::assert_snapshot!(
-                tester.get_comment_text(()).await?,
+                tester.get_next_comment_text(()).await?,
                 @r#"
             :sunny: Try build successful
             - [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1) :white_check_mark:
@@ -612,7 +654,7 @@ mod tests {
 
             tester.workflow_event(WorkflowEvent::failure(w2)).await?;
             insta::assert_snapshot!(
-                tester.get_comment_text(()).await?,
+                tester.get_next_comment_text(()).await?,
                 @":broken_heart: Test for merge-0-pr-1 failed: [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1), [Workflow1](https://github.com/rust-lang/borstest/actions/runs/2)"
             );
             Ok(())
@@ -639,7 +681,7 @@ min_ci_time = 10
                             .with_duration(Duration::from_secs(1)),
                     )
                     .await?;
-                insta::assert_snapshot!(tester.get_comment_text(()).await?, @r"
+                insta::assert_snapshot!(tester.get_next_comment_text(()).await?, @r"
                 :broken_heart: Test for merge-0-pr-1 failed: [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1)
                 A workflow was considered to be a failure because it took only `1s`. The minimum duration for CI workflows is configured to be `10s`.
                 ");
@@ -666,7 +708,7 @@ min_ci_time = 20
                             .with_duration(Duration::from_secs(100)),
                     )
                     .await?;
-                insta::assert_snapshot!(tester.get_comment_text(()).await?, @r#"
+                insta::assert_snapshot!(tester.get_next_comment_text(()).await?, @r#"
                 :sunny: Try build successful ([Workflow1](https://github.com/rust-lang/borstest/actions/runs/1))
                 Build commit: merge-0-pr-1 (`merge-0-pr-1`, parent: `main-sha1`)
 

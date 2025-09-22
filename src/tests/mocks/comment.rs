@@ -1,3 +1,8 @@
+use crate::github::api::client::HideCommentReason;
+use crate::tests::mocks::User;
+use crate::tests::mocks::pull_request::PrIdentifier;
+use crate::tests::mocks::repository::GitHubRepository;
+use crate::tests::mocks::user::GitHubUser;
 use chrono::Utc;
 use octocrab::models::events::payload::{IssueCommentEventAction, IssueCommentEventChanges};
 use octocrab::models::issues::IssueStateReason;
@@ -5,18 +10,14 @@ use octocrab::models::{Author, CommentId, IssueId, IssueState, Label};
 use serde::Serialize;
 use url::Url;
 
-use crate::tests::mocks::User;
-use crate::tests::mocks::pull_request::PrIdentifier;
-use crate::tests::mocks::repository::GitHubRepository;
-use crate::tests::mocks::user::GitHubUser;
-
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Comment {
     pub pr_ident: PrIdentifier,
     pub author: User,
     pub content: String,
     pub id: Option<u64>,
     pub node_id: Option<String>,
+    pub hide_reason: Option<HideCommentReason>,
 }
 
 impl Comment {
@@ -27,6 +28,7 @@ impl Comment {
             content: content.to_string(),
             id: None,
             node_id: None,
+            hide_reason: None,
         }
     }
 

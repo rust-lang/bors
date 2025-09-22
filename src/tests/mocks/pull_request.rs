@@ -34,7 +34,7 @@ pub fn default_pr_number() -> u64 {
 /// - `()`, which uses the default repo and default PR number.
 /// - A PR number, which uses the default repository.
 /// - A tuple (<repo-name>, <PR number>).
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PrIdentifier {
     pub repo: GithubRepoName,
     pub number: u64,

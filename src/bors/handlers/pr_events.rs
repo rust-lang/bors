@@ -350,7 +350,7 @@ mod tests {
                 .await?;
 
             insta::assert_snapshot!(
-                tester.get_comment_text(()).await?,
+                tester.get_next_comment_text(()).await?,
                 @r"
             :warning: The base branch changed to `beta`, and the
             PR will need to be re-approved.
@@ -400,7 +400,7 @@ mod tests {
             tester.push_to_pr(()).await?;
 
             insta::assert_snapshot!(
-                tester.get_comment_text(()).await?,
+                tester.get_next_comment_text(()).await?,
                 @r"
             :warning: A new commit `pr-1-commit-1` was pushed to the branch, the
             PR will need to be re-approved.
@@ -713,7 +713,7 @@ mod tests {
                 .workflow_start(WorkflowRunData::from(tester.auto_branch().await).with_run_id(123))
                 .await?;
             tester.push_to_pr(()).await?;
-            insta::assert_snapshot!(tester.get_comment_text(()).await?, @r"
+            insta::assert_snapshot!(tester.get_next_comment_text(()).await?, @r"
                 :warning: A new commit `pr-1-commit-1` was pushed to the branch, the
                 PR will need to be re-approved.
 
@@ -741,7 +741,7 @@ mod tests {
 
             tester.workflow_start(tester.auto_branch().await).await?;
             tester.push_to_pr(()).await?;
-            insta::assert_snapshot!(tester.get_comment_text(()).await?, @r"
+            insta::assert_snapshot!(tester.get_next_comment_text(()).await?, @r"
                 :warning: A new commit `pr-1-commit-1` was pushed to the branch, the
                 PR will need to be re-approved.
 

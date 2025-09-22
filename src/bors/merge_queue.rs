@@ -535,7 +535,7 @@ merge_queue_enabled = false
             tester.approve(()).await?;
             tester.process_merge_queue().await;
             insta::assert_snapshot!(
-                tester.get_comment_text(()).await?,
+                tester.get_next_comment_text(()).await?,
                 @":hourglass: Testing commit pr-1-sha with merge merge-0-pr-1..."
             );
             Ok(())
@@ -552,7 +552,7 @@ merge_queue_enabled = false
             tester.process_merge_queue().await;
 
             insta::assert_snapshot!(
-                tester.get_comment_text(()).await?,
+                tester.get_next_comment_text(()).await?,
                 @r"
             :sunny: Test successful - [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1)
             Approved by: `default-user`
@@ -572,7 +572,7 @@ merge_queue_enabled = false
             tester.workflow_full_failure(tester.auto_branch().await).await?;
 
             insta::assert_snapshot!(
-                tester.get_comment_text(()).await?,
+                tester.get_next_comment_text(()).await?,
                 @":broken_heart: Test for merge-0-pr-1 failed: [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1)"
             );
             Ok(())
@@ -714,7 +714,7 @@ merge_queue_enabled = false
             tester.workflow_full_success(tester.auto_branch().await).await?;
             tester.process_merge_queue().await;
             insta::assert_snapshot!(
-                tester.get_comment_text(()).await?,
+                tester.get_next_comment_text(()).await?,
                 @":eyes: Test was successful, but fast-forwarding failed: this PR has conflicts with the `main` branch"
             );
             Ok(())
@@ -735,7 +735,7 @@ merge_queue_enabled = false
             tester.workflow_full_success(tester.auto_branch().await).await?;
             tester.process_merge_queue().await;
             insta::assert_snapshot!(
-                tester.get_comment_text(()).await?,
+                tester.get_next_comment_text(()).await?,
                 @":eyes: Test was successful, but fast-forwarding failed: the tested commit was behind the `main` branch"
             );
             Ok(())
@@ -759,7 +759,7 @@ merge_queue_enabled = false
                 .await?;
             tester.process_merge_queue().await;
             insta::assert_snapshot!(
-                tester.get_comment_text(()).await?,
+                tester.get_next_comment_text(()).await?,
                 @":eyes: Test was successful, but fast-forwarding failed: IO error"
             );
             Ok(())
@@ -831,7 +831,7 @@ merge_queue_enabled = false
             tester.approve(()).await?;
             tester.process_merge_queue().await;
             insta::assert_snapshot!(
-                tester.get_comment_text(()).await?,
+                tester.get_next_comment_text(()).await?,
                 @r#"
             :lock: Merge conflict
 

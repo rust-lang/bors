@@ -457,12 +457,31 @@ impl GithubRepositoryClient {
             variables: V,
         }
 
+        #[derive(serde::Deserialize, Debug)]
+        struct Error {
+            #[allow(unused)]
+            message: String,
+        }
+
+        #[derive(serde::Deserialize)]
+        struct RawResponse<T> {
+            errors: Option<Vec<Error>>,
+            #[serde(flatten)]
+            result: T,
+        }
+
         let response = self
             .client
-            .graphql::<T>(&Payload { query, variables })
+            .graphql::<RawResponse<T>>(&Payload { query, variables })
             .await
             .context("GraphQL request failed")?;
-        Ok(response)
+
+        let errors = response.errors.unwrap_or_default();
+        if !errors.is_empty() {
+            Err(anyhow::anyhow!("Query ended with error(s): {errors:?}"))
+        } else {
+            Ok(response.result)
+        }
     }
 
     /// Hides a comment on an Issue, Commit, Pull Request, or Gist.
@@ -494,6 +513,89 @@ impl GithubRepositoryClient {
                 .await
                 .context("Failed to hide comment")?;
             anyhow::Ok(())
+        })
+        .await?;
+        Ok(())
+    }
+
+    pub async fn get_comment_content(&self, node_id: &str) -> anyhow::Result<String> {
+        const QUERY: &str = r#"
+            query($node_id: ID!) {
+                node(id: $node_id) {
+                    ... on IssueComment {
+                        body
+                    }
+                }
+            }
+        "#;
+
+        #[derive(Serialize)]
+        struct Variables<'a> {
+            node_id: &'a str,
+        }
+
+        #[derive(Deserialize)]
+        struct Output {
+            data: OutputInner,
+        }
+
+        #[derive(Deserialize)]
+        struct OutputInner {
+            node: Option<IssueCommentNode>,
+        }
+
+        #[derive(Deserialize)]
+        struct IssueCommentNode {
+            body: String,
+        }
+
+        tracing::debug!(node_id, "Fetching comment content");
+
+        let output = perform_retryable("get_comment_content", RetryMethod::default(), || async {
+            self.graphql::<Output, Variables>(QUERY, Variables { node_id })
+                .await
+                .context("Failed to fetch comment content")
+        })
+        .await?;
+
+        match output.data.node {
+            Some(comment) => Ok(comment.body),
+            None => anyhow::bail!("No comment found for node_id: {node_id}"),
+        }
+    }
+    pub async fn update_comment_content(
+        &self,
+        node_id: &str,
+        new_body: &str,
+    ) -> anyhow::Result<()> {
+        const QUERY: &str = r#"
+            mutation($id: ID!, $body: String!) {
+                updateIssueComment(input: {id: $id, body: $body}) {
+                    issueComment {
+                        id
+                    }
+                }
+            }
+        "#;
+
+        #[derive(Serialize)]
+        struct Variables<'a> {
+            id: &'a str,
+            body: &'a str,
+        }
+
+        tracing::debug!(node_id, "Updating comment content");
+
+        perform_retryable("update_comment_content", RetryMethod::default(), || async {
+            self.graphql::<(), Variables>(
+                QUERY,
+                Variables {
+                    id: node_id,
+                    body: new_body,
+                },
+            )
+            .await
+            .context("Failed to update comment")
         })
         .await?;
         Ok(())

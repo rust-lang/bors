@@ -108,7 +108,7 @@ pub async fn handle_bors_repository_event(
                 repo = payload.repository.to_string(),
                 id = payload.run_id.into_inner()
             );
-            handle_workflow_started(db, payload)
+            handle_workflow_started(repo, db, payload)
                 .instrument(span.clone())
                 .await?;
 
@@ -728,7 +728,7 @@ mod tests {
     async fn unknown_command(pool: sqlx::PgPool) {
         run_test(pool, async |tester: &mut BorsTester| {
             tester.post_comment(Comment::from("@bors foo")).await?;
-            insta::assert_snapshot!(tester.get_comment_text(()).await?, @r#"Unknown command "foo". Run `@bors help` to see available commands."#);
+            insta::assert_snapshot!(tester.get_next_comment_text(()).await?, @r#"Unknown command "foo". Run `@bors help` to see available commands."#);
             Ok(())
         })
         .await;

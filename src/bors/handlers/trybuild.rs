@@ -303,7 +303,7 @@ mod tests {
             tester.expect_comments((), 1).await;
             tester.workflow_full_success(tester.try_branch().await).await?;
             insta::assert_snapshot!(
-                tester.get_comment_text(()).await?,
+                tester.get_next_comment_text(()).await?,
                 @r#"
             :sunny: Try build successful ([Workflow1](https://github.com/rust-lang/borstest/actions/runs/1))
             Build commit: merge-0-pr-1 (`merge-0-pr-1`, parent: `main-sha1`)
@@ -323,7 +323,7 @@ mod tests {
             tester.expect_comments((), 1).await;
             tester.workflow_full_failure(tester.try_branch().await).await?;
             insta::assert_snapshot!(
-                tester.get_comment_text(()).await?,
+                tester.get_next_comment_text(()).await?,
                 @":broken_heart: Test for merge-0-pr-1 failed: [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1)"
             );
             Ok(())
@@ -354,7 +354,7 @@ mod tests {
             tester.modify_repo(&default_repo_name(), |repo| repo.update_workflow_run(workflow.clone(), WorkflowStatus::Pending)).await;
             tester.workflow_full_failure(workflow).await?;
             insta::assert_snapshot!(
-                tester.get_comment_text(()).await?,
+                tester.get_next_comment_text(()).await?,
                 @r"
             :broken_heart: Test for merge-0-pr-1 failed: [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1). Failed jobs:
 
@@ -374,7 +374,7 @@ mod tests {
                 .post_comment(Comment::from("@bors try").with_author(User::unprivileged()))
                 .await?;
             insta::assert_snapshot!(
-                tester.get_comment_text(()).await?,
+                tester.get_next_comment_text(()).await?,
                 @"@unprivileged-user: :key: Insufficient privileges: not in try users"
             );
             Ok(())
@@ -389,7 +389,7 @@ mod tests {
                 .post_comment(Comment::from("@bors try").with_author(User::try_user()))
                 .await?;
             insta::assert_snapshot!(
-                tester.get_comment_text(()).await?,
+                tester.get_next_comment_text(()).await?,
                 @r"
             :hourglass: Trying commit pr-1-sha with merge merge-0-pr-1…
 
@@ -406,7 +406,7 @@ mod tests {
         run_test(pool, async |tester: &mut BorsTester| {
             tester.post_comment("@bors try").await?;
             insta::assert_snapshot!(
-                tester.get_comment_text(()).await?,
+                tester.get_next_comment_text(()).await?,
                 @r"
             :hourglass: Trying commit pr-1-sha with merge merge-0-pr-1…
 
@@ -549,7 +549,7 @@ try-job: Bar
                 .await?;
             tester.expect_comments((), 1).await;
             tester.post_comment("@bors try parent=last").await?;
-            insta::assert_snapshot!(tester.get_comment_text(()).await?, @r"
+            insta::assert_snapshot!(tester.get_next_comment_text(()).await?, @r"
             :hourglass: Trying commit pr-1-sha with merge merge-1-pr-1…
 
             To cancel the try build, run the command `@bors try cancel`.
@@ -575,7 +575,7 @@ try-job: Bar
             tester
                 .post_comment("@bors try parent=last")
                 .await?;
-            insta::assert_snapshot!(tester.get_comment_text(()).await?, @":exclamation: There was no previous build. Please set an explicit parent or remove the `parent=last` argument to use the default parent.");
+            insta::assert_snapshot!(tester.get_next_comment_text(()).await?, @":exclamation: There was no previous build. Please set an explicit parent or remove the `parent=last` argument to use the default parent.");
             Ok(())
         })
             .await;
@@ -588,7 +588,7 @@ try-job: Bar
             tester
                 .post_comment("@bors try")
                 .await?;
-            insta::assert_snapshot!(tester.get_comment_text(()).await?, @r###"
+            insta::assert_snapshot!(tester.get_next_comment_text(()).await?, @r###"
             :lock: Merge conflict
 
             This pull request and the base branch diverged in a way that cannot
@@ -650,7 +650,7 @@ try-job: Bar
             tester.post_comment("@bors try").await?;
             tester.expect_comments((), 1).await;
             tester.post_comment("@bors try").await?;
-            insta::assert_snapshot!(tester.get_comment_text(()).await?, @r"
+            insta::assert_snapshot!(tester.get_next_comment_text(()).await?, @r"
             :hourglass: Trying commit pr-1-sha with merge merge-1-pr-1…
 
             To cancel the try build, run the command `@bors try cancel`.
@@ -672,12 +672,12 @@ try-job: Bar
 "#,
                 )
                 .await?;
-            insta::assert_snapshot!(tester.get_comment_text(()).await?, @r"
+            insta::assert_snapshot!(tester.get_next_comment_text(()).await?, @r"
             :hourglass: Trying commit pr-1-sha with merge merge-0-pr-1…
 
             To cancel the try build, run the command `@bors try cancel`.
             ");
-            insta::assert_snapshot!(tester.get_comment_text(()).await?, @"Try build cancelled. Cancelled workflows:");
+            insta::assert_snapshot!(tester.get_next_comment_text(()).await?, @"Try build cancelled. Cancelled workflows:");
             Ok(())
         })
         .await;
@@ -693,7 +693,7 @@ try-job: Bar
                 .await?;
 
             tester.post_comment("@bors try").await?;
-            insta::assert_snapshot!(tester.get_comment_text(()).await?, @r"
+            insta::assert_snapshot!(tester.get_next_comment_text(()).await?, @r"
             :hourglass: Trying commit pr-1-sha with merge merge-1-pr-1…
 
             (The previously running try build was automatically cancelled.)
@@ -717,7 +717,7 @@ try-job: Bar
             tester.expect_comments((), 1).await;
 
             tester.post_comment("@bors try").await?;
-            insta::assert_snapshot!(tester.get_comment_text(()).await?, @r"
+            insta::assert_snapshot!(tester.get_next_comment_text(()).await?, @r"
             :hourglass: Trying commit pr-1-sha with merge merge-1-pr-1…
 
             To cancel the try build, run the command `@bors try cancel`.
@@ -729,7 +729,7 @@ try-job: Bar
                         .with_check_suite_id(2),
                 )
                 .await?;
-            insta::assert_snapshot!(tester.get_comment_text(()).await?, @r#"
+            insta::assert_snapshot!(tester.get_next_comment_text(()).await?, @r#"
             :sunny: Try build successful ([Workflow1](https://github.com/rust-lang/borstest/actions/runs/2))
             Build commit: merge-1-pr-1 (`merge-1-pr-1`, parent: `main-sha1`)
 
@@ -744,7 +744,7 @@ try-job: Bar
     async fn try_cancel_no_running_build(pool: sqlx::PgPool) {
         run_test(pool, async |tester: &mut BorsTester| {
             tester.post_comment("@bors try cancel").await?;
-            insta::assert_snapshot!(tester.get_comment_text(()).await?, @":exclamation: There is currently no try build in progress.");
+            insta::assert_snapshot!(tester.get_next_comment_text(()).await?, @":exclamation: There is currently no try build in progress.");
             Ok(())
         })
             .await;
@@ -768,7 +768,7 @@ try-job: Bar
                 ))
                 .await?;
             tester.post_comment("@bors try cancel").await?;
-            insta::assert_snapshot!(tester.get_comment_text(()).await?, @r"
+            insta::assert_snapshot!(tester.get_next_comment_text(()).await?, @r"
             Try build cancelled. Cancelled workflows:
             - https://github.com/rust-lang/borstest/actions/runs/123
             - https://github.com/rust-lang/borstest/actions/runs/124
@@ -789,7 +789,7 @@ try-job: Bar
                 .workflow_event(WorkflowEvent::started(tester.try_branch().await))
                 .await?;
             tester.post_comment("@bors try cancel").await?;
-            insta::assert_snapshot!(tester.get_comment_text(()).await?, @"Try build was cancelled. It was not possible to cancel some workflows.");
+            insta::assert_snapshot!(tester.get_next_comment_text(()).await?, @"Try build was cancelled. It was not possible to cancel some workflows.");
             let build = tester.db().find_build(
                 &default_repo_name(),
                 tester.try_branch().await.get_name().to_string(),
@@ -843,7 +843,7 @@ try-job: Bar
             tester.workflow_full_success(w2).await?;
             tester.workflow_start(w3).await?;
             tester.post_comment("@bors try cancel").await?;
-            insta::assert_snapshot!(tester.get_comment_text(()).await?, @r"
+            insta::assert_snapshot!(tester.get_next_comment_text(()).await?, @r"
             Try build cancelled. Cancelled workflows:
             - https://github.com/rust-lang/borstest/actions/runs/3
             ");
@@ -881,7 +881,7 @@ try_failed = ["+foo", "+bar", "-baz"]
             ))
             .run_test(async |tester: &mut BorsTester| {
                 tester.post_comment("@bors try").await?;
-                insta::assert_snapshot!(tester.get_comment_text(()).await?, @r"
+                insta::assert_snapshot!(tester.get_next_comment_text(()).await?, @r"
                 :hourglass: Trying commit pr-1-sha with merge merge-0-pr-1…
 
                 To cancel the try build, run the command `@bors try cancel`.
@@ -1036,7 +1036,7 @@ try_failed = ["+foo", "+bar", "-baz"]
     async fn hide_try_build_started_comment_after_success(pool: sqlx::PgPool) {
         run_test(pool, async |tester: &mut BorsTester| {
             tester.post_comment("@bors try").await?;
-            let comment = tester.get_comment(()).await?;
+            let comment = tester.get_next_comment(()).await?;
             tester
                 .workflow_full_success(tester.try_branch().await)
                 .await?;
@@ -1054,7 +1054,7 @@ try_failed = ["+foo", "+bar", "-baz"]
     async fn hide_try_build_started_comment_after_failure(pool: sqlx::PgPool) {
         run_test(pool, async |tester: &mut BorsTester| {
             tester.post_comment("@bors try").await?;
-            let comment = tester.get_comment(()).await?;
+            let comment = tester.get_next_comment(()).await?;
             tester
                 .workflow_full_failure(tester.try_branch().await)
                 .await?;
@@ -1072,7 +1072,7 @@ try_failed = ["+foo", "+bar", "-baz"]
     async fn hide_try_build_started_comment_after_restart(pool: sqlx::PgPool) {
         run_test(pool, async |tester: &mut BorsTester| {
             tester.post_comment("@bors try").await?;
-            let comment = tester.get_comment(()).await?;
+            let comment = tester.get_next_comment(()).await?;
 
             // Hide the previous "Try build started" comment when we restart the build
             tester.post_comment("@bors try").await?;
@@ -1080,6 +1080,34 @@ try_failed = ["+foo", "+bar", "-baz"]
             tester
                 .expect_hidden_comment(&comment, HideCommentReason::Outdated)
                 .await;
+
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn update_try_build_started_comment_after_workflow_starts(pool: sqlx::PgPool) {
+        run_test(pool, async |tester: &mut BorsTester| {
+            tester.post_comment("@bors try").await?;
+            let comment = tester.get_next_comment(()).await?;
+
+            tester.workflow_start(tester.try_branch().await).await?;
+
+            // Check that the comment text has been updated with a link to the started workflow
+            let updated_comment = tester
+                .get_comment_by_node_id(&comment.node_id.unwrap())
+                .await
+                .unwrap();
+            insta::assert_snapshot!(updated_comment.content, @r"
+            :hourglass: Trying commit pr-1-sha with merge merge-0-pr-1…
+
+            To cancel the try build, run the command `@bors try cancel`.
+
+            **Workflows**:
+
+            - https://github.com/rust-lang/borstest/actions/runs/1
+            ");
 
             Ok(())
         })

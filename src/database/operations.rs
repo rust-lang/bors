@@ -1046,6 +1046,7 @@ pub(crate) async fn get_tagged_bot_comments(
             WHERE repository = $1
               AND pr_number = $2
               AND tag = $3
+            ORDER BY created_at
             "#,
             repo as &GithubRepoName,
             pr_number.0 as i32,
