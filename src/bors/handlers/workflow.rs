@@ -595,7 +595,7 @@ mod tests {
             tester.workflow_full_success(w2).await?;
 
             insta::assert_snapshot!(
-                tester.get_comment_text(()).await?,
+                tester.get_next_comment_text(()).await?,
                 @r#"
             :sunny: Try build successful
             - [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1) :white_check_mark:
@@ -625,7 +625,7 @@ mod tests {
             tester.workflow_event(WorkflowEvent::success(w1)).await?;
             tester.workflow_event(WorkflowEvent::success(w2)).await?;
             insta::assert_snapshot!(
-                tester.get_comment_text(()).await?,
+                tester.get_next_comment_text(()).await?,
                 @r#"
             :sunny: Try build successful
             - [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1) :white_check_mark:
@@ -654,7 +654,7 @@ mod tests {
 
             tester.workflow_event(WorkflowEvent::failure(w2)).await?;
             insta::assert_snapshot!(
-                tester.get_comment_text(()).await?,
+                tester.get_next_comment_text(()).await?,
                 @":broken_heart: Test for merge-0-pr-1 failed: [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1), [Workflow1](https://github.com/rust-lang/borstest/actions/runs/2)"
             );
             Ok(())
@@ -681,7 +681,7 @@ min_ci_time = 10
                             .with_duration(Duration::from_secs(1)),
                     )
                     .await?;
-                insta::assert_snapshot!(tester.get_comment_text(()).await?, @r"
+                insta::assert_snapshot!(tester.get_next_comment_text(()).await?, @r"
                 :broken_heart: Test for merge-0-pr-1 failed: [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1)
                 A workflow was considered to be a failure because it took only `1s`. The minimum duration for CI workflows is configured to be `10s`.
                 ");
@@ -708,7 +708,7 @@ min_ci_time = 20
                             .with_duration(Duration::from_secs(100)),
                     )
                     .await?;
-                insta::assert_snapshot!(tester.get_comment_text(()).await?, @r#"
+                insta::assert_snapshot!(tester.get_next_comment_text(()).await?, @r#"
                 :sunny: Try build successful ([Workflow1](https://github.com/rust-lang/borstest/actions/runs/1))
                 Build commit: merge-0-pr-1 (`merge-0-pr-1`, parent: `main-sha1`)
 

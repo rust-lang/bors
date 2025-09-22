@@ -103,7 +103,7 @@ impl GitHubState {
     /// events to arrive from the bors service.
     /// As such, it has to be written carefully to avoid holding GH/repo locks that are also
     /// acquired by dynamic HTTP mock handlers.
-    pub async fn get_comment<Id: Into<PrIdentifier>>(
+    pub async fn get_next_comment<Id: Into<PrIdentifier>>(
         state: Arc<tokio::sync::Mutex<Self>>,
         id: Id,
     ) -> anyhow::Result<Comment> {

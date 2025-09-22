@@ -55,7 +55,7 @@ mod tests {
                 .post_comment(Comment::from("@bors retry").with_author(User::unprivileged()))
                 .await?;
             insta::assert_snapshot!(
-                tester.get_comment_text(()).await?,
+                tester.get_next_comment_text(()).await?,
                 @"@unprivileged-user: :key: Insufficient privileges: not in review users"
             );
             Ok(())
@@ -68,7 +68,7 @@ mod tests {
         run_test(pool, async |tester: &mut BorsTester| {
             tester.post_comment(Comment::from("@bors retry")).await?;
             insta::assert_snapshot!(
-                tester.get_comment_text(()).await?,
+                tester.get_next_comment_text(()).await?,
                 @":exclamation: You can only retry pull requests that are approved and have a previously failed auto build"
             );
             Ok(())
@@ -89,7 +89,7 @@ mod tests {
             tester.wait_for_pr((), |pr| pr.auto_build.is_none()).await?;
             tester.process_merge_queue().await;
             insta::assert_snapshot!(
-                tester.get_comment_text(()).await?,
+                tester.get_next_comment_text(()).await?,
                 @":hourglass: Testing commit pr-1-sha with merge merge-1-pr-1..."
             );
             Ok(())
