@@ -1104,9 +1104,7 @@ try_failed = ["+foo", "+bar", "-baz"]
 
             To cancel the try build, run the command `@bors try cancel`.
 
-            **Workflows**:
-
-            - https://github.com/rust-lang/borstest/actions/runs/1
+            **Workflow**: https://github.com/rust-lang/borstest/actions/runs/1
             ");
 
             Ok(())
