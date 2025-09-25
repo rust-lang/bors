@@ -95,16 +95,18 @@ async fn add_workflow_links_to_try_build_start_comment(
 
     let workflows = db.get_workflow_urls_for_build(build).await?;
 
-    let mut comment_content = repo
-        .client
-        .get_comment_content(&try_build_comment.node_id)
-        .await?;
+    if !workflows.is_empty() {
+        let mut comment_content = repo
+            .client
+            .get_comment_content(&try_build_comment.node_id)
+            .await?;
 
-    append_workflow_links_to_comment(&mut comment_content, workflows);
+        append_workflow_links_to_comment(&mut comment_content, workflows);
 
-    repo.client
-        .update_comment_content(&try_build_comment.node_id, &comment_content)
-        .await?;
+        repo.client
+            .update_comment_content(&try_build_comment.node_id, &comment_content)
+            .await?;
+    }
 
     Ok(())
 }

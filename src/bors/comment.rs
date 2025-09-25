@@ -198,11 +198,14 @@ pub fn try_build_started_comment(
     Comment::new(msg)
 }
 
-pub fn append_workflow_links_to_comment(comment_content: &mut String, workflow_links: Vec<String>) {
-    comment_content.push_str("\n**Workflows**:\n\n");
-
-    for link in workflow_links {
-        comment_content.push_str(&format!("- {link}\n"));
+pub fn append_workflow_links_to_comment(comment_content: &mut String, workflow_urls: Vec<String>) {
+    if workflow_urls.len() == 1 {
+        comment_content.push_str(&format!("\n**Workflow**: {}", workflow_urls[0]));
+    } else {
+        comment_content.push_str("\n**Workflows**:\n\n");
+        for url in workflow_urls {
+            comment_content.push_str(&format!("- {url}\n"));
+        }
     }
 }
 
