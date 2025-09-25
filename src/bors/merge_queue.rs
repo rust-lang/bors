@@ -134,8 +134,12 @@ async fn process_repository(repo: &RepositoryState, ctx: &BorsContext) -> anyhow
         let pr_num = pr.number;
 
         match pr.queue_status() {
-            QueueStatus::NotApproved => unreachable!(),
-            QueueStatus::Stalled(..) => unreachable!(),
+            QueueStatus::NotApproved => unreachable!(
+                "PR {pr:?} is not approved. It should not have been returned by `get_merge_queue_prs`, this is a bug."
+            ),
+            QueueStatus::Stalled(..) => unreachable!(
+                "PR {pr:?} is stalled. It should not have been returned by `get_merge_queue_prs`, this is a bug."
+            ),
             QueueStatus::Pending(..) => {
                 // Build in progress - stop queue. We can only have one PR being built
                 // at a time.
@@ -1111,6 +1115,23 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
                 .await
                 .expect_status(PullRequestStatus::Merged)
                 .expect_auto_build(|b| b.status == BuildStatus::Success);
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn run_empty_queue(pool: sqlx::PgPool) {
+        run_test(pool, async |tester: &mut BorsTester| {
+            // This PR should not be in the queue
+            let pr = tester.open_pr(default_repo_name(), |_| {}).await?;
+            // Make sure that bors knows about the DB
+            tester
+                .post_comment(Comment::new(pr.id(), "@bors info"))
+                .await?;
+            tester.expect_comments(pr.id(), 1).await;
+
+            tester.process_merge_queue().await;
             Ok(())
         })
         .await;
