@@ -4,6 +4,7 @@
 
 {% block head %}
 <link rel="stylesheet" href="https://cdn.datatables.net/2.3.4/css/dataTables.dataTables.min.css" />
+<link rel="stylesheet" href="https://cdn.datatables.net/rowgroup/1.5.1/css/rowGroup.dataTables.min.css" />
 <style>
     main {
         max-width: 100rem;
@@ -47,6 +48,17 @@
     {{ stats.total_count }} total, {{ stats.in_queue_count }} in queue,
     {{ stats.failed_count }} failed, {{ stats.rolled_up_count }} rolled up
   </p>
+
+  <div style="margin-bottom: 1rem;">
+    <label for="groupBy">Group by: </label>
+    <select id="groupBy">
+      <option value="">None</option>
+      <option value="1">Status</option>
+      <option value="2">Mergeable</option>
+      <option value="4">Author</option>
+      <option value="7">Priority</option>
+    </select>
+  </div>
 
   <div class="table-wrapper">
     <table id="table">
@@ -123,11 +135,47 @@
 
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 <script src="https://cdn.datatables.net/2.3.4/js/dataTables.min.js"></script>
+<script src="https://cdn.datatables.net/rowgroup/1.5.1/js/dataTables.rowGroup.min.js"></script>
 
 <script>
-    let table = new DataTable('#table', {
+    let table = new DataTable("#table", {
         paging: false,
         info: false
+    });
+
+    // Extract clean status text from HTML, removing links and "(try)" suffix
+    function getStatusText(html) {
+        let tempDiv = document.createElement("div");
+        tempDiv.innerHTML = html;
+        let text = tempDiv.textContent || tempDiv.innerText || "";
+        return text.replace(/\s*\(try\)\s*$/, "").trim();
+    }
+
+    function initializeTable(colIndex) {
+        let config = {
+            paging: false,
+            info: false
+        };
+
+        if (colIndex !== null) {
+            // Sort by grouping column
+            config.order = [[colIndex, "asc"]];
+            config.rowGroup = {
+                // Status column needs specific handling to strip links and "(try)"
+                dataSrc: colIndex === 1
+                    ? (row, type) => type === "display" ? row[1] : getStatusText(row[1])
+                    : colIndex
+            };
+        }
+
+        return new DataTable("#table", config);
+    }
+
+    // Handle group by dropdown changes
+    document.getElementById("groupBy").addEventListener("change", function() {
+        let colIndex = this.value === "" ? null : parseInt(this.value);
+        table.destroy();
+        table = initializeTable(colIndex);
     });
 </script>
 {% endblock %}
