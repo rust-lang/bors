@@ -138,11 +138,6 @@
 <script src="https://cdn.datatables.net/rowgroup/1.5.1/js/dataTables.rowGroup.min.js"></script>
 
 <script>
-    let table = new DataTable("#table", {
-        paging: false,
-        info: false
-    });
-
     // Extract clean status text from HTML, removing links and "(try)" suffix
     function getStatusText(html) {
         let tempDiv = document.createElement("div");
@@ -151,10 +146,34 @@
         return text.replace(/\s*\(try\)\s*$/, "").trim();
     }
 
+    // Default table sort order
+    const statusOrder = {
+        "ready for merge": 1,
+        "pending": 2,
+        "approved": 3,
+        "stalled": 4,
+        "": 999
+    };
+
+    // Register custom sort type `status` with DataTables.
+    // The `-pre` suffix is a DataTables convention meaning this is a preprocessing
+    // function that converts cell data in to a sortable format (numbers).
+    $.fn.dataTable.ext.type.order['status-pre'] = function(data) {
+        let status = getStatusText(data).toLowerCase();
+        return statusOrder[status] !== undefined ? statusOrder[status] : 100;
+    };
+
     function initializeTable(colIndex) {
         let config = {
             paging: false,
-            info: false
+            info: false,
+            columnDefs: [
+                {
+                    targets: 1,           // Column 1 (Status column)
+                    type: 'status'        // Use custom `status` sort type
+                }
+            ],
+            order: [[1, "asc"]]
         };
 
         if (colIndex !== null) {
@@ -170,6 +189,8 @@
 
         return new DataTable("#table", config);
     }
+
+    let table = initializeTable(null);
 
     // Handle group by dropdown changes
     document.getElementById("groupBy").addEventListener("change", function() {
