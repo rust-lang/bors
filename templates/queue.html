@@ -82,11 +82,11 @@
                 <td>
                     <a href="{{ repo_url }}/pull/{{ pr.number }}">{{ pr.number.0 }}</a>
                 </td>
-                <td data-status="{{ pr.status_text() }}">
+                <td data-status="{{ crate::templates::status_text(pr) }}">
                     {% if let Some(try_build) = pr.try_build %}
-                    <a href="../results/{{ repo_name }}/{{ pr.number }}">{{ pr.status_text() }}</a> (try)
+                    <a href="../results/{{ repo_name }}/{{ pr.number }}">{{ crate::templates::status_text(pr) }}</a> (try)
                     {% else %}
-                    {{ pr.status_text() }}
+                    {{ crate::templates::status_text(pr) }}
                     {% endif %}
                 </td>
                 <td>

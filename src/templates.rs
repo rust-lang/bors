@@ -1,7 +1,22 @@
-use crate::database::{MergeableState::*, PullRequestModel, TreeState};
+use crate::database::{MergeableState::*, PullRequestModel, QueueStatus, TreeState};
 use askama::Template;
 use axum::response::{Html, IntoResponse, Response};
 use http::StatusCode;
+
+/// Build status to display on the queue page.
+pub fn status_text(pr: &PullRequestModel) -> String {
+    if let Some(try_build) = &pr.try_build {
+        try_build.status.to_string()
+    } else {
+        match pr.queue_status() {
+            QueueStatus::Approved(_) => "approved".to_string(),
+            QueueStatus::ReadyForMerge(_, _) => "ready for merge".to_string(),
+            QueueStatus::Pending(_, _) => "pending".to_string(),
+            QueueStatus::Stalled(_, _) => "stalled".to_string(),
+            QueueStatus::NotApproved => String::new(),
+        }
+    }
+}
 
 pub struct HtmlTemplate<T>(pub T);
 
