@@ -1,4 +1,4 @@
-use crate::database::{MergeableState::*, PullRequestModel, QueueStatus::*, TreeState};
+use crate::database::{MergeableState::*, PullRequestModel, TreeState};
 use askama::Template;
 use axum::response::{Html, IntoResponse, Response};
 use http::StatusCode;

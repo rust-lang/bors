@@ -416,6 +416,21 @@ impl PullRequestModel {
             },
         }
     }
+
+    /// Get the build status to display on the queue page.
+    pub fn status_text(&self) -> String {
+        if let Some(try_build) = &self.try_build {
+            try_build.status.to_string()
+        } else {
+            match self.queue_status() {
+                QueueStatus::Approved(_) => "approved".to_string(),
+                QueueStatus::ReadyForMerge(_, _) => "ready for merge".to_string(),
+                QueueStatus::Pending(_, _) => "pending".to_string(),
+                QueueStatus::Stalled(_, _) => "stalled".to_string(),
+                QueueStatus::NotApproved => String::new(),
+            }
+        }
+    }
 }
 
 /// Describes whether a workflow is a Github Actions workflow or if it's a job from some external

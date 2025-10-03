@@ -82,21 +82,11 @@
                 <td>
                     <a href="{{ repo_url }}/pull/{{ pr.number }}">{{ pr.number.0 }}</a>
                 </td>
-                <td>
+                <td data-status="{{ pr.status_text() }}">
                     {% if let Some(try_build) = pr.try_build %}
-                    <a href="../results/{{ repo_name }}/{{ pr.number }}">{{ try_build.status }}</a> (try)
+                    <a href="../results/{{ repo_name }}/{{ pr.number }}">{{ pr.status_text() }}</a> (try)
                     {% else %}
-                    {% match pr.queue_status() %}
-                    {% when Approved(_) %}
-                    approved
-                    {% when ReadyForMerge(_, _) %}
-                    ready for merge
-                    {% when Pending(_, _) %}
-                    pending
-                    {% when Stalled(_, _) %}
-                    stalled
-                    {% when NotApproved %}
-                    {% endmatch %}
+                    {{ pr.status_text() }}
                     {% endif %}
                 </td>
                 <td>
@@ -138,14 +128,6 @@
 <script src="https://cdn.datatables.net/rowgroup/1.5.1/js/dataTables.rowGroup.min.js"></script>
 
 <script>
-    // Extract clean status text from HTML, removing links and "(try)" suffix
-    function getStatusText(html) {
-        let tempDiv = document.createElement("div");
-        tempDiv.innerHTML = html;
-        let text = tempDiv.textContent || tempDiv.innerText || "";
-        return text.replace(/\s*\(try\)\s*$/, "").trim();
-    }
-
     // Default table sort order
     const statusOrder = {
         "ready for merge": 1,
@@ -159,9 +141,11 @@
     // The `-pre` suffix is a DataTables convention meaning this is a preprocessing
     // function that converts cell data in to a sortable format (numbers).
     $.fn.dataTable.ext.type.order['status-pre'] = function(data) {
-        let status = getStatusText(data).toLowerCase();
+        let status = (data || "").toLowerCase();
         return statusOrder[status] !== undefined ? statusOrder[status] : 100;
     };
+
+    const getDataStatusFromCell = (cell) => cell?.dataset?.status || '';
 
     function initializeTable(colIndex) {
         let config = {
@@ -169,20 +153,44 @@
             info: false,
             columnDefs: [
                 {
-                    targets: 1,           // Column 1 (Status column)
-                    type: 'status'        // Use custom `status` sort type
+                    targets: 1,     // Column 1 (Status column)
+                    type: 'status', // Use custom `status` sort type
+                    render: function(data, type, row, meta) {
+                        if (type === 'display') {
+                            return data;
+                        }
+
+                        // Use data-status for everything else
+                        if (meta && meta.settings && meta.row !== undefined) {
+                            let rowNode = meta.settings.aoData[meta.row]?.nTr;
+                            if (rowNode) {
+                                return getDataStatusFromCell(rowNode.cells[meta.col]);
+                            }
+                        }
+
+                        return data;
+                    }
                 }
             ],
             order: [[1, "asc"]]
         };
 
         if (colIndex !== null) {
-            // Sort by grouping column
             config.order = [[colIndex, "asc"]];
             config.rowGroup = {
-                // Status column needs specific handling to strip links and "(try)"
                 dataSrc: colIndex === 1
-                    ? (row, type) => type === "display" ? row[1] : getStatusText(row[1])
+                    ? ([_, html]) => {
+                        let table = document.getElementById('table');
+                        if (table && table.tBodies[0]) {
+                            let rows = Array.from(table.tBodies[0].rows);
+                            for (let row of rows) {
+                                if (row.cells[1] && row.cells[1].innerHTML === html) {
+                                    return getDataStatusFromCell(row.cells[1]);
+                                }
+                            }
+                        }
+                        return html;
+                    }
                     : colIndex
             };
         }
