@@ -128,23 +128,6 @@
 <script src="https://cdn.datatables.net/rowgroup/1.5.1/js/dataTables.rowGroup.min.js"></script>
 
 <script>
-    // Default table sort order
-    const statusOrder = {
-        "ready for merge": 1,
-        "pending": 2,
-        "approved": 3,
-        "stalled": 4,
-        "": 999
-    };
-
-    // Register custom sort type `status` with DataTables.
-    // The `-pre` suffix is a DataTables convention meaning this is a preprocessing
-    // function that converts cell data in to a sortable format (numbers).
-    $.fn.dataTable.ext.type.order['status-pre'] = function(data) {
-        let status = (data || "").toLowerCase();
-        return statusOrder[status] !== undefined ? statusOrder[status] : 100;
-    };
-
     const getDataStatusFromCell = (cell) => cell?.dataset?.status || '';
 
     function initializeTable(colIndex) {
@@ -154,7 +137,6 @@
             columnDefs: [
                 {
                     targets: 1,     // Column 1 (Status column)
-                    type: 'status', // Use custom `status` sort type
                     render: function(data, type, row, meta) {
                         if (type === 'display') {
                             return data;
@@ -172,7 +154,7 @@
                     }
                 }
             ],
-            order: [[1, "asc"]]
+            order: []
         };
 
         if (colIndex !== null) {
