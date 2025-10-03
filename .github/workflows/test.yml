@@ -34,7 +34,7 @@ jobs:
         run: cargo sqlx prepare --check -- --all-targets
 
       - name: Build
-        run: cargo build --workspace --all-targets
+        run: cargo build --workspace --all-targets --locked
 
       - name: Test
         run: cargo test --workspace
