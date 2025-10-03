@@ -3,11 +3,28 @@
 {% block title %}Bors queue - {{ repo_name }} {% if tree_state.is_closed() %} [TREECLOSED] {% endif %}{% endblock %}
 
 {% block head %}
+<link rel="stylesheet" href="https://cdn.datatables.net/2.3.4/css/dataTables.dataTables.min.css" />
+<link rel="stylesheet" href="https://cdn.datatables.net/rowgroup/1.5.1/css/rowGroup.dataTables.min.css" />
 <style>
     main {
         max-width: 100rem;
         width: 100%;
         margin: 0 auto;
+    }
+
+    .table-wrapper {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    table {
+        min-width: 100%;
+        white-space: nowrap;
+    }
+
+    table th,
+    table td {
+        padding: 0.5rem;
     }
 </style>
 {% endblock %}
@@ -32,72 +49,144 @@
     {{ stats.failed_count }} failed, {{ stats.rolled_up_count }} rolled up
   </p>
 
-  <table>
-    <thead>
-    <th>#</th>
-    <th>Status</th>
-    <th>Mergeable</th>
-    <th>Title</th>
-    <th>Author</th>
-    <th>Assignees</th>
-    <th>Approved by</th>
-    <th>Priority</th>
-    <th>Rollup</th>
-    </thead>
+  <div style="margin-bottom: 1rem;">
+    <label for="groupBy">Group by: </label>
+    <select id="groupBy">
+      <option value="">None</option>
+      <option value="1">Status</option>
+      <option value="2">Mergeable</option>
+      <option value="4">Author</option>
+      <option value="7">Priority</option>
+    </select>
+  </div>
 
-    <tbody>
-    {% for pr in prs %}
-    <tr>
-      <td>
-        <a href="{{ repo_url }}/pull/{{ pr.number }}">{{ pr.number.0 }}</a>
-      </td>
-      <td>
-        {% if let Some(try_build) = pr.try_build %}
-        <a href="../results/{{ repo_name }}/{{ pr.number }}">{{ try_build.status }}</a> (try)
-        {% else %}
-        {% match pr.queue_status() %}
-        {% when Approved(_) %}
-        approved
-        {% when ReadyForMerge(_, _) %}
-        ready for merge
-        {% when Pending(_, _) %}
-        pending
-        {% when Stalled(_, _) %}
-        stalled
-        {% when NotApproved %}
-        {% endmatch %}
-        {% endif %}
-      </td>
-      <td>
-        {% match pr.mergeable_state %}
-        {% when Mergeable %}
-        yes
-        {% when HasConflicts %}
-        no
-        {% when Unknown %}
-        {% endmatch %}
-      </td>
-      <td>{{ pr.title }}</td>
-      <td>{{ pr.author }}</td>
-      <td>{{ pr.assignees|join(", ") }}</td>
-      <td>
-        {% if let Some(approver) = pr.approver() %}
-        {{ approver }}
-        {% endif %}
-      </td>
-      <td>{{ pr.priority.unwrap_or(0) }}</td>
-      <td>
-        {% if let Some(rollup) = pr.rollup %}
-        {{ rollup }}
-        {% endif %}
-      </td>
-    </tr>
-    {% endfor %}
-    </tbody>
-  </table>
+  <div class="table-wrapper">
+    <table id="table">
+        <thead>
+            <tr>
+                <th>#</th>
+                <th>Status</th>
+                <th>Mergeable</th>
+                <th>Title</th>
+                <th>Author</th>
+                <th>Assignees</th>
+                <th>Approved by</th>
+                <th>Priority</th>
+                <th>Rollup</th>
+            </tr>
+        </thead>
+
+        <tbody>
+            {% for pr in prs %}
+            <tr>
+                <td>
+                    <a href="{{ repo_url }}/pull/{{ pr.number }}">{{ pr.number.0 }}</a>
+                </td>
+                <td data-status="{{ crate::templates::status_text(pr) }}">
+                    {% if let Some(try_build) = pr.try_build %}
+                    <a href="../results/{{ repo_name }}/{{ pr.number }}">{{ crate::templates::status_text(pr) }}</a> (try)
+                    {% else %}
+                    {{ crate::templates::status_text(pr) }}
+                    {% endif %}
+                </td>
+                <td>
+                    {% match pr.mergeable_state %}
+                    {% when Mergeable %}
+                    yes
+                    {% when HasConflicts %}
+                    no
+                    {% when Unknown %}
+                    {% endmatch %}
+                </td>
+                <td>{{ pr.title }}</td>
+                <td>{{ pr.author }}</td>
+                <td>{{ pr.assignees|join(", ") }}</td>
+                <td>
+                    {% if let Some(approver) = pr.approver() %}
+                    {{ approver }}
+                    {% endif %}
+                </td>
+                <td>{{ pr.priority.unwrap_or(0) }}</td>
+                <td>
+                    {% if let Some(rollup) = pr.rollup %}
+                    {{ rollup }}
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+  </div>
 
   <div style="text-align: center; margin-top: 1em;">
     <a href="https://github.com/rust-lang/bors">Contribute on GitHub</a>
   </div>
 </main>
+
+<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+<script src="https://cdn.datatables.net/2.3.4/js/dataTables.min.js"></script>
+<script src="https://cdn.datatables.net/rowgroup/1.5.1/js/dataTables.rowGroup.min.js"></script>
+
+<script>
+    const getDataStatusFromCell = (cell) => cell?.dataset?.status || '';
+
+    function initializeTable(colIndex) {
+        let config = {
+            paging: false,
+            info: false,
+            columnDefs: [
+                {
+                    targets: 1,     // Column 1 (Status column)
+                    render: function(data, type, row, meta) {
+                        if (type === 'display') {
+                            return data;
+                        }
+
+                        // Use data-status for everything else
+                        if (meta && meta.settings && meta.row !== undefined) {
+                            let rowNode = meta.settings.aoData[meta.row]?.nTr;
+                            if (rowNode) {
+                                return getDataStatusFromCell(rowNode.cells[meta.col]);
+                            }
+                        }
+
+                        return data;
+                    }
+                }
+            ],
+            order: []
+        };
+
+        if (colIndex !== null) {
+            config.order = [[colIndex, "asc"]];
+            config.rowGroup = {
+                dataSrc: colIndex === 1
+                    ? ([_, html]) => {
+                        let table = document.getElementById('table');
+                        if (table && table.tBodies[0]) {
+                            let rows = Array.from(table.tBodies[0].rows);
+                            for (let row of rows) {
+                                if (row.cells[1] && row.cells[1].innerHTML === html) {
+                                    return getDataStatusFromCell(row.cells[1]);
+                                }
+                            }
+                        }
+                        return html;
+                    }
+                    : colIndex
+            };
+        }
+
+        return new DataTable("#table", config);
+    }
+
+    let table = initializeTable(null);
+
+    // Handle group by dropdown changes
+    document.getElementById("groupBy").addEventListener("change", function() {
+        let colIndex = this.value === "" ? null : parseInt(this.value);
+        table.destroy();
+        table = initializeTable(colIndex);
+    });
+</script>
 {% endblock %}
