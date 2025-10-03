@@ -56,3 +56,12 @@ describes the file can be found in `src/config.rs`. [Here](rust-bors.example.tom
    - `automation/bors/try` branch (for try builds)
    - `automation/bors/auto` branch (for auto builds)
 5) Give the bot permissions to push to `automation/bors/try`, `automation/bors/try-merge`, `automation/bors/auto`, and `automation/bors/auto-merge`.
+
+## Contributing
+
+We are happy to receive contributions to bors! You can check out our list of [good first issues](https://github.com/rust-lang/bors/issues?q=is%3Aissue%20state%3Aopen%20label%3A%22good%20first%20issue%22).
+
+Note that sometimes the issues can get stale or they might not contain enough information that you would need to implement a feature or fix a bug. If you would like to work on something non-trivial, it would be great to open a topic on our [Zulip channel](https://rust-lang.zulipchat.com/#narrow/channel/496228-t-infra.2Fbors/topic/bors.20down/with/542683375) so that we can discuss it.
+
+## License
+Bors is dual-licensed under [MIT](LICENSE-MIT) and [Apache 2.0](LICENSE-APACHE).
