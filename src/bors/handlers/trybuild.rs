@@ -358,8 +358,8 @@ mod tests {
                 @r"
             :broken_heart: Test for merge-0-pr-1 failed: [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1). Failed jobs:
 
-            - `Job 42` ([web logs](https://github.com/job-logs/42), [extended logs](https://triage.rust-lang.org/gha-logs/rust-lang/borstest/42))
-            - `Job 50` ([web logs](https://github.com/job-logs/50), [extended logs](https://triage.rust-lang.org/gha-logs/rust-lang/borstest/50))
+            - `Job 42` ([web logs](https://github.com/job-logs/42), [enhanced plaintext logs](https://triage.rust-lang.org/gha-logs/rust-lang/borstest/42))
+            - `Job 50` ([web logs](https://github.com/job-logs/50), [enhanced plaintext logs](https://triage.rust-lang.org/gha-logs/rust-lang/borstest/50))
             "
             );
             Ok(())
