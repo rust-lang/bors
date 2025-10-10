@@ -140,7 +140,7 @@ pub fn build_failed_comment(
                 }
 
                 let logs_url = job.html_url.to_string();
-                let extended_logs_url = format!(
+                let enhanced_logs_url = format!(
                     "https://triage.rust-lang.org/gha-logs/{}/{}/{}",
                     repo.owner(),
                     repo.name(),
@@ -148,8 +148,8 @@ pub fn build_failed_comment(
                 );
                 writeln!(
                     msg,
-                    "- `{}` ([web logs]({}), [extended logs]({}))",
-                    job.name, logs_url, extended_logs_url
+                    "- `{}` ([web logs]({}), [enhanced plaintext logs]({}))",
+                    job.name, logs_url, enhanced_logs_url
                 )
                 .unwrap();
             }
