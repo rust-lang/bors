@@ -206,7 +206,10 @@
             select: {
                 style: 'multi',
                 selector: 'td.select-checkbox',
-                headerCheckbox: true
+                headerCheckbox: true,
+                selectable: (rowData, tr, index) => {
+                    return !!(rowData && rowData[7] && rowData[7].trim() !== '');
+                }
             }
         };
 
