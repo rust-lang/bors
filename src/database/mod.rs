@@ -416,6 +416,12 @@ impl PullRequestModel {
             },
         }
     }
+
+    /// Determines if this PR can be included in a rollup.
+    /// A PR is rollupable if it has been approved and rollup is not `RollupMode::Never`
+    pub fn is_rollupable(&self) -> bool {
+        self.is_approved() && !matches!(self.rollup, Some(RollupMode::Never))
+    }
 }
 
 /// Describes whether a workflow is a Github Actions workflow or if it's a job from some external

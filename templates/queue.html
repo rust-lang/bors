@@ -109,7 +109,7 @@
 
         <tbody>
             {% for pr in prs %}
-            <tr>
+            <tr data-rollupable="{{ pr.is_rollupable() }}">
                 <td class="select-checkbox"></td>
                 <td>
                     <a href="{{ repo_url }}/pull/{{ pr.number }}">{{ pr.number.0 }}</a>
@@ -218,9 +218,7 @@
                 selector: "td.select-checkbox",
                 headerCheckbox: true,
                 selectable: (rowData, tr, index) => {
-                    let table = $("#table").DataTable();
-                    let approvedByIndex = table.column("approved_by:name").index();
-                    return !!(rowData && rowData[approvedByIndex] && rowData[approvedByIndex].trim() !== "");
+                    return tr && tr.dataset && tr.dataset.rollupable === "true";
                 }
             }
         };
