@@ -26,6 +26,35 @@
     table td {
         padding: 0.5rem;
     }
+
+    th.select-checkbox,
+    td.select-checkbox {
+        width: 2.5rem;
+    }
+
+    #rollupModal {
+        display: none;
+        position: fixed;
+        z-index: 1000;
+        left: 0;
+        top: 0;
+        width: 100%;
+        height: 100%;
+        background-color: rgba(0,0,0,0.5);
+    }
+
+    #rollupModalContent {
+        background-color: white;
+        margin: 15% auto;
+        padding: 1rem;
+        border: 1px solid black;
+        max-width: 500px;
+    }
+
+    #rollupModalClose {
+        float: right;
+        cursor: pointer;
+    }
 </style>
 {% endblock %}
 
@@ -53,17 +82,19 @@
     <label for="groupBy">Group by: </label>
     <select id="groupBy">
       <option value="">None</option>
-      <option value="1">Status</option>
-      <option value="2">Mergeable</option>
-      <option value="4">Author</option>
-      <option value="7">Priority</option>
+      <option value="status">Status</option>
+      <option value="mergeable">Mergeable</option>
+      <option value="author">Author</option>
+      <option value="priority">Priority</option>
     </select>
+    <button id="showRollupSelection" style="margin-left: 1rem;">Create rollup</button>
   </div>
 
   <div class="table-wrapper">
     <table id="table">
         <thead>
             <tr>
+                <th class="select-checkbox"></th>
                 <th>#</th>
                 <th>Status</th>
                 <th>Mergeable</th>
@@ -78,7 +109,8 @@
 
         <tbody>
             {% for pr in prs %}
-            <tr>
+            <tr data-rollupable="{{ pr.is_rollupable() }}">
+                <td class="select-checkbox"></td>
                 <td>
                     <a href="{{ repo_url }}/pull/{{ pr.number }}">{{ pr.number.0 }}</a>
                 </td>
@@ -121,24 +153,50 @@
   <div style="text-align: center; margin-top: 1em;">
     <a href="https://github.com/rust-lang/bors">Contribute on GitHub</a>
   </div>
+
+  <div id="rollupModal">
+    <div id="rollupModalContent">
+      <span id="rollupModalClose">&times;</span>
+      <p id="rollupModalMessage"></p>
+      <button id="rollupModalContinue" style="display: none;">Continue</button>
+    </div>
+  </div>
 </main>
 
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 <script src="https://cdn.datatables.net/2.3.4/js/dataTables.min.js"></script>
-<script src="https://cdn.datatables.net/rowgroup/1.5.1/js/dataTables.rowGroup.min.js"></script>
+<script src="https://cdn.datatables.net/rowgroup/1.6.0/js/dataTables.rowGroup.min.js"></script>
+<script src="https://cdn.datatables.net/select/3.1.3/js/dataTables.select.min.js"></script>
 
 <script>
-    const getDataStatusFromCell = (cell) => cell?.dataset?.status || '';
+    const getDataStatusFromCell = (cell) => cell?.dataset?.status || "";
+    const interactiveSelector = "a, button, input, label, select, textarea";
 
-    function initializeTable(colIndex) {
+    function initializeTable(groupByColumnName) {
         let config = {
             paging: false,
             info: false,
+            columns: [
+                { name: "select", orderable: false, className: "select-checkbox" },
+                { name: "number" },
+                { name: "status" },
+                { name: "mergeable" },
+                { name: "title" },
+                { name: "author" },
+                { name: "assignees" },
+                { name: "approved_by" },
+                { name: "priority" },
+                { name: "rollup" }
+            ],
             columnDefs: [
                 {
-                    targets: 1,     // Column 1 (Status column)
-                    render: function(data, type, row, meta) {
-                        if (type === 'display') {
+                    targets: "select:name",
+                    render: DataTable.render.select()
+                },
+                {
+                    targets: "status:name",
+                    render: (data, type, row, meta) => {
+                        if (type === "display") {
                             return data;
                         }
 
@@ -154,39 +212,133 @@
                     }
                 }
             ],
-            order: []
+            order: [],
+            select: {
+                style: "multi",
+                selector: "td.select-checkbox",
+                headerCheckbox: true,
+                selectable: (rowData, tr, index) => {
+                    return tr && tr.dataset && tr.dataset.rollupable === "true";
+                }
+            }
         };
 
-        if (colIndex !== null) {
-            config.order = [[colIndex, "asc"]];
+        if (groupByColumnName) {
+            config.order = [[groupByColumnName + ":name", "asc"]];
             config.rowGroup = {
-                dataSrc: colIndex === 1
-                    ? ([_, html]) => {
-                        let table = document.getElementById('table');
-                        if (table && table.tBodies[0]) {
-                            let rows = Array.from(table.tBodies[0].rows);
-                            for (let row of rows) {
-                                if (row.cells[1] && row.cells[1].innerHTML === html) {
-                                    return getDataStatusFromCell(row.cells[1]);
-                                }
+                dataSrc: groupByColumnName === "status"
+                    ? (row, type) => {
+                        let table = $("#table").DataTable();
+                        let statusIndex = table.column("status:name").index();
+                        let statusHtml = row[statusIndex];
+
+                        // Find the corresponding DOM cell to get data-status attribute
+                        let tableRows = document.querySelectorAll("#table tbody tr");
+                        for (let tableRow of tableRows) {
+                            let statusCell = tableRow.cells[statusIndex];
+                            if (statusCell && statusCell.innerHTML.trim() === statusHtml.trim()) {
+                                return getDataStatusFromCell(statusCell);
                             }
                         }
-                        return html;
+
+                        // Fallback to HTML content
+                        return statusHtml;
                     }
-                    : colIndex
+                    : (row, type) => {
+                        let table = $("#table").DataTable();
+                        let colIndex = table.column(groupByColumnName + ":name").index();
+                        return row[colIndex];
+                    }
             };
         }
-
         return new DataTable("#table", config);
     }
 
+    function bindRowClick(tableInstance) {
+        const tbody = document.querySelector("#table tbody");
+        if (!tbody) {
+            return () => {};
+        }
+
+        const handler = (event) => {
+            // Ignore clicks on checkbox - let checkbox handle it
+            if (event.target.closest("td.select-checkbox")) {
+                return;
+            }
+
+            // Ignore clicks on interactive elements
+            if (event.target.closest(interactiveSelector)) {
+                return;
+            }
+
+            const rowElement = event.target.closest("tr");
+            if (!rowElement) {
+                return;
+            }
+
+            const rowApi = tableInstance.row(rowElement);
+            if (!rowApi.any()) {
+                return;
+            }
+
+            if (rowApi.selected()) {
+                rowApi.deselect();
+            } else {
+                rowApi.select();
+            }
+        };
+
+        tbody.addEventListener("click", handler);
+        return () => tbody.removeEventListener("click", handler);
+    }
+
     let table = initializeTable(null);
+    let detachRowClick = bindRowClick(table);
 
     // Handle group by dropdown changes
     document.getElementById("groupBy").addEventListener("change", function() {
-        let colIndex = this.value === "" ? null : parseInt(this.value);
+        let groupByColumnName = this.value === "" ? null : this.value;
         table.destroy();
-        table = initializeTable(colIndex);
+        detachRowClick();
+        table = initializeTable(groupByColumnName);
+        detachRowClick = bindRowClick(table);
+    });
+
+    const modal = document.getElementById("rollupModal");
+    const modalMessage = document.getElementById("rollupModalMessage");
+    const modalClose = document.getElementById("rollupModalClose");
+    const modalContinue = document.getElementById("rollupModalContinue");
+
+    function closeModal() {
+        modal.style.display = "none";
+        modalContinue.style.display = "none";
+    }
+
+    modalClose.addEventListener("click", closeModal);
+    modalContinue.addEventListener("click", closeModal);
+
+    window.addEventListener("click", function(event) {
+        if (event.target === modal) {
+            closeModal();
+        }
+    });
+
+    document.getElementById("showRollupSelection").addEventListener("click", function() {
+        let selectedRows = table.rows({ selected: true }).nodes().toArray();
+        let message;
+
+        if (selectedRows.length === 0) {
+            message = "No PRs selected for rollup.";
+            modalContinue.style.display = "none";
+        } else {
+            message = `You've selected <strong>${selectedRows.length} PR(s)</strong> to be included in this rollup.<br><br>
+            A rollup is useful for shortening the queue, but jumping the queue is unfair to older PRs who have waited too long.<br><br>
+            When creating a real rollup, see the <a href="https://forge.rust-lang.org/release/rollups.html" target="_blank">instructions</a> for reference.`;
+            modalContinue.style.display = "inline-block";
+        }
+
+        modalMessage.innerHTML = message;
+        modal.style.display = "block";
     });
 </script>
 {% endblock %}
