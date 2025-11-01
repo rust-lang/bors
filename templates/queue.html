@@ -82,10 +82,10 @@
     <label for="groupBy">Group by: </label>
     <select id="groupBy">
       <option value="">None</option>
-      <option value="2">Status</option>
-      <option value="3">Mergeable</option>
-      <option value="5">Author</option>
-      <option value="8">Priority</option>
+      <option value="status">Status</option>
+      <option value="mergeable">Mergeable</option>
+      <option value="author">Author</option>
+      <option value="priority">Priority</option>
     </select>
     <button id="showRollupSelection" style="margin-left: 1rem;">Create rollup</button>
   </div>
@@ -172,20 +172,30 @@
     const getDataStatusFromCell = (cell) => cell?.dataset?.status || '';
     const interactiveSelector = 'a, button, input, label, select, textarea';
 
-    function initializeTable(colIndex) {
+    function initializeTable(groupByColumnName) {
         let config = {
             paging: false,
             info: false,
+            columns: [
+                { name: "select", orderable: false, className: 'select-checkbox' },
+                { name: "number" },
+                { name: "status" },
+                { name: "mergeable" },
+                { name: "title" },
+                { name: "author" },
+                { name: "assignees" },
+                { name: "approved_by" },
+                { name: "priority" },
+                { name: "rollup" }
+            ],
             columnDefs: [
                 {
-                    targets: 0,
-                    orderable: false,
-                    className: 'select-checkbox',
+                    targets: "select:name",
                     render: DataTable.render.select()
                 },
                 {
-                    targets: 2,     // Column 2 (Status column)
-                    render: function(data, type, row, meta) {
+                    targets: "status:name",
+                    render: (data, type, row, meta) => {
                         if (type === 'display') {
                             return data;
                         }
@@ -208,31 +218,41 @@
                 selector: 'td.select-checkbox',
                 headerCheckbox: true,
                 selectable: (rowData, tr, index) => {
-                    return !!(rowData && rowData[7] && rowData[7].trim() !== '');
+                    let table = $('#table').DataTable();
+                    let approvedByIndex = table.column('approved_by:name').index();
+                    return !!(rowData && rowData[approvedByIndex] && rowData[approvedByIndex].trim() !== '');
                 }
             }
         };
 
-        if (colIndex !== null) {
-            config.order = [[colIndex, "asc"]];
+        if (groupByColumnName) {
+            config.order = [[groupByColumnName + ':name', "asc"]];
             config.rowGroup = {
-                dataSrc: colIndex === 2
-                    ? ([_, html]) => {
-                        let tableElement = document.getElementById('table');
-                        if (tableElement && tableElement.tBodies[0]) {
-                            let rows = Array.from(tableElement.tBodies[0].rows);
-                            for (let row of rows) {
-                                if (row.cells[2] && row.cells[2].innerHTML === html) {
-                                    return getDataStatusFromCell(row.cells[2]);
-                                }
+                dataSrc: groupByColumnName === 'status'
+                    ? (row, type) => {
+                        let table = $('#table').DataTable();
+                        let statusIndex = table.column('status:name').index();
+                        let statusHtml = row[statusIndex];
+
+                        // Find the corresponding DOM cell to get data-status attribute
+                        let tableRows = document.querySelectorAll('#table tbody tr');
+                        for (let tableRow of tableRows) {
+                            let statusCell = tableRow.cells[statusIndex];
+                            if (statusCell && statusCell.innerHTML.trim() === statusHtml.trim()) {
+                                return getDataStatusFromCell(statusCell);
                             }
                         }
-                        return html;
+
+                        // Fallback to HTML content
+                        return statusHtml;
                     }
-                    : colIndex
+                    : (row, type) => {
+                        let table = $('#table').DataTable();
+                        let colIndex = table.column(groupByColumnName + ':name').index();
+                        return row[colIndex];
+                    }
             };
         }
-
         return new DataTable("#table", config);
     }
 
@@ -279,10 +299,10 @@
 
     // Handle group by dropdown changes
     document.getElementById("groupBy").addEventListener("change", function() {
-        let colIndex = this.value === "" ? null : parseInt(this.value, 10);
+        let groupByColumnName = this.value === "" ? null : this.value;
         table.destroy();
         detachRowClick();
-        table = initializeTable(colIndex);
+        table = initializeTable(groupByColumnName);
         detachRowClick = bindRowClick(table);
     });
 
