@@ -4,8 +4,9 @@ use crate::bors::RepositoryState;
 use crate::bors::command::RollupMode;
 use crate::bors::command::{Approver, CommandPrefix};
 use crate::bors::comment::{
-    approve_blocking_labels_present, approve_non_open_pr_comment, approve_wip_title,
-    approved_comment, delegate_comment, delegate_try_builds_comment, unapprove_non_open_pr_comment,
+    approve_blocking_labels_present, approve_non_clean_pr, approve_non_open_pr_comment,
+    approve_wip_title, approved_comment, delegate_comment, delegate_try_builds_comment,
+    unapprove_non_open_pr_comment,
 };
 use crate::bors::handlers::labels::handle_label_trigger;
 use crate::bors::handlers::workflow::{AutoBuildCancelReason, maybe_cancel_auto_build};
@@ -20,6 +21,7 @@ use crate::github::LabelTrigger;
 use crate::github::{GithubUser, PullRequestNumber};
 use crate::permissions::PermissionType;
 use crate::{BorsContext, PgDbClient};
+use octocrab::models::pulls::MergeableState;
 
 /// Approve a pull request.
 /// A pull request can only be approved by a user of sufficient authority.
@@ -79,6 +81,10 @@ async fn check_pr_approval_validity(
     // Check PR status
     if !matches!(pr.github.status, PullRequestStatus::Open) {
         return Ok(Some(approve_non_open_pr_comment()));
+    }
+
+    if !matches!(pr.github.mergeable_state, MergeableState::Clean) {
+        return Ok(Some(approve_non_clean_pr()));
     }
 
     // Check WIP title

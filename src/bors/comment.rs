@@ -276,6 +276,12 @@ Hint: Remove **{keyword}** from this PR's title when it is ready for review.
     ))
 }
 
+pub fn approve_non_clean_pr() -> Comment {
+    Comment::new(format!(
+        r":clipboard: Looks like this PR is not ready to be merged, ignoring approval."
+    ))
+}
+
 pub fn approve_blocking_labels_present(blocking_labels: &[&str]) -> Comment {
     let labels = blocking_labels
         .iter()
