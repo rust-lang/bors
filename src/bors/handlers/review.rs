@@ -83,7 +83,7 @@ async fn check_pr_approval_validity(
         return Ok(Some(approve_non_open_pr_comment()));
     }
 
-    if !matches!(pr.github.mergeable_state, MergeableState::Clean) {
+    if matches!(pr.github.mergeable_state, MergeableState::Dirty) {
         return Ok(Some(approve_non_clean_pr()));
     }
 
