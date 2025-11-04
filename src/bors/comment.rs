@@ -277,7 +277,9 @@ Hint: Remove **{keyword}** from this PR's title when it is ready for review.
 }
 
 pub fn approve_non_clean_pr() -> Comment {
-    Comment::new(r":clipboard: Looks like this PR is not ready to be merged,.".to_string())
+    Comment::new(
+        r":clipboard: Looks like this PR is not ready to be merged, ignoring approval.".to_string(),
+    )
 }
 
 pub fn approve_blocking_labels_present(blocking_labels: &[&str]) -> Comment {

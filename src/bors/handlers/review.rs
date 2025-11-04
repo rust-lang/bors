@@ -1221,6 +1221,20 @@ mod tests {
     }
 
     #[sqlx::test]
+    async fn approve_dirty_pr(pool: sqlx::PgPool) {
+        run_test(pool, async |tester: &mut BorsTester| {
+            tester.edit_pr((), |pr| pr.dirty_pull_request()).await?;
+            tester.post_comment("@bors r+").await?;
+            insta::assert_snapshot!(tester.get_next_comment_text(()).await?, @r"
+            :clipboard: Looks like this PR is not ready to be merged, ignoring approval.
+            ");
+            tester.get_pr_copy(()).await.expect_unapproved();
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
     async fn approve_closed_pr(pool: sqlx::PgPool) {
         run_test(pool, async |tester: &mut BorsTester| {
             tester
