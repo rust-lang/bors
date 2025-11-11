@@ -59,14 +59,12 @@ itertools = "0.14"
 
 # Text processing
 pulldown-cmark = "0.13"
-regex = "1"
 
 [dev-dependencies]
 insta = "1.26"
 wiremock = "0.6"
 base64 = "0.22"
 tracing-test = "0.2"
-regex = "1"
 parking_lot = "0.12"
 thread_local = "1"
 sqlparser = { version = "0.59", features = ["visitor"] }
