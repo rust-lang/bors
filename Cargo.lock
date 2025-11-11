@@ -295,6 +295,7 @@ dependencies = [
  "octocrab",
  "parking_lot",
  "pulldown-cmark",
+ "regex",
  "reqwest",
  "secrecy",
  "serde",
