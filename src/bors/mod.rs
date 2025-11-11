@@ -129,14 +129,13 @@ pub fn create_merge_commit_message(pr: handlers::PullRequestData, merge_type: Me
 
     let pr_description = match &merge_type {
         // Only keep any lines starting with `CUSTOM_TRY_JOB_PREFIX`.
-        MergeType::Try { try_jobs } if try_jobs.is_empty() => {
-            pr.github
-                .message
-                .lines()
-                .map(|l| l.trim())
-                .filter(|l| l.starts_with(CUSTOM_TRY_JOB_PREFIX))
-                .join("\n")
-        }
+        MergeType::Try { try_jobs } if try_jobs.is_empty() => pr
+            .github
+            .message
+            .lines()
+            .map(|l| l.trim())
+            .filter(|l| l.starts_with(CUSTOM_TRY_JOB_PREFIX))
+            .join("\n"),
         // If we do not have any custom try jobs, keep the ones that might be in the PR
         // description.
         MergeType::Try { .. } => String::new(),
