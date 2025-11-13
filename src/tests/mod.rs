@@ -30,7 +30,8 @@ use crate::database::{
 };
 use crate::github::{GithubRepoName, PullRequestNumber};
 use crate::{
-    BorsContext, BorsGlobalEvent, BorsProcess, CommandParser, OAuthConfig, PgDbClient, ServerState, TreeState, WebhookSecret, create_app, create_bors_process, load_repositories
+    BorsContext, BorsGlobalEvent, BorsProcess, CommandParser, PgDbClient, ServerState, TreeState,
+    WebhookSecret, create_app, create_bors_process, load_repositories,
 };
 
 use crate::tests::mocks::comment::GitHubIssueCommentEventPayload;
@@ -202,7 +203,7 @@ impl BorsTester {
             repository_tx,
             global_tx.clone(),
             WebhookSecret::new(TEST_WEBHOOK_SECRET.to_string()),
-            OAuthConfig::new("".to_string(), "".to_string()),
+            None,
             repos.clone(),
             db.clone(),
             default_cmd_prefix(),

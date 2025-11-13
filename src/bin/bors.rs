@@ -51,11 +51,11 @@ struct Opts {
 
     /// GitHub OAuth client ID for rollups.
     #[arg(long, env = "CLIENT_ID")]
-    client_id: String,
+    client_id: Option<String>,
 
     /// GitHub OAuth client secret for rollups.
     #[arg(long, env = "CLIENT_SECRET")]
-    client_secret: String,
+    client_secret: Option<String>,
 
     /// Secret used to authenticate webhooks.
     #[arg(long, env = "WEBHOOK_SECRET")]
@@ -222,7 +222,21 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
         }
     };
 
-    let oauth_config = OAuthConfig::new(opts.client_id.clone(), opts.client_secret.clone());
+    let oauth_config = match (opts.client_id.clone(), opts.client_secret.clone()) {
+        (Some(client_id), Some(client_secret)) => Some(OAuthConfig::new(client_id, client_secret)),
+        (None, None) => None,
+        (Some(_), None) => {
+            return Err(anyhow::anyhow!(
+                "CLIENT_ID is set but CLIENT_SECRET is missing. Both must be set or neither."
+            ));
+        }
+        (None, Some(_)) => {
+            return Err(anyhow::anyhow!(
+                "CLIENT_SECRET is set but CLIENT_ID is missing. Both must be set or neither."
+            ));
+        }
+    };
+
     let state = ServerState::new(
         repository_tx,
         global_tx,

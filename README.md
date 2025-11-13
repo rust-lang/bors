@@ -19,8 +19,8 @@ required.
 | `--app-id`         | `APP_ID`             |             | GitHub app ID of the bors bot.                            |
 | `--private-key`    | `PRIVATE_KEY`        |             | Private key of the GitHub app.                            |
 | `--webhook-secret` | `WEBHOOK_SECRET`     |             | Key used to authenticate GitHub webhooks.                 |
-| `--client-id`      | `OAUTH_CLIENT_ID`    |             | GitHub OAuth client ID for rollup UI.                     |
-| `--client-secret`  | `OAUTH_CLIENT_SECRET`|             | GitHub OAuth client secret for rollup UI.                 |
+| `--client-id`      | `OAUTH_CLIENT_ID`    |             | GitHub OAuth client ID for rollup UI (optional).          |
+| `--client-secret`  | `OAUTH_CLIENT_SECRET`|             | GitHub OAuth client secret for rollup UI (optional).      |
 | `--db`             | `DATABASE_URL`       |             | Database connection string. Only PostgreSQL is supported. |
 | `--cmd-prefix`     | `CMD_PREFIX`         | @bors       | Prefix used to invoke bors commands in PR comments.       |
 

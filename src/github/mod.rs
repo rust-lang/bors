@@ -9,6 +9,7 @@ use url::Url;
 pub mod api;
 mod error;
 mod labels;
+mod rollup;
 pub mod server;
 mod webhook;
 

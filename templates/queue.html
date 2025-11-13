@@ -111,7 +111,7 @@
             {% for pr in prs %}
             <tr data-rollupable="{{ pr.is_rollupable() }}">
                 <td class="select-checkbox"></td>
-                <td>
+                <td data-pr-number="{{ pr.number.0 }}">
                     <a href="{{ repo_url }}/pull/{{ pr.number }}">{{ pr.number.0 }}</a>
                 </td>
                 <td data-status="{{ crate::templates::status_text(pr) }}">
@@ -317,6 +317,11 @@
     });
 
     createRollupButton.addEventListener("click", () => {
+        {% if oauth_client_id.is_none() %}
+        alert("Both CLIENT_ID and CLIENT_SECRET must be set to enabled OAuth.");
+        return;
+        {% endif %}
+
         const selectedRows = table.rows({ selected: true }).nodes().toArray();
         let message;
 
@@ -342,17 +347,18 @@
         let nums = selectedRows
             .map(row => {
                 let numberCell = row.cells[1];
-                let link = numberCell.querySelector("a");
-                return link ? parseInt(link.textContent) : null;
+                return numberCell?.dataset?.prNumber ? parseInt(numberCell.dataset.prNumber) : null;
             })
             .filter(num => num !== null);
 
         let state = JSON.stringify({
             pr_nums: nums,
+            repo_name: "{{ repo_name }}",
+            repo_owner: "{{ repo_owner }}"
         });
 
         const oauthUrl = new URL("https://github.com/login/oauth/authorize");
-        oauthUrl.searchParams.set("client_id", "{{ oauth_client_id }}");
+        oauthUrl.searchParams.set("client_id", "{{ oauth_client_id.as_ref().unwrap() }}");
         oauthUrl.searchParams.set("scope", scopes.join(","));
         oauthUrl.searchParams.set("state", state);
 
