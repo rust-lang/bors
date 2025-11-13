@@ -345,6 +345,8 @@
 
         let state = JSON.stringify({
             pr_nums: nums,
+            repo_name: "{{ repo_name }}",
+            repo_owner: "{{ repo_owner }}"
         });
 
         const oauthUrl = new URL("https://github.com/login/oauth/authorize");

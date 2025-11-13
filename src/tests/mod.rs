@@ -30,7 +30,8 @@ use crate::database::{
 };
 use crate::github::{GithubRepoName, PullRequestNumber};
 use crate::{
-    BorsContext, BorsGlobalEvent, BorsProcess, CommandParser, OAuthConfig, PgDbClient, ServerState, TreeState, WebhookSecret, create_app, create_bors_process, load_repositories
+    BorsContext, BorsGlobalEvent, BorsProcess, CommandParser, OAuthConfig, PgDbClient, ServerState,
+    TreeState, WebhookSecret, create_app, create_bors_process, load_repositories,
 };
 
 use crate::tests::mocks::comment::GitHubIssueCommentEventPayload;
