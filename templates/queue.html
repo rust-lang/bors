@@ -51,10 +51,6 @@
         max-width: 500px;
     }
 
-    #rollupModalClose {
-        float: right;
-        cursor: pointer;
-    }
 </style>
 {% endblock %}
 
@@ -156,7 +152,6 @@
 
   <div id="rollupModal">
     <div id="rollupModalContent">
-      <span id="rollupModalClose">&times;</span>
       <p id="rollupModalMessage"></p>
       <button id="rollupModalContinue" style="display: none;">Continue</button>
     </div>
@@ -306,7 +301,6 @@
 
     const modal = document.getElementById("rollupModal");
     const modalMessage = document.getElementById("rollupModalMessage");
-    const modalClose = document.getElementById("rollupModalClose");
     const modalContinue = document.getElementById("rollupModalContinue");
 
     function closeModal() {
@@ -314,7 +308,6 @@
         modalContinue.style.display = "none";
     }
 
-    modalClose.addEventListener("click", closeModal);
     modalContinue.addEventListener("click", closeModal);
 
     window.addEventListener("click", function(event) {
