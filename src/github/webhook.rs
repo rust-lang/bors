@@ -448,7 +448,6 @@ mod tests {
     use sqlx::PgPool;
     use tokio::sync::mpsc;
 
-    use crate::PgDbClient;
     use crate::bors::event::{BorsEvent, BorsGlobalEvent};
     use crate::github::server::{ServerState, ServerStateRef};
     use crate::github::webhook::GitHubWebhook;
@@ -456,6 +455,7 @@ mod tests {
     use crate::tests::default_cmd_prefix;
     use crate::tests::load_test_file;
     use crate::tests::{TEST_WEBHOOK_SECRET, create_webhook_request};
+    use crate::{OAuthConfig, PgDbClient};
 
     #[tokio::test]
     async fn installation_suspend() {
@@ -1538,6 +1538,7 @@ mod tests {
             repository_tx,
             global_tx,
             WebhookSecret::new(TEST_WEBHOOK_SECRET.to_string()),
+            OAuthConfig::new("".to_string(), "".to_string()),
             repos,
             db,
             default_cmd_prefix(),
