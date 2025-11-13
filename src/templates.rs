@@ -63,6 +63,7 @@ pub struct QueueTemplate {
     pub stats: PullRequestStats,
     pub prs: Vec<PullRequestModel>,
     pub tree_state: TreeState,
+    pub oauth_client_id: String,
 }
 
 #[derive(Template)]

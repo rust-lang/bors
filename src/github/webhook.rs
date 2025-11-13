@@ -448,7 +448,7 @@ mod tests {
     use sqlx::PgPool;
     use tokio::sync::mpsc;
 
-    use crate::PgDbClient;
+    use crate::{OAuthConfig, PgDbClient};
     use crate::bors::event::{BorsEvent, BorsGlobalEvent};
     use crate::github::server::{ServerState, ServerStateRef};
     use crate::github::webhook::GitHubWebhook;
@@ -1538,6 +1538,7 @@ mod tests {
             repository_tx,
             global_tx,
             WebhookSecret::new(TEST_WEBHOOK_SECRET.to_string()),
+            OAuthConfig::new("".to_string(), "".to_string()),
             repos,
             db,
             default_cmd_prefix(),
