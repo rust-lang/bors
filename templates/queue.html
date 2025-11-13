@@ -299,35 +299,30 @@
         detachRowClick = bindRowClick(table);
     });
 
+    const createRollupButton = document.getElementById("showRollupSelection")
     const modal = document.getElementById("rollupModal");
     const modalMessage = document.getElementById("rollupModalMessage");
-    const modalContinue = document.getElementById("rollupModalContinue");
 
-    function closeModal() {
-        modal.style.display = "none";
-        modalContinue.style.display = "none";
-    }
-
-    modalContinue.addEventListener("click", closeModal);
-
-    window.addEventListener("click", function(event) {
+    // Handle modal outside click
+    window.addEventListener("click", (event) => {
         if (event.target === modal) {
-            closeModal();
+            modal.style.display = "none";
+            rollupContinueButton.style.display = "none";
         }
     });
 
-    document.getElementById("showRollupSelection").addEventListener("click", function() {
-        let selectedRows = table.rows({ selected: true }).nodes().toArray();
+    createRollupButton.addEventListener("click", () => {
+        const selectedRows = table.rows({ selected: true }).nodes().toArray();
         let message;
 
         if (selectedRows.length === 0) {
             message = "No PRs selected for rollup.";
-            modalContinue.style.display = "none";
+            rollupContinueButton.style.display = "none";
         } else {
             message = `You've selected <strong>${selectedRows.length} PR(s)</strong> to be included in this rollup.<br><br>
             A rollup is useful for shortening the queue, but jumping the queue is unfair to older PRs who have waited too long.<br><br>
             When creating a real rollup, see the <a href="https://forge.rust-lang.org/release/rollups.html" target="_blank">instructions</a> for reference.`;
-            modalContinue.style.display = "inline-block";
+            rollupContinueButton.style.display = "inline-block";
         }
 
         modalMessage.innerHTML = message;
