@@ -21,11 +21,12 @@ use super::GithubRepoName;
 use crate::utils::sort_queue::sort_queue_prs;
 use anyhow::Error;
 use axum::Router;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
-use octocrab::Octocrab;
+use octocrab::{Octocrab, OctocrabBuilder};
+use secrecy::{ExposeSecret, SecretString};
 use std::any::Any;
 use std::collections::HashMap;
 use std::future::Future;
@@ -36,11 +37,35 @@ use tower::limit::ConcurrencyLimitLayer;
 use tower_http::catch_panic::CatchPanicLayer;
 use tracing::{Instrument, Span};
 
+#[derive(Clone)]
+pub struct OAuthConfig {
+    client_id: String,
+    client_secret: SecretString,
+}
+
+impl OAuthConfig {
+    pub fn new(client_id: String, client_secret: String) -> Self {
+        Self {
+            client_id,
+            client_secret: client_secret.into(),
+        }
+    }
+
+    pub fn client_id(&self) -> &str {
+        &self.client_id
+    }
+
+    pub fn client_secret(&self) -> &str {
+        self.client_secret.expose_secret()
+    }
+}
+
 /// Shared server state for all axum handlers.
 pub struct ServerState {
     repository_event_queue: mpsc::Sender<BorsRepositoryEvent>,
     global_event_queue: mpsc::Sender<BorsGlobalEvent>,
     webhook_secret: WebhookSecret,
+    oauth: OAuthConfig,
     repositories: HashMap<GithubRepoName, Arc<RepositoryState>>,
     db: Arc<PgDbClient>,
     cmd_prefix: CommandPrefix,
@@ -51,6 +76,7 @@ impl ServerState {
         repository_event_queue: mpsc::Sender<BorsRepositoryEvent>,
         global_event_queue: mpsc::Sender<BorsGlobalEvent>,
         webhook_secret: WebhookSecret,
+        oauth: OAuthConfig,
         repositories: HashMap<GithubRepoName, Arc<RepositoryState>>,
         db: Arc<PgDbClient>,
         cmd_prefix: CommandPrefix,
@@ -59,6 +85,7 @@ impl ServerState {
             repository_event_queue,
             global_event_queue,
             webhook_secret,
+            oauth,
             repositories,
             db,
             cmd_prefix,
@@ -83,6 +110,7 @@ pub fn create_app(state: ServerState) -> Router {
         .route("/queue/{repo_name}", get(queue_handler))
         .route("/github", post(github_webhook_handler))
         .route("/health", get(health_handler))
+        .route("/oauth/callback", get(oauth_callback_handler))
         .layer(ConcurrencyLimitLayer::new(100))
         .layer(CatchPanicLayer::custom(handle_panic))
         .with_state(Arc::new(state))
@@ -134,6 +162,74 @@ async fn help_handler(State(state): State<ServerStateRef>) -> impl IntoResponse 
     })
 }
 
+#[derive(serde::Deserialize)]
+struct OAuthCallbackQuery {
+    code: String,
+    state: String,
+}
+
+#[derive(serde::Deserialize)]
+struct OAuthState {
+    pr_nums: Vec<u32>,
+}
+
+async fn oauth_callback_handler(
+    Query(callback): Query<OAuthCallbackQuery>,
+    State(state): State<ServerStateRef>,
+) -> Result<impl IntoResponse, AppError> {
+    let oauth_state: OAuthState = serde_json::from_str(&callback.state)
+        .map_err(|_| anyhow::anyhow!("Invalid state parameter"))?;
+
+    // Exchange code for access token
+    let client = reqwest::Client::new();
+    let token_response = client
+        .post("https://github.com/login/oauth/access_token")
+        .form(&[
+            ("client_id", state.oauth.client_id()),
+            ("client_secret", state.oauth.client_secret()),
+            ("code", &callback.code),
+        ])
+        .send()
+        .await?
+        .text()
+        .await?;
+
+    // Extract access token
+    let oauth_token_params: HashMap<String, String> =
+        url::form_urlencoded::parse(token_response.as_bytes())
+            .into_owned()
+            .collect();
+    let access_token = oauth_token_params
+        .get("access_token")
+        .ok_or_else(|| anyhow::anyhow!("No access token in response"))?;
+
+    match create_rollup(state, oauth_state.pr_nums, access_token).await {
+        Ok(pr_url) => Ok(Redirect::temporary(&pr_url).into_response()),
+        Err(error) => Ok((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to create rollup: {error}"),
+        )
+            .into_response()),
+    }
+}
+
+async fn create_rollup(
+    state: Arc<ServerState>,
+    pr_nums: Vec<u32>,
+    access_token: &str,
+) -> anyhow::Result<String> {
+    let gh_client = OctocrabBuilder::new()
+        .user_access_token(access_token.to_string())
+        .build()?;
+    let user = gh_client.current().user().await?;
+
+    println!("{}", user.repos_url);
+
+    // Rollup logic...
+
+    Ok("https://github.com".to_string())
+}
+
 async fn queue_handler(
     Path(repo_name): Path<String>,
     State(state): State<ServerStateRef>,
@@ -171,6 +267,7 @@ async fn queue_handler(
             });
 
     Ok(HtmlTemplate(QueueTemplate {
+        oauth_client_id: state.oauth.client_id().to_string(),
         repo_name: repo.name.name().to_string(),
         repo_url: format!("https://github.com/{}", repo.name),
         tree_state: repo.tree_state,

@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use anyhow::Context;
 use bors::{
-    BorsContext, BorsGlobalEvent, BorsProcess, CommandParser, PgDbClient, ServerState,
+    BorsContext, BorsGlobalEvent, BorsProcess, CommandParser, OAuthConfig, PgDbClient, ServerState,
     TeamApiClient, TreeState, WebhookSecret, create_app, create_bors_process, create_github_client,
     load_repositories,
 };
@@ -48,6 +48,14 @@ struct Opts {
     /// Private key used to authenticate as a Github App.
     #[arg(long, env = "PRIVATE_KEY")]
     private_key: String,
+
+    /// GitHub OAuth client ID for rollups.
+    #[arg(long, env = "CLIENT_ID")]
+    client_id: String,
+
+    /// GitHub OAuth client secret for rollups.
+    #[arg(long, env = "CLIENT_SECRET")]
+    client_secret: String,
 
     /// Secret used to authenticate webhooks.
     #[arg(long, env = "WEBHOOK_SECRET")]
@@ -214,10 +222,12 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
         }
     };
 
+    let oauth_config = OAuthConfig::new(opts.client_id.clone(), opts.client_secret.clone());
     let state = ServerState::new(
         repository_tx,
         global_tx,
         WebhookSecret::new(opts.webhook_secret),
+        oauth_config,
         repos,
         db,
         opts.cmd_prefix.into(),

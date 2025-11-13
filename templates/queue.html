@@ -306,6 +306,7 @@
     const createRollupButton = document.getElementById("showRollupSelection")
     const modal = document.getElementById("rollupModal");
     const modalMessage = document.getElementById("rollupModalMessage");
+    const rollupContinueButton = document.getElementById("rollupModalContinue");
 
     // Handle modal outside click
     window.addEventListener("click", (event) => {
@@ -331,6 +332,31 @@
 
         modalMessage.innerHTML = message;
         modal.style.display = "block";
+    });
+
+    rollupContinueButton.addEventListener("click", () => {
+        const scopes = ["public_repo", "workflow"];
+
+        // Gather PR numbers
+        let selectedRows = table.rows({ selected: true }).nodes().toArray();
+        let nums = selectedRows
+            .map(row => {
+                let numberCell = row.cells[1];
+                let link = numberCell.querySelector("a");
+                return link ? parseInt(link.textContent) : null;
+            })
+            .filter(num => num !== null);
+
+        let state = JSON.stringify({
+            pr_nums: nums,
+        });
+
+        const oauthUrl = new URL("https://github.com/login/oauth/authorize");
+        oauthUrl.searchParams.set("client_id", "{{ oauth_client_id }}");
+        oauthUrl.searchParams.set("scope", scopes.join(","));
+        oauthUrl.searchParams.set("state", state);
+
+        window.location.href = oauthUrl.toString();
     });
 </script>
 {% endblock %}
