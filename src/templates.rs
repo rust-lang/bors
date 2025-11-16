@@ -1,4 +1,6 @@
-use crate::database::{MergeableState::*, PullRequestModel, QueueStatus, TreeState};
+use crate::database::{
+    BuildModel, BuildStatus, MergeableState::*, PullRequestModel, QueueStatus, TreeState,
+};
 use askama::Template;
 use axum::response::{Html, IntoResponse, Response};
 use http::StatusCode;
@@ -70,3 +72,12 @@ pub struct QueueTemplate {
 #[derive(Template)]
 #[template(path = "not_found.html")]
 pub struct NotFoundTemplate {}
+
+pub fn get_pending_build(pr: &PullRequestModel) -> Option<&BuildModel> {
+    if let Some(auto_build) = &pr.auto_build
+        && auto_build.status == BuildStatus::Pending
+    {
+        return Some(auto_build);
+    }
+    None
+}
