@@ -312,8 +312,7 @@ async fn notify_of_pushed_pr(
     cancel_message: Option<String>,
 ) -> anyhow::Result<()> {
     let mut comment = format!(
-        r#":warning: A new commit `{head_sha}` was pushed to the branch, the
-PR will need to be re-approved."#
+        r#":warning: A new commit `{head_sha}` was pushed to the branch, the PR will need to be re-approved."#
     );
 
     if let Some(message) = cancel_message {
@@ -401,10 +400,7 @@ mod tests {
 
             insta::assert_snapshot!(
                 tester.get_next_comment_text(()).await?,
-                @r"
-            :warning: A new commit `pr-1-commit-1` was pushed to the branch, the
-            PR will need to be re-approved.
-            "
+                @":warning: A new commit `pr-1-commit-1` was pushed to the branch, the PR will need to be re-approved."
             );
             tester.get_pr_copy(()).await.expect_unapproved();
             Ok(())
@@ -714,13 +710,12 @@ mod tests {
                 .await?;
             tester.push_to_pr(()).await?;
             insta::assert_snapshot!(tester.get_next_comment_text(()).await?, @r"
-                :warning: A new commit `pr-1-commit-1` was pushed to the branch, the
-                PR will need to be re-approved.
+            :warning: A new commit `pr-1-commit-1` was pushed to the branch, the PR will need to be re-approved.
 
-                Auto build cancelled due to push. Cancelled workflows:
+            Auto build cancelled due to push. Cancelled workflows:
 
-                - https://github.com/rust-lang/borstest/actions/runs/123
-                ");
+            - https://github.com/rust-lang/borstest/actions/runs/123
+            ");
             Ok(())
         })
         .await;
@@ -742,11 +737,10 @@ mod tests {
             tester.workflow_start(tester.auto_branch().await).await?;
             tester.push_to_pr(()).await?;
             insta::assert_snapshot!(tester.get_next_comment_text(()).await?, @r"
-                :warning: A new commit `pr-1-commit-1` was pushed to the branch, the
-                PR will need to be re-approved.
+            :warning: A new commit `pr-1-commit-1` was pushed to the branch, the PR will need to be re-approved.
 
-                Auto build cancelled due to push. It was not possible to cancel some workflows.
-                ");
+            Auto build cancelled due to push. It was not possible to cancel some workflows.
+            ");
             Ok(())
         })
         .await;
