@@ -13,8 +13,7 @@ use crate::bors::comment::{
 };
 use crate::bors::{PullRequestStatus, RepositoryState};
 use crate::database::{
-    ApprovalInfo, BuildModel, BuildStatus, MergeableState, OctocrabMergeableState,
-    PullRequestModel, QueueStatus,
+    ApprovalInfo, BuildModel, BuildStatus, MergeableState, PullRequestModel, QueueStatus,
 };
 use crate::github::api::client::CheckRunOutput;
 use crate::github::api::operations::{BranchUpdateError, ForcePush};
@@ -280,7 +279,10 @@ async fn verify_pr_state(gh_pr: &PullRequest, pr: &PullRequestModel) -> anyhow::
         gh_pr.head.sha
     );
     anyhow::ensure!(
-        gh_pr.mergeable_state == OctocrabMergeableState::Clean,
+        matches!(
+            MergeableState::from(gh_pr.mergeable_state.clone()),
+            MergeableState::Mergeable
+        ),
         "PR is not mergeable, mergeability status: {:?}",
         gh_pr.mergeable_state
     );
