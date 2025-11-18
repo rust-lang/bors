@@ -20,6 +20,9 @@
     table {
         min-width: 100%;
         white-space: nowrap;
+
+        --dt-row-stripe: 238, 238, 238;
+        --dt-row-stripe-alpha: 255;
     }
 
     table th,
@@ -106,6 +109,7 @@
                 <th>Rollup</th>
             </tr>
         </thead>
+    <table id="table" class="stripe">
 
         <tbody>
             {% for pr in prs %}
