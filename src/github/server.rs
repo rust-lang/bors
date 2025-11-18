@@ -17,6 +17,8 @@ use crate::templates::{
 use crate::{BorsGlobalEvent, BorsRepositoryEvent, PgDbClient, TeamApiClient};
 
 use super::AppError;
+use super::GithubRepoName;
+use crate::utils::sort_queue::sort_queue_prs;
 use anyhow::Error;
 use axum::Router;
 use axum::extract::{Path, State};
@@ -33,8 +35,6 @@ use tokio::sync::mpsc;
 use tower::limit::ConcurrencyLimitLayer;
 use tower_http::catch_panic::CatchPanicLayer;
 use tracing::{Instrument, Span};
-
-use super::GithubRepoName;
 
 /// Shared server state for all axum handlers.
 pub struct ServerState {
@@ -150,6 +150,7 @@ async fn queue_handler(
     };
 
     let prs = state.db.get_nonclosed_pull_requests(&repo.name).await?;
+    let prs = sort_queue_prs(prs);
 
     let (in_queue_count, failed_count, rolled_up_count) =
         prs.iter()
