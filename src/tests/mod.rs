@@ -203,6 +203,7 @@ impl BorsTester {
             repository_tx,
             global_tx.clone(),
             WebhookSecret::new(TEST_WEBHOOK_SECRET.to_string()),
+            None,
             repos.clone(),
             db.clone(),
             default_cmd_prefix(),

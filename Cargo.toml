@@ -56,6 +56,7 @@ chrono = "0.4"
 
 # Utilities
 itertools = "0.14"
+rand = { version = "0.9", features = ["alloc"] }
 
 # Text processing
 pulldown-cmark = "0.13"

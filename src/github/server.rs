@@ -18,6 +18,7 @@ use crate::{BorsGlobalEvent, BorsRepositoryEvent, PgDbClient, TeamApiClient};
 
 use super::AppError;
 use super::GithubRepoName;
+use super::rollup;
 use crate::utils::sort_queue::sort_queue_prs;
 use anyhow::Error;
 use axum::Router;
@@ -26,6 +27,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use octocrab::Octocrab;
+use secrecy::{ExposeSecret, SecretString};
 use std::any::Any;
 use std::collections::HashMap;
 use std::future::Future;
@@ -36,13 +38,37 @@ use tower::limit::ConcurrencyLimitLayer;
 use tower_http::catch_panic::CatchPanicLayer;
 use tracing::{Instrument, Span};
 
+#[derive(Clone)]
+pub struct OAuthConfig {
+    client_id: String,
+    client_secret: SecretString,
+}
+
+impl OAuthConfig {
+    pub fn new(client_id: String, client_secret: String) -> Self {
+        Self {
+            client_id,
+            client_secret: client_secret.into(),
+        }
+    }
+
+    pub fn client_id(&self) -> &str {
+        &self.client_id
+    }
+
+    pub fn client_secret(&self) -> &str {
+        self.client_secret.expose_secret()
+    }
+}
+
 /// Shared server state for all axum handlers.
 pub struct ServerState {
     repository_event_queue: mpsc::Sender<BorsRepositoryEvent>,
     global_event_queue: mpsc::Sender<BorsGlobalEvent>,
     webhook_secret: WebhookSecret,
+    pub(super) oauth: Option<OAuthConfig>,
     repositories: HashMap<GithubRepoName, Arc<RepositoryState>>,
-    db: Arc<PgDbClient>,
+    pub(super) db: Arc<PgDbClient>,
     cmd_prefix: CommandPrefix,
 }
 
@@ -51,6 +77,7 @@ impl ServerState {
         repository_event_queue: mpsc::Sender<BorsRepositoryEvent>,
         global_event_queue: mpsc::Sender<BorsGlobalEvent>,
         webhook_secret: WebhookSecret,
+        oauth: Option<OAuthConfig>,
         repositories: HashMap<GithubRepoName, Arc<RepositoryState>>,
         db: Arc<PgDbClient>,
         cmd_prefix: CommandPrefix,
@@ -59,6 +86,7 @@ impl ServerState {
             repository_event_queue,
             global_event_queue,
             webhook_secret,
+            oauth,
             repositories,
             db,
             cmd_prefix,
@@ -83,6 +111,7 @@ pub fn create_app(state: ServerState) -> Router {
         .route("/queue/{repo_name}", get(queue_handler))
         .route("/github", post(github_webhook_handler))
         .route("/health", get(health_handler))
+        .route("/oauth/callback", get(rollup::oauth_callback_handler))
         .layer(ConcurrencyLimitLayer::new(100))
         .layer(CatchPanicLayer::custom(handle_panic))
         .with_state(Arc::new(state))
@@ -134,7 +163,7 @@ async fn help_handler(State(state): State<ServerStateRef>) -> impl IntoResponse 
     })
 }
 
-async fn queue_handler(
+pub async fn queue_handler(
     Path(repo_name): Path<String>,
     State(state): State<ServerStateRef>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -171,7 +200,12 @@ async fn queue_handler(
             });
 
     Ok(HtmlTemplate(QueueTemplate {
+        oauth_client_id: state
+            .oauth
+            .as_ref()
+            .map(|config| config.client_id().to_string()),
         repo_name: repo.name.name().to_string(),
+        repo_owner: repo.name.owner().to_string(),
         repo_url: format!("https://github.com/{}", repo.name),
         tree_state: repo.tree_state,
         stats: PullRequestStats {

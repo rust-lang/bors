@@ -59,10 +59,12 @@ pub struct PullRequestStats {
 #[template(path = "queue.html")]
 pub struct QueueTemplate {
     pub repo_name: String,
+    pub repo_owner: String,
     pub repo_url: String,
     pub stats: PullRequestStats,
     pub prs: Vec<PullRequestModel>,
     pub tree_state: TreeState,
+    pub oauth_client_id: Option<String>,
 }
 
 #[derive(Template)]

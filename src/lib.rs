@@ -15,7 +15,7 @@ pub use github::{
     AppError, WebhookSecret,
     api::create_github_client,
     api::load_repositories,
-    server::{BorsProcess, ServerState, create_app, create_bors_process},
+    server::{BorsProcess, OAuthConfig, ServerState, create_app, create_bors_process},
 };
 pub use permissions::TeamApiClient;
 

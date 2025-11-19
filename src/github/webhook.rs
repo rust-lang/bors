@@ -1538,6 +1538,7 @@ mod tests {
             repository_tx,
             global_tx,
             WebhookSecret::new(TEST_WEBHOOK_SECRET.to_string()),
+            None,
             repos,
             db,
             default_cmd_prefix(),

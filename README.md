@@ -19,6 +19,8 @@ required.
 | `--app-id`         | `APP_ID`             |             | GitHub app ID of the bors bot.                            |
 | `--private-key`    | `PRIVATE_KEY`        |             | Private key of the GitHub app.                            |
 | `--webhook-secret` | `WEBHOOK_SECRET`     |             | Key used to authenticate GitHub webhooks.                 |
+| `--client-id`      | `OAUTH_CLIENT_ID`    |             | GitHub OAuth client ID for rollup UI (optional).          |
+| `--client-secret`  | `OAUTH_CLIENT_SECRET`|             | GitHub OAuth client secret for rollup UI (optional).      |
 | `--db`             | `DATABASE_URL`       |             | Database connection string. Only PostgreSQL is supported. |
 | `--cmd-prefix`     | `CMD_PREFIX`         | @bors       | Prefix used to invoke bors commands in PR comments.       |
 
@@ -44,6 +46,12 @@ atomically using the GitHub API.
 
 ### GitHub app
 If you want to attach `bors` to a GitHub app, you should point its webhooks at `<http address of bors>/github`.
+
+### OAuth app
+If you want to create rollups, you will need to create a GitHub OAuth app configured like so:
+1. In the [developer settings](https://github.com/settings/developers), go to "OAuth Apps" and create a new application.
+2. Set the Authorization callback URL to `<http address of bors>/oauth/callback`.
+3. Note the generated Client ID and Client secret, and pass them through the CLI flags or via your environment configuration.
 
 ### How to add a repository to bors
 Here is a guide on how to add a repository so that this bot can be used on it:
