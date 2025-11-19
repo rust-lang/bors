@@ -1,12 +1,8 @@
-use crate::bors::RollupMode;
-use crate::database::QueueStatus;
-use crate::templates::{HtmlTemplate, PullRequestStats, QueueTemplate};
-
 use super::GithubRepoName;
 use super::error::AppError;
 use super::server::ServerStateRef;
 use anyhow::Context;
-use axum::extract::{Path, Query, State};
+use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Redirect};
 use octocrab::OctocrabBuilder;
