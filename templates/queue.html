@@ -156,7 +156,7 @@
                 {% let pending_build = crate::templates::get_pending_build(pr) %}
                 <td class="status" data-status="{{ crate::templates::status_text(pr) }}"
                     {% if let Some(build) = pending_build %}
-                    title="{{ build.created_at.format("%d.%m.%Y %H:%M:%S") }} UTC"
+                    title="Started at {{ to_local_time(*build.created_at).format("%d.%m.%Y %H:%M:%S") }}"
                     data-created-at="{{ build.created_at.timestamp_millis() }}"
                     {% endif %}>
 
