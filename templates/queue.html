@@ -6,6 +6,22 @@
 <link rel="stylesheet" href="https://cdn.datatables.net/2.3.4/css/dataTables.dataTables.min.css" />
 <link rel="stylesheet" href="https://cdn.datatables.net/rowgroup/1.5.1/css/rowGroup.dataTables.min.css" />
 <style>
+    @keyframes barber-pole {
+        /* This animation is used to make the status indicator next to
+           pending pulls look like a barber poll. We do that with a
+           diagonal linear gradient. CSS does not allow us to animate a
+           gradient, so instead we make the indicator a little taller
+           than shown, and then animate the whole thing upward. */
+        from{
+            transform: translate(0, 0);
+        }
+        to {
+            /* The magic number 11.314 is sqrt(8^2 + 8^2), based on how
+               far vertically it takes to repeat a 45 degree gradient
+               that is 8 pixels long before it repeats. */
+            transform: translate(0, -11.314px);
+        }
+    }
     main {
         max-width: 100rem;
         width: 100%;
@@ -33,6 +49,30 @@
     th.select-checkbox,
     td.select-checkbox {
         width: 2.5rem;
+    }
+    table.dataTable > tbody > tr > td.status {
+        position: relative;
+        overflow: hidden;
+        padding-left: 16px;
+        white-space: nowrap;
+    }
+    td.status:before {
+        content: " ";
+        position: absolute;
+        display: block;
+        left: 6px;
+        width: 6px;
+        top: 0;
+        bottom: 0;
+    }
+    td.status[data-status="pending"]:before {
+        /* Give the pending state a little bit of animation to make it
+           clear that these items are the ones that are being tested
+           right now. */
+        bottom: -20px;
+        background-color: #F0DE57;
+        background-image: repeating-linear-gradient(135deg, #F0DE57 0, #F0DE57 4px, #FBEE97 4px, #FBEE97 8px, #F0DE57 0);
+        animation: barber-pole 1s linear infinite;
     }
 
     #rollupModal {
@@ -90,7 +130,7 @@
   </div>
 
   <div class="table-wrapper">
-    <table id="table">
+    <table id="table" class="stripe">
         <thead>
             <tr>
                 <th class="select-checkbox"></th>
@@ -105,7 +145,6 @@
                 <th>Rollup</th>
             </tr>
         </thead>
-    <table id="table" class="stripe">
 
         <tbody>
             {% for pr in prs %}
@@ -114,12 +153,19 @@
                 <td data-pr-number="{{ pr.number.0 }}">
                     <a href="{{ repo_url }}/pull/{{ pr.number }}">{{ pr.number.0 }}</a>
                 </td>
-                <td data-status="{{ crate::templates::status_text(pr) }}">
+                {% let pending_build = crate::templates::get_pending_build(pr) %}
+                <td class="status" data-status="{{ crate::templates::status_text(pr) }}"
+                    {% if let Some(build) = pending_build %}
+                    title="Started at {{ to_local_time(*build.created_at).format("%d.%m.%Y %H:%M:%S") }}"
+                    data-created-at="{{ build.created_at.timestamp_millis() }}"
+                    {% endif %}>
+
                     {% if let Some(try_build) = pr.try_build %}
                     <a href="../results/{{ repo_name }}/{{ pr.number }}">{{ crate::templates::status_text(pr) }}</a> (try)
                     {% else %}
                     {{ crate::templates::status_text(pr) }}
                     {% endif %}
+                    <span class="elapsed-time-display"></span>
                 </td>
                 <td>
                     {% match pr.mergeable_state %}
@@ -364,5 +410,44 @@
 
         window.location.href = oauthUrl.toString();
     });
+
+    function formatElapsedTime(ms) {
+        const totalSeconds = Math.floor(ms / 1000);
+        const hours = Math.floor(totalSeconds / 3600);
+        const remainingSeconds = totalSeconds % 3600;
+        const minutes = Math.floor(remainingSeconds / 60);
+
+        let output = '';
+        if (hours > 0) {
+            output += `${hours}h`;
+        }
+
+        if (minutes > 0) {
+            if (output.length > 0) {
+                output += ' ';
+            }
+            output += `${minutes}m`;
+        }
+        if (output.length > 0) {
+            return ` (${output})`;
+        }
+        return '';
+    }
+
+    function updateElapsedTimes() {
+        const now = Date.now();
+        document.querySelectorAll('[data-created-at]').forEach(td => {
+            const createdAtMs = parseInt(td.dataset.createdAt, 10);
+            if (createdAtMs > 0) {
+                const elapsedMs = now - createdAtMs;
+                const formattedTime = formatElapsedTime(elapsedMs);
+                let display = td.querySelector('.elapsed-time-display');
+                display.textContent = formattedTime;
+            }
+        });
+    }
+
+    updateElapsedTimes();
+    setInterval(updateElapsedTimes, 1000);
 </script>
 {% endblock %}
