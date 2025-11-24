@@ -38,6 +38,11 @@ pub struct RepositoryConfig {
     pub merge_queue_enabled: bool,
 }
 
+/// Load a repository config from TOML.
+pub fn deserialize_config(text: &str) -> Result<RepositoryConfig, toml::de::Error> {
+    toml::from_str(text)
+}
+
 fn default_timeout() -> Duration {
     Duration::from_secs(3600)
 }
@@ -150,9 +155,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use crate::config::{RepositoryConfig, default_timeout, deserialize_config};
     use std::{collections::BTreeMap, time::Duration};
-
-    use crate::config::{RepositoryConfig, default_timeout};
 
     #[test]
     fn deserialize_empty() {
@@ -275,6 +279,6 @@ approved = ["foo"]
     }
 
     fn load_config(config: &str) -> RepositoryConfig {
-        toml::from_str(config).unwrap()
+        deserialize_config(config).expect("Cannot deserialize repository config")
     }
 }

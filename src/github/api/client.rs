@@ -9,7 +9,7 @@ use tracing::log;
 
 use crate::bors::event::PullRequestComment;
 use crate::bors::{Comment, WorkflowRun};
-use crate::config::{CONFIG_FILE_PATH, RepositoryConfig};
+use crate::config::{CONFIG_FILE_PATH, RepositoryConfig, deserialize_config};
 use crate::database::WorkflowStatus;
 use crate::github::api::operations::{
     BranchUpdateError, ForcePush, MergeError, create_check_run, merge_branches,
@@ -83,7 +83,7 @@ impl GithubRepositoryClient {
                     .ok_or_else(|| anyhow::anyhow!("Configuration file not found"))
                     .and_then(|content| {
                         let config: RepositoryConfig =
-                            toml::from_str(&content).map_err(|error| {
+                            deserialize_config(&content).map_err(|error| {
                                 anyhow::anyhow!(
                                     "Could not deserialize repository config: {error:?}"
                                 )
