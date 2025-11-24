@@ -385,6 +385,7 @@
         modal.style.display = "block";
     });
 
+    {% if let Some(client_id) = oauth_client_id %}
     rollupContinueButton.addEventListener("click", () => {
         const scopes = ["public_repo", "workflow"];
 
@@ -404,12 +405,13 @@
         });
 
         const oauthUrl = new URL("https://github.com/login/oauth/authorize");
-        oauthUrl.searchParams.set("client_id", "{{ oauth_client_id.as_ref().unwrap() }}");
+        oauthUrl.searchParams.set("client_id", "{{ client_id }}");
         oauthUrl.searchParams.set("scope", scopes.join(","));
         oauthUrl.searchParams.set("state", state);
 
         window.location.href = oauthUrl.toString();
     });
+    {% endif %}
 
     function formatElapsedTime(ms) {
         const totalSeconds = Math.floor(ms / 1000);
