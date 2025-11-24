@@ -156,6 +156,7 @@ where
 #[cfg(test)]
 mod tests {
     use crate::config::{RepositoryConfig, default_timeout, deserialize_config};
+    use std::path::Path;
     use std::{collections::BTreeMap, time::Duration};
 
     #[test]
@@ -276,6 +277,15 @@ approved = ["foo"]
     fn deserialize_unknown_key_fail() {
         let content = r#"labels-blocking-approval = ["foo", "bar"]"#;
         load_config(content);
+    }
+
+    #[test]
+    fn load_example_config() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("rust-bors.example.toml");
+        let config = std::fs::read_to_string(path)
+            .expect("Cannot load example bors config from repository root");
+        deserialize_config(&config)
+            .expect("Cannot deserialize example bors config from `rust-bors.example.toml`");
     }
 
     fn load_config(config: &str) -> RepositoryConfig {
