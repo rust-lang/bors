@@ -157,13 +157,3 @@ When modifying commands, make sure to update both:
 ## Logs in tests
 By default, logs are disabled in tests. To enable them, add `#[traced_test]`
 on top of the test function.
-
-## Faster compilation
-Bors has a lot of dependencies and can be fairly slow to compile. If you want to improve compilation speed, you could use a faster linker, e.g. LLD.
-
-To do that, install it (e.g. using `sudo apt install lld`) and then put this:
-```toml
-[build]
-rustflags = ["-C", "link-arg=-fuse-ld=lld"]
-```
-into `.cargo/config.toml`.
