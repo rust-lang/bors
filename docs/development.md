@@ -57,6 +57,11 @@ One-time setup:
   - Subscribe it to webhook events `Issue comment`, `Pull request`, `Pull request review`, `Pull request review comment` and `Workflow run`.
 - Install your GitHub app on some test repository where you want to test bors.
   - Don't forget to configure `rust-bors.toml` in the root of the repository, and also add some example CI workflows.
+- Create try/review permissions for Github users
+  - Copy a review json file `cp data/permissions/bors.review.json.example data/permissions/bors.review.json`
+  - Copy a try json file `cp data/permissions/bors.try.json.example data/permissions/bors.try.json`
+  - Get your Github user `ID` `https://api.github.com/users/<your_github_user_name>`
+  - Edit both `bors.review.json` and `bors.try.json` files to include your GitHub `ID`: `{ "github_ids": [12345678] }`
 
 Everytime you want to run bors:
 - Run bors locally.
@@ -65,6 +70,7 @@ Everytime you want to run bors:
   - Set `PRIVATE_KEY` to the private key of the app.
   - (optional) Set `WEB_URL` to the public URL of the website of the app.
   - (optional) Set `CMD_PREFIX` to the command prefix used to control the bot (e.g. `@bors`).
+  - (optional) Set `PERMISSIONS` `"data/permissions"` directory path to list users with permissions to perform try/review.
 - Set up some globally reachable URL/IP address for your computer, e.g. using [ngrok](https://ngrok.com/).
   - Configure the webhook URL for your app to point to `<address>/github`. You can use [gh webhook](https://docs.github.com/en/webhooks/testing-and-troubleshooting-webhooks/using-the-github-cli-to-forward-webhooks-for-testing) for that.
 - Try `@bors ping` on some PR on the test repository :)
