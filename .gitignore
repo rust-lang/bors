@@ -2,3 +2,5 @@ target/
 .env
 .DS_Store
 __pycache__/
+*.review.json
+*.try.json

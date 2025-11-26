@@ -105,10 +105,8 @@ impl TeamApiClient {
         match &self.team_source {
             TeamSource::Url(base_url) => {
                 let normalized_name = repository_name.replace('-', "_");
-                let url = format!(
-                    "{}/v1/permissions/bors.{normalized_name}.{permission}.json",
-                    base_url
-                );
+                let url =
+                    format!("{base_url}/v1/permissions/bors.{normalized_name}.{permission}.json",);
                 let users = reqwest::get(url)
                     .await
                     .and_then(|res| res.error_for_status())
