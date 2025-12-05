@@ -24,7 +24,7 @@ serde_json = "1"
 toml = "0.9"
 
 # GitHub
-octocrab = { version = "0.47", features = ["timeout", "stream"] }
+octocrab = { version = "0.48", features = ["timeout", "stream"] }
 
 # Async
 futures = "0.3"
@@ -36,7 +36,7 @@ hyper = "1"
 axum = "0.8"
 tower = { version = "0.5", features = ["limit"] }
 tower-http = { version = "0.6.4", features = ["catch-panic"] }
-jsonwebtoken = "9"
+jsonwebtoken = "10"
 url = "2"
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
 http = "1"
