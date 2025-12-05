@@ -14,17 +14,17 @@ The production instance of the bot is deployed at https://bors-prod.rust-lang.ne
 There are several parameters that can be configured when launching the bot. Parameters without a default value are
 required.
 
-| **CLI flag**       | **Environment var.** | **Default** | **Description**                                           |
-|--------------------|----------------------|-------------|-----------------------------------------------------------|
-| `--app-id`         | `APP_ID`             |             | GitHub app ID of the bors bot.                            |
-| `--private-key`    | `PRIVATE_KEY`        |             | Private key of the GitHub app.                            |
-| `--webhook-secret` | `WEBHOOK_SECRET`     |             | Key used to authenticate GitHub webhooks.                 |
-| `--client-id`      | `OAUTH_CLIENT_ID`    |             | GitHub OAuth client ID for rollup UI (optional).          |
-| `--client-secret`  | `OAUTH_CLIENT_SECRET`|             | GitHub OAuth client secret for rollup UI (optional).      |
-| `--db`             | `DATABASE_URL`       |             | Database connection string. Only PostgreSQL is supported. |
-| `--cmd-prefix`     | `CMD_PREFIX`         | @bors       | Prefix used to invoke bors commands in PR comments.       |
-| `--web_url`        | `WEB_URL`            | http://localhost:8080| Web URL where the bot's website is deployed (optional).|
-| `--permissions`    | `PERMISSIONS`        | Rust Team API url| Either a URL to the team v1 API or a path to a directory containing JSON files with try/review permissions (optional).|
+| **CLI flag**       | **Environment var.**  | **Default**           | **Description**                                                                                                        |
+|--------------------|-----------------------|-----------------------|------------------------------------------------------------------------------------------------------------------------|
+| `--app-id`         | `APP_ID`              |                       | GitHub app ID of the bors bot.                                                                                         |
+| `--private-key`    | `PRIVATE_KEY`         |                       | Private key of the GitHub app.                                                                                         |
+| `--webhook-secret` | `WEBHOOK_SECRET`      |                       | Key used to authenticate GitHub webhooks.                                                                              |
+| `--client-id`      | `OAUTH_CLIENT_ID`     |                       | GitHub OAuth client ID for rollup UI (optional).                                                                       |
+| `--client-secret`  | `OAUTH_CLIENT_SECRET` |                       | GitHub OAuth client secret for rollup UI (optional).                                                                   |
+| `--db`             | `DATABASE_URL`        |                       | Database connection string. Only PostgreSQL is supported.                                                              |
+| `--cmd-prefix`     | `CMD_PREFIX`          | @bors                 | Prefix used to invoke bors commands in PR comments.                                                                    |
+| `--web_url`        | `WEB_URL`             | http://localhost:8080 | Web URL where the bot's website is deployed (optional).                                                                |
+| `--permissions`    | `PERMISSIONS`         | Rust Team API URL     | Either a URL to the team v1 API or a path to a directory containing JSON files with try/review permissions (optional). |
 
 ### Special branches
 The bot uses the following branch names for its operations.
