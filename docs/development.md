@@ -129,7 +129,7 @@ can still be done if needed.
 2. Run bors locally, and configure environment variables and/or command-line parameters for it:
    - Set `APP_ID` to the ID of the created GitHub app.
    - Set `WEBHOOK_SECRET` to the webhook secret of the app.
-   - Set `PRIVATE_KEY` to the private key of the app.
+   - Set `PRIVATE_KEY` to the private key of the app. **Note:** If you face an error related to the private key, you need to add `\n` at the beginning of environment variable: `\n-----BEGIN RSA PRIVATE KEY`
    - (optional) Set `WEB_URL` to the public URL of the website of the app.
    - (optional) Set `CMD_PREFIX` to the command prefix used to control the bot (e.g. `@bors`).
    - (optional) Set `PERMISSIONS` `"data/permissions"` directory path to list users with permissions to perform try/review.
