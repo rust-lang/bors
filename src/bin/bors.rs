@@ -125,7 +125,6 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
     let db = runtime
         .block_on(initialize_db(&opts.db))
         .context("Cannot initialize database")?;
-    // Unwrap will not panic due to default_value for the 'permissions' argument
     let team_api = TeamApiClient::new(opts.permissions);
     let (client, loaded_repos) = runtime.block_on(async {
         let client = create_github_client(
