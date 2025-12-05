@@ -48,15 +48,24 @@ pub(crate) struct UserPermissionsResponse {
     github_ids: HashSet<UserId>,
 }
 
+enum TeamSource {
+    Url(String),
+    Directory(String),
+}
+
 pub struct TeamApiClient {
-    base_url: String,
+    team_source: TeamSource,
 }
 
 impl TeamApiClient {
-    pub(crate) fn new(base_url: impl Into<String>) -> Self {
-        Self {
-            base_url: base_url.into(),
-        }
+    pub fn new(source: impl Into<String>) -> Self {
+        let source_str = source.into();
+        let team_source = if source_str.starts_with("http") {
+            TeamSource::Url(source_str)
+        } else {
+            TeamSource::Directory(source_str)
+        };
+        Self { team_source }
     }
 
     pub(crate) async fn load_permissions(
@@ -81,7 +90,8 @@ impl TeamApiClient {
         })
     }
 
-    /// Loads users that are allowed to perform try/review from the Rust Team API.
+    /// Loads users that are allowed to perform try/review from the Rust Team API
+    /// or from directory for local environment.
     async fn load_users(
         &self,
         repository_name: &str,
@@ -92,26 +102,33 @@ impl TeamApiClient {
             PermissionType::Try => "try",
         };
 
-        let normalized_name = repository_name.replace('-', "_");
-        let url = format!(
-            "{}/v1/permissions/bors.{normalized_name}.{permission}.json",
-            self.base_url
-        );
-        let users = reqwest::get(url)
-            .await
-            .and_then(|res| res.error_for_status())
-            .map_err(|error| anyhow::anyhow!("Cannot load users from team API: {error:?}"))?
-            .json::<UserPermissionsResponse>()
-            .await
-            .map_err(|error| {
-                anyhow::anyhow!("Cannot deserialize users from team API: {error:?}")
-            })?;
-        Ok(users.github_ids)
-    }
-}
-
-impl Default for TeamApiClient {
-    fn default() -> Self {
-        Self::new("https://team-api.infra.rust-lang.org")
+        match &self.team_source {
+            TeamSource::Url(base_url) => {
+                let normalized_name = repository_name.replace('-', "_");
+                let url =
+                    format!("{base_url}/v1/permissions/bors.{normalized_name}.{permission}.json",);
+                let users = reqwest::get(url)
+                    .await
+                    .and_then(|res| res.error_for_status())
+                    .map_err(|error| anyhow::anyhow!("Cannot load users from team API: {error:?}"))?
+                    .json::<UserPermissionsResponse>()
+                    .await
+                    .map_err(|error| {
+                        anyhow::anyhow!("Cannot deserialize users from team API: {error:?}")
+                    })?;
+                Ok(users.github_ids)
+            }
+            TeamSource::Directory(base_path) => {
+                let path = format!("{base_path}/bors.{permission}.json");
+                let data = std::fs::read_to_string(&path).map_err(|error| {
+                    anyhow::anyhow!("Could not read users from a file '{path}': {error:?}")
+                })?;
+                let users: UserPermissionsResponse =
+                    serde_json::from_str(&data).map_err(|error| {
+                        anyhow::anyhow!("Cannot deserialize users from a file '{path}': {error:?}")
+                    })?;
+                Ok(users.github_ids)
+            }
+        }
     }
 }

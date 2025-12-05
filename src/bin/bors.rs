@@ -72,6 +72,14 @@ struct Opts {
     /// Web URL where the bot's website is deployed.
     #[arg(long, env = "WEB_URL", default_value = "http://localhost:8080")]
     web_url: String,
+
+    /// Source of list of users with permissions to perform try/review.
+    #[arg(
+        long,
+        env = "PERMISSIONS",
+        default_value = "https://team-api.infra.rust-lang.org"
+    )]
+    permissions: String,
 }
 
 /// Starts a server that receives GitHub webhooks and generates events into a queue
@@ -117,7 +125,8 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
     let db = runtime
         .block_on(initialize_db(&opts.db))
         .context("Cannot initialize database")?;
-    let team_api = TeamApiClient::default();
+    // Unwrap will not panic due to default_value for the 'permissions' argument
+    let team_api = TeamApiClient::new(opts.permissions);
     let (client, loaded_repos) = runtime.block_on(async {
         let client = create_github_client(
             opts.app_id.into(),
