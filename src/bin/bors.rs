@@ -46,7 +46,7 @@ struct Opts {
     app_id: u64,
 
     /// Private key used to authenticate as a Github App.
-    #[arg(long, env = "PRIVATE_KEY")]
+    #[arg(long, env = "PRIVATE_KEY", allow_hyphen_values = true)]
     private_key: String,
 
     /// GitHub OAuth client ID for rollups.
