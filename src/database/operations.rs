@@ -235,16 +235,18 @@ pub(crate) async fn get_nonclosed_pull_requests(
     .await
 }
 
-pub(crate) async fn update_pr_mergeability_state(
+pub(crate) async fn set_pr_mergeability_state(
     executor: impl PgExecutor<'_>,
-    pr_id: i32,
+    repo: &GithubRepoName,
+    pr_number: PullRequestNumber,
     mergeability_state: MergeableState,
 ) -> anyhow::Result<()> {
     measure_db_query("update_pr_mergeability_state", || async {
         sqlx::query!(
-            "UPDATE pull_request SET mergeable_state = $1 WHERE id = $2",
+            "UPDATE pull_request SET mergeable_state = $3 WHERE repository = $1 AND number = $2",
+            repo as &GithubRepoName,
+            pr_number.0 as i32,
             mergeability_state as _,
-            pr_id
         )
         .execute(executor)
         .await?;

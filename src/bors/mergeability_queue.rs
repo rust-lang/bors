@@ -297,19 +297,12 @@ pub async fn check_mergeability(
     }
 
     // We know the mergeability status, so update it in the DB
-    let pr_model = match ctx
-        .db
-        .get_pull_request(&pull_request.repo, pull_request.pr_number)
-        .await?
-    {
-        Some(model) => model,
-        None => {
-            return Err(anyhow::anyhow!("PR not found in database: {pull_request}"));
-        }
-    };
-
     ctx.db
-        .update_pr_mergeable_state(&pr_model, new_mergeable_state.clone().into())
+        .set_pr_mergeable_state(
+            repo_state.repository(),
+            fetched_pr.number,
+            new_mergeable_state.into(),
+        )
         .await?;
 
     Ok(())

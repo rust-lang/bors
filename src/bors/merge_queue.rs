@@ -230,7 +230,7 @@ async fn handle_start_auto_build(
             tracing::debug!("Failed to start auto build for PR {pr_num} due to merge conflict");
 
             ctx.db
-                .update_pr_mergeable_state(pr, MergeableState::Unknown)
+                .set_pr_mergeable_state(repo.repository(), pr.number, MergeableState::Unknown)
                 .await?;
             repo.client
                 .post_comment(pr.number, merge_conflict_comment(&gh_pr.head.name))

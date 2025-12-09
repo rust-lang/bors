@@ -16,9 +16,9 @@ use super::operations::{
     get_nonclosed_pull_requests, get_pending_builds, get_prs_with_unknown_mergeability_state,
     get_pull_request, get_repository, get_repository_by_name, get_tagged_bot_comments,
     get_workflow_urls_for_build, get_workflows_for_build, insert_repo_if_not_exists,
-    record_tagged_bot_comment, set_pr_assignees, set_pr_priority, set_pr_rollup, set_pr_status,
-    unapprove_pull_request, undelegate_pull_request, update_build_check_run_id,
-    update_build_status, update_mergeable_states_by_base_branch, update_pr_mergeability_state,
+    record_tagged_bot_comment, set_pr_assignees, set_pr_mergeability_state, set_pr_priority,
+    set_pr_rollup, set_pr_status, unapprove_pull_request, undelegate_pull_request,
+    update_build_check_run_id, update_build_status, update_mergeable_states_by_base_branch,
     update_pr_try_build_id, update_workflow_status, upsert_pull_request, upsert_repository,
 };
 use super::{ApprovalInfo, DelegatedPermission, MergeableState, RunId, UpsertPullRequestParams};
@@ -69,12 +69,13 @@ impl PgDbClient {
         undelegate_pull_request(&self.pool, pr.id).await
     }
 
-    pub async fn update_pr_mergeable_state(
+    pub async fn set_pr_mergeable_state(
         &self,
-        pr: &PullRequestModel,
+        repo: &GithubRepoName,
+        pr_number: PullRequestNumber,
         mergeable_state: MergeableState,
     ) -> anyhow::Result<()> {
-        update_pr_mergeability_state(&self.pool, pr.id, mergeable_state).await
+        set_pr_mergeability_state(&self.pool, repo, pr_number, mergeable_state).await
     }
 
     pub async fn set_pr_assignees(
