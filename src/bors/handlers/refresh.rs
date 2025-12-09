@@ -6,7 +6,6 @@ use chrono::{DateTime, Utc};
 use octocrab::params::checks::CheckRunConclusion;
 use std::collections::BTreeMap;
 
-use crate::bors::PullRequestStatus;
 use crate::bors::RepositoryState;
 use crate::bors::comment::build_timed_out_comment;
 use crate::bors::handlers::workflow::{CancelBuildError, cancel_build};
@@ -177,12 +176,18 @@ pub async fn sync_pull_requests_state(
     // but bors does the merging so it should not happen.
     for pr_num in nonclosed_db_prs_num.keys() {
         if !nonclosed_gh_prs_num.contains_key(pr_num) {
+            let gh_pr = repo
+                .client
+                .get_pull_request(*pr_num)
+                .await
+                .with_context(|| {
+                    anyhow::anyhow!("Cannot fetch PR {}#{pr_num}", repo.repository())
+                })?;
             tracing::debug!(
-                "PR {} not found in open/draft prs in GitHub, closing it in DB",
-                pr_num
+                "PR {pr_num} not found in open/draft prs in GitHub, marking it as {} in DB",
+                gh_pr.status,
             );
-            db.set_pr_status(repo_name, *pr_num, PullRequestStatus::Closed)
-                .await?;
+            db.set_pr_status(repo_name, *pr_num, gh_pr.status).await?;
         }
     }
 
