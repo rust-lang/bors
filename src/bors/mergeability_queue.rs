@@ -53,7 +53,7 @@ enum QueueMessage {
     Item(MergeabilityQueueItem),
 }
 
-#[derive(PartialEq, Eq)]
+#[derive(PartialEq, Eq, Debug)]
 struct Item {
     /// When to process item (None = immediate is ordered before Some).
     expiration: Option<Instant>,
@@ -151,6 +151,19 @@ impl MergeabilityQueueSender {
 
     fn insert_item(&self, item: MergeabilityQueueItem, expiration: Option<Instant>) {
         let mut queue = self.inner.queue.lock().unwrap();
+
+        // Make sure that we don't ever put the same pull request twice into the queue
+        // This might seem a bit inefficient, but linearly iterating through e.g. 1000 PRs should
+        // be fine.
+        // We could maybe reset the attempt counter of the PR if it's "refreshed" from the outside,
+        // but that would require using e.g. Cell to mutate the attempt counter through &, which
+        // doesn't seem necessary at the moment.
+        if queue.iter().any(|entry| match &entry.0.inner {
+            QueueMessage::Shutdown => false,
+            QueueMessage::Item(i) => i.pull_request == item.pull_request,
+        }) {
+            return;
+        }
 
         // Notify when:
         // 1. The current item expires sooner than the head of the queue
@@ -297,19 +310,12 @@ pub async fn check_mergeability(
     }
 
     // We know the mergeability status, so update it in the DB
-    let pr_model = match ctx
-        .db
-        .get_pull_request(&pull_request.repo, pull_request.pr_number)
-        .await?
-    {
-        Some(model) => model,
-        None => {
-            return Err(anyhow::anyhow!("PR not found in database: {pull_request}"));
-        }
-    };
-
     ctx.db
-        .update_pr_mergeable_state(&pr_model, new_mergeable_state.clone().into())
+        .set_pr_mergeable_state(
+            repo_state.repository(),
+            fetched_pr.number,
+            new_mergeable_state.into(),
+        )
         .await?;
 
     Ok(())
@@ -318,11 +324,10 @@ pub async fn check_mergeability(
 #[cfg(test)]
 mod tests {
     use crate::bors::mergeability_queue::{
-        MergeabilityQueueItem, QueuedPullRequest, create_mergeability_queue,
+        BASE_DELAY, MergeabilityQueueItem, QueuedPullRequest, create_mergeability_queue,
     };
     use crate::github::PullRequestNumber;
     use crate::tests::default_repo_name;
-    use std::time::Duration;
 
     #[tokio::test]
     async fn order_by_pr_number() {
@@ -342,12 +347,10 @@ mod tests {
     #[tokio::test]
     async fn immediate_before_delayed() {
         let (tx, rx) = create_mergeability_queue();
-        tx.enqueue_retry_later(item(5, 1));
-        tx.enqueue_pr(default_repo_name(), 1u64.into());
-        tokio::time::sleep(Duration::from_millis(100)).await;
         tx.enqueue_retry_later(item(10, 1));
+        tx.enqueue_pr(default_repo_name(), 2u64.into());
 
-        for expected in [1, 5, 10] {
+        for expected in [2, 10] {
             assert_eq!(
                 rx.dequeue().await.unwrap().0.pull_request.pr_number.0,
                 expected
@@ -356,17 +359,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn duplicated_pr() {
+    async fn deduplicate_duplicated_pr() {
         let (tx, rx) = create_mergeability_queue();
-        // Handle duplicated PRs, still keep ordering by time
-        tx.enqueue_retry_later(item(5, 1)); // this attempt will be bumped to 2
+        // Make sure that we don't handle the same PR multiple times
+        tx.enqueue_retry_later(item(5, 1));
+        tx.enqueue_pr(default_repo_name(), 5u64.into());
         tx.enqueue_pr(default_repo_name(), 5u64.into());
 
-        for (pr, attempt) in [(5, 1), (5, 2)] {
-            let item = rx.dequeue().await.unwrap().0;
-            assert_eq!(item.pull_request.pr_number.0, pr);
-            assert_eq!(item.attempt, attempt);
-        }
+        rx.dequeue().await.unwrap();
+        let res = tokio::time::timeout(BASE_DELAY * 2, rx.dequeue()).await;
+        assert!(res.is_err());
     }
 
     fn item(pr_number: u64, attempt: u32) -> MergeabilityQueueItem {
