@@ -6,6 +6,7 @@ mod config;
 mod database;
 mod github;
 mod permissions;
+pub mod server;
 mod templates;
 mod utils;
 
@@ -15,9 +16,12 @@ pub use github::{
     AppError, WebhookSecret,
     api::create_github_client,
     api::load_repositories,
-    server::{BorsProcess, OAuthConfig, ServerState, create_app, create_bors_process},
+    process::{BorsProcess, create_bors_process},
 };
 pub use permissions::TeamApiClient;
+pub use server::OAuthConfig;
+pub use server::ServerState;
+pub use server::create_app;
 
 #[cfg(test)]
 mod tests;

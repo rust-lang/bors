@@ -24,8 +24,8 @@ use crate::bors::event::{
     PullRequestUnassigned, PushToBranch, WorkflowRunCompleted, WorkflowRunStarted,
 };
 use crate::database::{WorkflowStatus, WorkflowType};
-use crate::github::server::ServerStateRef;
 use crate::github::{CommitSha, GithubRepoName, PullRequestNumber};
+use crate::server::ServerStateRef;
 
 /// Wrapper for a secret which is zeroed on drop and can be exposed only through the
 /// [`WebhookSecret::expose`] method.
@@ -450,9 +450,9 @@ mod tests {
 
     use crate::PgDbClient;
     use crate::bors::event::{BorsEvent, BorsGlobalEvent};
-    use crate::github::server::{ServerState, ServerStateRef};
-    use crate::github::webhook::GitHubWebhook;
-    use crate::github::webhook::WebhookSecret;
+    use crate::server::webhook::GitHubWebhook;
+    use crate::server::webhook::WebhookSecret;
+    use crate::server::{ServerState, ServerStateRef};
     use crate::tests::default_cmd_prefix;
     use crate::tests::load_test_file;
     use crate::tests::{TEST_WEBHOOK_SECRET, create_webhook_request};
