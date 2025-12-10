@@ -5,10 +5,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context;
+use bors::server::{OAuthConfig, ServerState, create_app};
 use bors::{
-    BorsContext, BorsGlobalEvent, BorsProcess, CommandParser, OAuthConfig, PgDbClient, ServerState,
-    TeamApiClient, TreeState, WebhookSecret, create_app, create_bors_process, create_github_client,
-    load_repositories,
+    BorsContext, BorsGlobalEvent, BorsProcess, CommandParser, PgDbClient, TeamApiClient, TreeState,
+    WebhookSecret, create_bors_process, create_github_client, load_repositories,
 };
 use clap::Parser;
 use sqlx::postgres::PgConnectOptions;

@@ -1,6 +1,6 @@
 use super::GithubRepoName;
 use super::error::AppError;
-use super::server::ServerStateRef;
+use crate::server::ServerStateRef;
 use anyhow::Context;
 use axum::extract::{Query, State};
 use axum::http::StatusCode;

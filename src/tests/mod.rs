@@ -30,8 +30,8 @@ use crate::database::{
 };
 use crate::github::{GithubRepoName, PullRequestNumber};
 use crate::{
-    BorsContext, BorsGlobalEvent, BorsProcess, CommandParser, PgDbClient, ServerState, TreeState,
-    WebhookSecret, create_app, create_bors_process, load_repositories,
+    BorsContext, BorsGlobalEvent, BorsProcess, CommandParser, PgDbClient, TreeState, WebhookSecret,
+    create_bors_process, load_repositories,
 };
 
 use crate::tests::mocks::comment::GitHubIssueCommentEventPayload;
@@ -45,6 +45,7 @@ use crate::tests::mocks::workflow::{
 
 // Public re-exports for use in tests
 use crate::github::api::client::HideCommentReason;
+use crate::server::{ServerState, create_app};
 pub use io::load_test_file;
 pub use mocks::ExternalHttpMock;
 pub use mocks::GitHubState;

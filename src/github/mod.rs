@@ -9,14 +9,13 @@ use url::Url;
 pub mod api;
 mod error;
 mod labels;
-mod rollup;
-pub mod server;
-mod webhook;
+pub mod process;
+pub mod rollup;
 
+pub use crate::server::webhook::WebhookSecret;
 pub use api::operations::{MergeResult, attempt_merge};
 pub use error::AppError;
 pub use labels::{LabelModification, LabelTrigger};
-pub use webhook::WebhookSecret;
 
 use crate::bors::PullRequestStatus;
 
