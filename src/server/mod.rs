@@ -339,3 +339,21 @@ pub async fn github_webhook_handler(
         },
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::tests::{BorsTester, default_repo_name, run_test};
+
+    #[sqlx::test]
+    async fn api_queue_page(pool: sqlx::PgPool) {
+        run_test(pool, async |tester: &mut BorsTester| {
+            tester.approve(()).await?;
+            let response = tester
+                .rest_api(&format!("/api/queue/{}", default_repo_name().name()))
+                .await?;
+            insta::assert_snapshot!(response, @r#"[{"number":1,"title":"Title of PR 1","author":"default-user","status":"open","base_branch":"main","priority":null,"approver":"default-user","try_build":null,"auto_build":null}]"#);
+            Ok(())
+        })
+        .await;
+    }
+}

@@ -5,6 +5,7 @@ mod webhook;
 
 use anyhow::Context;
 use axum::Router;
+use http::{Method, Request};
 use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
 use parking_lot::Mutex;
 use serde::Serialize;
@@ -897,6 +898,32 @@ impl BorsTester {
         let result = func(self).await;
         self.webhooks_active = orig_webhooks;
         result
+    }
+
+    pub async fn rest_api(&mut self, path: &str) -> anyhow::Result<String> {
+        let response = self
+            .app
+            .call(
+                Request::builder()
+                    .uri(path)
+                    .method(Method::GET)
+                    .body(String::new())
+                    .unwrap(),
+            )
+            .await
+            .context("Cannot send REST API request")?;
+        if !response.status().is_success() {
+            return Err(anyhow::anyhow!(
+                "REST API to {path} failed with status {}",
+                response.status()
+            ));
+        }
+        let body_text = String::from_utf8(
+            axum::body::to_bytes(response.into_body(), 10 * 1024 * 1024)
+                .await?
+                .to_vec(),
+        )?;
+        Ok(body_text)
     }
 
     /// Get a GitHub comment that might have been modified by API calls from bors.
