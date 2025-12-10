@@ -1,5 +1,5 @@
 use crate::bors::event::BorsEvent;
-use crate::bors::{CommandPrefix, RepositoryState, RollupMode};
+use crate::bors::{CommandPrefix, RepositoryState, RollupMode, format_help};
 use crate::database::{ApprovalStatus, PullRequestModel, QueueStatus};
 use crate::github::{GithubRepoName, rollup};
 use crate::templates::{
@@ -14,6 +14,7 @@ use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use http::StatusCode;
+use pulldown_cmark::Parser;
 use secrecy::{ExposeSecret, SecretString};
 use std::any::Any;
 use std::collections::HashMap;
@@ -255,8 +256,15 @@ async fn help_handler(State(state): State<ServerStateRef>) -> impl IntoResponse 
         });
     }
 
+    let help_md = format_help();
+    let markdown = Parser::new(help_md);
+
+    let mut help_html = String::new();
+    pulldown_cmark::html::push_html(&mut help_html, markdown);
+
     HtmlTemplate(HelpTemplate {
         repos,
+        help: help_html,
         cmd_prefix: state.get_cmd_prefix().as_ref().to_string(),
     })
 }

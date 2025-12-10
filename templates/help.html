@@ -17,9 +17,9 @@
         overflow-x: auto;
     }
 
-	tbody tr:last-child td {
-	    border-bottom: none;
-	}
+    tbody tr:last-child td {
+        border-bottom: none;
+    }
 
     th,
     td {
@@ -45,145 +45,26 @@
 
 {% block body %}
 <main>
-    <h1>Bors</h1>
+  <h1>Bors</h1>
 
-    <h2>Repositories</h2>
-    <ul class="repos">
-      {% for repo in repos %}
-      <li>
-        <a href="queue/{{ repo.name }}">{{ repo.name }}</a>
-        {% if repo.treeclosed %} [TREECLOSED] {% endif %}
-      </li>
-      {% endfor %}
-    </ul>
+  <h2>Repositories</h2>
+  <ul class="repos">
+    {% for repo in repos %}
+    <li>
+      <a href="queue/{{ repo.name }}">{{ repo.name }}</a>
+      {% if repo.treeclosed %} [TREECLOSED] {% endif %}
+    </li>
+    {% endfor %}
+  </ul>
 
-    <h2>Commands</h2>
-    <p>Commands must be posted as comments on the PR and mention the bot account (<code>{{ cmd_prefix }}</code>).</p>
+  <h2>Commands</h2>
+  <p>Commands must be posted as comments on the PR and mention the bot account (<code>{{ cmd_prefix
+    }}</code>).</p>
 
-    <div class="table-wrapper">
-        <table>
-            <thead>
-                <tr>
-                    <th>Command</th>
-                    <th>Permissions</th>
-                    <th>Description</th>
-                </tr>
-            </thead>
-            <tbody>
-                <tr>
-                    <td><code>info</code></td>
-                    <td class="empty"></td>
-                    <td>Get information about the current PR</td>
-                </tr>
-                <tr>
-                    <td><code>ping</code></td>
-                    <td class="empty"></td>
-                    <td>Check if the bot is alive</td>
-                </tr>
-                <tr>
-                    <td><code>help</code></td>
-                    <td class="empty"></td>
-                    <td>Print help message</td>
-                </tr>
-                <tr>
-                    <td><code>r+</code></td>
-                    <td>review</td>
-                    <td>Approve this PR on your behalf</td>
-                </tr>
-                <tr>
-                    <td><code>r=&lt;user&gt;</code></td>
-                    <td>review</td>
-                    <td>Approve the PR on behalf of the specified user(s)</td>
-                </tr>
-                <tr>
-                    <td><code>r-</code></td>
-                    <td>review</td>
-                    <td>Unapprove the PR</td>
-                </tr>
-                <tr>
-                    <td><code>p=&lt;priority&gt;</code> or <code>priority=&lt;priority&gt;</code></td>
-                    <td>review</td>
-                    <td>Set the priority of the PR</td>
-                </tr>
-                <tr>
-                    <td><code>rollup</code></td>
-                    <td>review</td>
-                    <td>Short for <code>rollup=always</code></td>
-                </tr>
-                <tr>
-                    <td><code>rollup-</code></td>
-                    <td>review</td>
-                    <td>Short for <code>rollup=maybe</code></td>
-                </tr>
-                <tr>
-                    <td><code>rollup=&lt;never|iffy|maybe|always&gt;</code></td>
-                    <td>review</td>
-                    <td>Set the rollup status of the PR</td>
-                </tr>
-                <tr>
-                    <td><code>r+ [p=&lt;priority&gt;] [rollup=&lt;mode&gt;]</code></td>
-                    <td>review</td>
-                    <td>Approve this PR on your behalf with options</td>
-                </tr>
-                <tr>
-                    <td><code>r=&lt;user&gt; [p=&lt;priority&gt;] [rollup=&lt;mode&gt;]</code></td>
-                    <td>review</td>
-                    <td>Approve the PR on behalf of the specified user(s) with options</td>
-                </tr>
-                <tr>
-                    <td><code>try [parent=&lt;sha&gt;] [jobs=&lt;job1,job2,...&gt;]</code></td>
-                    <td>try</td>
-                    <td>Run a try build (max 10 jobs)</td>
-                </tr>
-                <tr>
-                    <td><code>try cancel</code></td>
-                    <td>try</td>
-                    <td>Cancel a running try build</td>
-                </tr>
-                <tr>
-                    <td><code>delegate+</code></td>
-                    <td>review</td>
-                    <td>Short for <code>delegate=review</code></td>
-                </tr>
-                <tr>
-                    <td><code>delegate-</code></td>
-                    <td>review</td>
-                    <td>Remove any previously granted delegated permissions</td>
-                </tr>
-                <tr>
-                    <td><code>delegate=&lt;try|review&gt;</code></td>
-                    <td>review</td>
-                    <td>Delegate permissions to the PR author (try or review)</td>
-                </tr>
-                <tr>
-                    <td><code>treeclosed-</code> or <code>treeopen</code></td>
-                    <td>review</td>
-                    <td>Open the repository tree for merging</td>
-                </tr>
-                <tr>
-                    <td><code>treeclosed=&lt;priority&gt;</code></td>
-                    <td>review</td>
-                    <td>Close the tree for PRs with priority less than <code>&lt;priority&gt;</code></td>
-                </tr>
-                <tr>
-                    <td><code>retry</code></td>
-                    <td>review</td>
-                    <td>Clear a failed auto build status from an approved PR. This will cause the merge queue to attempt to start a new auto build and retry merging the PR again.</td>
-                </tr>
-            </tbody>
-        </table>
-    </div>
+  {{ help | safe }}
 
-    <h2>Examples</h2>
-    <ul>
-        <li><code>{{ cmd_prefix }} r=user1,user2 p=5</code>: Approve on behalf of <code>user1</code> and <code>user2</code> with priority 5</li>
-        <li><code>{{ cmd_prefix }} r+ rollup p=1</code>: Approve with priority 1 and always rollup</li>
-        <li><code>{{ cmd_prefix }} try parent=last</code>: Start a try build using the same parent as the last try</li>
-        <li><code>{{ cmd_prefix }} try @rust-timer queue</code>: Short-hand for compile-perf benchmarking of PRs</li>
-    </ul>
-
-    <div style="text-align: center; margin-top: 1em;">
-        <a href="https://github.com/rust-lang/bors">Contribute on GitHub</a>
-    </div>
+  <div style="text-align: center; margin-top: 1em;">
+    <a href="https://github.com/rust-lang/bors">Contribute on GitHub</a>
+  </div>
 </main>
 {% endblock %}

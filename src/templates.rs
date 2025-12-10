@@ -44,6 +44,7 @@ where
 pub struct HelpTemplate {
     pub repos: Vec<RepositoryView>,
     pub cmd_prefix: String,
+    pub help: String,
 }
 
 pub struct RepositoryView {
