@@ -70,7 +70,7 @@ tracing-test = "0.2"
 regex = "1"
 parking_lot = "0.12"
 thread_local = "1"
-sqlparser = { version = "0.59", features = ["visitor"] }
+sqlparser = { version = "0.60", features = ["visitor"] }
 graphql-parser = "0.4"
 
 [profile.release]
