@@ -1,16 +1,18 @@
 use crate::bors::event::BorsEvent;
 use crate::bors::{CommandPrefix, RepositoryState, RollupMode};
-use crate::database::QueueStatus;
+use crate::database::{ApprovalStatus, PullRequestModel, QueueStatus};
 use crate::github::{GithubRepoName, rollup};
 use crate::templates::{
     HelpTemplate, HtmlTemplate, NotFoundTemplate, PullRequestStats, QueueTemplate, RepositoryView,
 };
 use crate::utils::sort_queue::sort_queue_prs;
-use crate::{AppError, BorsGlobalEvent, BorsRepositoryEvent, PgDbClient, WebhookSecret};
-use axum::Router;
+use crate::{
+    AppError, BorsGlobalEvent, BorsRepositoryEvent, PgDbClient, WebhookSecret, bors, database,
+};
 use axum::extract::{Path, State};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
+use axum::{Json, Router};
 use http::StatusCode;
 use secrecy::{ExposeSecret, SecretString};
 use std::any::Any;
@@ -90,6 +92,7 @@ impl ServerState {
 pub type ServerStateRef = Arc<ServerState>;
 
 pub fn create_app(state: ServerState) -> Router {
+    let api = create_api_router();
     Router::new()
         .route("/", get(index_handler))
         .route("/help", get(help_handler))
@@ -97,10 +100,120 @@ pub fn create_app(state: ServerState) -> Router {
         .route("/github", post(github_webhook_handler))
         .route("/health", get(health_handler))
         .route("/oauth/callback", get(rollup::oauth_callback_handler))
+        .nest("/api", api)
         .layer(ConcurrencyLimitLayer::new(100))
         .layer(CatchPanicLayer::custom(handle_panic))
         .with_state(Arc::new(state))
         .fallback(not_found_handler)
+}
+
+fn create_api_router() -> Router<ServerStateRef> {
+    let router = Router::new();
+    router.route("/queue/{repo_name}", get(api_merge_queue))
+}
+
+async fn api_merge_queue(
+    Path(repo_name): Path<String>,
+    State(state): State<ServerStateRef>,
+) -> Result<impl IntoResponse, AppError> {
+    let repo = match state.db.repo_by_name(&repo_name).await? {
+        Some(repo) => repo,
+        None => {
+            return Ok((
+                StatusCode::NOT_FOUND,
+                Json(format!("Repository {repo_name} not found")),
+            )
+                .into_response());
+        }
+    };
+
+    #[derive(serde::Serialize)]
+    #[serde(rename_all = "kebab-case")]
+    enum PullRequestStatus {
+        Closed,
+        Draft,
+        Merged,
+        Open,
+    }
+
+    #[derive(serde::Serialize)]
+    #[serde(rename_all = "kebab-case")]
+    pub enum BuildStatus {
+        Pending,
+        Success,
+        Failure,
+        Cancelled,
+        Timeouted,
+    }
+
+    #[derive(serde::Serialize)]
+    struct PullRequest {
+        number: u64,
+        title: String,
+        author: String,
+        status: PullRequestStatus,
+        base_branch: String,
+        priority: Option<u64>,
+        approver: Option<String>,
+        try_build: Option<BuildStatus>,
+        auto_build: Option<BuildStatus>,
+    }
+
+    fn convert_status(status: database::BuildStatus) -> BuildStatus {
+        match status {
+            database::BuildStatus::Pending => BuildStatus::Pending,
+            database::BuildStatus::Success => BuildStatus::Success,
+            database::BuildStatus::Failure => BuildStatus::Failure,
+            database::BuildStatus::Cancelled => BuildStatus::Cancelled,
+            database::BuildStatus::Timeouted => BuildStatus::Timeouted,
+        }
+    }
+
+    let prs = state.db.get_nonclosed_pull_requests(&repo.name).await?;
+    let prs = sort_queue_prs(prs);
+    let prs = prs
+        .into_iter()
+        .map(|pr| {
+            let PullRequestModel {
+                id: _,
+                repository: _,
+                number,
+                title,
+                author,
+                assignees: _,
+                pr_status,
+                base_branch,
+                mergeable_state: _,
+                approval_status,
+                delegated_permission: _,
+                priority,
+                rollup: _,
+                try_build,
+                auto_build,
+                created_at: _,
+            } = pr;
+            PullRequest {
+                number: number.0,
+                title,
+                author,
+                status: match pr_status {
+                    bors::PullRequestStatus::Closed => PullRequestStatus::Closed,
+                    bors::PullRequestStatus::Draft => PullRequestStatus::Draft,
+                    bors::PullRequestStatus::Merged => PullRequestStatus::Merged,
+                    bors::PullRequestStatus::Open => PullRequestStatus::Open,
+                },
+                base_branch,
+                priority: priority.map(|p| p as u64),
+                approver: match approval_status {
+                    ApprovalStatus::NotApproved => None,
+                    ApprovalStatus::Approved(info) => Some(info.approver),
+                },
+                try_build: try_build.map(|b| convert_status(b.status)),
+                auto_build: auto_build.map(|b| convert_status(b.status)),
+            }
+        })
+        .collect::<Vec<_>>();
+    Ok(Json(prs).into_response())
 }
 
 fn handle_panic(err: Box<dyn Any + Send + 'static>) -> Response {
