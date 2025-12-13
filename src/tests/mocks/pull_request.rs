@@ -206,6 +206,10 @@ impl PullRequest {
         self.status = PullRequestStatus::Draft;
     }
 
+    pub fn dirty_pull_request(&mut self) {
+        self.mergeable_state = MergeableState::Dirty;
+    }
+
     pub fn add_comment_to_history(&mut self, comment: Comment) {
         self.comment_history.push(comment);
     }
