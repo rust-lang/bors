@@ -1,5 +1,5 @@
-use chrono::DateTime;
 use chrono::Utc;
+use chrono::{DateTime, Duration};
 use sqlx::postgres::PgExecutor;
 
 use super::ApprovalInfo;
@@ -20,6 +20,7 @@ use crate::bors::RollupMode;
 use crate::bors::comment::CommentTag;
 use crate::database::BuildKind;
 use crate::database::BuildStatus;
+use crate::database::PgDuration;
 use crate::database::RepoModel;
 use crate::database::WorkflowModel;
 use crate::github::CommitSha;
@@ -594,7 +595,8 @@ SELECT
     status as "status: BuildStatus",
     parent,
     created_at as "created_at: DateTime<Utc>",
-    check_run_id
+    check_run_id,
+    duration as "duration: PgDuration"
 FROM build
 WHERE repository = $1
     AND branch = $2
@@ -628,7 +630,8 @@ SELECT
     status as "status: BuildStatus",
     parent,
     created_at as "created_at: DateTime<Utc>",
-    check_run_id
+    check_run_id,
+    duration as "duration: PgDuration"
 FROM build
 WHERE repository = $1
     AND status = $2
@@ -643,15 +646,23 @@ WHERE repository = $1
     .await
 }
 
-pub(crate) async fn update_build_status(
+pub(crate) async fn update_build_column(
     executor: impl PgExecutor<'_>,
     build_id: i32,
     status: BuildStatus,
+    duration: Option<Duration>,
 ) -> anyhow::Result<()> {
-    measure_db_query("update_build_status", || async {
+    measure_db_query("update_build_column", || async {
         sqlx::query!(
-            "UPDATE build SET status = $1 WHERE id = $2",
-            status as _,
+            r#"
+UPDATE build
+SET
+    status   = $1,
+    duration = COALESCE($2, duration)
+WHERE id = $3
+"#,
+            status as BuildStatus,
+            duration as Option<_>,
             build_id
         )
         .execute(executor)
@@ -789,7 +800,8 @@ SELECT
         build.parent,
         build.created_at,
         build.check_run_id,
-        build.kind
+        build.kind,
+        build.duration
     ) AS "build!: BuildModel"
 FROM workflow
     LEFT JOIN build ON workflow.build_id = build.id
@@ -850,7 +862,8 @@ SELECT
         build.parent,
         build.created_at,
         build.check_run_id,
-        build.kind
+        build.kind,
+        build.duration
     ) AS "build!: BuildModel"
 FROM workflow
     LEFT JOIN build ON workflow.build_id = build.id

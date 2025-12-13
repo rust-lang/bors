@@ -50,7 +50,7 @@ pub async fn cancel_build(
         CancelBuildConclusion::Timeout => BuildStatus::Timeouted,
         CancelBuildConclusion::Cancel => BuildStatus::Cancelled,
     };
-    db.update_build_status(build, status)
+    db.update_build_column(build, status, None)
         .await
         .map_err(CancelBuildError::FailedToMarkBuildAsCancelled)?;
 
