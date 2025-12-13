@@ -1,3 +1,4 @@
+use chrono::Duration;
 use sqlx::PgPool;
 
 use crate::bors::comment::CommentTag;
@@ -18,8 +19,9 @@ use super::operations::{
     get_workflow_urls_for_build, get_workflows_for_build, insert_repo_if_not_exists,
     record_tagged_bot_comment, set_pr_assignees, set_pr_mergeability_state, set_pr_priority,
     set_pr_rollup, set_pr_status, unapprove_pull_request, undelegate_pull_request,
-    update_build_check_run_id, update_build_status, update_mergeable_states_by_base_branch,
-    update_pr_try_build_id, update_workflow_status, upsert_pull_request, upsert_repository,
+    update_build_check_run_id, update_build_duration, update_build_status,
+    update_mergeable_states_by_base_branch, update_pr_try_build_id, update_workflow_status,
+    upsert_pull_request, upsert_repository,
 };
 use super::{ApprovalInfo, DelegatedPermission, MergeableState, RunId, UpsertPullRequestParams};
 
@@ -231,6 +233,14 @@ impl PgDbClient {
         status: BuildStatus,
     ) -> anyhow::Result<()> {
         update_build_status(&self.pool, build.id, status).await
+    }
+
+    pub async fn update_build_duration(
+        &self,
+        build: &BuildModel,
+        duration: Option<Duration>,
+    ) -> anyhow::Result<()> {
+        update_build_duration(&self.pool, build.id, duration).await
     }
 
     pub async fn update_build_check_run_id(

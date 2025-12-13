@@ -1,4 +1,5 @@
 use chrono::DateTime;
+use chrono::Duration;
 use chrono::Utc;
 use sqlx::postgres::PgExecutor;
 
@@ -622,6 +623,24 @@ pub(crate) async fn update_build_status(
         sqlx::query!(
             "UPDATE build SET status = $1 WHERE id = $2",
             status as _,
+            build_id
+        )
+        .execute(executor)
+        .await?;
+        Ok(())
+    })
+    .await
+}
+
+pub(crate) async fn update_build_duration(
+    executor: impl PgExecutor<'_>,
+    build_id: i32,
+    duration: Option<Duration>,
+) -> anyhow::Result<()> {
+    measure_db_query("update_build_duration", || async {
+        sqlx::query!(
+            "UPDATE build SET duration = $1 WHERE id = $2",
+            duration as _,
             build_id
         )
         .execute(executor)

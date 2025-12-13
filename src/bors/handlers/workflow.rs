@@ -269,6 +269,8 @@ async fn maybe_complete_build(
     };
 
     db.update_build_status(&build, status).await?;
+    db.update_build_duration(&build, payload.running_time)
+        .await?;
     if let Some(trigger) = trigger {
         handle_label_trigger(repo, pr_num, trigger).await?;
     }

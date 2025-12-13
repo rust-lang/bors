@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE build SET duration = $1 WHERE id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Interval",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "98bb13a50aa2b9a07086ee8065253aebbc461fed17903556e9a6dcc18faef200"
+}
