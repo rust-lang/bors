@@ -269,18 +269,18 @@
         };
 
         if (groupByColumnName) {
-            config.order = [[groupByColumnName + ":name", "asc"]];
+            const colIndex = table.column(groupByColumnName + ":name").index()
+            config.order = [[colIndex, "asc"]];
             config.rowGroup = {
                 dataSrc: groupByColumnName === "status"
                     ? (row, type) => {
                         let table = $("#table").DataTable();
-                        let statusIndex = table.column("status:name").index();
-                        let statusHtml = row[statusIndex];
+                        let statusHtml = row[colIndex];
 
                         // Find the corresponding DOM cell to get data-status attribute
                         let tableRows = document.querySelectorAll("#table tbody tr");
                         for (let tableRow of tableRows) {
-                            let statusCell = tableRow.cells[statusIndex];
+                            let statusCell = tableRow.cells[colIndex];
                             if (statusCell && statusCell.innerHTML.trim() === statusHtml.trim()) {
                                 return getDataStatusFromCell(statusCell);
                             }
@@ -289,11 +289,7 @@
                         // Fallback to HTML content
                         return statusHtml;
                     }
-                    : (row, type) => {
-                        let table = $("#table").DataTable();
-                        let colIndex = table.column(groupByColumnName + ":name").index();
-                        return row[colIndex];
-                    }
+                    : colIndex
             };
         }
         return new DataTable("#table", config);
