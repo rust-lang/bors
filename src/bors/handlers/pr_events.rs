@@ -5,14 +5,14 @@ use crate::bors::event::{
     PullRequestReadyForReview, PullRequestReopened, PullRequestUnassigned, PushToBranch,
 };
 
-use crate::bors::BorsContext;
 use crate::bors::handlers::handle_comment;
 use crate::bors::handlers::unapprove_pr;
 use crate::bors::handlers::workflow::{AutoBuildCancelReason, maybe_cancel_auto_build};
 use crate::bors::merge_queue::MergeQueueSender;
 use crate::bors::mergeability_queue::MergeabilityQueueSender;
+use crate::bors::{AUTO_BRANCH_NAME, BorsContext};
 use crate::bors::{Comment, PullRequestStatus, RepositoryState};
-use crate::database::{MergeableState, UpsertPullRequestParams};
+use crate::database::{MergeableState, PullRequestModel, UpsertPullRequestParams};
 use crate::github::{CommitSha, PullRequestNumber};
 use crate::utils::text::pluralize;
 use std::sync::Arc;
@@ -260,12 +260,42 @@ pub(super) async fn handle_push_to_branch(
             payload.branch
         );
 
+        // Try to find an auto build that matches this SHA
+        let pr = find_pr_by_merged_commit(&repo_state, &db, CommitSha(payload.sha))
+            .await
+            .ok()
+            .flatten()
+            .map(|pr| pr.number);
+
         for pr in affected_prs {
             mergeability_queue.enqueue_pr(&pr);
         }
     }
 
     Ok(())
+}
+
+/// Try to find a merged PR that might have produced a build with the given commit SHA.
+async fn find_pr_by_merged_commit(
+    repo_state: &RepositoryState,
+    db: &PgDbClient,
+    sha: CommitSha,
+) -> anyhow::Result<Option<PullRequestModel>> {
+    let Some(build) = db
+        .find_build(repo_state.repository(), AUTO_BRANCH_NAME, sha)
+        .await?
+    else {
+        return Ok(None);
+    };
+
+    let Some(pr) = db.find_pr_by_build(&build).await? else {
+        return Ok(None);
+    };
+    if pr.auto_build.as_ref().map(|b| b.id) == Some(build.id) {
+        Ok(Some(pr))
+    } else {
+        Ok(None)
+    }
 }
 
 async fn process_pr_description_commands(

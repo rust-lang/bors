@@ -202,10 +202,10 @@ impl PgDbClient {
     pub async fn find_build(
         &self,
         repo: &GithubRepoName,
-        branch: String,
+        branch: &str,
         commit_sha: CommitSha,
     ) -> anyhow::Result<Option<BuildModel>> {
-        find_build(&self.pool, repo, &branch, &commit_sha).await
+        find_build(&self.pool, repo, branch, &commit_sha).await
     }
 
     pub async fn get_pending_builds(

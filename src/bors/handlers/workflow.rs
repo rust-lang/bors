@@ -40,7 +40,7 @@ pub(super) async fn handle_workflow_started(
     let Some(build) = db
         .find_build(
             &payload.repository,
-            payload.branch.clone(),
+            &payload.branch,
             payload.commit_sha.clone(),
         )
         .await?
@@ -173,7 +173,7 @@ async fn maybe_complete_build(
     let Some(build) = db
         .find_build(
             &payload.repository,
-            payload.branch.clone(),
+            &payload.branch,
             payload.commit_sha.clone(),
         )
         .await?

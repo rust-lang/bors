@@ -632,7 +632,7 @@ try-job: Bar
                     .db()
                     .find_build(
                         &default_repo_name(),
-                        TRY_BRANCH_NAME.to_string(),
+                        TRY_BRANCH_NAME,
                         CommitSha(tester.try_branch().await.get_sha().to_string()),
                     )
                     .await?
