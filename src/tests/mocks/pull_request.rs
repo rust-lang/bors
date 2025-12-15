@@ -89,6 +89,12 @@ impl From<()> for PrIdentifier {
     }
 }
 
+impl From<PullRequest> for PrIdentifier {
+    fn from(pr: PullRequest) -> Self {
+        pr.id()
+    }
+}
+
 pub enum CommentMsg {
     Comment(Comment),
     Close,
@@ -534,13 +540,15 @@ pub struct GitHubPushEventPayload {
     pub repository: GitHubRepository,
     #[serde(rename = "ref")]
     pub ref_field: String,
+    pub after: String,
 }
 
 impl GitHubPushEventPayload {
-    pub fn new(branch_name: &str) -> Self {
+    pub fn new(branch_name: &str, sha: &str) -> Self {
         GitHubPushEventPayload {
             repository: default_repo_name().into(),
             ref_field: format!("refs/heads/{branch_name}"),
+            after: sha.to_string(),
         }
     }
 }

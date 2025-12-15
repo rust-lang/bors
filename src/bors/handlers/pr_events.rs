@@ -119,7 +119,7 @@ pub(super) async fn handle_pull_request_opened(
                 author: payload.pull_request.author.username.clone(),
                 assignees,
                 base_branch: payload.pull_request.base.name.clone(),
-                mergeable_state: MergeableState::Unknown,
+                mergeable_state: payload.pull_request.mergeable_state.clone().into(),
                 pr_status,
             },
         )
@@ -361,6 +361,7 @@ async fn notify_of_pushed_pr(
 
 #[cfg(test)]
 mod tests {
+    use insta::assert_snapshot;
     use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
 
     use crate::bors::PullRequestStatus;
@@ -439,7 +440,7 @@ mod tests {
             tester.get_pr_copy(()).await.expect_unapproved();
             Ok(())
         })
-        .await;
+            .await;
     }
 
     #[sqlx::test]
@@ -653,13 +654,13 @@ mod tests {
         run_test(pool, async |tester: &mut BorsTester| {
             let pr = tester
                 .open_pr(default_repo_name(), |pr| {
-                    pr.mergeable_state = OctocrabMergeableState::Unknown
+                    pr.mergeable_state = OctocrabMergeableState::Unknown;
                 })
                 .await?;
-            tester.push_to_branch(default_branch_name()).await?;
+            tester.push_to_branch(default_branch_name(), "sha").await?;
             tester
                 .modify_pr_state(pr.id(), |pr| {
-                    pr.mergeable_state = OctocrabMergeableState::Dirty
+                    pr.mergeable_state = OctocrabMergeableState::Dirty;
                 })
                 .await;
             tester
@@ -670,6 +671,86 @@ mod tests {
             Ok(())
         })
         .await;
+    }
+
+    #[sqlx::test]
+    async fn conflict_message_unknown_sha(pool: sqlx::PgPool) {
+        run_test(pool, async |tester: &mut BorsTester| {
+            let pr = tester
+                .open_pr(default_repo_name(), |pr| {
+                    pr.mergeable_state = OctocrabMergeableState::Clean;
+                })
+                .await?;
+            tester
+                .modify_pr_state(pr.id(), |pr| {
+                    pr.mergeable_state = OctocrabMergeableState::Dirty;
+                })
+                .await;
+            tester.push_to_branch(default_branch_name(), "sha").await?;
+            assert_snapshot!(tester.get_next_comment_text(pr).await?, @":umbrella: The latest upstream changes made this pull request unmergeable. Please [resolve the merge conflicts](https://rustc-dev-guide.rust-lang.org/git.html#rebasing-and-conflicts).");
+
+            Ok(())
+        })
+            .await;
+    }
+
+    #[sqlx::test]
+    async fn conflict_message_unknown_sha_approved(pool: sqlx::PgPool) {
+        run_test(pool, async |tester: &mut BorsTester| {
+            let pr = tester
+                .open_pr(default_repo_name(), |pr| {
+                    pr.mergeable_state = OctocrabMergeableState::Clean;
+                })
+                .await?;
+            tester.approve(pr.id()).await?;
+            tester
+                .modify_pr_state(pr.id(), |pr| {
+                    pr.mergeable_state = OctocrabMergeableState::Dirty;
+                })
+                .await;
+            tester.push_to_branch(default_branch_name(), "sha").await?;
+            assert_snapshot!(tester.get_next_comment_text(pr.id()).await?, @r"
+            :umbrella: The latest upstream changes made this pull request unmergeable. Please [resolve the merge conflicts](https://rustc-dev-guide.rust-lang.org/git.html#rebasing-and-conflicts).
+
+            This pull request was unapproved.
+            ");
+            tester.get_pr_copy(pr.id()).await.expect_unapproved();
+
+            Ok(())
+        })
+            .await;
+    }
+
+    #[sqlx::test]
+    async fn conflict_message_known_sha(pool: sqlx::PgPool) {
+        run_test(pool, async |tester: &mut BorsTester| {
+            let pr2 = tester
+                .open_pr(default_repo_name(), |pr| {
+                    pr.mergeable_state = OctocrabMergeableState::Clean;
+                })
+                .await?;
+
+            let pr1 = tester
+                .open_pr(default_repo_name(), |_| {})
+                .await?;
+            tester.approve(pr1.id()).await?;
+            tester.start_auto_build(pr1.id()).await?;
+            tester.workflow_full_success(tester.auto_branch().await).await?;
+            tester.process_merge_queue().await;
+            tester.expect_comments(pr1.id(), 1).await;
+            let sha = tester.auto_branch().await.get_sha().to_string();
+
+            tester
+                .modify_pr_state(pr2.id(), |pr| {
+                    pr.mergeable_state = OctocrabMergeableState::Dirty;
+                })
+                .await;
+            tester.push_to_branch(default_branch_name(), &sha).await?;
+            assert_snapshot!(tester.get_next_comment_text(pr2.id()).await?, @":umbrella: The latest upstream changes (presumably #3) made this pull request unmergeable. Please [resolve the merge conflicts](https://rustc-dev-guide.rust-lang.org/git.html#rebasing-and-conflicts).");
+
+            Ok(())
+        })
+            .await;
     }
 
     #[sqlx::test]
@@ -752,7 +833,7 @@ mod tests {
             ");
             Ok(())
         })
-        .await;
+            .await;
         gh.check_cancelled_workflows(default_repo_name(), &[123]);
     }
 
@@ -777,7 +858,7 @@ mod tests {
             ");
             Ok(())
         })
-        .await;
+            .await;
     }
 
     #[sqlx::test]
