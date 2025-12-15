@@ -791,7 +791,7 @@ try-job: Bar
             insta::assert_snapshot!(tester.get_next_comment_text(()).await?, @"Try build was cancelled. It was not possible to cancel some workflows.");
             let build = tester.db().find_build(
                 &default_repo_name(),
-                tester.try_branch().await.get_name().to_string(),
+                tester.try_branch().await.get_name(),
                 tester.try_branch().await.get_sha().to_string().into()
             ).await?.expect("build not found");
             assert_eq!(build.status, BuildStatus::Cancelled);

@@ -10,7 +10,7 @@
 //! either get a known mergeability status from GH or until we run out of retries.
 
 use super::BorsContext;
-use crate::database::{OctocrabMergeableState, PullRequestModel};
+use crate::database::{MergeableState, OctocrabMergeableState, PullRequestModel};
 use crate::github::{GithubRepoName, PullRequestNumber};
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BinaryHeap};
@@ -54,6 +54,10 @@ pub struct PullRequestToCheck {
     /// Notably, even if a higher priority item has an expiration set, and a lower priority item
     /// doesn't, the higher priority item will be handled first, if it's expiration has elapsed.
     priority: MergeabilityCheckPriority,
+    /// Was the pull request mergeable *before* being put into the mergeability queue?
+    was_previously_mergeable: bool,
+    /// Merged pull request that *might* have caused a merge conflict for this PR.
+    conflict_source: Option<PullRequestNumber>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -144,7 +148,7 @@ impl MergeabilityQueueSender {
     /// Enqueues the given PR for a mergeability check.
     /// It will be repeatedly fetched in the background from the GH API, until we can figure out
     /// its mergeability status.
-    pub fn enqueue_pr(&self, model: &PullRequestModel) {
+    pub fn enqueue_pr(&self, model: &PullRequestModel, conflict_source: Option<PullRequestNumber>) {
         // Prioritize approved PRs, so that they are checked first.
         // Those are the most important to check, because after a merge of some other PR, they
         // might be kicked out of the merge queue if they are no longer mergeable.
@@ -153,6 +157,12 @@ impl MergeabilityQueueSender {
             &model.repository,
             model.number,
             MergeabilityCheckPriority(priority),
+            match model.mergeable_state {
+                MergeableState::Mergeable => true,
+                MergeableState::HasConflicts => false,
+                MergeableState::Unknown => false,
+            },
+            conflict_source,
         );
     }
 
@@ -161,6 +171,8 @@ impl MergeabilityQueueSender {
         repo: &GithubRepoName,
         number: PullRequestNumber,
         priority: MergeabilityCheckPriority,
+        was_previously_mergeable: bool,
+        conflict_source: Option<PullRequestNumber>,
     ) {
         self.insert_pr_item(
             PullRequestToCheck {
@@ -170,25 +182,37 @@ impl MergeabilityQueueSender {
                 },
                 attempt: 1,
                 priority,
+                was_previously_mergeable,
+                conflict_source,
             },
             None,
         );
     }
 
     fn enqueue_retry(&self, pr_item: PullRequestToCheck) {
+        let PullRequestToCheck {
+            pull_request,
+            attempt,
+            priority,
+            was_previously_mergeable,
+            conflict_source,
+        } = pr_item;
+
         // First attempt = BASE_DELAY
         // Second attempt = BASE_DELAY * 2
         // Third attempt = BASE_DELAY * 3
         // etc.
-        let delay = BASE_DELAY * pr_item.attempt;
+        let delay = BASE_DELAY * attempt;
         let expiration = Some(Instant::now() + delay);
-        let next_attempt = pr_item.attempt + 1;
+        let next_attempt = attempt + 1;
 
         self.insert_pr_item(
             PullRequestToCheck {
-                pull_request: pr_item.pull_request,
+                pull_request,
                 attempt: next_attempt,
-                priority: pr_item.priority,
+                priority,
+                was_previously_mergeable,
+                conflict_source,
             },
             expiration,
         );
@@ -344,6 +368,8 @@ pub async fn check_mergeability(
         ref pull_request,
         ref attempt,
         priority: _,
+        conflict_source: _,
+        was_previously_mergeable: _,
     } = mq_item;
 
     if *attempt >= MAX_RETRIES {
@@ -521,7 +547,7 @@ mod tests {
         }
 
         fn enqueue(&self, tx: &MergeabilityQueueSender) {
-            tx.enqueue(&self.repo, self.number, self.priority);
+            tx.enqueue(&self.repo, self.number, self.priority, false, None);
         }
 
         fn enqueue_retry(&self, tx: &MergeabilityQueueSender, attempt: u32) {
@@ -532,6 +558,8 @@ mod tests {
                 },
                 attempt,
                 priority: self.priority,
+                was_previously_mergeable: false,
+                conflict_source: None,
             });
         }
     }

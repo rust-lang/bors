@@ -34,7 +34,7 @@ pub(super) async fn handle_pull_request_edited(
         return Ok(());
     };
 
-    mergeability_queue.enqueue_pr(&pr_model);
+    mergeability_queue.enqueue_pr(&pr_model, None);
 
     if !pr_model.is_approved() {
         return Ok(());
@@ -56,7 +56,7 @@ pub(super) async fn handle_push_to_pull_request(
         .upsert_pull_request(repo_state.repository(), pr.clone().into())
         .await?;
 
-    mergeability_queue.enqueue_pr(&pr_model);
+    mergeability_queue.enqueue_pr(&pr_model, None);
 
     let auto_build_cancel_message = maybe_cancel_auto_build(
         &repo_state.client,
@@ -127,7 +127,7 @@ pub(super) async fn handle_pull_request_opened(
 
     process_pr_description_commands(&payload, repo_state.clone(), db, ctx, merge_queue_tx).await?;
 
-    mergeability_queue.enqueue_pr(&pr);
+    mergeability_queue.enqueue_pr(&pr, None);
 
     Ok(())
 }
@@ -169,7 +169,7 @@ pub(super) async fn handle_pull_request_reopened(
         .upsert_pull_request(repo_state.repository(), pr.clone().into())
         .await?;
 
-    mergeability_queue.enqueue_pr(&pr);
+    mergeability_queue.enqueue_pr(&pr, None);
 
     Ok(())
 }
@@ -261,14 +261,14 @@ pub(super) async fn handle_push_to_branch(
         );
 
         // Try to find an auto build that matches this SHA
-        let pr = find_pr_by_merged_commit(&repo_state, &db, CommitSha(payload.sha))
+        let merged_pr = find_pr_by_merged_commit(&repo_state, &db, CommitSha(payload.sha))
             .await
             .ok()
             .flatten()
             .map(|pr| pr.number);
 
         for pr in affected_prs {
-            mergeability_queue.enqueue_pr(&pr);
+            mergeability_queue.enqueue_pr(&pr, merged_pr);
         }
     }
 
