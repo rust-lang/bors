@@ -90,7 +90,7 @@ You can use the following commands:
 - `delegate+`: Delegate approval permissions to the PR author
     - Shortcut for `delegate=review`
 - `delegate-`: Remove any previously granted permission delegation
-- `try [parent=<parent>] [jobs=<jobs>]`: Start a try build.
+- `try [parent=<parent>] [job|jobs=<jobs>]`: Start a try build.
     - Optionally, you can specify a `<parent>` SHA with which will the PR be merged. You can specify `parent=last` to use the same parent SHA as the previous try build.
     - Optionally, you can select a comma-separated list of CI `<jobs>` to run in the try build.
 - `try cancel`: Cancel a running try build

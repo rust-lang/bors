@@ -290,7 +290,7 @@ fn parser_try(command: &CommandPart<'_>, parts: &[CommandPart<'_>]) -> ParseResu
                         ))));
                     }
                 },
-                ("jobs", value) => {
+                ("job" | "jobs", value) => {
                     let raw_jobs: Vec<_> = value.split(',').map(|s| s.to_string()).collect();
                     if raw_jobs.is_empty() {
                         return Some(Err(CommandParseError::ValidationError(
