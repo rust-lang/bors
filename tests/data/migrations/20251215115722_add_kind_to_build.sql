@@ -1,0 +1,3 @@
+-- Empty to satisfy migration tests
+-- We don't need to add any new data here, as the kind column has been auto-filled
+-- from the branch column by this migration.
