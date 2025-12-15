@@ -132,8 +132,8 @@ async fn process_repository(repo: &RepositoryState, ctx: &BorsContext) -> anyhow
             QueueStatus::NotApproved => unreachable!(
                 "PR {pr:?} is not approved. It should not have been returned by `get_merge_queue_prs`, this is a bug."
             ),
-            QueueStatus::Stalled(..) => unreachable!(
-                "PR {pr:?} is stalled. It should not have been returned by `get_merge_queue_prs`, this is a bug."
+            QueueStatus::Failed(..) => unreachable!(
+                "Build of PR {pr:?} has failed. It should not have been returned by `get_merge_queue_prs`, this is a bug."
             ),
             QueueStatus::Pending(..) => {
                 // Build in progress - stop queue. We can only have one PR being built

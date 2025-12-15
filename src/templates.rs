@@ -15,7 +15,7 @@ pub fn status_text(pr: &PullRequestModel) -> String {
             QueueStatus::Approved(_) => "approved".to_string(),
             QueueStatus::ReadyForMerge(_, _) => "ready for merge".to_string(),
             QueueStatus::Pending(_, _) => "pending".to_string(),
-            QueueStatus::Stalled(_, _) => "stalled".to_string(),
+            QueueStatus::Failed(_, _) => "failed".to_string(),
             QueueStatus::NotApproved => String::new(),
         }
     }

@@ -22,7 +22,7 @@ pub(super) async fn command_retry(
 
     let pr_model = pr.db;
 
-    if matches!(pr_model.queue_status(), QueueStatus::Stalled(_, _)) {
+    if matches!(pr_model.queue_status(), QueueStatus::Failed(_, _)) {
         db.clear_auto_build(pr_model).await?;
         merge_queue_tx.notify().await?;
     } else {
