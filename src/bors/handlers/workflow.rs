@@ -5,7 +5,7 @@ use crate::bors::comment::{
 };
 use crate::bors::event::{WorkflowRunCompleted, WorkflowRunStarted};
 use crate::bors::handlers::labels::handle_label_trigger;
-use crate::bors::handlers::{hide_try_build_started_comments, is_bors_observed_branch};
+use crate::bors::handlers::{hide_build_started_comments, is_bors_observed_branch};
 use crate::bors::merge_queue::MergeQueueSender;
 use crate::bors::{FailedWorkflowRun, RepositoryState, WorkflowRun};
 use crate::database::{
@@ -337,9 +337,11 @@ async fn maybe_complete_build(
         ))
     };
 
-    if build.kind == BuildKind::Try {
-        hide_try_build_started_comments(repo, db, &pr).await?;
-    }
+    let tag = match build.kind {
+        BuildKind::Try => CommentTag::TryBuildStarted,
+        BuildKind::Auto => CommentTag::AutoBuildStarted,
+    };
+    hide_build_started_comments(repo, db, &pr, tag).await?;
 
     if let Some(comment) = comment_opt {
         repo.client.post_comment(pr_num, comment).await?;

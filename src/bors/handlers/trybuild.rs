@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use super::{PullRequestData, deny_request};
-use super::{has_permission, hide_try_build_started_comments};
+use super::{has_permission, hide_build_started_comments};
 use crate::PgDbClient;
 use crate::bors::command::{CommandPrefix, Parent};
 use crate::bors::comment::try_build_cancelled_comment;
@@ -73,7 +73,9 @@ pub(super) async fn command_try_build(
     let cancelled_workflow_urls = if let Some(build) = get_pending_build(pr.db) {
         let res = cancel_previous_try_build(repo, &db, build).await?;
         // Also try to hide previous "Try build started" comments that weren't hidden yet
-        if let Err(error) = hide_try_build_started_comments(repo, &db, pr.db).await {
+        if let Err(error) =
+            hide_build_started_comments(repo, &db, pr.db, CommentTag::TryBuildStarted).await
+        {
             tracing::error!("Failed to hide previous try build started comment(s): {error:?}");
         }
 

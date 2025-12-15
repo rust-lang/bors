@@ -658,14 +658,15 @@ async fn unapprove_pr(
     handle_label_trigger(repo_state, pr.number, LabelTrigger::Unapproved).await
 }
 
-/// Hide all previous "Try build started" comments on the given PR.
-async fn hide_try_build_started_comments(
+/// Hide all previous "Try/auto build started" comments on the given PR.
+async fn hide_build_started_comments(
     repo: &RepositoryState,
     db: &PgDbClient,
     pr: &PullRequestModel,
+    tag: CommentTag,
 ) -> anyhow::Result<()> {
     let outdated = db
-        .get_tagged_bot_comments(repo.repository(), pr.number, CommentTag::TryBuildStarted)
+        .get_tagged_bot_comments(repo.repository(), pr.number, tag)
         .await?;
     for comment in outdated {
         repo.client

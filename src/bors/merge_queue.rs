@@ -491,6 +491,7 @@ pub fn start_merge_queue(
 mod tests {
     use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
 
+    use crate::github::api::client::HideCommentReason;
     use crate::tests::{BorsBuilder, GitHubState, run_test};
     use crate::{
         bors::{
@@ -1168,6 +1169,26 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
 
             **Workflow**: https://github.com/rust-lang/borstest/actions/runs/1
             ");
+
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn hide_auto_build_started_comment_after_workflow_finish(pool: sqlx::PgPool) {
+        run_test(pool, async |tester: &mut BorsTester| {
+            tester.approve(()).await?;
+            tester.process_merge_queue().await;
+            let comment = tester.get_next_comment(()).await?;
+
+            tester
+                .workflow_full_failure(tester.auto_branch().await)
+                .await?;
+            tester.expect_comments((), 1).await;
+            tester
+                .expect_hidden_comment(&comment, HideCommentReason::Outdated)
+                .await;
 
             Ok(())
         })
