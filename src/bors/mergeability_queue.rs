@@ -442,6 +442,11 @@ async fn handle_pr_conflict(
 ) -> anyhow::Result<()> {
     tracing::info!("Pull request {pr:?} was likely unmergeable (source: {conflict_source:?})");
 
+    if !repo_state.config.load().report_merge_conflicts {
+        tracing::info!("Reporting merge conflicts is disabled, not doing anything further");
+        return Ok(());
+    }
+
     let Some(pr) = db.get_pull_request(&pr.repo, pr.pr_number).await? else {
         return Err(anyhow::anyhow!("Pull request {pr:?} was not found"));
     };
