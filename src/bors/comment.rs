@@ -28,6 +28,7 @@ pub enum CommentMetadata {
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum CommentTag {
     TryBuildStarted,
+    AutoBuildStarted,
 }
 
 impl Comment {
@@ -199,6 +200,10 @@ pub fn try_build_started_comment(
 }
 
 pub fn append_workflow_links_to_comment(comment_content: &mut String, workflow_urls: Vec<String>) {
+    if !comment_content.ends_with("\n") {
+        comment_content.push('\n');
+    }
+
     if workflow_urls.len() == 1 {
         comment_content.push_str(&format!("\n**Workflow**: {}", workflow_urls[0]));
     } else {

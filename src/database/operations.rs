@@ -2,17 +2,6 @@ use chrono::DateTime;
 use chrono::Utc;
 use sqlx::postgres::PgExecutor;
 
-use crate::bors::PullRequestStatus;
-use crate::bors::RollupMode;
-use crate::bors::comment::CommentTag;
-use crate::database::BuildStatus;
-use crate::database::RepoModel;
-use crate::database::WorkflowModel;
-use crate::github::CommitSha;
-use crate::github::GithubRepoName;
-use crate::github::PullRequestNumber;
-use crate::utils::timing::measure_db_query;
-
 use super::ApprovalInfo;
 use super::ApprovalStatus;
 use super::Assignees;
@@ -26,6 +15,17 @@ use super::TreeState;
 use super::UpsertPullRequestParams;
 use super::WorkflowStatus;
 use super::WorkflowType;
+use crate::bors::PullRequestStatus;
+use crate::bors::RollupMode;
+use crate::bors::comment::CommentTag;
+use crate::database::BuildKind;
+use crate::database::BuildStatus;
+use crate::database::RepoModel;
+use crate::database::WorkflowModel;
+use crate::github::CommitSha;
+use crate::github::GithubRepoName;
+use crate::github::PullRequestNumber;
+use crate::utils::timing::measure_db_query;
 use futures::TryStreamExt;
 
 pub(crate) async fn get_pull_request(
@@ -524,18 +524,20 @@ pub(crate) async fn create_build(
     executor: impl PgExecutor<'_>,
     repo: &GithubRepoName,
     branch: &str,
+    kind: BuildKind,
     commit_sha: &CommitSha,
     parent: &CommitSha,
 ) -> anyhow::Result<i32> {
     measure_db_query("create_build", || async {
         let build_id = sqlx::query_scalar!(
             r#"
-INSERT INTO build (repository, branch, commit_sha, parent, status)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO build (repository, branch, kind, commit_sha, parent, status)
+VALUES ($1, $2, $3, $4, $5, $6)
 RETURNING id
 "#,
             repo as &GithubRepoName,
             branch,
+            kind as BuildKind,
             commit_sha.0,
             parent.0,
             BuildStatus::Pending as BuildStatus
@@ -561,6 +563,7 @@ SELECT
     id,
     repository as "repository: GithubRepoName",
     branch,
+    kind as "kind: BuildKind",
     commit_sha,
     status as "status: BuildStatus",
     parent,
@@ -594,6 +597,7 @@ SELECT
     id,
     repository as "repository: GithubRepoName",
     branch,
+    kind as "kind: BuildKind",
     commit_sha,
     status as "status: BuildStatus",
     parent,
@@ -758,7 +762,8 @@ SELECT
         build.status,
         build.parent,
         build.created_at,
-        build.check_run_id
+        build.check_run_id,
+        build.kind
     ) AS "build!: BuildModel"
 FROM workflow
     LEFT JOIN build ON workflow.build_id = build.id
@@ -818,7 +823,8 @@ SELECT
         build.status,
         build.parent,
         build.created_at,
-        build.check_run_id
+        build.check_run_id,
+        build.kind
     ) AS "build!: BuildModel"
 FROM workflow
     LEFT JOIN build ON workflow.build_id = build.id

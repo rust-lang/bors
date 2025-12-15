@@ -1,12 +1,11 @@
-use super::trybuild::TRY_BRANCH_NAME;
 use crate::PgDbClient;
+use crate::bors::BuildKind;
 use crate::bors::comment::{
     CommentTag, append_workflow_links_to_comment, build_failed_comment, try_build_succeeded_comment,
 };
 use crate::bors::event::{WorkflowRunCompleted, WorkflowRunStarted};
 use crate::bors::handlers::labels::handle_label_trigger;
-use crate::bors::handlers::{BuildType, is_bors_observed_branch};
-use crate::bors::handlers::{get_build_type, hide_try_build_started_comments};
+use crate::bors::handlers::{hide_build_started_comments, is_bors_observed_branch};
 use crate::bors::merge_queue::MergeQueueSender;
 use crate::bors::{FailedWorkflowRun, RepositoryState, WorkflowRun};
 use crate::database::{
@@ -67,14 +66,12 @@ pub(super) async fn handle_workflow_started(
     )
     .await?;
 
-    if build.branch == TRY_BRANCH_NAME {
-        add_workflow_links_to_try_build_start_comment(repo, db, &build, payload).await?;
-    }
+    add_workflow_links_to_build_start_comment(repo, db, &build, payload).await?;
 
     Ok(())
 }
 
-async fn add_workflow_links_to_try_build_start_comment(
+async fn add_workflow_links_to_build_start_comment(
     repo: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
     build: &BuildModel,
@@ -84,27 +81,31 @@ async fn add_workflow_links_to_try_build_start_comment(
         tracing::warn!("PR for build not found");
         return Ok(());
     };
+
+    let tag = match build.kind {
+        BuildKind::Try => CommentTag::TryBuildStarted,
+        BuildKind::Auto => CommentTag::AutoBuildStarted,
+    };
     let comments = db
-        .get_tagged_bot_comments(&payload.repository, pr.number, CommentTag::TryBuildStarted)
+        .get_tagged_bot_comments(&payload.repository, pr.number, tag)
         .await?;
 
-    let Some(try_build_comment) = comments.last() else {
-        tracing::warn!("No try build comment found for PR");
+    let Some(build_started_comment) = comments.last() else {
+        tracing::warn!("No build started comment found for PR");
         return Ok(());
     };
 
     let workflows = db.get_workflow_urls_for_build(build).await?;
-
     if !workflows.is_empty() {
         let mut comment_content = repo
             .client
-            .get_comment_content(&try_build_comment.node_id)
+            .get_comment_content(&build_started_comment.node_id)
             .await?;
 
         append_workflow_links_to_comment(&mut comment_content, workflows);
 
         repo.client
-            .update_comment_content(&try_build_comment.node_id, &comment_content)
+            .update_comment_content(&build_started_comment.node_id, &comment_content)
             .await?;
     }
 
@@ -155,6 +156,7 @@ pub(super) async fn handle_workflow_completed(
     )
     .await
 }
+
 /// Attempt to complete a pending build after a workflow run has been completed.
 /// We assume that the status of the completed workflow run has already been updated in the
 /// database.
@@ -168,10 +170,6 @@ async fn maybe_complete_build(
     merge_queue_tx: &MergeQueueSender,
     error_context: Option<String>,
 ) -> anyhow::Result<()> {
-    let Some(build_type) = get_build_type(&payload.branch) else {
-        return Ok(());
-    };
-
     let Some(build) = db
         .find_build(
             &payload.repository,
@@ -181,7 +179,7 @@ async fn maybe_complete_build(
         .await?
     else {
         tracing::warn!(
-            "Received check suite finished for an unknown build: {}",
+            "Received workflow finished for an unknown build: {}",
             payload.commit_sha
         );
         return Ok(());
@@ -253,15 +251,15 @@ async fn maybe_complete_build(
     } else {
         BuildStatus::Failure
     };
-    let trigger = match build_type {
-        BuildType::Try => {
+    let trigger = match build.kind {
+        BuildKind::Try => {
             if !build_succeeded {
                 Some(LabelTrigger::TryBuildFailed)
             } else {
                 None
             }
         }
-        BuildType::Auto => Some(if build_succeeded {
+        BuildKind::Auto => Some(if build_succeeded {
             LabelTrigger::AutoBuildSucceeded
         } else {
             LabelTrigger::AutoBuildFailed
@@ -290,7 +288,7 @@ async fn maybe_complete_build(
     }
 
     // Trigger merge queue when an auto build completes
-    if build_type == BuildType::Auto {
+    if build.kind == BuildKind::Auto {
         merge_queue_tx.notify().await?;
     }
 
@@ -299,7 +297,7 @@ async fn maybe_complete_build(
     let comment_opt = if build_succeeded {
         tracing::info!("Build succeeded for PR {pr_num}");
 
-        if build_type == BuildType::Try {
+        if build.kind == BuildKind::Try {
             Some(try_build_succeeded_comment(
                 &db_workflow_runs,
                 payload.commit_sha,
@@ -339,9 +337,11 @@ async fn maybe_complete_build(
         ))
     };
 
-    if build_type == BuildType::Try {
-        hide_try_build_started_comments(repo, db, &pr).await?;
-    }
+    let tag = match build.kind {
+        BuildKind::Try => CommentTag::TryBuildStarted,
+        BuildKind::Auto => CommentTag::AutoBuildStarted,
+    };
+    hide_build_started_comments(repo, db, &pr, tag).await?;
 
     if let Some(comment) = comment_opt {
         repo.client.post_comment(pr_num, comment).await?;

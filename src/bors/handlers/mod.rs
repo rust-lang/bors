@@ -19,10 +19,12 @@ use crate::bors::handlers::retry::command_retry;
 use crate::bors::handlers::review::{
     command_approve, command_close_tree, command_open_tree, command_unapprove,
 };
-use crate::bors::handlers::trybuild::{TRY_BRANCH_NAME, command_try_build, command_try_cancel};
+use crate::bors::handlers::trybuild::{command_try_build, command_try_cancel};
 use crate::bors::handlers::workflow::{handle_workflow_completed, handle_workflow_started};
-use crate::bors::merge_queue::{AUTO_BRANCH_NAME, MergeQueueSender};
-use crate::bors::{BorsContext, CommandPrefix, Comment, RepositoryState};
+use crate::bors::merge_queue::MergeQueueSender;
+use crate::bors::{
+    AUTO_BRANCH_NAME, BorsContext, CommandPrefix, Comment, RepositoryState, TRY_BRANCH_NAME,
+};
 use crate::database::{DelegatedPermission, PullRequestModel};
 use crate::github::api::client::HideCommentReason;
 use crate::github::{GithubUser, LabelTrigger, PullRequest, PullRequestNumber};
@@ -591,28 +593,6 @@ async fn reload_repos(
     Ok(())
 }
 
-/// Is this branch interesting for the bot?
-fn is_bors_observed_branch(branch: &str) -> bool {
-    branch == TRY_BRANCH_NAME || branch == AUTO_BRANCH_NAME
-}
-
-#[derive(PartialEq, Eq, Copy, Clone, Debug)]
-pub enum BuildType {
-    Try,
-    Auto,
-}
-
-/// Get the build type based on the branch where it happened.
-pub fn get_build_type(branch: &str) -> Option<BuildType> {
-    if branch == TRY_BRANCH_NAME {
-        Some(BuildType::Try)
-    } else if branch == AUTO_BRANCH_NAME {
-        Some(BuildType::Auto)
-    } else {
-        None
-    }
-}
-
 /// Deny permission for a request.
 async fn deny_request(
     repo: &RepositoryState,
@@ -678,14 +658,15 @@ async fn unapprove_pr(
     handle_label_trigger(repo_state, pr.number, LabelTrigger::Unapproved).await
 }
 
-/// Hide all previous "Try build started" comments on the given PR.
-async fn hide_try_build_started_comments(
+/// Hide all previous "Try/auto build started" comments on the given PR.
+async fn hide_build_started_comments(
     repo: &RepositoryState,
     db: &PgDbClient,
     pr: &PullRequestModel,
+    tag: CommentTag,
 ) -> anyhow::Result<()> {
     let outdated = db
-        .get_tagged_bot_comments(repo.repository(), pr.number, CommentTag::TryBuildStarted)
+        .get_tagged_bot_comments(repo.repository(), pr.number, tag)
         .await?;
     for comment in outdated {
         repo.client
@@ -694,6 +675,11 @@ async fn hide_try_build_started_comments(
         db.delete_tagged_bot_comment(&comment).await?;
     }
     Ok(())
+}
+
+/// Is this branch interesting for the bot?
+fn is_bors_observed_branch(branch: &str) -> bool {
+    branch == TRY_BRANCH_NAME || branch == AUTO_BRANCH_NAME
 }
 
 #[cfg(test)]

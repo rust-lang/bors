@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use super::{PullRequestData, deny_request};
-use super::{has_permission, hide_try_build_started_comments};
+use super::{has_permission, hide_build_started_comments};
 use crate::PgDbClient;
 use crate::bors::command::{CommandPrefix, Parent};
 use crate::bors::comment::try_build_cancelled_comment;
@@ -11,7 +11,7 @@ use crate::bors::comment::{
     cant_find_last_parent_comment, merge_conflict_comment, try_build_started_comment,
 };
 use crate::bors::handlers::workflow::{CancelBuildError, cancel_build};
-use crate::bors::{MergeType, RepositoryState, create_merge_commit_message};
+use crate::bors::{MergeType, RepositoryState, TRY_BRANCH_NAME, create_merge_commit_message};
 use crate::database::{BuildModel, BuildStatus, PullRequestModel};
 use crate::github::api::client::{CheckRunOutput, GithubRepositoryClient};
 use crate::github::api::operations::ForcePush;
@@ -28,9 +28,6 @@ use tracing::log;
 // Because this action (reset + merge) is not atomic, this branch should not run CI checks to avoid
 // starting them twice.
 pub(super) const TRY_MERGE_BRANCH_NAME: &str = "automation/bors/try-merge";
-
-// This branch should run CI checks.
-pub(super) const TRY_BRANCH_NAME: &str = "automation/bors/try";
 
 // The name of the check run seen in the GitHub UI.
 pub(super) const TRY_BUILD_CHECK_RUN_NAME: &str = "Bors try build";
@@ -76,7 +73,9 @@ pub(super) async fn command_try_build(
     let cancelled_workflow_urls = if let Some(build) = get_pending_build(pr.db) {
         let res = cancel_previous_try_build(repo, &db, build).await?;
         // Also try to hide previous "Try build started" comments that weren't hidden yet
-        if let Err(error) = hide_try_build_started_comments(repo, &db, pr.db).await {
+        if let Err(error) =
+            hide_build_started_comments(repo, &db, pr.db, CommentTag::TryBuildStarted).await
+        {
             tracing::error!("Failed to hide previous try build started comment(s): {error:?}");
         }
 

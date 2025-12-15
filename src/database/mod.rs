@@ -4,6 +4,7 @@ use std::{
     str::FromStr,
 };
 
+use crate::bors::BuildKind;
 use crate::bors::comment::CommentTag;
 use crate::{
     bors::{PullRequestStatus, RollupMode},
@@ -340,6 +341,37 @@ pub struct BuildModel {
     pub created_at: DateTime<Utc>,
     /// The ID of the check run associated with the build.
     pub check_run_id: Option<i64>,
+    /// What kind of build this is (`try` or `auto`).
+    pub kind: BuildKind,
+}
+
+impl sqlx::Type<sqlx::Postgres> for BuildKind {
+    fn type_info() -> sqlx::postgres::PgTypeInfo {
+        <String as sqlx::Type<sqlx::Postgres>>::type_info()
+    }
+}
+
+impl sqlx::Encode<'_, sqlx::Postgres> for BuildKind {
+    fn encode_by_ref(
+        &self,
+        buf: &mut sqlx::postgres::PgArgumentBuffer,
+    ) -> Result<sqlx::encode::IsNull, BoxDynError> {
+        let tag = match self {
+            Self::Try => "try",
+            Self::Auto => "auto",
+        };
+        <&str as sqlx::Encode<sqlx::Postgres>>::encode(tag, buf)
+    }
+}
+
+impl sqlx::Decode<'_, sqlx::Postgres> for BuildKind {
+    fn decode(value: sqlx::postgres::PgValueRef<'_>) -> Result<Self, BoxDynError> {
+        match <&str as sqlx::Decode<sqlx::Postgres>>::decode(value)? {
+            "try" => Ok(Self::Try),
+            "auto" => Ok(Self::Auto),
+            kind => Err(format!("Unknown build kind: {kind}").into()),
+        }
+    }
 }
 
 /// Represents a pull request.
@@ -590,6 +622,7 @@ impl sqlx::Encode<'_, sqlx::Postgres> for CommentTag {
     ) -> Result<sqlx::encode::IsNull, BoxDynError> {
         let tag = match self {
             CommentTag::TryBuildStarted => "TryBuildStarted",
+            CommentTag::AutoBuildStarted => "AutoBuildStarted",
         };
         <&str as sqlx::Encode<sqlx::Postgres>>::encode(tag, buf)
     }
@@ -599,6 +632,7 @@ impl sqlx::Decode<'_, sqlx::Postgres> for CommentTag {
     fn decode(value: sqlx::postgres::PgValueRef<'_>) -> Result<Self, BoxDynError> {
         match <&str as sqlx::Decode<sqlx::Postgres>>::decode(value)? {
             "TryBuildStarted" => Ok(CommentTag::TryBuildStarted),
+            "AutoBuildStarted" => Ok(CommentTag::AutoBuildStarted),
             tag => Err(format!("Unknown comment tag: {tag}").into()),
         }
     }

@@ -31,6 +31,19 @@ use crate::bors::command::BorsCommand;
 use crate::database::{WorkflowModel, WorkflowStatus};
 pub use command::CommandPrefix;
 
+/// Branch where CI checks run for auto builds.
+/// This branch should run CI checks.
+pub const AUTO_BRANCH_NAME: &str = "automation/bors/auto";
+
+/// This branch should run CI checks.
+pub const TRY_BRANCH_NAME: &str = "automation/bors/try";
+
+#[derive(PartialEq, Eq, Copy, Clone, Debug)]
+pub enum BuildKind {
+    Try,
+    Auto,
+}
+
 /// Format the bors command help in Markdown format.
 pub fn format_help() -> &'static str {
     // The help is generated manually to have a nicer structure.

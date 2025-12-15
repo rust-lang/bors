@@ -8,10 +8,10 @@ use tracing::Instrument;
 
 use crate::BorsContext;
 use crate::bors::comment::{
-    auto_build_push_failed_comment, auto_build_started_comment, auto_build_succeeded_comment,
-    merge_conflict_comment,
+    CommentTag, auto_build_push_failed_comment, auto_build_started_comment,
+    auto_build_succeeded_comment, merge_conflict_comment,
 };
-use crate::bors::{PullRequestStatus, RepositoryState};
+use crate::bors::{AUTO_BRANCH_NAME, PullRequestStatus, RepositoryState};
 use crate::database::{
     ApprovalInfo, BuildModel, BuildStatus, MergeableState, PullRequestModel, QueueStatus,
 };
@@ -82,10 +82,6 @@ impl MergeQueueSender {
 /// Branch used for performing merge operations.
 /// This branch should not run CI checks.
 pub(super) const AUTO_MERGE_BRANCH_NAME: &str = "automation/bors/auto-merge";
-
-/// Branch where CI checks run for auto builds.
-/// This branch should run CI checks.
-pub(super) const AUTO_BRANCH_NAME: &str = "automation/bors/auto";
 
 // The name of the check run seen in the GitHub UI.
 pub(super) const AUTO_BUILD_CHECK_RUN_NAME: &str = "Bors auto build";
@@ -213,6 +209,7 @@ async fn handle_successful_build(
 
 /// Handle starting a new auto build for an approved PR.
 /// Returns true if the queue should break, false to continue.
+#[tracing::instrument(skip(repo, ctx, pr))]
 async fn handle_start_auto_build(
     repo: &RepositoryState,
     ctx: &BorsContext,
@@ -391,11 +388,24 @@ async fn start_auto_build(
 
     // 5. Post status comment
     let comment = auto_build_started_comment(&head_sha, &merge_sha);
-    if let Err(error) = client.post_comment(pr.number, comment).await {
-        tracing::error!(
-            "Failed to post auto build started comment on PR {}: {error:?}",
-            pr.number
-        );
+    match client.post_comment(pr.number, comment).await {
+        Ok(comment) => {
+            if let Err(error) = ctx
+                .db
+                .record_tagged_bot_comment(
+                    repo.repository(),
+                    pr.number,
+                    CommentTag::AutoBuildStarted,
+                    &comment.node_id,
+                )
+                .await
+            {
+                tracing::error!("Cannot tag auto build started comment: {error:?}",);
+            }
+        }
+        Err(error) => {
+            tracing::error!("Failed to post auto build started comment: {error:?}",);
+        }
     };
 
     Ok(())
@@ -481,6 +491,7 @@ pub fn start_merge_queue(
 mod tests {
     use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
 
+    use crate::github::api::client::HideCommentReason;
     use crate::tests::{BorsBuilder, GitHubState, run_test};
     use crate::{
         bors::{
@@ -1134,6 +1145,51 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
             tester.expect_comments(pr.id(), 1).await;
 
             tester.process_merge_queue().await;
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn update_auto_build_started_comment_after_workflow_starts(pool: sqlx::PgPool) {
+        run_test(pool, async |tester: &mut BorsTester| {
+            tester.approve(()).await?;
+            tester.process_merge_queue().await;
+            let comment = tester.get_next_comment(()).await?;
+
+            tester.workflow_start(tester.auto_branch().await).await?;
+
+            // Check that the comment text has been updated with a link to the started workflow
+            let updated_comment = tester
+                .get_comment_by_node_id(&comment.node_id.unwrap())
+                .await
+                .unwrap();
+            insta::assert_snapshot!(updated_comment.content, @r"
+            :hourglass: Testing commit pr-1-sha with merge merge-0-pr-1...
+
+            **Workflow**: https://github.com/rust-lang/borstest/actions/runs/1
+            ");
+
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn hide_auto_build_started_comment_after_workflow_finish(pool: sqlx::PgPool) {
+        run_test(pool, async |tester: &mut BorsTester| {
+            tester.approve(()).await?;
+            tester.process_merge_queue().await;
+            let comment = tester.get_next_comment(()).await?;
+
+            tester
+                .workflow_full_failure(tester.auto_branch().await)
+                .await?;
+            tester.expect_comments((), 1).await;
+            tester
+                .expect_hidden_comment(&comment, HideCommentReason::Outdated)
+                .await;
+
             Ok(())
         })
         .await;
