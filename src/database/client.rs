@@ -11,15 +11,15 @@ use crate::github::PullRequestNumber;
 use crate::github::{CommitSha, GithubRepoName};
 
 use super::operations::{
-    approve_pull_request, clear_auto_build, create_build, create_pull_request, create_workflow,
-    delegate_pull_request, delete_tagged_bot_comment, find_build, find_pr_by_build,
-    get_nonclosed_pull_requests, get_pending_builds, get_prs_with_unknown_mergeability_state,
-    get_pull_request, get_repository, get_repository_by_name, get_tagged_bot_comments,
-    get_workflow_urls_for_build, get_workflows_for_build, insert_repo_if_not_exists,
-    record_tagged_bot_comment, set_pr_assignees, set_pr_mergeability_state, set_pr_priority,
-    set_pr_rollup, set_pr_status, unapprove_pull_request, undelegate_pull_request,
-    update_build_check_run_id, update_build_status, update_mergeable_states_by_base_branch,
-    update_pr_try_build_id, update_workflow_status, upsert_pull_request, upsert_repository,
+    approve_pull_request, clear_auto_build, create_build, create_workflow, delegate_pull_request,
+    delete_tagged_bot_comment, find_build, find_pr_by_build, get_nonclosed_pull_requests,
+    get_pending_builds, get_prs_with_unknown_mergeability_state, get_pull_request, get_repository,
+    get_repository_by_name, get_tagged_bot_comments, get_workflow_urls_for_build,
+    get_workflows_for_build, insert_repo_if_not_exists, record_tagged_bot_comment,
+    set_pr_assignees, set_pr_mergeability_state, set_pr_priority, set_pr_rollup, set_pr_status,
+    unapprove_pull_request, undelegate_pull_request, update_build_check_run_id,
+    update_build_status, update_mergeable_states_by_base_branch, update_pr_try_build_id,
+    update_workflow_status, upsert_pull_request, upsert_repository,
 };
 use super::{ApprovalInfo, DelegatedPermission, MergeableState, RunId, UpsertPullRequestParams};
 
@@ -137,30 +137,6 @@ impl PgDbClient {
         repo: &GithubRepoName,
     ) -> anyhow::Result<Vec<PullRequestModel>> {
         get_nonclosed_pull_requests(&self.pool, repo).await
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub async fn create_pull_request(
-        &self,
-        repo: &GithubRepoName,
-        pr_number: PullRequestNumber,
-        title: &str,
-        author: &str,
-        assignees: &[String],
-        base_branch: &str,
-        pr_status: PullRequestStatus,
-    ) -> anyhow::Result<()> {
-        create_pull_request(
-            &self.pool,
-            repo,
-            pr_number,
-            title,
-            author,
-            assignees,
-            base_branch,
-            pr_status,
-        )
-        .await
     }
 
     pub async fn set_pr_status(

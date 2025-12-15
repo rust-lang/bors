@@ -74,38 +74,6 @@ pub(crate) async fn get_pull_request(
     .await
 }
 
-#[allow(clippy::too_many_arguments)]
-pub(crate) async fn create_pull_request(
-    executor: impl PgExecutor<'_>,
-    repo: &GithubRepoName,
-    pr_number: PullRequestNumber,
-    title: &str,
-    author: &str,
-    assignees: &[String],
-    base_branch: &str,
-    pr_status: PullRequestStatus,
-) -> anyhow::Result<()> {
-    measure_db_query("create_pull_request", || async {
-        sqlx::query!(
-            r#"
-INSERT INTO pull_request (repository, number, title, author, assignees, base_branch, status)
-VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT DO NOTHING
-"#,
-            repo as &GithubRepoName,
-            pr_number.0 as i32,
-            title,
-            author,
-            assignees.join(","),
-            base_branch,
-            pr_status as PullRequestStatus,
-        )
-        .execute(executor)
-        .await?;
-        Ok(())
-    })
-    .await
-}
-
 pub(crate) async fn set_pr_status(
     executor: impl PgExecutor<'_>,
     repo: &GithubRepoName,

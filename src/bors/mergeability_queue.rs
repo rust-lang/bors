@@ -10,10 +10,11 @@
 //! either get a known mergeability status from GH or until we run out of retries.
 
 use super::BorsContext;
-use crate::database::OctocrabMergeableState;
+use crate::database::{OctocrabMergeableState, PullRequestModel};
 use crate::github::{GithubRepoName, PullRequestNumber};
 use std::cmp::Reverse;
-use std::collections::BinaryHeap;
+use std::collections::{BTreeMap, BinaryHeap};
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::sync::Notify;
@@ -29,55 +30,80 @@ const BASE_DELAY: Duration = Duration::from_millis(500);
 /// Max number of mergeable check retries before giving up.
 const MAX_RETRIES: u32 = 5;
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Default)]
+pub struct MergeabilityCheckPriority(u32);
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct QueuedPullRequest {
-    pub pr_number: PullRequestNumber,
-    pub repo: GithubRepoName,
+pub struct PullRequestData {
+    repo: GithubRepoName,
+    pr_number: PullRequestNumber,
 }
 
-impl std::fmt::Display for QueuedPullRequest {
+impl std::fmt::Display for PullRequestData {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}/#{}", self.repo, self.pr_number)
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct MergeabilityQueueItem {
-    pub pull_request: QueuedPullRequest,
-    pub attempt: u32,
+pub struct PullRequestToCheck {
+    pull_request: PullRequestData,
+    /// Which attempt to check mergeability are we processing?
+    attempt: u32,
+    /// Priority of the item. Higher priority items are handled before lower priority items.
+    /// Notably, even if a higher priority item has an expiration set, and a lower priority item
+    /// doesn't, the higher priority item will be handled first, if it's expiration has elapsed.
+    priority: MergeabilityCheckPriority,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-enum QueueMessage {
-    Shutdown,
-    Item(MergeabilityQueueItem),
-}
-
-#[derive(PartialEq, Eq, Debug)]
-struct Item {
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct QueueItem {
+    entry: PullRequestToCheck,
     /// When to process item (None = immediate is ordered before Some).
     expiration: Option<Instant>,
-    inner: QueueMessage,
 }
 
-impl PartialOrd for Item {
+impl PartialOrd for QueueItem {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl Ord for Item {
+impl Ord for QueueItem {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.expiration
-            .cmp(&other.expiration)
-            .then_with(|| self.inner.cmp(&other.inner))
+        // Order shutdowns after all other kinds of messages
+        let (
+            QueueItem {
+                entry: entry1,
+                expiration: expire1,
+            },
+            QueueItem {
+                entry: entry2,
+                expiration: expire2,
+            },
+        ) = (self, other);
+        {
+            // Note: we don't order by priority, because items with a different priority should
+            // be in different queues altogether. Let's check that here
+            assert_eq!(entry1.priority, entry2.priority);
+
+            // Order by expiration => None before Some
+            expire1
+                .cmp(expire2)
+                // Then order by PR number
+                .then_with(|| entry1.pull_request.cmp(&entry2.pull_request))
+                // And finally by attempt
+                .then_with(|| entry1.attempt.cmp(&entry2.attempt))
+        }
     }
 }
 
 struct SharedInner {
-    /// Reversed to create a min-heap (return items that expire the soonest).
-    queue: Mutex<BinaryHeap<Reverse<Item>>>,
+    /// List of queues ordered by priority.
+    /// Reversed is used to create a min-heap (return items that expire the soonest).
+    queues: Mutex<BTreeMap<MergeabilityCheckPriority, BinaryHeap<Reverse<QueueItem>>>>,
     notify: Notify,
+    shutdown_requested: AtomicBool,
 }
 
 #[derive(Clone)]
@@ -91,8 +117,9 @@ pub struct MergeabilityQueueReceiver {
 
 pub fn create_mergeability_queue() -> (MergeabilityQueueSender, MergeabilityQueueReceiver) {
     let shared = Arc::new(SharedInner {
-        queue: Mutex::new(BinaryHeap::new()),
+        queues: Mutex::new(BTreeMap::new()),
         notify: Notify::new(),
+        shutdown_requested: AtomicBool::new(false),
     });
 
     (
@@ -106,67 +133,89 @@ pub fn create_mergeability_queue() -> (MergeabilityQueueSender, MergeabilityQueu
 impl MergeabilityQueueSender {
     /// Shutdown the mergeability queue.
     pub fn shutdown(&self) {
-        let mut queue = self.inner.queue.lock().unwrap();
-
-        // Send shutdown message
-        queue.push(Reverse(Item {
-            expiration: None,
-            inner: QueueMessage::Shutdown,
-        }));
-
-        // and wake receiver for immediate processing.
+        // Store shutdown flag
+        self.inner
+            .shutdown_requested
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        // and wake the receiver for immediate processing.
         self.inner.notify.notify_one();
     }
 
     /// Enqueues the given PR for a mergeability check.
     /// It will be repeatedly fetched in the background from the GH API, until we can figure out
     /// its mergeability status.
-    pub fn enqueue_pr(&self, repo: GithubRepoName, pr_number: PullRequestNumber) {
-        self.insert_item(
-            MergeabilityQueueItem {
-                pull_request: QueuedPullRequest { pr_number, repo },
+    pub fn enqueue_pr(&self, model: &PullRequestModel) {
+        // Prioritize approved PRs, so that they are checked first.
+        // Those are the most important to check, because after a merge of some other PR, they
+        // might be kicked out of the merge queue if they are no longer mergeable.
+        let priority = if model.is_approved() { 1 } else { 0 };
+        self.enqueue(
+            &model.repository,
+            model.number,
+            MergeabilityCheckPriority(priority),
+        );
+    }
+
+    pub fn enqueue(
+        &self,
+        repo: &GithubRepoName,
+        number: PullRequestNumber,
+        priority: MergeabilityCheckPriority,
+    ) {
+        self.insert_pr_item(
+            PullRequestToCheck {
+                pull_request: PullRequestData {
+                    pr_number: number,
+                    repo: repo.clone(),
+                },
                 attempt: 1,
+                priority,
             },
             None,
         );
     }
 
-    fn enqueue_retry_later(&self, queue_item: MergeabilityQueueItem) {
+    fn enqueue_retry(&self, pr_item: PullRequestToCheck) {
         // First attempt = BASE_DELAY
         // Second attempt = BASE_DELAY * 2
         // Third attempt = BASE_DELAY * 3
         // etc.
-        let delay = BASE_DELAY * queue_item.attempt;
+        let delay = BASE_DELAY * pr_item.attempt;
         let expiration = Some(Instant::now() + delay);
-        let next_attempt = queue_item.attempt + 1;
+        let next_attempt = pr_item.attempt + 1;
 
-        self.insert_item(
-            MergeabilityQueueItem {
-                pull_request: queue_item.pull_request,
+        self.insert_pr_item(
+            PullRequestToCheck {
+                pull_request: pr_item.pull_request,
                 attempt: next_attempt,
+                priority: pr_item.priority,
             },
             expiration,
         );
     }
 
-    fn insert_item(&self, item: MergeabilityQueueItem, expiration: Option<Instant>) {
-        let mut queue = self.inner.queue.lock().unwrap();
+    fn insert_pr_item(&self, item: PullRequestToCheck, expiration: Option<Instant>) {
+        let mut queues = self.inner.queues.lock().unwrap();
 
-        // Make sure that we don't ever put the same pull request twice into the queue
+        // Make sure that we don't ever put the same pull request twice into the queues
         // This might seem a bit inefficient, but linearly iterating through e.g. 1000 PRs should
         // be fine.
         // We could maybe reset the attempt counter of the PR if it's "refreshed" from the outside,
         // but that would require using e.g. Cell to mutate the attempt counter through &, which
         // doesn't seem necessary at the moment.
-        if queue.iter().any(|entry| match &entry.0.inner {
-            QueueMessage::Shutdown => false,
-            QueueMessage::Item(i) => i.pull_request == item.pull_request,
-        }) {
+        if queues
+            .iter()
+            .flat_map(|(_, queue)| queue.iter())
+            .any(|entry| entry.0.entry.pull_request == item.pull_request)
+        {
             return;
         }
 
+        let queue = queues.entry(item.priority).or_default();
+
         // Notify when:
-        // 1. The current item expires sooner than the head of the queue
+        // 1. The current item expires sooner than the head of the queue or has higher
+        // priority than it.
         let has_earlier_expiration =
             queue
                 .peek()
@@ -177,9 +226,9 @@ impl MergeabilityQueueSender {
         // 2. The queue was empty before insertion (reader might be waiting)
         let should_notify = queue.is_empty() || expiration.is_none() || has_earlier_expiration;
 
-        queue.push(Reverse(Item {
+        queue.push(Reverse(QueueItem {
             expiration,
-            inner: QueueMessage::Item(item),
+            entry: item,
         }));
 
         if should_notify {
@@ -190,20 +239,22 @@ impl MergeabilityQueueSender {
 
 impl MergeabilityQueueReceiver {
     /// Get the next item from the queue.
-    pub async fn dequeue(&self) -> Option<(MergeabilityQueueItem, MergeabilityQueueSender)> {
+    pub async fn dequeue(&self) -> Option<(PullRequestToCheck, MergeabilityQueueSender)> {
         loop {
             match self.peek_inner() {
+                // Shutdown signal
+                Ok(None) => break None,
                 // Item is ready.
-                Ok(QueueMessage::Item(item)) => {
+                Ok(Some(QueueItem {
+                    entry,
+                    expiration: _,
+                })) => {
                     break Some((
-                        item,
+                        entry,
                         MergeabilityQueueSender {
                             inner: self.inner.clone(),
                         },
                     ));
-                }
-                Ok(QueueMessage::Shutdown) => {
-                    break None;
                 }
                 // Item exists but is not ready, wait until then or until notified of a higher
                 // priority item.
@@ -222,36 +273,64 @@ impl MergeabilityQueueReceiver {
     /// If no item should be processed at this time, returns an optional duration before the next
     /// item should be available.
     /// This duration is not known if the queue is empty.
-    fn peek_inner(&self) -> Result<QueueMessage, Option<Duration>> {
+    fn peek_inner(&self) -> Result<Option<QueueItem>, Option<Duration>> {
         let now = Instant::now();
-        let mut queue = self.inner.queue.lock().unwrap();
+        let mut queues = self.inner.queues.lock().unwrap();
 
-        match queue.peek() {
-            // Immediate item, ready for processing.
-            Some(Reverse(Item {
-                expiration: None, ..
-            })) => {
-                let item = queue.pop().unwrap().0.inner;
-                Ok(item)
+        // Shutdown requested, report end
+        if self
+            .inner
+            .shutdown_requested
+            .load(std::sync::atomic::Ordering::SeqCst)
+        {
+            return Ok(None);
+        }
+
+        let mut sleep_time = None;
+
+        // Iterate queues from highest priority to lowest, trying to find an item to be dequeued
+        for (_, queue) in queues.iter_mut().rev() {
+            match queue.peek() {
+                // Immediate item, ready for processing.
+                Some(Reverse(QueueItem {
+                    expiration: None,
+                    entry: _,
+                })) => {
+                    let item = queue.pop().unwrap().0;
+                    return Ok(Some(item));
+                }
+                // Expiration has passed, ready for processing.
+                Some(Reverse(QueueItem {
+                    expiration: Some(expiration),
+                    ..
+                })) if *expiration <= now => {
+                    let item = queue.pop().unwrap().0;
+                    return Ok(Some(item));
+                }
+                // Scheduled for the future, wait until it's ready.
+                Some(Reverse(QueueItem {
+                    expiration: Some(expiration),
+                    ..
+                })) => {
+                    let wait_time = *expiration - now;
+                    sleep_time = match sleep_time {
+                        None => Some(wait_time),
+                        Some(t) => Some(t.min(wait_time)),
+                    };
+                }
+                // Empty queue, move on to the next one.
+                None => {}
             }
-            // Expiration has passed, ready for processing.
-            Some(Reverse(Item {
-                expiration: Some(expiration),
-                ..
-            })) if *expiration <= now => {
-                let item = queue.pop().unwrap().0.inner;
-                Ok(item)
+        }
+        match sleep_time {
+            Some(time) => {
+                // Some queues are waiting, report sleep time
+                Err(Some(time))
             }
-            // Scheduled for the future, wait until it's ready.
-            Some(Reverse(Item {
-                expiration: Some(expiration),
-                ..
-            })) => {
-                let wait_time = *expiration - now;
-                Err(Some(wait_time))
+            None => {
+                // All queues are empty
+                Err(None)
             }
-            // Empty queue, wait for an item to be added.
-            None => Err(None),
         }
     }
 }
@@ -259,11 +338,12 @@ impl MergeabilityQueueReceiver {
 pub async fn check_mergeability(
     ctx: Arc<BorsContext>,
     mq_tx: MergeabilityQueueSender,
-    mq_item: MergeabilityQueueItem,
+    mq_item: PullRequestToCheck,
 ) -> anyhow::Result<()> {
-    let MergeabilityQueueItem {
+    let PullRequestToCheck {
         ref pull_request,
         ref attempt,
+        priority: _,
     } = mq_item;
 
     if *attempt >= MAX_RETRIES {
@@ -302,7 +382,7 @@ pub async fn check_mergeability(
     if new_mergeable_state == OctocrabMergeableState::Unknown {
         tracing::info!("Mergeability status unknown, scheduling retry.");
 
-        mq_tx.enqueue_retry_later(mq_item);
+        mq_tx.enqueue_retry(mq_item);
 
         return Ok(());
     } else {
@@ -324,17 +404,18 @@ pub async fn check_mergeability(
 #[cfg(test)]
 mod tests {
     use crate::bors::mergeability_queue::{
-        BASE_DELAY, MergeabilityQueueItem, QueuedPullRequest, create_mergeability_queue,
+        BASE_DELAY, MergeabilityCheckPriority, MergeabilityQueueSender, PullRequestData,
+        PullRequestToCheck, create_mergeability_queue,
     };
-    use crate::github::PullRequestNumber;
+    use crate::github::{GithubRepoName, PullRequestNumber};
     use crate::tests::default_repo_name;
 
     #[tokio::test]
     async fn order_by_pr_number() {
         let (tx, rx) = create_mergeability_queue();
-        tx.enqueue_pr(default_repo_name(), 3u64.into());
-        tx.enqueue_pr(default_repo_name(), 1u64.into());
-        tx.enqueue_pr(default_repo_name(), 2u64.into());
+        item(3).enqueue(&tx);
+        item(1).enqueue(&tx);
+        item(2).enqueue(&tx);
 
         for expected in [1, 2, 3] {
             assert_eq!(
@@ -347,8 +428,8 @@ mod tests {
     #[tokio::test]
     async fn immediate_before_delayed() {
         let (tx, rx) = create_mergeability_queue();
-        tx.enqueue_retry_later(item(10, 1));
-        tx.enqueue_pr(default_repo_name(), 2u64.into());
+        item(10).enqueue_retry(&tx, 1);
+        item(2).enqueue(&tx);
 
         for expected in [2, 10] {
             assert_eq!(
@@ -362,22 +443,106 @@ mod tests {
     async fn deduplicate_duplicated_pr() {
         let (tx, rx) = create_mergeability_queue();
         // Make sure that we don't handle the same PR multiple times
-        tx.enqueue_retry_later(item(5, 1));
-        tx.enqueue_pr(default_repo_name(), 5u64.into());
-        tx.enqueue_pr(default_repo_name(), 5u64.into());
+        item(5).enqueue(&tx);
+        item(5).enqueue(&tx);
+        item(5).enqueue_retry(&tx, 1);
 
         rx.dequeue().await.unwrap();
         let res = tokio::time::timeout(BASE_DELAY * 2, rx.dequeue()).await;
         assert!(res.is_err());
     }
 
-    fn item(pr_number: u64, attempt: u32) -> MergeabilityQueueItem {
-        MergeabilityQueueItem {
-            pull_request: QueuedPullRequest {
-                pr_number: PullRequestNumber(pr_number),
+    #[tokio::test]
+    async fn deduplicate_duplicated_pr_across_priorities() {
+        let (tx, rx) = create_mergeability_queue();
+        // Make sure that we don't handle the same PR multiple times
+        item(5).enqueue(&tx);
+        item(5).priority(2).enqueue(&tx);
+        item(5).enqueue_retry(&tx, 1);
+
+        rx.dequeue().await.unwrap();
+        let res = tokio::time::timeout(BASE_DELAY * 2, rx.dequeue()).await;
+        assert!(res.is_err());
+    }
+
+    #[tokio::test]
+    async fn order_by_priority() {
+        let (tx, rx) = create_mergeability_queue();
+        item(3).priority(1).enqueue(&tx);
+        item(1).enqueue(&tx);
+
+        for expected in [3, 1] {
+            assert_eq!(
+                rx.dequeue().await.unwrap().0.pull_request.pr_number.0,
+                expected
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn order_by_priority_expiration() {
+        let (tx, rx) = create_mergeability_queue();
+        item(3).priority(1).enqueue_retry(&tx, 1);
+        item(1).enqueue(&tx);
+        item(2).enqueue(&tx);
+
+        assert_eq!(rx.dequeue().await.unwrap().0.pull_request.pr_number.0, 1);
+
+        // Wait for the higher priority item to have expiration set
+        tokio::time::sleep(BASE_DELAY * 2).await;
+
+        // And check that it is returned before the immediate item with lower priority
+        for expected in [3, 2] {
+            assert_eq!(
+                rx.dequeue().await.unwrap().0.pull_request.pr_number.0,
+                expected
+            );
+        }
+    }
+
+    fn item(pr: u64) -> ItemToCheck {
+        ItemToCheck::default().pr(pr)
+    }
+
+    struct ItemToCheck {
+        repo: GithubRepoName,
+        number: PullRequestNumber,
+        priority: MergeabilityCheckPriority,
+    }
+
+    impl ItemToCheck {
+        fn pr(mut self, number: u64) -> Self {
+            self.number = PullRequestNumber(number);
+            self
+        }
+        fn priority(mut self, priority: u32) -> Self {
+            self.priority = MergeabilityCheckPriority(priority);
+            self
+        }
+
+        fn enqueue(&self, tx: &MergeabilityQueueSender) {
+            tx.enqueue(&self.repo, self.number, self.priority);
+        }
+
+        fn enqueue_retry(&self, tx: &MergeabilityQueueSender, attempt: u32) {
+            tx.enqueue_retry(PullRequestToCheck {
+                pull_request: PullRequestData {
+                    repo: self.repo.clone(),
+                    pr_number: self.number,
+                },
+                attempt,
+                priority: self.priority,
+            });
+        }
+    }
+
+    impl Default for ItemToCheck {
+        fn default() -> Self {
+            Self {
                 repo: default_repo_name(),
-            },
-            attempt,
+                number: PullRequestNumber(1),
+                priority: MergeabilityCheckPriority::default(),
+            }
         }
     }
 }

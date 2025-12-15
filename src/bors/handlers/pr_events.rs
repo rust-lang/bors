@@ -12,7 +12,7 @@ use crate::bors::handlers::workflow::{AutoBuildCancelReason, maybe_cancel_auto_b
 use crate::bors::merge_queue::MergeQueueSender;
 use crate::bors::mergeability_queue::MergeabilityQueueSender;
 use crate::bors::{Comment, PullRequestStatus, RepositoryState};
-use crate::database::MergeableState;
+use crate::database::{MergeableState, UpsertPullRequestParams};
 use crate::github::{CommitSha, PullRequestNumber};
 use crate::utils::text::pluralize;
 use std::sync::Arc;
@@ -34,7 +34,7 @@ pub(super) async fn handle_pull_request_edited(
         return Ok(());
     };
 
-    mergeability_queue.enqueue_pr(pr_model.repository.clone(), pr_number);
+    mergeability_queue.enqueue_pr(&pr_model);
 
     if !pr_model.is_approved() {
         return Ok(());
@@ -56,7 +56,7 @@ pub(super) async fn handle_push_to_pull_request(
         .upsert_pull_request(repo_state.repository(), pr.clone().into())
         .await?;
 
-    mergeability_queue.enqueue_pr(repo_state.repository().clone(), pr_number);
+    mergeability_queue.enqueue_pr(&pr_model);
 
     let auto_build_cancel_message = maybe_cancel_auto_build(
         &repo_state.client,
@@ -110,20 +110,24 @@ pub(super) async fn handle_pull_request_opened(
         .iter()
         .map(|user| user.username.clone())
         .collect();
-    db.create_pull_request(
-        repo_state.repository(),
-        payload.pull_request.number,
-        &payload.pull_request.title,
-        &payload.pull_request.author.username,
-        &assignees,
-        &payload.pull_request.base.name,
-        pr_status,
-    )
-    .await?;
+    let pr = db
+        .upsert_pull_request(
+            repo_state.repository(),
+            UpsertPullRequestParams {
+                pr_number: payload.pull_request.number,
+                title: payload.pull_request.title.clone(),
+                author: payload.pull_request.author.username.clone(),
+                assignees,
+                base_branch: payload.pull_request.base.name.clone(),
+                mergeable_state: MergeableState::Unknown,
+                pr_status,
+            },
+        )
+        .await?;
 
     process_pr_description_commands(&payload, repo_state.clone(), db, ctx, merge_queue_tx).await?;
 
-    mergeability_queue.enqueue_pr(repo_state.repository().clone(), payload.pull_request.number);
+    mergeability_queue.enqueue_pr(&pr);
 
     Ok(())
 }
@@ -161,11 +165,11 @@ pub(super) async fn handle_pull_request_reopened(
     payload: PullRequestReopened,
 ) -> anyhow::Result<()> {
     let pr = &payload.pull_request;
-    let pr_number = pr.number;
-    db.upsert_pull_request(repo_state.repository(), pr.clone().into())
+    let pr = db
+        .upsert_pull_request(repo_state.repository(), pr.clone().into())
         .await?;
 
-    mergeability_queue.enqueue_pr(repo_state.repository().clone(), pr_number);
+    mergeability_queue.enqueue_pr(&pr);
 
     Ok(())
 }
@@ -257,7 +261,7 @@ pub(super) async fn handle_push_to_branch(
         );
 
         for pr in affected_prs {
-            mergeability_queue.enqueue_pr(repo_state.repository().clone(), pr.number);
+            mergeability_queue.enqueue_pr(&pr);
         }
     }
 
