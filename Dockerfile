@@ -1,4 +1,4 @@
-FROM rust:1.88 AS base
+FROM rust:1.92 AS base
 
 ENV CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse
 
@@ -26,7 +26,7 @@ COPY templates templates
 
 RUN cargo build --release
 
-FROM ubuntu:22.04 AS runtime
+FROM ubuntu:24.04 AS runtime
 
 WORKDIR /
 
