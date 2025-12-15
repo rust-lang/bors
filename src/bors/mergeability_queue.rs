@@ -9,7 +9,9 @@
 //! be checked in increasing intervals (after 5s, then after 10s, then after 15s, etc.), until we
 //! either get a known mergeability status from GH or until we run out of retries.
 
-use super::BorsContext;
+use super::{BorsContext, RepositoryState};
+use crate::PgDbClient;
+use crate::bors::comment::conflict_comment;
 use crate::database::{MergeableState, OctocrabMergeableState, PullRequestModel};
 use crate::github::{GithubRepoName, PullRequestNumber};
 use std::cmp::Reverse;
@@ -368,8 +370,8 @@ pub async fn check_mergeability(
         ref pull_request,
         ref attempt,
         priority: _,
-        conflict_source: _,
-        was_previously_mergeable: _,
+        conflict_source,
+        was_previously_mergeable,
     } = mq_item;
 
     if *attempt >= MAX_RETRIES {
@@ -415,15 +417,46 @@ pub async fn check_mergeability(
         tracing::info!("Received mergeability status {new_mergeable_state:?}");
     }
 
+    let new_mergeable_state: MergeableState = new_mergeable_state.into();
     // We know the mergeability status, so update it in the DB
     ctx.db
         .set_pr_mergeable_state(
             repo_state.repository(),
             fetched_pr.number,
-            new_mergeable_state.into(),
+            new_mergeable_state.clone(),
         )
         .await?;
 
+    if new_mergeable_state == MergeableState::HasConflicts && was_previously_mergeable {
+        handle_pr_conflict(&repo_state, &ctx.db, pull_request, conflict_source).await?;
+    }
+
+    Ok(())
+}
+
+async fn handle_pr_conflict(
+    repo_state: &RepositoryState,
+    db: &PgDbClient,
+    pr: &PullRequestData,
+    conflict_source: Option<PullRequestNumber>,
+) -> anyhow::Result<()> {
+    tracing::info!("Pull request {pr:?} was likely unmergeable (source: {conflict_source:?})");
+
+    let Some(pr) = db.get_pull_request(&pr.repo, pr.pr_number).await? else {
+        return Err(anyhow::anyhow!("Pull request {pr:?} was not found"));
+    };
+
+    // Unapprove PR
+    let unapproved = if pr.is_approved() {
+        db.unapprove(&pr).await?;
+        true
+    } else {
+        false
+    };
+    repo_state
+        .client
+        .post_comment(pr.number, conflict_comment(conflict_source, unapproved))
+        .await?;
     Ok(())
 }
 
