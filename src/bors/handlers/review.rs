@@ -370,14 +370,12 @@ async fn notify_of_delegation(
 mod tests {
     use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
 
+    use crate::bors::TRY_BRANCH_NAME;
     use crate::bors::merge_queue::AUTO_BUILD_CHECK_RUN_NAME;
     use crate::database::{DelegatedPermission, TreeState};
     use crate::tests::BorsTester;
     use crate::{
-        bors::{
-            RollupMode,
-            handlers::{TRY_BRANCH_NAME, trybuild::TRY_MERGE_BRANCH_NAME},
-        },
+        bors::{RollupMode, handlers::trybuild::TRY_MERGE_BRANCH_NAME},
         tests::{
             BorsBuilder, Comment, GitHubState, Permissions, User, default_repo_name, run_test,
         },

@@ -19,9 +19,9 @@ use crate::bors::handlers::retry::command_retry;
 use crate::bors::handlers::review::{
     command_approve, command_close_tree, command_open_tree, command_unapprove,
 };
-use crate::bors::handlers::trybuild::{TRY_BRANCH_NAME, command_try_build, command_try_cancel};
+use crate::bors::handlers::trybuild::{command_try_build, command_try_cancel};
 use crate::bors::handlers::workflow::{handle_workflow_completed, handle_workflow_started};
-use crate::bors::merge_queue::{AUTO_BRANCH_NAME, MergeQueueSender};
+use crate::bors::merge_queue::MergeQueueSender;
 use crate::bors::{BorsContext, CommandPrefix, Comment, RepositoryState};
 use crate::database::{DelegatedPermission, PullRequestModel};
 use crate::github::api::client::HideCommentReason;
@@ -589,28 +589,6 @@ async fn reload_repos(
         }
     }
     Ok(())
-}
-
-/// Is this branch interesting for the bot?
-fn is_bors_observed_branch(branch: &str) -> bool {
-    branch == TRY_BRANCH_NAME || branch == AUTO_BRANCH_NAME
-}
-
-#[derive(PartialEq, Eq, Copy, Clone, Debug)]
-pub enum BuildKind {
-    Try,
-    Auto,
-}
-
-/// Get the build type based on the branch where it happened.
-pub fn get_build_kind(branch: &str) -> Option<BuildKind> {
-    if branch == TRY_BRANCH_NAME {
-        Some(BuildKind::Try)
-    } else if branch == AUTO_BRANCH_NAME {
-        Some(BuildKind::Auto)
-    } else {
-        None
-    }
 }
 
 /// Deny permission for a request.

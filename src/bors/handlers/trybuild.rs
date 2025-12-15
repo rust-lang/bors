@@ -11,7 +11,7 @@ use crate::bors::comment::{
     cant_find_last_parent_comment, merge_conflict_comment, try_build_started_comment,
 };
 use crate::bors::handlers::workflow::{CancelBuildError, cancel_build};
-use crate::bors::{MergeType, RepositoryState, create_merge_commit_message};
+use crate::bors::{MergeType, RepositoryState, TRY_BRANCH_NAME, create_merge_commit_message};
 use crate::database::{BuildModel, BuildStatus, PullRequestModel};
 use crate::github::api::client::{CheckRunOutput, GithubRepositoryClient};
 use crate::github::api::operations::ForcePush;
@@ -28,9 +28,6 @@ use tracing::log;
 // Because this action (reset + merge) is not atomic, this branch should not run CI checks to avoid
 // starting them twice.
 pub(super) const TRY_MERGE_BRANCH_NAME: &str = "automation/bors/try-merge";
-
-// This branch should run CI checks.
-pub(super) const TRY_BRANCH_NAME: &str = "automation/bors/try";
 
 // The name of the check run seen in the GitHub UI.
 pub(super) const TRY_BUILD_CHECK_RUN_NAME: &str = "Bors try build";

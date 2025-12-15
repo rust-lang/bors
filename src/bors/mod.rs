@@ -31,6 +31,19 @@ use crate::bors::command::BorsCommand;
 use crate::database::{WorkflowModel, WorkflowStatus};
 pub use command::CommandPrefix;
 
+/// Branch where CI checks run for auto builds.
+/// This branch should run CI checks.
+pub const AUTO_BRANCH_NAME: &str = "automation/bors/auto";
+
+/// This branch should run CI checks.
+pub const TRY_BRANCH_NAME: &str = "automation/bors/try";
+
+#[derive(PartialEq, Eq, Copy, Clone, Debug)]
+pub enum BuildKind {
+    Try,
+    Auto,
+}
+
 /// Format the bors command help in Markdown format.
 pub fn format_help() -> &'static str {
     // The help is generated manually to have a nicer structure.
@@ -225,4 +238,20 @@ pub fn create_merge_commit_message(pr: handlers::PullRequestData, merge_type: Me
         MergeType::Auto => {}
     }
     message
+}
+
+/// Is this branch interesting for the bot?
+pub fn is_bors_observed_branch(branch: &str) -> bool {
+    branch == TRY_BRANCH_NAME || branch == AUTO_BRANCH_NAME
+}
+
+/// Get the build type based on the branch where it happened.
+pub fn get_build_kind(branch: &str) -> Option<BuildKind> {
+    if branch == TRY_BRANCH_NAME {
+        Some(BuildKind::Try)
+    } else if branch == AUTO_BRANCH_NAME {
+        Some(BuildKind::Auto)
+    } else {
+        None
+    }
 }

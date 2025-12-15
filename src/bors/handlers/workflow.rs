@@ -1,13 +1,12 @@
-use super::trybuild::TRY_BRANCH_NAME;
 use crate::PgDbClient;
 use crate::bors::comment::{
     CommentTag, append_workflow_links_to_comment, build_failed_comment, try_build_succeeded_comment,
 };
 use crate::bors::event::{WorkflowRunCompleted, WorkflowRunStarted};
+use crate::bors::handlers::hide_try_build_started_comments;
 use crate::bors::handlers::labels::handle_label_trigger;
-use crate::bors::handlers::{BuildKind, is_bors_observed_branch};
-use crate::bors::handlers::{get_build_kind, hide_try_build_started_comments};
 use crate::bors::merge_queue::MergeQueueSender;
+use crate::bors::{BuildKind, TRY_BRANCH_NAME, get_build_kind, is_bors_observed_branch};
 use crate::bors::{FailedWorkflowRun, RepositoryState, WorkflowRun};
 use crate::database::{
     BuildModel, BuildStatus, PullRequestModel, QueueStatus, WorkflowModel, WorkflowStatus,

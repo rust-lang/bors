@@ -11,7 +11,7 @@ use crate::bors::comment::{
     auto_build_push_failed_comment, auto_build_started_comment, auto_build_succeeded_comment,
     merge_conflict_comment,
 };
-use crate::bors::{PullRequestStatus, RepositoryState};
+use crate::bors::{AUTO_BRANCH_NAME, PullRequestStatus, RepositoryState};
 use crate::database::{
     ApprovalInfo, BuildModel, BuildStatus, MergeableState, PullRequestModel, QueueStatus,
 };
@@ -82,10 +82,6 @@ impl MergeQueueSender {
 /// Branch used for performing merge operations.
 /// This branch should not run CI checks.
 pub(super) const AUTO_MERGE_BRANCH_NAME: &str = "automation/bors/auto-merge";
-
-/// Branch where CI checks run for auto builds.
-/// This branch should run CI checks.
-pub(super) const AUTO_BRANCH_NAME: &str = "automation/bors/auto";
 
 // The name of the check run seen in the GitHub UI.
 pub(super) const AUTO_BUILD_CHECK_RUN_NAME: &str = "Bors auto build";
