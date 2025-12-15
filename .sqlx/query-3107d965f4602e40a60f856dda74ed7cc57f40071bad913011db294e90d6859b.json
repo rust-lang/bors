@@ -112,6 +112,10 @@
                 [
                   "check_run_id",
                   "Int8"
+                ],
+                [
+                  "kind",
+                  "Text"
                 ]
               ]
             }
@@ -157,6 +161,10 @@
                 [
                   "check_run_id",
                   "Int8"
+                ],
+                [
+                  "kind",
+                  "Text"
                 ]
               ]
             }
