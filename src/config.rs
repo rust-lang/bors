@@ -36,6 +36,10 @@ pub struct RepositoryConfig {
     /// Defaults to false.
     #[serde(default)]
     pub merge_queue_enabled: bool,
+    /// Whether merge conflicts should be reported on PRs.
+    /// Defaults to false.
+    #[serde(default)]
+    pub report_merge_conflicts: bool,
 }
 
 /// Load a repository config from TOML.

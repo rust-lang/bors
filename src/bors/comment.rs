@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use crate::bors::FailedWorkflowRun;
 use crate::bors::command::CommandPrefix;
-use crate::github::GithubRepoName;
+use crate::github::{GithubRepoName, PullRequestNumber};
 use crate::utils::text::pluralize;
 use crate::{
     database::{WorkflowModel, WorkflowStatus},
@@ -366,5 +366,19 @@ Pushing {merge_sha} to `{base_ref}`..."#
 pub fn auto_build_push_failed_comment(error: &str) -> Comment {
     Comment::new(format!(
         ":eyes: Test was successful, but fast-forwarding failed: {error}"
+    ))
+}
+
+pub fn conflict_comment(source: Option<PullRequestNumber>, was_unapproved: bool) -> Comment {
+    Comment::new(format!(
+        r#":umbrella: The latest upstream changes{} made this pull request unmergeable. Please [resolve the merge conflicts](https://rustc-dev-guide.rust-lang.org/git.html#rebasing-and-conflicts).{}"#,
+        source
+            .map(|n| format!(" (presumably #{n})"))
+            .unwrap_or_default(),
+        if was_unapproved {
+            "\n\nThis pull request was unapproved."
+        } else {
+            ""
+        }
     ))
 }

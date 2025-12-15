@@ -89,7 +89,8 @@ impl PgDbClient {
 
     /// Sets the mergeability status of all PRs with the given `base_branch` to
     /// `mergeability_state`.
-    /// Returns the list of updated pull requests targeting this base branch.
+    /// Returns the list of pull requests that target this base branch.
+    /// Their state will be set to BEFORE the mergeability change was made.
     pub async fn update_mergeable_states_by_base_branch(
         &self,
         repo: &GithubRepoName,
@@ -202,10 +203,10 @@ impl PgDbClient {
     pub async fn find_build(
         &self,
         repo: &GithubRepoName,
-        branch: String,
+        branch: &str,
         commit_sha: CommitSha,
     ) -> anyhow::Result<Option<BuildModel>> {
-        find_build(&self.pool, repo, &branch, &commit_sha).await
+        find_build(&self.pool, repo, branch, &commit_sha).await
     }
 
     pub async fn get_pending_builds(

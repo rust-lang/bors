@@ -7,6 +7,10 @@ timeout = 3600
 # (Optional, defaults to false)
 merge_queue_enabled = true
 
+# Whether merge conflicts should be reported on PRs.
+# (Optional, defaults to false)
+report_merge_conflicts = true
+
 # Labels that will block approval when present on a PR
 # (Optional)
 labels_blocking_approval = ["final-comment-period", "proposed-final-comment-period"]

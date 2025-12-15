@@ -46,6 +46,7 @@ struct WebhookPushToBranchEvent {
     repository: Repository,
     #[serde(rename = "ref")]
     ref_field: String,
+    after: String,
 }
 
 /// This struct is used to extract the repository and user from a GitHub webhook event.
@@ -182,7 +183,11 @@ fn parse_push_event(body: &[u8]) -> anyhow::Result<Option<BorsEvent>> {
     };
 
     Ok(Some(BorsEvent::Repository(
-        BorsRepositoryEvent::PushToBranch(PushToBranch { repository, branch }),
+        BorsRepositoryEvent::PushToBranch(PushToBranch {
+            repository,
+            branch,
+            sha: payload.after,
+        }),
     )))
 }
 
@@ -482,22 +487,23 @@ mod tests {
         insta::assert_debug_snapshot!(
             check_webhook("webhook/push.json", "push").await,
             @r#"
-            Ok(
-                GitHubWebhook(
-                    Repository(
-                        PushToBranch(
-                            PushToBranch {
-                                repository: GithubRepoName {
-                                    owner: "kobzol",
-                                    name: "bors-kindergarten",
-                                },
-                                branch: "main",
+        Ok(
+            GitHubWebhook(
+                Repository(
+                    PushToBranch(
+                        PushToBranch {
+                            repository: GithubRepoName {
+                                owner: "kobzol",
+                                name: "bors-kindergarten",
                             },
-                        ),
+                            branch: "main",
+                            sha: "bc7370e473896a94d40a7dff71f197a3ff0208f5",
+                        },
                     ),
                 ),
-            )
-            "#
+            ),
+        )
+        "#
         );
     }
 

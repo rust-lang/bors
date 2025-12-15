@@ -607,7 +607,7 @@ merge_queue_enabled = false
                     .db()
                     .find_build(
                         &default_repo_name(),
-                        AUTO_BRANCH_NAME.to_string(),
+                        AUTO_BRANCH_NAME,
                         CommitSha(tester.auto_branch().await.get_sha().to_string()),
                     )
                     .await?

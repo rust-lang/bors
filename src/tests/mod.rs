@@ -352,8 +352,8 @@ impl BorsTester {
             .get_commit_message(branch.get_sha())
     }
 
-    pub async fn push_to_branch(&mut self, branch: &str) -> anyhow::Result<()> {
-        self.send_webhook("push", GitHubPushEventPayload::new(branch))
+    pub async fn push_to_branch(&mut self, branch: &str, sha: &str) -> anyhow::Result<()> {
+        self.send_webhook("push", GitHubPushEventPayload::new(branch, sha))
             .await
     }
 

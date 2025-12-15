@@ -115,7 +115,7 @@ pub async fn reload_mergeability_status(
     );
 
     for pr in prs {
-        mergeability_queue.enqueue_pr(&pr);
+        mergeability_queue.enqueue_pr(&pr, None);
     }
 
     Ok(())

@@ -277,14 +277,19 @@ pub(crate) async fn update_mergeable_states_by_base_branch(
     measure_db_query("update_mergeable_states_by_base_branch", || async {
         let result = sqlx::query_as!(
             PullRequestModel,
+            // The self-join is performed to be able to read the original values of the row
+            // *before* the update has been performed.
+            // See https://stackoverflow.com/a/7927957/1107768
             r#"
             WITH pr AS (
-                UPDATE pull_request
+                UPDATE pull_request AS pr1
                 SET mergeable_state = $1
-                WHERE repository = $2
-                    AND base_branch = $3
-                    AND status IN ('open', 'draft')
-                RETURNING pull_request.*
+                FROM pull_request AS pr2
+                WHERE pr1.id = pr2.id
+                    AND pr1.repository = $2
+                    AND pr1.base_branch = $3
+                    AND pr1.status IN ('open', 'draft')
+                RETURNING pr2.*
             )
             SELECT
                 pr.id,
