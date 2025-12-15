@@ -239,19 +239,3 @@ pub fn create_merge_commit_message(pr: handlers::PullRequestData, merge_type: Me
     }
     message
 }
-
-/// Is this branch interesting for the bot?
-pub fn is_bors_observed_branch(branch: &str) -> bool {
-    branch == TRY_BRANCH_NAME || branch == AUTO_BRANCH_NAME
-}
-
-/// Get the build type based on the branch where it happened.
-pub fn get_build_kind(branch: &str) -> Option<BuildKind> {
-    if branch == TRY_BRANCH_NAME {
-        Some(BuildKind::Try)
-    } else if branch == AUTO_BRANCH_NAME {
-        Some(BuildKind::Auto)
-    } else {
-        None
-    }
-}

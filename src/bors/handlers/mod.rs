@@ -22,7 +22,9 @@ use crate::bors::handlers::review::{
 use crate::bors::handlers::trybuild::{command_try_build, command_try_cancel};
 use crate::bors::handlers::workflow::{handle_workflow_completed, handle_workflow_started};
 use crate::bors::merge_queue::MergeQueueSender;
-use crate::bors::{BorsContext, CommandPrefix, Comment, RepositoryState};
+use crate::bors::{
+    AUTO_BRANCH_NAME, BorsContext, CommandPrefix, Comment, RepositoryState, TRY_BRANCH_NAME,
+};
 use crate::database::{DelegatedPermission, PullRequestModel};
 use crate::github::api::client::HideCommentReason;
 use crate::github::{GithubUser, LabelTrigger, PullRequest, PullRequestNumber};
@@ -672,6 +674,11 @@ async fn hide_try_build_started_comments(
         db.delete_tagged_bot_comment(&comment).await?;
     }
     Ok(())
+}
+
+/// Is this branch interesting for the bot?
+fn is_bors_observed_branch(branch: &str) -> bool {
+    branch == TRY_BRANCH_NAME || branch == AUTO_BRANCH_NAME
 }
 
 #[cfg(test)]
