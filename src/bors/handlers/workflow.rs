@@ -5,8 +5,8 @@ use crate::bors::comment::{
 };
 use crate::bors::event::{WorkflowRunCompleted, WorkflowRunStarted};
 use crate::bors::handlers::labels::handle_label_trigger;
-use crate::bors::handlers::{BuildType, is_bors_observed_branch};
-use crate::bors::handlers::{get_build_type, hide_try_build_started_comments};
+use crate::bors::handlers::{BuildKind, is_bors_observed_branch};
+use crate::bors::handlers::{get_build_kind, hide_try_build_started_comments};
 use crate::bors::merge_queue::MergeQueueSender;
 use crate::bors::{FailedWorkflowRun, RepositoryState, WorkflowRun};
 use crate::database::{
@@ -168,7 +168,7 @@ async fn maybe_complete_build(
     merge_queue_tx: &MergeQueueSender,
     error_context: Option<String>,
 ) -> anyhow::Result<()> {
-    let Some(build_type) = get_build_type(&payload.branch) else {
+    let Some(build_type) = get_build_kind(&payload.branch) else {
         return Ok(());
     };
 
@@ -254,14 +254,14 @@ async fn maybe_complete_build(
         BuildStatus::Failure
     };
     let trigger = match build_type {
-        BuildType::Try => {
+        BuildKind::Try => {
             if !build_succeeded {
                 Some(LabelTrigger::TryBuildFailed)
             } else {
                 None
             }
         }
-        BuildType::Auto => Some(if build_succeeded {
+        BuildKind::Auto => Some(if build_succeeded {
             LabelTrigger::AutoBuildSucceeded
         } else {
             LabelTrigger::AutoBuildFailed
@@ -290,7 +290,7 @@ async fn maybe_complete_build(
     }
 
     // Trigger merge queue when an auto build completes
-    if build_type == BuildType::Auto {
+    if build_type == BuildKind::Auto {
         merge_queue_tx.notify().await?;
     }
 
@@ -299,7 +299,7 @@ async fn maybe_complete_build(
     let comment_opt = if build_succeeded {
         tracing::info!("Build succeeded for PR {pr_num}");
 
-        if build_type == BuildType::Try {
+        if build_type == BuildKind::Try {
             Some(try_build_succeeded_comment(
                 &db_workflow_runs,
                 payload.commit_sha,
@@ -339,7 +339,7 @@ async fn maybe_complete_build(
         ))
     };
 
-    if build_type == BuildType::Try {
+    if build_type == BuildKind::Try {
         hide_try_build_started_comments(repo, db, &pr).await?;
     }
 

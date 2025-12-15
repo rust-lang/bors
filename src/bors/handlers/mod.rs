@@ -597,17 +597,17 @@ fn is_bors_observed_branch(branch: &str) -> bool {
 }
 
 #[derive(PartialEq, Eq, Copy, Clone, Debug)]
-pub enum BuildType {
+pub enum BuildKind {
     Try,
     Auto,
 }
 
 /// Get the build type based on the branch where it happened.
-pub fn get_build_type(branch: &str) -> Option<BuildType> {
+pub fn get_build_kind(branch: &str) -> Option<BuildKind> {
     if branch == TRY_BRANCH_NAME {
-        Some(BuildType::Try)
+        Some(BuildKind::Try)
     } else if branch == AUTO_BRANCH_NAME {
-        Some(BuildType::Auto)
+        Some(BuildKind::Auto)
     } else {
         None
     }
