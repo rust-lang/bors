@@ -153,14 +153,15 @@ async fn consume_mergeability_queue(
     ctx: Arc<BorsContext>,
     mergeability_queue_rx: MergeabilityQueueReceiver,
 ) {
+    // We do not receive the sender here, but rather take it from dequeue every time.
+    // Because when the last sender disappears, we want to end this loop, but that wouldn't work
+    // if we also had a sender in this function.
     while let Some((mq_item, mq_tx)) = mergeability_queue_rx.dequeue().await {
         let ctx = ctx.clone();
 
         let span = tracing::debug_span!(
             "Mergeability check",
-            repo = mq_item.pull_request.repo.to_string(),
-            pr = mq_item.pull_request.pr_number.0,
-            attempt = mq_item.attempt
+            item = ?mq_item
         );
         if let Err(error) = check_mergeability(ctx, mq_tx, mq_item)
             .instrument(span.clone())
