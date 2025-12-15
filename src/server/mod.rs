@@ -294,7 +294,7 @@ pub async fn queue_handler(
                     QueueStatus::Approved(..) => (1, 0),
                     QueueStatus::ReadyForMerge(..) => (1, 0),
                     QueueStatus::Pending(..) => (1, 0),
-                    QueueStatus::Stalled(..) => (0, 1),
+                    QueueStatus::Failed(..) => (0, 1),
                     QueueStatus::NotApproved => (0, 0),
                 };
 

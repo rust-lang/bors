@@ -187,7 +187,7 @@ pub enum QueueStatus {
     /// Approved with running auto build.
     Pending(ApprovalInfo, BuildModel),
     /// Approved with failed auto build.
-    Stalled(ApprovalInfo, BuildModel),
+    Failed(ApprovalInfo, BuildModel),
     /// Approved with no auto build started yet or a failed auto build was reset
     /// with `@bors retry`.
     Approved(ApprovalInfo),
@@ -441,7 +441,7 @@ impl PullRequestModel {
                         QueueStatus::ReadyForMerge(approval_info.clone(), build.clone())
                     }
                     BuildStatus::Failure | BuildStatus::Cancelled | BuildStatus::Timeouted => {
-                        QueueStatus::Stalled(approval_info.clone(), build.clone())
+                        QueueStatus::Failed(approval_info.clone(), build.clone())
                     }
                 },
                 None => QueueStatus::Approved(approval_info.clone()),
