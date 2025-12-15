@@ -160,6 +160,7 @@ pub struct PullRequestUnassigned {
 pub struct PushToBranch {
     pub repository: GithubRepoName,
     pub branch: String,
+    pub sha: String,
 }
 
 #[derive(Debug)]
