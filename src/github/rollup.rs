@@ -2,6 +2,7 @@ use super::GithubRepoName;
 use super::error::AppError;
 use crate::PgDbClient;
 use crate::github::oauth::OAuthClient;
+use anyhow::Context;
 use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Redirect};
@@ -22,7 +23,7 @@ pub struct OAuthCallbackQuery {
     state: String,
 }
 
-#[derive(serde::Deserialize)]
+#[derive(serde::Serialize, serde::Deserialize)]
 struct OAuthRollupState {
     pr_nums: Vec<u32>,
     repo_name: String,
@@ -65,10 +66,10 @@ pub async fn oauth_callback_handler(
             Ok(Redirect::temporary(&pr_url).into_response())
         }
         Err(error) => {
-            tracing::error!("Failed to create rollup: {error}");
+            tracing::error!("Failed to create rollup: {error:?}");
             Ok((
                 StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to create rollup: {error}"),
+                format!("Failed to create rollup: {error:?}"),
             )
                 .into_response())
         }
@@ -88,7 +89,11 @@ async fn create_rollup(
         pr_nums,
     } = rollup_state;
 
-    let user = user_client.current().user().await?;
+    let user = user_client
+        .current()
+        .user()
+        .await
+        .context("Cannot get user authenticated with OAuth")?;
     let username = user.login;
 
     tracing::info!("User {username} is creating a rollup with PRs: {pr_nums:?}");
@@ -256,4 +261,47 @@ async fn create_rollup(
         .to_string();
 
     Ok(pr_url)
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::github::rollup::OAuthRollupState;
+    use crate::github::{GithubRepoName, PullRequestNumber};
+    use crate::tests::{ApiRequest, BorsTester, default_repo_name, run_test};
+    use http::StatusCode;
+
+    #[sqlx::test]
+    async fn create_rollup_missing_fork(pool: sqlx::PgPool) {
+        run_test(pool, async |tester: &mut BorsTester| {
+            let pr1 = tester.open_pr(default_repo_name(), |_| {}).await?;
+            let pr2 = tester.open_pr(default_repo_name(), |_| {}).await?;
+
+            let repo_name = default_repo_name();
+            tester
+                .api_request(rollup_request(
+                    "rolluper",
+                    repo_name.clone(),
+                    &[pr1.number, pr2.number],
+                ))
+                .await?
+                .assert_status(StatusCode::INTERNAL_SERVER_ERROR)
+                .assert_body_contains(&format!(
+                    "You must have a fork of rolluper/{} named borstest under your account",
+                    repo_name.name()
+                ));
+            Ok(())
+        })
+        .await;
+    }
+
+    fn rollup_request(code: &str, repo: GithubRepoName, prs: &[PullRequestNumber]) -> ApiRequest {
+        let state = OAuthRollupState {
+            pr_nums: prs.iter().map(|v| v.0 as u32).collect(),
+            repo_name: repo.name,
+            repo_owner: repo.owner,
+        };
+        ApiRequest::get("/oauth/callback")
+            .query("code", code)
+            .query("state", &serde_json::to_string(&state).unwrap())
+    }
 }

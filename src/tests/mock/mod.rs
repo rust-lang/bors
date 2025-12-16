@@ -4,7 +4,7 @@ use crate::tests::mock::app::{AppHandler, default_app_id};
 use crate::tests::mock::permissions::TeamApiMockServer;
 use crate::tests::mock::repository::{mock_repo, mock_repo_list};
 use crate::tests::{GitHub, User};
-use crate::{TeamApiClient, create_github_client};
+use crate::{OAuthClient, OAuthConfig, TeamApiClient, create_github_client};
 use graphql_parser::query::{Definition, Document, OperationDefinition, Selection};
 use octocrab::Octocrab;
 use regex::Regex;
@@ -18,11 +18,13 @@ use wiremock::{Mock, MockServer, Request, ResponseTemplate};
 
 mod app;
 mod comment;
+mod oauth;
 mod permissions;
 mod pull_request;
 mod repository;
 mod workflow;
 
+use crate::tests::mock::oauth::mock_oauth;
 pub use comment::GitHubIssueCommentEventPayload;
 pub use pull_request::{
     GitHubPullRequestEventPayload, GitHubPushEventPayload, PullRequestChangeEvent,
@@ -124,6 +126,10 @@ impl ExternalHttpMock {
     pub fn team_api_client(&self) -> TeamApiClient {
         self.team_api_server.client()
     }
+
+    pub fn oauth_client(&self, config: OAuthConfig) -> OAuthClient {
+        OAuthClient::new(config, self.gh_server.mock_server.uri())
+    }
 }
 
 pub struct GitHubMockServer {
@@ -138,6 +144,7 @@ impl GitHubMockServer {
         {
             let gh_locked = github.lock().await;
             mock_repo_list(&gh_locked, &mock_server).await;
+            mock_oauth(&gh_locked, &mock_server).await;
             mock_graphql(github.clone(), &mock_server).await;
 
             // Repositories are mocked separately to make it easier to

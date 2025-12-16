@@ -52,6 +52,7 @@ impl OAuthClient {
         tracing::info!("Retrieved OAuth access token");
 
         let user_client = OctocrabBuilder::new()
+            .base_uri(&self.github_base_url)?
             .user_access_token(access_token.clone())
             .build()?;
 
@@ -77,7 +78,7 @@ impl OAuthConfig {
         &self.client_id
     }
 
-    fn client_secret(&self) -> &str {
+    pub fn client_secret(&self) -> &str {
         self.client_secret.expose_secret()
     }
 }

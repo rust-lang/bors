@@ -342,7 +342,7 @@ pub async fn github_webhook_handler(
 
 #[cfg(test)]
 mod tests {
-    use crate::tests::default_repo_name;
+    use crate::tests::{ApiRequest, default_repo_name};
     use crate::tests::{BorsTester, run_test};
 
     #[sqlx::test]
@@ -350,8 +350,10 @@ mod tests {
         run_test(pool, async |tester: &mut BorsTester| {
             tester.approve(()).await?;
             let response = tester
-                .rest_api(&format!("/api/queue/{}", default_repo_name().name()))
-                .await?;
+                .api_request(ApiRequest::get(&format!("/api/queue/{}", default_repo_name().name())))
+                .await?
+                .assert_ok()
+                .into_body();
             insta::assert_snapshot!(response, @r#"[{"number":1,"title":"Title of PR 1","author":"default-user","status":"open","base_branch":"main","priority":null,"approver":"default-user","try_build":null,"auto_build":null}]"#);
             Ok(())
         })
