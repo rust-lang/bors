@@ -1,6 +1,6 @@
-use crate::tests::WorkflowEvent;
 use crate::tests::github::WorkflowEventKind;
 use crate::tests::mock::repository::GitHubRepository;
+use crate::tests::{Repo, WorkflowEvent};
 use chrono::{DateTime, Utc};
 use octocrab::models::{CheckSuiteId, RunId, WorkflowId};
 use serde::Serialize;
@@ -13,9 +13,9 @@ pub struct GitHubWorkflowEventPayload {
     repository: GitHubRepository,
 }
 
-impl From<WorkflowEvent> for GitHubWorkflowEventPayload {
-    fn from(value: WorkflowEvent) -> Self {
-        let WorkflowEvent { event, workflow } = value;
+impl GitHubWorkflowEventPayload {
+    pub fn new(repo: &Repo, event: WorkflowEvent) -> Self {
+        let WorkflowEvent { event, workflow } = event;
 
         let url: Url = format!(
             "https://github.com/{}/actions/runs/{}",
@@ -27,6 +27,7 @@ impl From<WorkflowEvent> for GitHubWorkflowEventPayload {
         let completed_at = Utc::now();
         let created_at = completed_at - workflow.duration;
 
+        let repository = GitHubRepository::from(repo);
         Self {
             action: match &event {
                 WorkflowEventKind::Started => "requested",
@@ -73,9 +74,9 @@ impl From<WorkflowEvent> for GitHubWorkflowEventPayload {
                         email: "".to_string(),
                     },
                 },
-                repository: workflow.repository.clone().into(),
+                repository: repository.clone(),
             },
-            repository: workflow.repository.into(),
+            repository,
         }
     }
 }

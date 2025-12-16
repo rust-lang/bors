@@ -1,9 +1,9 @@
+use crate::OAuthConfig;
 use crate::bors::PullRequestStatus;
 use crate::database::WorkflowStatus;
 use crate::github::api::client::HideCommentReason;
 use crate::github::{GithubRepoName, PullRequestNumber};
 use crate::permissions::PermissionType;
-use crate::{OAuthConfig, tests};
 use chrono::{DateTime, Utc};
 use octocrab::models::pulls::MergeableState;
 use octocrab::models::{CheckSuiteId, JobId, RunId};
@@ -19,6 +19,7 @@ use tokio::sync::mpsc::{Receiver, Sender};
 pub struct GitHub {
     pub(super) repos: HashMap<GithubRepoName, Arc<Mutex<Repo>>>,
     comments: HashMap<String, Comment>,
+    users: HashMap<String, User>,
     pub oauth_config: OAuthConfig,
 }
 
@@ -40,17 +41,35 @@ impl GitHub {
         self
     }
 
+    pub fn add_user(&mut self, user: User) {
+        assert!(
+            !self
+                .users
+                .values()
+                .map(|u| u.github_id)
+                .any(|id| id == user.github_id)
+        );
+        assert!(self.users.insert(user.name.clone(), user).is_none());
+    }
+
     pub fn default_repo(&self) -> Arc<Mutex<Repo>> {
         self.get_repo(&default_repo_name())
     }
 
     pub fn get_repo(&self, name: &GithubRepoName) -> Arc<Mutex<Repo>> {
-        self.repos.get(name).unwrap().clone()
+        self.repos.get(name).expect("Repo not found").clone()
+    }
+
+    pub fn add_repo(&mut self, repo: Repo) {
+        assert!(
+            self.repos
+                .insert(repo.full_name(), Arc::new(Mutex::new(repo)))
+                .is_none()
+        );
     }
 
     pub fn with_repo(mut self, repo: Repo) -> Self {
-        self.repos
-            .insert(repo.name.clone(), Arc::new(Mutex::new(repo)));
+        self.add_repo(repo);
         self
     }
 
@@ -88,7 +107,7 @@ impl GitHub {
     /// As such, it has to be written carefully to avoid holding GH/repo locks that are also
     /// acquired by dynamic HTTP mock handlers.
     pub async fn get_next_comment<Id: Into<PrIdentifier>>(
-        state: Arc<tokio::sync::Mutex<Self>>,
+        state: Arc<Mutex<Self>>,
         id: Id,
     ) -> anyhow::Result<Comment> {
         use std::fmt::Write;
@@ -97,7 +116,7 @@ impl GitHub {
         // We need to avoid holding the GH state and repo lock here, otherwise the mocking code
         // could not lock the repo and send the comment (or other information) to a PR.
         let comment_rx = {
-            let mut gh_state = state.lock().await;
+            let mut gh_state = state.lock();
             let repo = gh_state
                 .repos
                 .get_mut(&id.repo)
@@ -118,7 +137,7 @@ impl GitHub {
             Err(_) => {
                 let mut comment_history = String::new();
 
-                let mut gh_state = state.lock().await;
+                let mut gh_state = state.lock();
                 let repo = gh_state
                     .repos
                     .get_mut(&id.repo)
@@ -149,7 +168,7 @@ impl GitHub {
         };
 
         {
-            let mut gh_state = state.lock().await;
+            let mut gh_state = state.lock();
             {
                 let repo = gh_state
                     .repos
@@ -197,14 +216,60 @@ impl GitHub {
     }
 }
 
+/// Represents the default GitHub state for tests.
+/// It uses a basic configuration that might be also encountered on a real repository.
+///
+/// It contains a single pull request by default, [PullRequest::default], and a single
+/// branch called `main`.
 impl Default for GitHub {
     fn default() -> Self {
-        let repo = Repo::default();
-        Self {
-            repos: HashMap::from([(repo.name.clone(), Arc::new(Mutex::new(repo)))]),
+        let mut gh = Self {
+            repos: HashMap::default(),
             comments: Default::default(),
+            users: Default::default(),
             oauth_config: default_oauth_config(),
-        }
+        };
+
+        let config = r#"
+timeout = 3600
+merge_queue_enabled = true
+
+# Set labels on PR approvals
+[labels]
+approved = ["+approved"]
+"#
+        .to_string();
+
+        gh.add_user(User::default_pr_author());
+        gh.add_user(User::try_user());
+        gh.add_user(User::reviewer());
+        gh.add_user(User::bors_bot());
+        gh.add_user(User::unprivileged());
+
+        let repo_name = default_repo_name();
+        let org_user = User::new(1000001, repo_name.owner());
+        gh.add_user(org_user.clone());
+
+        let mut users = HashMap::default();
+        users.insert(
+            User::default_pr_author(),
+            vec![PermissionType::Try, PermissionType::Review],
+        );
+        users.insert(User::try_user(), vec![PermissionType::Try]);
+        users.insert(
+            User::reviewer(),
+            vec![PermissionType::Try, PermissionType::Review],
+        );
+
+        let mut repo = Repo::new(org_user.clone(), repo_name.name()).with_pr(PullRequest::new(
+            repo_name,
+            default_pr_number(),
+            User::default_pr_author(),
+        ));
+        repo.config = config;
+        repo.permissions = Permissions { users };
+        gh.add_repo(repo);
+        gh
     }
 }
 
@@ -215,6 +280,13 @@ pub struct User {
 }
 
 impl User {
+    pub fn new(id: u64, name: &str) -> Self {
+        Self {
+            github_id: id,
+            name: name.to_string(),
+        }
+    }
+
     /// The user that creates a pull request by default.
     pub fn default_pr_author() -> Self {
         Self::new(101, "default-user")
@@ -238,18 +310,12 @@ impl User {
     pub fn reviewer() -> Self {
         Self::new(105, "reviewer")
     }
-
-    pub fn new(id: u64, name: &str) -> Self {
-        Self {
-            github_id: id,
-            name: name.to_string(),
-        }
-    }
 }
 
 #[derive(Clone)]
 pub struct Repo {
-    pub name: GithubRepoName,
+    pub name: String,
+    pub owner: User,
     pub permissions: Permissions,
     pub config: String,
     pub branches: Vec<Branch>,
@@ -265,14 +331,16 @@ pub struct Repo {
     /// Push error failure/success behaviour.
     pub push_behaviour: BranchPushBehaviour,
     pub pr_push_counter: u64,
+    pub fork: bool,
 }
 
 impl Repo {
-    pub fn new(name: GithubRepoName, permissions: Permissions, config: String) -> Self {
+    pub fn new(owner: User, name: &str) -> Self {
         Self {
-            name,
-            permissions,
-            config,
+            name: name.to_string(),
+            permissions: Permissions::empty(),
+            config: String::new(),
+            owner,
             pull_requests: Default::default(),
             branches: vec![Branch::default()],
             commit_messages: Default::default(),
@@ -283,7 +351,12 @@ impl Repo {
             pr_push_counter: 0,
             check_runs: vec![],
             push_behaviour: BranchPushBehaviour::default(),
+            fork: false,
         }
+    }
+
+    pub fn full_name(&self) -> GithubRepoName {
+        GithubRepoName::new(&self.owner.name, &self.name)
     }
 
     pub fn with_user_perms(mut self, user: User, permissions: &[PermissionType]) -> Self {
@@ -291,10 +364,17 @@ impl Repo {
         self
     }
 
-    pub fn with_pr(mut self, pull_request: PullRequest) -> Self {
-        self.pull_requests
-            .insert(pull_request.number.0, pull_request);
+    // TODO: refactor to now allow anyone to add PR from the outside
+    pub fn with_pr(mut self, pr: PullRequest) -> Self {
+        assert!(self.pull_requests.insert(pr.number.0, pr).is_none());
         self
+    }
+
+    pub fn new_pr(&mut self, author: User) -> &mut PullRequest {
+        let number = self.pull_requests.keys().copied().max().unwrap_or(0) + 1;
+        let pr = PullRequest::new(self.full_name(), number, author);
+        assert!(self.pull_requests.insert(pr.number.0, pr).is_none());
+        self.pull_requests.get_mut(&number).unwrap()
     }
 
     pub fn get_pr(&self, pr: u64) -> &PullRequest {
@@ -359,39 +439,6 @@ impl Repo {
     pub fn set_commit_message(&mut self, sha: &str, message: &str) {
         self.commit_messages
             .insert(sha.to_string(), message.to_string());
-    }
-}
-
-/// Represents the default repository for tests.
-/// It uses a basic configuration that might be also encountered on a real repository.
-///
-/// It contains a single pull request by default, [PullRequest::default], and a single
-/// branch called `main`.
-impl Default for Repo {
-    fn default() -> Self {
-        let config = r#"
-timeout = 3600
-merge_queue_enabled = true
-
-# Set labels on PR approvals
-[labels]
-approved = ["+approved"]
-"#
-        .to_string();
-
-        let mut users = HashMap::default();
-        users.insert(
-            User::default_pr_author(),
-            vec![PermissionType::Try, PermissionType::Review],
-        );
-        users.insert(User::try_user(), vec![PermissionType::Try]);
-        users.insert(
-            User::reviewer(),
-            vec![PermissionType::Try, PermissionType::Review],
-        );
-
-        Self::new(tests::default_repo_name(), Permissions { users }, config)
-            .with_pr(PullRequest::default())
     }
 }
 
@@ -533,21 +580,7 @@ impl PullRequest {
             comment_history: Vec::new(),
         }
     }
-}
 
-/// Creates a default pull request with number set to
-/// [default_pr_number].
-impl Default for PullRequest {
-    fn default() -> Self {
-        Self::new(
-            default_repo_name(),
-            default_pr_number(),
-            User::default_pr_author(),
-        )
-    }
-}
-
-impl PullRequest {
     pub fn id(&self) -> PrIdentifier {
         PrIdentifier {
             repo: self.repo.clone(),

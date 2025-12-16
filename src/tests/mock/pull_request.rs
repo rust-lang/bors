@@ -1,10 +1,11 @@
 use super::{
-    GitHubUser, User, comment::GitHubComment, dynamic_mock_req, repository::GitHubRepository,
+    GitHubUser, User, comment::GitHubComment, dynamic_mock_req, oauth_user_from_request,
+    repository::GitHubRepository,
 };
-use crate::tests::Comment;
+use crate::bors::PullRequestStatus;
+use crate::tests::Repo;
 use crate::tests::github::{CommentMsg, PullRequest};
-use crate::tests::{Repo, default_repo_name};
-use crate::{bors::PullRequestStatus, github::GithubRepoName};
+use crate::tests::{Branch, Comment};
 use chrono::{DateTime, Utc};
 use octocrab::models::LabelId;
 use octocrab::models::pulls::MergeableState as OctocrabMergeableState;
@@ -18,9 +19,69 @@ use wiremock::{
 };
 
 pub async fn mock_pull_requests(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
-    let repo_name = repo.lock().name.clone();
-    let repo_clone = repo.clone();
+    mock_pr_list(repo.clone(), mock_server).await;
+    mock_pr(repo.clone(), mock_server).await;
+    mock_pr_create(repo.clone(), mock_server).await;
+    mock_pr_comments(repo.clone(), mock_server).await;
+    mock_pr_labels(repo, mock_server).await;
+}
 
+async fn mock_pr(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
+    let repo_name = repo.lock().full_name();
+    dynamic_mock_req(
+        move |_req: &Request, [pr_number]: [&str; 1]| {
+            let pr_number: u64 = pr_number.parse().unwrap();
+            let pull_request_error = repo.lock().pull_request_error;
+            if pull_request_error {
+                ResponseTemplate::new(500)
+            } else if let Some(pr) = repo.lock().pull_requests.get(&pr_number) {
+                ResponseTemplate::new(200).set_body_json(GitHubPullRequest::from(pr.clone()))
+            } else {
+                ResponseTemplate::new(404)
+            }
+        },
+        "GET",
+        format!("^/repos/{repo_name}/pulls/([0-9]+)$"),
+    )
+    .mount(mock_server)
+    .await;
+}
+
+async fn mock_pr_create(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
+    let repo_name = repo.lock().full_name();
+    dynamic_mock_req(
+        move |req: &Request, []: [&str; 0]| {
+            let mut repo = repo.lock();
+
+            #[derive(serde::Deserialize)]
+            struct RequestData {
+                title: String,
+                head: String,
+                base: String,
+                body: String,
+            }
+
+            let data: RequestData = req.body_json::<RequestData>().unwrap();
+
+            let user = oauth_user_from_request(req);
+            let pr = repo.new_pr(user);
+
+            pr.title = data.title;
+            pr.description = data.body;
+            // TODO: load this from GitHub state
+            pr.head_sha = data.head;
+            pr.base_branch = Branch::new(&data.base, "sha");
+            ResponseTemplate::new(200).set_body_json(GitHubPullRequest::from(pr.clone()))
+        },
+        "POST",
+        format!("^/repos/{repo_name}/pulls$"),
+    )
+    .mount(mock_server)
+    .await;
+}
+
+async fn mock_pr_list(repo_clone: Arc<Mutex<Repo>>, mock_server: &MockServer) {
+    let repo_name = repo_clone.lock().full_name();
     Mock::given(method("GET"))
         .and(path(format!("/repos/{repo_name}/pulls")))
         .respond_with(move |_: &Request| {
@@ -39,33 +100,10 @@ pub async fn mock_pull_requests(repo: Arc<Mutex<Repo>>, mock_server: &MockServer
         })
         .mount(mock_server)
         .await;
-
-    let repo_clone = repo.clone();
-    dynamic_mock_req(
-        move |_req: &Request, [pr_number]: [&str; 1]| {
-            let pr_number: u64 = pr_number.parse().unwrap();
-            let pull_request_error = repo_clone.lock().pull_request_error;
-            if pull_request_error {
-                ResponseTemplate::new(500)
-            } else if let Some(pr) = repo_clone.lock().pull_requests.get(&pr_number) {
-                ResponseTemplate::new(200).set_body_json(GitHubPullRequest::from(pr.clone()))
-            } else {
-                ResponseTemplate::new(404)
-            }
-        },
-        "GET",
-        format!("^/repos/{repo_name}/pulls/([0-9]+)$"),
-    )
-    .mount(mock_server)
-    .await;
-
-    mock_pr_comments(repo.clone(), mock_server).await;
-    mock_pr_labels(repo.clone(), repo_name.clone(), mock_server).await;
 }
 
 async fn mock_pr_comments(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
-    let repo_name = repo.lock().name.clone();
-    let repo_name_clone = repo_name.clone();
+    let repo_name = repo.lock().full_name();
     dynamic_mock_req(
         move |req: &Request, [pr_number]: [&str; 1]| {
             let pr_number: u64 = pr_number.parse().unwrap();
@@ -77,12 +115,13 @@ async fn mock_pr_comments(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
 
             let comment_payload: CommentCreatePayload = req.body_json().unwrap();
             let mut repo = repo.lock();
+            let repo_name = repo.full_name();
             let pr = repo.pull_requests.get_mut(&pr_number).unwrap_or_else(|| {
-                panic!("Received a comment for a non-existing PR {repo_name_clone}/{pr_number}")
+                panic!("Received a comment for a non-existing PR {repo_name}/{pr_number}")
             });
             let (id, node_id) = pr.next_comment_ids();
 
-            let comment = Comment::new((repo_name_clone.clone(), pr_number), &comment_payload.body)
+            let comment = Comment::new((repo_name.clone(), pr_number), &comment_payload.body)
                 .with_author(User::bors_bot())
                 .with_ids(id, node_id);
 
@@ -101,11 +140,8 @@ async fn mock_pr_comments(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
     .await;
 }
 
-async fn mock_pr_labels(
-    repo: Arc<Mutex<Repo>>,
-    repo_name: GithubRepoName,
-    mock_server: &MockServer,
-) {
+async fn mock_pr_labels(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
+    let repo_name = repo.lock().full_name();
     let repo2 = repo.clone();
     // Add label(s)
     dynamic_mock_req(
@@ -189,13 +225,14 @@ pub struct GitHubPullRequest {
     user: GitHubUser,
     assignees: Vec<GitHubUser>,
     labels: Vec<GitHubLabel>,
+    html_url: String,
 }
 
 impl From<PullRequest> for GitHubPullRequest {
     fn from(pr: PullRequest) -> Self {
         let PullRequest {
             number,
-            repo: _,
+            repo,
             labels_added_by_bors: _,
             labels_removed_by_bors: _,
             comment_counter: _,
@@ -217,6 +254,7 @@ impl From<PullRequest> for GitHubPullRequest {
         GitHubPullRequest {
             user: author.clone().into(),
             url: "https://test.com".to_string(),
+            html_url: format!("https://github.com/{repo}/pull/{number}"),
             id: number.0 + 1000,
             title,
             body: description,
@@ -285,16 +323,16 @@ pub struct GitHubPullRequestEventPayload {
 
 impl GitHubPullRequestEventPayload {
     pub fn new(
+        repo: &Repo,
         pull_request: PullRequest,
         action: &str,
         changes: Option<PullRequestChangeEvent>,
     ) -> Self {
-        let repository = pull_request.repo.clone();
         GitHubPullRequestEventPayload {
             action: action.to_string(),
-            pull_request: pull_request.into(),
+            pull_request: pull_request.clone().into(),
             changes: changes.map(Into::into),
-            repository: repository.into(),
+            repository: GitHubRepository::from(repo),
         }
     }
 }
@@ -344,9 +382,9 @@ pub struct GitHubPushEventPayload {
 }
 
 impl GitHubPushEventPayload {
-    pub fn new(branch_name: &str, sha: &str) -> Self {
+    pub fn new(repo: &Repo, branch_name: &str, sha: &str) -> Self {
         GitHubPushEventPayload {
-            repository: default_repo_name().into(),
+            repository: GitHubRepository::from(repo),
             ref_field: format!("refs/heads/{branch_name}"),
             after: sha.to_string(),
         }

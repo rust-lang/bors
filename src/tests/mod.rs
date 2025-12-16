@@ -16,7 +16,7 @@ use crate::{
 };
 use anyhow::Context;
 use axum::Router;
-use http::{Method, Request, StatusCode};
+use http::{HeaderMap, Method, Request, StatusCode};
 use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
 use parking_lot::Mutex;
 use serde::Serialize;
@@ -131,13 +131,32 @@ impl BorsBuilder {
     }
 }
 
+impl From<PgPool> for BorsBuilder {
+    fn from(pool: PgPool) -> Self {
+        Self {
+            pool,
+            github: GitHub::default(),
+        }
+    }
+}
+
+impl From<(PgPool, GitHub)> for BorsBuilder {
+    fn from((pool, github): (PgPool, GitHub)) -> Self {
+        Self { pool, github }
+    }
+}
+
 /// Simple end-to-end test entrypoint for tests that don't need to prepare any custom state.
 /// See [GitHub::default] for how does the default state look like.
-pub async fn run_test<F: AsyncFnOnce(&mut BorsTester) -> anyhow::Result<()>>(
-    pool: PgPool,
+pub async fn run_test<
+    T: Into<BorsBuilder>,
+    F: AsyncFnOnce(&mut BorsTester) -> anyhow::Result<()>,
+>(
+    args: T,
     f: F,
 ) -> GitHub {
-    BorsBuilder::new(pool).run_test(f).await
+    let builder: BorsBuilder = args.into();
+    builder.run_test(f).await
 }
 
 /// Represents a running bors web application. This structure should be used
@@ -148,7 +167,7 @@ pub async fn run_test<F: AsyncFnOnce(&mut BorsTester) -> anyhow::Result<()>>(
 pub struct BorsTester {
     app: Router,
     http_mock: ExternalHttpMock,
-    github: Arc<tokio::sync::Mutex<GitHub>>,
+    github: Arc<Mutex<GitHub>>,
     db: Arc<PgDbClient>,
     mergeability_queue_tx: MergeabilityQueueSender,
     merge_queue_tx: MergeQueueSender,
@@ -160,7 +179,7 @@ pub struct BorsTester {
 
 impl BorsTester {
     async fn new(pool: PgPool, github: GitHub) -> (Self, JoinHandle<()>) {
-        let github = Arc::new(tokio::sync::Mutex::new(github));
+        let github = Arc::new(Mutex::new(github));
         let mock = ExternalHttpMock::start(github.clone()).await;
         let db = Arc::new(PgDbClient::new(pool));
 
@@ -238,12 +257,12 @@ impl BorsTester {
     }
 
     pub async fn get_repo(&self, name: &GithubRepoName) -> Arc<Mutex<Repo>> {
-        self.github.lock().await.get_repo(name)
+        self.github.lock().get_repo(name)
     }
 
     /// Modifies the given repo state in the GitHub mock (**without sending a webhook**).
     pub async fn modify_repo<F: FnOnce(&mut Repo)>(&mut self, repo: &GithubRepoName, func: F) {
-        let repo = self.github.lock().await.get_repo(repo);
+        let repo = self.github.lock().get_repo(repo);
         let mut repo = repo.lock();
         func(&mut repo)
     }
@@ -299,7 +318,6 @@ impl BorsTester {
         let repo = self
             .github
             .lock()
-            .await
             .repos
             .get(&default_repo_name())
             .unwrap()
@@ -320,7 +338,6 @@ impl BorsTester {
         let repo = self
             .github
             .lock()
-            .await
             .repos
             .get(&default_repo_name())
             .unwrap()
@@ -336,7 +353,6 @@ impl BorsTester {
     pub async fn get_branch_copy(&self, name: &str) -> Branch {
         self.github
             .lock()
-            .await
             .default_repo()
             .lock()
             .get_branch_by_name(name)
@@ -347,15 +363,17 @@ impl BorsTester {
     pub async fn get_branch_commit_message(&self, branch: &Branch) -> String {
         self.github
             .lock()
-            .await
             .default_repo()
             .lock()
             .get_commit_message(branch.get_sha())
     }
 
     pub async fn push_to_branch(&mut self, branch: &str, sha: &str) -> anyhow::Result<()> {
-        self.send_webhook("push", GitHubPushEventPayload::new(branch, sha))
-            .await
+        let payload = {
+            let gh = self.github.lock();
+            GitHubPushEventPayload::new(&gh.get_repo(&default_repo_name()).lock(), branch, sha)
+        };
+        self.send_webhook("push", payload).await
     }
 
     pub async fn try_branch(&self) -> Branch {
@@ -391,7 +409,7 @@ impl BorsTester {
 
         // Allocate comment IDs
         let comment = {
-            let gh = self.github.lock().await;
+            let gh = self.github.lock();
             let repo = gh.get_repo(&comment.pr_ident.repo);
             let mut repo = repo.lock();
             let pr = repo.get_pr_mut(comment.pr_ident.number);
@@ -481,7 +499,6 @@ impl BorsTester {
             let repo = self
                 .github
                 .lock()
-                .await
                 .get_repo(&event.workflow.repository.clone());
             let mut repo = repo.lock();
             let status = match &event.event {
@@ -554,7 +571,7 @@ impl BorsTester {
         modify_pr: F,
     ) -> anyhow::Result<PullRequest> {
         let number = {
-            let repo = self.github.lock().await.get_repo(&repo_name);
+            let repo = self.github.lock().get_repo(&repo_name);
             let repo = repo.lock();
             repo.pull_requests.keys().max().copied().unwrap_or(0) + 1
         };
@@ -563,17 +580,15 @@ impl BorsTester {
         modify_pr(&mut pr);
 
         // Add the PR to the repository
-        {
-            let repo = self.github.lock().await.get_repo(&repo_name);
+        let payload = {
+            let gh = self.github.lock();
+            let repo = gh.get_repo(&repo_name);
             let mut repo = repo.lock();
             repo.pull_requests.insert(number, pr.clone());
-        }
+            GitHubPullRequestEventPayload::new(&repo, pr.clone(), "opened", None)
+        };
 
-        self.send_webhook(
-            "pull_request",
-            GitHubPullRequestEventPayload::new(pr.clone(), "opened", None),
-        )
-        .await?;
+        self.send_webhook("pull_request", payload).await?;
         Ok(pr)
     }
 
@@ -585,7 +600,7 @@ impl BorsTester {
         func: F,
     ) -> PullRequest {
         let id = id.into();
-        let repo = self.github.lock().await.get_repo(&id.repo);
+        let repo = self.github.lock().get_repo(&id.repo);
         let mut repo = repo.lock();
         let pr = repo
             .pull_requests
@@ -598,11 +613,13 @@ impl BorsTester {
     pub async fn reopen_pr<Id: Into<PrIdentifier>>(&mut self, id: Id) -> anyhow::Result<()> {
         let id = id.into();
         let pr = self.modify_pr_state(id, |pr| pr.reopen_pr()).await;
-        self.send_webhook(
-            "pull_request",
-            GitHubPullRequestEventPayload::new(pr, "reopened", None),
-        )
-        .await?;
+
+        let payload = {
+            let gh = self.github.lock();
+            GitHubPullRequestEventPayload::new(&gh.get_repo(&pr.repo).lock(), pr, "reopened", None)
+        };
+
+        self.send_webhook("pull_request", payload).await?;
         Ok(())
     }
 
@@ -611,11 +628,12 @@ impl BorsTester {
         id: Id,
     ) -> anyhow::Result<()> {
         let pr = self.modify_pr_state(id, |pr| pr.close_pr()).await;
-        self.send_webhook(
-            "pull_request",
-            GitHubPullRequestEventPayload::new(pr.clone(), "closed", None),
-        )
-        .await?;
+
+        let payload = {
+            let gh = self.github.lock();
+            GitHubPullRequestEventPayload::new(&gh.get_repo(&pr.repo).lock(), pr, "closed", None)
+        };
+        self.send_webhook("pull_request", payload).await?;
         Ok(())
     }
 
@@ -624,11 +642,17 @@ impl BorsTester {
         id: Id,
     ) -> anyhow::Result<()> {
         let pr = self.modify_pr_state(id, |pr| pr.convert_to_draft()).await;
-        self.send_webhook(
-            "pull_request",
-            GitHubPullRequestEventPayload::new(pr, "converted_to_draft", None),
-        )
-        .await?;
+
+        let payload = {
+            let gh = self.github.lock();
+            GitHubPullRequestEventPayload::new(
+                &gh.get_repo(&pr.repo).lock(),
+                pr,
+                "converted_to_draft",
+                None,
+            )
+        };
+        self.send_webhook("pull_request", payload).await?;
         Ok(())
     }
 
@@ -637,11 +661,17 @@ impl BorsTester {
         id: Id,
     ) -> anyhow::Result<()> {
         let pr = self.modify_pr_state(id, |pr| pr.ready_for_review()).await;
-        self.send_webhook(
-            "pull_request",
-            GitHubPullRequestEventPayload::new(pr, "ready_for_review", None),
-        )
-        .await?;
+
+        let payload = {
+            let gh = self.github.lock();
+            GitHubPullRequestEventPayload::new(
+                &gh.get_repo(&pr.repo).lock(),
+                pr,
+                "ready_for_review",
+                None,
+            )
+        };
+        self.send_webhook("pull_request", payload).await?;
         Ok(())
     }
 
@@ -650,11 +680,12 @@ impl BorsTester {
         id: Id,
     ) -> anyhow::Result<()> {
         let pr = self.modify_pr_state(id, |pr| pr.merge_pr()).await;
-        self.send_webhook(
-            "pull_request",
-            GitHubPullRequestEventPayload::new(pr, "closed", None),
-        )
-        .await?;
+
+        let payload = {
+            let gh = self.github.lock();
+            GitHubPullRequestEventPayload::new(&gh.get_repo(&pr.repo).lock(), pr, "closed", None)
+        };
+        self.send_webhook("pull_request", payload).await?;
         Ok(())
     }
 
@@ -669,7 +700,7 @@ impl BorsTester {
         F: FnOnce(&mut PullRequest),
     {
         let id = id.into();
-        let repo = self.github.lock().await.get_repo(&id.repo);
+        let repo = self.github.lock().get_repo(&id.repo);
 
         let (pr, changes) = {
             let mut repo = repo.lock();
@@ -692,8 +723,9 @@ impl BorsTester {
 
     pub async fn push_to_pr<Id: Into<PrIdentifier>>(&mut self, id: Id) -> anyhow::Result<()> {
         let id = id.into();
-        let pr = {
-            let repo = self.github.lock().await.get_repo(&id.repo);
+        let payload = {
+            let gh = self.github.lock();
+            let repo = gh.get_repo(&id.repo);
             let mut repo = repo.lock();
 
             let counter = repo.get_next_pr_push_counter();
@@ -704,14 +736,11 @@ impl BorsTester {
                 .expect("PR must be initialized before pushing to it");
             pr.head_sha = format!("pr-{}-commit-{counter}", id.number);
             pr.mergeable_state = OctocrabMergeableState::Unknown;
-            pr.clone()
+            let pr = pr.clone();
+            GitHubPullRequestEventPayload::new(&repo, pr, "synchronize", None)
         };
 
-        self.send_webhook(
-            "pull_request",
-            GitHubPullRequestEventPayload::new(pr, "synchronize", None),
-        )
-        .await
+        self.send_webhook("pull_request", payload).await
     }
 
     pub async fn assign_pr<Id: Into<PrIdentifier>>(
@@ -722,11 +751,11 @@ impl BorsTester {
         let pr = self
             .modify_pr_state(id, |pr| pr.assignees.push(assignee.clone()))
             .await;
-        self.send_webhook(
-            "pull_request",
-            GitHubPullRequestEventPayload::new(pr, "assigned", None),
-        )
-        .await
+        let payload = {
+            let gh = self.github.lock();
+            GitHubPullRequestEventPayload::new(&gh.get_repo(&pr.repo).lock(), pr, "assigned", None)
+        };
+        self.send_webhook("pull_request", payload).await
     }
 
     pub async fn unassign_pr<Id: Into<PrIdentifier>>(
@@ -737,11 +766,16 @@ impl BorsTester {
         let pr = self
             .modify_pr_state(id, |pr| pr.assignees.retain(|a| a != &assignee))
             .await;
-        self.send_webhook(
-            "pull_request",
-            GitHubPullRequestEventPayload::new(pr, "unassigned", None),
-        )
-        .await
+        let payload = {
+            let gh = self.github.lock();
+            GitHubPullRequestEventPayload::new(
+                &gh.get_repo(&pr.repo).lock(),
+                pr,
+                "unassigned",
+                None,
+            )
+        };
+        self.send_webhook("pull_request", payload).await
     }
 
     /// Starts an auto build, with the expectation that it will start testing the given PR.
@@ -792,7 +826,6 @@ impl BorsTester {
     pub async fn expect_hidden_comment(&self, comment: &Comment, reason: HideCommentReason) {
         self.github
             .lock()
-            .await
             .check_comment_was_hidden(comment.node_id.as_deref().unwrap(), reason);
     }
 
@@ -919,6 +952,7 @@ impl BorsTester {
             )
             .await
             .context("Cannot send REST API request")?;
+        let headers = response.headers().clone();
         let status = response.status();
         let body_text = String::from_utf8(
             axum::body::to_bytes(response.into_body(), 10 * 1024 * 1024)
@@ -927,32 +961,38 @@ impl BorsTester {
         );
         Ok(ApiResponse {
             status,
+            headers,
             body: body_text?,
         })
     }
 
     /// Get a GitHub comment that might have been modified by API calls from bors.
     pub async fn get_comment_by_node_id(&self, node_id: &str) -> Option<Comment> {
-        self.github
-            .lock()
-            .await
-            .get_comment_by_node_id(node_id)
-            .cloned()
+        self.github.lock().get_comment_by_node_id(node_id).cloned()
     }
 
     //-- Internal helper functions --/
     async fn webhook_comment(&mut self, comment: Comment) -> anyhow::Result<()> {
-        self.send_webhook(
-            "issue_comment",
-            // The Box is here to prevent a stack overflow in debug mode
-            Box::from(GitHubIssueCommentEventPayload::from(comment)),
-        )
-        .await
+        let payload = {
+            let gh = self.github.lock();
+            GitHubIssueCommentEventPayload::new(
+                &gh.get_repo(&comment.pr_ident.repo).lock(),
+                comment,
+            )
+        };
+
+        // The Box is here to prevent a stack overflow in debug mode
+        let payload = Box::from(payload);
+        self.send_webhook("issue_comment", payload).await
     }
 
     async fn webhook_workflow(&mut self, event: WorkflowEvent) -> anyhow::Result<()> {
-        self.send_webhook("workflow_run", GitHubWorkflowEventPayload::from(event))
-            .await
+        let payload = {
+            let gh = self.github.lock();
+            GitHubWorkflowEventPayload::new(&gh.get_repo(&event.workflow.repository).lock(), event)
+        };
+
+        self.send_webhook("workflow_run", payload).await
     }
 
     async fn pull_request_edited(
@@ -960,11 +1000,16 @@ impl BorsTester {
         pr: PullRequest,
         changes: Option<PullRequestChangeEvent>,
     ) -> anyhow::Result<()> {
-        self.send_webhook(
-            "pull_request",
-            GitHubPullRequestEventPayload::new(pr, "edited", Some(changes.unwrap_or_default())),
-        )
-        .await
+        let payload = {
+            let gh = self.github.lock();
+            GitHubPullRequestEventPayload::new(
+                &gh.get_repo(&pr.repo).lock(),
+                pr,
+                "edited",
+                Some(changes.unwrap_or_default()),
+            )
+        };
+        self.send_webhook("pull_request", payload).await
     }
 
     async fn send_webhook<S: Serialize>(&mut self, event: &str, content: S) -> anyhow::Result<()> {
@@ -1040,6 +1085,7 @@ impl ApiRequest {
 pub struct ApiResponse {
     status: StatusCode,
     body: String,
+    headers: HeaderMap,
 }
 
 impl ApiResponse {
@@ -1068,6 +1114,14 @@ impl ApiResponse {
                 self.body
             );
         }
+    }
+    pub fn get_header(&self, name: &str) -> String {
+        self.headers
+            .get(name)
+            .unwrap_or_else(|| panic!("Header {name} not found"))
+            .to_str()
+            .unwrap()
+            .to_string()
     }
     pub fn into_body(self) -> String {
         self.body

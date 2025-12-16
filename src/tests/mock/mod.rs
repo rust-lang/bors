@@ -6,11 +6,12 @@ use crate::tests::mock::repository::{mock_repo, mock_repo_list};
 use crate::tests::{GitHub, User};
 use crate::{OAuthClient, OAuthConfig, TeamApiClient, create_github_client};
 use graphql_parser::query::{Definition, Document, OperationDefinition, Selection};
+use http::HeaderValue;
+use http::header::AUTHORIZATION;
 use octocrab::Octocrab;
+use parking_lot::Mutex;
 use regex::Regex;
-use serde::Serialize;
 use std::collections::HashMap;
-use std::ops::Deref;
 use std::sync::Arc;
 use url::Url;
 use wiremock::matchers::{method, path_regex};
@@ -31,7 +32,7 @@ pub use pull_request::{
 };
 pub use workflow::GitHubWorkflowEventPayload;
 
-#[derive(Serialize)]
+#[derive(serde::Serialize, Clone)]
 struct GitHubUser {
     login: String,
     id: u64,
@@ -110,9 +111,9 @@ pub struct ExternalHttpMock {
 }
 
 impl ExternalHttpMock {
-    pub async fn start(github: Arc<tokio::sync::Mutex<GitHub>>) -> Self {
+    pub async fn start(github: Arc<Mutex<GitHub>>) -> Self {
         let gh_server = GitHubMockServer::start(github.clone()).await;
-        let team_api_server = TeamApiMockServer::start(github.lock().await.deref()).await;
+        let team_api_server = TeamApiMockServer::start(github.clone()).await;
         Self {
             gh_server,
             team_api_server,
@@ -134,22 +135,22 @@ impl ExternalHttpMock {
 
 pub struct GitHubMockServer {
     mock_server: MockServer,
-    github: Arc<tokio::sync::Mutex<GitHub>>,
+    github: Arc<Mutex<GitHub>>,
 }
 
 impl GitHubMockServer {
-    pub async fn start(github: Arc<tokio::sync::Mutex<GitHub>>) -> Self {
+    pub async fn start(github: Arc<Mutex<GitHub>>) -> Self {
         let mock_server = MockServer::start().await;
 
         {
-            let gh_locked = github.lock().await;
-            mock_repo_list(&gh_locked, &mock_server).await;
-            mock_oauth(&gh_locked, &mock_server).await;
+            mock_repo_list(github.clone(), &mock_server).await;
+            mock_oauth(github.clone(), &mock_server).await;
             mock_graphql(github.clone(), &mock_server).await;
 
             // Repositories are mocked separately to make it easier to
             // pass comm. channels to them.
-            for repo in gh_locked.repos.values() {
+            let repos: Vec<_> = github.lock().repos.values().cloned().collect();
+            for repo in repos {
                 mock_repo(repo.clone(), &mock_server).await;
             }
         }
@@ -173,13 +174,29 @@ impl GitHubMockServer {
 
     /// Make sure that there are no leftover events left in the queues.
     pub async fn assert_empty_queues(self) {
+        // This is useful for debugging:
+        // for req in self
+        //     .mock_server
+        //     .received_requests()
+        //     .await
+        //     .unwrap_or_default()
+        // {
+        //     eprintln!(
+        //         "Received mock request `{} {}` with body:\n{}",
+        //         req.method,
+        //         req.url,
+        //         String::from_utf8_lossy(&req.body)
+        //     );
+        // }
+
         // This will remove all mocks and thus also any leftover
         // channel senders, so that we can be sure below that the `recv`
         // call will not block indefinitely.
         self.mock_server.reset().await;
         drop(self.mock_server);
 
-        for (name, repo) in self.github.lock().await.repos.iter_mut() {
+        let repos = self.github.lock().repos.clone();
+        for (name, repo) in repos.iter() {
             let prs = repo
                 .lock()
                 .pull_requests
@@ -214,7 +231,7 @@ impl GitHubMockServer {
     }
 }
 
-async fn mock_graphql(github: Arc<tokio::sync::Mutex<GitHub>>, mock_server: &MockServer) {
+async fn mock_graphql(github: Arc<Mutex<GitHub>>, mock_server: &MockServer) {
     dynamic_mock_req(
         move |request: &Request, []: [&str; 0]| {
             #[derive(serde::Deserialize)]
@@ -252,16 +269,9 @@ async fn mock_graphql(github: Arc<tokio::sync::Mutex<GitHub>>, mock_server: &Moc
 
                     let github = github.clone();
                     let data: Variables = serde_json::from_value(body.variables).unwrap();
-
-                    // We have to use e.g. `blocking_lock` to lock from a sync function.
-                    // It has to happen in a separate thread though.
-                    std::thread::spawn(move || {
-                        github
-                            .blocking_lock()
-                            .modify_comment(&data.node_id, |c| c.hide_reason = Some(data.reason));
-                    })
-                    .join()
-                    .unwrap();
+                    github
+                        .lock()
+                        .modify_comment(&data.node_id, |c| c.hide_reason = Some(data.reason));
                     ResponseTemplate::new(200).set_body_json(HashMap::<String, String>::new())
                 }
                 "updateIssueComment" => {
@@ -278,14 +288,9 @@ async fn mock_graphql(github: Arc<tokio::sync::Mutex<GitHub>>, mock_server: &Moc
                         }
                     });
 
-                    let github = github.clone();
-                    std::thread::spawn(move || {
-                        github
-                            .blocking_lock()
-                            .modify_comment(&data.id, |c| c.content = data.body);
-                    })
-                    .join()
-                    .unwrap();
+                    github
+                        .lock()
+                        .modify_comment(&data.id, |c| c.content = data.body);
 
                     ResponseTemplate::new(200).set_body_json(response)
                 }
@@ -299,16 +304,12 @@ async fn mock_graphql(github: Arc<tokio::sync::Mutex<GitHub>>, mock_server: &Moc
                     let data: Variables = serde_json::from_value(body.variables).unwrap();
 
                     let github = github.clone();
-                    let comment_text = std::thread::spawn(move || {
-                        github
-                            .blocking_lock()
-                            .get_comment_by_node_id(&data.node_id)
-                            .unwrap()
-                            .content
-                            .clone()
-                    })
-                    .join()
-                    .unwrap();
+                    let comment_text = github
+                        .lock()
+                        .get_comment_by_node_id(&data.node_id)
+                        .unwrap()
+                        .content
+                        .clone();
                     let response = serde_json::json!({
                         "data": {
                             "node": {
@@ -356,6 +357,18 @@ EjQJOzV2OIk4waurl+BsbOHP7C0Zhp7rpyWx4fUCgYEAp/4UceUfbJZGa8CcWZ8F
 3VafpHjFw+fMUjcIkQk0VfdbRD5fLDQpJy6hUVq6A+duSqTvlhE8DFAdBAC3VZ9k
 34PVnCZP7HB3k2eBSpDp4vk=
 -----END PRIVATE KEY-----"###;
+
+fn oauth_user_from_request(request: &Request) -> User {
+    let auth: &HeaderValue = request
+        .headers
+        .get(AUTHORIZATION)
+        .expect("Authorization header not found");
+    let (_bearer, token) = auth.to_str().unwrap().split_once(" ").unwrap();
+    let (user, rest) = token.split_once("-").unwrap();
+    assert_eq!(rest, "access-token");
+    // TODO: load this from GitHub state
+    User::new(10000, user)
+}
 
 /// Create a mock that dynamically responds to its requests using the given function `f`.
 /// It is expected that the path will be a regex, which will be parsed when a request is received,
