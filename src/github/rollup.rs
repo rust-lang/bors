@@ -1,6 +1,6 @@
 use super::GithubRepoName;
 use super::error::AppError;
-use crate::server::ServerStateRef;
+use crate::{OAuthConfig, PgDbClient};
 use anyhow::Context;
 use axum::extract::{Query, State};
 use axum::http::StatusCode;
@@ -9,6 +9,7 @@ use octocrab::OctocrabBuilder;
 use octocrab::params::repos::Reference;
 use rand::{Rng, distr::Alphanumeric};
 use std::collections::HashMap;
+use std::sync::Arc;
 use tracing::Instrument;
 
 /// Query parameters received from GitHub's OAuth callback.
@@ -23,24 +24,25 @@ pub struct OAuthCallbackQuery {
 }
 
 #[derive(serde::Deserialize)]
-pub struct OAuthState {
+pub struct OAuthRollupState {
     pub pr_nums: Vec<u32>,
     pub repo_name: String,
     pub repo_owner: String,
 }
 
 pub async fn oauth_callback_handler(
+    State(db): State<Arc<PgDbClient>>,
+    State(oauth): State<Option<OAuthConfig>>,
     Query(callback): Query<OAuthCallbackQuery>,
-    State(state): State<ServerStateRef>,
 ) -> Result<impl IntoResponse, AppError> {
-    let oauth_config = state.oauth.as_ref().ok_or_else(|| {
+    let Some(oauth_config) = oauth else {
         let error =
             anyhow::anyhow!("OAuth not configured. Please set CLIENT_ID and CLIENT_SECRET.");
         tracing::error!("{error}");
-        error
-    })?;
+        return Err(error.into());
+    };
 
-    let oauth_state: OAuthState = serde_json::from_str(&callback.state)
+    let oauth_state: OAuthRollupState = serde_json::from_str(&callback.state)
         .map_err(|_| anyhow::anyhow!("Invalid state parameter"))?;
 
     tracing::info!("Exchanging OAuth code for access token");
@@ -76,7 +78,7 @@ pub async fn oauth_callback_handler(
         pr_nums = ?oauth_state.pr_nums
     );
 
-    match create_rollup(state, oauth_state, access_token)
+    match create_rollup(db, oauth_state, access_token)
         .instrument(span)
         .await
     {
@@ -98,15 +100,15 @@ pub async fn oauth_callback_handler(
 /// Creates a rollup PR by merging multiple approved PRs into a single branch
 /// in the user's fork, then opens a PR to the upstream repository.
 async fn create_rollup(
-    state: ServerStateRef,
-    oauth_state: OAuthState,
+    db: Arc<PgDbClient>,
+    rollup_state: OAuthRollupState,
     access_token: &str,
 ) -> anyhow::Result<String> {
-    let OAuthState {
+    let OAuthRollupState {
         repo_name,
         repo_owner,
         pr_nums,
-    } = oauth_state;
+    } = rollup_state;
 
     let gh_client = OctocrabBuilder::new()
         .user_access_token(access_token.to_string())
@@ -129,8 +131,7 @@ async fn create_rollup(
     // Validate PRs
     let mut rollup_prs = Vec::new();
     for num in pr_nums {
-        match state
-            .db
+        match db
             .get_pull_request(
                 &GithubRepoName::new(&repo_owner, &repo_name),
                 (num as u64).into(),

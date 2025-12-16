@@ -9,7 +9,7 @@ use crate::utils::sort_queue::sort_queue_prs;
 use crate::{
     AppError, BorsGlobalEvent, BorsRepositoryEvent, PgDbClient, WebhookSecret, bors, database,
 };
-use axum::extract::{Path, State};
+use axum::extract::{FromRef, Path, State};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -54,9 +54,9 @@ pub struct ServerState {
     repository_event_queue: mpsc::Sender<BorsRepositoryEvent>,
     global_event_queue: mpsc::Sender<BorsGlobalEvent>,
     webhook_secret: WebhookSecret,
-    pub(crate) oauth: Option<OAuthConfig>,
+    oauth: Option<OAuthConfig>,
     repositories: HashMap<GithubRepoName, Arc<RepositoryState>>,
-    pub(crate) db: Arc<PgDbClient>,
+    db: Arc<PgDbClient>,
     cmd_prefix: CommandPrefix,
 }
 
@@ -90,7 +90,20 @@ impl ServerState {
     }
 }
 
-pub type ServerStateRef = Arc<ServerState>;
+impl FromRef<ServerStateRef> for Option<OAuthConfig> {
+    fn from_ref(state: &ServerStateRef) -> Self {
+        state.0.oauth.clone()
+    }
+}
+
+impl FromRef<ServerStateRef> for Arc<PgDbClient> {
+    fn from_ref(state: &ServerStateRef) -> Self {
+        state.0.db.clone()
+    }
+}
+
+#[derive(Clone)]
+pub struct ServerStateRef(Arc<ServerState>);
 
 pub fn create_app(state: ServerState) -> Router {
     let api = create_api_router();
@@ -104,7 +117,7 @@ pub fn create_app(state: ServerState) -> Router {
         .nest("/api", api)
         .layer(ConcurrencyLimitLayer::new(100))
         .layer(CatchPanicLayer::custom(handle_panic))
-        .with_state(Arc::new(state))
+        .with_state(ServerStateRef(Arc::new(state)))
         .fallback(not_found_handler)
 }
 
@@ -115,9 +128,9 @@ fn create_api_router() -> Router<ServerStateRef> {
 
 async fn api_merge_queue(
     Path(repo_name): Path<String>,
-    State(state): State<ServerStateRef>,
+    State(db): State<Arc<PgDbClient>>,
 ) -> Result<impl IntoResponse, AppError> {
-    let repo = match state.db.repo_by_name(&repo_name).await? {
+    let repo = match db.repo_by_name(&repo_name).await? {
         Some(repo) => repo,
         None => {
             return Ok((
@@ -170,7 +183,7 @@ async fn api_merge_queue(
         }
     }
 
-    let prs = state.db.get_nonclosed_pull_requests(&repo.name).await?;
+    let prs = db.get_nonclosed_pull_requests(&repo.name).await?;
     let prs = sort_queue_prs(prs);
     let prs = prs
         .into_iter()
@@ -230,17 +243,19 @@ async fn health_handler() -> impl IntoResponse {
     (StatusCode::OK, "")
 }
 
-async fn index_handler(State(state): State<ServerStateRef>) -> impl IntoResponse {
+async fn index_handler(State(ServerStateRef(state)): State<ServerStateRef>) -> impl IntoResponse {
     // If we manage exactly one repo, redirect to its queue page directly
     if let Some(repo_name) = state.repositories.keys().next()
         && state.repositories.len() == 1
     {
         return Redirect::temporary(&format!("/queue/{}", repo_name.name())).into_response();
     }
-    help_handler(State(state)).await.into_response()
+    help_handler(State(ServerStateRef(state)))
+        .await
+        .into_response()
 }
 
-async fn help_handler(State(state): State<ServerStateRef>) -> impl IntoResponse {
+async fn help_handler(State(ServerStateRef(state)): State<ServerStateRef>) -> impl IntoResponse {
     let mut repos = Vec::with_capacity(state.repositories.len());
     for repo in state.repositories.keys() {
         let treeclosed = state
@@ -271,9 +286,10 @@ async fn help_handler(State(state): State<ServerStateRef>) -> impl IntoResponse 
 
 pub async fn queue_handler(
     Path(repo_name): Path<String>,
-    State(state): State<ServerStateRef>,
+    State(db): State<Arc<PgDbClient>>,
+    State(oauth): State<Option<OAuthConfig>>,
 ) -> Result<impl IntoResponse, AppError> {
-    let repo = match state.db.repo_by_name(&repo_name).await? {
+    let repo = match db.repo_by_name(&repo_name).await? {
         Some(repo) => repo,
         None => {
             return Ok((
@@ -284,7 +300,7 @@ pub async fn queue_handler(
         }
     };
 
-    let prs = state.db.get_nonclosed_pull_requests(&repo.name).await?;
+    let prs = db.get_nonclosed_pull_requests(&repo.name).await?;
     let prs = sort_queue_prs(prs);
 
     let (in_queue_count, failed_count, rolled_up_count) =
@@ -306,10 +322,7 @@ pub async fn queue_handler(
             });
 
     Ok(HtmlTemplate(QueueTemplate {
-        oauth_client_id: state
-            .oauth
-            .as_ref()
-            .map(|config| config.client_id().to_string()),
+        oauth_client_id: oauth.as_ref().map(|config| config.client_id().to_string()),
         repo_name: repo.name.name().to_string(),
         repo_owner: repo.name.owner().to_string(),
         repo_url: format!("https://github.com/{}", repo.name),
@@ -327,7 +340,7 @@ pub async fn queue_handler(
 
 /// Axum handler that receives a webhook and sends it to a webhook channel.
 pub async fn github_webhook_handler(
-    State(state): State<ServerStateRef>,
+    State(ServerStateRef(state)): State<ServerStateRef>,
     GitHubWebhook(event): GitHubWebhook,
 ) -> impl IntoResponse {
     match event {
