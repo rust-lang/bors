@@ -2,8 +2,8 @@ use super::{
     GitHubUser, User, comment::GitHubComment, dynamic_mock_req, repository::GitHubRepository,
 };
 use crate::tests::Comment;
+use crate::tests::Repo;
 use crate::tests::github::{CommentMsg, PullRequest};
-use crate::tests::{Repo, default_repo_name};
 use crate::{bors::PullRequestStatus, github::GithubRepoName};
 use chrono::{DateTime, Utc};
 use octocrab::models::LabelId;
@@ -18,7 +18,7 @@ use wiremock::{
 };
 
 pub async fn mock_pull_requests(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
-    let repo_name = repo.lock().name.clone();
+    let repo_name = repo.lock().full_name();
     let repo_clone = repo.clone();
 
     Mock::given(method("GET"))
@@ -64,7 +64,7 @@ pub async fn mock_pull_requests(repo: Arc<Mutex<Repo>>, mock_server: &MockServer
 }
 
 async fn mock_pr_comments(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
-    let repo_name = repo.lock().name.clone();
+    let repo_name = repo.lock().full_name();
     let repo_name_clone = repo_name.clone();
     dynamic_mock_req(
         move |req: &Request, [pr_number]: [&str; 1]| {
@@ -285,16 +285,16 @@ pub struct GitHubPullRequestEventPayload {
 
 impl GitHubPullRequestEventPayload {
     pub fn new(
+        repo: &Repo,
         pull_request: PullRequest,
         action: &str,
         changes: Option<PullRequestChangeEvent>,
     ) -> Self {
-        let repository = pull_request.repo.clone();
         GitHubPullRequestEventPayload {
             action: action.to_string(),
-            pull_request: pull_request.into(),
+            pull_request: pull_request.clone().into(),
             changes: changes.map(Into::into),
-            repository: repository.into(),
+            repository: GitHubRepository::from(repo),
         }
     }
 }
@@ -344,9 +344,9 @@ pub struct GitHubPushEventPayload {
 }
 
 impl GitHubPushEventPayload {
-    pub fn new(branch_name: &str, sha: &str) -> Self {
+    pub fn new(repo: &Repo, branch_name: &str, sha: &str) -> Self {
         GitHubPushEventPayload {
-            repository: default_repo_name().into(),
+            repository: GitHubRepository::from(repo),
             ref_field: format!("refs/heads/{branch_name}"),
             after: sha.to_string(),
         }

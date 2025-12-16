@@ -29,7 +29,7 @@ impl TeamApiMockServer {
             Mock::given(method("GET"))
                 .and(path(format!(
                     "/v1/permissions/bors.{}.{name}.json",
-                    repo.name.name()
+                    repo.name
                 )))
                 .respond_with(ResponseTemplate::new(200).set_body_json(permissions))
         };

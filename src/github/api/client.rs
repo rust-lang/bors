@@ -635,7 +635,6 @@ mod tests {
     use crate::github::api::load_repositories;
     use crate::permissions::PermissionType;
     use crate::tests::ExternalHttpMock;
-    use crate::tests::Permissions;
     use crate::tests::Repo;
     use crate::tests::{GitHub, User};
     use octocrab::models::UserId;
@@ -647,18 +646,10 @@ mod tests {
         let mock = ExternalHttpMock::start(Arc::new(Mutex::new(
             GitHub::default()
                 .with_repo(
-                    Repo::new(
-                        GithubRepoName::new("foo", "bar"),
-                        Permissions::empty(),
-                        "".to_string(),
-                    )
-                    .with_user_perms(User::new(1, "user"), &[PermissionType::Try]),
+                    Repo::new(User::new(2, "foo"), "bar")
+                        .with_user_perms(User::new(1, "user"), &[PermissionType::Try]),
                 )
-                .with_repo(Repo::new(
-                    GithubRepoName::new("foo", "baz"),
-                    Permissions::empty(),
-                    "".to_string(),
-                )),
+                .with_repo(Repo::new(User::new(2, "foo"), "baz")),
         )))
         .await;
         let client = mock.github_client();

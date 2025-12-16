@@ -2,12 +2,11 @@ use std::num::NonZeroU64;
 use std::sync::Arc;
 
 use crate::database::WorkflowStatus;
-use crate::github::GithubRepoName;
 use crate::tests::BranchPushError;
 use crate::tests::github::{CheckRunData, WorkflowRun};
 use crate::tests::mock::pull_request::mock_pull_requests;
 use crate::tests::mock::{GitHubUser, dynamic_mock_req};
-use crate::tests::{Branch, GitHub, Repo, User, WorkflowJob};
+use crate::tests::{Branch, GitHub, Repo, WorkflowJob};
 use base64::Engine;
 use chrono::{DateTime, Utc};
 use octocrab::models::repos::Object;
@@ -28,15 +27,10 @@ pub async fn mock_repo_list(github: &GitHub, mock_server: &MockServer) {
         repositories: github
             .repos
             .iter()
-            .enumerate()
-            .map(|(index, (_, repo))| {
+            .map(|(_, repo)| {
                 let repo = repo.lock();
-                GitHubRepository {
-                    id: index as u64,
-                    owner: User::new(index as u64, repo.name.owner()).into(),
-                    name: repo.name.name().to_string(),
-                    url: format!("https://{}.foo", repo.name.name()).parse().unwrap(),
-                }
+                let repo: &Repo = &repo;
+                GitHubRepository::from(repo)
             })
             .collect(),
     };
@@ -66,7 +60,7 @@ async fn mock_branches(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
 }
 
 async fn mock_cancel_workflow(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
-    let repo_name = repo.lock().name.clone();
+    let repo_name = repo.lock().full_name();
     dynamic_mock_req(
         move |_req: &Request, [run_id]: [&str; 1]| {
             let run_id: u64 = run_id.parse().unwrap();
@@ -86,7 +80,7 @@ async fn mock_cancel_workflow(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) 
 }
 
 async fn mock_get_branch(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
-    let repo_name = repo.lock().name.clone();
+    let repo_name = repo.lock().full_name();
     dynamic_mock_req(
         move |_req: &Request, [branch_name]: [&str; 1]| {
             let mut repo = repo.lock();
@@ -113,7 +107,7 @@ async fn mock_get_branch(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
 }
 
 async fn mock_create_branch(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
-    let repo_name = repo.lock().name.clone();
+    let repo_name = repo.lock().full_name();
     Mock::given(method("POST"))
         .and(path(format!("/repos/{repo_name}/git/refs")))
         .respond_with(move |request: &Request| {
@@ -161,7 +155,7 @@ async fn mock_create_branch(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
 }
 
 async fn mock_update_branch(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
-    let repo_name = repo.lock().name.clone();
+    let repo_name = repo.lock().full_name();
     dynamic_mock_req(
         move |req: &Request, [branch_name]: [&str; 1]| {
             let mut repo = repo.lock();
@@ -218,7 +212,7 @@ async fn mock_update_branch(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
 
 async fn mock_merge_branch(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
     Mock::given(method("POST"))
-        .and(path(format!("/repos/{}/merges", repo.lock().name)))
+        .and(path(format!("/repos/{}/merges", repo.lock().full_name())))
         .respond_with(move |request: &Request| {
             let mut repo = repo.lock();
 
@@ -285,7 +279,7 @@ async fn mock_workflow_runs(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
         workflow_runs: Vec<WorkflowRunResponse>,
     }
 
-    let repo_name = repo.lock().name.clone();
+    let repo_name = repo.lock().full_name();
     dynamic_mock_req(
         move |req: &Request, []| {
             let repo = repo.lock();
@@ -337,7 +331,7 @@ fn status_to_gh(status: WorkflowStatus) -> (Status, Option<Conclusion>) {
 }
 
 async fn mock_workflow_jobs(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
-    let repo_name = repo.lock().name.clone();
+    let repo_name = repo.lock().full_name();
     dynamic_mock_req(
         move |_req: &Request, [run_id]: [&str; 1]| {
             let repo = repo.lock();
@@ -381,7 +375,7 @@ async fn mock_config(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
         Mock::given(method("GET"))
             .and(path(format!(
                 "/repos/{}/contents/rust-bors.toml",
-                repo.name
+                repo.full_name()
             )))
             .respond_with(
                 ResponseTemplate::new(200)
@@ -427,7 +421,7 @@ struct CheckRunResponseOutput {
 }
 
 async fn mock_check_runs(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
-    let repo_name = repo.lock().name.clone();
+    let repo_name = repo.lock().full_name();
     Mock::given(method("POST"))
         .and(path(format!("/repos/{repo_name}/check-runs")))
         .respond_with({
@@ -570,7 +564,7 @@ struct GitHubRepositories {
     repositories: Vec<GitHubRepository>,
 }
 
-#[derive(Serialize)]
+#[derive(serde::Serialize, Clone)]
 pub struct GitHubRepository {
     id: u64,
     name: String,
@@ -578,13 +572,15 @@ pub struct GitHubRepository {
     owner: GitHubUser,
 }
 
-impl From<GithubRepoName> for GitHubRepository {
-    fn from(value: GithubRepoName) -> Self {
+impl<'a> From<&'a Repo> for GitHubRepository {
+    fn from(value: &'a Repo) -> Self {
         Self {
-            id: 1,
-            name: value.name().to_string(),
-            owner: User::new(1001, value.owner()).into(),
-            url: format!("https://github.com/{value}").parse().unwrap(),
+            id: 1000,
+            name: value.name.clone(),
+            owner: value.owner.clone().into(),
+            url: format!("https://github.com/{}", value.full_name())
+                .parse()
+                .unwrap(),
         }
     }
 }

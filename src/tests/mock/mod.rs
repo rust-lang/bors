@@ -9,7 +9,6 @@ use graphql_parser::query::{Definition, Document, OperationDefinition, Selection
 use octocrab::Octocrab;
 use parking_lot::Mutex;
 use regex::Regex;
-use serde::Serialize;
 use std::collections::HashMap;
 use std::ops::Deref;
 use std::sync::Arc;
@@ -32,7 +31,7 @@ pub use pull_request::{
 };
 pub use workflow::GitHubWorkflowEventPayload;
 
-#[derive(Serialize)]
+#[derive(serde::Serialize, Clone)]
 struct GitHubUser {
     login: String,
     id: u64,

@@ -1,6 +1,6 @@
-use crate::tests::Comment;
 use crate::tests::mock::GitHubUser;
 use crate::tests::mock::repository::GitHubRepository;
+use crate::tests::{Comment, Repo};
 use chrono::Utc;
 use octocrab::models::events::payload::{IssueCommentEventAction, IssueCommentEventChanges};
 use octocrab::models::issues::IssueStateReason;
@@ -18,18 +18,18 @@ pub struct GitHubIssueCommentEventPayload {
     changes: Option<IssueCommentEventChanges>,
 }
 
-impl From<Comment> for GitHubIssueCommentEventPayload {
-    fn from(value: Comment) -> Self {
+impl GitHubIssueCommentEventPayload {
+    pub fn new(repo: &Repo, comment: Comment) -> Self {
         let time = Utc::now();
         let html_url = format!(
             "https://github.com/{}/pull/{}#issuecomment-{}",
-            value.pr_ident.repo,
-            value.pr_ident.number,
-            value.id.unwrap()
+            comment.pr_ident.repo,
+            comment.pr_ident.number,
+            comment.id.unwrap()
         );
         let url = Url::parse(&html_url).unwrap();
         Self {
-            repository: value.pr_ident.repo.clone().into(),
+            repository: GitHubRepository::from(repo),
             action: IssueCommentEventAction::Created,
             issue: GitHubIssue {
                 id: IssueId(1),
@@ -40,14 +40,14 @@ impl From<Comment> for GitHubIssueCommentEventPayload {
                 comments_url: url.clone(),
                 events_url: url.clone(),
                 html_url: url.clone(),
-                number: value.pr_ident.number,
+                number: comment.pr_ident.number,
                 state: IssueState::Open,
                 state_reason: None,
-                title: format!("PR #{}", value.pr_ident.number),
+                title: format!("PR #{}", comment.pr_ident.number),
                 body: None,
                 body_text: None,
                 body_html: None,
-                user: value.author.clone().into(),
+                user: comment.author.clone().into(),
                 labels: vec![],
                 assignees: vec![],
                 author_association: "OWNER".to_string(),
@@ -62,7 +62,7 @@ impl From<Comment> for GitHubIssueCommentEventPayload {
                 created_at: time,
                 updated_at: time,
             },
-            comment: value.into(),
+            comment: GitHubComment::from(comment),
             changes: None,
         }
     }
