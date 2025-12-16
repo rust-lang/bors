@@ -684,7 +684,8 @@ fn is_bors_observed_branch(branch: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use crate::tests::{BorsTester, Comment, User, default_repo_name, run_test};
+    use crate::tests::default_repo_name;
+    use crate::tests::{BorsTester, Comment, User, run_test};
 
     #[sqlx::test]
     async fn ignore_bot_comment(pool: sqlx::PgPool) {

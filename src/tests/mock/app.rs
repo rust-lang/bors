@@ -1,12 +1,11 @@
 use crate::tests::User;
+use crate::tests::mock::GitHubUser;
 use serde::Serialize;
 use url::Url;
 use wiremock::{
     Mock, MockServer, ResponseTemplate,
     matchers::{method, path, path_regex},
 };
-
-use super::user::GitHubUser;
 
 /// Handles all app related requests
 #[derive(Default)]
@@ -51,7 +50,7 @@ impl Default for GitHubApp {
         GitHubApp {
             id: default_app_id(),
             node_id: "1234".to_string(),
-            owner: GitHubUser::default(),
+            owner: User::default_pr_author().into(),
             name: "bors".to_string(),
             // same as bors user html_url
             html_url: GitHubUser::from(User::bors_bot()).html_url,
@@ -82,7 +81,7 @@ impl Default for Installation {
         Installation {
             id: 1,
             node_id: "".to_string(),
-            account: GitHubUser::default(),
+            account: User::default_pr_author().into(),
             permissions: Permissions {},
             events: vec!["*".to_string()],
         }

@@ -1,24 +1,138 @@
+use crate::github::api::client::HideCommentReason;
+use crate::tests::github::CommentMsg;
+use crate::tests::mock::app::{AppHandler, default_app_id};
+use crate::tests::mock::permissions::TeamApiMockServer;
+use crate::tests::mock::repository::{mock_repo, mock_repo_list};
+use crate::tests::{GitHub, User};
+use crate::{TeamApiClient, create_github_client};
 use graphql_parser::query::{Definition, Document, OperationDefinition, Selection};
 use octocrab::Octocrab;
+use regex::Regex;
+use serde::Serialize;
 use std::collections::HashMap;
+use std::ops::Deref;
 use std::sync::Arc;
-use wiremock::{MockServer, Request, ResponseTemplate};
+use url::Url;
+use wiremock::matchers::{method, path_regex};
+use wiremock::{Mock, MockServer, Request, ResponseTemplate};
 
-use crate::create_github_client;
-use crate::github::api::client::HideCommentReason;
-use crate::tests::GitHubState;
-use crate::tests::mocks::app::{AppHandler, default_app_id};
-use crate::tests::mocks::dynamic_mock_req;
-use crate::tests::mocks::pull_request::CommentMsg;
-use crate::tests::mocks::repository::{mock_repo, mock_repo_list};
+mod app;
+mod comment;
+mod permissions;
+mod pull_request;
+mod repository;
+mod workflow;
+
+pub use comment::GitHubIssueCommentEventPayload;
+pub use pull_request::{
+    GitHubPullRequestEventPayload, GitHubPushEventPayload, PullRequestChangeEvent,
+};
+pub use workflow::GitHubWorkflowEventPayload;
+
+#[derive(Serialize)]
+struct GitHubUser {
+    login: String,
+    id: u64,
+    node_id: String,
+    avatar_url: Url,
+    gravatar_id: String,
+    url: Url,
+    html_url: Url,
+    followers_url: Url,
+    following_url: Url,
+    gists_url: Url,
+    starred_url: Url,
+    subscriptions_url: Url,
+    organizations_url: Url,
+    repos_url: Url,
+    events_url: Url,
+    received_events_url: Url,
+    r#type: String,
+    site_admin: bool,
+}
+
+impl From<User> for GitHubUser {
+    fn from(user: User) -> Self {
+        let User {
+            github_id: id,
+            name,
+        } = user;
+        Self {
+            id,
+            login: name.clone(),
+            node_id: "MDQ6VXNlcjQ1MzkwNTc=".to_string(),
+            avatar_url: format!("https://avatars.githubusercontent.com/u/{id}?v=4",)
+                .parse()
+                .unwrap(),
+            gravatar_id: "".to_string(),
+            url: format!("https://api.github.com/users/{name}")
+                .parse()
+                .unwrap(),
+            html_url: format!("https://github.com/{name}").parse().unwrap(),
+            followers_url: format!("https://api.github.com/users/{name}/followers")
+                .parse()
+                .unwrap(),
+            following_url: format!("https://api.github.com/users/{name}/following{{/other_user}}")
+                .parse()
+                .unwrap(),
+            gists_url: format!("https://api.github.com/users/{name}/gists{{/gist_id}}")
+                .parse()
+                .unwrap(),
+            starred_url: format!("https://api.github.com/users/{name}/starred{{/owner}}{{/repo}}")
+                .parse()
+                .unwrap(),
+            subscriptions_url: format!("https://api.github.com/users/{name}/subscriptions")
+                .parse()
+                .unwrap(),
+            organizations_url: format!("https://api.github.com/users/{name}/orgs")
+                .parse()
+                .unwrap(),
+            repos_url: format!("https://api.github.com/users/{name}/repos")
+                .parse()
+                .unwrap(),
+            events_url: format!("https://api.github.com/users/{name}/events{{/privacy}}")
+                .parse()
+                .unwrap(),
+            received_events_url: format!("https://api.github.com/users/{name}/received_events")
+                .parse()
+                .unwrap(),
+            r#type: "User".to_string(),
+            site_admin: false,
+        }
+    }
+}
+
+pub struct ExternalHttpMock {
+    pub(super) gh_server: GitHubMockServer,
+    team_api_server: TeamApiMockServer,
+}
+
+impl ExternalHttpMock {
+    pub async fn start(github: Arc<tokio::sync::Mutex<GitHub>>) -> Self {
+        let gh_server = GitHubMockServer::start(github.clone()).await;
+        let team_api_server = TeamApiMockServer::start(github.lock().await.deref()).await;
+        Self {
+            gh_server,
+            team_api_server,
+        }
+    }
+
+    pub fn github_client(&self) -> Octocrab {
+        self.gh_server.client()
+    }
+
+    pub fn team_api_client(&self) -> TeamApiClient {
+        self.team_api_server.client()
+    }
+}
 
 pub struct GitHubMockServer {
     mock_server: MockServer,
-    github: Arc<tokio::sync::Mutex<GitHubState>>,
+    github: Arc<tokio::sync::Mutex<GitHub>>,
 }
 
 impl GitHubMockServer {
-    pub async fn start(github: Arc<tokio::sync::Mutex<GitHubState>>) -> Self {
+    pub async fn start(github: Arc<tokio::sync::Mutex<GitHub>>) -> Self {
         let mock_server = MockServer::start().await;
 
         {
@@ -93,7 +207,7 @@ impl GitHubMockServer {
     }
 }
 
-async fn mock_graphql(github: Arc<tokio::sync::Mutex<GitHubState>>, mock_server: &MockServer) {
+async fn mock_graphql(github: Arc<tokio::sync::Mutex<GitHub>>, mock_server: &MockServer) {
     dynamic_mock_req(
         move |request: &Request, []: [&str; 0]| {
             #[derive(serde::Deserialize)]
@@ -235,3 +349,29 @@ EjQJOzV2OIk4waurl+BsbOHP7C0Zhp7rpyWx4fUCgYEAp/4UceUfbJZGa8CcWZ8F
 3VafpHjFw+fMUjcIkQk0VfdbRD5fLDQpJy6hUVq6A+duSqTvlhE8DFAdBAC3VZ9k
 34PVnCZP7HB3k2eBSpDp4vk=
 -----END PRIVATE KEY-----"###;
+
+/// Create a mock that dynamically responds to its requests using the given function `f`.
+/// It is expected that the path will be a regex, which will be parsed when a request is received,
+/// and matched capture groups will be passed as a second argument to `f`.
+fn dynamic_mock_req<
+    F: Fn(&Request, [&str; N]) -> ResponseTemplate + Send + Sync + 'static,
+    const N: usize,
+>(
+    f: F,
+    m: &str,
+    regex: String,
+) -> Mock {
+    // We need to parse the regex from the request path again, because wiremock doesn't give
+    // the parsed path regex results to us :(
+    let parsed_regex = Regex::new(&regex).unwrap();
+    Mock::given(method(m))
+        .and(path_regex(regex))
+        .respond_with(move |req: &Request| {
+            let captured = parsed_regex
+                .captures(req.url.path())
+                .unwrap()
+                .extract::<N>()
+                .1;
+            f(req, captured)
+        })
+}

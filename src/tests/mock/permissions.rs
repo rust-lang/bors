@@ -1,35 +1,20 @@
 use crate::permissions::PermissionType;
 use parking_lot::Mutex;
 use serde_json::json;
-use std::collections::HashMap;
 use std::sync::Arc;
 use wiremock::matchers::path;
 use wiremock::{Mock, MockServer, ResponseTemplate, matchers::method};
 
 use crate::TeamApiClient;
-use crate::tests::mocks::Repo;
-use crate::tests::{GitHubState, User};
-
-#[derive(Clone)]
-pub struct Permissions {
-    pub users: HashMap<User, Vec<PermissionType>>,
-}
-
-impl Permissions {
-    /// Empty permissions => no one has permissions.
-    pub fn empty() -> Self {
-        Self {
-            users: HashMap::default(),
-        }
-    }
-}
+use crate::tests::GitHub;
+use crate::tests::Repo;
 
 pub struct TeamApiMockServer {
     mock_server: MockServer,
 }
 
 impl TeamApiMockServer {
-    pub async fn start(github: &GitHubState) -> Self {
+    pub async fn start(github: &GitHub) -> Self {
         let mock_server = MockServer::start().await;
 
         let add_mock = |repo: Arc<Mutex<Repo>>, kind: PermissionType, name: &str| {

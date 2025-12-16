@@ -350,7 +350,8 @@ pub async fn github_webhook_handler(
 
 #[cfg(test)]
 mod tests {
-    use crate::tests::{BorsTester, default_repo_name, run_test};
+    use crate::tests::default_repo_name;
+    use crate::tests::{BorsTester, run_test};
 
     #[sqlx::test]
     async fn api_queue_page(pool: sqlx::PgPool) {

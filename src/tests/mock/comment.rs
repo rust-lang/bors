@@ -1,8 +1,6 @@
-use crate::github::api::client::HideCommentReason;
-use crate::tests::mocks::User;
-use crate::tests::mocks::pull_request::PrIdentifier;
-use crate::tests::mocks::repository::GitHubRepository;
-use crate::tests::mocks::user::GitHubUser;
+use crate::tests::Comment;
+use crate::tests::mock::GitHubUser;
+use crate::tests::mock::repository::GitHubRepository;
 use chrono::Utc;
 use octocrab::models::events::payload::{IssueCommentEventAction, IssueCommentEventChanges};
 use octocrab::models::issues::IssueStateReason;
@@ -10,48 +8,7 @@ use octocrab::models::{Author, CommentId, IssueId, IssueState, Label};
 use serde::Serialize;
 use url::Url;
 
-#[derive(Clone, Debug, PartialEq)]
-pub struct Comment {
-    pub pr_ident: PrIdentifier,
-    pub author: User,
-    pub content: String,
-    pub id: Option<u64>,
-    pub node_id: Option<String>,
-    pub hide_reason: Option<HideCommentReason>,
-}
-
-impl Comment {
-    pub fn new<Id: Into<PrIdentifier>>(id: Id, content: &str) -> Self {
-        Self {
-            pr_ident: id.into(),
-            author: User::default_pr_author(),
-            content: content.to_string(),
-            id: None,
-            node_id: None,
-            hide_reason: None,
-        }
-    }
-
-    pub fn with_author(self, author: User) -> Self {
-        Self { author, ..self }
-    }
-
-    pub fn with_ids(self, id: u64, node_id: String) -> Self {
-        Self {
-            id: Some(id),
-            node_id: Some(node_id),
-            ..self
-        }
-    }
-}
-
-impl<'a> From<&'a str> for Comment {
-    fn from(value: &'a str) -> Self {
-        Comment::new(PrIdentifier::default(), value)
-    }
-}
-
-// Copied from octocrab, since its version if #[non_exhaustive]
+// Copied from octocrab, since its version is #[non_exhaustive]
 #[derive(Serialize)]
 pub struct GitHubIssueCommentEventPayload {
     repository: GitHubRepository,
@@ -111,7 +68,7 @@ impl From<Comment> for GitHubIssueCommentEventPayload {
     }
 }
 
-// Copied from octocrab, since its version if #[non_exhaustive]
+// Copied from octocrab, since its version is #[non_exhaustive]
 #[derive(Serialize)]
 struct GitHubIssue {
     id: IssueId,
@@ -140,7 +97,7 @@ struct GitHubIssue {
     updated_at: chrono::DateTime<chrono::Utc>,
 }
 
-// Copied from octocrab, since its version if #[non_exhaustive]
+// Copied from octocrab, since its version is #[non_exhaustive]
 #[derive(Serialize)]
 pub(super) struct GitHubComment {
     author_association: String,

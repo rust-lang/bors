@@ -1,14 +1,13 @@
-use std::collections::HashMap;
 use std::num::NonZeroU64;
 use std::sync::Arc;
 
-use super::user::{GitHubUser, User};
 use crate::database::WorkflowStatus;
 use crate::github::GithubRepoName;
-use crate::permissions::PermissionType;
-use crate::tests::mocks::dynamic_mock_req;
-use crate::tests::mocks::pull_request::{PullRequest, mock_pull_requests};
-use crate::tests::{GitHubState, Permissions, WorkflowJob, WorkflowRunData};
+use crate::tests::BranchPushError;
+use crate::tests::github::{CheckRunData, WorkflowRun};
+use crate::tests::mock::pull_request::mock_pull_requests;
+use crate::tests::mock::{GitHubUser, dynamic_mock_req};
+use crate::tests::{Branch, GitHub, Repo, User, WorkflowJob};
 use base64::Engine;
 use chrono::{DateTime, Utc};
 use octocrab::models::repos::Object;
@@ -23,266 +22,7 @@ use wiremock::{
     matchers::{method, path},
 };
 
-#[derive(Clone, Debug)]
-pub struct CheckRunData {
-    pub name: String,
-    pub head_sha: String,
-    pub status: String,
-    pub conclusion: Option<String>,
-    pub title: String,
-    pub summary: String,
-    pub text: String,
-    pub external_id: String,
-}
-
-#[derive(Clone)]
-pub struct WorkflowRun {
-    workflow_run: WorkflowRunData,
-    status: WorkflowStatus,
-}
-
-#[derive(Clone, Debug)]
-pub enum BranchPushError {
-    Conflict,
-    ValidationFailed,
-    InternalServerError,
-}
-
-#[derive(Clone, Debug)]
-pub struct BranchPushBehaviour {
-    pub error: Option<(BranchPushError, NonZeroU64)>,
-}
-
-impl BranchPushBehaviour {
-    pub fn success() -> Self {
-        Self { error: None }
-    }
-
-    pub fn always_fail(error_type: BranchPushError) -> Self {
-        Self {
-            error: Some((error_type, NonZeroU64::new(u64::MAX).unwrap())),
-        }
-    }
-
-    pub fn fail_n_times(error_type: BranchPushError, count: u64) -> Self {
-        Self {
-            error: NonZeroU64::new(count).map(|remaining| (error_type, remaining)),
-        }
-    }
-}
-
-impl Default for BranchPushBehaviour {
-    fn default() -> Self {
-        Self::success()
-    }
-}
-
-#[derive(Clone)]
-pub struct Repo {
-    pub name: GithubRepoName,
-    pub permissions: Permissions,
-    pub config: String,
-    pub branches: Vec<Branch>,
-    pub commit_messages: HashMap<String, String>,
-    pub workflows_cancelled_by_bors: Vec<u64>,
-    pub workflow_cancel_error: bool,
-    /// All workflows that we know about from the side of the test.
-    pub workflow_runs: Vec<WorkflowRun>,
-    pub pull_requests: HashMap<u64, PullRequest>,
-    pub check_runs: Vec<CheckRunData>,
-    /// Cause pull request fetch to fail.
-    pub pull_request_error: bool,
-    /// Push error failure/success behaviour.
-    pub push_behaviour: BranchPushBehaviour,
-    pub pr_push_counter: u64,
-}
-
-impl Repo {
-    pub fn new(name: GithubRepoName, permissions: Permissions, config: String) -> Self {
-        Self {
-            name,
-            permissions,
-            config,
-            pull_requests: Default::default(),
-            branches: vec![Branch::default()],
-            commit_messages: Default::default(),
-            workflows_cancelled_by_bors: vec![],
-            workflow_cancel_error: false,
-            workflow_runs: vec![],
-            pull_request_error: false,
-            pr_push_counter: 0,
-            check_runs: vec![],
-            push_behaviour: BranchPushBehaviour::default(),
-        }
-    }
-
-    pub fn with_user_perms(mut self, user: User, permissions: &[PermissionType]) -> Self {
-        self.permissions.users.insert(user, permissions.to_vec());
-        self
-    }
-
-    pub fn with_pr(mut self, pull_request: PullRequest) -> Self {
-        self.pull_requests
-            .insert(pull_request.number.0, pull_request);
-        self
-    }
-
-    pub fn get_pr(&self, pr: u64) -> &PullRequest {
-        self.pull_requests.get(&pr).unwrap()
-    }
-
-    pub fn get_pr_mut(&mut self, pr: u64) -> &mut PullRequest {
-        self.pull_requests.get_mut(&pr).unwrap()
-    }
-
-    pub fn get_branch_by_name(&mut self, name: &str) -> Option<&mut Branch> {
-        self.branches.iter_mut().find(|b| b.name == name)
-    }
-
-    pub fn add_cancelled_workflow(&mut self, run_id: u64) {
-        self.workflows_cancelled_by_bors.push(run_id);
-    }
-
-    pub fn add_check_run(&mut self, check_run: CheckRunData) {
-        self.check_runs.push(check_run);
-    }
-
-    pub fn update_check_run(
-        &mut self,
-        check_run_id: u64,
-        status: String,
-        conclusion: Option<String>,
-    ) {
-        let check_run = self.check_runs.get_mut(check_run_id as usize).unwrap();
-        check_run.status = status;
-        check_run.conclusion = conclusion;
-    }
-
-    /// Inserts or updates the status of the given workflow run.
-    pub fn update_workflow_run(&mut self, workflow_run: WorkflowRunData, status: WorkflowStatus) {
-        if let Some(workflow) = self
-            .workflow_runs
-            .iter_mut()
-            .find(|w| w.workflow_run.run_id == workflow_run.run_id)
-        {
-            workflow.status = status;
-        } else {
-            self.workflow_runs.push(WorkflowRun {
-                workflow_run,
-                status,
-            });
-        }
-    }
-
-    pub fn get_next_pr_push_counter(&mut self) -> u64 {
-        self.pr_push_counter += 1;
-        self.pr_push_counter
-    }
-
-    pub fn get_commit_message(&self, sha: &str) -> String {
-        self.commit_messages
-            .get(sha)
-            .expect("Commit message not found")
-            .clone()
-    }
-
-    pub fn set_commit_message(&mut self, sha: &str, message: &str) {
-        self.commit_messages
-            .insert(sha.to_string(), message.to_string());
-    }
-}
-
-/// Represents the default repository for tests.
-/// It uses a basic configuration that might be also encountered on a real repository.
-///
-/// It contains a single pull request by default, [PullRequest::default], and a single
-/// branch called `main`.
-impl Default for Repo {
-    fn default() -> Self {
-        let config = r#"
-timeout = 3600
-merge_queue_enabled = true
-
-# Set labels on PR approvals
-[labels]
-approved = ["+approved"]
-"#
-        .to_string();
-
-        let mut users = HashMap::default();
-        users.insert(
-            User::default_pr_author(),
-            vec![PermissionType::Try, PermissionType::Review],
-        );
-        users.insert(User::try_user(), vec![PermissionType::Try]);
-        users.insert(
-            User::reviewer(),
-            vec![PermissionType::Try, PermissionType::Review],
-        );
-
-        Self::new(default_repo_name(), Permissions { users }, config)
-            .with_pr(PullRequest::default())
-    }
-}
-
-pub fn default_repo_name() -> GithubRepoName {
-    GithubRepoName::new("rust-lang", "borstest")
-}
-
-#[derive(Clone, PartialEq, Eq, Debug)]
-pub struct Branch {
-    name: String,
-    sha: String,
-    sha_history: Vec<String>,
-    merge_counter: u64,
-    pub merge_conflict: bool,
-}
-
-impl Branch {
-    pub fn new(name: &str, sha: &str) -> Self {
-        Self {
-            name: name.to_string(),
-            sha: sha.to_string(),
-            sha_history: vec![],
-            merge_counter: 0,
-            merge_conflict: false,
-        }
-    }
-
-    pub fn get_name(&self) -> &str {
-        &self.name
-    }
-    pub fn get_sha(&self) -> &str {
-        &self.sha
-    }
-
-    pub fn set_to_sha(&mut self, sha: &str) {
-        self.sha_history.push(self.sha.clone());
-        self.sha = sha.to_string();
-    }
-
-    pub fn get_sha_history(&self) -> Vec<String> {
-        let mut shas = self.sha_history.clone();
-        shas.push(self.sha.clone());
-        shas
-    }
-}
-
-impl Default for Branch {
-    fn default() -> Self {
-        Self::new(default_branch_name(), default_branch_sha())
-    }
-}
-
-pub fn default_branch_name() -> &'static str {
-    "main"
-}
-
-pub fn default_branch_sha() -> &'static str {
-    "main-sha1"
-}
-
-pub async fn mock_repo_list(github: &GitHubState, mock_server: &MockServer) {
+pub async fn mock_repo_list(github: &GitHub, mock_server: &MockServer) {
     let repos = GitHubRepositories {
         total_count: github.repos.len() as u64,
         repositories: github
@@ -843,7 +583,7 @@ impl From<GithubRepoName> for GitHubRepository {
         Self {
             id: 1,
             name: value.name().to_string(),
-            owner: GitHubUser::new(value.owner(), 1001),
+            owner: User::new(1001, value.owner()).into(),
             url: format!("https://github.com/{value}").parse().unwrap(),
         }
     }

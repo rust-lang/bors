@@ -366,10 +366,11 @@ mod tests {
 
     use crate::bors::PullRequestStatus;
     use crate::bors::merge_queue::AUTO_BUILD_CHECK_RUN_NAME;
-    use crate::tests::{BorsBuilder, BorsTester, GitHubState, WorkflowRunData};
+    use crate::tests::default_repo_name;
+    use crate::tests::{BorsBuilder, BorsTester, GitHub, WorkflowRunData};
     use crate::{
         database::{MergeableState, OctocrabMergeableState},
-        tests::{User, default_branch_name, default_repo_name, run_test},
+        tests::{User, default_branch_name, run_test},
     };
 
     #[sqlx::test]
@@ -696,7 +697,7 @@ mod tests {
     #[sqlx::test]
     async fn conflict_message_unknown_sha(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
-            .github(GitHubState::default().with_default_config(
+            .github(GitHub::default().with_default_config(
                 r#"
 merge_queue_enabled = true
 report_merge_conflicts = true
@@ -723,7 +724,7 @@ report_merge_conflicts = true
     #[sqlx::test]
     async fn conflict_message_unknown_sha_approved(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
-            .github(GitHubState::default().with_default_config(
+            .github(GitHub::default().with_default_config(
                 r#"
 merge_queue_enabled = true
 report_merge_conflicts = true
@@ -756,7 +757,7 @@ report_merge_conflicts = true
     #[sqlx::test]
     async fn conflict_message_known_sha(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
-            .github(GitHubState::default().with_default_config(
+            .github(GitHub::default().with_default_config(
                 r#"
 merge_queue_enabled = true
 report_merge_conflicts = true
