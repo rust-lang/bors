@@ -508,7 +508,8 @@ mod tests {
 
     use crate::database::WorkflowStatus;
     use crate::database::operations::get_all_workflows;
-    use crate::tests::{BorsBuilder, BorsTester, GitHubState, default_repo_name};
+    use crate::tests::default_repo_name;
+    use crate::tests::{BorsBuilder, BorsTester, GitHub};
     use crate::tests::{Branch, WorkflowEvent, WorkflowRunData, run_test};
 
     #[sqlx::test]
@@ -667,7 +668,7 @@ mod tests {
     #[sqlx::test]
     async fn min_ci_time_mark_too_short_workflow_as_failed(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
-            .github(GitHubState::default().with_default_config(
+            .github(GitHub::default().with_default_config(
                 r#"
 min_ci_time = 10
 "#,
@@ -695,7 +696,7 @@ min_ci_time = 10
     #[sqlx::test]
     async fn min_ci_time_ignore_long_enough_workflow(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
-            .github(GitHubState::default().with_default_config(
+            .github(GitHub::default().with_default_config(
                 r#"
 min_ci_time = 20
 "#,

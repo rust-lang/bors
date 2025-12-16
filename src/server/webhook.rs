@@ -1536,7 +1536,7 @@ mod tests {
         let (repository_tx, _) = mpsc::channel(1024);
         let (global_tx, _) = mpsc::channel(1024);
         let repos = HashMap::new();
-        // We do not need an actual database;
+        // We do not need an actual database
         let db = Arc::new(PgDbClient::new(
             PgPool::connect_lazy("postgres://").unwrap(),
         ));

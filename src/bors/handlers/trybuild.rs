@@ -288,9 +288,9 @@ mod tests {
     use crate::github::CommitSha;
     use crate::github::api::client::HideCommentReason;
     use crate::tests::BorsTester;
+    use crate::tests::default_repo_name;
     use crate::tests::{
-        BorsBuilder, Comment, GitHubState, User, WorkflowEvent, WorkflowJob, WorkflowRunData,
-        default_repo_name, run_test,
+        BorsBuilder, Comment, GitHub, User, WorkflowEvent, WorkflowJob, WorkflowRunData, run_test,
     };
     use octocrab::models::JobId;
     use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
@@ -872,7 +872,7 @@ try-job: Bar
     #[sqlx::test]
     async fn try_build_failed_modify_labels(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
-            .github(GitHubState::default().with_default_config(
+            .github(GitHub::default().with_default_config(
                 r#"
 [labels]
 try_failed = ["+foo", "+bar", "-baz"]

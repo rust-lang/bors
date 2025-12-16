@@ -220,7 +220,8 @@ mod tests {
     use crate::bors::handlers::refresh::MOCK_TIME;
     use crate::bors::handlers::trybuild::TRY_BUILD_CHECK_RUN_NAME;
     use crate::database::{MergeableState, OctocrabMergeableState};
-    use crate::tests::{BorsBuilder, BorsTester, GitHubState, default_repo_name, run_test};
+    use crate::tests::default_repo_name;
+    use crate::tests::{BorsBuilder, BorsTester, GitHub, run_test};
     use chrono::Utc;
     use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
     use std::future::Future;
@@ -245,8 +246,8 @@ mod tests {
         .await;
     }
 
-    fn gh_state_with_long_timeout() -> GitHubState {
-        GitHubState::default().with_default_config(
+    fn gh_state_with_long_timeout() -> GitHub {
+        GitHub::default().with_default_config(
             r#"
 timeout = 3600
 "#,

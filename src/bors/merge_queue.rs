@@ -492,7 +492,8 @@ mod tests {
     use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
 
     use crate::github::api::client::HideCommentReason;
-    use crate::tests::{BorsBuilder, GitHubState, run_test};
+    use crate::tests::default_repo_name;
+    use crate::tests::{BorsBuilder, GitHub, run_test};
     use crate::{
         bors::{
             PullRequestStatus,
@@ -500,13 +501,13 @@ mod tests {
         },
         database::{BuildStatus, MergeableState, OctocrabMergeableState},
         github::CommitSha,
-        tests::{BorsTester, BranchPushBehaviour, BranchPushError, Comment, default_repo_name},
+        tests::{BorsTester, BranchPushBehaviour, BranchPushError, Comment},
     };
 
     #[sqlx::test]
     async fn disabled_merge_queue(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
-            .github(GitHubState::default().with_default_config(
+            .github(GitHub::default().with_default_config(
                 r#"
 merge_queue_enabled = false
 "#,
@@ -992,7 +993,7 @@ merge_queue_enabled = false
 
     #[sqlx::test]
     async fn auto_build_success_labels(pool: sqlx::PgPool) {
-        let github = GitHubState::default().with_default_config(
+        let github = GitHub::default().with_default_config(
             r#"
 merge_queue_enabled = true
 
@@ -1022,7 +1023,7 @@ auto_build_succeeded = ["+foo", "+bar", "-baz"]
 
     #[sqlx::test]
     async fn auto_build_failed_labels(pool: sqlx::PgPool) {
-        let github = GitHubState::default().with_default_config(
+        let github = GitHub::default().with_default_config(
             r#"
 merge_queue_enabled = true
 

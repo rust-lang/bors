@@ -1,23 +1,3 @@
-mod io;
-mod mocks;
-mod util;
-mod webhook;
-
-use anyhow::Context;
-use axum::Router;
-use http::{Method, Request};
-use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
-use parking_lot::Mutex;
-use serde::Serialize;
-use sqlx::PgPool;
-use std::collections::HashMap;
-use std::future::Future;
-use std::sync::Arc;
-use std::time::Duration;
-use tokio::sync::mpsc::Sender;
-use tokio::task::{JoinError, JoinHandle};
-use tower::Service;
-
 use crate::bors::merge_queue::MergeQueueSender;
 use crate::bors::mergeability_queue::MergeabilityQueueSender;
 use crate::bors::{
@@ -34,31 +14,46 @@ use crate::{
     BorsContext, BorsGlobalEvent, BorsProcess, CommandParser, PgDbClient, TreeState, WebhookSecret,
     create_bors_process, load_repositories,
 };
+use anyhow::Context;
+use axum::Router;
+use http::{Method, Request};
+use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
+use parking_lot::Mutex;
+use serde::Serialize;
+use sqlx::PgPool;
+use std::collections::HashMap;
+use std::future::Future;
+use std::sync::Arc;
+use std::time::Duration;
+use tokio::sync::mpsc::Sender;
+use tokio::task::{JoinError, JoinHandle};
+use tower::Service;
 
-use crate::tests::mocks::comment::GitHubIssueCommentEventPayload;
-use crate::tests::mocks::pull_request::{
-    GitHubPullRequestEventPayload, GitHubPushEventPayload, PrIdentifier, PullRequest,
-    PullRequestChangeEvent,
-};
-use crate::tests::mocks::workflow::{
-    GitHubWorkflowEventPayload, TestWorkflowStatus, WorkflowEventKind,
-};
+mod github;
+mod mock;
+mod utils;
 
 // Public re-exports for use in tests
 use crate::github::api::client::HideCommentReason;
 use crate::server::{ServerState, create_app};
-pub use io::load_test_file;
-pub use mocks::ExternalHttpMock;
-pub use mocks::GitHubState;
-pub use mocks::comment::Comment;
-pub use mocks::permissions::Permissions;
-pub use mocks::repository::{
-    Branch, BranchPushBehaviour, BranchPushError, Repo, default_branch_name, default_repo_name,
+use crate::tests::github::{PrIdentifier, PullRequest, TestWorkflowStatus, WorkflowEventKind};
+use crate::tests::mock::{
+    GitHubIssueCommentEventPayload, GitHubPullRequestEventPayload, GitHubPushEventPayload,
+    GitHubWorkflowEventPayload, PullRequestChangeEvent,
 };
-pub use mocks::user::User;
-pub use mocks::workflow::{WorkflowEvent, WorkflowJob, WorkflowRunData};
-pub use util::TestSyncMarker;
-pub use webhook::{TEST_WEBHOOK_SECRET, create_webhook_request};
+pub use github::Branch;
+pub use github::Comment;
+pub use github::GitHub;
+pub use github::Permissions;
+pub use github::Repo;
+pub use github::User;
+pub use github::{BranchPushBehaviour, BranchPushError};
+pub use github::{WorkflowEvent, WorkflowJob, WorkflowRunData};
+pub use github::{default_branch_name, default_repo_name};
+pub use mock::ExternalHttpMock;
+pub use utils::io::load_test_file;
+pub use utils::sync::TestSyncMarker;
+pub use utils::webhook::{TEST_WEBHOOK_SECRET, create_webhook_request};
 
 /// How long should we wait before we timeout a test.
 /// You can increase this if you want to do interactive debugging.
@@ -69,7 +64,7 @@ pub fn default_cmd_prefix() -> CommandPrefix {
 }
 
 pub struct BorsBuilder {
-    github: GitHubState,
+    github: GitHub,
     pool: PgPool,
 }
 
@@ -81,7 +76,7 @@ impl BorsBuilder {
         }
     }
 
-    pub fn github(self, github: GitHubState) -> Self {
+    pub fn github(self, github: GitHub) -> Self {
         Self { github, ..self }
     }
 
@@ -91,7 +86,7 @@ impl BorsBuilder {
     pub async fn run_test<F: AsyncFnOnce(&mut BorsTester) -> anyhow::Result<()>>(
         self,
         f: F,
-    ) -> GitHubState {
+    ) -> GitHub {
         // We return `tester` and `bors` separately, so that we can finish `bors`
         // even if `f` returns an error or times out, for better error propagation.
         let (mut tester, mut bors) = BorsTester::new(self.pool, self.github).await;
@@ -134,11 +129,11 @@ impl BorsBuilder {
 }
 
 /// Simple end-to-end test entrypoint for tests that don't need to prepare any custom state.
-/// See [GitHubState::default] for how does the default state look like.
+/// See [GitHub::default] for how does the default state look like.
 pub async fn run_test<F: AsyncFnOnce(&mut BorsTester) -> anyhow::Result<()>>(
     pool: PgPool,
     f: F,
-) -> GitHubState {
+) -> GitHub {
     BorsBuilder::new(pool).run_test(f).await
 }
 
@@ -150,7 +145,7 @@ pub async fn run_test<F: AsyncFnOnce(&mut BorsTester) -> anyhow::Result<()>>(
 pub struct BorsTester {
     app: Router,
     http_mock: ExternalHttpMock,
-    github: Arc<tokio::sync::Mutex<GitHubState>>,
+    github: Arc<tokio::sync::Mutex<GitHub>>,
     db: Arc<PgDbClient>,
     mergeability_queue_tx: MergeabilityQueueSender,
     merge_queue_tx: MergeQueueSender,
@@ -161,7 +156,7 @@ pub struct BorsTester {
 }
 
 impl BorsTester {
-    async fn new(pool: PgPool, github: GitHubState) -> (Self, JoinHandle<()>) {
+    async fn new(pool: PgPool, github: GitHub) -> (Self, JoinHandle<()>) {
         let github = Arc::new(tokio::sync::Mutex::new(github));
         let mock = ExternalHttpMock::start(github.clone()).await;
         let db = Arc::new(PgDbClient::new(pool));
@@ -371,7 +366,7 @@ impl BorsTester {
         &mut self,
         id: Id,
     ) -> anyhow::Result<String> {
-        Ok(GitHubState::get_next_comment(self.github.clone(), id)
+        Ok(GitHub::get_next_comment(self.github.clone(), id)
             .await?
             .content)
     }
@@ -381,7 +376,7 @@ impl BorsTester {
         &mut self,
         id: Id,
     ) -> anyhow::Result<Comment> {
-        GitHubState::get_next_comment(self.github.clone(), id).await
+        GitHub::get_next_comment(self.github.clone(), id).await
     }
 
     //-- Generation of GitHub events --//
@@ -989,7 +984,7 @@ impl BorsTester {
         Ok(())
     }
 
-    async fn finish(self, bors: JoinHandle<()>) -> anyhow::Result<GitHubState> {
+    async fn finish(self, bors: JoinHandle<()>) -> anyhow::Result<GitHub> {
         // Make sure that the event channel senders are closed
         drop(self.app);
         drop(self.global_tx);

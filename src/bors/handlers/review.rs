@@ -374,11 +374,10 @@ mod tests {
     use crate::bors::merge_queue::AUTO_BUILD_CHECK_RUN_NAME;
     use crate::database::{DelegatedPermission, TreeState};
     use crate::tests::BorsTester;
+    use crate::tests::default_repo_name;
     use crate::{
         bors::{RollupMode, handlers::trybuild::TRY_MERGE_BRANCH_NAME},
-        tests::{
-            BorsBuilder, Comment, GitHubState, Permissions, User, default_repo_name, run_test,
-        },
+        tests::{BorsBuilder, Comment, GitHub, Permissions, User, run_test},
     };
 
     #[sqlx::test]
@@ -630,7 +629,7 @@ mod tests {
 
     #[sqlx::test]
     async fn insufficient_permission_tree_closed(pool: sqlx::PgPool) {
-        let gh = GitHubState::default();
+        let gh = GitHub::default();
         gh.default_repo().lock().permissions = Permissions::empty();
 
         BorsBuilder::new(pool)
@@ -653,7 +652,7 @@ mod tests {
     #[sqlx::test]
     async fn cannot_approve_without_delegation(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
-            .github(GitHubState::unauthorized_pr_author())
+            .github(GitHub::unauthorized_pr_author())
             .run_test(async |tester: &mut BorsTester| {
                 tester.post_comment("@bors r+").await?;
                 insta::assert_snapshot!(
@@ -668,7 +667,7 @@ mod tests {
     #[sqlx::test]
     async fn delegate_author(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
-            .github(GitHubState::unauthorized_pr_author())
+            .github(GitHub::unauthorized_pr_author())
             .run_test(async |tester: &mut BorsTester| {
                 tester
                     .post_comment(review_comment("@bors delegate+"))
@@ -694,7 +693,7 @@ mod tests {
     #[sqlx::test]
     async fn delegatee_can_approve(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
-            .github(GitHubState::unauthorized_pr_author())
+            .github(GitHub::unauthorized_pr_author())
             .run_test(async |tester: &mut BorsTester| {
                 tester
                     .post_comment(review_comment("@bors delegate+"))
@@ -715,7 +714,7 @@ mod tests {
     #[sqlx::test]
     async fn delegatee_can_try(pool: sqlx::PgPool) {
         let gh = BorsBuilder::new(pool)
-            .github(GitHubState::unauthorized_pr_author())
+            .github(GitHub::unauthorized_pr_author())
             .run_test(async |tester: &mut BorsTester| {
                 tester
                     .post_comment(review_comment("@bors delegate+"))
@@ -738,7 +737,7 @@ mod tests {
     #[sqlx::test]
     async fn delegatee_can_set_priority(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
-            .github(GitHubState::unauthorized_pr_author())
+            .github(GitHub::unauthorized_pr_author())
             .run_test(async |tester: &mut BorsTester| {
                 tester
                     .post_comment(review_comment("@bors delegate+"))
@@ -756,7 +755,7 @@ mod tests {
     #[sqlx::test]
     async fn delegate_insufficient_permission(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
-            .github(GitHubState::unauthorized_pr_author())
+            .github(GitHub::unauthorized_pr_author())
             .run_test(async |tester: &mut BorsTester| {
                 tester.post_comment("@bors delegate+").await?;
                 insta::assert_snapshot!(
@@ -771,7 +770,7 @@ mod tests {
     #[sqlx::test]
     async fn undelegate_by_reviewer(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
-            .github(GitHubState::unauthorized_pr_author())
+            .github(GitHub::unauthorized_pr_author())
             .run_test(async |tester: &mut BorsTester| {
                 tester
                     .post_comment(review_comment("@bors delegate+"))
@@ -797,7 +796,7 @@ mod tests {
     #[sqlx::test]
     async fn undelegate_by_delegatee(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
-            .github(GitHubState::unauthorized_pr_author())
+            .github(GitHub::unauthorized_pr_author())
             .run_test(async |tester: &mut BorsTester| {
                 tester
                     .post_comment(review_comment("@bors delegate+"))
@@ -817,7 +816,7 @@ mod tests {
     #[sqlx::test]
     async fn reviewer_unapprove_delegated_approval(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
-            .github(GitHubState::unauthorized_pr_author())
+            .github(GitHub::unauthorized_pr_author())
             .run_test(async |tester: &mut BorsTester| {
                 tester
                     .post_comment(review_comment("@bors delegate+"))
@@ -843,7 +842,7 @@ mod tests {
     #[sqlx::test]
     async fn non_author_cannot_use_delegation(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
-            .github(GitHubState::unauthorized_pr_author())
+            .github(GitHub::unauthorized_pr_author())
             .run_test(async |tester: &mut BorsTester| {
                 tester
                     .post_comment(review_comment("@bors delegate+"))
@@ -1105,7 +1104,7 @@ mod tests {
     #[sqlx::test]
     async fn delegate_try(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
-            .github(GitHubState::unauthorized_pr_author())
+            .github(GitHub::unauthorized_pr_author())
             .run_test(async |tester: &mut BorsTester| {
                 tester
                     .post_comment(review_comment("@bors delegate=try"))
@@ -1130,7 +1129,7 @@ mod tests {
     #[sqlx::test]
     async fn delegated_try_can_build(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
-            .github(GitHubState::unauthorized_pr_author())
+            .github(GitHub::unauthorized_pr_author())
             .run_test(async |tester: &mut BorsTester| {
                 tester
                     .post_comment(review_comment("@bors delegate=try"))
@@ -1152,7 +1151,7 @@ mod tests {
     #[sqlx::test]
     async fn delegated_try_can_not_approve(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
-            .github(GitHubState::unauthorized_pr_author())
+            .github(GitHub::unauthorized_pr_author())
             .run_test(async |tester: &mut BorsTester| {
                 tester
                     .post_comment(review_comment("@bors delegate=try"))
@@ -1263,7 +1262,7 @@ mod tests {
     #[sqlx::test]
     async fn approve_pr_with_blocked_label(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
-            .github(GitHubState::default().with_default_config(
+            .github(GitHub::default().with_default_config(
                 r#"
 labels_blocking_approval = ["proposed-final-comment-period"]
 "#,
@@ -1288,7 +1287,7 @@ labels_blocking_approval = ["proposed-final-comment-period"]
     #[sqlx::test]
     async fn approve_pr_with_blocked_labels(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
-            .github(GitHubState::default().with_default_config(
+            .github(GitHub::default().with_default_config(
                 r#"
 labels_blocking_approval = ["proposed-final-comment-period", "final-comment-period"]
 "#,
