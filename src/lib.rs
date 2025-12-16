@@ -13,13 +13,12 @@ mod utils;
 pub use bors::{BorsContext, CommandParser, event::BorsGlobalEvent, event::BorsRepositoryEvent};
 pub use database::{PgDbClient, TreeState};
 pub use github::{
-    AppError, WebhookSecret,
+    AppError, OAuthClient, OAuthConfig, WebhookSecret,
     api::create_github_client,
     api::load_repositories,
     process::{BorsProcess, create_bors_process},
 };
 pub use permissions::TeamApiClient;
-pub use server::OAuthConfig;
 pub use server::ServerState;
 pub use server::create_app;
 

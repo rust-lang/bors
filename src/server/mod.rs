@@ -7,7 +7,8 @@ use crate::templates::{
 };
 use crate::utils::sort_queue::sort_queue_prs;
 use crate::{
-    AppError, BorsGlobalEvent, BorsRepositoryEvent, PgDbClient, WebhookSecret, bors, database,
+    AppError, BorsGlobalEvent, BorsRepositoryEvent, OAuthClient, PgDbClient, WebhookSecret, bors,
+    database,
 };
 use axum::extract::{FromRef, Path, State};
 use axum::response::{IntoResponse, Redirect, Response};
@@ -15,7 +16,6 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use http::StatusCode;
 use pulldown_cmark::Parser;
-use secrecy::{ExposeSecret, SecretString};
 use std::any::Any;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -26,35 +26,12 @@ use webhook::GitHubWebhook;
 
 pub mod webhook;
 
-#[derive(Clone)]
-pub struct OAuthConfig {
-    client_id: String,
-    client_secret: SecretString,
-}
-
-impl OAuthConfig {
-    pub fn new(client_id: String, client_secret: String) -> Self {
-        Self {
-            client_id,
-            client_secret: client_secret.into(),
-        }
-    }
-
-    pub fn client_id(&self) -> &str {
-        &self.client_id
-    }
-
-    pub fn client_secret(&self) -> &str {
-        self.client_secret.expose_secret()
-    }
-}
-
 /// Shared server state for all axum handlers.
 pub struct ServerState {
     repository_event_queue: mpsc::Sender<BorsRepositoryEvent>,
     global_event_queue: mpsc::Sender<BorsGlobalEvent>,
     webhook_secret: WebhookSecret,
-    oauth: Option<OAuthConfig>,
+    oauth: Option<OAuthClient>,
     repositories: HashMap<GithubRepoName, Arc<RepositoryState>>,
     db: Arc<PgDbClient>,
     cmd_prefix: CommandPrefix,
@@ -65,7 +42,7 @@ impl ServerState {
         repository_event_queue: mpsc::Sender<BorsRepositoryEvent>,
         global_event_queue: mpsc::Sender<BorsGlobalEvent>,
         webhook_secret: WebhookSecret,
-        oauth: Option<OAuthConfig>,
+        oauth: Option<OAuthClient>,
         repositories: HashMap<GithubRepoName, Arc<RepositoryState>>,
         db: Arc<PgDbClient>,
         cmd_prefix: CommandPrefix,
@@ -90,7 +67,7 @@ impl ServerState {
     }
 }
 
-impl FromRef<ServerStateRef> for Option<OAuthConfig> {
+impl FromRef<ServerStateRef> for Option<OAuthClient> {
     fn from_ref(state: &ServerStateRef) -> Self {
         state.0.oauth.clone()
     }
@@ -103,7 +80,7 @@ impl FromRef<ServerStateRef> for Arc<PgDbClient> {
 }
 
 #[derive(Clone)]
-pub struct ServerStateRef(Arc<ServerState>);
+pub struct ServerStateRef(pub Arc<ServerState>);
 
 pub fn create_app(state: ServerState) -> Router {
     let api = create_api_router();
@@ -287,7 +264,7 @@ async fn help_handler(State(ServerStateRef(state)): State<ServerStateRef>) -> im
 pub async fn queue_handler(
     Path(repo_name): Path<String>,
     State(db): State<Arc<PgDbClient>>,
-    State(oauth): State<Option<OAuthConfig>>,
+    State(oauth): State<Option<OAuthClient>>,
 ) -> Result<impl IntoResponse, AppError> {
     let repo = match db.repo_by_name(&repo_name).await? {
         Some(repo) => repo,
@@ -322,7 +299,9 @@ pub async fn queue_handler(
             });
 
     Ok(HtmlTemplate(QueueTemplate {
-        oauth_client_id: oauth.as_ref().map(|config| config.client_id().to_string()),
+        oauth_client_id: oauth
+            .as_ref()
+            .map(|client| client.config().client_id().to_string()),
         repo_name: repo.name.name().to_string(),
         repo_owner: repo.name.owner().to_string(),
         repo_url: format!("https://github.com/{}", repo.name),
