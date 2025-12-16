@@ -72,6 +72,7 @@ parking_lot = "0.12"
 thread_local = "1"
 sqlparser = { version = "0.59", features = ["visitor"] }
 graphql-parser = "0.4"
+urlencoding = "2"
 
 [profile.release]
 debug = 1

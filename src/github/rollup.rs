@@ -1,14 +1,15 @@
 use super::GithubRepoName;
 use super::error::AppError;
-use crate::server::ServerStateRef;
+use crate::PgDbClient;
+use crate::github::oauth::OAuthClient;
 use anyhow::Context;
 use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Redirect};
-use octocrab::OctocrabBuilder;
+use octocrab::Octocrab;
 use octocrab::params::repos::Reference;
 use rand::{Rng, distr::Alphanumeric};
-use std::collections::HashMap;
+use std::sync::Arc;
 use tracing::Instrument;
 
 /// Query parameters received from GitHub's OAuth callback.
@@ -17,58 +18,38 @@ use tracing::Instrument;
 #[derive(serde::Deserialize)]
 pub struct OAuthCallbackQuery {
     /// Temporary code from GitHub to exchange for an access token (expires in 10m).
-    pub code: String,
+    code: String,
     /// State passed in the initial OAuth request - contains rollup info created from the queue page.
-    pub state: String,
+    state: String,
 }
 
-#[derive(serde::Deserialize)]
-pub struct OAuthState {
-    pub pr_nums: Vec<u32>,
-    pub repo_name: String,
-    pub repo_owner: String,
+#[derive(serde::Serialize, serde::Deserialize)]
+struct OAuthRollupState {
+    pr_nums: Vec<u32>,
+    repo_name: String,
+    repo_owner: String,
 }
 
 pub async fn oauth_callback_handler(
+    State(db): State<Arc<PgDbClient>>,
+    State(oauth): State<Option<OAuthClient>>,
     Query(callback): Query<OAuthCallbackQuery>,
-    State(state): State<ServerStateRef>,
 ) -> Result<impl IntoResponse, AppError> {
-    let oauth_config = state.oauth.as_ref().ok_or_else(|| {
+    let Some(oauth_client) = oauth else {
         let error =
             anyhow::anyhow!("OAuth not configured. Please set CLIENT_ID and CLIENT_SECRET.");
         tracing::error!("{error}");
-        error
-    })?;
+        return Err(error.into());
+    };
 
-    let oauth_state: OAuthState = serde_json::from_str(&callback.state)
+    let oauth_state: OAuthRollupState = serde_json::from_str(&callback.state)
         .map_err(|_| anyhow::anyhow!("Invalid state parameter"))?;
 
-    tracing::info!("Exchanging OAuth code for access token");
-    let client = reqwest::Client::new();
-    let token_response = client
-        .post("https://github.com/login/oauth/access_token")
-        .form(&[
-            ("client_id", oauth_config.client_id()),
-            ("client_secret", oauth_config.client_secret()),
-            ("code", &callback.code),
-        ])
-        .send()
-        .await
-        .context("Failed to send OAuth token exchange request to GitHub")?
-        .text()
-        .await
-        .context("Failed to read OAuth token response from GitHub")?;
+    // let repo_state = state
 
-    tracing::debug!("Extracting access token from OAuth response");
-    let oauth_token_params: HashMap<String, String> =
-        url::form_urlencoded::parse(token_response.as_bytes())
-            .into_owned()
-            .collect();
-    let access_token = oauth_token_params
-        .get("access_token")
-        .ok_or_else(|| anyhow::anyhow!("No access token in response"))?;
-
-    tracing::info!("Retrieved OAuth access token, creating rollup");
+    let user_client = oauth_client
+        .get_authenticated_client(&callback.code)
+        .await?;
 
     let span = tracing::info_span!(
         "create_rollup",
@@ -76,7 +57,7 @@ pub async fn oauth_callback_handler(
         pr_nums = ?oauth_state.pr_nums
     );
 
-    match create_rollup(state, oauth_state, access_token)
+    match create_rollup(db, oauth_state, user_client)
         .instrument(span)
         .await
     {
@@ -85,10 +66,10 @@ pub async fn oauth_callback_handler(
             Ok(Redirect::temporary(&pr_url).into_response())
         }
         Err(error) => {
-            tracing::error!("Failed to create rollup: {error}");
+            tracing::error!("Failed to create rollup: {error:?}");
             Ok((
                 StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to create rollup: {error}"),
+                format!("Failed to create rollup: {error:?}"),
             )
                 .into_response())
         }
@@ -98,26 +79,27 @@ pub async fn oauth_callback_handler(
 /// Creates a rollup PR by merging multiple approved PRs into a single branch
 /// in the user's fork, then opens a PR to the upstream repository.
 async fn create_rollup(
-    state: ServerStateRef,
-    oauth_state: OAuthState,
-    access_token: &str,
+    db: Arc<PgDbClient>,
+    rollup_state: OAuthRollupState,
+    user_client: Octocrab,
 ) -> anyhow::Result<String> {
-    let OAuthState {
+    let OAuthRollupState {
         repo_name,
         repo_owner,
         pr_nums,
-    } = oauth_state;
+    } = rollup_state;
 
-    let gh_client = OctocrabBuilder::new()
-        .user_access_token(access_token.to_string())
-        .build()?;
-    let user = gh_client.current().user().await?;
+    let user = user_client
+        .current()
+        .user()
+        .await
+        .context("Cannot get user authenticated with OAuth")?;
     let username = user.login;
 
     tracing::info!("User {username} is creating a rollup with PRs: {pr_nums:?}");
 
     // Ensure user has a fork
-    match gh_client.repos(&username, &repo_name).get().await {
+    match user_client.repos(&username, &repo_name).get().await {
         Ok(repo) => repo,
         Err(_) => {
             anyhow::bail!(
@@ -129,8 +111,7 @@ async fn create_rollup(
     // Validate PRs
     let mut rollup_prs = Vec::new();
     for num in pr_nums {
-        match state
-            .db
+        match db
             .get_pull_request(
                 &GithubRepoName::new(&repo_owner, &repo_name),
                 (num as u64).into(),
@@ -157,7 +138,7 @@ async fn create_rollup(
     rollup_prs.sort_by_key(|pr| pr.number.0);
 
     // Fetch the first PR from GitHub to determine the target base branch
-    let first_pr_github = gh_client
+    let first_pr_github = user_client
         .pulls(&repo_owner, &repo_name)
         .get(rollup_prs[0].number.0)
         .await?;
@@ -165,7 +146,7 @@ async fn create_rollup(
 
     // Fetch the current SHA of the base branch - this is the commit our
     // rollup branch starts from.
-    let base_branch_ref = gh_client
+    let base_branch_ref = user_client
         .repos(&repo_owner, &repo_name)
         .get_ref(&Reference::Branch(base_ref.clone()))
         .await?;
@@ -183,7 +164,7 @@ async fn create_rollup(
     let branch_name = format!("rollup-{branch_suffix}");
 
     // Create the branch on the user's fork
-    gh_client
+    user_client
         .repos(&username, &repo_name)
         .create_ref(
             &octocrab::params::repos::Reference::Branch(branch_name.clone()),
@@ -199,7 +180,7 @@ async fn create_rollup(
 
     // Merge each PR's commits into the rollup branch
     for pr in rollup_prs {
-        let pr_github = gh_client
+        let pr_github = user_client
             .pulls(&repo_owner, &repo_name)
             .get(pr.number.0)
             .await?;
@@ -221,7 +202,7 @@ async fn create_rollup(
         );
 
         // Merge the PR's head commit into the rollup branch
-        let merge_attempt = gh_client
+        let merge_attempt = user_client
             .repos(&username, &repo_name)
             .merge(&head_sha, &branch_name)
             .commit_message(&merge_msg)
@@ -267,7 +248,7 @@ async fn create_rollup(
     let title = format!("Rollup of {} pull requests", successes.len());
 
     // Create the rollup PR from the user's fork branch to the base branch
-    let pr = gh_client
+    let pr = user_client
         .pulls(&repo_owner, &repo_name)
         .create(&title, format!("{username}:{branch_name}"), &base_ref)
         .body(&body)
@@ -280,4 +261,47 @@ async fn create_rollup(
         .to_string();
 
     Ok(pr_url)
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::github::rollup::OAuthRollupState;
+    use crate::github::{GithubRepoName, PullRequestNumber};
+    use crate::tests::{ApiRequest, BorsTester, default_repo_name, run_test};
+    use http::StatusCode;
+
+    #[sqlx::test]
+    async fn create_rollup_missing_fork(pool: sqlx::PgPool) {
+        run_test(pool, async |tester: &mut BorsTester| {
+            let pr1 = tester.open_pr(default_repo_name(), |_| {}).await?;
+            let pr2 = tester.open_pr(default_repo_name(), |_| {}).await?;
+
+            let repo_name = default_repo_name();
+            tester
+                .api_request(rollup_request(
+                    "rolluper",
+                    repo_name.clone(),
+                    &[pr1.number, pr2.number],
+                ))
+                .await?
+                .assert_status(StatusCode::INTERNAL_SERVER_ERROR)
+                .assert_body_contains(&format!(
+                    "You must have a fork of rolluper/{} named borstest under your account",
+                    repo_name.name()
+                ));
+            Ok(())
+        })
+        .await;
+    }
+
+    fn rollup_request(code: &str, repo: GithubRepoName, prs: &[PullRequestNumber]) -> ApiRequest {
+        let state = OAuthRollupState {
+            pr_nums: prs.iter().map(|v| v.0 as u32).collect(),
+            repo_name: repo.name,
+            repo_owner: repo.owner,
+        };
+        ApiRequest::get("/oauth/callback")
+            .query("code", code)
+            .query("state", &serde_json::to_string(&state).unwrap())
+    }
 }

@@ -16,12 +16,13 @@ use crate::{
 };
 use anyhow::Context;
 use axum::Router;
-use http::{Method, Request};
+use http::{Method, Request, StatusCode};
 use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
 use parking_lot::Mutex;
 use serde::Serialize;
 use sqlx::PgPool;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
+use std::fmt::Write;
 use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
@@ -36,7 +37,9 @@ mod utils;
 // Public re-exports for use in tests
 use crate::github::api::client::HideCommentReason;
 use crate::server::{ServerState, create_app};
-use crate::tests::github::{PrIdentifier, PullRequest, TestWorkflowStatus, WorkflowEventKind};
+use crate::tests::github::{
+    PrIdentifier, PullRequest, TestWorkflowStatus, WorkflowEventKind, default_oauth_config,
+};
 use crate::tests::mock::{
     GitHubIssueCommentEventPayload, GitHubPullRequestEventPayload, GitHubPushEventPayload,
     GitHubWorkflowEventPayload, PullRequestChangeEvent,
@@ -196,11 +199,14 @@ impl BorsTester {
             chrono::Duration::seconds(1),
         );
 
+        let oauth_config = default_oauth_config();
+        let oauth_client = mock.oauth_client(oauth_config);
+
         let state = ServerState::new(
             repository_tx,
             global_tx.clone(),
             WebhookSecret::new(TEST_WEBHOOK_SECRET.to_string()),
-            None,
+            Some(oauth_client),
             repos.clone(),
             db.clone(),
             default_cmd_prefix(),
@@ -895,30 +901,34 @@ impl BorsTester {
         result
     }
 
-    pub async fn rest_api(&mut self, path: &str) -> anyhow::Result<String> {
+    pub async fn api_request(&mut self, request: ApiRequest) -> anyhow::Result<ApiResponse> {
+        let mut path = request.path;
+        for (index, (key, value)) in request.query.iter().enumerate() {
+            let c = if index == 0 { "?" } else { "&" };
+            write!(path, "{c}{key}={}", urlencoding::encode(value))?;
+        }
+
         let response = self
             .app
             .call(
                 Request::builder()
-                    .uri(path)
-                    .method(Method::GET)
+                    .uri(&path)
+                    .method(request.method)
                     .body(String::new())
                     .unwrap(),
             )
             .await
             .context("Cannot send REST API request")?;
-        if !response.status().is_success() {
-            return Err(anyhow::anyhow!(
-                "REST API to {path} failed with status {}",
-                response.status()
-            ));
-        }
+        let status = response.status();
         let body_text = String::from_utf8(
             axum::body::to_bytes(response.into_body(), 10 * 1024 * 1024)
                 .await?
                 .to_vec(),
-        )?;
-        Ok(body_text)
+        );
+        Ok(ApiResponse {
+            status,
+            body: body_text?,
+        })
     }
 
     /// Get a GitHub comment that might have been modified by API calls from bors.
@@ -1003,6 +1013,64 @@ impl BorsTester {
         // Flush any local queues
         self.http_mock.gh_server.assert_empty_queues().await;
         Ok(Arc::into_inner(self.github).unwrap().into_inner())
+    }
+}
+
+pub struct ApiRequest {
+    method: Method,
+    path: String,
+    query: BTreeMap<String, String>,
+}
+
+impl ApiRequest {
+    pub fn get(path: &str) -> Self {
+        Self {
+            method: Method::GET,
+            path: path.to_string(),
+            query: Default::default(),
+        }
+    }
+    pub fn query(mut self, key: &str, value: &str) -> Self {
+        self.query.insert(key.to_string(), value.to_string());
+        self
+    }
+}
+
+#[must_use]
+pub struct ApiResponse {
+    status: StatusCode,
+    body: String,
+}
+
+impl ApiResponse {
+    pub fn assert_ok(self) -> Self {
+        if !self.status.is_success() {
+            panic!(
+                "HTTP response was not success. Status code: {}, body:\n{}",
+                self.status, self.body
+            );
+        }
+        self
+    }
+    pub fn assert_status(self, status: StatusCode) -> Self {
+        if self.status != status {
+            panic!(
+                "HTTP response did not have expected status `{status}`. Status code: {}, body:\n{}",
+                self.status, self.body
+            );
+        }
+        self
+    }
+    pub fn assert_body_contains(&self, needle: &str) {
+        if !self.body.contains(needle) {
+            panic!(
+                "HTTP response did not contain needle `{needle}`. Body:\n{}",
+                self.body
+            );
+        }
+    }
+    pub fn into_body(self) -> String {
+        self.body
     }
 }
 

@@ -124,7 +124,7 @@ impl FromRequest<ServerStateRef> for GitHubWebhook {
             })?;
 
         // Verify that the request is valid
-        if !verify_gh_signature(&parts.headers, &body, state.get_webhook_secret()) {
+        if !verify_gh_signature(&parts.headers, &body, state.0.get_webhook_secret()) {
             tracing::error!("Webhook request failed, could not authenticate webhook");
             return Err(StatusCode::BAD_REQUEST);
         }
@@ -1540,7 +1540,7 @@ mod tests {
         let db = Arc::new(PgDbClient::new(
             PgPool::connect_lazy("postgres://").unwrap(),
         ));
-        let server_ref = ServerStateRef::new(ServerState::new(
+        let server_ref = ServerStateRef(Arc::new(ServerState::new(
             repository_tx,
             global_tx,
             WebhookSecret::new(TEST_WEBHOOK_SECRET.to_string()),
@@ -1548,7 +1548,7 @@ mod tests {
             repos,
             db,
             default_cmd_prefix(),
-        ));
+        )));
         GitHubWebhook::from_request(request, &server_ref).await
     }
 }

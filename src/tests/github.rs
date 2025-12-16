@@ -3,7 +3,7 @@ use crate::database::WorkflowStatus;
 use crate::github::api::client::HideCommentReason;
 use crate::github::{GithubRepoName, PullRequestNumber};
 use crate::permissions::PermissionType;
-use crate::tests;
+use crate::{OAuthConfig, tests};
 use chrono::{DateTime, Utc};
 use octocrab::models::pulls::MergeableState;
 use octocrab::models::{CheckSuiteId, JobId, RunId};
@@ -19,6 +19,7 @@ use tokio::sync::mpsc::{Receiver, Sender};
 pub struct GitHub {
     pub(super) repos: HashMap<GithubRepoName, Arc<Mutex<Repo>>>,
     comments: HashMap<String, Comment>,
+    pub oauth_config: OAuthConfig,
 }
 
 impl GitHub {
@@ -202,6 +203,7 @@ impl Default for GitHub {
         Self {
             repos: HashMap::from([(repo.name.clone(), Arc::new(Mutex::new(repo)))]),
             comments: Default::default(),
+            oauth_config: default_oauth_config(),
         }
     }
 }
@@ -399,6 +401,18 @@ pub fn default_repo_name() -> GithubRepoName {
 
 pub fn default_pr_number() -> u64 {
     1
+}
+
+pub fn default_oauth_config() -> OAuthConfig {
+    OAuthConfig::new(test_oauth_client_id(), test_oauth_client_secret())
+}
+
+fn test_oauth_client_id() -> String {
+    "OAUTH_CLIENT_ID".to_string()
+}
+
+fn test_oauth_client_secret() -> String {
+    "OAUTH_CLIENT_SECRET".to_string()
 }
 
 /// Helper struct for uniquely identifying a pull request.

@@ -5,10 +5,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context;
-use bors::server::{OAuthConfig, ServerState, create_app};
+use bors::server::{ServerState, create_app};
 use bors::{
-    BorsContext, BorsGlobalEvent, BorsProcess, CommandParser, PgDbClient, TeamApiClient, TreeState,
-    WebhookSecret, create_bors_process, create_github_client, load_repositories,
+    BorsContext, BorsGlobalEvent, BorsProcess, CommandParser, OAuthClient, OAuthConfig, PgDbClient,
+    TeamApiClient, TreeState, WebhookSecret, create_bors_process, create_github_client,
+    load_repositories,
 };
 use clap::Parser;
 use sqlx::postgres::PgConnectOptions;
@@ -230,8 +231,11 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
         }
     };
 
-    let oauth_config = match (opts.client_id.clone(), opts.client_secret.clone()) {
-        (Some(client_id), Some(client_secret)) => Some(OAuthConfig::new(client_id, client_secret)),
+    let oauth_client = match (opts.client_id.clone(), opts.client_secret.clone()) {
+        (Some(client_id), Some(client_secret)) => {
+            let config = OAuthConfig::new(client_id, client_secret);
+            Some(OAuthClient::new(config, "https://github.com".to_string()))
+        }
         (None, None) => None,
         (Some(_), None) => {
             return Err(anyhow::anyhow!(
@@ -249,7 +253,7 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
         repository_tx,
         global_tx,
         WebhookSecret::new(opts.webhook_secret),
-        oauth_config,
+        oauth_client,
         repos,
         db,
         opts.cmd_prefix.into(),
