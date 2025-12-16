@@ -35,6 +35,10 @@ impl TeamApiMockServer {
         };
 
         for repo in github.repos.values() {
+            if repo.lock().fork {
+                continue;
+            }
+
             add_mock(repo.clone(), PermissionType::Review, "review")
                 .mount(&mock_server)
                 .await;

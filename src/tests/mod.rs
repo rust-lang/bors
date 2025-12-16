@@ -16,7 +16,7 @@ use crate::{
 };
 use anyhow::Context;
 use axum::Router;
-use http::{Method, Request, StatusCode};
+use http::{HeaderMap, Method, Request, StatusCode};
 use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
 use parking_lot::Mutex;
 use serde::Serialize;
@@ -952,6 +952,7 @@ impl BorsTester {
             )
             .await
             .context("Cannot send REST API request")?;
+        let headers = response.headers().clone();
         let status = response.status();
         let body_text = String::from_utf8(
             axum::body::to_bytes(response.into_body(), 10 * 1024 * 1024)
@@ -960,6 +961,7 @@ impl BorsTester {
         );
         Ok(ApiResponse {
             status,
+            headers,
             body: body_text?,
         })
     }
@@ -1083,6 +1085,7 @@ impl ApiRequest {
 pub struct ApiResponse {
     status: StatusCode,
     body: String,
+    headers: HeaderMap,
 }
 
 impl ApiResponse {
@@ -1111,6 +1114,14 @@ impl ApiResponse {
                 self.body
             );
         }
+    }
+    pub fn get_header(&self, name: &str) -> String {
+        self.headers
+            .get(name)
+            .unwrap_or_else(|| panic!("Header {name} not found"))
+            .to_str()
+            .unwrap()
+            .to_string()
     }
     pub fn into_body(self) -> String {
         self.body

@@ -1,7 +1,5 @@
-use crate::tests::mock::GitHubUser;
-use crate::tests::{GitHub, User};
-use http::HeaderValue;
-use http::header::AUTHORIZATION;
+use crate::tests::GitHub;
+use crate::tests::mock::{GitHubUser, oauth_user_from_request};
 use std::collections::HashMap;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, Request, ResponseTemplate};
@@ -42,16 +40,7 @@ pub async fn mock_oauth(github: &GitHub, mock_server: &MockServer) {
     Mock::given(method("GET"))
         .and(path("/user"))
         .respond_with(move |req: &Request| {
-            let auth: &HeaderValue = req
-                .headers
-                .get(AUTHORIZATION)
-                .expect("Authorization header not found");
-            let (_bearer, token) = auth.to_str().unwrap().split_once(" ").unwrap();
-            let (user, rest) = token.split_once("-").unwrap();
-            assert_eq!(rest, "access-token");
-            // TODO: load this from GitHub state
-            let user = User::new(10000, user);
-
+            let user = oauth_user_from_request(req);
             ResponseTemplate::new(200).set_body_json(GitHubUser::from(user))
         })
         .mount(mock_server)

@@ -497,7 +497,7 @@ impl GithubRepositoryClient {
             self.repo_name.owner(),
             self.repo_name.name(),
         );
-        tracing::debug!("Sending request to {url}");
+        tracing::debug!("Sending GET request to {url}");
         let response: T = self.client.get(url.as_str(), None::<&()>).await?;
         tracing::debug!("Received response: {response:?}");
         Ok(response)

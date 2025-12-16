@@ -57,12 +57,15 @@ impl GitHub {
     }
 
     pub fn get_repo(&self, name: &GithubRepoName) -> Arc<Mutex<Repo>> {
-        self.repos.get(name).unwrap().clone()
+        self.repos.get(name).expect("Repo not found").clone()
     }
 
     pub fn add_repo(&mut self, repo: Repo) {
-        self.repos
-            .insert(repo.full_name(), Arc::new(Mutex::new(repo)));
+        assert!(
+            self.repos
+                .insert(repo.full_name(), Arc::new(Mutex::new(repo)))
+                .is_none()
+        );
     }
 
     pub fn with_repo(mut self, repo: Repo) -> Self {
@@ -240,6 +243,8 @@ approved = ["+approved"]
         gh.add_user(User::default_pr_author());
         gh.add_user(User::try_user());
         gh.add_user(User::reviewer());
+        gh.add_user(User::bors_bot());
+        gh.add_user(User::unprivileged());
 
         let repo_name = default_repo_name();
         let org_user = User::new(1000001, repo_name.owner());
@@ -326,6 +331,7 @@ pub struct Repo {
     /// Push error failure/success behaviour.
     pub push_behaviour: BranchPushBehaviour,
     pub pr_push_counter: u64,
+    pub fork: bool,
 }
 
 impl Repo {
@@ -345,6 +351,7 @@ impl Repo {
             pr_push_counter: 0,
             check_runs: vec![],
             push_behaviour: BranchPushBehaviour::default(),
+            fork: false,
         }
     }
 
@@ -357,10 +364,17 @@ impl Repo {
         self
     }
 
-    pub fn with_pr(mut self, pull_request: PullRequest) -> Self {
-        self.pull_requests
-            .insert(pull_request.number.0, pull_request);
+    // TODO: refactor to now allow anyone to add PR from the outside
+    pub fn with_pr(mut self, pr: PullRequest) -> Self {
+        assert!(self.pull_requests.insert(pr.number.0, pr).is_none());
         self
+    }
+
+    pub fn new_pr(&mut self, author: User) -> &mut PullRequest {
+        let number = self.pull_requests.keys().copied().max().unwrap_or(0) + 1;
+        let pr = PullRequest::new(self.full_name(), number, author);
+        assert!(self.pull_requests.insert(pr.number.0, pr).is_none());
+        self.pull_requests.get_mut(&number).unwrap()
     }
 
     pub fn get_pr(&self, pr: u64) -> &PullRequest {

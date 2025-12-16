@@ -6,6 +6,8 @@ use crate::tests::mock::repository::{mock_repo, mock_repo_list};
 use crate::tests::{GitHub, User};
 use crate::{OAuthClient, OAuthConfig, TeamApiClient, create_github_client};
 use graphql_parser::query::{Definition, Document, OperationDefinition, Selection};
+use http::HeaderValue;
+use http::header::AUTHORIZATION;
 use octocrab::Octocrab;
 use parking_lot::Mutex;
 use regex::Regex;
@@ -173,6 +175,21 @@ impl GitHubMockServer {
 
     /// Make sure that there are no leftover events left in the queues.
     pub async fn assert_empty_queues(self) {
+        // This is useful for debugging:
+        // for req in self
+        //     .mock_server
+        //     .received_requests()
+        //     .await
+        //     .unwrap_or_default()
+        // {
+        //     eprintln!(
+        //         "Received mock request `{} {}` with body:\n{}",
+        //         req.method,
+        //         req.url,
+        //         String::from_utf8_lossy(&req.body)
+        //     );
+        // }
+
         // This will remove all mocks and thus also any leftover
         // channel senders, so that we can be sure below that the `recv`
         // call will not block indefinitely.
@@ -341,6 +358,18 @@ EjQJOzV2OIk4waurl+BsbOHP7C0Zhp7rpyWx4fUCgYEAp/4UceUfbJZGa8CcWZ8F
 3VafpHjFw+fMUjcIkQk0VfdbRD5fLDQpJy6hUVq6A+duSqTvlhE8DFAdBAC3VZ9k
 34PVnCZP7HB3k2eBSpDp4vk=
 -----END PRIVATE KEY-----"###;
+
+fn oauth_user_from_request(request: &Request) -> User {
+    let auth: &HeaderValue = request
+        .headers
+        .get(AUTHORIZATION)
+        .expect("Authorization header not found");
+    let (_bearer, token) = auth.to_str().unwrap().split_once(" ").unwrap();
+    let (user, rest) = token.split_once("-").unwrap();
+    assert_eq!(rest, "access-token");
+    // TODO: load this from GitHub state
+    User::new(10000, user)
+}
 
 /// Create a mock that dynamically responds to its requests using the given function `f`.
 /// It is expected that the path will be a regex, which will be parsed when a request is received,

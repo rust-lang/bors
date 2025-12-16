@@ -1,4 +1,5 @@
 use std::num::NonZeroU64;
+use std::ops::Deref;
 use std::sync::Arc;
 
 use crate::database::WorkflowStatus;
@@ -43,6 +44,18 @@ pub async fn mock_repo_list(github: &GitHub, mock_server: &MockServer) {
 }
 
 pub async fn mock_repo(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
+    {
+        let repo = repo.clone();
+        Mock::given(method("GET"))
+            .and(path(format!("/repos/{}", repo.lock().full_name())))
+            .respond_with(move |_: &Request| {
+                let gh_repo = GitHubRepository::from(repo.lock().deref());
+                ResponseTemplate::new(200).set_body_json(gh_repo)
+            })
+            .mount(mock_server)
+            .await;
+    }
+
     mock_pull_requests(repo.clone(), mock_server).await;
     mock_branches(repo.clone(), mock_server).await;
     mock_cancel_workflow(repo.clone(), mock_server).await;
