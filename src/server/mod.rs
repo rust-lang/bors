@@ -65,6 +65,10 @@ impl ServerState {
     pub fn get_cmd_prefix(&self) -> &CommandPrefix {
         &self.cmd_prefix
     }
+
+    pub fn get_repo(&self, repo: &GithubRepoName) -> Option<Arc<RepositoryState>> {
+        self.repositories.get(repo).cloned()
+    }
 }
 
 impl FromRef<ServerStateRef> for Option<OAuthClient> {
