@@ -14,7 +14,7 @@ pub struct TeamApiMockServer {
 }
 
 impl TeamApiMockServer {
-    pub async fn start(github: &GitHub) -> Self {
+    pub async fn start(github: Arc<Mutex<GitHub>>) -> Self {
         let mock_server = MockServer::start().await;
 
         let add_mock = |repo: Arc<Mutex<Repo>>, kind: PermissionType, name: &str| {
@@ -34,7 +34,8 @@ impl TeamApiMockServer {
                 .respond_with(ResponseTemplate::new(200).set_body_json(permissions))
         };
 
-        for repo in github.repos.values() {
+        let repos: Vec<_> = github.lock().repos.values().cloned().collect();
+        for repo in repos {
             if repo.lock().fork {
                 continue;
             }

@@ -12,7 +12,6 @@ use octocrab::Octocrab;
 use parking_lot::Mutex;
 use regex::Regex;
 use std::collections::HashMap;
-use std::ops::Deref;
 use std::sync::Arc;
 use url::Url;
 use wiremock::matchers::{method, path_regex};
@@ -114,7 +113,7 @@ pub struct ExternalHttpMock {
 impl ExternalHttpMock {
     pub async fn start(github: Arc<Mutex<GitHub>>) -> Self {
         let gh_server = GitHubMockServer::start(github.clone()).await;
-        let team_api_server = TeamApiMockServer::start(github.lock().deref()).await;
+        let team_api_server = TeamApiMockServer::start(github.clone()).await;
         Self {
             gh_server,
             team_api_server,
@@ -144,14 +143,14 @@ impl GitHubMockServer {
         let mock_server = MockServer::start().await;
 
         {
-            let gh_locked = github.lock();
-            mock_repo_list(&gh_locked, &mock_server).await;
-            mock_oauth(&gh_locked, &mock_server).await;
+            mock_repo_list(github.clone(), &mock_server).await;
+            mock_oauth(github.clone(), &mock_server).await;
             mock_graphql(github.clone(), &mock_server).await;
 
             // Repositories are mocked separately to make it easier to
             // pass comm. channels to them.
-            for repo in gh_locked.repos.values() {
+            let repos: Vec<_> = github.lock().repos.values().cloned().collect();
+            for repo in repos {
                 mock_repo(repo.clone(), &mock_server).await;
             }
         }

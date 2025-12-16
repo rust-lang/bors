@@ -144,7 +144,7 @@ async fn create_rollup(
 
     // Fetch the current SHA of the base branch - this is the commit our
     // rollup branch starts from.
-    let base_branch_sha = gh_client.get_branch_sha(&base_branch).await?;
+    let base_branch_sha = gh_client.get_branch_sha(base_branch).await?;
 
     let branch_suffix: String = rand::rng()
         .sample_iter(Alphanumeric)
@@ -203,8 +203,7 @@ async fn create_rollup(
                     return Err(anyhow::anyhow!(
                         "Merge of #{} failed with error: {error:?}",
                         pr.number
-                    )
-                    .into());
+                    ));
                 }
             },
         }
@@ -340,8 +339,7 @@ mod tests {
         // Create fork
         let mut repo = Repo::new(rolluper, default_repo_name().name());
         repo.fork = true;
-        let gh = gh.with_repo(repo);
-        gh
+        gh.with_repo(repo)
     }
 
     fn rollup_request(code: &str, repo: GithubRepoName, prs: &[PullRequestNumber]) -> ApiRequest {

@@ -1,11 +1,13 @@
 use crate::tests::GitHub;
 use crate::tests::mock::{GitHubUser, oauth_user_from_request};
+use parking_lot::Mutex;
 use std::collections::HashMap;
+use std::sync::Arc;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, Request, ResponseTemplate};
 
-pub async fn mock_oauth(github: &GitHub, mock_server: &MockServer) {
-    let config = github.oauth_config.clone();
+pub async fn mock_oauth(github: Arc<Mutex<GitHub>>, mock_server: &MockServer) {
+    let config = github.lock().oauth_config.clone();
 
     Mock::given(method("POST"))
         .and(path("/login/oauth/access_token"))

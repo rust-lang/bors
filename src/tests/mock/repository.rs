@@ -22,18 +22,21 @@ use wiremock::{
     matchers::{method, path},
 };
 
-pub async fn mock_repo_list(github: &GitHub, mock_server: &MockServer) {
-    let repos = GitHubRepositories {
-        total_count: github.repos.len() as u64,
-        repositories: github
-            .repos
-            .iter()
-            .map(|(_, repo)| {
-                let repo = repo.lock();
-                let repo: &Repo = &repo;
-                GitHubRepository::from(repo)
-            })
-            .collect(),
+pub async fn mock_repo_list(github: Arc<Mutex<GitHub>>, mock_server: &MockServer) {
+    let repos = {
+        let github = github.lock();
+        GitHubRepositories {
+            total_count: github.repos.len() as u64,
+            repositories: github
+                .repos
+                .values()
+                .map(|repo| {
+                    let repo = repo.lock();
+                    let repo: &Repo = &repo;
+                    GitHubRepository::from(repo)
+                })
+                .collect(),
+        }
     };
 
     Mock::given(method("GET"))
