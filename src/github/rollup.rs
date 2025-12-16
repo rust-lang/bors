@@ -2,13 +2,13 @@ use super::GithubRepoName;
 use super::error::AppError;
 use crate::PgDbClient;
 use crate::github::api::client::GithubRepositoryClient;
-use crate::github::oauth::OAuthClient;
+use crate::github::api::operations::{ForcePush, MergeError};
+use crate::github::oauth::{OAuthClient, UserGitHubClient};
 use crate::server::ServerStateRef;
 use anyhow::Context;
 use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Redirect};
-use octocrab::Octocrab;
 use rand::{Rng, distr::Alphanumeric};
 use std::sync::Arc;
 use tracing::Instrument;
@@ -53,7 +53,7 @@ pub async fn oauth_callback_handler(
     };
 
     let user_client = oauth_client
-        .get_authenticated_client(&callback.code)
+        .get_authenticated_client(repo_name.clone(), &callback.code)
         .await?;
 
     let span = tracing::info_span!(
@@ -87,7 +87,7 @@ async fn create_rollup(
     db: Arc<PgDbClient>,
     rollup_state: OAuthRollupState,
     gh_client: &GithubRepositoryClient,
-    user_client: Octocrab,
+    user_client: UserGitHubClient,
 ) -> anyhow::Result<String> {
     let OAuthRollupState {
         repo_name,
@@ -95,17 +95,12 @@ async fn create_rollup(
         pr_nums,
     } = rollup_state;
 
-    let user = user_client
-        .current()
-        .user()
-        .await
-        .context("Cannot get user authenticated with OAuth")?;
-    let username = user.login;
+    let username = user_client.username;
 
     tracing::info!("User {username} is creating a rollup with PRs: {pr_nums:?}");
 
     // Ensure user has a fork
-    match user_client.repos(&username, &repo_name).get().await {
+    match user_client.client.get_repo().await {
         Ok(repo) => repo,
         Err(_) => {
             anyhow::bail!(
@@ -156,18 +151,15 @@ async fn create_rollup(
         .take(7)
         .map(char::from)
         .collect();
-    let branch_name = format!("rollup-{branch_suffix}");
+    let rollup_branch = format!("rollup-{branch_suffix}");
 
     // Create the branch on the user's fork
     user_client
-        .repos(&username, &repo_name)
-        .create_ref(
-            &octocrab::params::repos::Reference::Branch(branch_name.clone()),
-            base_branch_sha.0,
-        )
+        .client
+        .set_branch_to_sha(&rollup_branch, &base_branch_sha, ForcePush::Yes)
         .await
         .map_err(|error| {
-            anyhow::anyhow!("Could not create rollup branch {branch_name}: {error}",)
+            anyhow::anyhow!("Could not create rollup branch {rollup_branch}: {error:?}")
         })?;
 
     let mut successes = Vec::new();
@@ -195,32 +187,26 @@ async fn create_rollup(
 
         // Merge the PR's head commit into the rollup branch
         let merge_attempt = user_client
-            .repos(&username, &repo_name)
-            .merge(&head_sha.0, &branch_name)
-            .commit_message(&merge_msg)
-            .send()
+            .client
+            .merge_branches(&rollup_branch, &head_sha, &merge_msg)
             .await;
 
         match merge_attempt {
             Ok(_) => {
                 successes.push(pr);
             }
-            Err(error) => {
-                if let octocrab::Error::GitHub { source, .. } = &error {
-                    if source.status_code == http::StatusCode::CONFLICT {
-                        failures.push(pr);
-                        continue;
-                    }
-
-                    anyhow::bail!(
-                        "Merge failed with GitHub error (status {}): {}",
-                        source.status_code,
-                        source.message
-                    );
+            Err(error) => match error {
+                MergeError::Conflict => {
+                    failures.push(pr);
                 }
-
-                anyhow::bail!("Merge failed with unexpected error: {error}");
-            }
+                error => {
+                    return Err(anyhow::anyhow!(
+                        "Merge of #{} failed with error: {error:?}",
+                        pr.number
+                    )
+                    .into());
+                }
+            },
         }
     }
 
@@ -241,11 +227,15 @@ async fn create_rollup(
 
     // Create the rollup PR from the user's fork branch to the base branch
     let pr = user_client
-        .pulls(&repo_owner, &repo_name)
-        .create(&title, format!("{username}:{branch_name}"), base_branch)
-        .body(&body)
-        .send()
-        .await?;
+        .client
+        .create_pr(
+            &title,
+            &format!("{username}:{rollup_branch}"),
+            base_branch,
+            &body,
+        )
+        .await
+        .context("Cannot create PR")?;
     let pr_url = pr
         .html_url
         .as_ref()

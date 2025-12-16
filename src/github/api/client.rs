@@ -1,7 +1,7 @@
 use anyhow::Context;
 use octocrab::Octocrab;
 use octocrab::models::checks::CheckRun;
-use octocrab::models::{App, CheckRunId, CheckSuiteId, RunId};
+use octocrab::models::{CheckRunId, CheckSuiteId, Repository, RunId};
 use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
@@ -20,10 +20,12 @@ use crate::utils::timing::{RetryMethod, RetryableOpError, ShouldRetry, perform_r
 use futures::TryStreamExt;
 use octocrab::models::workflows::Job;
 use serde::de::DeserializeOwned;
+use url::Url;
 
 /// Provides access to a single app installation (repository) using the GitHub API.
 pub struct GithubRepositoryClient {
-    app: App,
+    /// HTML URL of the author, to recognize
+    author_html_url: Url,
     /// The client caches the access token for this given repository and refreshes it once it
     /// expires.
     client: Octocrab,
@@ -33,9 +35,9 @@ pub struct GithubRepositoryClient {
 }
 
 impl GithubRepositoryClient {
-    pub fn new(app: App, client: Octocrab, repo_name: GithubRepoName) -> Self {
+    pub fn new(author_html_url: Url, client: Octocrab, repo_name: GithubRepoName) -> Self {
         Self {
-            app,
+            author_html_url,
             client,
             repo_name,
         }
@@ -51,7 +53,69 @@ impl GithubRepositoryClient {
 
     /// Was the comment created by the bot?
     pub async fn is_comment_internal(&self, comment: &PullRequestComment) -> anyhow::Result<bool> {
-        Ok(comment.author.html_url == self.app.html_url)
+        Ok(comment.author.html_url == self.author_html_url)
+    }
+
+    /// Load repository information for the current client
+    pub async fn get_repo(&self) -> anyhow::Result<Repository> {
+        let repo = perform_retryable::<Repository, anyhow::Error, _, _, _>(
+            "get_repo",
+            RetryMethod::default(),
+            || async {
+                let response = self
+                    .client
+                    .repos(&self.repo_name.owner, &self.repo_name.name)
+                    .get()
+                    .await
+                    .map_err(|error| {
+                        anyhow::anyhow!("Could not fetch repository {}: {error:?}", self.repo_name)
+                    })?;
+                anyhow::Ok(response)
+            },
+        )
+        .await?;
+        Ok(repo)
+    }
+
+    /// Create a new pull request.
+    ///
+    /// - `title` — The title of the new pull request.
+    /// - `head` — The name of the branch where your changes are implemented.
+    ///   For cross-repository pull requests in the same network, namespace head
+    ///   with a user like this: `username:branch`.
+    /// - `base` — The name of the branch you want the changes pulled into. This
+    ///   should be an existing branch on the current repository. You cannot
+    ///   submit a pull request to one repository that requests a merge to a
+    ///   base of another repository.
+    pub async fn create_pr(
+        &self,
+        title: &str,
+        head: &str,
+        base: &str,
+        body: &str,
+    ) -> anyhow::Result<PullRequest> {
+        let pr = perform_retryable::<PullRequest, anyhow::Error, _, _, _>(
+            "create_pr",
+            RetryMethod::default(),
+            || async {
+                let pr = self
+                    .client
+                    .pulls(&self.repo_name.owner, &self.repo_name.name)
+                    .create(title, head, base)
+                    .body(body)
+                    .send()
+                    .await
+                    .map_err(|error| {
+                        anyhow::anyhow!(
+                            "Could not create pull request `{title}` in `{}`: {error:?}",
+                            self.repo_name
+                        )
+                    })?;
+                anyhow::Ok(pr.into())
+            },
+        )
+        .await?;
+        Ok(pr)
     }
 
     /// Loads repository configuration from a file located at `[CONFIG_FILE_PATH]` in the main

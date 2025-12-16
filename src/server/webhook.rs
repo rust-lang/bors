@@ -618,6 +618,23 @@ mod tests {
                                     "foobar",
                                     "baz",
                                 ],
+                                html_url: Some(
+                                    Url {
+                                        scheme: "https",
+                                        cannot_be_a_base: false,
+                                        username: "",
+                                        password: None,
+                                        host: Some(
+                                            Domain(
+                                                "github.com",
+                                            ),
+                                        ),
+                                        port: None,
+                                        path: "/vohoanglong0107/test-bors/pull/1",
+                                        query: None,
+                                        fragment: None,
+                                    },
+                                ),
                             },
                             from_base_sha: Some(
                                 CommitSha(
@@ -695,6 +712,23 @@ mod tests {
                                     "foobar",
                                     "baz",
                                 ],
+                                html_url: Some(
+                                    Url {
+                                        scheme: "https",
+                                        cannot_be_a_base: false,
+                                        username: "",
+                                        password: None,
+                                        host: Some(
+                                            Domain(
+                                                "github.com",
+                                            ),
+                                        ),
+                                        port: None,
+                                        path: "/vohoanglong0107/test-bors/pull/1",
+                                        query: None,
+                                        fragment: None,
+                                    },
+                                ),
                             },
                         },
                     ),
@@ -812,6 +846,23 @@ mod tests {
                                 assignees: [],
                                 status: Open,
                                 labels: [],
+                                html_url: Some(
+                                    Url {
+                                        scheme: "https",
+                                        cannot_be_a_base: false,
+                                        username: "",
+                                        password: None,
+                                        host: Some(
+                                            Domain(
+                                                "github.com",
+                                            ),
+                                        ),
+                                        port: None,
+                                        path: "/Sakib25800/bors-test/pull/2",
+                                        query: None,
+                                        fragment: None,
+                                    },
+                                ),
                             },
                             draft: false,
                         },
@@ -883,6 +934,23 @@ mod tests {
                                 labels: [
                                     "foo",
                                 ],
+                                html_url: Some(
+                                    Url {
+                                        scheme: "https",
+                                        cannot_be_a_base: false,
+                                        username: "",
+                                        password: None,
+                                        host: Some(
+                                            Domain(
+                                                "github.com",
+                                            ),
+                                        ),
+                                        port: None,
+                                        path: "/geetanshjuneja/test-bors/pull/3",
+                                        query: None,
+                                        fragment: None,
+                                    },
+                                ),
                             },
                         },
                     ),
@@ -951,6 +1019,23 @@ mod tests {
                                 assignees: [],
                                 status: Merged,
                                 labels: [],
+                                html_url: Some(
+                                    Url {
+                                        scheme: "https",
+                                        cannot_be_a_base: false,
+                                        username: "",
+                                        password: None,
+                                        host: Some(
+                                            Domain(
+                                                "github.com",
+                                            ),
+                                        ),
+                                        port: None,
+                                        path: "/geetanshjuneja/test-bors/pull/5",
+                                        query: None,
+                                        fragment: None,
+                                    },
+                                ),
                             },
                         },
                     ),
@@ -1021,6 +1106,23 @@ mod tests {
                                 labels: [
                                     "foo",
                                 ],
+                                html_url: Some(
+                                    Url {
+                                        scheme: "https",
+                                        cannot_be_a_base: false,
+                                        username: "",
+                                        password: None,
+                                        host: Some(
+                                            Domain(
+                                                "github.com",
+                                            ),
+                                        ),
+                                        port: None,
+                                        path: "/geetanshjuneja/test-bors/pull/3",
+                                        query: None,
+                                        fragment: None,
+                                    },
+                                ),
                             },
                         },
                     ),
@@ -1089,6 +1191,23 @@ mod tests {
                                 assignees: [],
                                 status: Draft,
                                 labels: [],
+                                html_url: Some(
+                                    Url {
+                                        scheme: "https",
+                                        cannot_be_a_base: false,
+                                        username: "",
+                                        password: None,
+                                        host: Some(
+                                            Domain(
+                                                "github.com",
+                                            ),
+                                        ),
+                                        port: None,
+                                        path: "/geetanshjuneja/test-bors/pull/5",
+                                        query: None,
+                                        fragment: None,
+                                    },
+                                ),
                             },
                             draft: true,
                         },
@@ -1158,6 +1277,23 @@ mod tests {
                                 assignees: [],
                                 status: Draft,
                                 labels: [],
+                                html_url: Some(
+                                    Url {
+                                        scheme: "https",
+                                        cannot_be_a_base: false,
+                                        username: "",
+                                        password: None,
+                                        host: Some(
+                                            Domain(
+                                                "github.com",
+                                            ),
+                                        ),
+                                        port: None,
+                                        path: "/geetanshjuneja/test-bors/pull/5",
+                                        query: None,
+                                        fragment: None,
+                                    },
+                                ),
                             },
                         },
                     ),
@@ -1226,6 +1362,23 @@ mod tests {
                                 assignees: [],
                                 status: Open,
                                 labels: [],
+                                html_url: Some(
+                                    Url {
+                                        scheme: "https",
+                                        cannot_be_a_base: false,
+                                        username: "",
+                                        password: None,
+                                        host: Some(
+                                            Domain(
+                                                "github.com",
+                                            ),
+                                        ),
+                                        port: None,
+                                        path: "/geetanshjuneja/test-bors/pull/5",
+                                        query: None,
+                                        fragment: None,
+                                    },
+                                ),
                             },
                         },
                     ),
@@ -1365,6 +1518,23 @@ mod tests {
                                 ],
                                 status: Open,
                                 labels: [],
+                                html_url: Some(
+                                    Url {
+                                        scheme: "https",
+                                        cannot_be_a_base: false,
+                                        username: "",
+                                        password: None,
+                                        host: Some(
+                                            Domain(
+                                                "github.com",
+                                            ),
+                                        ),
+                                        port: None,
+                                        path: "/Sakib25800/bors-test-2/pull/3",
+                                        query: None,
+                                        fragment: None,
+                                    },
+                                ),
                             },
                         },
                     ),
@@ -1433,6 +1603,23 @@ mod tests {
                                 assignees: [],
                                 status: Open,
                                 labels: [],
+                                html_url: Some(
+                                    Url {
+                                        scheme: "https",
+                                        cannot_be_a_base: false,
+                                        username: "",
+                                        password: None,
+                                        host: Some(
+                                            Domain(
+                                                "github.com",
+                                            ),
+                                        ),
+                                        port: None,
+                                        path: "/Sakib25800/bors-test-2/pull/3",
+                                        query: None,
+                                        fragment: None,
+                                    },
+                                ),
                             },
                         },
                     ),

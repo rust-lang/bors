@@ -125,6 +125,7 @@ pub struct PullRequest {
     pub assignees: Vec<GithubUser>,
     pub status: PullRequestStatus,
     pub labels: Vec<String>,
+    pub html_url: Option<Url>,
 }
 
 impl From<octocrab::models::pulls::PullRequest> for PullRequest {
@@ -167,6 +168,7 @@ impl From<octocrab::models::pulls::PullRequest> for PullRequest {
                 .into_iter()
                 .map(|l| l.name)
                 .collect(),
+            html_url: pr.html_url,
         }
     }
 }

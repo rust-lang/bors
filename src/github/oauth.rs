@@ -1,5 +1,7 @@
+use crate::github::GithubRepoName;
+use crate::github::api::client::GithubRepositoryClient;
 use anyhow::Context;
-use octocrab::{Octocrab, OctocrabBuilder};
+use octocrab::OctocrabBuilder;
 use secrecy::{ExposeSecret, SecretString};
 use std::collections::HashMap;
 
@@ -24,7 +26,11 @@ impl OAuthClient {
     }
 
     /// Create a GitHub client authenticated as a user with the given OAuth exchange code.
-    pub async fn get_authenticated_client(&self, code: &str) -> anyhow::Result<Octocrab> {
+    pub async fn get_authenticated_client(
+        &self,
+        repo: GithubRepoName,
+        code: &str,
+    ) -> anyhow::Result<UserGitHubClient> {
         tracing::info!("Exchanging OAuth code for access token");
         let client = reqwest::Client::new();
         let token_response = client
@@ -55,9 +61,25 @@ impl OAuthClient {
             .base_uri(&self.github_base_url)?
             .user_access_token(access_token.clone())
             .build()?;
+        let user = user_client
+            .current()
+            .user()
+            .await
+            .context("Cannot get user authenticated with OAuth")?;
 
-        Ok(user_client)
+        let client_repo = GithubRepoName::new(&user.login, repo.name());
+        let client = GithubRepositoryClient::new(user.html_url, user_client, client_repo);
+        Ok(UserGitHubClient {
+            username: user.login,
+            client,
+        })
     }
+}
+
+/// GitHub client authenticated to work with a user's fork of a repository managed by bors.
+pub struct UserGitHubClient {
+    pub username: String,
+    pub client: GithubRepositoryClient,
 }
 
 #[derive(Clone)]

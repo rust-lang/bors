@@ -149,7 +149,7 @@ async fn create_repo_state(
 ) -> anyhow::Result<RepositoryState> {
     tracing::info!("Found repository {name}");
 
-    let client = GithubRepositoryClient::new(app, repo_client, name.clone());
+    let client = GithubRepositoryClient::new(app.html_url, repo_client, name.clone());
 
     let permissions = team_api_client
         .load_permissions(&name)
