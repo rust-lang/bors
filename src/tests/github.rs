@@ -88,7 +88,7 @@ impl GitHub {
     /// As such, it has to be written carefully to avoid holding GH/repo locks that are also
     /// acquired by dynamic HTTP mock handlers.
     pub async fn get_next_comment<Id: Into<PrIdentifier>>(
-        state: Arc<tokio::sync::Mutex<Self>>,
+        state: Arc<Mutex<Self>>,
         id: Id,
     ) -> anyhow::Result<Comment> {
         use std::fmt::Write;
@@ -97,7 +97,7 @@ impl GitHub {
         // We need to avoid holding the GH state and repo lock here, otherwise the mocking code
         // could not lock the repo and send the comment (or other information) to a PR.
         let comment_rx = {
-            let mut gh_state = state.lock().await;
+            let mut gh_state = state.lock();
             let repo = gh_state
                 .repos
                 .get_mut(&id.repo)
@@ -118,7 +118,7 @@ impl GitHub {
             Err(_) => {
                 let mut comment_history = String::new();
 
-                let mut gh_state = state.lock().await;
+                let mut gh_state = state.lock();
                 let repo = gh_state
                     .repos
                     .get_mut(&id.repo)
@@ -149,7 +149,7 @@ impl GitHub {
         };
 
         {
-            let mut gh_state = state.lock().await;
+            let mut gh_state = state.lock();
             {
                 let repo = gh_state
                     .repos

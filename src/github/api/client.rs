@@ -639,11 +639,12 @@ mod tests {
     use crate::tests::Repo;
     use crate::tests::{GitHub, User};
     use octocrab::models::UserId;
+    use parking_lot::Mutex;
     use std::sync::Arc;
 
     #[tokio::test]
     async fn load_installed_repos() {
-        let mock = ExternalHttpMock::start(Arc::new(tokio::sync::Mutex::new(
+        let mock = ExternalHttpMock::start(Arc::new(Mutex::new(
             GitHub::default()
                 .with_repo(
                     Repo::new(
