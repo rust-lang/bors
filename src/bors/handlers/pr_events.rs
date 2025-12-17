@@ -10,6 +10,7 @@ use crate::bors::handlers::unapprove_pr;
 use crate::bors::handlers::workflow::{AutoBuildCancelReason, maybe_cancel_auto_build};
 use crate::bors::merge_queue::MergeQueueSender;
 use crate::bors::mergeability_queue::MergeabilityQueueSender;
+use crate::bors::process::QueueSenders;
 use crate::bors::{AUTO_BRANCH_NAME, BorsContext};
 use crate::bors::{Comment, PullRequestStatus, RepositoryState};
 use crate::database::{MergeableState, PullRequestModel, UpsertPullRequestParams};
@@ -20,7 +21,7 @@ use std::sync::Arc;
 pub(super) async fn handle_pull_request_edited(
     repo_state: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
-    mergeability_queue: MergeabilityQueueSender,
+    mergeability_queue: &MergeabilityQueueSender,
     payload: PullRequestEdited,
 ) -> anyhow::Result<()> {
     let pr = &payload.pull_request;
@@ -47,7 +48,7 @@ pub(super) async fn handle_pull_request_edited(
 pub(super) async fn handle_push_to_pull_request(
     repo_state: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
-    mergeability_queue: MergeabilityQueueSender,
+    mergeability_queue: &MergeabilityQueueSender,
     payload: PullRequestPushed,
 ) -> anyhow::Result<()> {
     let pr = &payload.pull_request;
@@ -95,8 +96,7 @@ pub(super) async fn handle_pull_request_opened(
     repo_state: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
     ctx: Arc<BorsContext>,
-    mergeability_queue: MergeabilityQueueSender,
-    merge_queue_tx: MergeQueueSender,
+    senders: &QueueSenders,
     payload: PullRequestOpened,
 ) -> anyhow::Result<()> {
     let pr_status = if payload.draft {
@@ -125,9 +125,10 @@ pub(super) async fn handle_pull_request_opened(
         )
         .await?;
 
-    process_pr_description_commands(&payload, repo_state.clone(), db, ctx, merge_queue_tx).await?;
+    process_pr_description_commands(&payload, repo_state.clone(), db, ctx, senders.merge_queue())
+        .await?;
 
-    mergeability_queue.enqueue_pr(&pr, None);
+    senders.mergeability_queue().enqueue_pr(&pr, None);
 
     Ok(())
 }
@@ -161,7 +162,7 @@ pub(super) async fn handle_pull_request_merged(
 pub(super) async fn handle_pull_request_reopened(
     repo_state: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
-    mergeability_queue: MergeabilityQueueSender,
+    mergeability_queue: &MergeabilityQueueSender,
     payload: PullRequestReopened,
 ) -> anyhow::Result<()> {
     let pr = &payload.pull_request;
@@ -241,7 +242,7 @@ pub(super) async fn handle_pull_request_ready_for_review(
 pub(super) async fn handle_push_to_branch(
     repo_state: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
-    mergeability_queue: MergeabilityQueueSender,
+    mergeability_queue: &MergeabilityQueueSender,
     payload: PushToBranch,
 ) -> anyhow::Result<()> {
     let affected_prs = db
@@ -303,7 +304,7 @@ async fn process_pr_description_commands(
     repo: Arc<RepositoryState>,
     database: Arc<PgDbClient>,
     ctx: Arc<BorsContext>,
-    merge_queue_tx: MergeQueueSender,
+    merge_queue_tx: &MergeQueueSender,
 ) -> anyhow::Result<()> {
     let pr_description_comment = create_pr_description_comment(payload);
     handle_comment(repo, database, ctx, pr_description_comment, merge_queue_tx).await

@@ -125,14 +125,9 @@ async fn consume_repository_events(
 
         let span = tracing::info_span!("RepositoryEvent");
         tracing::debug!("Received repository event: {event:?}");
-        if let Err(error) = handle_bors_repository_event(
-            event,
-            ctx,
-            senders.mergeability_queue.clone(),
-            senders.merge_queue.clone(),
-        )
-        .instrument(span.clone())
-        .await
+        if let Err(error) = handle_bors_repository_event(event, ctx, senders.clone())
+            .instrument(span.clone())
+            .await
         {
             handle_root_error(span, error);
         }

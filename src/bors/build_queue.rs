@@ -42,6 +42,19 @@ impl BuildQueueSender {
             .send(BuildQueueEvent::RefreshPendingBuilds(repo))
             .await
     }
+
+    pub async fn on_workflow_completed(
+        &self,
+        event: WorkflowRunCompleted,
+        error_context: Option<String>,
+    ) -> Result<(), mpsc::error::SendError<BuildQueueEvent>> {
+        self.inner
+            .send(BuildQueueEvent::OnWorkflowCompleted {
+                event,
+                error_context,
+            })
+            .await
+    }
 }
 
 pub fn create_buid_queue() -> (BuildQueueSender, BuildQueueReceiver) {
@@ -53,7 +66,6 @@ pub fn create_buid_queue() -> (BuildQueueSender, BuildQueueReceiver) {
 pub enum BuildQueueEvent {
     RefreshPendingBuilds(GithubRepoName),
     OnWorkflowCompleted {
-        repo: GithubRepoName,
         event: WorkflowRunCompleted,
         error_context: Option<String>,
     },

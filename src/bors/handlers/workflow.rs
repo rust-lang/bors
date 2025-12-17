@@ -1,23 +1,17 @@
 use crate::PgDbClient;
+use crate::bors::RepositoryState;
 use crate::bors::build::CancelBuildError;
-use crate::bors::comment::{
-    CommentTag, append_workflow_links_to_comment, build_failed_comment, try_build_succeeded_comment,
-};
+use crate::bors::build_queue::BuildQueueSender;
+use crate::bors::comment::{CommentTag, append_workflow_links_to_comment};
 use crate::bors::event::{WorkflowRunCompleted, WorkflowRunStarted};
-use crate::bors::handlers::labels::handle_label_trigger;
-use crate::bors::handlers::{hide_build_started_comments, is_bors_observed_branch};
-use crate::bors::merge_queue::MergeQueueSender;
+use crate::bors::handlers::is_bors_observed_branch;
 use crate::bors::{BuildKind, build};
-use crate::bors::{FailedWorkflowRun, RepositoryState, WorkflowRun};
 use crate::database::{
     BuildModel, BuildStatus, PullRequestModel, QueueStatus, WorkflowModel, WorkflowStatus,
 };
 use crate::github::api::client::GithubRepositoryClient;
-use crate::github::{CommitSha, LabelTrigger};
-use octocrab::models::CheckRunId;
 use octocrab::models::workflows::{Conclusion, Job, Status};
 use octocrab::params::checks::CheckRunConclusion;
-use octocrab::params::checks::CheckRunStatus;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -117,7 +111,7 @@ pub(super) async fn handle_workflow_completed(
     repo: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
     mut payload: WorkflowRunCompleted,
-    merge_queue_tx: &MergeQueueSender,
+    build_queue_tx: &BuildQueueSender,
 ) -> anyhow::Result<()> {
     if !is_bors_observed_branch(&payload.branch) {
         return Ok(());
@@ -148,206 +142,9 @@ pub(super) async fn handle_workflow_completed(
     db.update_workflow_status(*payload.run_id, payload.status)
         .await?;
 
-    maybe_complete_build(
-        repo.as_ref(),
-        db.as_ref(),
-        payload,
-        merge_queue_tx,
-        error_context,
-    )
-    .await
-}
-
-/// Attempt to complete a pending build after a workflow run has been completed.
-/// We assume that the status of the completed workflow run has already been updated in the
-/// database.
-/// We also assume that there is only a single check suite attached to a single build of a commit.
-///
-/// `error_context` is an additional message that should be added to a comment if the build failed.
-async fn maybe_complete_build(
-    repo: &RepositoryState,
-    db: &PgDbClient,
-    payload: WorkflowRunCompleted,
-    merge_queue_tx: &MergeQueueSender,
-    error_context: Option<String>,
-) -> anyhow::Result<()> {
-    let Some(build) = db
-        .find_build(
-            &payload.repository,
-            &payload.branch,
-            payload.commit_sha.clone(),
-        )
-        .await?
-    else {
-        tracing::warn!(
-            "Received workflow finished for an unknown build: {}",
-            payload.commit_sha
-        );
-        return Ok(());
-    };
-
-    // If the build has already been marked with a conclusion, ignore this event
-    if build.status != BuildStatus::Pending {
-        return Ok(());
-    }
-
-    let Some(pr) = db.find_pr_by_build(&build).await? else {
-        tracing::warn!("Cannot find PR for build {}", build.commit_sha);
-        return Ok(());
-    };
-
-    // Load the workflow runs that we know about from the DB. We know about workflow runs for
-    // which we have received a started or a completed event.
-    let mut db_workflow_runs = db.get_workflows_for_build(&build).await?;
-    tracing::debug!("Workflow runs from DB: {db_workflow_runs:?}");
-
-    // If the workflow run was a success, check if we're still waiting for some other workflow run.
-    // If it was a failure, then immediately mark the build as failed.
-    if payload.status == WorkflowStatus::Success {
-        {
-            // Ask GitHub about all workflow runs attached to the check suite of the completed workflow run.
-            // This tells us for how many workflow runs we should wait.
-            // We assume that this number is final, and after a single workflow run has been completed, no
-            // other workflow runs attached to the check suite can appear out of nowhere.
-            // Note: we actually only need the number of workflow runs in this function, but we download
-            // some data about them to have better logging.
-            let gh_workflow_runs: Vec<WorkflowRun> = repo
-                .client
-                .get_workflow_runs_for_check_suite(payload.check_suite_id)
-                .await?;
-            tracing::debug!("Workflow runs from GitHub: {gh_workflow_runs:?}");
-
-            // This could happen if a workflow run webhook is lost, or if one workflow run manages to finish
-            // before another workflow run even manages to start. It should be rare.
-            // We will wait for the next workflow run completed webhook.
-            if db_workflow_runs.len() < gh_workflow_runs.len() {
-                tracing::warn!("Workflow count mismatch, waiting for the next webhook");
-                return Ok(());
-            }
-        }
-
-        // We have all expected workflow runs in the DB, but some of them are still pending.
-        // Wait for the next workflow run to be finished.
-        if db_workflow_runs
-            .iter()
-            .any(|w| w.status == WorkflowStatus::Pending)
-        {
-            tracing::info!("Some workflows are not finished yet, waiting for the next webhook.");
-            return Ok(());
-        }
-    }
-
-    // Below this point, we assume that the build has completed.
-    // Either all workflow runs attached to the corresponding check suite are completed or there
-    // was at least one failure.
-
-    let has_failure = db_workflow_runs
-        .iter()
-        .any(|check| matches!(check.status, WorkflowStatus::Failure));
-    let build_succeeded = !has_failure;
-    let pr_num = pr.number;
-
-    let status = if build_succeeded {
-        BuildStatus::Success
-    } else {
-        BuildStatus::Failure
-    };
-    let trigger = match build.kind {
-        BuildKind::Try => {
-            if !build_succeeded {
-                Some(LabelTrigger::TryBuildFailed)
-            } else {
-                None
-            }
-        }
-        BuildKind::Auto => Some(if build_succeeded {
-            LabelTrigger::AutoBuildSucceeded
-        } else {
-            LabelTrigger::AutoBuildFailed
-        }),
-    };
-
-    db.update_build_status(&build, status).await?;
-    if let Some(trigger) = trigger {
-        handle_label_trigger(repo, pr_num, trigger).await?;
-    }
-
-    if let Some(check_run_id) = build.check_run_id {
-        let (status, conclusion) = if build_succeeded {
-            (CheckRunStatus::Completed, Some(CheckRunConclusion::Success))
-        } else {
-            (CheckRunStatus::Completed, Some(CheckRunConclusion::Failure))
-        };
-
-        if let Err(error) = repo
-            .client
-            .update_check_run(CheckRunId(check_run_id as u64), status, conclusion)
-            .await
-        {
-            tracing::error!("Could not update check run {check_run_id}: {error:?}");
-        }
-    }
-
-    // Trigger merge queue when an auto build completes
-    if build.kind == BuildKind::Auto {
-        merge_queue_tx.notify().await?;
-    }
-
-    db_workflow_runs.sort_by(|a, b| a.name.cmp(&b.name));
-
-    let comment_opt = if build_succeeded {
-        tracing::info!("Build succeeded for PR {pr_num}");
-
-        if build.kind == BuildKind::Try {
-            Some(try_build_succeeded_comment(
-                &db_workflow_runs,
-                payload.commit_sha,
-                CommitSha(build.parent.clone()),
-            ))
-        } else {
-            // Merge queue will post the build succeeded comment
-            None
-        }
-    } else {
-        tracing::info!("Build failed for PR {pr_num}");
-
-        // Download failed jobs
-        let mut workflow_runs: Vec<FailedWorkflowRun> = vec![];
-        for workflow_run in db_workflow_runs {
-            let failed_jobs = match get_failed_jobs(repo, &workflow_run).await {
-                Ok(jobs) => jobs,
-                Err(error) => {
-                    tracing::error!(
-                        "Cannot download jobs for workflow run {}: {error:?}",
-                        workflow_run.run_id
-                    );
-                    vec![]
-                }
-            };
-            workflow_runs.push(FailedWorkflowRun {
-                workflow_run,
-                failed_jobs,
-            })
-        }
-
-        Some(build_failed_comment(
-            repo.repository(),
-            payload.commit_sha,
-            workflow_runs,
-            error_context,
-        ))
-    };
-
-    let tag = match build.kind {
-        BuildKind::Try => CommentTag::TryBuildStarted,
-        BuildKind::Auto => CommentTag::AutoBuildStarted,
-    };
-    hide_build_started_comments(repo, db, &pr, tag).await?;
-
-    if let Some(comment) = comment_opt {
-        repo.client.post_comment(pr_num, comment).await?;
-    }
-
+    build_queue_tx
+        .on_workflow_completed(payload, error_context)
+        .await?;
     Ok(())
 }
 

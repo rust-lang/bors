@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use super::mergeability_queue::MergeabilityQueueSender;
 use crate::bors::command::{BorsCommand, CommandParseError};
 use crate::bors::comment::CommentTag;
 use crate::bors::event::{BorsGlobalEvent, BorsRepositoryEvent, PullRequestComment};
@@ -53,12 +52,11 @@ mod review;
 mod trybuild;
 mod workflow;
 
-/// This function executes a single BORS repository event
+/// This function executes a single bors repository event
 pub async fn handle_bors_repository_event(
     event: BorsRepositoryEvent,
     ctx: Arc<BorsContext>,
-    mergeability_queue_tx: MergeabilityQueueSender,
-    merge_queue_tx: MergeQueueSender,
+    senders: QueueSenders,
 ) -> anyhow::Result<()> {
     let db = Arc::clone(&ctx.db);
     let Some(repo) = ctx
@@ -89,7 +87,7 @@ pub async fn handle_bors_repository_event(
             );
             let pr_number = comment.pr_number;
             if let Err(error) =
-                handle_comment(Arc::clone(&repo), db, ctx, comment, merge_queue_tx.clone())
+                handle_comment(Arc::clone(&repo), db, ctx, comment, senders.merge_queue())
                     .instrument(span.clone())
                     .await
             {
@@ -124,7 +122,7 @@ pub async fn handle_bors_repository_event(
                 repo = payload.repository.to_string(),
                 id = payload.run_id.into_inner()
             );
-            handle_workflow_completed(repo, db, payload, &merge_queue_tx)
+            handle_workflow_completed(repo, db, payload, senders.build_queue())
                 .instrument(span.clone())
                 .await?;
 
@@ -135,7 +133,7 @@ pub async fn handle_bors_repository_event(
             let span =
                 tracing::info_span!("Pull request edited", repo = payload.repository.to_string());
 
-            handle_pull_request_edited(repo, db, mergeability_queue_tx, payload)
+            handle_pull_request_edited(repo, db, senders.mergeability_queue(), payload)
                 .instrument(span.clone())
                 .await?;
         }
@@ -143,7 +141,7 @@ pub async fn handle_bors_repository_event(
             let span =
                 tracing::info_span!("Pull request pushed", repo = payload.repository.to_string());
 
-            handle_push_to_pull_request(repo, db, mergeability_queue_tx, payload)
+            handle_push_to_pull_request(repo, db, senders.mergeability_queue(), payload)
                 .instrument(span.clone())
                 .await?;
         }
@@ -151,16 +149,9 @@ pub async fn handle_bors_repository_event(
             let span =
                 tracing::info_span!("Pull request opened", repo = payload.repository.to_string());
 
-            handle_pull_request_opened(
-                repo,
-                db,
-                ctx,
-                mergeability_queue_tx,
-                merge_queue_tx,
-                payload,
-            )
-            .instrument(span.clone())
-            .await?;
+            handle_pull_request_opened(repo, db, ctx, &senders, payload)
+                .instrument(span.clone())
+                .await?;
         }
         BorsRepositoryEvent::PullRequestClosed(payload) => {
             let span =
@@ -184,7 +175,7 @@ pub async fn handle_bors_repository_event(
                 repo = payload.repository.to_string()
             );
 
-            handle_pull_request_reopened(repo, db, mergeability_queue_tx, payload)
+            handle_pull_request_reopened(repo, db, senders.mergeability_queue(), payload)
                 .instrument(span.clone())
                 .await?;
         }
@@ -232,7 +223,7 @@ pub async fn handle_bors_repository_event(
             let span =
                 tracing::info_span!("Pushed to branch", repo = payload.repository.to_string());
 
-            handle_push_to_branch(repo, db, mergeability_queue_tx, payload)
+            handle_push_to_branch(repo, db, senders.mergeability_queue(), payload)
                 .instrument(span.clone())
                 .await?;
         }
@@ -350,7 +341,7 @@ async fn handle_comment(
     database: Arc<PgDbClient>,
     ctx: Arc<BorsContext>,
     comment: PullRequestComment,
-    merge_queue_tx: MergeQueueSender,
+    merge_queue_tx: &MergeQueueSender,
 ) -> anyhow::Result<()> {
     use std::fmt::Write;
 
@@ -406,7 +397,7 @@ async fn handle_comment(
                 let result = match command {
                     BorsCommand::Retry => {
                         let span = tracing::info_span!("Retry");
-                        command_retry(repo, database, pr, &comment.author, &merge_queue_tx)
+                        command_retry(repo, database, pr, &comment.author, merge_queue_tx)
                             .instrument(span)
                             .await
                     }
@@ -425,14 +416,14 @@ async fn handle_comment(
                             &approver,
                             priority,
                             rollup,
-                            &merge_queue_tx,
+                            merge_queue_tx,
                         )
                         .instrument(span)
                         .await
                     }
                     BorsCommand::OpenTree => {
                         let span = tracing::info_span!("TreeOpen");
-                        command_open_tree(repo, database, pr, &comment.author, &merge_queue_tx)
+                        command_open_tree(repo, database, pr, &comment.author, merge_queue_tx)
                             .instrument(span)
                             .await
                     }
@@ -445,7 +436,7 @@ async fn handle_comment(
                             &comment.author,
                             priority,
                             &comment.html_url,
-                            &merge_queue_tx,
+                            merge_queue_tx,
                         )
                         .instrument(span)
                         .await
