@@ -65,12 +65,11 @@ pub enum BorsGlobalEvent {
     RefreshConfig,
     /// Refresh the team permissions.
     RefreshPermissions,
-    /// Examine pending builds and handle any issues (e.g. cancel builds that have been running for
-    /// a long time).
+    /// Examine pending builds, and try to complete or timeout them.
     RefreshPendingBuilds,
     /// Refresh mergeability status of PRs that have unknown mergeability status.
     RefreshPullRequestMergeability,
-    /// Periodic event that serves for synchronizing PR state.
+    /// Synchronize PR status with GitHub.
     RefreshPullRequestState,
     /// Try to process the merge queue.
     ProcessMergeQueue,

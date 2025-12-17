@@ -1,7 +1,7 @@
 use crate::bors::{
-    CommandPrefix, PullRequestStatus, RollupMode, WAIT_FOR_MERGE_QUEUE,
-    WAIT_FOR_MERGEABILITY_STATUS_REFRESH, WAIT_FOR_PR_STATUS_REFRESH,
-    WAIT_FOR_REFRESH_PENDING_BUILDS, WAIT_FOR_WORKFLOW_COMPLETED, WAIT_FOR_WORKFLOW_STARTED,
+    CommandPrefix, PullRequestStatus, RollupMode, WAIT_FOR_BUILD_QUEUE, WAIT_FOR_MERGE_QUEUE,
+    WAIT_FOR_MERGEABILITY_STATUS_REFRESH, WAIT_FOR_PR_STATUS_REFRESH, WAIT_FOR_WORKFLOW_COMPLETED,
+    WAIT_FOR_WORKFLOW_STARTED,
 };
 use crate::database::{
     BuildModel, BuildStatus, DelegatedPermission, MergeableState, OctocrabMergeableState,
@@ -448,7 +448,7 @@ impl BorsTester {
                     .unwrap();
                 Ok(())
             },
-            &WAIT_FOR_REFRESH_PENDING_BUILDS,
+            &WAIT_FOR_BUILD_QUEUE,
         )
         .await
         .unwrap();

@@ -1,83 +1,11 @@
 use std::sync::Arc;
-use std::time::Duration;
 
 use anyhow::Context;
-use octocrab::params::checks::CheckRunConclusion;
 use std::collections::BTreeMap;
 
-use crate::bors::build::{CancelBuildError, cancel_build};
-use crate::bors::comment::build_timed_out_comment;
+use crate::bors::RepositoryState;
 use crate::bors::mergeability_queue::MergeabilityQueueSender;
-use crate::bors::{RepositoryState, elapsed_time_since};
-use crate::database::{BuildModel, BuildStatus};
 use crate::{PgDbClient, TeamApiClient};
-
-/// Go through pending builds and figure out if we need to do something about them:
-/// - Cancel CI builds that have been running for too long.
-pub async fn refresh_pending_builds(
-    repo: Arc<RepositoryState>,
-    db: &PgDbClient,
-) -> anyhow::Result<()> {
-    let running_builds = db.get_pending_builds(repo.repository()).await?;
-    tracing::info!("Found {} pending build(s)", running_builds.len());
-
-    let timeout = repo.config.load().timeout;
-    for build in running_builds {
-        if let Err(error) = refresh_build(&repo, db, &build, timeout).await {
-            tracing::error!("Could not refresh pending build {build:?}: {error:?}");
-        }
-    }
-    Ok(())
-}
-
-async fn refresh_build(
-    repo: &RepositoryState,
-    db: &PgDbClient,
-    build: &BuildModel,
-    timeout: Duration,
-) -> anyhow::Result<()> {
-    if elapsed_time_since(build.created_at) >= timeout {
-        if let Some(pr) = db.find_pr_by_build(build).await? {
-            tracing::info!("Cancelling build {build:?}");
-            match cancel_build(&repo.client, db, build, CheckRunConclusion::TimedOut).await {
-                Ok(_) => {}
-                Err(
-                    CancelBuildError::FailedToMarkBuildAsCancelled(error)
-                    | CancelBuildError::FailedToCancelWorkflows(error),
-                ) => {
-                    tracing::error!(
-                        "Could not cancel workflows for SHA {}: {error:?}",
-                        build.commit_sha
-                    );
-                }
-            }
-
-            if let Err(error) = repo
-                .client
-                .post_comment(pr.number, build_timed_out_comment(timeout))
-                .await
-            {
-                tracing::error!("Could not send comment to PR {}: {error:?}", pr.number);
-            }
-        } else {
-            // This is an orphaned build. It should never be created, unless we have some bug or
-            // unexpected race condition in bors.
-            // When we do encounter such a build, we can mark it as timeouted, as it is no longer
-            // relevant.
-            // Note that we could write an explicit query for finding these orphaned builds,
-            // but that could be quite expensive. Instead we piggyback on the existing logic
-            // for timed out builds; if a build is still pending and has no PR attached, then
-            // there likely won't be any additional event that could mark it as finished.
-            // So eventually all such builds will arrive here
-            tracing::warn!(
-                "Detected orphaned pending without a PR, marking it as time outed: {build:?}"
-            );
-            db.update_build_status(build, BuildStatus::Timeouted)
-                .await?;
-        }
-    }
-    Ok(())
-}
 
 /// Reload the team DB bors permissions for the given repository.
 pub async fn reload_repository_permissions(

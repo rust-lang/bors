@@ -12,8 +12,7 @@ use crate::bors::handlers::pr_events::{
     handle_pull_request_assigned, handle_pull_request_unassigned,
 };
 use crate::bors::handlers::refresh::{
-    refresh_pending_builds, reload_mergeability_status, reload_repository_config,
-    reload_repository_permissions,
+    reload_mergeability_status, reload_repository_config, reload_repository_permissions,
 };
 use crate::bors::handlers::retry::command_retry;
 use crate::bors::handlers::review::{
@@ -22,6 +21,7 @@ use crate::bors::handlers::review::{
 use crate::bors::handlers::trybuild::{command_try_build, command_try_cancel};
 use crate::bors::handlers::workflow::{handle_workflow_completed, handle_workflow_started};
 use crate::bors::merge_queue::MergeQueueSender;
+use crate::bors::process::QueueSenders;
 use crate::bors::{
     AUTO_BRANCH_NAME, BorsContext, CommandPrefix, Comment, RepositoryState, TRY_BRANCH_NAME,
 };
@@ -31,6 +31,7 @@ use crate::github::{GithubUser, LabelTrigger, PullRequest, PullRequestNumber};
 use crate::permissions::PermissionType;
 use crate::{CommandParser, PgDbClient, TeamApiClient, load_repositories};
 use anyhow::Context;
+use futures::TryFutureExt;
 use octocrab::Octocrab;
 use pr_events::{
     handle_pull_request_closed, handle_pull_request_converted_to_draft, handle_pull_request_edited,
@@ -245,8 +246,7 @@ pub async fn handle_bors_global_event(
     ctx: Arc<BorsContext>,
     gh_client: &Octocrab,
     team_api_client: &TeamApiClient,
-    mergeability_queue_tx: MergeabilityQueueSender,
-    merge_queue_tx: MergeQueueSender,
+    senders: QueueSenders,
 ) -> anyhow::Result<()> {
     let db = Arc::clone(&ctx.db);
     match event {
@@ -277,20 +277,20 @@ pub async fn handle_bors_global_event(
         BorsGlobalEvent::RefreshPendingBuilds => {
             let span = tracing::info_span!("Refresh pending builds");
             for_each_repo(&ctx, |repo| {
-                let span = tracing::info_span!("Repo", repo = repo.repository().to_string());
-                refresh_pending_builds(repo, &db).instrument(span)
+                senders
+                    .build_queue()
+                    .refresh_pending_builds(repo.repository().clone())
+                    .instrument(span.clone())
+                    .map_err(|e| e.into())
             })
-            .instrument(span)
+            .instrument(span.clone())
             .await?;
-
-            #[cfg(test)]
-            crate::bors::WAIT_FOR_REFRESH_PENDING_BUILDS.mark();
         }
         BorsGlobalEvent::RefreshPullRequestMergeability => {
             let span = tracing::info_span!("Refresh PR mergeability status");
             for_each_repo(&ctx, |repo| {
                 let span = tracing::info_span!("Repo", repo = repo.repository().to_string());
-                reload_mergeability_status(repo, &db, mergeability_queue_tx.clone())
+                reload_mergeability_status(repo, &db, senders.mergeability_queue().clone())
                     .instrument(span)
             })
             .instrument(span)
@@ -312,7 +312,7 @@ pub async fn handle_bors_global_event(
             crate::bors::WAIT_FOR_PR_STATUS_REFRESH.mark();
         }
         BorsGlobalEvent::ProcessMergeQueue => {
-            merge_queue_tx.maybe_perform_tick().await?;
+            senders.merge_queue().maybe_perform_tick().await?;
         }
     }
     Ok(())

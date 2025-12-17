@@ -21,6 +21,7 @@ use crate::permissions::UserPermissions;
 use crate::tests::TestSyncMarker;
 
 mod build;
+mod build_queue;
 mod command;
 pub mod comment;
 mod context;
@@ -111,7 +112,7 @@ You can use the following commands:
 }
 
 #[cfg(test)]
-pub static WAIT_FOR_REFRESH_PENDING_BUILDS: TestSyncMarker = TestSyncMarker::new();
+pub static WAIT_FOR_BUILD_QUEUE: TestSyncMarker = TestSyncMarker::new();
 
 #[cfg(test)]
 pub static WAIT_FOR_MERGEABILITY_STATUS_REFRESH: TestSyncMarker = TestSyncMarker::new();
