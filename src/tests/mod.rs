@@ -1,5 +1,3 @@
-use crate::bors::merge_queue::MergeQueueSender;
-use crate::bors::mergeability_queue::MergeabilityQueueSender;
 use crate::bors::{
     CommandPrefix, PullRequestStatus, RollupMode, WAIT_FOR_MERGE_QUEUE,
     WAIT_FOR_MERGEABILITY_STATUS_REFRESH, WAIT_FOR_PR_STATUS_REFRESH,
@@ -35,6 +33,7 @@ mod mock;
 mod utils;
 
 // Public re-exports for use in tests
+use crate::bors::process::QueueSenders;
 use crate::github::api::client::HideCommentReason;
 use crate::server::{ServerState, create_app};
 use crate::tests::github::{
@@ -169,12 +168,11 @@ pub struct BorsTester {
     http_mock: ExternalHttpMock,
     github: Arc<Mutex<GitHub>>,
     db: Arc<PgDbClient>,
-    mergeability_queue_tx: MergeabilityQueueSender,
-    merge_queue_tx: MergeQueueSender,
     // Sender for bors global events
     global_tx: Sender<BorsGlobalEvent>,
     // When this field is false, no webhooks should be generated from BorsTester methods
     webhooks_active: bool,
+    senders: QueueSenders,
 }
 
 impl BorsTester {
@@ -208,8 +206,7 @@ impl BorsTester {
         let BorsProcess {
             repository_tx,
             global_tx,
-            mergeability_queue_tx,
-            merge_queue_tx,
+            senders,
             bors_process,
         } = create_bors_process(
             ctx,
@@ -238,8 +235,7 @@ impl BorsTester {
                 http_mock: mock,
                 github,
                 db,
-                mergeability_queue_tx,
-                merge_queue_tx,
+                senders,
                 global_tx,
                 webhooks_active: true,
             },
@@ -483,7 +479,7 @@ impl BorsTester {
         // Wait until the merge queue processing is fully handled
         wait_for_marker(
             async || {
-                self.merge_queue_tx.perform_tick().await.unwrap();
+                self.senders.merge_queue().perform_tick().await.unwrap();
                 Ok(())
             },
             &WAIT_FOR_MERGE_QUEUE,
@@ -1043,8 +1039,8 @@ impl BorsTester {
         // Make sure that the event channel senders are closed
         drop(self.app);
         drop(self.global_tx);
-        self.merge_queue_tx.shutdown();
-        self.mergeability_queue_tx.shutdown();
+        self.senders.merge_queue().shutdown();
+        self.senders.mergeability_queue().shutdown();
         // Wait until all events are handled in the bors service
         match tokio::time::timeout(Duration::from_secs(5), bors).await {
             Ok(Ok(_)) => {}
