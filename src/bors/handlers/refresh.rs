@@ -194,26 +194,6 @@ pub async fn sync_pull_requests_state(
     Ok(())
 }
 
-#[cfg(not(test))]
-fn now() -> DateTime<Utc> {
-    Utc::now()
-}
-
-#[cfg(test)]
-thread_local! {
-    static MOCK_TIME: std::cell::RefCell<Option<DateTime<Utc>>> = const { std::cell::RefCell::new(None) };
-}
-
-#[cfg(test)]
-fn now() -> DateTime<Utc> {
-    MOCK_TIME.with(|time| time.borrow_mut().unwrap_or_else(Utc::now))
-}
-
-fn elapsed_time(date: DateTime<Utc>) -> Duration {
-    let time: DateTime<Utc> = now();
-    (time - date).to_std().unwrap_or(Duration::ZERO)
-}
-
 #[cfg(test)]
 mod tests {
     use crate::bors::PullRequestStatus;
