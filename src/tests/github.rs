@@ -289,11 +289,8 @@ approved = ["+approved"]
             vec![PermissionType::Try, PermissionType::Review],
         );
 
-        let mut repo = Repo::new(org_user.clone(), repo_name.name()).with_pr(PullRequest::new(
-            repo_name,
-            default_pr_number(),
-            User::default_pr_author(),
-        ));
+        let mut repo = Repo::new(org_user.clone(), repo_name.name());
+        repo.add_pr(User::default_pr_author());
         repo.config = config;
         repo.permissions = Permissions { users };
         gh.add_repo(repo);
@@ -400,13 +397,7 @@ impl Repo {
         self
     }
 
-    // TODO: refactor to now allow anyone to add PR from the outside
-    pub fn with_pr(mut self, pr: PullRequest) -> Self {
-        assert!(self.pull_requests.insert(pr.number.0, pr).is_none());
-        self
-    }
-
-    pub fn new_pr(&mut self, author: User) -> &mut PullRequest {
+    pub fn add_pr(&mut self, author: User) -> &mut PullRequest {
         let number = self.pull_requests.keys().copied().max().unwrap_or(0) + 1;
         let pr = PullRequest::new(self.full_name(), number, author);
         assert!(self.pull_requests.insert(pr.number.0, pr).is_none());
@@ -507,10 +498,6 @@ pub fn default_repo_name() -> GithubRepoName {
     GithubRepoName::new("rust-lang", "borstest")
 }
 
-pub fn default_pr_number() -> u64 {
-    1
-}
-
 pub fn default_oauth_config() -> OAuthConfig {
     OAuthConfig::new(test_oauth_client_id(), test_oauth_client_secret())
 }
@@ -563,15 +550,6 @@ impl Display for PrIdentifier {
     }
 }
 
-impl Default for PrIdentifier {
-    fn default() -> Self {
-        Self {
-            repo: default_repo_name(),
-            number: default_pr_number(),
-        }
-    }
-}
-
 impl From<u64> for PrIdentifier {
     fn from(number: u64) -> Self {
         Self {
@@ -600,7 +578,7 @@ impl From<()> for PrIdentifier {
     fn from(_: ()) -> Self {
         Self {
             repo: default_repo_name(),
-            number: default_pr_number(),
+            number: 1,
         }
     }
 }
@@ -840,7 +818,7 @@ impl Comment {
 
 impl<'a> From<&'a str> for Comment {
     fn from(value: &'a str) -> Self {
-        Comment::new(PrIdentifier::default(), value)
+        Comment::new(PrIdentifier::from(()), value)
     }
 }
 
