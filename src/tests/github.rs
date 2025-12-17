@@ -4,6 +4,7 @@ use crate::database::WorkflowStatus;
 use crate::github::api::client::HideCommentReason;
 use crate::github::{GithubRepoName, PullRequestNumber};
 use crate::permissions::PermissionType;
+use crate::tests::{AUTO_BRANCH, TRY_BRANCH};
 use chrono::{DateTime, Utc};
 use octocrab::models::pulls::MergeableState;
 use octocrab::models::{CheckSuiteId, JobId, RunId};
@@ -389,6 +390,22 @@ impl Repo {
 
     pub fn get_pr_mut(&mut self, pr: u64) -> &mut PullRequest {
         self.pull_requests.get_mut(&pr).unwrap()
+    }
+
+    pub fn try_branch(&self) -> Branch {
+        self.branches
+            .iter()
+            .find(|b| b.name == TRY_BRANCH)
+            .expect("Try branch not found")
+            .clone()
+    }
+
+    pub fn auto_branch(&self) -> Branch {
+        self.branches
+            .iter()
+            .find(|b| b.name == AUTO_BRANCH)
+            .expect("Auto branch not found")
+            .clone()
     }
 
     pub fn get_branch_by_name(&mut self, name: &str) -> Option<&mut Branch> {

@@ -62,6 +62,9 @@ pub use utils::webhook::{TEST_WEBHOOK_SECRET, create_webhook_request};
 /// You can increase this if you want to do interactive debugging.
 const TEST_TIMEOUT: Duration = Duration::from_secs(10);
 
+const TRY_BRANCH: &str = "automation/bors/try";
+const AUTO_BRANCH: &str = "automation/bors/auto";
+
 pub fn default_cmd_prefix() -> CommandPrefix {
     "@bors".to_string().into()
 }
@@ -249,7 +252,7 @@ impl BorsTester {
         self.db.clone()
     }
 
-    pub fn default_repo(&self) -> Arc<Mutex<Repo>> {
+    pub fn repo(&self) -> Arc<Mutex<Repo>> {
         self.get_repo(default_repo_name())
     }
 
@@ -346,16 +349,6 @@ impl BorsTester {
         }
     }
 
-    pub fn get_branch_copy(&self, name: &str) -> Branch {
-        self.github
-            .lock()
-            .default_repo()
-            .lock()
-            .get_branch_by_name(name)
-            .unwrap()
-            .clone()
-    }
-
     pub fn get_branch_commit_message(&self, branch: &Branch) -> String {
         self.github
             .lock()
@@ -373,11 +366,11 @@ impl BorsTester {
     }
 
     pub fn try_branch(&self) -> Branch {
-        self.get_branch_copy("automation/bors/try")
+        self.repo().lock().try_branch()
     }
 
     pub fn auto_branch(&self) -> Branch {
-        self.get_branch_copy("automation/bors/auto")
+        self.repo().lock().auto_branch()
     }
 
     /// Wait until the next bot comment is received on the specified repo and PR, and return its
@@ -830,7 +823,7 @@ impl BorsTester {
         status: CheckRunStatus,
         conclusion: Option<CheckRunConclusion>,
     ) -> &Self {
-        let repo = self.default_repo();
+        let repo = self.repo();
         let repo = repo.lock();
         let check_runs: Vec<_> = repo
             .check_runs
