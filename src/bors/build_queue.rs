@@ -120,6 +120,7 @@ pub async fn handle_build_queue_event(
                 return Ok(());
             };
             if build.status != BuildStatus::Pending {
+                tracing::warn!("Received workflow completed for an already completed build");
                 return Ok(());
             }
             let Some(pr) = db.find_pr_by_build(&build).await? else {

@@ -37,7 +37,7 @@ pub(super) async fn handle_workflow_started(
         )
         .await?
     else {
-        tracing::warn!("Build for workflow not found");
+        tracing::warn!("Build for workflow started not found");
         return Ok(());
     };
 
