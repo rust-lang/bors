@@ -7,8 +7,8 @@ use octocrab::params::checks::CheckRunConclusion;
 use std::collections::BTreeMap;
 
 use crate::bors::RepositoryState;
+use crate::bors::build::{CancelBuildError, cancel_build};
 use crate::bors::comment::build_timed_out_comment;
-use crate::bors::handlers::workflow::{CancelBuildError, cancel_build};
 use crate::bors::mergeability_queue::MergeabilityQueueSender;
 use crate::database::{BuildModel, BuildStatus};
 use crate::{PgDbClient, TeamApiClient};

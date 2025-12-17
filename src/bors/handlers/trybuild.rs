@@ -3,6 +3,7 @@ use std::sync::Arc;
 use super::{PullRequestData, deny_request};
 use super::{has_permission, hide_build_started_comments};
 use crate::PgDbClient;
+use crate::bors::build::{CancelBuildError, cancel_build};
 use crate::bors::command::{CommandPrefix, Parent};
 use crate::bors::comment::try_build_cancelled_comment;
 use crate::bors::comment::try_build_cancelled_with_failed_workflow_cancel_comment;
@@ -10,7 +11,6 @@ use crate::bors::comment::{CommentTag, no_try_build_in_progress_comment};
 use crate::bors::comment::{
     cant_find_last_parent_comment, merge_conflict_comment, try_build_started_comment,
 };
-use crate::bors::handlers::workflow::{CancelBuildError, cancel_build};
 use crate::bors::{MergeType, RepositoryState, TRY_BRANCH_NAME, create_merge_commit_message};
 use crate::database::{BuildModel, BuildStatus, PullRequestModel};
 use crate::github::api::client::{CheckRunOutput, GithubRepositoryClient};

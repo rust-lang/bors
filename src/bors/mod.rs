@@ -19,6 +19,7 @@ use crate::permissions::UserPermissions;
 #[cfg(test)]
 use crate::tests::TestSyncMarker;
 
+mod build;
 mod command;
 pub mod comment;
 mod context;
