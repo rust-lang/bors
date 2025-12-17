@@ -649,7 +649,7 @@ async fn has_permission(
 }
 
 /// Unapprove a PR in the DB and apply the corresponding label trigger.
-async fn unapprove_pr(
+pub async fn unapprove_pr(
     repo_state: &RepositoryState,
     db: &PgDbClient,
     pr: &PullRequestModel,
