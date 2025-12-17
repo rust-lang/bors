@@ -756,12 +756,6 @@ impl BranchPushBehaviour {
             error: Some((error_type, NonZeroU64::new(u64::MAX).unwrap())),
         }
     }
-
-    pub fn fail_n_times(error_type: BranchPushError, count: u64) -> Self {
-        Self {
-            error: NonZeroU64::new(count).map(|remaining| (error_type, remaining)),
-        }
-    }
 }
 
 impl Default for BranchPushBehaviour {

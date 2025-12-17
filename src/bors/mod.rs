@@ -130,6 +130,10 @@ pub static WAIT_FOR_WORKFLOW_COMPLETED: TestSyncMarker = TestSyncMarker::new();
 #[cfg(test)]
 pub static WAIT_FOR_MERGE_QUEUE: TestSyncMarker = TestSyncMarker::new();
 
+/// The merge queue has attempted to merge a PR.
+#[cfg(test)]
+pub static WAIT_FOR_MERGE_QUEUE_MERGE_ATTEMPT: TestSyncMarker = TestSyncMarker::new();
+
 #[cfg(not(test))]
 fn now() -> DateTime<Utc> {
     Utc::now()

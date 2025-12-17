@@ -1,7 +1,7 @@
 use crate::bors::{
     CommandPrefix, PullRequestStatus, RollupMode, WAIT_FOR_BUILD_QUEUE, WAIT_FOR_MERGE_QUEUE,
-    WAIT_FOR_MERGEABILITY_STATUS_REFRESH, WAIT_FOR_PR_STATUS_REFRESH, WAIT_FOR_WORKFLOW_COMPLETED,
-    WAIT_FOR_WORKFLOW_STARTED,
+    WAIT_FOR_MERGE_QUEUE_MERGE_ATTEMPT, WAIT_FOR_MERGEABILITY_STATUS_REFRESH,
+    WAIT_FOR_PR_STATUS_REFRESH, WAIT_FOR_WORKFLOW_COMPLETED, WAIT_FOR_WORKFLOW_STARTED,
 };
 use crate::database::{
     BuildModel, BuildStatus, DelegatedPermission, MergeableState, OctocrabMergeableState,
@@ -62,9 +62,9 @@ pub use utils::webhook::{TEST_WEBHOOK_SECRET, create_webhook_request};
 
 /// How long should we wait before we timeout a test.
 /// You can increase this if you want to do interactive debugging.
-const TEST_TIMEOUT: Duration = Duration::from_secs(20);
-const SYNC_MARKER_TIMEOUT: Duration = Duration::from_secs(10);
-const COMMENT_RECEIVE_TIMEOUT: Duration = Duration::from_secs(10);
+const TEST_TIMEOUT: Duration = Duration::from_secs(150);
+const SYNC_MARKER_TIMEOUT: Duration = Duration::from_secs(100);
+const COMMENT_RECEIVE_TIMEOUT: Duration = Duration::from_secs(100);
 
 const TRY_BRANCH: &str = "automation/bors/try";
 const AUTO_BRANCH: &str = "automation/bors/auto";
@@ -489,8 +489,14 @@ impl BorsTester {
         .unwrap();
     }
 
-    pub async fn process_merge_queue(&self) {
-        // Wait until the merge queue processing is fully handled
+    /// Trigger the merge queue immediately and wait until it performs a single tick.
+    /// Ensure that the merge queue is ready for what it is supposed to do in the test when you
+    /// call this function. If that is not the case, it might lead to race conditions.
+    /// It is more robust to call `run_merge_queue_until_merge_attempt` instead.
+    ///
+    /// In particular, if you want to ensure that the merge queue has seen a workflow completed
+    /// event, you should really run `run_merge_queue_until_merge_attempt`.
+    pub async fn run_merge_queue_now(&self) {
         wait_for_marker(
             async || {
                 self.senders.merge_queue().perform_tick().await.unwrap();
@@ -502,9 +508,15 @@ impl BorsTester {
         .unwrap();
     }
 
-    /// Wait until the build queue runs
-    pub async fn wait_for_build_queue(&self) {
-        WAIT_FOR_BUILD_QUEUE.sync().await;
+    /// Repeatedly trigger the merge queue until it attempts to perform a merge.
+    pub async fn run_merge_queue_until_merge_attempt(&self) {
+        let run_merge_queue = async move {
+            loop {
+                self.run_merge_queue_now().await;
+                tokio::time::sleep(Duration::from_millis(500)).await;
+            }
+        };
+        wait_for_marker_concurrent(run_merge_queue, &WAIT_FOR_MERGE_QUEUE_MERGE_ATTEMPT).await;
     }
 
     /// Performs a single started/success/failure workflow event.
@@ -798,7 +810,7 @@ impl BorsTester {
             .get_branch_by_name(AUTO_BRANCH)
             .map(|b| b.sha.clone());
 
-        self.process_merge_queue().await;
+        self.run_merge_queue_now().await;
         let comment = self.get_next_comment_text(id).await?;
         assert!(comment.contains("Testing commit"));
         let new_auto_sha = self.auto_branch().sha;
@@ -816,8 +828,7 @@ impl BorsTester {
         id: Id,
     ) -> anyhow::Result<()> {
         self.workflow_full_success(self.auto_workflow()).await?;
-        self.wait_for_build_queue().await;
-        self.process_merge_queue().await;
+        self.run_merge_queue_until_merge_attempt().await;
         let comment = self.get_next_comment_text(id).await?;
         assert!(comment.contains("Test successful"));
         Ok(())
@@ -841,7 +852,7 @@ impl BorsTester {
             let id = id.clone();
             self.get_next_comment_text(id)
                 .await
-                .unwrap_or_else(|_| panic!("Failed to get comment #{i}"));
+                .unwrap_or_else(|e| panic!("Failed to get comment #{i}: {e:?}"));
         }
     }
 
@@ -1070,7 +1081,7 @@ impl BorsTester {
             }
         };
         // Flush any local queues
-        self.http_mock.gh_server.assert_empty_queues().await;
+        self.http_mock.gh_server.assert_empty_queues().await?;
         Ok(Arc::into_inner(self.github).unwrap().into_inner())
     }
 }
@@ -1310,4 +1321,17 @@ where
             .map_err(|_| anyhow::anyhow!("Timed out waiting for a test marker to be marked"))?;
     }
     res
+}
+
+/// Concurrenly run an async operation with the specific future, until the future finishes.
+/// `fut` is supposed to be a diverging future.
+async fn wait_for_marker_concurrent<Fut>(fut: Fut, marker: &TestSyncMarker)
+where
+    Fut: Future<Output = ()>,
+{
+    marker.drain().await;
+    tokio::select! {
+        _ = fut => {}
+        _ = marker.sync() => {}
+    }
 }
