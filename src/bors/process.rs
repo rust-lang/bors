@@ -15,8 +15,7 @@ use tracing::{Instrument, Span};
 pub struct BorsProcess {
     pub repository_tx: mpsc::Sender<BorsRepositoryEvent>,
     pub global_tx: mpsc::Sender<BorsGlobalEvent>,
-    pub merge_queue_tx: MergeQueueSender,
-    pub mergeability_queue_tx: MergeabilityQueueSender,
+    pub senders: QueueSenders,
     pub bors_process: Pin<Box<dyn Future<Output = ()> + Send>>,
 }
 
@@ -31,13 +30,17 @@ pub fn create_bors_process(
     let (repository_tx, repository_rx) = mpsc::channel::<BorsRepositoryEvent>(1024);
     let (global_tx, global_rx) = mpsc::channel::<BorsGlobalEvent>(1024);
     let (mergeability_queue_tx, mergeability_queue_rx) = create_mergeability_queue();
-    let mergeability_queue_tx2 = mergeability_queue_tx.clone();
 
     let ctx = Arc::new(ctx);
 
     let (merge_queue_tx, merge_queue_fut) =
         start_merge_queue(ctx.clone(), merge_queue_max_interval);
-    let merge_queue_tx2 = merge_queue_tx.clone();
+
+    let senders = QueueSenders {
+        merge_queue: merge_queue_tx,
+        mergeability_queue: mergeability_queue_tx,
+    };
+    let senders2 = senders.clone();
 
     let service = async move {
         // In tests, we shutdown these futures by dropping the channel sender,
@@ -47,21 +50,9 @@ pub fn create_bors_process(
         #[cfg(test)]
         {
             let _ = tokio::join!(
-                consume_repository_events(
-                    ctx.clone(),
-                    repository_rx,
-                    mergeability_queue_tx2.clone(),
-                    merge_queue_tx2.clone()
-                ),
-                consume_global_events(
-                    ctx.clone(),
-                    global_rx,
-                    mergeability_queue_tx2,
-                    merge_queue_tx2,
-                    gh_client,
-                    team_api
-                ),
-                consume_mergeability_queue(ctx.clone(), mergeability_queue_rx),
+                consume_repository_events(ctx.clone(), repository_rx, senders2.clone()),
+                consume_global_events(ctx.clone(), global_rx, senders2, gh_client, team_api),
+                consume_mergeability_queue_events(ctx.clone(), mergeability_queue_rx),
                 merge_queue_fut
             );
         }
@@ -71,13 +62,13 @@ pub fn create_bors_process(
         #[cfg(not(test))]
         {
             tokio::select! {
-                _ = consume_repository_events(ctx.clone(), repository_rx, mergeability_queue_tx2.clone(), merge_queue_tx2.clone()) => {
+                _ = consume_repository_events(ctx.clone(), repository_rx, senders2.clone()) => {
                     tracing::error!("Repository event handling process has ended");
                 }
-                _ = consume_global_events(ctx.clone(), global_rx, mergeability_queue_tx2, merge_queue_tx2, gh_client, team_api) => {
+                _ = consume_global_events(ctx.clone(), global_rx, senders2, gh_client, team_api) => {
                     tracing::error!("Global event handling process has ended");
                 }
-                _ = consume_mergeability_queue(ctx.clone(), mergeability_queue_rx) => {
+                _ = consume_mergeability_queue_events(ctx.clone(), mergeability_queue_rx) => {
                     tracing::error!("Mergeability queue handling process has ended")
                 }
                 _ = merge_queue_fut => {
@@ -90,56 +81,41 @@ pub fn create_bors_process(
     BorsProcess {
         repository_tx,
         global_tx,
-        mergeability_queue_tx,
-        merge_queue_tx,
+        senders,
         bors_process: Box::pin(service),
+    }
+}
+
+#[derive(Clone)]
+pub struct QueueSenders {
+    mergeability_queue: MergeabilityQueueSender,
+    merge_queue: MergeQueueSender,
+}
+
+impl QueueSenders {
+    pub fn merge_queue(&self) -> &MergeQueueSender {
+        &self.merge_queue
+    }
+    pub fn mergeability_queue(&self) -> &MergeabilityQueueSender {
+        &self.mergeability_queue
     }
 }
 
 async fn consume_repository_events(
     ctx: Arc<BorsContext>,
     mut repository_rx: mpsc::Receiver<BorsRepositoryEvent>,
-    mergeability_queue_tx: MergeabilityQueueSender,
-    merge_queue_tx: MergeQueueSender,
+    senders: QueueSenders,
 ) {
     while let Some(event) = repository_rx.recv().await {
         let ctx = ctx.clone();
-        let mergeability_queue_tx = mergeability_queue_tx.clone();
 
         let span = tracing::info_span!("RepositoryEvent");
         tracing::debug!("Received repository event: {event:?}");
-        if let Err(error) =
-            handle_bors_repository_event(event, ctx, mergeability_queue_tx, merge_queue_tx.clone())
-                .instrument(span.clone())
-                .await
-        {
-            handle_root_error(span, error);
-        }
-    }
-}
-
-async fn consume_global_events(
-    ctx: Arc<BorsContext>,
-    mut global_rx: mpsc::Receiver<BorsGlobalEvent>,
-    mergeability_queue_tx: MergeabilityQueueSender,
-    merge_queue_tx: MergeQueueSender,
-    gh_client: Octocrab,
-    team_api: TeamApiClient,
-) {
-    while let Some(event) = global_rx.recv().await {
-        let ctx = ctx.clone();
-        let mergeability_queue_tx = mergeability_queue_tx.clone();
-        let merge_queue_tx = merge_queue_tx.clone();
-
-        let span = tracing::info_span!("GlobalEvent");
-        tracing::trace!("Received global event: {event:?}");
-        if let Err(error) = handle_bors_global_event(
+        if let Err(error) = handle_bors_repository_event(
             event,
             ctx,
-            &gh_client,
-            &team_api,
-            mergeability_queue_tx,
-            merge_queue_tx,
+            senders.mergeability_queue.clone(),
+            senders.merge_queue.clone(),
         )
         .instrument(span.clone())
         .await
@@ -149,7 +125,33 @@ async fn consume_global_events(
     }
 }
 
-async fn consume_mergeability_queue(
+async fn consume_global_events(
+    ctx: Arc<BorsContext>,
+    mut global_rx: mpsc::Receiver<BorsGlobalEvent>,
+    senders: QueueSenders,
+    gh_client: Octocrab,
+    team_api: TeamApiClient,
+) {
+    while let Some(event) = global_rx.recv().await {
+        let span = tracing::info_span!("GlobalEvent");
+        tracing::trace!("Received global event: {event:?}");
+        if let Err(error) = handle_bors_global_event(
+            event,
+            ctx.clone(),
+            &gh_client,
+            &team_api,
+            senders.mergeability_queue.clone(),
+            senders.merge_queue.clone(),
+        )
+        .instrument(span.clone())
+        .await
+        {
+            handle_root_error(span, error);
+        }
+    }
+}
+
+async fn consume_mergeability_queue_events(
     ctx: Arc<BorsContext>,
     mergeability_queue_rx: MergeabilityQueueReceiver,
 ) {

@@ -1,7 +1,5 @@
-use std::fmt;
-use std::str::FromStr;
-
 use arc_swap::ArcSwap;
+use chrono::{DateTime, Utc};
 pub use command::CommandParser;
 pub use command::RollupMode;
 pub use comment::Comment;
@@ -11,6 +9,9 @@ use itertools::Itertools;
 use octocrab::models::RunId;
 use octocrab::models::workflows::Job;
 use serde::Serialize;
+use std::fmt;
+use std::str::FromStr;
+use std::time::Duration;
 
 use crate::config::RepositoryConfig;
 use crate::github::GithubRepoName;
@@ -19,6 +20,7 @@ use crate::permissions::UserPermissions;
 #[cfg(test)]
 use crate::tests::TestSyncMarker;
 
+mod build;
 mod command;
 pub mod comment;
 mod context;
@@ -26,6 +28,7 @@ pub mod event;
 mod handlers;
 pub mod merge_queue;
 pub mod mergeability_queue;
+pub mod process;
 
 use crate::bors::command::BorsCommand;
 use crate::database::{WorkflowModel, WorkflowStatus};
@@ -124,6 +127,26 @@ pub static WAIT_FOR_WORKFLOW_COMPLETED: TestSyncMarker = TestSyncMarker::new();
 
 #[cfg(test)]
 pub static WAIT_FOR_MERGE_QUEUE: TestSyncMarker = TestSyncMarker::new();
+
+#[cfg(not(test))]
+fn now() -> DateTime<Utc> {
+    Utc::now()
+}
+
+#[cfg(test)]
+thread_local! {
+    static MOCK_TIME: std::cell::RefCell<Option<DateTime<Utc>>> = const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+fn now() -> DateTime<Utc> {
+    MOCK_TIME.with(|time| time.borrow_mut().unwrap_or_else(Utc::now))
+}
+
+fn elapsed_time_since(date: DateTime<Utc>) -> Duration {
+    let time: DateTime<Utc> = now();
+    (time - date).to_std().unwrap_or(Duration::ZERO)
+}
 
 /// Corresponds to a single execution of a workflow.
 #[derive(Clone, Debug)]

@@ -10,7 +10,6 @@ pub mod api;
 mod error;
 mod labels;
 mod oauth;
-pub mod process;
 pub mod rollup;
 
 pub use oauth::{OAuthClient, OAuthConfig};
