@@ -356,7 +356,7 @@ timeout = 3600
         run_test(pool, async |tester: &mut BorsTester| {
             let pr = tester
                 .with_blocked_webhooks(async |tester: &mut BorsTester| {
-                    tester.open_pr(default_repo_name(), |_| {}).await
+                    tester.open_pr((), |_| {}).await
                 })
                 .await?;
             tester.refresh_prs().await;
@@ -372,7 +372,7 @@ timeout = 3600
     #[sqlx::test]
     async fn refresh_pr_with_status_closed(pool: sqlx::PgPool) {
         run_test(pool, async |tester: &mut BorsTester| {
-            let pr = tester.open_pr(default_repo_name(), |_| {}).await?;
+            let pr = tester.open_pr((), |_| {}).await?;
             tester.wait_for_pr(pr.number, |_| true).await?;
             tester
                 .with_blocked_webhooks(async |tester: &mut BorsTester| {
@@ -392,7 +392,7 @@ timeout = 3600
     #[sqlx::test]
     async fn refresh_pr_with_status_draft(pool: sqlx::PgPool) {
         run_test(pool, async |tester: &mut BorsTester| {
-            let pr = tester.open_pr(default_repo_name(), |_| {}).await?;
+            let pr = tester.open_pr((), |_| {}).await?;
             tester
                 .with_blocked_webhooks(async |tester: &mut BorsTester| {
                     tester.set_pr_status_draft(pr.number).await

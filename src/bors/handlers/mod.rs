@@ -684,7 +684,6 @@ fn is_bors_observed_branch(branch: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use crate::tests::default_repo_name;
     use crate::tests::{BorsTester, Comment, User, run_test};
 
     #[sqlx::test]
@@ -702,7 +701,7 @@ mod tests {
     #[sqlx::test]
     async fn do_not_load_pr_on_unrelated_comment(pool: sqlx::PgPool) {
         run_test(pool, async |tester: &mut BorsTester| {
-            tester.modify_repo(&default_repo_name(), |repo| repo.pull_request_error = true);
+            tester.with_repo((), |repo| repo.pull_request_error = true);
             tester.post_comment("no command").await?;
             Ok(())
         })

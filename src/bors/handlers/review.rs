@@ -1334,7 +1334,7 @@ labels_blocking_approval = ["proposed-final-comment-period", "final-comment-peri
     #[sqlx::test]
     async fn unapprove_running_auto_build_pr_failed_comment(pool: sqlx::PgPool) {
         run_test(pool, async |tester: &mut BorsTester| {
-            tester.modify_repo(&default_repo_name(), |pr| pr.workflow_cancel_error = true);
+            tester.with_repo((), |pr| pr.workflow_cancel_error = true);
 
             tester.approve(()).await?;
             tester.start_auto_build(()).await?;

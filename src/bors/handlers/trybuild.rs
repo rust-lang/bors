@@ -350,7 +350,7 @@ mod tests {
                 status: WorkflowStatus::Success,
             });
 
-            tester.modify_repo(&default_repo_name(), |repo| repo.update_workflow_run(workflow.clone(), WorkflowStatus::Pending));
+            tester.with_repo((), |repo| repo.update_workflow_run(workflow.clone(), WorkflowStatus::Pending));
             tester.workflow_full_failure(workflow).await?;
             insta::assert_snapshot!(
                 tester.get_next_comment_text(()).await?,
@@ -779,7 +779,7 @@ try-job: Bar
     #[sqlx::test]
     async fn try_cancel_error(pool: sqlx::PgPool) {
         run_test(pool, async |tester: &mut BorsTester| {
-            tester.modify_repo(&default_repo_name(), |repo| repo.workflow_cancel_error = true);
+            tester.with_repo((), |repo| repo.workflow_cancel_error = true);
             tester.post_comment("@bors try").await?;
             tester.expect_comments((), 1).await;
             tester
@@ -802,9 +802,7 @@ try-job: Bar
     #[sqlx::test]
     async fn try_cancel_cancel_in_db(pool: sqlx::PgPool) {
         run_test(pool, async |tester: &mut BorsTester| {
-            tester.modify_repo(&default_repo_name(), |repo| {
-                repo.workflow_cancel_error = true
-            });
+            tester.with_repo((), |repo| repo.workflow_cancel_error = true);
             tester.post_comment("@bors try").await?;
             tester.expect_comments((), 1).await;
             tester.post_comment("@bors try cancel").await?;
@@ -827,7 +825,7 @@ try-job: Bar
             let w2 = WorkflowRunData::from(branch.clone()).with_run_id(2);
             let w3 = WorkflowRunData::from(branch).with_run_id(3);
             for workflow in [&w1, &w2, &w3] {
-                tester.modify_repo(&default_repo_name(), |repo| {
+                tester.with_repo((), |repo| {
                     repo.update_workflow_run(workflow.clone(), WorkflowStatus::Pending)
                 });
             }

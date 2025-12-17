@@ -712,9 +712,9 @@ merge_queue_enabled = false
         let gh = run_test(pool, async |tester: &mut BorsTester| {
             let prs = [
                 tester.get_pr_copy(()).await.get_gh_pr(),
-                tester.open_pr(default_repo_name(), |_| {}).await?,
-                tester.open_pr(default_repo_name(), |_| {}).await?,
-                tester.open_pr(default_repo_name(), |_| {}).await?,
+                tester.open_pr((), |_| {}).await?,
+                tester.open_pr((), |_| {}).await?,
+                tester.open_pr((), |_| {}).await?,
             ];
 
             // Approve the PRs
@@ -747,9 +747,9 @@ merge_queue_enabled = false
     #[sqlx::test]
     async fn merge_queue_priority_order(pool: sqlx::PgPool) {
         let gh = run_test(pool, async |tester: &mut BorsTester| {
-            let pr2 = tester.open_pr(default_repo_name(), |_| {}).await?;
-            let pr3 = tester.open_pr(default_repo_name(), |_| {}).await?;
-            let pr4 = tester.open_pr(default_repo_name(), |_| {}).await?;
+            let pr2 = tester.open_pr((), |_| {}).await?;
+            let pr3 = tester.open_pr((), |_| {}).await?;
+            let pr4 = tester.open_pr((), |_| {}).await?;
 
             tester.approve(pr2.id()).await?;
             tester.approve(pr3.id()).await?;
@@ -779,7 +779,7 @@ merge_queue_enabled = false
             tester.approve(()).await?;
             tester.start_auto_build(()).await?;
             tester
-               .modify_repo(&default_repo_name(), |repo| {
+               .with_repo((), |repo| {
                    repo.push_behaviour = BranchPushBehaviour::always_fail(BranchPushError::Conflict)
                })
                ;
@@ -800,7 +800,7 @@ merge_queue_enabled = false
             tester.approve(()).await?;
             tester.start_auto_build(()).await?;
             tester
-                .modify_repo(&default_repo_name(), |repo| {
+                .with_repo((), |repo| {
                     repo.push_behaviour = BranchPushBehaviour::always_fail(BranchPushError::ValidationFailed)
                 })
                ;
@@ -820,7 +820,7 @@ merge_queue_enabled = false
         run_test(pool, async |tester: &mut BorsTester| {
             tester.approve(()).await?;
             tester.start_auto_build(()).await?;
-            tester.modify_repo(&default_repo_name(), |repo| {
+            tester.with_repo((), |repo| {
                 repo.push_behaviour =
                     BranchPushBehaviour::always_fail(BranchPushError::InternalServerError)
             });
@@ -840,7 +840,7 @@ merge_queue_enabled = false
         run_test(pool, async |tester: &mut BorsTester| {
             tester.approve(()).await?;
             tester.start_auto_build(()).await?;
-            tester.modify_repo(&default_repo_name(), |repo| {
+            tester.with_repo((), |repo| {
                 repo.push_behaviour = BranchPushBehaviour::always_fail(BranchPushError::Conflict)
             });
             tester.workflow_full_success(tester.auto_branch()).await?;
@@ -861,7 +861,7 @@ merge_queue_enabled = false
         run_test(pool, async |tester: &mut BorsTester| {
             tester.approve(()).await?;
             tester.start_auto_build(()).await?;
-            tester.modify_repo(&default_repo_name(), |repo| {
+            tester.with_repo((), |repo| {
                 repo.push_behaviour =
                     BranchPushBehaviour::fail_n_times(BranchPushError::InternalServerError, 1)
             });
@@ -947,7 +947,7 @@ merge_queue_enabled = false
     #[sqlx::test]
     async fn auto_build_mergeable_state_sanity_check_fails(pool: sqlx::PgPool) {
         run_test(pool, async |tester: &mut BorsTester| {
-            let pr = tester.open_pr(default_repo_name(), |_| {}).await?;
+            let pr = tester.open_pr((), |_| {}).await?;
             tester.approve(pr.id()).await?;
             tester.modify_pr_state(pr.id(), |pr| {
                 pr.mergeable_state = OctocrabMergeableState::Dirty;
@@ -962,7 +962,7 @@ merge_queue_enabled = false
     #[sqlx::test]
     async fn auto_build_status_sanity_check_fails(pool: sqlx::PgPool) {
         run_test(pool, async |tester: &mut BorsTester| {
-            let pr = tester.open_pr(default_repo_name(), |_| {}).await?;
+            let pr = tester.open_pr((), |_| {}).await?;
             tester.approve(pr.id()).await?;
             tester.modify_pr_state(pr.id(), |pr| pr.close_pr());
             tester.process_merge_queue().await;
@@ -975,7 +975,7 @@ merge_queue_enabled = false
     #[sqlx::test]
     async fn auto_build_sha_mismatch_sanity_check_fails(pool: sqlx::PgPool) {
         run_test(pool, async |tester: &mut BorsTester| {
-            let pr = tester.open_pr(default_repo_name(), |_| {}).await?;
+            let pr = tester.open_pr((), |_| {}).await?;
             tester.approve(pr.id()).await?;
             tester
                 .edit_pr(pr.id(), |pr| {
@@ -1145,7 +1145,7 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
     async fn run_empty_queue(pool: sqlx::PgPool) {
         run_test(pool, async |tester: &mut BorsTester| {
             // This PR should not be in the queue
-            let pr = tester.open_pr(default_repo_name(), |_| {}).await?;
+            let pr = tester.open_pr((), |_| {}).await?;
             // Make sure that bors knows about the DB
             tester
                 .post_comment(Comment::new(pr.id(), "@bors info"))

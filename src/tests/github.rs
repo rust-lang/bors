@@ -53,11 +53,12 @@ impl GitHub {
     }
 
     pub fn default_repo(&self) -> Arc<Mutex<Repo>> {
-        self.get_repo(&default_repo_name())
+        self.get_repo(default_repo_name())
     }
 
-    pub fn get_repo(&self, name: &GithubRepoName) -> Arc<Mutex<Repo>> {
-        self.repos.get(name).expect("Repo not found").clone()
+    pub fn get_repo<Id: Into<RepoIdentifier>>(&self, id: Id) -> Arc<Mutex<Repo>> {
+        let id = id.into();
+        self.repos.get(&id.0).expect("Repo not found").clone()
     }
 
     pub fn add_repo(&mut self, repo: Repo) {
@@ -77,9 +78,14 @@ impl GitHub {
         func(self.comments.get_mut(node_id).unwrap());
     }
 
-    pub fn check_sha_history(&self, repo: GithubRepoName, branch: &str, expected_shas: &[&str]) {
+    pub fn check_sha_history<Id: Into<RepoIdentifier>>(
+        &self,
+        repo: Id,
+        branch: &str,
+        expected_shas: &[&str],
+    ) {
         let actual_shas = self
-            .get_repo(&repo)
+            .get_repo(repo)
             .lock()
             .get_branch_by_name(branch)
             .expect("Branch not found")
@@ -460,6 +466,26 @@ fn test_oauth_client_id() -> String {
 
 fn test_oauth_client_secret() -> String {
     "OAUTH_CLIENT_SECRET".to_string()
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct RepoIdentifier(pub GithubRepoName);
+
+impl From<()> for RepoIdentifier {
+    fn from(_: ()) -> Self {
+        Self(default_repo_name())
+    }
+}
+
+impl From<GithubRepoName> for RepoIdentifier {
+    fn from(value: GithubRepoName) -> Self {
+        Self(value)
+    }
+}
+impl<'a> From<&'a GithubRepoName> for RepoIdentifier {
+    fn from(value: &'a GithubRepoName) -> Self {
+        Self(value.clone())
+    }
 }
 
 /// Helper struct for uniquely identifying a pull request.

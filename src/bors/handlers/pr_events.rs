@@ -476,7 +476,7 @@ mod tests {
     #[sqlx::test]
     async fn store_base_branch_on_pr_opened(pool: sqlx::PgPool) {
         run_test(pool, async |tester: &mut BorsTester| {
-            let pr = tester.open_pr(default_repo_name(), |_| {}).await?;
+            let pr = tester.open_pr((), |_| {}).await?;
             tester
                 .wait_for_pr(pr.number, |pr| {
                     pr.base_branch == *default_branch_name()
@@ -522,7 +522,7 @@ mod tests {
     #[sqlx::test]
     async fn open_close_and_reopen_pr(pool: sqlx::PgPool) {
         run_test(pool, async |tester: &mut BorsTester| {
-            let pr = tester.open_pr(default_repo_name(), |_| {}).await?;
+            let pr = tester.open_pr((), |_| {}).await?;
             tester
                 .wait_for_pr(pr.number, |pr| pr.pr_status == PullRequestStatus::Open)
                 .await?;
@@ -562,7 +562,7 @@ mod tests {
     #[sqlx::test]
     async fn open_pr_and_convert_to_draft(pool: sqlx::PgPool) {
         run_test(pool, async |tester: &mut BorsTester| {
-            let pr = tester.open_pr(default_repo_name(), |_| {}).await?;
+            let pr = tester.open_pr((), |_| {}).await?;
             tester
                 .wait_for_pr(pr.number, |pr| pr.pr_status == PullRequestStatus::Open)
                 .await?;
@@ -578,7 +578,7 @@ mod tests {
     #[sqlx::test]
     async fn assign_pr_updates_assignees(pool: sqlx::PgPool) {
         run_test(pool, async |tester: &mut BorsTester| {
-            let pr = tester.open_pr(default_repo_name(), |_| {}).await?;
+            let pr = tester.open_pr((), |_| {}).await?;
             tester
                 .wait_for_pr(pr.number, |pr| pr.assignees.is_empty())
                 .await?;
@@ -594,7 +594,7 @@ mod tests {
     #[sqlx::test]
     async fn unassign_pr_updates_assignees(pool: sqlx::PgPool) {
         run_test(pool, async |tester: &mut BorsTester| {
-            let pr = tester.open_pr(default_repo_name(), |_| {}).await?;
+            let pr = tester.open_pr((), |_| {}).await?;
             tester.assign_pr(pr.number, User::reviewer()).await?;
             tester
                 .wait_for_pr(pr.number, |pr| pr.assignees == vec![User::reviewer().name])
@@ -611,7 +611,7 @@ mod tests {
     #[sqlx::test]
     async fn open_and_merge_pr(pool: sqlx::PgPool) {
         run_test(pool, async |tester: &mut BorsTester| {
-            let pr = tester.open_pr(default_repo_name(), |_| {}).await?;
+            let pr = tester.open_pr((), |_| {}).await?;
             tester
                 .wait_for_pr(pr.number, |pr| pr.pr_status == PullRequestStatus::Open)
                 .await?;
@@ -863,8 +863,8 @@ report_merge_conflicts = true
     async fn cancel_pending_auto_build_on_push_error_comment(pool: sqlx::PgPool) {
         run_test(pool, async |tester: &mut BorsTester| {
             tester
-                .modify_repo(&default_repo_name(), |repo| {
-                    repo.workflow_cancel_error = true
+                .with_repo((), |repo| {
+                    repo.workflow_cancel_error = true;
                 });
             tester.approve(()).await?;
             tester.start_auto_build(()).await?;

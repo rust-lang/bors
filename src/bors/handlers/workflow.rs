@@ -446,7 +446,6 @@ mod tests {
 
     use crate::database::WorkflowStatus;
     use crate::database::operations::get_all_workflows;
-    use crate::tests::default_repo_name;
     use crate::tests::{BorsBuilder, BorsTester, GitHub};
     use crate::tests::{Branch, WorkflowEvent, WorkflowRunData, run_test};
 
@@ -525,7 +524,7 @@ mod tests {
             let w2 = WorkflowRunData::from(tester.try_branch()).with_run_id(2);
 
             // Let the GH mock know about the existence of the second workflow
-            tester.modify_repo(&default_repo_name(), |repo| {
+            tester.with_repo((), |repo| {
                 repo.update_workflow_run(w2.clone(), WorkflowStatus::Pending)
             });
 

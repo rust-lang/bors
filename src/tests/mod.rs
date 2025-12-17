@@ -7,7 +7,7 @@ use crate::database::{
     BuildModel, BuildStatus, DelegatedPermission, MergeableState, OctocrabMergeableState,
     PullRequestModel, WorkflowStatus,
 };
-use crate::github::{GithubRepoName, PullRequestNumber};
+use crate::github::PullRequestNumber;
 use crate::{
     BorsContext, BorsGlobalEvent, BorsProcess, CommandParser, PgDbClient, TreeState, WebhookSecret,
     create_bors_process, load_repositories,
@@ -37,7 +37,8 @@ use crate::bors::process::QueueSenders;
 use crate::github::api::client::HideCommentReason;
 use crate::server::{ServerState, create_app};
 use crate::tests::github::{
-    PrIdentifier, PullRequest, TestWorkflowStatus, WorkflowEventKind, default_oauth_config,
+    PrIdentifier, PullRequest, RepoIdentifier, TestWorkflowStatus, WorkflowEventKind,
+    default_oauth_config,
 };
 use crate::tests::mock::{
     GitHubIssueCommentEventPayload, GitHubPullRequestEventPayload, GitHubPushEventPayload,
@@ -249,16 +250,20 @@ impl BorsTester {
     }
 
     pub fn default_repo(&self) -> Arc<Mutex<Repo>> {
-        self.get_repo(&default_repo_name())
+        self.get_repo(default_repo_name())
     }
 
-    pub fn get_repo(&self, name: &GithubRepoName) -> Arc<Mutex<Repo>> {
-        self.github.lock().get_repo(name)
+    pub fn get_repo<Id: Into<RepoIdentifier>>(&self, id: Id) -> Arc<Mutex<Repo>> {
+        self.github.lock().get_repo(id)
     }
 
     /// Modifies the given repo state in the GitHub mock (**without sending a webhook**).
-    pub fn modify_repo<F: FnOnce(&mut Repo)>(&mut self, repo: &GithubRepoName, func: F) {
-        let repo = self.github.lock().get_repo(repo);
+    pub fn with_repo<F: FnOnce(&mut Repo) -> R, Id: Into<RepoIdentifier>, R>(
+        &mut self,
+        id: Id,
+        func: F,
+    ) -> R {
+        let repo = self.github.lock().get_repo(id);
         let mut repo = repo.lock();
         func(&mut repo)
     }
@@ -266,7 +271,7 @@ impl BorsTester {
     /// Get a PR proxy that can be used to assert various things about the PR.
     pub async fn get_pr_copy<Id: Into<PrIdentifier>>(&self, id: Id) -> PullRequestProxy {
         let id = id.into();
-        let pr = self.get_repo(&id.repo).lock().get_pr(id.number).clone();
+        let pr = self.get_repo(id.repo).lock().get_pr(id.number).clone();
         PullRequestProxy::new(self, pr).await
     }
 
@@ -362,7 +367,7 @@ impl BorsTester {
     pub async fn push_to_branch(&mut self, branch: &str, sha: &str) -> anyhow::Result<()> {
         let payload = {
             let gh = self.github.lock();
-            GitHubPushEventPayload::new(&gh.get_repo(&default_repo_name()).lock(), branch, sha)
+            GitHubPushEventPayload::new(&gh.get_repo(default_repo_name()).lock(), branch, sha)
         };
         self.send_webhook("push", payload).await
     }
@@ -556,24 +561,25 @@ impl BorsTester {
     /// Creates a new PR and sends a webhook about its creation.
     /// If you want to set some non-default properties on the PR,
     /// use the `modify_pr` callback, to avoid race conditions with the webhook being sent.
-    pub async fn open_pr<F: FnOnce(&mut PullRequest)>(
+    pub async fn open_pr<F: FnOnce(&mut PullRequest), Id: Into<RepoIdentifier>>(
         &mut self,
-        repo_name: GithubRepoName,
+        repo: Id,
         modify_pr: F,
     ) -> anyhow::Result<PullRequest> {
+        let repo = repo.into();
         let number = {
-            let repo = self.github.lock().get_repo(&repo_name);
+            let repo = self.github.lock().get_repo(repo.clone());
             let repo = repo.lock();
             repo.pull_requests.keys().max().copied().unwrap_or(0) + 1
         };
 
-        let mut pr = PullRequest::new(repo_name.clone(), number, User::default_pr_author());
+        let mut pr = PullRequest::new(repo.0.clone(), number, User::default_pr_author());
         modify_pr(&mut pr);
 
         // Add the PR to the repository
         let payload = {
             let gh = self.github.lock();
-            let repo = gh.get_repo(&repo_name);
+            let repo = gh.get_repo(repo);
             let mut repo = repo.lock();
             repo.pull_requests.insert(number, pr.clone());
             GitHubPullRequestEventPayload::new(&repo, pr.clone(), "opened", None)
