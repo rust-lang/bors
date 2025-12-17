@@ -6,6 +6,7 @@ use crate::database::WorkflowStatus;
 use crate::tests::BranchPushError;
 use crate::tests::github::{CheckRunData, WorkflowRun};
 use crate::tests::mock::pull_request::mock_pull_requests;
+use crate::tests::mock::workflow::GitHubWorkflowRun;
 use crate::tests::mock::{GitHubUser, dynamic_mock_req};
 use crate::tests::{Branch, GitHub, Repo, WorkflowJob};
 use base64::Engine;
@@ -13,7 +14,7 @@ use chrono::{DateTime, Utc};
 use octocrab::models::repos::Object;
 use octocrab::models::repos::Object::Commit;
 use octocrab::models::workflows::{Conclusion, Status, Step};
-use octocrab::models::{CheckSuiteId, JobId, RunId};
+use octocrab::models::{JobId, RunId};
 use parking_lot::Mutex;
 use serde::Serialize;
 use url::Url;
@@ -283,40 +284,22 @@ async fn mock_merge_branch(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
 }
 
 async fn mock_workflow_runs(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
-    #[derive(serde::Serialize, Debug)]
-    struct WorkflowRunResponse {
-        id: octocrab::models::RunId,
-        status: Status,
-        conclusion: Option<Conclusion>,
-    }
-
-    #[derive(serde::Serialize, Debug)]
+    #[derive(serde::Serialize)]
     struct WorkflowRunsResponse {
-        workflow_runs: Vec<WorkflowRunResponse>,
+        workflow_runs: Vec<GitHubWorkflowRun>,
     }
 
     let repo_name = repo.lock().full_name();
     dynamic_mock_req(
         move |req: &Request, []| {
             let repo = repo.lock();
-            let check_suite_id: CheckSuiteId = get_query_param(req, "check_suite_id")
-                .parse::<u64>()
-                .unwrap()
-                .into();
-            let workflow_runs: Vec<WorkflowRun> =
-                repo.find_workflows_by_check_suite_id(check_suite_id);
+            let head_sha = get_query_param(req, "head_sha");
+            let workflow_runs: Vec<WorkflowRun> = repo.find_workflows_by_commit_sha(&head_sha);
 
             let response = WorkflowRunsResponse {
                 workflow_runs: workflow_runs
                     .into_iter()
-                    .map(|run| {
-                        let (status, conclusion) = status_to_gh(run.status());
-                        WorkflowRunResponse {
-                            id: run.run_id(),
-                            status,
-                            conclusion,
-                        }
-                    })
+                    .map(|run| GitHubWorkflowRun::new(&repo, run))
                     .collect(),
             };
             ResponseTemplate::new(200).set_body_json(response)

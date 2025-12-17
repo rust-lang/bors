@@ -518,6 +518,7 @@ pub fn start_merge_queue(
                     crate::bors::WAIT_FOR_MERGE_QUEUE.mark();
                 }
                 MergeQueueEvent::MaybePerformTick => {
+                    // Note: this is not executed at all in tests
                     if notified || (Utc::now() - last_executed_at) >= max_interval {
                         run_tick(&ctx, &mut notified, &mut last_executed_at).await;
                     }
@@ -770,8 +771,7 @@ merge_queue_enabled = false
             tester
                .modify_repo((), |repo| {
                    repo.push_behaviour = BranchPushBehaviour::always_fail(BranchPushError::Conflict)
-               })
-               ;
+               });
             tester.workflow_full_success(tester.auto_workflow()).await?;
             tester.process_merge_queue().await;
             insta::assert_snapshot!(
@@ -791,8 +791,7 @@ merge_queue_enabled = false
             tester
                 .modify_repo((), |repo| {
                     repo.push_behaviour = BranchPushBehaviour::always_fail(BranchPushError::ValidationFailed)
-                })
-               ;
+                });
             tester.workflow_full_success(tester.auto_workflow()).await?;
             tester.process_merge_queue().await;
             insta::assert_snapshot!(
@@ -833,6 +832,8 @@ merge_queue_enabled = false
                 repo.push_behaviour = BranchPushBehaviour::always_fail(BranchPushError::Conflict)
             });
             tester.workflow_full_success(tester.auto_workflow()).await?;
+            tester.wait_for_build_queue().await;
+
             tester.process_merge_queue().await;
             tester.expect_comments((), 1).await;
 
@@ -856,8 +857,13 @@ merge_queue_enabled = false
             });
 
             tester.workflow_full_success(tester.auto_workflow()).await?;
+            tester.wait_for_build_queue().await;
+
+            // This should fail
+            tester.process_merge_queue().await;
             // Check that the merge queue retries the push request
-            tester.finish_auto_build(()).await?;
+            tester.process_merge_queue().await;
+            tester.expect_comments((), 1).await;
 
             tester
                 .get_pr_copy(())

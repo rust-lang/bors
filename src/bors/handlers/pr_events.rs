@@ -760,14 +760,12 @@ report_merge_conflicts = true
                 })
                 .await?;
 
-            let pr1 = tester
+            let pr3 = tester
                 .open_pr(default_repo_name(), |_| {})
                 .await?;
-            tester.approve(pr1.id()).await?;
-            tester.start_auto_build(pr1.id()).await?;
-            tester.workflow_full_success(tester.auto_workflow()).await?;
-            tester.process_merge_queue().await;
-            tester.expect_comments(pr1.id(), 1).await;
+            tester.approve(pr3.id()).await?;
+
+            tester.start_and_finish_auto_build(pr3.id()).await?;
             let sha = tester.auto_branch().get_sha().to_string();
 
             tester

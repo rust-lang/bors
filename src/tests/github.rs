@@ -4,9 +4,11 @@ use crate::database::WorkflowStatus;
 use crate::github::api::client::HideCommentReason;
 use crate::github::{GithubRepoName, PullRequestNumber};
 use crate::permissions::PermissionType;
+use crate::tests::COMMENT_RECEIVE_TIMEOUT;
 use crate::tests::{AUTO_BRANCH, TRY_BRANCH};
 use chrono::{DateTime, Utc};
 use octocrab::models::pulls::MergeableState;
+use octocrab::models::workflows::Conclusion;
 use octocrab::models::{CheckSuiteId, JobId, RunId};
 use parking_lot::Mutex;
 use std::collections::HashMap;
@@ -148,7 +150,7 @@ impl GitHub {
 
         // Timeout individual comment reads to give better error messages than if the whole test
         // times out.
-        let comment = match tokio::time::timeout(Duration::from_secs(2), guard.recv()).await {
+        let comment = match tokio::time::timeout(COMMENT_RECEIVE_TIMEOUT, guard.recv()).await {
             Ok(comment) => comment,
             Err(_) => {
                 let mut comment_history = String::new();
@@ -485,10 +487,10 @@ impl Repo {
         self.workflow_runs.iter().find(|w| w.run_id == id).cloned()
     }
 
-    pub fn find_workflows_by_check_suite_id(&self, id: CheckSuiteId) -> Vec<WorkflowRun> {
+    pub fn find_workflows_by_commit_sha(&self, sha: &str) -> Vec<WorkflowRun> {
         self.workflow_runs
             .iter()
-            .filter(|w| w.check_suite_id == id)
+            .filter(|w| w.head_sha == sha)
             .cloned()
             .collect()
     }
@@ -852,7 +854,7 @@ impl WorkflowEvent {
     pub fn success(run_id: RunId) -> Self {
         Self {
             event: WorkflowEventKind::Completed {
-                status: "success".to_string(),
+                status: Conclusion::Success,
             },
             run_id,
         }
@@ -860,7 +862,7 @@ impl WorkflowEvent {
     pub fn failure(run_id: RunId) -> Self {
         Self {
             event: WorkflowEventKind::Completed {
-                status: "failure".to_string(),
+                status: Conclusion::Failure,
             },
             run_id,
         }
@@ -870,7 +872,7 @@ impl WorkflowEvent {
 #[derive(Clone)]
 pub enum WorkflowEventKind {
     Started,
-    Completed { status: String },
+    Completed { status: Conclusion },
 }
 
 #[derive(Clone)]

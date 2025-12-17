@@ -18,7 +18,7 @@ use crate::github::api::operations::{
 use crate::github::{CommitSha, GithubRepoName, PullRequest, PullRequestNumber};
 use crate::utils::timing::{RetryMethod, RetryableOpError, ShouldRetry, perform_retryable};
 use futures::TryStreamExt;
-use octocrab::models::workflows::Job;
+use octocrab::models::workflows::{Job, Run};
 use serde::de::DeserializeOwned;
 use url::Url;
 
@@ -350,6 +350,53 @@ impl GithubRepositoryClient {
             anyhow::Ok(runs)
         })
         .await?;
+        Ok(runs)
+    }
+
+    /// Find all workflows attached to a specific commit SHA.
+    pub async fn get_workflow_runs_for_commit_sha(
+        &self,
+        commit_sha: CommitSha,
+    ) -> anyhow::Result<Vec<WorkflowRun>> {
+        let runs = perform_retryable("get_workflows_for_commit_sha", RetryMethod::default(), || async {
+            let response = self.client.workflows(self.repo_name.owner(), self.repo_name.name())
+                .list_all_runs()
+                .head_sha(&commit_sha.0)
+                .send()
+                .await?;
+            let mut runs = Vec::with_capacity(
+                response
+                    .total_count
+                    .map(|v| v as usize)
+                    .unwrap_or(response.items.len()),
+            );
+
+            fn get_status(run: &Run) -> WorkflowStatus {
+                match run.status.as_str() {
+                    "completed" => match run.conclusion.as_deref() {
+                        Some("success") => WorkflowStatus::Success,
+                        Some(_) => WorkflowStatus::Failure,
+                        None => {
+                            tracing::warn!("Received completed status with empty conclusion for workflow run {}", run.id);
+                            WorkflowStatus::Failure
+                        }
+                    },
+                    "failure" | "startup_failure" => WorkflowStatus::Failure,
+                    _ => WorkflowStatus::Pending
+                }
+            }
+
+            let mut stream = std::pin::pin!(response.into_stream(&self.client));
+            while let Some(run) = stream.try_next().await? {
+                let run = WorkflowRun {
+                    id: run.id,
+                    status: get_status(&run),
+                };
+                runs.push(run);
+            }
+            anyhow::Ok(runs)
+        })
+            .await?;
         Ok(runs)
     }
 

@@ -16,6 +16,7 @@ use anyhow::Context;
 use axum::Router;
 use http::{HeaderMap, Method, Request, StatusCode};
 use octocrab::models::RunId;
+use octocrab::models::workflows::Conclusion;
 use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
 use parking_lot::Mutex;
 use serde::Serialize;
@@ -61,7 +62,9 @@ pub use utils::webhook::{TEST_WEBHOOK_SECRET, create_webhook_request};
 
 /// How long should we wait before we timeout a test.
 /// You can increase this if you want to do interactive debugging.
-const TEST_TIMEOUT: Duration = Duration::from_secs(10);
+const TEST_TIMEOUT: Duration = Duration::from_secs(20);
+const SYNC_MARKER_TIMEOUT: Duration = Duration::from_secs(10);
+const COMMENT_RECEIVE_TIMEOUT: Duration = Duration::from_secs(10);
 
 const TRY_BRANCH: &str = "automation/bors/try";
 const AUTO_BRANCH: &str = "automation/bors/auto";
@@ -499,6 +502,11 @@ impl BorsTester {
         .unwrap();
     }
 
+    /// Wait until the build queue runs
+    pub async fn wait_for_build_queue(&self) {
+        WAIT_FOR_BUILD_QUEUE.sync().await;
+    }
+
     /// Performs a single started/success/failure workflow event.
     pub async fn workflow_event(&mut self, event: WorkflowEvent) -> anyhow::Result<()> {
         // Update the status of the workflow in the GitHub state mock
@@ -507,9 +515,9 @@ impl BorsTester {
             let mut repo = repo.lock();
             let status = match &event.event {
                 WorkflowEventKind::Started => WorkflowStatus::Pending,
-                WorkflowEventKind::Completed { status } => match status.as_str() {
-                    "success" => WorkflowStatus::Success,
-                    "failure" => WorkflowStatus::Failure,
+                WorkflowEventKind::Completed { status } => match status {
+                    Conclusion::Success => WorkflowStatus::Success,
+                    Conclusion::Failure => WorkflowStatus::Failure,
                     _ => unreachable!(),
                 },
             };
@@ -517,7 +525,13 @@ impl BorsTester {
             let workflow = repo.get_workflow_mut(event.run_id);
             workflow.change_status(status);
             let workflow = workflow.clone();
-            GitHubWorkflowEventPayload::new(&repo, workflow, event.event.clone())
+
+            // Box is here to prevent stack overflow in debug mode
+            Box::new(GitHubWorkflowEventPayload::new(
+                &repo,
+                workflow,
+                event.event.clone(),
+            ))
         };
 
         let marker = match &event.event {
@@ -775,9 +789,23 @@ impl BorsTester {
     /// Starts an auto build, with the expectation that it will start testing the given PR.
     pub async fn start_auto_build<Id: Into<PrIdentifier>>(&mut self, id: Id) -> anyhow::Result<()> {
         let id = id.into();
+
+        let previous_sha = self
+            .github
+            .lock()
+            .get_repo(&id.repo)
+            .lock()
+            .get_branch_by_name(AUTO_BRANCH)
+            .map(|b| b.sha.clone());
+
         self.process_merge_queue().await;
         let comment = self.get_next_comment_text(id).await?;
         assert!(comment.contains("Testing commit"));
+        let new_auto_sha = self.auto_branch().sha;
+        if let Some(previous_sha) = previous_sha {
+            assert_ne!(previous_sha, new_auto_sha, "Auto SHA did not change");
+        }
+
         Ok(())
     }
 
@@ -788,6 +816,7 @@ impl BorsTester {
         id: Id,
     ) -> anyhow::Result<()> {
         self.workflow_full_success(self.auto_workflow()).await?;
+        self.wait_for_build_queue().await;
         self.process_merge_queue().await;
         let comment = self.get_next_comment_text(id).await?;
         assert!(comment.contains("Test successful"));
@@ -1028,7 +1057,6 @@ impl BorsTester {
         // Make sure that the event channel senders are closed
         drop(self.app);
         drop(self.global_tx);
-        // self.senders.merge_queue().shutdown();
         self.senders.mergeability_queue().shutdown();
         drop(self.senders);
         // Wait until all events are handled in the bors service
@@ -1277,7 +1305,7 @@ where
 
     let res = func().await;
     if res.is_ok() {
-        tokio::time::timeout(Duration::from_secs(15), marker.sync())
+        tokio::time::timeout(SYNC_MARKER_TIMEOUT, marker.sync())
             .await
             .map_err(|_| anyhow::anyhow!("Timed out waiting for a test marker to be marked"))?;
     }

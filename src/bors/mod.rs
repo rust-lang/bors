@@ -27,6 +27,7 @@ pub mod comment;
 mod context;
 pub mod event;
 mod handlers;
+mod labels;
 pub mod merge_queue;
 pub mod mergeability_queue;
 pub mod process;

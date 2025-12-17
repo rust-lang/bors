@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
+use super::has_permission;
 use super::{PullRequestData, deny_request};
-use super::{has_permission, hide_build_started_comments};
 use crate::PgDbClient;
-use crate::bors::build::{CancelBuildError, cancel_build};
+use crate::bors::build::{CancelBuildError, cancel_build, hide_build_started_comments};
 use crate::bors::command::{CommandPrefix, Parent};
 use crate::bors::comment::try_build_cancelled_comment;
 use crate::bors::comment::try_build_cancelled_with_failed_workflow_cancel_comment;

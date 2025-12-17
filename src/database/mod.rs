@@ -483,6 +483,12 @@ pub enum WorkflowStatus {
     Failure,
 }
 
+impl WorkflowStatus {
+    pub fn is_pending(&self) -> bool {
+        matches!(self, Self::Pending)
+    }
+}
+
 /// Represents a workflow run, coming either from Github Actions or from some external CI.
 #[derive(Debug)]
 pub struct WorkflowModel {

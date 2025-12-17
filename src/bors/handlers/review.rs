@@ -7,10 +7,10 @@ use crate::bors::comment::{
     approve_blocking_labels_present, approve_non_open_pr_comment, approve_wip_title,
     approved_comment, delegate_comment, delegate_try_builds_comment, unapprove_non_open_pr_comment,
 };
-use crate::bors::handlers::labels::handle_label_trigger;
 use crate::bors::handlers::workflow::{AutoBuildCancelReason, maybe_cancel_auto_build};
 use crate::bors::handlers::{PullRequestData, deny_request};
 use crate::bors::handlers::{has_permission, unapprove_pr};
+use crate::bors::labels::handle_label_trigger;
 use crate::bors::merge_queue::MergeQueueSender;
 use crate::bors::{Comment, PullRequestStatus};
 use crate::database::ApprovalInfo;

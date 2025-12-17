@@ -195,6 +195,9 @@ async fn consume_build_queue_events(
         {
             handle_root_error(span, error);
         }
+
+        #[cfg(test)]
+        crate::bors::WAIT_FOR_BUILD_QUEUE.mark();
     }
 }
 

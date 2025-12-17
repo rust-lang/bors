@@ -1,11 +1,9 @@
 use std::sync::Arc;
 
 use crate::bors::command::{BorsCommand, CommandParseError};
-use crate::bors::comment::CommentTag;
 use crate::bors::event::{BorsGlobalEvent, BorsRepositoryEvent, PullRequestComment};
 use crate::bors::handlers::help::command_help;
 use crate::bors::handlers::info::command_info;
-use crate::bors::handlers::labels::handle_label_trigger;
 use crate::bors::handlers::ping::command_ping;
 use crate::bors::handlers::pr_events::{
     handle_pull_request_assigned, handle_pull_request_unassigned,
@@ -19,13 +17,13 @@ use crate::bors::handlers::review::{
 };
 use crate::bors::handlers::trybuild::{command_try_build, command_try_cancel};
 use crate::bors::handlers::workflow::{handle_workflow_completed, handle_workflow_started};
+use crate::bors::labels::handle_label_trigger;
 use crate::bors::merge_queue::MergeQueueSender;
 use crate::bors::process::QueueSenders;
 use crate::bors::{
     AUTO_BRANCH_NAME, BorsContext, CommandPrefix, Comment, RepositoryState, TRY_BRANCH_NAME,
 };
 use crate::database::{DelegatedPermission, PullRequestModel};
-use crate::github::api::client::HideCommentReason;
 use crate::github::{GithubUser, LabelTrigger, PullRequest, PullRequestNumber};
 use crate::permissions::PermissionType;
 use crate::{CommandParser, PgDbClient, TeamApiClient, load_repositories};
@@ -43,7 +41,6 @@ use tracing::Instrument;
 
 mod help;
 mod info;
-mod labels;
 mod ping;
 mod pr_events;
 mod refresh;
@@ -647,25 +644,6 @@ pub async fn unapprove_pr(
 ) -> anyhow::Result<()> {
     db.unapprove(pr).await?;
     handle_label_trigger(repo_state, pr.number, LabelTrigger::Unapproved).await
-}
-
-/// Hide all previous "Try/auto build started" comments on the given PR.
-async fn hide_build_started_comments(
-    repo: &RepositoryState,
-    db: &PgDbClient,
-    pr: &PullRequestModel,
-    tag: CommentTag,
-) -> anyhow::Result<()> {
-    let outdated = db
-        .get_tagged_bot_comments(repo.repository(), pr.number, tag)
-        .await?;
-    for comment in outdated {
-        repo.client
-            .hide_comment(&comment.node_id, HideCommentReason::Outdated)
-            .await?;
-        db.delete_tagged_bot_comment(&comment).await?;
-    }
-    Ok(())
 }
 
 /// Is this branch interesting for the bot?

@@ -6,11 +6,8 @@ use crate::bors::comment::{CommentTag, append_workflow_links_to_comment};
 use crate::bors::event::{WorkflowRunCompleted, WorkflowRunStarted};
 use crate::bors::handlers::is_bors_observed_branch;
 use crate::bors::{BuildKind, build};
-use crate::database::{
-    BuildModel, BuildStatus, PullRequestModel, QueueStatus, WorkflowModel, WorkflowStatus,
-};
+use crate::database::{BuildModel, BuildStatus, PullRequestModel, QueueStatus, WorkflowStatus};
 use crate::github::api::client::GithubRepositoryClient;
-use octocrab::models::workflows::{Conclusion, Job, Status};
 use octocrab::params::checks::CheckRunConclusion;
 use std::sync::Arc;
 use std::time::Duration;
@@ -148,29 +145,6 @@ pub(super) async fn handle_workflow_completed(
     Ok(())
 }
 
-/// Return failed jobs from the given workflow run.
-async fn get_failed_jobs(
-    repo: &RepositoryState,
-    workflow_run: &WorkflowModel,
-) -> anyhow::Result<Vec<Job>> {
-    let jobs = repo
-        .client
-        .get_jobs_for_workflow_run(workflow_run.run_id.into())
-        .await?;
-    Ok(jobs
-        .into_iter()
-        .filter(|j| {
-            j.status == Status::Failed || {
-                j.status == Status::Completed
-                    && matches!(
-                        j.conclusion,
-                        Some(Conclusion::Failure | Conclusion::Cancelled | Conclusion::TimedOut)
-                    )
-            }
-        })
-        .collect())
-}
-
 /// Why did we cancel an auto build?
 pub enum AutoBuildCancelReason {
     /// A new commit was pushed to a PR while it was being tested in an auto build.
@@ -270,8 +244,7 @@ mod tests {
     async fn workflow_completed_unknown_build(pool: sqlx::PgPool) {
         run_test(pool.clone(), async |tester: &mut BorsTester| {
             tester.modify_repo((), |repo| {
-                let branch = Branch::new("unknown", "unknown-sha");
-                repo.add_branch(branch.clone());
+                repo.add_branch(Branch::new("unknown", "unknown-sha").clone());
             });
             let run_id = tester
                 .gh()
