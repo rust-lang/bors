@@ -582,12 +582,12 @@ pub struct GitHubRepository {
 }
 
 impl<'a> From<&'a Repo> for GitHubRepository {
-    fn from(value: &'a Repo) -> Self {
+    fn from(repo: &'a Repo) -> Self {
         Self {
             id: 1000,
-            name: value.name.clone(),
-            owner: value.owner.clone().into(),
-            url: format!("https://github.com/{}", value.full_name())
+            name: repo.full_name().name().to_owned(),
+            owner: repo.owner().clone().into(),
+            url: format!("https://github.com/{}", repo.full_name())
                 .parse()
                 .unwrap(),
         }

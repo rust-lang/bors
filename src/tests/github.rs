@@ -342,13 +342,13 @@ impl User {
 
 #[derive(Clone)]
 pub struct Repo {
-    pub name: String,
-    pub owner: User,
+    name: String,
+    owner: User,
     pub permissions: Permissions,
     pub config: String,
     branches: Vec<Branch>,
-    pub commit_messages: HashMap<String, String>,
-    pub workflows_cancelled_by_bors: Vec<RunId>,
+    commit_messages: HashMap<String, String>,
+    workflows_cancelled_by_bors: Vec<RunId>,
     pub workflow_cancel_error: bool,
     /// All workflows that we know about from the side of the test.
     workflow_runs: Vec<WorkflowRun>,
@@ -385,6 +385,10 @@ impl Repo {
 
     pub fn full_name(&self) -> GithubRepoName {
         GithubRepoName::new(&self.owner.name, &self.name)
+    }
+
+    pub fn owner(&self) -> &User {
+        &self.owner
     }
 
     pub fn branches(&self) -> &[Branch] {
