@@ -12,6 +12,7 @@
 use super::{BorsContext, RepositoryState};
 use crate::PgDbClient;
 use crate::bors::comment::conflict_comment;
+use crate::bors::handlers::unapprove_pr;
 use crate::database::{MergeableState, OctocrabMergeableState, PullRequestModel};
 use crate::github::{GithubRepoName, PullRequestNumber};
 use std::cmp::Reverse;
@@ -453,7 +454,7 @@ async fn handle_pr_conflict(
 
     // Unapprove PR
     let unapproved = if pr.is_approved() {
-        db.unapprove(&pr).await?;
+        unapprove_pr(repo_state, db, &pr).await?;
         true
     } else {
         false
