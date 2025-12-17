@@ -367,7 +367,7 @@ mod tests {
     use crate::bors::PullRequestStatus;
     use crate::bors::merge_queue::AUTO_BUILD_CHECK_RUN_NAME;
     use crate::tests::default_repo_name;
-    use crate::tests::{BorsBuilder, BorsTester, GitHub, WorkflowRunData};
+    use crate::tests::{BorsBuilder, BorsTester, GitHub};
     use crate::{
         database::{MergeableState, OctocrabMergeableState},
         tests::{User, default_branch_name, run_test},
@@ -460,7 +460,7 @@ mod tests {
         run_test(pool, async |tester: &mut BorsTester| {
             tester.approve(()).await?;
             tester.start_auto_build(()).await?;
-            tester.workflow_full_failure(tester.auto_branch()).await?;
+            tester.workflow_full_failure(tester.auto_workflow()).await?;
             tester.expect_comments((), 1).await;
             tester.push_to_pr(()).await?;
 
@@ -764,7 +764,7 @@ report_merge_conflicts = true
                 .await?;
             tester.approve(pr1.id()).await?;
             tester.start_auto_build(pr1.id()).await?;
-            tester.workflow_full_success(tester.auto_branch()).await?;
+            tester.workflow_full_success(tester.auto_workflow()).await?;
             tester.process_merge_queue().await;
             tester.expect_comments(pr1.id(), 1).await;
             let sha = tester.auto_branch().get_sha().to_string();
@@ -838,12 +838,14 @@ report_merge_conflicts = true
 
     #[sqlx::test]
     async fn cancel_pending_auto_build_on_push_comment(pool: sqlx::PgPool) {
-        let gh = run_test(pool, async |tester: &mut BorsTester| {
+        run_test(pool, async |tester: &mut BorsTester| {
             tester.approve(()).await?;
             tester.start_auto_build(()).await?;
             tester.get_pr_copy(()).await.expect_auto_build(|_| true);
+
+            let run_id = tester.auto_workflow();
             tester
-                .workflow_start(WorkflowRunData::from(tester.auto_branch()).with_run_id(123))
+                .workflow_start(run_id)
                 .await?;
             tester.push_to_pr(()).await?;
             insta::assert_snapshot!(tester.get_next_comment_text(()).await?, @r"
@@ -851,26 +853,26 @@ report_merge_conflicts = true
 
             Auto build cancelled due to push. Cancelled workflows:
 
-            - https://github.com/rust-lang/borstest/actions/runs/123
+            - https://github.com/rust-lang/borstest/actions/runs/1
             ");
+            tester.gh().lock().check_cancelled_workflows(default_repo_name(), &[run_id]);
             Ok(())
         })
             .await;
-        gh.check_cancelled_workflows(default_repo_name(), &[123]);
     }
 
     #[sqlx::test]
     async fn cancel_pending_auto_build_on_push_error_comment(pool: sqlx::PgPool) {
         run_test(pool, async |tester: &mut BorsTester| {
             tester
-                .with_repo((), |repo| {
+                .modify_repo((), |repo| {
                     repo.workflow_cancel_error = true;
                 });
             tester.approve(()).await?;
             tester.start_auto_build(()).await?;
             tester.get_pr_copy(()).await.expect_auto_build(|_| true);
 
-            tester.workflow_start(tester.auto_branch()).await?;
+            tester.workflow_start(tester.auto_workflow()).await?;
             tester.push_to_pr(()).await?;
             insta::assert_snapshot!(tester.get_next_comment_text(()).await?, @r"
             :warning: A new commit `pr-1-commit-1` was pushed to the branch, the PR will need to be re-approved.
@@ -887,7 +889,7 @@ report_merge_conflicts = true
         run_test(pool, async |tester: &mut BorsTester| {
             tester.approve(()).await?;
             tester.start_auto_build(()).await?;
-            tester.workflow_start(tester.auto_branch()).await?;
+            tester.workflow_start(tester.auto_workflow()).await?;
 
             let prev_commit = &tester.get_pr_copy(()).await.get_gh_pr().head_sha;
             tester.push_to_pr(()).await?;

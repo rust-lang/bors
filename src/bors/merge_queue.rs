@@ -620,7 +620,7 @@ merge_queue_enabled = false
         run_test(pool, async |tester: &mut BorsTester| {
             tester.approve(()).await?;
             tester.start_auto_build(()).await?;
-            tester.workflow_full_success(tester.auto_branch()).await?;
+            tester.workflow_full_success(tester.auto_workflow()).await?;
             tester.process_merge_queue().await;
 
             insta::assert_snapshot!(
@@ -641,7 +641,7 @@ merge_queue_enabled = false
         run_test(pool, async |tester: &mut BorsTester| {
             tester.approve(()).await?;
             tester.start_auto_build(()).await?;
-            tester.workflow_full_failure(tester.auto_branch()).await?;
+            tester.workflow_full_failure(tester.auto_workflow()).await?;
 
             insta::assert_snapshot!(
                 tester.get_next_comment_text(()).await?,
@@ -779,11 +779,11 @@ merge_queue_enabled = false
             tester.approve(()).await?;
             tester.start_auto_build(()).await?;
             tester
-               .with_repo((), |repo| {
+               .modify_repo((), |repo| {
                    repo.push_behaviour = BranchPushBehaviour::always_fail(BranchPushError::Conflict)
                })
                ;
-            tester.workflow_full_success(tester.auto_branch()).await?;
+            tester.workflow_full_success(tester.auto_workflow()).await?;
             tester.process_merge_queue().await;
             insta::assert_snapshot!(
                 tester.get_next_comment_text(()).await?,
@@ -800,11 +800,11 @@ merge_queue_enabled = false
             tester.approve(()).await?;
             tester.start_auto_build(()).await?;
             tester
-                .with_repo((), |repo| {
+                .modify_repo((), |repo| {
                     repo.push_behaviour = BranchPushBehaviour::always_fail(BranchPushError::ValidationFailed)
                 })
                ;
-            tester.workflow_full_success(tester.auto_branch()).await?;
+            tester.workflow_full_success(tester.auto_workflow()).await?;
             tester.process_merge_queue().await;
             insta::assert_snapshot!(
                 tester.get_next_comment_text(()).await?,
@@ -820,11 +820,11 @@ merge_queue_enabled = false
         run_test(pool, async |tester: &mut BorsTester| {
             tester.approve(()).await?;
             tester.start_auto_build(()).await?;
-            tester.with_repo((), |repo| {
+            tester.modify_repo((), |repo| {
                 repo.push_behaviour =
                     BranchPushBehaviour::always_fail(BranchPushError::InternalServerError)
             });
-            tester.workflow_full_success(tester.auto_branch()).await?;
+            tester.workflow_full_success(tester.auto_workflow()).await?;
             tester.process_merge_queue().await;
             insta::assert_snapshot!(
                 tester.get_next_comment_text(()).await?,
@@ -840,10 +840,10 @@ merge_queue_enabled = false
         run_test(pool, async |tester: &mut BorsTester| {
             tester.approve(()).await?;
             tester.start_auto_build(()).await?;
-            tester.with_repo((), |repo| {
+            tester.modify_repo((), |repo| {
                 repo.push_behaviour = BranchPushBehaviour::always_fail(BranchPushError::Conflict)
             });
-            tester.workflow_full_success(tester.auto_branch()).await?;
+            tester.workflow_full_success(tester.auto_workflow()).await?;
             tester.process_merge_queue().await;
             tester.expect_comments((), 1).await;
 
@@ -861,12 +861,12 @@ merge_queue_enabled = false
         run_test(pool, async |tester: &mut BorsTester| {
             tester.approve(()).await?;
             tester.start_auto_build(()).await?;
-            tester.with_repo((), |repo| {
+            tester.modify_repo((), |repo| {
                 repo.push_behaviour =
                     BranchPushBehaviour::fail_n_times(BranchPushError::InternalServerError, 1)
             });
 
-            tester.workflow_full_success(tester.auto_branch()).await?;
+            tester.workflow_full_success(tester.auto_workflow()).await?;
             // Check that the merge queue retries the push request
             tester.finish_auto_build(()).await?;
 
@@ -1054,7 +1054,7 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
                 tester.start_auto_build(()).await?;
 
                 tester.get_pr_copy(()).await.expect_added_labels(&[]);
-                tester.workflow_full_failure(tester.auto_branch()).await?;
+                tester.workflow_full_failure(tester.auto_workflow()).await?;
                 tester.expect_comments((), 1).await;
 
                 tester
@@ -1074,7 +1074,7 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
             tester.approve(()).await?;
             tester.start_auto_build(()).await?;
 
-            tester.workflow_full_failure(tester.auto_branch()).await?;
+            tester.workflow_full_failure(tester.auto_workflow()).await?;
             tester.expect_comments((), 1).await;
             tester.expect_check_run(
                 &tester.get_pr_copy(()).await.get_gh_pr().head_sha,
@@ -1123,7 +1123,7 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
 
             // Finish the auto build BEFORE the tree has been closed, then close the tree,
             // and only then run the merge queue
-            tester.workflow_full_success(tester.auto_branch()).await?;
+            tester.workflow_full_success(tester.auto_workflow()).await?;
 
             tester.post_comment("@bors treeclosed=100").await?;
             tester.expect_comments((), 1).await;
@@ -1165,7 +1165,7 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
             tester.process_merge_queue().await;
             let comment = tester.get_next_comment(()).await?;
 
-            tester.workflow_start(tester.auto_branch()).await?;
+            tester.workflow_start(tester.auto_workflow()).await?;
 
             // Check that the comment text has been updated with a link to the started workflow
             let updated_comment = tester
@@ -1189,7 +1189,7 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
             tester.process_merge_queue().await;
             let comment = tester.get_next_comment(()).await?;
 
-            tester.workflow_full_failure(tester.auto_branch()).await?;
+            tester.workflow_full_failure(tester.auto_workflow()).await?;
             tester.expect_comments((), 1).await;
             tester.expect_hidden_comment(&comment, HideCommentReason::Outdated);
 

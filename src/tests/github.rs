@@ -22,6 +22,7 @@ pub struct GitHub {
     comments: HashMap<String, Comment>,
     users: HashMap<String, User>,
     pub oauth_config: OAuthConfig,
+    workflow_run_id_counter: u64,
 }
 
 impl GitHub {
@@ -75,6 +76,14 @@ impl GitHub {
         self
     }
 
+    pub fn get_repo_by_run_id(&self, run_id: RunId) -> Arc<Mutex<Repo>> {
+        self.repos
+            .values()
+            .find(|repo| repo.lock().workflow_runs.iter().any(|w| w.run_id == run_id))
+            .unwrap()
+            .clone()
+    }
+
     pub fn modify_comment<F: FnOnce(&mut Comment)>(&mut self, node_id: &str, func: F) {
         func(self.comments.get_mut(node_id).unwrap());
     }
@@ -95,7 +104,7 @@ impl GitHub {
         assert_eq!(actual_shas, expected_shas);
     }
 
-    pub fn check_cancelled_workflows(&self, repo: GithubRepoName, expected_run_ids: &[u64]) {
+    pub fn check_cancelled_workflows(&self, repo: GithubRepoName, expected_run_ids: &[RunId]) {
         let mut workflows = self
             .get_repo(&repo)
             .lock()
@@ -221,6 +230,17 @@ impl GitHub {
             "Comment {comment:?} was not hidden with reason {reason:?}."
         );
     }
+
+    pub fn new_workflow(&mut self, repo: &GithubRepoName, branch: &str) -> RunId {
+        let repo = self.get_repo(repo);
+        let mut repo = repo.lock();
+        let branch = repo.get_branch_by_name(branch).expect("Branch not found");
+        self.workflow_run_id_counter += 1;
+        let run_id = RunId(self.workflow_run_id_counter);
+        let workflow = WorkflowRun::new(run_id, branch);
+        repo.workflow_runs.push(workflow);
+        run_id
+    }
 }
 
 /// Represents the default GitHub state for tests.
@@ -235,6 +255,7 @@ impl Default for GitHub {
             comments: Default::default(),
             users: Default::default(),
             oauth_config: default_oauth_config(),
+            workflow_run_id_counter: 0,
         };
 
         let config = r#"
@@ -325,12 +346,12 @@ pub struct Repo {
     pub owner: User,
     pub permissions: Permissions,
     pub config: String,
-    pub branches: Vec<Branch>,
+    branches: Vec<Branch>,
     pub commit_messages: HashMap<String, String>,
-    pub workflows_cancelled_by_bors: Vec<u64>,
+    pub workflows_cancelled_by_bors: Vec<RunId>,
     pub workflow_cancel_error: bool,
     /// All workflows that we know about from the side of the test.
-    pub workflow_runs: Vec<WorkflowRun>,
+    workflow_runs: Vec<WorkflowRun>,
     pub pull_requests: HashMap<u64, PullRequest>,
     pub check_runs: Vec<CheckRunData>,
     /// Cause pull request fetch to fail.
@@ -366,6 +387,10 @@ impl Repo {
         GithubRepoName::new(&self.owner.name, &self.name)
     }
 
+    pub fn branches(&self) -> &[Branch] {
+        &self.branches
+    }
+
     pub fn with_user_perms(mut self, user: User, permissions: &[PermissionType]) -> Self {
         self.permissions.users.insert(user, permissions.to_vec());
         self
@@ -392,6 +417,11 @@ impl Repo {
         self.pull_requests.get_mut(&pr).unwrap()
     }
 
+    pub fn add_branch(&mut self, branch: Branch) {
+        assert!(self.get_branch_by_name(&branch.name).is_none());
+        self.branches.push(branch);
+    }
+
     pub fn try_branch(&self) -> Branch {
         self.branches
             .iter()
@@ -412,8 +442,9 @@ impl Repo {
         self.branches.iter_mut().find(|b| b.name == name)
     }
 
-    pub fn add_cancelled_workflow(&mut self, run_id: u64) {
+    pub fn add_cancelled_workflow(&mut self, run_id: RunId) {
         self.workflows_cancelled_by_bors.push(run_id);
+        self.get_workflow_mut(run_id).status = WorkflowStatus::Failure;
     }
 
     pub fn add_check_run(&mut self, check_run: CheckRunData) {
@@ -431,20 +462,11 @@ impl Repo {
         check_run.conclusion = conclusion;
     }
 
-    /// Inserts or updates the status of the given workflow run.
-    pub fn update_workflow_run(&mut self, workflow_run: WorkflowRunData, status: WorkflowStatus) {
-        if let Some(workflow) = self
-            .workflow_runs
+    pub fn get_workflow_mut(&mut self, run_id: RunId) -> &mut WorkflowRun {
+        self.workflow_runs
             .iter_mut()
-            .find(|w| w.workflow_run.run_id == workflow_run.run_id)
-        {
-            workflow.status = status;
-        } else {
-            self.workflow_runs.push(WorkflowRun {
-                workflow_run,
-                status,
-            });
-        }
+            .find(|w| w.run_id == run_id)
+            .unwrap()
     }
 
     pub fn get_next_pr_push_counter(&mut self) -> u64 {
@@ -462,6 +484,18 @@ impl Repo {
     pub fn set_commit_message(&mut self, sha: &str, message: &str) {
         self.commit_messages
             .insert(sha.to_string(), message.to_string());
+    }
+
+    pub fn find_workflow(&self, id: RunId) -> Option<WorkflowRun> {
+        self.workflow_runs.iter().find(|w| w.run_id == id).cloned()
+    }
+
+    pub fn find_workflows_by_check_suite_id(&self, id: CheckSuiteId) -> Vec<WorkflowRun> {
+        self.workflow_runs
+            .iter()
+            .filter(|w| w.check_suite_id == id)
+            .cloned()
+            .collect()
     }
 }
 
@@ -823,30 +857,30 @@ impl Permissions {
 #[derive(Clone)]
 pub struct WorkflowEvent {
     pub event: WorkflowEventKind,
-    pub workflow: WorkflowRunData,
+    pub run_id: RunId,
 }
 
 impl WorkflowEvent {
-    pub fn started<W: Into<WorkflowRunData>>(workflow: W) -> WorkflowEvent {
+    pub fn started(run_id: RunId) -> WorkflowEvent {
         Self {
             event: WorkflowEventKind::Started,
-            workflow: workflow.into(),
+            run_id,
         }
     }
-    pub fn success<W: Into<WorkflowRunData>>(workflow: W) -> Self {
+    pub fn success(run_id: RunId) -> Self {
         Self {
             event: WorkflowEventKind::Completed {
                 status: "success".to_string(),
             },
-            workflow: workflow.into(),
+            run_id,
         }
     }
-    pub fn failure<W: Into<WorkflowRunData>>(workflow: W) -> Self {
+    pub fn failure(run_id: RunId) -> Self {
         Self {
             event: WorkflowEventKind::Completed {
                 status: "failure".to_string(),
             },
-            workflow: workflow.into(),
+            run_id,
         }
     }
 }
@@ -861,58 +895,6 @@ pub enum WorkflowEventKind {
 pub struct WorkflowJob {
     pub id: JobId,
     pub status: WorkflowStatus,
-}
-
-#[derive(Clone)]
-pub struct WorkflowRunData {
-    pub repository: GithubRepoName,
-    pub name: String,
-    pub run_id: RunId,
-    pub check_suite_id: CheckSuiteId,
-    pub head_branch: String,
-    pub jobs: Vec<WorkflowJob>,
-    pub head_sha: String,
-    /// How long did the workflow run for?
-    pub duration: Duration,
-}
-
-impl WorkflowRunData {
-    fn new(branch: Branch) -> Self {
-        Self {
-            repository: default_repo_name(),
-            name: "Workflow1".to_string(),
-            run_id: RunId(1),
-            check_suite_id: CheckSuiteId(1),
-            head_branch: branch.get_name().to_string(),
-            jobs: vec![],
-            head_sha: branch.get_sha().to_string(),
-            duration: Duration::from_secs(3600),
-        }
-    }
-
-    pub fn with_run_id(self, run_id: u64) -> Self {
-        Self {
-            run_id: RunId(run_id),
-            ..self
-        }
-    }
-
-    pub fn with_check_suite_id(self, check_suite_id: u64) -> Self {
-        Self {
-            check_suite_id: CheckSuiteId(check_suite_id),
-            ..self
-        }
-    }
-
-    pub fn with_duration(self, duration: Duration) -> Self {
-        Self { duration, ..self }
-    }
-}
-
-impl From<Branch> for WorkflowRunData {
-    fn from(value: Branch) -> Self {
-        Self::new(value)
-    }
 }
 
 #[derive(Copy, Clone)]
@@ -935,6 +917,74 @@ pub struct CheckRunData {
 
 #[derive(Clone)]
 pub struct WorkflowRun {
-    pub workflow_run: WorkflowRunData,
-    pub status: WorkflowStatus,
+    name: String,
+    run_id: RunId,
+    check_suite_id: CheckSuiteId,
+    head_branch: String,
+    jobs: Vec<WorkflowJob>,
+    head_sha: String,
+    /// How long did the workflow run for?
+    duration: Duration,
+    status: WorkflowStatus,
+}
+
+impl WorkflowRun {
+    fn new(run_id: RunId, branch: &Branch) -> Self {
+        Self {
+            status: WorkflowStatus::Pending,
+            name: "Workflow1".to_string(),
+            run_id,
+            check_suite_id: CheckSuiteId(run_id.0),
+            head_branch: branch.get_name().to_string(),
+            jobs: vec![],
+            head_sha: branch.get_sha().to_string(),
+            duration: Duration::from_secs(3600),
+        }
+    }
+
+    pub fn run_id(&self) -> RunId {
+        self.run_id
+    }
+
+    pub fn change_status(&mut self, status: WorkflowStatus) {
+        self.status = status;
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn check_suite_id(&self) -> CheckSuiteId {
+        self.check_suite_id
+    }
+
+    pub fn head_branch(&self) -> &str {
+        &self.head_branch
+    }
+
+    pub fn jobs(&self) -> &[WorkflowJob] {
+        &self.jobs
+    }
+
+    pub fn head_sha(&self) -> &str {
+        &self.head_sha
+    }
+
+    pub fn duration(&self) -> Duration {
+        self.duration
+    }
+    pub fn set_duration(&mut self, duration: Duration) {
+        self.duration = duration;
+    }
+
+    pub fn status(&self) -> WorkflowStatus {
+        self.status
+    }
+
+    pub fn add_job(&mut self, status: WorkflowStatus) {
+        self.jobs.push(WorkflowJob {
+            id: JobId(self.run_id.0 * 1000 + self.jobs.len() as u64),
+            status,
+        });
+    }
 }

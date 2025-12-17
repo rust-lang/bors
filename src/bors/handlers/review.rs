@@ -1317,7 +1317,7 @@ labels_blocking_approval = ["proposed-final-comment-period", "final-comment-peri
             tester.approve(()).await?;
             tester.start_auto_build(()).await?;
             tester.get_pr_copy(()).await.expect_auto_build(|_| true);
-            tester.workflow_start(tester.auto_branch()).await?;
+            tester.workflow_start(tester.auto_workflow()).await?;
             tester.post_comment("@bors r-").await?;
             insta::assert_snapshot!(tester.get_next_comment_text(()).await?, @r"
                 Commit pr-1-sha has been unapproved.
@@ -1334,12 +1334,12 @@ labels_blocking_approval = ["proposed-final-comment-period", "final-comment-peri
     #[sqlx::test]
     async fn unapprove_running_auto_build_pr_failed_comment(pool: sqlx::PgPool) {
         run_test(pool, async |tester: &mut BorsTester| {
-            tester.with_repo((), |pr| pr.workflow_cancel_error = true);
+            tester.modify_repo((), |pr| pr.workflow_cancel_error = true);
 
             tester.approve(()).await?;
             tester.start_auto_build(()).await?;
             tester.get_pr_copy(()).await.expect_auto_build(|_| true);
-            tester.workflow_start(tester.auto_branch()).await?;
+            tester.workflow_start(tester.auto_workflow()).await?;
             tester.post_comment("@bors r-").await?;
             insta::assert_snapshot!(tester.get_next_comment_text(()).await?, @r"
             Commit pr-1-sha has been unapproved.
@@ -1358,7 +1358,7 @@ labels_blocking_approval = ["proposed-final-comment-period", "final-comment-peri
             tester.start_auto_build(()).await?;
             tester.get_pr_copy(()).await.expect_auto_build(|_| true);
 
-            tester.workflow_start(tester.auto_branch()).await?;
+            tester.workflow_start(tester.auto_workflow()).await?;
             tester.post_comment("@bors r-").await?;
             tester.expect_comments((), 1).await;
             tester.expect_check_run(

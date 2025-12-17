@@ -86,7 +86,7 @@ pub(super) async fn command_info(
 
 #[cfg(test)]
 mod tests {
-    use crate::tests::{BorsTester, WorkflowEvent, WorkflowRunData, run_test};
+    use crate::tests::{BorsTester, WorkflowEvent, run_test};
 
     #[sqlx::test]
     async fn info_for_unapproved_pr(pool: sqlx::PgPool) {
@@ -179,9 +179,7 @@ mod tests {
             tester.expect_comments((), 1).await;
 
             tester
-                .workflow_event(WorkflowEvent::started(WorkflowRunData::from(
-                    tester.try_branch(),
-                )))
+                .workflow_event(WorkflowEvent::started(tester.try_workflow()))
                 .await?;
 
             tester.post_comment("@bors info").await?;

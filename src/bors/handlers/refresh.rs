@@ -312,22 +312,27 @@ timeout = 3600
 
     #[sqlx::test]
     async fn refresh_cancel_workflow_after_timeout(pool: sqlx::PgPool) {
-        let gh = BorsBuilder::new(pool)
+        BorsBuilder::new(pool)
             .github(gh_state_with_long_timeout())
             .run_test(async |tester: &mut BorsTester| {
                 tester.post_comment("@bors try").await?;
                 tester.expect_comments((), 1).await;
-                tester.workflow_start(tester.try_branch()).await?;
+
+                let run_id = tester.try_workflow();
+                tester.workflow_start(run_id).await?;
 
                 with_mocked_time(Duration::from_secs(4000), async {
                     tester.cancel_timed_out_builds().await;
                 })
                 .await;
                 tester.expect_comments((), 1).await;
+                tester
+                    .gh()
+                    .lock()
+                    .check_cancelled_workflows(default_repo_name(), &[run_id]);
                 Ok(())
             })
             .await;
-        gh.check_cancelled_workflows(default_repo_name(), &[1]);
     }
 
     #[sqlx::test]

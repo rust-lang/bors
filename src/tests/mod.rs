@@ -15,6 +15,7 @@ use crate::{
 use anyhow::Context;
 use axum::Router;
 use http::{HeaderMap, Method, Request, StatusCode};
+use octocrab::models::RunId;
 use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
 use parking_lot::Mutex;
 use serde::Serialize;
@@ -37,7 +38,7 @@ use crate::bors::process::QueueSenders;
 use crate::github::api::client::HideCommentReason;
 use crate::server::{ServerState, create_app};
 use crate::tests::github::{
-    PrIdentifier, PullRequest, RepoIdentifier, TestWorkflowStatus, WorkflowEventKind,
+    PrIdentifier, PullRequest, RepoIdentifier, TestWorkflowStatus, WorkflowEventKind, WorkflowRun,
     default_oauth_config,
 };
 use crate::tests::mock::{
@@ -51,7 +52,7 @@ pub use github::Permissions;
 pub use github::Repo;
 pub use github::User;
 pub use github::{BranchPushBehaviour, BranchPushError};
-pub use github::{WorkflowEvent, WorkflowJob, WorkflowRunData};
+pub use github::{WorkflowEvent, WorkflowJob};
 pub use github::{default_branch_name, default_repo_name};
 pub use mock::ExternalHttpMock;
 pub use utils::io::load_test_file;
@@ -252,8 +253,13 @@ impl BorsTester {
         self.db.clone()
     }
 
+    pub fn gh(&self) -> Arc<Mutex<GitHub>> {
+        self.github.clone()
+    }
+
+    /// Return the default repo
     pub fn repo(&self) -> Arc<Mutex<Repo>> {
-        self.get_repo(default_repo_name())
+        self.get_repo(())
     }
 
     pub fn get_repo<Id: Into<RepoIdentifier>>(&self, id: Id) -> Arc<Mutex<Repo>> {
@@ -261,7 +267,7 @@ impl BorsTester {
     }
 
     /// Modifies the given repo state in the GitHub mock (**without sending a webhook**).
-    pub fn with_repo<F: FnOnce(&mut Repo) -> R, Id: Into<RepoIdentifier>, R>(
+    pub fn modify_repo<F: FnOnce(&mut Repo) -> R, Id: Into<RepoIdentifier>, R>(
         &mut self,
         id: Id,
         func: F,
@@ -269,6 +275,22 @@ impl BorsTester {
         let repo = self.github.lock().get_repo(id);
         let mut repo = repo.lock();
         func(&mut repo)
+    }
+
+    pub fn try_workflow(&self) -> RunId {
+        let mut gh = self.github.lock();
+        gh.new_workflow(&default_repo_name(), TRY_BRANCH)
+    }
+
+    pub fn auto_workflow(&self) -> RunId {
+        let mut gh = self.github.lock();
+        gh.new_workflow(&default_repo_name(), AUTO_BRANCH)
+    }
+
+    pub fn modify_workflow<F: FnOnce(&mut WorkflowRun)>(&mut self, run_id: RunId, func: F) {
+        let repo = self.github.lock().get_repo_by_run_id(run_id);
+        let mut repo = repo.lock();
+        func(repo.get_workflow_mut(run_id));
     }
 
     /// Get a PR proxy that can be used to assert various things about the PR.
@@ -323,16 +345,12 @@ impl BorsTester {
             .clone();
         let mut repo = repo.lock();
 
-        assert!(
-            repo.get_branch_by_name(name).is_none(),
-            "Branch {name} already exists"
-        );
-        repo.branches
-            .push(Branch::new(name, &format!("{name}-initial")));
-        repo.branches.last_mut().unwrap().clone()
+        repo.add_branch(Branch::new(name, &format!("{name}-initial")));
+        repo.get_branch_by_name(name).unwrap().clone()
     }
 
     /// Modifies an existing branch on the default repository.
+    /// If it doesn't exist yet, it will be created.
     pub fn modify_branch<F: FnOnce(&mut Branch)>(&mut self, name: &str, func: F) {
         let repo = self
             .github
@@ -484,11 +502,8 @@ impl BorsTester {
     /// Performs a single started/success/failure workflow event.
     pub async fn workflow_event(&mut self, event: WorkflowEvent) -> anyhow::Result<()> {
         // Update the status of the workflow in the GitHub state mock
-        {
-            let repo = self
-                .github
-                .lock()
-                .get_repo(&event.workflow.repository.clone());
+        let payload = {
+            let repo = self.github.lock().get_repo_by_run_id(event.run_id);
             let mut repo = repo.lock();
             let status = match &event.event {
                 WorkflowEventKind::Started => WorkflowStatus::Pending,
@@ -498,56 +513,49 @@ impl BorsTester {
                     _ => unreachable!(),
                 },
             };
-            repo.update_workflow_run(event.workflow.clone(), status);
-        }
+
+            let workflow = repo.get_workflow_mut(event.run_id);
+            workflow.change_status(status);
+            let workflow = workflow.clone();
+            GitHubWorkflowEventPayload::new(&repo, workflow, event.event.clone())
+        };
 
         let marker = match &event.event {
             WorkflowEventKind::Started => &WAIT_FOR_WORKFLOW_STARTED,
             WorkflowEventKind::Completed { .. } => &WAIT_FOR_WORKFLOW_COMPLETED,
         };
 
-        wait_for_marker(async || self.webhook_workflow(event).await, marker).await
+        let fut = self.send_webhook("workflow_run", payload);
+        wait_for_marker(async || fut.await, marker).await
     }
 
     /// Start a workflow and wait until the workflow has been handled by bors.
-    pub async fn workflow_start<W: Into<WorkflowRunData>>(
-        &mut self,
-        workflow: W,
-    ) -> anyhow::Result<()> {
-        self.workflow_event(WorkflowEvent::started(workflow)).await
+    pub async fn workflow_start(&mut self, run_id: RunId) -> anyhow::Result<()> {
+        self.workflow_event(WorkflowEvent::started(run_id)).await
     }
 
     /// Performs all necessary events to complete a single workflow (start, success/fail).
     #[inline]
-    pub async fn workflow_full<W: Into<WorkflowRunData>>(
+    pub async fn workflow_full(
         &mut self,
-        workflow: W,
+        run_id: RunId,
         status: TestWorkflowStatus,
     ) -> anyhow::Result<()> {
-        let workflow = workflow.into();
-
-        self.workflow_event(WorkflowEvent::started(workflow.clone()))
-            .await?;
+        self.workflow_event(WorkflowEvent::started(run_id)).await?;
         let event = match status {
-            TestWorkflowStatus::Success => WorkflowEvent::success(workflow.clone()),
-            TestWorkflowStatus::Failure => WorkflowEvent::failure(workflow.clone()),
+            TestWorkflowStatus::Success => WorkflowEvent::success(run_id),
+            TestWorkflowStatus::Failure => WorkflowEvent::failure(run_id),
         };
         self.workflow_event(event).await
     }
 
-    pub async fn workflow_full_success<W: Into<WorkflowRunData>>(
-        &mut self,
-        workflow: W,
-    ) -> anyhow::Result<()> {
-        self.workflow_full(workflow, TestWorkflowStatus::Success)
+    pub async fn workflow_full_success(&mut self, run_id: RunId) -> anyhow::Result<()> {
+        self.workflow_full(run_id, TestWorkflowStatus::Success)
             .await
     }
 
-    pub async fn workflow_full_failure<W: Into<WorkflowRunData>>(
-        &mut self,
-        workflow: W,
-    ) -> anyhow::Result<()> {
-        self.workflow_full(workflow, TestWorkflowStatus::Failure)
+    pub async fn workflow_full_failure(&mut self, run_id: RunId) -> anyhow::Result<()> {
+        self.workflow_full(run_id, TestWorkflowStatus::Failure)
             .await
     }
 
@@ -779,7 +787,7 @@ impl BorsTester {
         &mut self,
         id: Id,
     ) -> anyhow::Result<()> {
-        self.workflow_full_success(self.auto_branch()).await?;
+        self.workflow_full_success(self.auto_workflow()).await?;
         self.process_merge_queue().await;
         let comment = self.get_next_comment_text(id).await?;
         assert!(comment.contains("Test successful"));
@@ -970,15 +978,6 @@ impl BorsTester {
         // The Box is here to prevent a stack overflow in debug mode
         let payload = Box::from(payload);
         self.send_webhook("issue_comment", payload).await
-    }
-
-    async fn webhook_workflow(&mut self, event: WorkflowEvent) -> anyhow::Result<()> {
-        let payload = {
-            let gh = self.github.lock();
-            GitHubWorkflowEventPayload::new(&gh.get_repo(&event.workflow.repository).lock(), event)
-        };
-
-        self.send_webhook("workflow_run", payload).await
     }
 
     async fn pull_request_edited(

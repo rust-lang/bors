@@ -446,17 +446,22 @@ mod tests {
 
     use crate::database::WorkflowStatus;
     use crate::database::operations::get_all_workflows;
-    use crate::tests::{BorsBuilder, BorsTester, GitHub};
-    use crate::tests::{Branch, WorkflowEvent, WorkflowRunData, run_test};
+    use crate::tests::{BorsBuilder, BorsTester, GitHub, default_repo_name};
+    use crate::tests::{Branch, WorkflowEvent, run_test};
 
     #[sqlx::test]
     async fn workflow_started_unknown_build(pool: sqlx::PgPool) {
         run_test(pool.clone(), async |tester: &mut BorsTester| {
+            tester.modify_repo((), |repo| {
+                let branch = Branch::new("unknown", "unknown-sha");
+                repo.add_branch(branch.clone());
+            });
+            let run_id = tester
+                .gh()
+                .lock()
+                .new_workflow(&default_repo_name(), "unknown");
             tester
-                .workflow_event(WorkflowEvent::started(Branch::new(
-                    "unknown",
-                    "unknown-sha",
-                )))
+                .workflow_event(WorkflowEvent::started(run_id))
                 .await?;
             Ok(())
         })
@@ -467,11 +472,16 @@ mod tests {
     #[sqlx::test]
     async fn workflow_completed_unknown_build(pool: sqlx::PgPool) {
         run_test(pool.clone(), async |tester: &mut BorsTester| {
+            tester.modify_repo((), |repo| {
+                let branch = Branch::new("unknown", "unknown-sha");
+                repo.add_branch(branch.clone());
+            });
+            let run_id = tester
+                .gh()
+                .lock()
+                .new_workflow(&default_repo_name(), "unknown");
             tester
-                .workflow_event(WorkflowEvent::success(Branch::new(
-                    "unknown",
-                    "unknown-sha",
-                )))
+                .workflow_event(WorkflowEvent::success(run_id))
                 .await?;
             Ok(())
         })
@@ -485,7 +495,7 @@ mod tests {
             tester.post_comment("@bors try").await?;
             tester.expect_comments((), 1).await;
             tester
-                .workflow_event(WorkflowEvent::started(tester.try_branch()))
+                .workflow_event(WorkflowEvent::started(tester.try_workflow()))
                 .await?;
             Ok(())
         })
@@ -500,12 +510,11 @@ mod tests {
             tester.post_comment("@bors try").await?;
             tester.expect_comments((), 1).await;
 
-            let workflow = WorkflowRunData::from(tester.try_branch());
             tester
-                .workflow_event(WorkflowEvent::started(workflow.clone()))
+                .workflow_event(WorkflowEvent::started(tester.try_workflow()))
                 .await?;
             tester
-                .workflow_event(WorkflowEvent::started(workflow.with_run_id(2)))
+                .workflow_event(WorkflowEvent::started(tester.try_workflow()))
                 .await?;
             Ok(())
         })
@@ -520,13 +529,8 @@ mod tests {
             tester.post_comment("@bors try").await?;
             tester.expect_comments((), 1).await;
 
-            let w1 = WorkflowRunData::from(tester.try_branch()).with_run_id(1);
-            let w2 = WorkflowRunData::from(tester.try_branch()).with_run_id(2);
-
-            // Let the GH mock know about the existence of the second workflow
-            tester.with_repo((), |repo| {
-                repo.update_workflow_run(w2.clone(), WorkflowStatus::Pending)
-            });
+            let w1 = tester.try_workflow();
+            let w2 = tester.try_workflow();
 
             // Finish w1 while w2 is not yet in the DB
             tester.workflow_full_success(w1).await?;
@@ -555,10 +559,10 @@ mod tests {
             tester.post_comment("@bors try").await?;
             tester.expect_comments((), 1).await;
 
-            let w1 = WorkflowRunData::from(tester.try_branch()).with_run_id(1);
-            let w2 = WorkflowRunData::from(tester.try_branch()).with_run_id(2);
-            tester.workflow_start(w1.clone()).await?;
-            tester.workflow_start(w2.clone()).await?;
+            let w1 = tester.try_workflow();
+            let w2 = tester.try_workflow();
+            tester.workflow_start(w1).await?;
+            tester.workflow_start(w2).await?;
 
             tester.workflow_event(WorkflowEvent::success(w1)).await?;
             tester.workflow_event(WorkflowEvent::success(w2)).await?;
@@ -585,10 +589,10 @@ mod tests {
             tester.post_comment("@bors try").await?;
             tester.expect_comments((), 1).await;
 
-            let w1 = WorkflowRunData::from(tester.try_branch()).with_run_id(1);
-            let w2 = WorkflowRunData::from(tester.try_branch()).with_run_id(2);
-            tester.workflow_start(w1.clone()).await?;
-            tester.workflow_start(w2.clone()).await?;
+            let w1 = tester.try_workflow();
+            let w2 = tester.try_workflow();
+            tester.workflow_start(w1).await?;
+            tester.workflow_start(w2).await?;
 
             tester.workflow_event(WorkflowEvent::failure(w2)).await?;
             insta::assert_snapshot!(
@@ -612,12 +616,12 @@ min_ci_time = 10
                 tester.post_comment("@bors try").await?;
                 tester.expect_comments((), 1).await;
 
+                let w1 = tester.try_workflow();
+                tester.modify_workflow(w1, |w| w.set_duration(Duration::from_secs(1)));
+
                 // Too short workflow, it should be marked as a failure
                 tester
-                    .workflow_full_success(
-                        WorkflowRunData::from(tester.try_branch())
-                            .with_duration(Duration::from_secs(1)),
-                    )
+                    .workflow_full_success(w1)
                     .await?;
                 insta::assert_snapshot!(tester.get_next_comment_text(()).await?, @r"
                 :broken_heart: Test for merge-0-pr-1 failed: [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1)
@@ -640,11 +644,10 @@ min_ci_time = 20
                 tester.post_comment("@bors try").await?;
                 tester.expect_comments((), 1).await;
 
+                let w1 = tester.try_workflow();
+                tester.modify_workflow(w1, |w| w.set_duration(Duration::from_secs(100)));
                 tester
-                    .workflow_full_success(
-                        WorkflowRunData::from(tester.try_branch())
-                            .with_duration(Duration::from_secs(100)),
-                    )
+                    .workflow_full_success(w1)
                     .await?;
                 insta::assert_snapshot!(tester.get_next_comment_text(()).await?, @r#"
                 :sunny: Try build successful ([Workflow1](https://github.com/rust-lang/borstest/actions/runs/1))

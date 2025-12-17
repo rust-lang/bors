@@ -1,6 +1,7 @@
-use crate::tests::github::WorkflowEventKind;
+use crate::database::WorkflowStatus;
+use crate::tests::Repo;
+use crate::tests::github::{WorkflowEventKind, WorkflowRun};
 use crate::tests::mock::repository::GitHubRepository;
-use crate::tests::{Repo, WorkflowEvent};
 use chrono::{DateTime, Utc};
 use octocrab::models::{CheckSuiteId, RunId, WorkflowId};
 use serde::Serialize;
@@ -14,18 +15,17 @@ pub struct GitHubWorkflowEventPayload {
 }
 
 impl GitHubWorkflowEventPayload {
-    pub fn new(repo: &Repo, event: WorkflowEvent) -> Self {
-        let WorkflowEvent { event, workflow } = event;
-
+    pub fn new(repo: &Repo, run: WorkflowRun, event: WorkflowEventKind) -> Self {
         let url: Url = format!(
             "https://github.com/{}/actions/runs/{}",
-            workflow.repository, workflow.run_id
+            repo.full_name(),
+            run.run_id()
         )
         .parse()
         .unwrap();
 
         let completed_at = Utc::now();
-        let created_at = completed_at - workflow.duration;
+        let created_at = completed_at - run.duration();
 
         let repository = GitHubRepository::from(repo);
         Self {
@@ -35,15 +35,19 @@ impl GitHubWorkflowEventPayload {
             }
             .to_string(),
             workflow_run: GitHubWorkflowRun {
-                id: workflow.run_id,
+                id: run.run_id(),
                 workflow_id: 1.into(),
                 node_id: "".to_string(),
-                name: workflow.name,
-                head_branch: workflow.head_branch,
-                head_sha: workflow.head_sha,
+                name: run.name().to_owned(),
+                head_branch: run.head_branch().to_owned(),
+                head_sha: run.head_sha().to_owned(),
                 run_number: 0,
                 event: "".to_string(),
-                status: "".to_string(),
+                status: match run.status() {
+                    WorkflowStatus::Pending => "pending",
+                    WorkflowStatus::Success | WorkflowStatus::Failure => "completed",
+                }
+                .to_owned(),
                 conclusion: match event {
                     WorkflowEventKind::Started => None,
                     WorkflowEventKind::Completed { status } => Some(status),
@@ -55,7 +59,7 @@ impl GitHubWorkflowEventPayload {
                 jobs_url: url.clone(),
                 logs_url: url.clone(),
                 check_suite_url: url.clone(),
-                check_suite_id: workflow.check_suite_id,
+                check_suite_id: run.check_suite_id(),
                 artifacts_url: url.clone(),
                 cancel_url: url.clone(),
                 rerun_url: url.clone(),
