@@ -173,21 +173,21 @@ impl GitHubMockServer {
     }
 
     /// Make sure that there are no leftover events left in the queues.
-    pub async fn assert_empty_queues(self) {
+    pub async fn assert_empty_queues(self) -> anyhow::Result<()> {
         // This is useful for debugging:
-        // for req in self
-        //     .mock_server
-        //     .received_requests()
-        //     .await
-        //     .unwrap_or_default()
-        // {
-        //     eprintln!(
-        //         "Received mock request `{} {}` with body:\n{}",
-        //         req.method,
-        //         req.url,
-        //         String::from_utf8_lossy(&req.body)
-        //     );
-        // }
+        for req in self
+            .mock_server
+            .received_requests()
+            .await
+            .unwrap_or_default()
+        {
+            eprintln!(
+                "Received mock request `{} {}` with body:\n{}",
+                req.method,
+                req.url,
+                String::from_utf8_lossy(&req.body)
+            );
+        }
 
         // This will remove all mocks and thus also any leftover
         // channel senders, so that we can be sure below that the `recv`
@@ -217,10 +217,10 @@ impl GitHubMockServer {
                     .expect("Empty comment queue");
                 match msg {
                     CommentMsg::Comment(comment) => {
-                        panic!(
+                        return Err(anyhow::anyhow!(
                             "Expected that PR {name}#{} won't have any further received comments, but it received {comment:?}",
                             pr.number
-                        );
+                        ));
                     }
                     CommentMsg::Close => {
                         // The queue was correctly empty
@@ -228,6 +228,7 @@ impl GitHubMockServer {
                 };
             }
         }
+        Ok(())
     }
 }
 
