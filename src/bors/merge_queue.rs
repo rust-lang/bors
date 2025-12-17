@@ -589,15 +589,13 @@ merge_queue_enabled = false
         run_test(pool, async |tester: &mut BorsTester| {
             tester.approve(()).await?;
             tester.start_auto_build(()).await?;
-            tester
-                .expect_check_run(
-                    &tester.get_pr_copy(()).await.get_gh_pr().head_sha,
-                    AUTO_BUILD_CHECK_RUN_NAME,
-                    AUTO_BUILD_CHECK_RUN_NAME,
-                    CheckRunStatus::InProgress,
-                    None,
-                )
-                .await;
+            tester.expect_check_run(
+                &tester.get_pr_copy(()).await.get_gh_pr().head_sha,
+                AUTO_BUILD_CHECK_RUN_NAME,
+                AUTO_BUILD_CHECK_RUN_NAME,
+                CheckRunStatus::InProgress,
+                None,
+            );
             Ok(())
         })
         .await;
@@ -622,7 +620,7 @@ merge_queue_enabled = false
         run_test(pool, async |tester: &mut BorsTester| {
             tester.approve(()).await?;
             tester.start_auto_build(()).await?;
-            tester.workflow_full_success(tester.auto_branch().await).await?;
+            tester.workflow_full_success(tester.auto_branch()).await?;
             tester.process_merge_queue().await;
 
             insta::assert_snapshot!(
@@ -643,7 +641,7 @@ merge_queue_enabled = false
         run_test(pool, async |tester: &mut BorsTester| {
             tester.approve(()).await?;
             tester.start_auto_build(()).await?;
-            tester.workflow_full_failure(tester.auto_branch().await).await?;
+            tester.workflow_full_failure(tester.auto_branch()).await?;
 
             insta::assert_snapshot!(
                 tester.get_next_comment_text(()).await?,
@@ -665,7 +663,7 @@ merge_queue_enabled = false
                     .find_build(
                         &default_repo_name(),
                         AUTO_BRANCH_NAME,
-                        CommitSha(tester.auto_branch().await.get_sha().to_string()),
+                        CommitSha(tester.auto_branch().get_sha().to_string()),
                     )
                     .await?
                     .is_some()
@@ -784,8 +782,8 @@ merge_queue_enabled = false
                .modify_repo(&default_repo_name(), |repo| {
                    repo.push_behaviour = BranchPushBehaviour::always_fail(BranchPushError::Conflict)
                })
-               .await;
-            tester.workflow_full_success(tester.auto_branch().await).await?;
+               ;
+            tester.workflow_full_success(tester.auto_branch()).await?;
             tester.process_merge_queue().await;
             insta::assert_snapshot!(
                 tester.get_next_comment_text(()).await?,
@@ -805,8 +803,8 @@ merge_queue_enabled = false
                 .modify_repo(&default_repo_name(), |repo| {
                     repo.push_behaviour = BranchPushBehaviour::always_fail(BranchPushError::ValidationFailed)
                 })
-               .await;
-            tester.workflow_full_success(tester.auto_branch().await).await?;
+               ;
+            tester.workflow_full_success(tester.auto_branch()).await?;
             tester.process_merge_queue().await;
             insta::assert_snapshot!(
                 tester.get_next_comment_text(()).await?,
@@ -822,15 +820,11 @@ merge_queue_enabled = false
         run_test(pool, async |tester: &mut BorsTester| {
             tester.approve(()).await?;
             tester.start_auto_build(()).await?;
-            tester
-                .modify_repo(&default_repo_name(), |repo| {
-                    repo.push_behaviour =
-                        BranchPushBehaviour::always_fail(BranchPushError::InternalServerError)
-                })
-                .await;
-            tester
-                .workflow_full_success(tester.auto_branch().await)
-                .await?;
+            tester.modify_repo(&default_repo_name(), |repo| {
+                repo.push_behaviour =
+                    BranchPushBehaviour::always_fail(BranchPushError::InternalServerError)
+            });
+            tester.workflow_full_success(tester.auto_branch()).await?;
             tester.process_merge_queue().await;
             insta::assert_snapshot!(
                 tester.get_next_comment_text(()).await?,
@@ -846,15 +840,10 @@ merge_queue_enabled = false
         run_test(pool, async |tester: &mut BorsTester| {
             tester.approve(()).await?;
             tester.start_auto_build(()).await?;
-            tester
-                .modify_repo(&default_repo_name(), |repo| {
-                    repo.push_behaviour =
-                        BranchPushBehaviour::always_fail(BranchPushError::Conflict)
-                })
-                .await;
-            tester
-                .workflow_full_success(tester.auto_branch().await)
-                .await?;
+            tester.modify_repo(&default_repo_name(), |repo| {
+                repo.push_behaviour = BranchPushBehaviour::always_fail(BranchPushError::Conflict)
+            });
+            tester.workflow_full_success(tester.auto_branch()).await?;
             tester.process_merge_queue().await;
             tester.expect_comments((), 1).await;
 
@@ -872,16 +861,12 @@ merge_queue_enabled = false
         run_test(pool, async |tester: &mut BorsTester| {
             tester.approve(()).await?;
             tester.start_auto_build(()).await?;
-            tester
-                .modify_repo(&default_repo_name(), |repo| {
-                    repo.push_behaviour =
-                        BranchPushBehaviour::fail_n_times(BranchPushError::InternalServerError, 1)
-                })
-                .await;
+            tester.modify_repo(&default_repo_name(), |repo| {
+                repo.push_behaviour =
+                    BranchPushBehaviour::fail_n_times(BranchPushError::InternalServerError, 1)
+            });
 
-            tester
-                .workflow_full_success(tester.auto_branch().await)
-                .await?;
+            tester.workflow_full_success(tester.auto_branch()).await?;
             // Check that the merge queue retries the push request
             tester.finish_auto_build(()).await?;
 
@@ -900,8 +885,7 @@ merge_queue_enabled = false
             tester
                 .modify_branch(AUTO_MERGE_BRANCH_NAME, |branch| {
                     branch.merge_conflict = true;
-                })
-                .await;
+                });
             tester.approve(()).await?;
             tester.process_merge_queue().await;
             insta::assert_snapshot!(
@@ -945,11 +929,9 @@ merge_queue_enabled = false
     #[sqlx::test]
     async fn auto_build_start_merge_conflict_in_db(pool: sqlx::PgPool) {
         run_test(pool, async |tester: &mut BorsTester| {
-            tester
-                .modify_branch(AUTO_MERGE_BRANCH_NAME, |branch| {
-                    branch.merge_conflict = true;
-                })
-                .await;
+            tester.modify_branch(AUTO_MERGE_BRANCH_NAME, |branch| {
+                branch.merge_conflict = true;
+            });
             tester.approve(()).await?;
             tester.process_merge_queue().await;
             tester.expect_comments((), 1).await;
@@ -967,11 +949,9 @@ merge_queue_enabled = false
         run_test(pool, async |tester: &mut BorsTester| {
             let pr = tester.open_pr(default_repo_name(), |_| {}).await?;
             tester.approve(pr.id()).await?;
-            tester
-                .modify_pr_state(pr.id(), |pr| {
-                    pr.mergeable_state = OctocrabMergeableState::Dirty;
-                })
-                .await;
+            tester.modify_pr_state(pr.id(), |pr| {
+                pr.mergeable_state = OctocrabMergeableState::Dirty;
+            });
             tester.process_merge_queue().await;
             tester.get_pr_copy(pr.id()).await.expect_no_auto_build();
             Ok(())
@@ -984,7 +964,7 @@ merge_queue_enabled = false
         run_test(pool, async |tester: &mut BorsTester| {
             let pr = tester.open_pr(default_repo_name(), |_| {}).await?;
             tester.approve(pr.id()).await?;
-            tester.modify_pr_state(pr.id(), |pr| pr.close_pr()).await;
+            tester.modify_pr_state(pr.id(), |pr| pr.close_pr());
             tester.process_merge_queue().await;
             tester.get_pr_copy(pr.id()).await.expect_no_auto_build();
             Ok(())
@@ -1014,15 +994,13 @@ merge_queue_enabled = false
         run_test(pool, async |tester: &mut BorsTester| {
             tester.approve(()).await?;
             tester.start_and_finish_auto_build(()).await?;
-            tester
-                .expect_check_run(
-                    &tester.get_pr_copy(()).await.get_gh_pr().head_sha,
-                    AUTO_BUILD_CHECK_RUN_NAME,
-                    AUTO_BUILD_CHECK_RUN_NAME,
-                    CheckRunStatus::Completed,
-                    Some(CheckRunConclusion::Success),
-                )
-                .await;
+            tester.expect_check_run(
+                &tester.get_pr_copy(()).await.get_gh_pr().head_sha,
+                AUTO_BUILD_CHECK_RUN_NAME,
+                AUTO_BUILD_CHECK_RUN_NAME,
+                CheckRunStatus::Completed,
+                Some(CheckRunConclusion::Success),
+            );
             Ok(())
         })
         .await;
@@ -1076,9 +1054,7 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
                 tester.start_auto_build(()).await?;
 
                 tester.get_pr_copy(()).await.expect_added_labels(&[]);
-                tester
-                    .workflow_full_failure(tester.auto_branch().await)
-                    .await?;
+                tester.workflow_full_failure(tester.auto_branch()).await?;
                 tester.expect_comments((), 1).await;
 
                 tester
@@ -1098,19 +1074,15 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
             tester.approve(()).await?;
             tester.start_auto_build(()).await?;
 
-            tester
-                .workflow_full_failure(tester.auto_branch().await)
-                .await?;
+            tester.workflow_full_failure(tester.auto_branch()).await?;
             tester.expect_comments((), 1).await;
-            tester
-                .expect_check_run(
-                    &tester.get_pr_copy(()).await.get_gh_pr().head_sha,
-                    AUTO_BUILD_CHECK_RUN_NAME,
-                    AUTO_BUILD_CHECK_RUN_NAME,
-                    CheckRunStatus::Completed,
-                    Some(CheckRunConclusion::Failure),
-                )
-                .await;
+            tester.expect_check_run(
+                &tester.get_pr_copy(()).await.get_gh_pr().head_sha,
+                AUTO_BUILD_CHECK_RUN_NAME,
+                AUTO_BUILD_CHECK_RUN_NAME,
+                CheckRunStatus::Completed,
+                Some(CheckRunConclusion::Failure),
+            );
             Ok(())
         })
         .await;
@@ -1151,9 +1123,7 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
 
             // Finish the auto build BEFORE the tree has been closed, then close the tree,
             // and only then run the merge queue
-            tester
-                .workflow_full_success(tester.auto_branch().await)
-                .await?;
+            tester.workflow_full_success(tester.auto_branch()).await?;
 
             tester.post_comment("@bors treeclosed=100").await?;
             tester.expect_comments((), 1).await;
@@ -1195,12 +1165,11 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
             tester.process_merge_queue().await;
             let comment = tester.get_next_comment(()).await?;
 
-            tester.workflow_start(tester.auto_branch().await).await?;
+            tester.workflow_start(tester.auto_branch()).await?;
 
             // Check that the comment text has been updated with a link to the started workflow
             let updated_comment = tester
                 .get_comment_by_node_id(&comment.node_id.unwrap())
-                .await
                 .unwrap();
             insta::assert_snapshot!(updated_comment.content, @r"
             :hourglass: Testing commit pr-1-sha with merge merge-0-pr-1...
@@ -1220,13 +1189,9 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
             tester.process_merge_queue().await;
             let comment = tester.get_next_comment(()).await?;
 
-            tester
-                .workflow_full_failure(tester.auto_branch().await)
-                .await?;
+            tester.workflow_full_failure(tester.auto_branch()).await?;
             tester.expect_comments((), 1).await;
-            tester
-                .expect_hidden_comment(&comment, HideCommentReason::Outdated)
-                .await;
+            tester.expect_hidden_comment(&comment, HideCommentReason::Outdated);
 
             Ok(())
         })

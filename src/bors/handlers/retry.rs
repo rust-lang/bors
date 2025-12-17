@@ -82,9 +82,7 @@ mod tests {
         run_test(pool, async |tester: &mut BorsTester| {
             tester.approve(()).await?;
             tester.start_auto_build(()).await?;
-            tester
-                .workflow_full_failure(tester.auto_branch().await)
-                .await?;
+            tester.workflow_full_failure(tester.auto_branch()).await?;
             tester.expect_comments((), 1).await;
             tester.post_comment(Comment::from("@bors retry")).await?;
             tester.wait_for_pr((), |pr| pr.auto_build.is_none()).await?;

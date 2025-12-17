@@ -248,16 +248,16 @@ impl BorsTester {
         self.db.clone()
     }
 
-    pub async fn default_repo(&self) -> Arc<Mutex<Repo>> {
-        self.get_repo(&default_repo_name()).await
+    pub fn default_repo(&self) -> Arc<Mutex<Repo>> {
+        self.get_repo(&default_repo_name())
     }
 
-    pub async fn get_repo(&self, name: &GithubRepoName) -> Arc<Mutex<Repo>> {
+    pub fn get_repo(&self, name: &GithubRepoName) -> Arc<Mutex<Repo>> {
         self.github.lock().get_repo(name)
     }
 
     /// Modifies the given repo state in the GitHub mock (**without sending a webhook**).
-    pub async fn modify_repo<F: FnOnce(&mut Repo)>(&mut self, repo: &GithubRepoName, func: F) {
+    pub fn modify_repo<F: FnOnce(&mut Repo)>(&mut self, repo: &GithubRepoName, func: F) {
         let repo = self.github.lock().get_repo(repo);
         let mut repo = repo.lock();
         func(&mut repo)
@@ -266,12 +266,7 @@ impl BorsTester {
     /// Get a PR proxy that can be used to assert various things about the PR.
     pub async fn get_pr_copy<Id: Into<PrIdentifier>>(&self, id: Id) -> PullRequestProxy {
         let id = id.into();
-        let pr = self
-            .get_repo(&id.repo)
-            .await
-            .lock()
-            .get_pr(id.number)
-            .clone();
+        let pr = self.get_repo(&id.repo).lock().get_pr(id.number).clone();
         PullRequestProxy::new(self, pr).await
     }
 
@@ -310,7 +305,7 @@ impl BorsTester {
     }
 
     /// Creates a branch and returns a **copy** of it.
-    pub async fn create_branch(&mut self, name: &str) -> Branch {
+    pub fn create_branch(&mut self, name: &str) -> Branch {
         let repo = self
             .github
             .lock()
@@ -330,7 +325,7 @@ impl BorsTester {
     }
 
     /// Modifies an existing branch on the default repository.
-    pub async fn modify_branch<F: FnOnce(&mut Branch)>(&mut self, name: &str, func: F) {
+    pub fn modify_branch<F: FnOnce(&mut Branch)>(&mut self, name: &str, func: F) {
         let repo = self
             .github
             .lock()
@@ -341,12 +336,12 @@ impl BorsTester {
         if let Some(branch) = repo.lock().get_branch_by_name(name) {
             func(branch);
         } else {
-            self.create_branch(name).await;
+            self.create_branch(name);
             func(repo.lock().get_branch_by_name(name).unwrap());
         }
     }
 
-    pub async fn get_branch_copy(&self, name: &str) -> Branch {
+    pub fn get_branch_copy(&self, name: &str) -> Branch {
         self.github
             .lock()
             .default_repo()
@@ -356,7 +351,7 @@ impl BorsTester {
             .clone()
     }
 
-    pub async fn get_branch_commit_message(&self, branch: &Branch) -> String {
+    pub fn get_branch_commit_message(&self, branch: &Branch) -> String {
         self.github
             .lock()
             .default_repo()
@@ -372,12 +367,12 @@ impl BorsTester {
         self.send_webhook("push", payload).await
     }
 
-    pub async fn try_branch(&self) -> Branch {
-        self.get_branch_copy("automation/bors/try").await
+    pub fn try_branch(&self) -> Branch {
+        self.get_branch_copy("automation/bors/try")
     }
 
-    pub async fn auto_branch(&self) -> Branch {
-        self.get_branch_copy("automation/bors/auto").await
+    pub fn auto_branch(&self) -> Branch {
+        self.get_branch_copy("automation/bors/auto")
     }
 
     /// Wait until the next bot comment is received on the specified repo and PR, and return its
@@ -590,7 +585,7 @@ impl BorsTester {
 
     /// Modifies the given PR state in the GitHub mock (**without sending a webhook**)
     /// and returns a copy of it.
-    pub async fn modify_pr_state<Id: Into<PrIdentifier>, F: FnOnce(&mut PullRequest)>(
+    pub fn modify_pr_state<Id: Into<PrIdentifier>, F: FnOnce(&mut PullRequest)>(
         &mut self,
         id: Id,
         func: F,
@@ -608,7 +603,7 @@ impl BorsTester {
 
     pub async fn reopen_pr<Id: Into<PrIdentifier>>(&mut self, id: Id) -> anyhow::Result<()> {
         let id = id.into();
-        let pr = self.modify_pr_state(id, |pr| pr.reopen_pr()).await;
+        let pr = self.modify_pr_state(id, |pr| pr.reopen_pr());
 
         let payload = {
             let gh = self.github.lock();
@@ -623,7 +618,7 @@ impl BorsTester {
         &mut self,
         id: Id,
     ) -> anyhow::Result<()> {
-        let pr = self.modify_pr_state(id, |pr| pr.close_pr()).await;
+        let pr = self.modify_pr_state(id, |pr| pr.close_pr());
 
         let payload = {
             let gh = self.github.lock();
@@ -637,7 +632,7 @@ impl BorsTester {
         &mut self,
         id: Id,
     ) -> anyhow::Result<()> {
-        let pr = self.modify_pr_state(id, |pr| pr.convert_to_draft()).await;
+        let pr = self.modify_pr_state(id, |pr| pr.convert_to_draft());
 
         let payload = {
             let gh = self.github.lock();
@@ -656,7 +651,7 @@ impl BorsTester {
         &mut self,
         id: Id,
     ) -> anyhow::Result<()> {
-        let pr = self.modify_pr_state(id, |pr| pr.ready_for_review()).await;
+        let pr = self.modify_pr_state(id, |pr| pr.ready_for_review());
 
         let payload = {
             let gh = self.github.lock();
@@ -675,7 +670,7 @@ impl BorsTester {
         &mut self,
         id: Id,
     ) -> anyhow::Result<()> {
-        let pr = self.modify_pr_state(id, |pr| pr.merge_pr()).await;
+        let pr = self.modify_pr_state(id, |pr| pr.merge_pr());
 
         let payload = {
             let gh = self.github.lock();
@@ -744,9 +739,7 @@ impl BorsTester {
         id: Id,
         assignee: User,
     ) -> anyhow::Result<()> {
-        let pr = self
-            .modify_pr_state(id, |pr| pr.assignees.push(assignee.clone()))
-            .await;
+        let pr = self.modify_pr_state(id, |pr| pr.assignees.push(assignee.clone()));
         let payload = {
             let gh = self.github.lock();
             GitHubPullRequestEventPayload::new(&gh.get_repo(&pr.repo).lock(), pr, "assigned", None)
@@ -759,9 +752,7 @@ impl BorsTester {
         id: Id,
         assignee: User,
     ) -> anyhow::Result<()> {
-        let pr = self
-            .modify_pr_state(id, |pr| pr.assignees.retain(|a| a != &assignee))
-            .await;
+        let pr = self.modify_pr_state(id, |pr| pr.assignees.retain(|a| a != &assignee));
         let payload = {
             let gh = self.github.lock();
             GitHubPullRequestEventPayload::new(
@@ -789,7 +780,7 @@ impl BorsTester {
         &mut self,
         id: Id,
     ) -> anyhow::Result<()> {
-        self.workflow_full_success(self.auto_branch().await).await?;
+        self.workflow_full_success(self.auto_branch()).await?;
         self.process_merge_queue().await;
         let comment = self.get_next_comment_text(id).await?;
         assert!(comment.contains("Test successful"));
@@ -819,13 +810,13 @@ impl BorsTester {
     }
 
     /// Assert that the given comment has been hidden.
-    pub async fn expect_hidden_comment(&self, comment: &Comment, reason: HideCommentReason) {
+    pub fn expect_hidden_comment(&self, comment: &Comment, reason: HideCommentReason) {
         self.github
             .lock()
             .check_comment_was_hidden(comment.node_id.as_deref().unwrap(), reason);
     }
 
-    pub async fn expect_check_run(
+    pub fn expect_check_run(
         &self,
         head_sha: &str,
         name: &str,
@@ -833,7 +824,7 @@ impl BorsTester {
         status: CheckRunStatus,
         conclusion: Option<CheckRunConclusion>,
     ) -> &Self {
-        let repo = self.default_repo().await;
+        let repo = self.default_repo();
         let repo = repo.lock();
         let check_runs: Vec<_> = repo
             .check_runs
@@ -963,7 +954,7 @@ impl BorsTester {
     }
 
     /// Get a GitHub comment that might have been modified by API calls from bors.
-    pub async fn get_comment_by_node_id(&self, node_id: &str) -> Option<Comment> {
+    pub fn get_comment_by_node_id(&self, node_id: &str) -> Option<Comment> {
         self.github.lock().get_comment_by_node_id(node_id).cloned()
     }
 

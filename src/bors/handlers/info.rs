@@ -180,7 +180,7 @@ mod tests {
 
             tester
                 .workflow_event(WorkflowEvent::started(WorkflowRunData::from(
-                    tester.try_branch().await,
+                    tester.try_branch(),
                 )))
                 .await?;
 

@@ -702,9 +702,7 @@ mod tests {
     #[sqlx::test]
     async fn do_not_load_pr_on_unrelated_comment(pool: sqlx::PgPool) {
         run_test(pool, async |tester: &mut BorsTester| {
-            tester
-                .modify_repo(&default_repo_name(), |repo| repo.pull_request_error = true)
-                .await;
+            tester.modify_repo(&default_repo_name(), |repo| repo.pull_request_error = true);
             tester.post_comment("no command").await?;
             Ok(())
         })
