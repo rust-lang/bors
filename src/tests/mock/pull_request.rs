@@ -64,7 +64,7 @@ async fn mock_pr_create(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
             let data: RequestData = req.body_json::<RequestData>().unwrap();
 
             let user = oauth_user_from_request(req);
-            let pr = repo.new_pr(user);
+            let pr = repo.add_pr(user);
 
             pr.title = data.title;
             pr.description = data.body;

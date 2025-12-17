@@ -319,7 +319,7 @@ mod tests {
             Ok(())
         })
         .await;
-        let repo = gh.get_repo(&GithubRepoName::new("rolluper", default_repo_name().name()));
+        let repo = gh.get_repo(GithubRepoName::new("rolluper", default_repo_name().name()));
         let repo = repo.lock();
         insta::assert_snapshot!(repo.get_pr(1).description, @r"
         Successful merges:

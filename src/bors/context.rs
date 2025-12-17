@@ -34,4 +34,21 @@ impl BorsContext {
     pub fn get_web_url(&self) -> &str {
         &self.web_url
     }
+
+    pub fn get_repo(&self, name: &GithubRepoName) -> anyhow::Result<Arc<RepositoryState>> {
+        let repo_state = match self.repositories.read() {
+            Ok(guard) => match guard.get(name) {
+                Some(state) => state.clone(),
+                None => {
+                    return Err(anyhow::anyhow!("Repository not found: {name}"));
+                }
+            },
+            Err(err) => {
+                return Err(anyhow::anyhow!(
+                    "Failed to acquire read lock on repositories: {err:?}",
+                ));
+            }
+        };
+        Ok(repo_state)
+    }
 }

@@ -1,3 +1,6 @@
+use crate::bors::build_queue::{
+    BuildQueueReceiver, BuildQueueSender, create_buid_queue, handle_build_queue_event,
+};
 use crate::bors::merge_queue::{MergeQueueSender, start_merge_queue};
 use crate::bors::mergeability_queue::{
     MergeabilityQueueReceiver, MergeabilityQueueSender, check_mergeability,
@@ -36,9 +39,12 @@ pub fn create_bors_process(
     let (merge_queue_tx, merge_queue_fut) =
         start_merge_queue(ctx.clone(), merge_queue_max_interval);
 
+    let (build_queue_tx, build_queue_rx) = create_buid_queue();
+
     let senders = QueueSenders {
-        merge_queue: merge_queue_tx,
+        merge_queue: merge_queue_tx.clone(),
         mergeability_queue: mergeability_queue_tx,
+        build_queue: build_queue_tx,
     };
     let senders2 = senders.clone();
 
@@ -53,6 +59,7 @@ pub fn create_bors_process(
                 consume_repository_events(ctx.clone(), repository_rx, senders2.clone()),
                 consume_global_events(ctx.clone(), global_rx, senders2, gh_client, team_api),
                 consume_mergeability_queue_events(ctx.clone(), mergeability_queue_rx),
+                consume_build_queue_events(ctx.clone(), build_queue_rx, merge_queue_tx),
                 merge_queue_fut
             );
         }
@@ -70,6 +77,9 @@ pub fn create_bors_process(
                 }
                 _ = consume_mergeability_queue_events(ctx.clone(), mergeability_queue_rx) => {
                     tracing::error!("Mergeability queue handling process has ended")
+                }
+                _ = consume_build_queue_events(ctx.clone(), build_queue_rx, merge_queue_tx) => {
+                    tracing::error!("Build queue handling process has ended")
                 }
                 _ = merge_queue_fut => {
                     tracing::error!("Merge queue handling process has ended");
@@ -90,6 +100,7 @@ pub fn create_bors_process(
 pub struct QueueSenders {
     mergeability_queue: MergeabilityQueueSender,
     merge_queue: MergeQueueSender,
+    build_queue: BuildQueueSender,
 }
 
 impl QueueSenders {
@@ -98,6 +109,9 @@ impl QueueSenders {
     }
     pub fn mergeability_queue(&self) -> &MergeabilityQueueSender {
         &self.mergeability_queue
+    }
+    pub fn build_queue(&self) -> &BuildQueueSender {
+        &self.build_queue
     }
 }
 
@@ -111,14 +125,9 @@ async fn consume_repository_events(
 
         let span = tracing::info_span!("RepositoryEvent");
         tracing::debug!("Received repository event: {event:?}");
-        if let Err(error) = handle_bors_repository_event(
-            event,
-            ctx,
-            senders.mergeability_queue.clone(),
-            senders.merge_queue.clone(),
-        )
-        .instrument(span.clone())
-        .await
+        if let Err(error) = handle_bors_repository_event(event, ctx, senders.clone())
+            .instrument(span.clone())
+            .await
         {
             handle_root_error(span, error);
         }
@@ -135,16 +144,10 @@ async fn consume_global_events(
     while let Some(event) = global_rx.recv().await {
         let span = tracing::info_span!("GlobalEvent");
         tracing::trace!("Received global event: {event:?}");
-        if let Err(error) = handle_bors_global_event(
-            event,
-            ctx.clone(),
-            &gh_client,
-            &team_api,
-            senders.mergeability_queue.clone(),
-            senders.merge_queue.clone(),
-        )
-        .instrument(span.clone())
-        .await
+        if let Err(error) =
+            handle_bors_global_event(event, ctx.clone(), &gh_client, &team_api, senders.clone())
+                .instrument(span.clone())
+                .await
         {
             handle_root_error(span, error);
         }
@@ -171,6 +174,30 @@ async fn consume_mergeability_queue_events(
         {
             handle_root_error(span, error);
         }
+    }
+}
+
+async fn consume_build_queue_events(
+    ctx: Arc<BorsContext>,
+    mut build_queue_rx: BuildQueueReceiver,
+    merge_queue_tx: MergeQueueSender,
+) {
+    while let Some(event) = build_queue_rx.recv().await {
+        let ctx = ctx.clone();
+
+        let span = tracing::debug_span!(
+            "Build queue event",
+            event = ?event
+        );
+        if let Err(error) = handle_build_queue_event(ctx, event, merge_queue_tx.clone())
+            .instrument(span.clone())
+            .await
+        {
+            handle_root_error(span, error);
+        }
+
+        #[cfg(test)]
+        crate::bors::WAIT_FOR_BUILD_QUEUE.mark();
     }
 }
 

@@ -21,11 +21,13 @@ use crate::permissions::UserPermissions;
 use crate::tests::TestSyncMarker;
 
 mod build;
+mod build_queue;
 mod command;
 pub mod comment;
 mod context;
 pub mod event;
 mod handlers;
+mod labels;
 pub mod merge_queue;
 pub mod mergeability_queue;
 pub mod process;
@@ -111,7 +113,7 @@ You can use the following commands:
 }
 
 #[cfg(test)]
-pub static WAIT_FOR_REFRESH_PENDING_BUILDS: TestSyncMarker = TestSyncMarker::new();
+pub static WAIT_FOR_BUILD_QUEUE: TestSyncMarker = TestSyncMarker::new();
 
 #[cfg(test)]
 pub static WAIT_FOR_MERGEABILITY_STATUS_REFRESH: TestSyncMarker = TestSyncMarker::new();
@@ -127,6 +129,10 @@ pub static WAIT_FOR_WORKFLOW_COMPLETED: TestSyncMarker = TestSyncMarker::new();
 
 #[cfg(test)]
 pub static WAIT_FOR_MERGE_QUEUE: TestSyncMarker = TestSyncMarker::new();
+
+/// The merge queue has attempted to merge a PR.
+#[cfg(test)]
+pub static WAIT_FOR_MERGE_QUEUE_MERGE_ATTEMPT: TestSyncMarker = TestSyncMarker::new();
 
 #[cfg(not(test))]
 fn now() -> DateTime<Utc> {

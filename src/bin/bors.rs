@@ -190,7 +190,7 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
 
     let refresh_process = async move {
         // Refresh state when starting the bot: first reload PRs from GitHub, then check their
-        // mergeability, then time out potentially stale builds, and then run the merge queue.
+        // mergeability, then refresh builds, and then run the merge queue.
         let startup_events = [
             BorsGlobalEvent::RefreshPullRequestState,
             BorsGlobalEvent::RefreshPullRequestMergeability,

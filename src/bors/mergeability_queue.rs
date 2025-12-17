@@ -380,22 +380,7 @@ pub async fn check_mergeability(
         return Ok(());
     }
 
-    let repo_state = match ctx.repositories.read() {
-        Ok(guard) => match guard.get(&pull_request.repo) {
-            Some(state) => state.clone(),
-            None => {
-                return Err(anyhow::anyhow!(
-                    "Repository not found: {}",
-                    pull_request.repo
-                ));
-            }
-        },
-        Err(err) => {
-            return Err(anyhow::anyhow!(
-                "Failed to acquire read lock on repositories: {err:?}",
-            ));
-        }
-    };
+    let repo_state = ctx.get_repo(&pull_request.repo)?;
 
     // Load the PR from GitHub.
     // - If the PR's mergeability is unknown, and the GH background job hasn't been started yet,

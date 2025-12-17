@@ -6,6 +6,7 @@ use crate::database::WorkflowStatus;
 use crate::tests::BranchPushError;
 use crate::tests::github::{CheckRunData, WorkflowRun};
 use crate::tests::mock::pull_request::mock_pull_requests;
+use crate::tests::mock::workflow::GitHubWorkflowRun;
 use crate::tests::mock::{GitHubUser, dynamic_mock_req};
 use crate::tests::{Branch, GitHub, Repo, WorkflowJob};
 use base64::Engine;
@@ -13,7 +14,7 @@ use chrono::{DateTime, Utc};
 use octocrab::models::repos::Object;
 use octocrab::models::repos::Object::Commit;
 use octocrab::models::workflows::{Conclusion, Status, Step};
-use octocrab::models::{CheckSuiteId, JobId, RunId};
+use octocrab::models::{JobId, RunId};
 use parking_lot::Mutex;
 use serde::Serialize;
 use url::Url;
@@ -84,7 +85,7 @@ async fn mock_cancel_workflow(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) 
             if repo.workflow_cancel_error {
                 ResponseTemplate::new(500)
             } else {
-                repo.add_cancelled_workflow(run_id);
+                repo.add_cancelled_workflow(RunId(run_id));
                 ResponseTemplate::new(200)
             }
         },
@@ -151,7 +152,7 @@ async fn mock_create_branch(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
                 }
                 None => {
                     // Create a new branch
-                    repo.branches.push(Branch::new(branch_name, &sha));
+                    repo.add_branch(Branch::new(branch_name, &sha));
                 }
             }
 
@@ -160,7 +161,7 @@ async fn mock_create_branch(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
                 .unwrap();
             let response = GitHubRef {
                 ref_field: data.r#ref,
-                node_id: repo.branches.len().to_string(),
+                node_id: repo.branches().len().to_string(),
                 url: url.clone(),
                 object: Commit { sha, url },
             };
@@ -283,44 +284,22 @@ async fn mock_merge_branch(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
 }
 
 async fn mock_workflow_runs(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
-    #[derive(serde::Serialize, Debug)]
-    struct WorkflowRunResponse {
-        id: octocrab::models::RunId,
-        status: Status,
-        conclusion: Option<Conclusion>,
-    }
-
-    #[derive(serde::Serialize, Debug)]
+    #[derive(serde::Serialize)]
     struct WorkflowRunsResponse {
-        workflow_runs: Vec<WorkflowRunResponse>,
+        workflow_runs: Vec<GitHubWorkflowRun>,
     }
 
     let repo_name = repo.lock().full_name();
     dynamic_mock_req(
         move |req: &Request, []| {
             let repo = repo.lock();
-            let check_suite_id: CheckSuiteId = get_query_param(req, "check_suite_id")
-                .parse::<u64>()
-                .unwrap()
-                .into();
-            let workflow_runs: Vec<WorkflowRun> = repo
-                .workflow_runs
-                .iter()
-                .filter(|w| w.workflow_run.check_suite_id == check_suite_id)
-                .cloned()
-                .collect();
+            let head_sha = get_query_param(req, "head_sha");
+            let workflow_runs: Vec<WorkflowRun> = repo.find_workflows_by_commit_sha(&head_sha);
 
             let response = WorkflowRunsResponse {
                 workflow_runs: workflow_runs
                     .into_iter()
-                    .map(|run| {
-                        let (status, conclusion) = status_to_gh(run.status);
-                        WorkflowRunResponse {
-                            id: run.workflow_run.run_id,
-                            status,
-                            conclusion,
-                        }
-                    })
+                    .map(|run| GitHubWorkflowRun::new(&repo, run))
                     .collect(),
             };
             ResponseTemplate::new(200).set_body_json(response)
@@ -353,16 +332,13 @@ async fn mock_workflow_jobs(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
             let repo = repo.lock();
             let run_id: RunId = run_id.parse::<u64>().expect("Non-integer run id").into();
             let workflow_run = repo
-                .workflow_runs
-                .iter()
-                .find(|w| w.workflow_run.run_id == run_id)
+                .find_workflow(run_id)
                 .unwrap_or_else(|| panic!("Workflow run with ID {run_id} not found"));
 
             let response = GitHubWorkflowJobs {
-                total_count: workflow_run.workflow_run.jobs.len() as u64,
+                total_count: workflow_run.jobs().len() as u64,
                 jobs: workflow_run
-                    .workflow_run
-                    .jobs
+                    .jobs()
                     .iter()
                     .map(|job| workflow_job_to_gh(job, run_id))
                     .collect(),
@@ -589,12 +565,12 @@ pub struct GitHubRepository {
 }
 
 impl<'a> From<&'a Repo> for GitHubRepository {
-    fn from(value: &'a Repo) -> Self {
+    fn from(repo: &'a Repo) -> Self {
         Self {
             id: 1000,
-            name: value.name.clone(),
-            owner: value.owner.clone().into(),
-            url: format!("https://github.com/{}", value.full_name())
+            name: repo.full_name().name().to_owned(),
+            owner: repo.owner().clone().into(),
+            url: format!("https://github.com/{}", repo.full_name())
                 .parse()
                 .unwrap(),
         }

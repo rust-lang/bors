@@ -173,7 +173,7 @@ impl GitHubMockServer {
     }
 
     /// Make sure that there are no leftover events left in the queues.
-    pub async fn assert_empty_queues(self) {
+    pub async fn assert_empty_queues(self) -> anyhow::Result<()> {
         // This is useful for debugging:
         // for req in self
         //     .mock_server
@@ -217,10 +217,10 @@ impl GitHubMockServer {
                     .expect("Empty comment queue");
                 match msg {
                     CommentMsg::Comment(comment) => {
-                        panic!(
+                        return Err(anyhow::anyhow!(
                             "Expected that PR {name}#{} won't have any further received comments, but it received {comment:?}",
                             pr.number
-                        );
+                        ));
                     }
                     CommentMsg::Close => {
                         // The queue was correctly empty
@@ -228,6 +228,7 @@ impl GitHubMockServer {
                 };
             }
         }
+        Ok(())
     }
 }
 

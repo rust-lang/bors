@@ -1,13 +1,13 @@
 use crate::bors::{
-    CommandPrefix, PullRequestStatus, RollupMode, WAIT_FOR_MERGE_QUEUE,
-    WAIT_FOR_MERGEABILITY_STATUS_REFRESH, WAIT_FOR_PR_STATUS_REFRESH,
-    WAIT_FOR_REFRESH_PENDING_BUILDS, WAIT_FOR_WORKFLOW_COMPLETED, WAIT_FOR_WORKFLOW_STARTED,
+    CommandPrefix, PullRequestStatus, RollupMode, WAIT_FOR_BUILD_QUEUE, WAIT_FOR_MERGE_QUEUE,
+    WAIT_FOR_MERGE_QUEUE_MERGE_ATTEMPT, WAIT_FOR_MERGEABILITY_STATUS_REFRESH,
+    WAIT_FOR_PR_STATUS_REFRESH, WAIT_FOR_WORKFLOW_COMPLETED, WAIT_FOR_WORKFLOW_STARTED,
 };
 use crate::database::{
     BuildModel, BuildStatus, DelegatedPermission, MergeableState, OctocrabMergeableState,
     PullRequestModel, WorkflowStatus,
 };
-use crate::github::{GithubRepoName, PullRequestNumber};
+use crate::github::PullRequestNumber;
 use crate::{
     BorsContext, BorsGlobalEvent, BorsProcess, CommandParser, PgDbClient, TreeState, WebhookSecret,
     create_bors_process, load_repositories,
@@ -15,6 +15,8 @@ use crate::{
 use anyhow::Context;
 use axum::Router;
 use http::{HeaderMap, Method, Request, StatusCode};
+use octocrab::models::RunId;
+use octocrab::models::workflows::Conclusion;
 use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
 use parking_lot::Mutex;
 use serde::Serialize;
@@ -37,7 +39,8 @@ use crate::bors::process::QueueSenders;
 use crate::github::api::client::HideCommentReason;
 use crate::server::{ServerState, create_app};
 use crate::tests::github::{
-    PrIdentifier, PullRequest, TestWorkflowStatus, WorkflowEventKind, default_oauth_config,
+    PrIdentifier, PullRequest, RepoIdentifier, TestWorkflowStatus, WorkflowEventKind, WorkflowRun,
+    default_oauth_config,
 };
 use crate::tests::mock::{
     GitHubIssueCommentEventPayload, GitHubPullRequestEventPayload, GitHubPushEventPayload,
@@ -50,7 +53,7 @@ pub use github::Permissions;
 pub use github::Repo;
 pub use github::User;
 pub use github::{BranchPushBehaviour, BranchPushError};
-pub use github::{WorkflowEvent, WorkflowJob, WorkflowRunData};
+pub use github::{WorkflowEvent, WorkflowJob};
 pub use github::{default_branch_name, default_repo_name};
 pub use mock::ExternalHttpMock;
 pub use utils::io::load_test_file;
@@ -59,7 +62,12 @@ pub use utils::webhook::{TEST_WEBHOOK_SECRET, create_webhook_request};
 
 /// How long should we wait before we timeout a test.
 /// You can increase this if you want to do interactive debugging.
-const TEST_TIMEOUT: Duration = Duration::from_secs(10);
+const TEST_TIMEOUT: Duration = Duration::from_secs(150);
+const SYNC_MARKER_TIMEOUT: Duration = Duration::from_secs(100);
+const COMMENT_RECEIVE_TIMEOUT: Duration = Duration::from_secs(100);
+
+const TRY_BRANCH: &str = "automation/bors/try";
+const AUTO_BRANCH: &str = "automation/bors/auto";
 
 pub fn default_cmd_prefix() -> CommandPrefix {
     "@bors".to_string().into()
@@ -248,30 +256,50 @@ impl BorsTester {
         self.db.clone()
     }
 
-    pub async fn default_repo(&self) -> Arc<Mutex<Repo>> {
-        self.get_repo(&default_repo_name()).await
+    pub fn gh(&self) -> Arc<Mutex<GitHub>> {
+        self.github.clone()
     }
 
-    pub async fn get_repo(&self, name: &GithubRepoName) -> Arc<Mutex<Repo>> {
-        self.github.lock().get_repo(name)
+    /// Return the default repo
+    pub fn repo(&self) -> Arc<Mutex<Repo>> {
+        self.get_repo(())
+    }
+
+    pub fn get_repo<Id: Into<RepoIdentifier>>(&self, id: Id) -> Arc<Mutex<Repo>> {
+        self.github.lock().get_repo(id)
     }
 
     /// Modifies the given repo state in the GitHub mock (**without sending a webhook**).
-    pub async fn modify_repo<F: FnOnce(&mut Repo)>(&mut self, repo: &GithubRepoName, func: F) {
-        let repo = self.github.lock().get_repo(repo);
+    pub fn modify_repo<F: FnOnce(&mut Repo) -> R, Id: Into<RepoIdentifier>, R>(
+        &mut self,
+        id: Id,
+        func: F,
+    ) -> R {
+        let repo = self.github.lock().get_repo(id);
         let mut repo = repo.lock();
         func(&mut repo)
+    }
+
+    pub fn try_workflow(&self) -> RunId {
+        let mut gh = self.github.lock();
+        gh.new_workflow(&default_repo_name(), TRY_BRANCH)
+    }
+
+    pub fn auto_workflow(&self) -> RunId {
+        let mut gh = self.github.lock();
+        gh.new_workflow(&default_repo_name(), AUTO_BRANCH)
+    }
+
+    pub fn modify_workflow<F: FnOnce(&mut WorkflowRun)>(&mut self, run_id: RunId, func: F) {
+        let repo = self.github.lock().get_repo_by_run_id(run_id);
+        let mut repo = repo.lock();
+        func(repo.get_workflow_mut(run_id));
     }
 
     /// Get a PR proxy that can be used to assert various things about the PR.
     pub async fn get_pr_copy<Id: Into<PrIdentifier>>(&self, id: Id) -> PullRequestProxy {
         let id = id.into();
-        let pr = self
-            .get_repo(&id.repo)
-            .await
-            .lock()
-            .get_pr(id.number)
-            .clone();
+        let pr = self.get_repo(id.repo).lock().get_pr(id.number).clone();
         PullRequestProxy::new(self, pr).await
     }
 
@@ -310,7 +338,7 @@ impl BorsTester {
     }
 
     /// Creates a branch and returns a **copy** of it.
-    pub async fn create_branch(&mut self, name: &str) -> Branch {
+    pub fn create_branch(&mut self, name: &str) -> Branch {
         let repo = self
             .github
             .lock()
@@ -320,17 +348,13 @@ impl BorsTester {
             .clone();
         let mut repo = repo.lock();
 
-        assert!(
-            repo.get_branch_by_name(name).is_none(),
-            "Branch {name} already exists"
-        );
-        repo.branches
-            .push(Branch::new(name, &format!("{name}-initial")));
-        repo.branches.last_mut().unwrap().clone()
+        repo.add_branch(Branch::new(name, &format!("{name}-initial")));
+        repo.get_branch_by_name(name).unwrap().clone()
     }
 
     /// Modifies an existing branch on the default repository.
-    pub async fn modify_branch<F: FnOnce(&mut Branch)>(&mut self, name: &str, func: F) {
+    /// If it doesn't exist yet, it will be created.
+    pub fn modify_branch<F: FnOnce(&mut Branch)>(&mut self, name: &str, func: F) {
         let repo = self
             .github
             .lock()
@@ -341,22 +365,12 @@ impl BorsTester {
         if let Some(branch) = repo.lock().get_branch_by_name(name) {
             func(branch);
         } else {
-            self.create_branch(name).await;
+            self.create_branch(name);
             func(repo.lock().get_branch_by_name(name).unwrap());
         }
     }
 
-    pub async fn get_branch_copy(&self, name: &str) -> Branch {
-        self.github
-            .lock()
-            .default_repo()
-            .lock()
-            .get_branch_by_name(name)
-            .unwrap()
-            .clone()
-    }
-
-    pub async fn get_branch_commit_message(&self, branch: &Branch) -> String {
+    pub fn get_branch_commit_message(&self, branch: &Branch) -> String {
         self.github
             .lock()
             .default_repo()
@@ -367,17 +381,17 @@ impl BorsTester {
     pub async fn push_to_branch(&mut self, branch: &str, sha: &str) -> anyhow::Result<()> {
         let payload = {
             let gh = self.github.lock();
-            GitHubPushEventPayload::new(&gh.get_repo(&default_repo_name()).lock(), branch, sha)
+            GitHubPushEventPayload::new(&gh.get_repo(default_repo_name()).lock(), branch, sha)
         };
         self.send_webhook("push", payload).await
     }
 
-    pub async fn try_branch(&self) -> Branch {
-        self.get_branch_copy("automation/bors/try").await
+    pub fn try_branch(&self) -> Branch {
+        self.repo().lock().try_branch()
     }
 
-    pub async fn auto_branch(&self) -> Branch {
-        self.get_branch_copy("automation/bors/auto").await
+    pub fn auto_branch(&self) -> Branch {
+        self.repo().lock().auto_branch()
     }
 
     /// Wait until the next bot comment is received on the specified repo and PR, and return its
@@ -437,7 +451,7 @@ impl BorsTester {
                     .unwrap();
                 Ok(())
             },
-            &WAIT_FOR_REFRESH_PENDING_BUILDS,
+            &WAIT_FOR_BUILD_QUEUE,
         )
         .await
         .unwrap();
@@ -475,8 +489,14 @@ impl BorsTester {
         .unwrap();
     }
 
-    pub async fn process_merge_queue(&self) {
-        // Wait until the merge queue processing is fully handled
+    /// Trigger the merge queue immediately and wait until it performs a single tick.
+    /// Ensure that the merge queue is ready for what it is supposed to do in the test when you
+    /// call this function. If that is not the case, it might lead to race conditions.
+    /// It is more robust to call `run_merge_queue_until_merge_attempt` instead.
+    ///
+    /// In particular, if you want to ensure that the merge queue has seen a workflow completed
+    /// event, you should really run `run_merge_queue_until_merge_attempt`.
+    pub async fn run_merge_queue_now(&self) {
         wait_for_marker(
             async || {
                 self.senders.merge_queue().perform_tick().await.unwrap();
@@ -488,97 +508,105 @@ impl BorsTester {
         .unwrap();
     }
 
+    /// Repeatedly trigger the merge queue until it attempts to perform a merge.
+    pub async fn run_merge_queue_until_merge_attempt(&self) {
+        let run_merge_queue = async move {
+            loop {
+                self.run_merge_queue_now().await;
+                tokio::time::sleep(Duration::from_millis(500)).await;
+            }
+        };
+        wait_for_marker_concurrent(run_merge_queue, &WAIT_FOR_MERGE_QUEUE_MERGE_ATTEMPT).await;
+    }
+
     /// Performs a single started/success/failure workflow event.
     pub async fn workflow_event(&mut self, event: WorkflowEvent) -> anyhow::Result<()> {
         // Update the status of the workflow in the GitHub state mock
-        {
-            let repo = self
-                .github
-                .lock()
-                .get_repo(&event.workflow.repository.clone());
+        let payload = {
+            let repo = self.github.lock().get_repo_by_run_id(event.run_id);
             let mut repo = repo.lock();
             let status = match &event.event {
                 WorkflowEventKind::Started => WorkflowStatus::Pending,
-                WorkflowEventKind::Completed { status } => match status.as_str() {
-                    "success" => WorkflowStatus::Success,
-                    "failure" => WorkflowStatus::Failure,
+                WorkflowEventKind::Completed { status } => match status {
+                    Conclusion::Success => WorkflowStatus::Success,
+                    Conclusion::Failure => WorkflowStatus::Failure,
                     _ => unreachable!(),
                 },
             };
-            repo.update_workflow_run(event.workflow.clone(), status);
-        }
+
+            let workflow = repo.get_workflow_mut(event.run_id);
+            workflow.change_status(status);
+            let workflow = workflow.clone();
+
+            // Box is here to prevent stack overflow in debug mode
+            Box::new(GitHubWorkflowEventPayload::new(
+                &repo,
+                workflow,
+                event.event.clone(),
+            ))
+        };
 
         let marker = match &event.event {
             WorkflowEventKind::Started => &WAIT_FOR_WORKFLOW_STARTED,
             WorkflowEventKind::Completed { .. } => &WAIT_FOR_WORKFLOW_COMPLETED,
         };
 
-        wait_for_marker(async || self.webhook_workflow(event).await, marker).await
+        let fut = self.send_webhook("workflow_run", payload);
+        wait_for_marker(async || fut.await, marker).await
     }
 
     /// Start a workflow and wait until the workflow has been handled by bors.
-    pub async fn workflow_start<W: Into<WorkflowRunData>>(
-        &mut self,
-        workflow: W,
-    ) -> anyhow::Result<()> {
-        self.workflow_event(WorkflowEvent::started(workflow)).await
+    pub async fn workflow_start(&mut self, run_id: RunId) -> anyhow::Result<()> {
+        self.workflow_event(WorkflowEvent::started(run_id)).await
     }
 
     /// Performs all necessary events to complete a single workflow (start, success/fail).
     #[inline]
-    pub async fn workflow_full<W: Into<WorkflowRunData>>(
+    pub async fn workflow_full(
         &mut self,
-        workflow: W,
+        run_id: RunId,
         status: TestWorkflowStatus,
     ) -> anyhow::Result<()> {
-        let workflow = workflow.into();
-
-        self.workflow_event(WorkflowEvent::started(workflow.clone()))
-            .await?;
+        self.workflow_event(WorkflowEvent::started(run_id)).await?;
         let event = match status {
-            TestWorkflowStatus::Success => WorkflowEvent::success(workflow.clone()),
-            TestWorkflowStatus::Failure => WorkflowEvent::failure(workflow.clone()),
+            TestWorkflowStatus::Success => WorkflowEvent::success(run_id),
+            TestWorkflowStatus::Failure => WorkflowEvent::failure(run_id),
         };
         self.workflow_event(event).await
     }
 
-    pub async fn workflow_full_success<W: Into<WorkflowRunData>>(
-        &mut self,
-        workflow: W,
-    ) -> anyhow::Result<()> {
-        self.workflow_full(workflow, TestWorkflowStatus::Success)
+    pub async fn workflow_full_success(&mut self, run_id: RunId) -> anyhow::Result<()> {
+        self.workflow_full(run_id, TestWorkflowStatus::Success)
             .await
     }
 
-    pub async fn workflow_full_failure<W: Into<WorkflowRunData>>(
-        &mut self,
-        workflow: W,
-    ) -> anyhow::Result<()> {
-        self.workflow_full(workflow, TestWorkflowStatus::Failure)
+    pub async fn workflow_full_failure(&mut self, run_id: RunId) -> anyhow::Result<()> {
+        self.workflow_full(run_id, TestWorkflowStatus::Failure)
             .await
     }
 
     /// Creates a new PR and sends a webhook about its creation.
     /// If you want to set some non-default properties on the PR,
     /// use the `modify_pr` callback, to avoid race conditions with the webhook being sent.
-    pub async fn open_pr<F: FnOnce(&mut PullRequest)>(
+    pub async fn open_pr<F: FnOnce(&mut PullRequest), Id: Into<RepoIdentifier>>(
         &mut self,
-        repo_name: GithubRepoName,
+        repo: Id,
         modify_pr: F,
     ) -> anyhow::Result<PullRequest> {
+        let repo = repo.into();
         let number = {
-            let repo = self.github.lock().get_repo(&repo_name);
+            let repo = self.github.lock().get_repo(repo.clone());
             let repo = repo.lock();
             repo.pull_requests.keys().max().copied().unwrap_or(0) + 1
         };
 
-        let mut pr = PullRequest::new(repo_name.clone(), number, User::default_pr_author());
+        let mut pr = PullRequest::new(repo.0.clone(), number, User::default_pr_author());
         modify_pr(&mut pr);
 
         // Add the PR to the repository
         let payload = {
             let gh = self.github.lock();
-            let repo = gh.get_repo(&repo_name);
+            let repo = gh.get_repo(repo);
             let mut repo = repo.lock();
             repo.pull_requests.insert(number, pr.clone());
             GitHubPullRequestEventPayload::new(&repo, pr.clone(), "opened", None)
@@ -590,7 +618,7 @@ impl BorsTester {
 
     /// Modifies the given PR state in the GitHub mock (**without sending a webhook**)
     /// and returns a copy of it.
-    pub async fn modify_pr_state<Id: Into<PrIdentifier>, F: FnOnce(&mut PullRequest)>(
+    pub fn modify_pr_state<Id: Into<PrIdentifier>, F: FnOnce(&mut PullRequest)>(
         &mut self,
         id: Id,
         func: F,
@@ -608,7 +636,7 @@ impl BorsTester {
 
     pub async fn reopen_pr<Id: Into<PrIdentifier>>(&mut self, id: Id) -> anyhow::Result<()> {
         let id = id.into();
-        let pr = self.modify_pr_state(id, |pr| pr.reopen_pr()).await;
+        let pr = self.modify_pr_state(id, |pr| pr.reopen_pr());
 
         let payload = {
             let gh = self.github.lock();
@@ -623,7 +651,7 @@ impl BorsTester {
         &mut self,
         id: Id,
     ) -> anyhow::Result<()> {
-        let pr = self.modify_pr_state(id, |pr| pr.close_pr()).await;
+        let pr = self.modify_pr_state(id, |pr| pr.close_pr());
 
         let payload = {
             let gh = self.github.lock();
@@ -637,7 +665,7 @@ impl BorsTester {
         &mut self,
         id: Id,
     ) -> anyhow::Result<()> {
-        let pr = self.modify_pr_state(id, |pr| pr.convert_to_draft()).await;
+        let pr = self.modify_pr_state(id, |pr| pr.convert_to_draft());
 
         let payload = {
             let gh = self.github.lock();
@@ -656,7 +684,7 @@ impl BorsTester {
         &mut self,
         id: Id,
     ) -> anyhow::Result<()> {
-        let pr = self.modify_pr_state(id, |pr| pr.ready_for_review()).await;
+        let pr = self.modify_pr_state(id, |pr| pr.ready_for_review());
 
         let payload = {
             let gh = self.github.lock();
@@ -675,7 +703,7 @@ impl BorsTester {
         &mut self,
         id: Id,
     ) -> anyhow::Result<()> {
-        let pr = self.modify_pr_state(id, |pr| pr.merge_pr()).await;
+        let pr = self.modify_pr_state(id, |pr| pr.merge_pr());
 
         let payload = {
             let gh = self.github.lock();
@@ -744,9 +772,7 @@ impl BorsTester {
         id: Id,
         assignee: User,
     ) -> anyhow::Result<()> {
-        let pr = self
-            .modify_pr_state(id, |pr| pr.assignees.push(assignee.clone()))
-            .await;
+        let pr = self.modify_pr_state(id, |pr| pr.assignees.push(assignee.clone()));
         let payload = {
             let gh = self.github.lock();
             GitHubPullRequestEventPayload::new(&gh.get_repo(&pr.repo).lock(), pr, "assigned", None)
@@ -759,9 +785,7 @@ impl BorsTester {
         id: Id,
         assignee: User,
     ) -> anyhow::Result<()> {
-        let pr = self
-            .modify_pr_state(id, |pr| pr.assignees.retain(|a| a != &assignee))
-            .await;
+        let pr = self.modify_pr_state(id, |pr| pr.assignees.retain(|a| a != &assignee));
         let payload = {
             let gh = self.github.lock();
             GitHubPullRequestEventPayload::new(
@@ -777,9 +801,23 @@ impl BorsTester {
     /// Starts an auto build, with the expectation that it will start testing the given PR.
     pub async fn start_auto_build<Id: Into<PrIdentifier>>(&mut self, id: Id) -> anyhow::Result<()> {
         let id = id.into();
-        self.process_merge_queue().await;
+
+        let previous_sha = self
+            .github
+            .lock()
+            .get_repo(&id.repo)
+            .lock()
+            .get_branch_by_name(AUTO_BRANCH)
+            .map(|b| b.sha.clone());
+
+        self.run_merge_queue_now().await;
         let comment = self.get_next_comment_text(id).await?;
         assert!(comment.contains("Testing commit"));
+        let new_auto_sha = self.auto_branch().sha;
+        if let Some(previous_sha) = previous_sha {
+            assert_ne!(previous_sha, new_auto_sha, "Auto SHA did not change");
+        }
+
         Ok(())
     }
 
@@ -789,8 +827,8 @@ impl BorsTester {
         &mut self,
         id: Id,
     ) -> anyhow::Result<()> {
-        self.workflow_full_success(self.auto_branch().await).await?;
-        self.process_merge_queue().await;
+        self.workflow_full_success(self.auto_workflow()).await?;
+        self.run_merge_queue_until_merge_attempt().await;
         let comment = self.get_next_comment_text(id).await?;
         assert!(comment.contains("Test successful"));
         Ok(())
@@ -814,18 +852,18 @@ impl BorsTester {
             let id = id.clone();
             self.get_next_comment_text(id)
                 .await
-                .unwrap_or_else(|_| panic!("Failed to get comment #{i}"));
+                .unwrap_or_else(|e| panic!("Failed to get comment #{i}: {e:?}"));
         }
     }
 
     /// Assert that the given comment has been hidden.
-    pub async fn expect_hidden_comment(&self, comment: &Comment, reason: HideCommentReason) {
+    pub fn expect_hidden_comment(&self, comment: &Comment, reason: HideCommentReason) {
         self.github
             .lock()
             .check_comment_was_hidden(comment.node_id.as_deref().unwrap(), reason);
     }
 
-    pub async fn expect_check_run(
+    pub fn expect_check_run(
         &self,
         head_sha: &str,
         name: &str,
@@ -833,7 +871,7 @@ impl BorsTester {
         status: CheckRunStatus,
         conclusion: Option<CheckRunConclusion>,
     ) -> &Self {
-        let repo = self.default_repo().await;
+        let repo = self.repo();
         let repo = repo.lock();
         let check_runs: Vec<_> = repo
             .check_runs
@@ -963,7 +1001,7 @@ impl BorsTester {
     }
 
     /// Get a GitHub comment that might have been modified by API calls from bors.
-    pub async fn get_comment_by_node_id(&self, node_id: &str) -> Option<Comment> {
+    pub fn get_comment_by_node_id(&self, node_id: &str) -> Option<Comment> {
         self.github.lock().get_comment_by_node_id(node_id).cloned()
     }
 
@@ -980,15 +1018,6 @@ impl BorsTester {
         // The Box is here to prevent a stack overflow in debug mode
         let payload = Box::from(payload);
         self.send_webhook("issue_comment", payload).await
-    }
-
-    async fn webhook_workflow(&mut self, event: WorkflowEvent) -> anyhow::Result<()> {
-        let payload = {
-            let gh = self.github.lock();
-            GitHubWorkflowEventPayload::new(&gh.get_repo(&event.workflow.repository).lock(), event)
-        };
-
-        self.send_webhook("workflow_run", payload).await
     }
 
     async fn pull_request_edited(
@@ -1039,8 +1068,8 @@ impl BorsTester {
         // Make sure that the event channel senders are closed
         drop(self.app);
         drop(self.global_tx);
-        self.senders.merge_queue().shutdown();
         self.senders.mergeability_queue().shutdown();
+        drop(self.senders);
         // Wait until all events are handled in the bors service
         match tokio::time::timeout(Duration::from_secs(5), bors).await {
             Ok(Ok(_)) => {}
@@ -1052,7 +1081,7 @@ impl BorsTester {
             }
         };
         // Flush any local queues
-        self.http_mock.gh_server.assert_empty_queues().await;
+        self.http_mock.gh_server.assert_empty_queues().await?;
         Ok(Arc::into_inner(self.github).unwrap().into_inner())
     }
 }
@@ -1287,9 +1316,22 @@ where
 
     let res = func().await;
     if res.is_ok() {
-        tokio::time::timeout(Duration::from_secs(15), marker.sync())
+        tokio::time::timeout(SYNC_MARKER_TIMEOUT, marker.sync())
             .await
             .map_err(|_| anyhow::anyhow!("Timed out waiting for a test marker to be marked"))?;
     }
     res
+}
+
+/// Concurrenly run an async operation with the specific future, until the future finishes.
+/// `fut` is supposed to be a diverging future.
+async fn wait_for_marker_concurrent<Fut>(fut: Fut, marker: &TestSyncMarker)
+where
+    Fut: Future<Output = ()>,
+{
+    marker.drain().await;
+    tokio::select! {
+        _ = fut => {}
+        _ = marker.sync() => {}
+    }
 }

@@ -82,13 +82,11 @@ mod tests {
         run_test(pool, async |tester: &mut BorsTester| {
             tester.approve(()).await?;
             tester.start_auto_build(()).await?;
-            tester
-                .workflow_full_failure(tester.auto_branch().await)
-                .await?;
+            tester.workflow_full_failure(tester.auto_workflow()).await?;
             tester.expect_comments((), 1).await;
             tester.post_comment(Comment::from("@bors retry")).await?;
             tester.wait_for_pr((), |pr| pr.auto_build.is_none()).await?;
-            tester.process_merge_queue().await;
+            tester.run_merge_queue_now().await;
             insta::assert_snapshot!(
                 tester.get_next_comment_text(()).await?,
                 @":hourglass: Testing commit pr-1-sha with merge merge-1-pr-1..."

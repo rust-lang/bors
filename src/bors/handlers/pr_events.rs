@@ -10,6 +10,7 @@ use crate::bors::handlers::unapprove_pr;
 use crate::bors::handlers::workflow::{AutoBuildCancelReason, maybe_cancel_auto_build};
 use crate::bors::merge_queue::MergeQueueSender;
 use crate::bors::mergeability_queue::MergeabilityQueueSender;
+use crate::bors::process::QueueSenders;
 use crate::bors::{AUTO_BRANCH_NAME, BorsContext};
 use crate::bors::{Comment, PullRequestStatus, RepositoryState};
 use crate::database::{MergeableState, PullRequestModel, UpsertPullRequestParams};
@@ -20,7 +21,7 @@ use std::sync::Arc;
 pub(super) async fn handle_pull_request_edited(
     repo_state: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
-    mergeability_queue: MergeabilityQueueSender,
+    mergeability_queue: &MergeabilityQueueSender,
     payload: PullRequestEdited,
 ) -> anyhow::Result<()> {
     let pr = &payload.pull_request;
@@ -47,7 +48,7 @@ pub(super) async fn handle_pull_request_edited(
 pub(super) async fn handle_push_to_pull_request(
     repo_state: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
-    mergeability_queue: MergeabilityQueueSender,
+    mergeability_queue: &MergeabilityQueueSender,
     payload: PullRequestPushed,
 ) -> anyhow::Result<()> {
     let pr = &payload.pull_request;
@@ -95,8 +96,7 @@ pub(super) async fn handle_pull_request_opened(
     repo_state: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
     ctx: Arc<BorsContext>,
-    mergeability_queue: MergeabilityQueueSender,
-    merge_queue_tx: MergeQueueSender,
+    senders: &QueueSenders,
     payload: PullRequestOpened,
 ) -> anyhow::Result<()> {
     let pr_status = if payload.draft {
@@ -125,9 +125,10 @@ pub(super) async fn handle_pull_request_opened(
         )
         .await?;
 
-    process_pr_description_commands(&payload, repo_state.clone(), db, ctx, merge_queue_tx).await?;
+    process_pr_description_commands(&payload, repo_state.clone(), db, ctx, senders.merge_queue())
+        .await?;
 
-    mergeability_queue.enqueue_pr(&pr, None);
+    senders.mergeability_queue().enqueue_pr(&pr, None);
 
     Ok(())
 }
@@ -161,7 +162,7 @@ pub(super) async fn handle_pull_request_merged(
 pub(super) async fn handle_pull_request_reopened(
     repo_state: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
-    mergeability_queue: MergeabilityQueueSender,
+    mergeability_queue: &MergeabilityQueueSender,
     payload: PullRequestReopened,
 ) -> anyhow::Result<()> {
     let pr = &payload.pull_request;
@@ -241,7 +242,7 @@ pub(super) async fn handle_pull_request_ready_for_review(
 pub(super) async fn handle_push_to_branch(
     repo_state: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
-    mergeability_queue: MergeabilityQueueSender,
+    mergeability_queue: &MergeabilityQueueSender,
     payload: PushToBranch,
 ) -> anyhow::Result<()> {
     let affected_prs = db
@@ -303,7 +304,7 @@ async fn process_pr_description_commands(
     repo: Arc<RepositoryState>,
     database: Arc<PgDbClient>,
     ctx: Arc<BorsContext>,
-    merge_queue_tx: MergeQueueSender,
+    merge_queue_tx: &MergeQueueSender,
 ) -> anyhow::Result<()> {
     let pr_description_comment = create_pr_description_comment(payload);
     handle_comment(repo, database, ctx, pr_description_comment, merge_queue_tx).await
@@ -367,7 +368,7 @@ mod tests {
     use crate::bors::PullRequestStatus;
     use crate::bors::merge_queue::AUTO_BUILD_CHECK_RUN_NAME;
     use crate::tests::default_repo_name;
-    use crate::tests::{BorsBuilder, BorsTester, GitHub, WorkflowRunData};
+    use crate::tests::{BorsBuilder, BorsTester, GitHub};
     use crate::{
         database::{MergeableState, OctocrabMergeableState},
         tests::{User, default_branch_name, run_test},
@@ -377,7 +378,7 @@ mod tests {
     async fn unapprove_on_base_edited(pool: sqlx::PgPool) {
         run_test(pool, async |tester: &mut BorsTester| {
             tester.approve(()).await?;
-            let branch = tester.create_branch("beta").await;
+            let branch = tester.create_branch("beta");
             tester
                 .edit_pr((), |pr| {
                     pr.base_branch = branch;
@@ -415,7 +416,7 @@ mod tests {
     #[sqlx::test]
     async fn edit_pr_do_nothing_when_not_approved(pool: sqlx::PgPool) {
         run_test(pool, async |tester: &mut BorsTester| {
-            let branch = tester.create_branch("beta").await;
+            let branch = tester.create_branch("beta");
             tester
                 .edit_pr((), |pr| {
                     pr.base_branch = branch;
@@ -460,9 +461,7 @@ mod tests {
         run_test(pool, async |tester: &mut BorsTester| {
             tester.approve(()).await?;
             tester.start_auto_build(()).await?;
-            tester
-                .workflow_full_failure(tester.auto_branch().await)
-                .await?;
+            tester.workflow_full_failure(tester.auto_workflow()).await?;
             tester.expect_comments((), 1).await;
             tester.push_to_pr(()).await?;
 
@@ -478,7 +477,7 @@ mod tests {
     #[sqlx::test]
     async fn store_base_branch_on_pr_opened(pool: sqlx::PgPool) {
         run_test(pool, async |tester: &mut BorsTester| {
-            let pr = tester.open_pr(default_repo_name(), |_| {}).await?;
+            let pr = tester.open_pr((), |_| {}).await?;
             tester
                 .wait_for_pr(pr.number, |pr| {
                     pr.base_branch == *default_branch_name()
@@ -493,7 +492,7 @@ mod tests {
     #[sqlx::test]
     async fn update_base_branch_on_pr_edited(pool: sqlx::PgPool) {
         run_test(pool, async |tester: &mut BorsTester| {
-            let branch = tester.create_branch("foo").await;
+            let branch = tester.create_branch("foo");
             tester
                 .edit_pr((), |pr| {
                     pr.base_branch = branch;
@@ -524,7 +523,7 @@ mod tests {
     #[sqlx::test]
     async fn open_close_and_reopen_pr(pool: sqlx::PgPool) {
         run_test(pool, async |tester: &mut BorsTester| {
-            let pr = tester.open_pr(default_repo_name(), |_| {}).await?;
+            let pr = tester.open_pr((), |_| {}).await?;
             tester
                 .wait_for_pr(pr.number, |pr| pr.pr_status == PullRequestStatus::Open)
                 .await?;
@@ -564,7 +563,7 @@ mod tests {
     #[sqlx::test]
     async fn open_pr_and_convert_to_draft(pool: sqlx::PgPool) {
         run_test(pool, async |tester: &mut BorsTester| {
-            let pr = tester.open_pr(default_repo_name(), |_| {}).await?;
+            let pr = tester.open_pr((), |_| {}).await?;
             tester
                 .wait_for_pr(pr.number, |pr| pr.pr_status == PullRequestStatus::Open)
                 .await?;
@@ -580,7 +579,7 @@ mod tests {
     #[sqlx::test]
     async fn assign_pr_updates_assignees(pool: sqlx::PgPool) {
         run_test(pool, async |tester: &mut BorsTester| {
-            let pr = tester.open_pr(default_repo_name(), |_| {}).await?;
+            let pr = tester.open_pr((), |_| {}).await?;
             tester
                 .wait_for_pr(pr.number, |pr| pr.assignees.is_empty())
                 .await?;
@@ -596,7 +595,7 @@ mod tests {
     #[sqlx::test]
     async fn unassign_pr_updates_assignees(pool: sqlx::PgPool) {
         run_test(pool, async |tester: &mut BorsTester| {
-            let pr = tester.open_pr(default_repo_name(), |_| {}).await?;
+            let pr = tester.open_pr((), |_| {}).await?;
             tester.assign_pr(pr.number, User::reviewer()).await?;
             tester
                 .wait_for_pr(pr.number, |pr| pr.assignees == vec![User::reviewer().name])
@@ -613,7 +612,7 @@ mod tests {
     #[sqlx::test]
     async fn open_and_merge_pr(pool: sqlx::PgPool) {
         run_test(pool, async |tester: &mut BorsTester| {
-            let pr = tester.open_pr(default_repo_name(), |_| {}).await?;
+            let pr = tester.open_pr((), |_| {}).await?;
             tester
                 .wait_for_pr(pr.number, |pr| pr.pr_status == PullRequestStatus::Open)
                 .await?;
@@ -629,7 +628,7 @@ mod tests {
     #[sqlx::test]
     async fn mergeability_queue_processes_pr_base_change(pool: sqlx::PgPool) {
         run_test(pool, async |tester: &mut BorsTester| {
-            let branch = tester.create_branch("beta").await;
+            let branch = tester.create_branch("beta");
             tester
                 .edit_pr((), |pr| {
                     pr.base_branch = branch;
@@ -639,9 +638,7 @@ mod tests {
             tester
                 .wait_for_pr((), |pr| pr.mergeable_state == MergeableState::Unknown)
                 .await?;
-            tester
-                .modify_pr_state((), |pr| pr.mergeable_state = OctocrabMergeableState::Dirty)
-                .await;
+            tester.modify_pr_state((), |pr| pr.mergeable_state = OctocrabMergeableState::Dirty);
             tester
                 .wait_for_pr((), |pr| pr.mergeable_state == MergeableState::HasConflicts)
                 .await?;
@@ -659,11 +656,9 @@ mod tests {
                 })
                 .await?;
             tester.push_to_branch(default_branch_name(), "sha").await?;
-            tester
-                .modify_pr_state(pr.id(), |pr| {
-                    pr.mergeable_state = OctocrabMergeableState::Dirty;
-                })
-                .await;
+            tester.modify_pr_state(pr.id(), |pr| {
+                pr.mergeable_state = OctocrabMergeableState::Dirty;
+            });
             tester
                 .wait_for_pr(pr.id(), |pr| {
                     pr.mergeable_state == MergeableState::HasConflicts
@@ -682,11 +677,9 @@ mod tests {
                     pr.mergeable_state = OctocrabMergeableState::Clean;
                 })
                 .await?;
-            tester
-                .modify_pr_state(pr.id(), |pr| {
-                    pr.mergeable_state = OctocrabMergeableState::Dirty;
-                })
-                .await;
+            tester.modify_pr_state(pr.id(), |pr| {
+                pr.mergeable_state = OctocrabMergeableState::Dirty;
+            });
             tester.push_to_branch(default_branch_name(), "sha").await?;
 
             Ok(())
@@ -711,8 +704,7 @@ report_merge_conflicts = true
             tester
                 .modify_pr_state(pr.id(), |pr| {
                     pr.mergeable_state = OctocrabMergeableState::Dirty;
-                })
-                .await;
+                });
             tester.push_to_branch(default_branch_name(), "sha").await?;
             assert_snapshot!(tester.get_next_comment_text(pr).await?, @":umbrella: The latest upstream changes made this pull request unmergeable. Please [resolve the merge conflicts](https://rustc-dev-guide.rust-lang.org/git.html#rebasing-and-conflicts).");
 
@@ -739,8 +731,7 @@ report_merge_conflicts = true
             tester
                 .modify_pr_state(pr.id(), |pr| {
                     pr.mergeable_state = OctocrabMergeableState::Dirty;
-                })
-                .await;
+                });
             tester.push_to_branch(default_branch_name(), "sha").await?;
             assert_snapshot!(tester.get_next_comment_text(pr.id()).await?, @r"
             :umbrella: The latest upstream changes made this pull request unmergeable. Please [resolve the merge conflicts](https://rustc-dev-guide.rust-lang.org/git.html#rebasing-and-conflicts).
@@ -769,21 +760,18 @@ report_merge_conflicts = true
                 })
                 .await?;
 
-            let pr1 = tester
+            let pr3 = tester
                 .open_pr(default_repo_name(), |_| {})
                 .await?;
-            tester.approve(pr1.id()).await?;
-            tester.start_auto_build(pr1.id()).await?;
-            tester.workflow_full_success(tester.auto_branch().await).await?;
-            tester.process_merge_queue().await;
-            tester.expect_comments(pr1.id(), 1).await;
-            let sha = tester.auto_branch().await.get_sha().to_string();
+            tester.approve(pr3.id()).await?;
+
+            tester.start_and_finish_auto_build(pr3.id()).await?;
+            let sha = tester.auto_branch().get_sha().to_string();
 
             tester
                 .modify_pr_state(pr2.id(), |pr| {
                     pr.mergeable_state = OctocrabMergeableState::Dirty;
-                })
-                .await;
+                });
             tester.push_to_branch(default_branch_name(), &sha).await?;
             assert_snapshot!(tester.get_next_comment_text(pr2.id()).await?, @":umbrella: The latest upstream changes (presumably #3) made this pull request unmergeable. Please [resolve the merge conflicts](https://rustc-dev-guide.rust-lang.org/git.html#rebasing-and-conflicts).");
 
@@ -813,20 +801,16 @@ report_merge_conflicts = true
     #[sqlx::test]
     async fn enqueue_prs_on_pr_reopened(pool: sqlx::PgPool) {
         run_test(pool, async |tester: &mut BorsTester| {
-            tester
-                .modify_pr_state((), |pr| {
-                    pr.mergeable_state = OctocrabMergeableState::Unknown;
-                })
-                .await;
+            tester.modify_pr_state((), |pr| {
+                pr.mergeable_state = OctocrabMergeableState::Unknown;
+            });
             tester.reopen_pr(()).await?;
             tester
                 .wait_for_pr((), |pr| pr.mergeable_state == MergeableState::Unknown)
                 .await?;
-            tester
-                .modify_pr_state((), |pr| {
-                    pr.mergeable_state = OctocrabMergeableState::Dirty;
-                })
-                .await;
+            tester.modify_pr_state((), |pr| {
+                pr.mergeable_state = OctocrabMergeableState::Dirty;
+            });
             tester
                 .wait_for_pr((), |pr| pr.mergeable_state == MergeableState::HasConflicts)
                 .await?;
@@ -842,9 +826,7 @@ report_merge_conflicts = true
             tester
                 .wait_for_pr((), |pr| pr.mergeable_state == MergeableState::Unknown)
                 .await?;
-            tester
-                .modify_pr_state((), |pr| pr.mergeable_state = OctocrabMergeableState::Dirty)
-                .await;
+            tester.modify_pr_state((), |pr| pr.mergeable_state = OctocrabMergeableState::Dirty);
             tester
                 .wait_for_pr((), |pr| pr.mergeable_state == MergeableState::HasConflicts)
                 .await?;
@@ -855,12 +837,14 @@ report_merge_conflicts = true
 
     #[sqlx::test]
     async fn cancel_pending_auto_build_on_push_comment(pool: sqlx::PgPool) {
-        let gh = run_test(pool, async |tester: &mut BorsTester| {
+        run_test(pool, async |tester: &mut BorsTester| {
             tester.approve(()).await?;
             tester.start_auto_build(()).await?;
             tester.get_pr_copy(()).await.expect_auto_build(|_| true);
+
+            let run_id = tester.auto_workflow();
             tester
-                .workflow_start(WorkflowRunData::from(tester.auto_branch().await).with_run_id(123))
+                .workflow_start(run_id)
                 .await?;
             tester.push_to_pr(()).await?;
             insta::assert_snapshot!(tester.get_next_comment_text(()).await?, @r"
@@ -868,27 +852,26 @@ report_merge_conflicts = true
 
             Auto build cancelled due to push. Cancelled workflows:
 
-            - https://github.com/rust-lang/borstest/actions/runs/123
+            - https://github.com/rust-lang/borstest/actions/runs/1
             ");
+            tester.gh().lock().check_cancelled_workflows(default_repo_name(), &[run_id]);
             Ok(())
         })
             .await;
-        gh.check_cancelled_workflows(default_repo_name(), &[123]);
     }
 
     #[sqlx::test]
     async fn cancel_pending_auto_build_on_push_error_comment(pool: sqlx::PgPool) {
         run_test(pool, async |tester: &mut BorsTester| {
             tester
-                .modify_repo(&default_repo_name(), |repo| {
-                    repo.workflow_cancel_error = true
-                })
-                .await;
+                .modify_repo((), |repo| {
+                    repo.workflow_cancel_error = true;
+                });
             tester.approve(()).await?;
             tester.start_auto_build(()).await?;
             tester.get_pr_copy(()).await.expect_auto_build(|_| true);
 
-            tester.workflow_start(tester.auto_branch().await).await?;
+            tester.workflow_start(tester.auto_workflow()).await?;
             tester.push_to_pr(()).await?;
             insta::assert_snapshot!(tester.get_next_comment_text(()).await?, @r"
             :warning: A new commit `pr-1-commit-1` was pushed to the branch, the PR will need to be re-approved.
@@ -905,20 +888,18 @@ report_merge_conflicts = true
         run_test(pool, async |tester: &mut BorsTester| {
             tester.approve(()).await?;
             tester.start_auto_build(()).await?;
-            tester.workflow_start(tester.auto_branch().await).await?;
+            tester.workflow_start(tester.auto_workflow()).await?;
 
             let prev_commit = &tester.get_pr_copy(()).await.get_gh_pr().head_sha;
             tester.push_to_pr(()).await?;
             tester.expect_comments((), 1).await;
-            tester
-                .expect_check_run(
-                    prev_commit,
-                    AUTO_BUILD_CHECK_RUN_NAME,
-                    AUTO_BUILD_CHECK_RUN_NAME,
-                    CheckRunStatus::Completed,
-                    Some(CheckRunConclusion::Cancelled),
-                )
-                .await;
+            tester.expect_check_run(
+                prev_commit,
+                AUTO_BUILD_CHECK_RUN_NAME,
+                AUTO_BUILD_CHECK_RUN_NAME,
+                CheckRunStatus::Completed,
+                Some(CheckRunConclusion::Cancelled),
+            );
             Ok(())
         })
         .await;

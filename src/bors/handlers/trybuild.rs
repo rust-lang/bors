@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
+use super::has_permission;
 use super::{PullRequestData, deny_request};
-use super::{has_permission, hide_build_started_comments};
 use crate::PgDbClient;
-use crate::bors::build::{CancelBuildError, cancel_build};
+use crate::bors::build::{CancelBuildError, cancel_build, hide_build_started_comments};
 use crate::bors::command::{CommandPrefix, Parent};
 use crate::bors::comment::try_build_cancelled_comment;
 use crate::bors::comment::try_build_cancelled_with_failed_workflow_cancel_comment;
@@ -289,10 +289,7 @@ mod tests {
     use crate::github::api::client::HideCommentReason;
     use crate::tests::BorsTester;
     use crate::tests::default_repo_name;
-    use crate::tests::{
-        BorsBuilder, Comment, GitHub, User, WorkflowEvent, WorkflowJob, WorkflowRunData, run_test,
-    };
-    use octocrab::models::JobId;
+    use crate::tests::{BorsBuilder, Comment, GitHub, User, WorkflowEvent, run_test};
     use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
 
     #[sqlx::test]
@@ -300,7 +297,7 @@ mod tests {
         run_test(pool.clone(), async |tester: &mut BorsTester| {
             tester.post_comment("@bors try").await?;
             tester.expect_comments((), 1).await;
-            tester.workflow_full_success(tester.try_branch().await).await?;
+            tester.workflow_full_success(tester.try_workflow()).await?;
             insta::assert_snapshot!(
                 tester.get_next_comment_text(()).await?,
                 @r#"
@@ -320,7 +317,7 @@ mod tests {
         run_test(pool, async |tester: &mut BorsTester| {
             tester.post_comment("@bors try").await?;
             tester.expect_comments((), 1).await;
-            tester.workflow_full_failure(tester.try_branch().await).await?;
+            tester.workflow_full_failure(tester.try_workflow()).await?;
             insta::assert_snapshot!(
                 tester.get_next_comment_text(()).await?,
                 @":broken_heart: Test for merge-0-pr-1 failed: [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1)"
@@ -336,29 +333,21 @@ mod tests {
             tester.post_comment("@bors try").await?;
             tester.expect_comments((), 1).await;
 
-            let mut workflow = WorkflowRunData::from(tester.try_branch().await);
-            workflow.jobs.push(WorkflowJob {
-                id: JobId(42),
-                status: WorkflowStatus::Failure,
-            });
-            workflow.jobs.push(WorkflowJob {
-                id: JobId(50),
-                status: WorkflowStatus::Failure,
-            });
-            workflow.jobs.push(WorkflowJob {
-                id: JobId(51),
-                status: WorkflowStatus::Success,
+            let run_id = tester.try_workflow();
+            tester.modify_workflow(run_id, |w| {
+                w.add_job(WorkflowStatus::Failure);
+                w.add_job(WorkflowStatus::Failure);
+                w.add_job(WorkflowStatus::Success);
             });
 
-            tester.modify_repo(&default_repo_name(), |repo| repo.update_workflow_run(workflow.clone(), WorkflowStatus::Pending)).await;
-            tester.workflow_full_failure(workflow).await?;
+            tester.workflow_full_failure(run_id).await?;
             insta::assert_snapshot!(
                 tester.get_next_comment_text(()).await?,
                 @r"
             :broken_heart: Test for merge-0-pr-1 failed: [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1). Failed jobs:
 
-            - `Job 42` ([web logs](https://github.com/job-logs/42), [enhanced plaintext logs](https://triage.rust-lang.org/gha-logs/rust-lang/borstest/42))
-            - `Job 50` ([web logs](https://github.com/job-logs/50), [enhanced plaintext logs](https://triage.rust-lang.org/gha-logs/rust-lang/borstest/50))
+            - `Job 1000` ([web logs](https://github.com/job-logs/1000), [enhanced plaintext logs](https://triage.rust-lang.org/gha-logs/rust-lang/borstest/1000))
+            - `Job 1001` ([web logs](https://github.com/job-logs/1001), [enhanced plaintext logs](https://triage.rust-lang.org/gha-logs/rust-lang/borstest/1001))
             "
             );
             Ok(())
@@ -432,7 +421,7 @@ It fixes so many issues, sir."
             tester.post_comment("@bors try").await?;
             tester.expect_comments((), 1).await;
 
-            insta::assert_snapshot!(tester.get_branch_commit_message(&tester.try_branch().await).await, @r###"
+            insta::assert_snapshot!(tester.get_branch_commit_message(&tester.try_branch()), @r###"
             Auto merge of #1 - pr-1, r=<try>
             Title of PR 1
             "###);
@@ -461,7 +450,7 @@ try-job: Bar
             tester.post_comment("@bors try").await?;
             tester.expect_comments((), 1).await;
 
-            insta::assert_snapshot!(tester.get_branch_commit_message(&tester.try_branch().await).await, @r###"
+            insta::assert_snapshot!(tester.get_branch_commit_message(&tester.try_branch()), @r###"
             Auto merge of #1 - pr-1, r=<try>
             Title of PR 1
 
@@ -490,7 +479,7 @@ try-job: Bar
             tester.post_comment("@bors try jobs=Baz,Baz2").await?;
             tester.expect_comments((), 1).await;
 
-            insta::assert_snapshot!(tester.get_branch_commit_message(&tester.try_branch().await).await, @r###"
+            insta::assert_snapshot!(tester.get_branch_commit_message(&tester.try_branch()), @r###"
             Auto merge of #1 - pr-1, r=<try>
             Title of PR 1
 
@@ -543,9 +532,7 @@ try-job: Bar
                 .post_comment("@bors try parent=ea9c1b050cc8b420c2c211d2177811e564a4dc60")
                 .await?;
             tester.expect_comments((), 1).await;
-            tester
-                .workflow_full_success(tester.try_branch().await)
-                .await?;
+            tester.workflow_full_success(tester.try_workflow()).await?;
             tester.expect_comments((), 1).await;
             tester.post_comment("@bors try parent=last").await?;
             insta::assert_snapshot!(tester.get_next_comment_text(()).await?, @r"
@@ -557,7 +544,7 @@ try-job: Bar
         })
         .await;
         gh.check_sha_history(
-            default_repo_name(),
+            (),
             TRY_MERGE_BRANCH_NAME,
             &[
                 "ea9c1b050cc8b420c2c211d2177811e564a4dc60",
@@ -583,7 +570,7 @@ try-job: Bar
     #[sqlx::test]
     async fn try_merge_conflict(pool: sqlx::PgPool) {
         run_test(pool, async |tester: &mut BorsTester| {
-            tester.modify_branch(TRY_MERGE_BRANCH_NAME, |branch| branch.merge_conflict = true).await;
+            tester.modify_branch(TRY_MERGE_BRANCH_NAME, |branch| branch.merge_conflict = true);
             tester
                 .post_comment("@bors try")
                 .await?;
@@ -633,7 +620,7 @@ try-job: Bar
                     .find_build(
                         &default_repo_name(),
                         TRY_BRANCH_NAME,
-                        CommitSha(tester.try_branch().await.get_sha().to_string()),
+                        CommitSha(tester.try_branch().get_sha().to_string()),
                     )
                     .await?
                     .is_some()
@@ -684,12 +671,12 @@ try-job: Bar
 
     #[sqlx::test]
     async fn try_cancel_previous_build_running_workflows(pool: sqlx::PgPool) {
-        let gh = run_test(pool, async |tester: &mut BorsTester| {
+        run_test(pool, async |tester: &mut BorsTester| {
             tester.post_comment("@bors try").await?;
             tester.expect_comments((), 1).await;
-            tester
-                .workflow_start(WorkflowRunData::from(tester.try_branch().await).with_run_id(123))
-                .await?;
+
+            let run_id = tester.try_workflow();
+            tester.workflow_start(run_id).await?;
 
             tester.post_comment("@bors try").await?;
             insta::assert_snapshot!(tester.get_next_comment_text(()).await?, @r"
@@ -699,10 +686,13 @@ try-job: Bar
 
             To cancel the try build, run the command `@bors try cancel`.
             ");
+            tester
+                .gh()
+                .lock()
+                .check_cancelled_workflows(default_repo_name(), &[run_id]);
             Ok(())
         })
         .await;
-        gh.check_cancelled_workflows(default_repo_name(), &[123]);
     }
 
     #[sqlx::test]
@@ -711,7 +701,7 @@ try-job: Bar
             tester.post_comment("@bors try").await?;
             tester.expect_comments((), 1).await;
             tester
-                .workflow_full_success(WorkflowRunData::from(tester.try_branch().await).with_run_id(1))
+                .workflow_full_success(tester.try_workflow())
                 .await?;
             tester.expect_comments((), 1).await;
 
@@ -722,11 +712,7 @@ try-job: Bar
             To cancel the try build, run the command `@bors try cancel`.
             ");
             tester
-                .workflow_full_success(
-                    WorkflowRunData::from(tester.try_branch().await)
-                        .with_run_id(2)
-                        .with_check_suite_id(2),
-                )
+                .workflow_full_success(tester.try_workflow())
                 .await?;
             insta::assert_snapshot!(tester.get_next_comment_text(()).await?, @r#"
             :sunny: Try build successful ([Workflow1](https://github.com/rust-lang/borstest/actions/runs/2))
@@ -751,48 +737,45 @@ try-job: Bar
 
     #[sqlx::test]
     async fn try_cancel_cancel_workflows(pool: sqlx::PgPool) {
-        let gh = run_test(pool, async |tester: &mut BorsTester| {
+        run_test(pool, async |tester: &mut BorsTester| {
             tester.post_comment("@bors try").await?;
             tester.expect_comments((), 1).await;
 
-            let branch = tester.try_branch().await;
-            tester
-                .workflow_event(WorkflowEvent::started(
-                    WorkflowRunData::from(branch.clone()).with_run_id(123),
-                ))
-                .await?;
-            tester
-                .workflow_event(WorkflowEvent::started(
-                    WorkflowRunData::from(branch.clone()).with_run_id(124),
-                ))
-                .await?;
+            let w1 = tester.try_workflow();
+            let w2 = tester.try_workflow();
+            tester.workflow_event(WorkflowEvent::started(w1)).await?;
+            tester.workflow_event(WorkflowEvent::started(w2)).await?;
             tester.post_comment("@bors try cancel").await?;
             insta::assert_snapshot!(tester.get_next_comment_text(()).await?, @r"
             Try build cancelled. Cancelled workflows:
-            - https://github.com/rust-lang/borstest/actions/runs/123
-            - https://github.com/rust-lang/borstest/actions/runs/124
+            - https://github.com/rust-lang/borstest/actions/runs/1
+            - https://github.com/rust-lang/borstest/actions/runs/2
             ");
+            tester
+                .gh()
+                .lock()
+                .check_cancelled_workflows(default_repo_name(), &[w1, w2]);
+
             Ok(())
         })
         .await;
-        gh.check_cancelled_workflows(default_repo_name(), &[123, 124]);
     }
 
     #[sqlx::test]
     async fn try_cancel_error(pool: sqlx::PgPool) {
         run_test(pool, async |tester: &mut BorsTester| {
-            tester.modify_repo(&default_repo_name(), |repo| repo.workflow_cancel_error = true).await;
+            tester.modify_repo((), |repo| repo.workflow_cancel_error = true);
             tester.post_comment("@bors try").await?;
             tester.expect_comments((), 1).await;
             tester
-                .workflow_event(WorkflowEvent::started(tester.try_branch().await))
+                .workflow_event(WorkflowEvent::started(tester.try_workflow()))
                 .await?;
             tester.post_comment("@bors try cancel").await?;
             insta::assert_snapshot!(tester.get_next_comment_text(()).await?, @"Try build was cancelled. It was not possible to cancel some workflows.");
             let build = tester.db().find_build(
                 &default_repo_name(),
-                tester.try_branch().await.get_name(),
-                tester.try_branch().await.get_sha().to_string().into()
+                tester.try_branch().get_name(),
+                tester.try_branch().get_sha().to_string().into()
             ).await?.expect("build not found");
             assert_eq!(build.status, BuildStatus::Cancelled);
 
@@ -804,11 +787,7 @@ try-job: Bar
     #[sqlx::test]
     async fn try_cancel_cancel_in_db(pool: sqlx::PgPool) {
         run_test(pool, async |tester: &mut BorsTester| {
-            tester
-                .modify_repo(&default_repo_name(), |repo| {
-                    repo.workflow_cancel_error = true
-                })
-                .await;
+            tester.modify_repo((), |repo| repo.workflow_cancel_error = true);
             tester.post_comment("@bors try").await?;
             tester.expect_comments((), 1).await;
             tester.post_comment("@bors try cancel").await?;
@@ -822,21 +801,13 @@ try-job: Bar
 
     #[sqlx::test]
     async fn try_cancel_ignore_finished_workflows(pool: sqlx::PgPool) {
-        let gh = run_test(pool, async |tester: &mut BorsTester| {
+        run_test(pool, async |tester: &mut BorsTester| {
             tester.post_comment("@bors try").await?;
             tester.expect_comments((), 1).await;
-            let branch = tester.try_branch().await;
 
-            let w1 = WorkflowRunData::from(branch.clone()).with_run_id(1);
-            let w2 = WorkflowRunData::from(branch.clone()).with_run_id(2);
-            let w3 = WorkflowRunData::from(branch).with_run_id(3);
-            for workflow in [&w1, &w2, &w3] {
-                tester
-                    .modify_repo(&default_repo_name(), |repo| {
-                        repo.update_workflow_run(workflow.clone(), WorkflowStatus::Pending)
-                    })
-                    .await;
-            }
+            let w1 = tester.try_workflow();
+            let w2 = tester.try_workflow();
+            let w3 = tester.try_workflow();
 
             tester.workflow_full_success(w1).await?;
             tester.workflow_full_success(w2).await?;
@@ -846,10 +817,13 @@ try-job: Bar
             Try build cancelled. Cancelled workflows:
             - https://github.com/rust-lang/borstest/actions/runs/3
             ");
+            tester
+                .gh()
+                .lock()
+                .check_cancelled_workflows(default_repo_name(), &[w3]);
             Ok(())
         })
         .await;
-        gh.check_cancelled_workflows(default_repo_name(), &[3]);
     }
 
     #[sqlx::test]
@@ -861,7 +835,7 @@ try-job: Bar
             tester.expect_comments((), 1).await;
 
             tester
-                .workflow_event(WorkflowEvent::started(tester.try_branch().await))
+                .workflow_event(WorkflowEvent::started(tester.try_workflow()))
                 .await?;
             Ok(())
         })
@@ -886,9 +860,7 @@ try_failed = ["+foo", "+bar", "-baz"]
                 To cancel the try build, run the command `@bors try cancel`.
                 ");
                 tester.get_pr_copy(()).await.expect_added_labels(&[]);
-                tester
-                    .workflow_full_failure(tester.try_branch().await)
-                    .await?;
+                tester.workflow_full_failure(tester.try_workflow()).await?;
                 tester.expect_comments((), 1).await;
                 tester
                     .get_pr_copy(())
@@ -906,15 +878,13 @@ try_failed = ["+foo", "+bar", "-baz"]
             tester.post_comment("@bors try").await?;
             tester.expect_comments((), 1).await;
 
-            tester
-                .expect_check_run(
-                    &tester.get_pr_copy(()).await.get_gh_pr().head_sha,
-                    TRY_BUILD_CHECK_RUN_NAME,
-                    "Bors try build",
-                    CheckRunStatus::InProgress,
-                    None,
-                )
-                .await;
+            tester.expect_check_run(
+                &tester.get_pr_copy(()).await.get_gh_pr().head_sha,
+                TRY_BUILD_CHECK_RUN_NAME,
+                "Bors try build",
+                CheckRunStatus::InProgress,
+                None,
+            );
 
             Ok(())
         })
@@ -927,20 +897,16 @@ try_failed = ["+foo", "+bar", "-baz"]
             tester.post_comment("@bors try").await?;
             tester.expect_comments((), 1).await;
 
-            tester
-                .workflow_full_success(tester.try_branch().await)
-                .await?;
+            tester.workflow_full_success(tester.try_workflow()).await?;
             tester.expect_comments((), 1).await;
 
-            tester
-                .expect_check_run(
-                    &tester.get_pr_copy(()).await.get_gh_pr().head_sha,
-                    TRY_BUILD_CHECK_RUN_NAME,
-                    "Bors try build",
-                    CheckRunStatus::Completed,
-                    Some(CheckRunConclusion::Success),
-                )
-                .await;
+            tester.expect_check_run(
+                &tester.get_pr_copy(()).await.get_gh_pr().head_sha,
+                TRY_BUILD_CHECK_RUN_NAME,
+                "Bors try build",
+                CheckRunStatus::Completed,
+                Some(CheckRunConclusion::Success),
+            );
 
             Ok(())
         })
@@ -953,20 +919,16 @@ try_failed = ["+foo", "+bar", "-baz"]
             tester.post_comment("@bors try").await?;
             tester.expect_comments((), 1).await;
 
-            tester
-                .workflow_full_failure(tester.try_branch().await)
-                .await?;
+            tester.workflow_full_failure(tester.try_workflow()).await?;
             tester.expect_comments((), 1).await;
 
-            tester
-                .expect_check_run(
-                    &tester.get_pr_copy(()).await.get_gh_pr().head_sha,
-                    TRY_BUILD_CHECK_RUN_NAME,
-                    "Bors try build",
-                    CheckRunStatus::Completed,
-                    Some(CheckRunConclusion::Failure),
-                )
-                .await;
+            tester.expect_check_run(
+                &tester.get_pr_copy(()).await.get_gh_pr().head_sha,
+                TRY_BUILD_CHECK_RUN_NAME,
+                "Bors try build",
+                CheckRunStatus::Completed,
+                Some(CheckRunConclusion::Failure),
+            );
 
             Ok(())
         })
@@ -982,15 +944,13 @@ try_failed = ["+foo", "+bar", "-baz"]
             tester.post_comment("@bors try cancel").await?;
             tester.expect_comments((), 1).await;
 
-            tester
-                .expect_check_run(
-                    &tester.get_pr_copy(()).await.get_gh_pr().head_sha,
-                    TRY_BUILD_CHECK_RUN_NAME,
-                    "Bors try build",
-                    CheckRunStatus::Completed,
-                    Some(CheckRunConclusion::Cancelled),
-                )
-                .await;
+            tester.expect_check_run(
+                &tester.get_pr_copy(()).await.get_gh_pr().head_sha,
+                TRY_BUILD_CHECK_RUN_NAME,
+                "Bors try build",
+                CheckRunStatus::Completed,
+                Some(CheckRunConclusion::Cancelled),
+            );
 
             Ok(())
         })
@@ -1008,24 +968,20 @@ try_failed = ["+foo", "+bar", "-baz"]
             tester.post_comment("@bors try").await?;
             tester.expect_comments((), 1).await;
 
-            tester
-                .expect_check_run(
-                    &prev_sha,
-                    TRY_BUILD_CHECK_RUN_NAME,
-                    "Bors try build",
-                    CheckRunStatus::Completed,
-                    Some(CheckRunConclusion::Cancelled),
-                )
-                .await;
-            tester
-                .expect_check_run(
-                    &tester.get_pr_copy(()).await.get_gh_pr().head_sha,
-                    TRY_BUILD_CHECK_RUN_NAME,
-                    "Bors try build",
-                    CheckRunStatus::InProgress,
-                    None,
-                )
-                .await;
+            tester.expect_check_run(
+                &prev_sha,
+                TRY_BUILD_CHECK_RUN_NAME,
+                "Bors try build",
+                CheckRunStatus::Completed,
+                Some(CheckRunConclusion::Cancelled),
+            );
+            tester.expect_check_run(
+                &tester.get_pr_copy(()).await.get_gh_pr().head_sha,
+                TRY_BUILD_CHECK_RUN_NAME,
+                "Bors try build",
+                CheckRunStatus::InProgress,
+                None,
+            );
             Ok(())
         })
         .await;
@@ -1036,13 +992,9 @@ try_failed = ["+foo", "+bar", "-baz"]
         run_test(pool, async |tester: &mut BorsTester| {
             tester.post_comment("@bors try").await?;
             let comment = tester.get_next_comment(()).await?;
-            tester
-                .workflow_full_success(tester.try_branch().await)
-                .await?;
+            tester.workflow_full_success(tester.try_workflow()).await?;
             tester.expect_comments((), 1).await;
-            tester
-                .expect_hidden_comment(&comment, HideCommentReason::Outdated)
-                .await;
+            tester.expect_hidden_comment(&comment, HideCommentReason::Outdated);
 
             Ok(())
         })
@@ -1054,13 +1006,9 @@ try_failed = ["+foo", "+bar", "-baz"]
         run_test(pool, async |tester: &mut BorsTester| {
             tester.post_comment("@bors try").await?;
             let comment = tester.get_next_comment(()).await?;
-            tester
-                .workflow_full_failure(tester.try_branch().await)
-                .await?;
+            tester.workflow_full_failure(tester.try_workflow()).await?;
             tester.expect_comments((), 1).await;
-            tester
-                .expect_hidden_comment(&comment, HideCommentReason::Outdated)
-                .await;
+            tester.expect_hidden_comment(&comment, HideCommentReason::Outdated);
 
             Ok(())
         })
@@ -1076,9 +1024,7 @@ try_failed = ["+foo", "+bar", "-baz"]
             // Hide the previous "Try build started" comment when we restart the build
             tester.post_comment("@bors try").await?;
             tester.expect_comments((), 1).await;
-            tester
-                .expect_hidden_comment(&comment, HideCommentReason::Outdated)
-                .await;
+            tester.expect_hidden_comment(&comment, HideCommentReason::Outdated);
 
             Ok(())
         })
@@ -1091,12 +1037,11 @@ try_failed = ["+foo", "+bar", "-baz"]
             tester.post_comment("@bors try").await?;
             let comment = tester.get_next_comment(()).await?;
 
-            tester.workflow_start(tester.try_branch().await).await?;
+            tester.workflow_start(tester.try_workflow()).await?;
 
             // Check that the comment text has been updated with a link to the started workflow
             let updated_comment = tester
                 .get_comment_by_node_id(&comment.node_id.unwrap())
-                .await
                 .unwrap();
             insta::assert_snapshot!(updated_comment.content, @r"
             :hourglass: Trying commit pr-1-sha with merge merge-0-pr-1…

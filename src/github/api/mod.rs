@@ -8,12 +8,12 @@ use octocrab::Octocrab;
 use octocrab::models::{App, AppId, InstallationRepositories, Repository};
 use secrecy::{ExposeSecret, SecretString};
 
-use client::GithubRepositoryClient;
-
 use crate::bors::RepositoryState;
 use crate::config::RepositoryConfig;
 use crate::github::GithubRepoName;
 use crate::permissions::TeamApiClient;
+use client::GithubRepositoryClient;
+use octocrab::service::middleware::retry::RetryConfig;
 
 pub mod client;
 pub(crate) mod operations;
@@ -34,6 +34,9 @@ pub fn create_github_client(
         .set_read_timeout(Some(DEFAULT_REQUEST_TIMEOUT))
         .set_write_timeout(Some(DEFAULT_REQUEST_TIMEOUT))
         .set_connect_timeout(Some(DEFAULT_REQUEST_TIMEOUT))
+        // Octocrab retrying is buggy as of 0.48
+        // When it duplicates PATCH requests, it does not re-send their body
+        .add_retry_config(RetryConfig::None)
         .build()
         .context("Could not create octocrab builder")
 }
