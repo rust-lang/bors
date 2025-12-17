@@ -28,6 +28,7 @@ pub mod event;
 mod handlers;
 pub mod merge_queue;
 pub mod mergeability_queue;
+pub mod process;
 
 use crate::bors::command::BorsCommand;
 use crate::database::{WorkflowModel, WorkflowStatus};

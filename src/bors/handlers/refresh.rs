@@ -2,14 +2,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context;
-use chrono::{DateTime, Utc};
 use octocrab::params::checks::CheckRunConclusion;
 use std::collections::BTreeMap;
 
-use crate::bors::RepositoryState;
 use crate::bors::build::{CancelBuildError, cancel_build};
 use crate::bors::comment::build_timed_out_comment;
 use crate::bors::mergeability_queue::MergeabilityQueueSender;
+use crate::bors::{RepositoryState, elapsed_time_since};
 use crate::database::{BuildModel, BuildStatus};
 use crate::{PgDbClient, TeamApiClient};
 
@@ -37,7 +36,7 @@ async fn refresh_build(
     build: &BuildModel,
     timeout: Duration,
 ) -> anyhow::Result<()> {
-    if elapsed_time(build.created_at) >= timeout {
+    if elapsed_time_since(build.created_at) >= timeout {
         if let Some(pr) = db.find_pr_by_build(build).await? {
             tracing::info!("Cancelling build {build:?}");
             match cancel_build(&repo.client, db, build, CheckRunConclusion::TimedOut).await {
@@ -196,9 +195,8 @@ pub async fn sync_pull_requests_state(
 
 #[cfg(test)]
 mod tests {
-    use crate::bors::PullRequestStatus;
-    use crate::bors::handlers::refresh::MOCK_TIME;
     use crate::bors::handlers::trybuild::TRY_BUILD_CHECK_RUN_NAME;
+    use crate::bors::{MOCK_TIME, PullRequestStatus};
     use crate::database::{MergeableState, OctocrabMergeableState};
     use crate::tests::default_repo_name;
     use crate::tests::{BorsBuilder, BorsTester, GitHub, run_test};
