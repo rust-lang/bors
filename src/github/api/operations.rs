@@ -169,14 +169,20 @@ async fn update_branch(
 
     tracing::debug!("Updating branch {} to SHA {}", url, sha.as_ref());
 
+    #[derive(serde::Serialize)]
+    struct Request<'a> {
+        sha: &'a str,
+        force: bool,
+    }
+
     let res = repo
         .client()
         ._patch(
             url.as_str(),
-            Some(&serde_json::json!({
-                "sha": sha.as_ref(),
-                "force": matches!(force, ForcePush::Yes)
-            })),
+            Some(&Request {
+                sha: sha.as_ref(),
+                force: matches!(force, ForcePush::Yes),
+            }),
         )
         .await?;
 
