@@ -35,8 +35,6 @@ enum MergeQueueEvent {
     /// Tells the merge queue that some interesting event has happened and it should thus run
     /// soon(er).
     Notify,
-    /// Shutdown the merge queue.
-    Shutdown,
 }
 
 #[derive(Clone)]
@@ -71,11 +69,6 @@ impl MergeQueueSender {
             .send(MergeQueueEvent::Notify)
             .await
             .map_err(|_| mpsc::error::SendError(()))
-    }
-
-    /// Shutdown the merge queue.
-    pub fn shutdown(&self) {
-        let _ = self.inner.try_send(MergeQueueEvent::Shutdown);
     }
 }
 
@@ -531,10 +524,6 @@ pub fn start_merge_queue(
                 }
                 MergeQueueEvent::Notify => {
                     notified = true;
-                }
-                MergeQueueEvent::Shutdown => {
-                    tracing::debug!("Merge queue received shutdown signal");
-                    break;
                 }
             }
         }

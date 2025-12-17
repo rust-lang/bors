@@ -1028,8 +1028,9 @@ impl BorsTester {
         // Make sure that the event channel senders are closed
         drop(self.app);
         drop(self.global_tx);
-        self.senders.merge_queue().shutdown();
+        // self.senders.merge_queue().shutdown();
         self.senders.mergeability_queue().shutdown();
+        drop(self.senders);
         // Wait until all events are handled in the bors service
         match tokio::time::timeout(Duration::from_secs(5), bors).await {
             Ok(Ok(_)) => {}
