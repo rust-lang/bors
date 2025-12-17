@@ -146,9 +146,12 @@ async fn process_repository(repo: &RepositoryState, ctx: &BorsContext) -> anyhow
                     .await?;
                 break;
             }
-            QueueStatus::Approved(..) => {
-                if handle_start_auto_build(repo, ctx, &pr, pr_num).await? {
-                    break;
+            QueueStatus::Approved(approval_info) => {
+                match handle_start_auto_build(repo, ctx, &pr, pr_num, approval_info).await? {
+                    AutoBuildStartOutcome::BuildStarted | AutoBuildStartOutcome::PauseQueue => {
+                        break;
+                    }
+                    AutoBuildStartOutcome::ContinueToNextPr => {}
                 }
             }
         }
@@ -207,18 +210,27 @@ async fn handle_successful_build(
     Ok(())
 }
 
+enum AutoBuildStartOutcome {
+    /// The auto build has been started.
+    BuildStarted,
+    /// The pull request was kicked out of the queue, continue to the next PR.
+    ContinueToNextPr,
+    /// There was some transient error, the queue should be paused for a bit.
+    PauseQueue,
+}
+
 /// Handle starting a new auto build for an approved PR.
-/// Returns true if the queue should break, false to continue.
 #[tracing::instrument(skip(repo, ctx, pr))]
 async fn handle_start_auto_build(
     repo: &RepositoryState,
     ctx: &BorsContext,
     pr: &PullRequestModel,
     pr_num: PullRequestNumber,
-) -> anyhow::Result<bool> {
-    let Err(error) = start_auto_build(repo, ctx, pr).await else {
-        tracing::info!("Starting auto build for PR {pr_num}");
-        return Ok(true);
+    approval_info: ApprovalInfo,
+) -> anyhow::Result<AutoBuildStartOutcome> {
+    let Err(error) = start_auto_build(repo, ctx, pr, approval_info).await else {
+        tracing::info!("Started auto build for PR {pr_num}");
+        return Ok(AutoBuildStartOutcome::BuildStarted);
     };
 
     match error {
@@ -226,35 +238,65 @@ async fn handle_start_auto_build(
             let gh_pr = repo.client.get_pull_request(pr.number).await?;
             tracing::debug!("Failed to start auto build for PR {pr_num} due to merge conflict");
 
+            // TODO: add PR to mergeability queue?
             ctx.db
                 .set_pr_mergeable_state(repo.repository(), pr.number, MergeableState::Unknown)
                 .await?;
             repo.client
                 .post_comment(pr.number, merge_conflict_comment(&gh_pr.head.name))
                 .await?;
-            Ok(false)
+            Ok(AutoBuildStartOutcome::ContinueToNextPr)
         }
-        StartAutoBuildError::SanityCheckFailed(error) => {
-            tracing::info!("Sanity check failed for PR {pr_num}: {error:?}");
-            Ok(true)
+        StartAutoBuildError::SanityCheckFailed(SanityCheckError::WrongStatus { status }) => {
+            tracing::info!("Sanity check failed for PR {pr_num}: its status was {status}");
+            // The DB PR status was wrong, let's update it.
+            ctx.db
+                .set_pr_status(&pr.repository, pr.number, status)
+                .await?;
+            Ok(AutoBuildStartOutcome::ContinueToNextPr)
+        }
+        StartAutoBuildError::SanityCheckFailed(SanityCheckError::NotMergeable {
+            mergeable_state,
+        }) => {
+            tracing::info!(
+                "Sanity check failed for PR {pr_num}: it was not mergeable (mergeable state: {mergeable_state:?})"
+            );
+            // The DB mergeability status was wrong, let's update it.
+            ctx.db
+                .set_pr_mergeable_state(&pr.repository, pr.number, mergeable_state)
+                .await?;
+            Ok(AutoBuildStartOutcome::ContinueToNextPr)
+        }
+        StartAutoBuildError::SanityCheckFailed(SanityCheckError::ApprovedShaMismatch {
+            approved,
+            actual,
+        }) => {
+            tracing::info!(
+                "Sanity check failed for PR {pr_num}: approved SHA ({approved}) did not match actual SHA ({actual})"
+            );
+            // The PR head SHA does not match the approved SHA.
+            // This should only happen if we missed a PR push webhook (which would normally unapprove
+            // the PR). Let's unapprove it here instead to unblock the queue.
+            ctx.db.unapprove(pr).await?;
+            Ok(AutoBuildStartOutcome::ContinueToNextPr)
         }
         StartAutoBuildError::GitHubError(error) => {
             tracing::debug!(
                 "Failed to start auto build for PR {pr_num} due to a GitHub error: {error:?}"
             );
-            Ok(true)
+            Ok(AutoBuildStartOutcome::PauseQueue)
         }
         StartAutoBuildError::DatabaseError(error) => {
             tracing::debug!(
                 "Failed to start auto build for PR {pr_num} due to database error: {error:?}"
             );
-            Ok(true)
+            Ok(AutoBuildStartOutcome::PauseQueue)
         }
     }
 }
 
 #[must_use]
-pub enum StartAutoBuildError {
+enum StartAutoBuildError {
     /// Merge conflict between PR head and base branch.
     MergeConflict,
     /// Failed to perform required database operation.
@@ -262,32 +304,45 @@ pub enum StartAutoBuildError {
     /// GitHub API error.
     GitHubError(anyhow::Error),
     /// Sanity checks failed - PR state doesn't match requirements.
-    SanityCheckFailed(anyhow::Error),
+    SanityCheckFailed(SanityCheckError),
 }
 
-async fn verify_pr_state(gh_pr: &PullRequest, pr: &PullRequestModel) -> anyhow::Result<()> {
-    let approved_sha = pr
-        .approved_sha()
-        .ok_or_else(|| anyhow::anyhow!("PR is not approved"))?;
+enum SanityCheckError {
+    /// The pull request head SHA (actual) was different than the approved SHA.
+    ApprovedShaMismatch {
+        approved: CommitSha,
+        actual: CommitSha,
+    },
+    /// The pull request was not mergeable.
+    NotMergeable { mergeable_state: MergeableState },
+    /// The pull request was not open.
+    WrongStatus { status: PullRequestStatus },
+}
 
-    anyhow::ensure!(
-        gh_pr.head.sha == CommitSha(approved_sha.to_string()),
-        "PR head SHA {} does not match approved SHA {approved_sha}",
-        gh_pr.head.sha
-    );
-    anyhow::ensure!(
-        matches!(
-            MergeableState::from(gh_pr.mergeable_state.clone()),
-            MergeableState::Mergeable
-        ),
-        "PR is not mergeable, mergeability status: {:?}",
-        gh_pr.mergeable_state
-    );
-    anyhow::ensure!(
-        gh_pr.status == PullRequestStatus::Open,
-        "PR is not open, status: {:?}",
-        gh_pr.status
-    );
+async fn sanity_check_pr(
+    gh_pr: &PullRequest,
+    approval_info: ApprovalInfo,
+) -> Result<(), SanityCheckError> {
+    let approved_sha = approval_info.sha;
+
+    if gh_pr.status != PullRequestStatus::Open {
+        return Err(SanityCheckError::WrongStatus {
+            status: gh_pr.status,
+        });
+    }
+
+    let mergeable_state = MergeableState::from(gh_pr.mergeable_state.clone());
+    if mergeable_state != MergeableState::Mergeable {
+        return Err(SanityCheckError::NotMergeable { mergeable_state });
+    }
+
+    let expected_sha = CommitSha(approved_sha.to_string());
+    if gh_pr.head.sha != expected_sha {
+        return Err(SanityCheckError::ApprovedShaMismatch {
+            approved: expected_sha,
+            actual: gh_pr.head.sha.clone(),
+        });
+    }
     Ok(())
 }
 
@@ -296,6 +351,7 @@ async fn start_auto_build(
     repo: &RepositoryState,
     ctx: &BorsContext,
     pr: &PullRequestModel,
+    approval_info: ApprovalInfo,
 ) -> anyhow::Result<(), StartAutoBuildError> {
     let client = &repo.client;
 
@@ -309,7 +365,7 @@ async fn start_auto_build(
         .map_err(StartAutoBuildError::GitHubError)?;
     let head_sha = gh_pr.head.sha.clone();
 
-    verify_pr_state(&gh_pr, pr)
+    sanity_check_pr(&gh_pr, approval_info)
         .await
         .map_err(StartAutoBuildError::SanityCheckFailed)?;
 
@@ -954,25 +1010,6 @@ merge_queue_enabled = false
     }
 
     #[sqlx::test]
-    async fn auto_build_sanity_check_recovers(pool: sqlx::PgPool) {
-        run_test(pool, async |tester: &mut BorsTester| {
-            let pr = tester.open_pr(default_repo_name(), |_| {}).await?;
-            tester.approve(pr.id()).await?;
-            tester.modify_pr_state(pr.id(), |pr| pr.close_pr()).await;
-            tester.process_merge_queue().await;
-            tester.get_pr_copy(pr.id()).await.expect_no_auto_build();
-            tester.modify_pr_state(pr.id(), |pr| pr.open_pr()).await;
-            tester.start_auto_build(pr.id()).await?;
-            tester
-                .get_pr_copy(pr.id())
-                .await
-                .expect_auto_build(|_| true);
-            Ok(())
-        })
-        .await;
-    }
-
-    #[sqlx::test]
     async fn auto_build_success_updates_check_run(pool: sqlx::PgPool) {
         run_test(pool, async |tester: &mut BorsTester| {
             tester.approve(()).await?;
@@ -1194,5 +1231,67 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
             Ok(())
         })
         .await;
+    }
+
+    // Recover from a situation where an approved PR goes to the head of the queue, but it received
+    // a new push in the meantime, but bors missed the webhook about that push.
+    #[sqlx::test]
+    async fn recover_approved_sha_mismatch_missed_webhook(pool: sqlx::PgPool) {
+        run_test(pool, async |tester: &mut BorsTester| {
+            let pr2 = tester.open_pr(default_repo_name(), |_| {}).await?;
+            let pr3 = tester.open_pr(default_repo_name(), |_| {}).await?;
+
+            // Approve a PR
+            tester.approve(pr2.id()).await?;
+            tester.approve(pr3.id()).await?;
+
+            // Change its head SHA, but don't tell bors about it
+            tester
+                .modify_pr_state(pr2.id(), |pr| {
+                    pr.head_sha = format!("{}-modified", pr.head_sha);
+                })
+                .await;
+
+            // Run the merge queue. It should recover and start merging PR2
+            tester.process_merge_queue().await;
+            let comment = tester.get_next_comment_text(pr3.id()).await?;
+            insta::assert_snapshot!(comment, @":hourglass: Testing commit pr-3-sha with merge merge-0-pr-3...");
+
+            // The merge queue should also unapprove PR1
+            tester.wait_for_pr(pr2.id(), |pr| !pr.is_approved()).await?;
+            tester.get_pr_copy(pr2.id()).await.expect_no_auto_build();
+
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn recover_wrong_pr_status_missed_webhook(pool: sqlx::PgPool) {
+        run_test(pool, async |tester: &mut BorsTester| {
+            let pr2 = tester.open_pr(default_repo_name(), |_| {}).await?;
+            let pr3 = tester.open_pr(default_repo_name(), |_| {}).await?;
+
+            // Approve a PR
+            tester.approve(pr2.id()).await?;
+            tester.approve(pr3.id()).await?;
+
+            // Change its status, but don't tell bors about it
+            tester
+                .modify_pr_state(pr2.id(), |pr| {
+                    pr.close_pr();
+                })
+                .await;
+
+            // Run the merge queue. It should recover and start merging PR2
+            tester.process_merge_queue().await;
+            let comment = tester.get_next_comment_text(pr3.id()).await?;
+            insta::assert_snapshot!(comment, @":hourglass: Testing commit pr-3-sha with merge merge-0-pr-3...");
+
+            tester.get_pr_copy(pr2.id()).await.expect_no_auto_build();
+
+            Ok(())
+        })
+            .await;
     }
 }

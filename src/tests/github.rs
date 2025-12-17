@@ -541,9 +541,9 @@ pub struct PullRequest {
     pub author: User,
     pub base_branch: Branch,
     pub mergeable_state: MergeableState,
-    pub status: PullRequestStatus,
-    pub merged_at: Option<DateTime<Utc>>,
-    pub closed_at: Option<DateTime<Utc>>,
+    pub(super) status: PullRequestStatus,
+    pub(super) merged_at: Option<DateTime<Utc>>,
+    pub(super) closed_at: Option<DateTime<Utc>>,
     pub assignees: Vec<User>,
     pub description: String,
     pub title: String,
@@ -608,11 +608,6 @@ impl PullRequest {
     pub fn close_pr(&mut self) {
         self.closed_at = Some(SystemTime::now().into());
         self.status = PullRequestStatus::Closed;
-    }
-
-    pub fn open_pr(&mut self) {
-        self.status = PullRequestStatus::Open;
-        self.closed_at = None;
     }
 
     pub fn reopen_pr(&mut self) {
