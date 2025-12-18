@@ -1256,4 +1256,20 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
         })
             .await;
     }
+
+    #[sqlx::test]
+    async fn try_build_while_auto_build_is_running(pool: sqlx::PgPool) {
+        run_test(pool, async |tester: &mut BorsTester| {
+            tester.approve(()).await?;
+            tester.start_auto_build(()).await?;
+            tester.post_comment("@bors try").await?;
+            tester.expect_comments((), 1).await;
+            tester.workflow_full_success(tester.try_workflow()).await?;
+            tester.expect_comments((), 1).await;
+            tester.finish_auto_build(()).await?;
+
+            Ok(())
+        })
+        .await;
+    }
 }
