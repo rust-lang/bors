@@ -62,9 +62,9 @@ pub use utils::webhook::{TEST_WEBHOOK_SECRET, create_webhook_request};
 
 /// How long should we wait before we timeout a test.
 /// You can increase this if you want to do interactive debugging.
-const TEST_TIMEOUT: Duration = Duration::from_secs(150);
-const SYNC_MARKER_TIMEOUT: Duration = Duration::from_secs(100);
-const COMMENT_RECEIVE_TIMEOUT: Duration = Duration::from_secs(100);
+const TEST_TIMEOUT: Duration = Duration::from_secs(15);
+const SYNC_MARKER_TIMEOUT: Duration = Duration::from_secs(10);
+const COMMENT_RECEIVE_TIMEOUT: Duration = Duration::from_secs(10);
 
 const TRY_BRANCH: &str = "automation/bors/try";
 const AUTO_BRANCH: &str = "automation/bors/auto";
@@ -441,7 +441,7 @@ impl BorsTester {
         Ok(())
     }
 
-    pub async fn cancel_timed_out_builds(&self) {
+    pub async fn refresh_pending_builds(&self) {
         // Wait until the refresh is fully handled
         wait_for_marker(
             async || {
