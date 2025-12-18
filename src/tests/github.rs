@@ -2,10 +2,9 @@ use crate::OAuthConfig;
 use crate::bors::PullRequestStatus;
 use crate::database::WorkflowStatus;
 use crate::github::api::client::HideCommentReason;
-use crate::github::{GithubRepoName, PullRequestNumber};
+use crate::github::{CommitSha, GithubRepoName, PullRequestNumber};
 use crate::permissions::PermissionType;
 use crate::tests::COMMENT_RECEIVE_TIMEOUT;
-use crate::tests::{AUTO_BRANCH, TRY_BRANCH};
 use chrono::{DateTime, Utc};
 use octocrab::models::pulls::MergeableState;
 use octocrab::models::workflows::Conclusion;
@@ -56,6 +55,10 @@ impl GitHub {
         assert!(self.users.insert(user.name.clone(), user).is_none());
     }
 
+    pub fn get_user(&self, name: &str) -> Option<&User> {
+        self.users.get(name)
+    }
+
     pub fn default_repo(&self) -> Arc<Mutex<Repo>> {
         self.get_repo(default_repo_name())
     }
@@ -101,7 +104,10 @@ impl GitHub {
             .lock()
             .get_branch_by_name(branch)
             .expect("Branch not found")
-            .get_sha_history();
+            .get_commit_history()
+            .into_iter()
+            .map(|b| b.sha)
+            .collect::<Vec<_>>();
         let actual_shas: Vec<&str> = actual_shas.iter().map(|s| s.as_str()).collect();
         assert_eq!(actual_shas, expected_shas);
     }
@@ -346,13 +352,13 @@ pub struct Repo {
     pub permissions: Permissions,
     pub config: String,
     branches: Vec<Branch>,
-    commit_messages: HashMap<String, String>,
+    commits: HashMap<CommitSha, Commit>,
     workflows_cancelled_by_bors: Vec<RunId>,
     pub workflow_cancel_error: bool,
     /// All workflows that we know about from the side of the test.
     workflow_runs: Vec<WorkflowRun>,
-    pub pull_requests: HashMap<u64, PullRequest>,
-    pub check_runs: Vec<CheckRunData>,
+    pull_requests: HashMap<u64, PullRequest>,
+    check_runs: Vec<CheckRunData>,
     /// Cause pull request fetch to fail.
     pub pull_request_error: bool,
     /// Push error failure/success behaviour.
@@ -363,14 +369,14 @@ pub struct Repo {
 
 impl Repo {
     pub fn new(owner: User, name: &str) -> Self {
-        Self {
+        let mut repo = Self {
             name: name.to_string(),
             permissions: Permissions::empty(),
             config: String::new(),
             owner,
             pull_requests: Default::default(),
-            branches: vec![Branch::default()],
-            commit_messages: Default::default(),
+            branches: vec![],
+            commits: Default::default(),
             workflows_cancelled_by_bors: vec![],
             workflow_cancel_error: false,
             workflow_runs: vec![],
@@ -379,7 +385,9 @@ impl Repo {
             check_runs: vec![],
             push_behaviour: BranchPushBehaviour::default(),
             fork: false,
-        }
+        };
+        repo.add_branch(Branch::default());
+        repo
     }
 
     pub fn full_name(&self) -> GithubRepoName {
@@ -392,6 +400,18 @@ impl Repo {
 
     pub fn branches(&self) -> &[Branch] {
         &self.branches
+    }
+
+    pub fn check_runs(&self) -> &[CheckRunData] {
+        &self.check_runs
+    }
+
+    pub fn pulls(&self) -> &HashMap<u64, PullRequest> {
+        &self.pull_requests
+    }
+
+    pub fn pulls_mut(&mut self) -> &mut HashMap<u64, PullRequest> {
+        &mut self.pull_requests
     }
 
     pub fn with_user_perms(mut self, user: User, permissions: &[PermissionType]) -> Self {
@@ -416,27 +436,32 @@ impl Repo {
 
     pub fn add_branch(&mut self, branch: Branch) {
         assert!(self.get_branch_by_name(&branch.name).is_none());
+        for commit in &branch.commits {
+            self.commits
+                .entry(commit.commit_sha())
+                .or_insert_with(|| commit.clone());
+        }
         self.branches.push(branch);
-    }
-
-    pub fn try_branch(&self) -> Branch {
-        self.branches
-            .iter()
-            .find(|b| b.name == TRY_BRANCH)
-            .expect("Try branch not found")
-            .clone()
-    }
-
-    pub fn auto_branch(&self) -> Branch {
-        self.branches
-            .iter()
-            .find(|b| b.name == AUTO_BRANCH)
-            .expect("Auto branch not found")
-            .clone()
     }
 
     pub fn get_branch_by_name(&mut self, name: &str) -> Option<&mut Branch> {
         self.branches.iter_mut().find(|b| b.name == name)
+    }
+
+    pub fn push_commit(&mut self, branch_name: &str, commit: Commit) {
+        self.get_branch_by_name(branch_name)
+            .expect("Pushing to a non-existing branch")
+            .push_commit(commit.clone());
+        if let Some(old) = self.commits.insert(commit.commit_sha(), commit.clone()) {
+            assert_eq!(old, commit);
+        }
+    }
+
+    pub fn get_commit_by_sha(&self, sha: &str) -> Commit {
+        self.commits
+            .get(&CommitSha(sha.to_owned()))
+            .expect("Looking up non-existing commit SHA")
+            .clone()
     }
 
     pub fn add_cancelled_workflow(&mut self, run_id: RunId) {
@@ -469,18 +494,6 @@ impl Repo {
     pub fn get_next_pr_push_counter(&mut self) -> u64 {
         self.pr_push_counter += 1;
         self.pr_push_counter
-    }
-
-    pub fn get_commit_message(&self, sha: &str) -> String {
-        self.commit_messages
-            .get(sha)
-            .expect("Commit message not found")
-            .clone()
-    }
-
-    pub fn set_commit_message(&mut self, sha: &str, message: &str) {
-        self.commit_messages
-            .insert(sha.to_string(), message.to_string());
     }
 
     pub fn find_workflow(&self, id: RunId) -> Option<WorkflowRun> {
@@ -661,17 +674,17 @@ impl PullRequest {
         )
     }
 
-    pub fn merge_pr(&mut self) {
+    pub fn merge(&mut self) {
         self.merged_at = Some(SystemTime::now().into());
         self.status = PullRequestStatus::Merged;
     }
 
-    pub fn close_pr(&mut self) {
+    pub fn close(&mut self) {
         self.closed_at = Some(SystemTime::now().into());
         self.status = PullRequestStatus::Closed;
     }
 
-    pub fn reopen_pr(&mut self) {
+    pub fn reopen(&mut self) {
         self.closed_at = None;
         self.status = PullRequestStatus::Open;
     }
@@ -691,46 +704,73 @@ impl PullRequest {
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Branch {
-    pub name: String,
-    pub sha: String,
-    sha_history: Vec<String>,
+    name: String,
+    commits: Vec<Commit>,
     pub merge_counter: u64,
     pub merge_conflict: bool,
 }
 
 impl Branch {
-    pub fn new(name: &str, sha: &str) -> Self {
+    pub fn new(name: &str, commit: Commit) -> Self {
         Self {
             name: name.to_string(),
-            sha: sha.to_string(),
-            sha_history: vec![],
+            commits: vec![commit],
             merge_counter: 0,
             merge_conflict: false,
         }
     }
 
-    pub fn get_name(&self) -> &str {
+    pub fn name(&self) -> &str {
         &self.name
     }
-    pub fn get_sha(&self) -> &str {
-        &self.sha
+    pub fn get_commit(&self) -> &Commit {
+        self.commits.last().unwrap()
+    }
+    pub fn sha(&self) -> String {
+        self.get_commit().sha().to_owned()
     }
 
-    pub fn set_to_sha(&mut self, sha: &str) {
-        self.sha_history.push(self.sha.clone());
-        self.sha = sha.to_string();
+    fn push_commit(&mut self, commit: Commit) {
+        self.commits.push(commit);
     }
 
-    pub fn get_sha_history(&self) -> Vec<String> {
-        let mut shas = self.sha_history.clone();
-        shas.push(self.sha.clone());
-        shas
+    pub fn get_commit_history(&self) -> Vec<Commit> {
+        self.commits.clone()
     }
 }
 
 impl Default for Branch {
     fn default() -> Self {
-        Self::new(default_branch_name(), default_branch_sha())
+        Self::new(
+            default_branch_name(),
+            Commit::new(default_branch_sha(), "initial commit"),
+        )
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct Commit {
+    sha: String,
+    message: String,
+}
+
+impl Commit {
+    pub fn new(sha: &str, message: &str) -> Self {
+        Self {
+            sha: sha.to_owned(),
+            message: message.to_owned(),
+        }
+    }
+
+    pub fn sha(&self) -> &str {
+        &self.sha
+    }
+    pub fn commit_sha(&self) -> CommitSha {
+        CommitSha(self.sha.to_owned())
+    }
+
+    pub fn message(&self) -> &str {
+        &self.message
     }
 }
 
@@ -743,7 +783,7 @@ pub enum BranchPushError {
 
 #[derive(Clone, Debug)]
 pub struct BranchPushBehaviour {
-    pub error: Option<(BranchPushError, NonZeroU64)>,
+    error: Option<(BranchPushError, NonZeroU64)>,
 }
 
 impl BranchPushBehaviour {
@@ -754,6 +794,19 @@ impl BranchPushBehaviour {
     pub fn always_fail(error_type: BranchPushError) -> Self {
         Self {
             error: Some((error_type, NonZeroU64::new(u64::MAX).unwrap())),
+        }
+    }
+
+    pub fn try_push(&mut self) -> Option<BranchPushError> {
+        if let Some((error, remaining)) = self.error.clone() {
+            if remaining.get() == 1 {
+                self.error = None;
+            } else {
+                self.error = Some((error.clone(), NonZeroU64::new(remaining.get() - 1).unwrap()));
+            }
+            Some(error)
+        } else {
+            None
         }
     }
 }
@@ -779,12 +832,12 @@ pub enum CommentMsg {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Comment {
-    pub pr_ident: PrIdentifier,
-    pub author: User,
-    pub content: String,
-    pub id: Option<u64>,
-    pub node_id: Option<String>,
-    pub hide_reason: Option<HideCommentReason>,
+    pr_ident: PrIdentifier,
+    author: User,
+    content: String,
+    id: Option<u64>,
+    node_id: Option<String>,
+    hide_reason: Option<HideCommentReason>,
 }
 
 impl Comment {
@@ -809,6 +862,33 @@ impl Comment {
             node_id: Some(node_id),
             ..self
         }
+    }
+
+    pub fn pr_ident(&self) -> PrIdentifier {
+        self.pr_ident.clone()
+    }
+
+    pub fn author(&self) -> User {
+        self.author.clone()
+    }
+
+    pub fn content(&self) -> String {
+        self.content.clone()
+    }
+    pub fn set_content(&mut self, content: &str) {
+        self.content = content.to_owned();
+    }
+
+    pub fn id(&self) -> Option<u64> {
+        self.id
+    }
+
+    pub fn node_id(&self) -> Option<String> {
+        self.node_id.clone()
+    }
+
+    pub fn hide(&mut self, reason: HideCommentReason) {
+        self.hide_reason = Some(reason);
     }
 }
 
@@ -913,9 +993,9 @@ impl WorkflowRun {
             name: "Workflow1".to_string(),
             run_id,
             check_suite_id: CheckSuiteId(run_id.0),
-            head_branch: branch.get_name().to_string(),
+            head_branch: branch.name().to_string(),
             jobs: vec![],
-            head_sha: branch.get_sha().to_string(),
+            head_sha: branch.sha(),
             duration: Duration::from_secs(3600),
         }
     }

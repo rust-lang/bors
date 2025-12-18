@@ -1,16 +1,18 @@
 use super::{
-    GitHubUser, User, comment::GitHubComment, dynamic_mock_req, oauth_user_from_request,
-    repository::GitHubRepository,
+    GitHubUser, User, comment::GitHubComment, dynamic_mock_req, repository::GitHubRepository,
 };
 use crate::bors::PullRequestStatus;
+use crate::github::GithubRepoName;
 use crate::tests::Repo;
 use crate::tests::github::{CommentMsg, PullRequest};
-use crate::tests::{Branch, Comment};
+use crate::tests::{Comment, GitHub};
 use chrono::{DateTime, Utc};
 use octocrab::models::LabelId;
 use octocrab::models::pulls::MergeableState as OctocrabMergeableState;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
+use std::collections::HashMap;
 use std::sync::Arc;
 use url::Url;
 use wiremock::{
@@ -18,10 +20,14 @@ use wiremock::{
     matchers::{method, path},
 };
 
-pub async fn mock_pull_requests(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
+pub async fn mock_pull_requests(
+    repo: Arc<Mutex<Repo>>,
+    github: Arc<Mutex<GitHub>>,
+    mock_server: &MockServer,
+) {
     mock_pr_list(repo.clone(), mock_server).await;
     mock_pr(repo.clone(), mock_server).await;
-    mock_pr_create(repo.clone(), mock_server).await;
+    mock_pr_create(repo.clone(), github, mock_server).await;
     mock_pr_comments(repo.clone(), mock_server).await;
     mock_pr_labels(repo, mock_server).await;
 }
@@ -34,7 +40,7 @@ async fn mock_pr(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
             let pull_request_error = repo.lock().pull_request_error;
             if pull_request_error {
                 ResponseTemplate::new(500)
-            } else if let Some(pr) = repo.lock().pull_requests.get(&pr_number) {
+            } else if let Some(pr) = repo.lock().pulls().get(&pr_number) {
                 ResponseTemplate::new(200).set_body_json(GitHubPullRequest::from(pr.clone()))
             } else {
                 ResponseTemplate::new(404)
@@ -47,7 +53,11 @@ async fn mock_pr(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
     .await;
 }
 
-async fn mock_pr_create(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
+async fn mock_pr_create(
+    repo: Arc<Mutex<Repo>>,
+    github: Arc<Mutex<GitHub>>,
+    mock_server: &MockServer,
+) {
     let repo_name = repo.lock().full_name();
     dynamic_mock_req(
         move |req: &Request, []: [&str; 0]| {
@@ -63,14 +73,38 @@ async fn mock_pr_create(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
 
             let data: RequestData = req.body_json::<RequestData>().unwrap();
 
-            let user = oauth_user_from_request(req);
-            let pr = repo.add_pr(user);
+            // We only support PRs from forks for now
+            assert!(data.head.contains(":"));
 
+            let (fork_owner, branch) = data.head.split_once(":").unwrap();
+            assert_ne!(fork_owner, repo.full_name().owner());
+            let fork = github
+                .lock()
+                .repos
+                .get(&GithubRepoName::new(fork_owner, repo.full_name().name()))
+                .expect("Fork not found")
+                .clone();
+            let commit = fork
+                .lock()
+                .get_branch_by_name(branch)
+                .expect("Fork PR source branch not found")
+                .get_commit()
+                .clone();
+
+            let pr_author = github
+                .lock()
+                .get_user(fork_owner)
+                .expect("PR author not found")
+                .clone();
+            let base_branch = repo
+                .get_branch_by_name(&data.base)
+                .expect("Base branch not found")
+                .clone();
+            let pr = repo.add_pr(pr_author);
             pr.title = data.title;
             pr.description = data.body;
-            // TODO: load this from GitHub state
-            pr.head_sha = data.head;
-            pr.base_branch = Branch::new(&data.base, "sha");
+            pr.head_sha = commit.sha().to_owned();
+            pr.base_branch = base_branch;
             ResponseTemplate::new(200).set_body_json(GitHubPullRequest::from(pr.clone()))
         },
         "POST",
@@ -84,16 +118,32 @@ async fn mock_pr_list(repo_clone: Arc<Mutex<Repo>>, mock_server: &MockServer) {
     let repo_name = repo_clone.lock().full_name();
     Mock::given(method("GET"))
         .and(path(format!("/repos/{repo_name}/pulls")))
-        .respond_with(move |_: &Request| {
+        .respond_with(move |req: &Request| {
             let pull_request_error = repo_clone.lock().pull_request_error;
             if pull_request_error {
                 ResponseTemplate::new(500)
             } else {
-                let prs = repo_clone.lock().pull_requests.clone();
+                let query: HashMap<Cow<str>, Cow<str>> = req.url.query_pairs().collect();
+                let filter_statuses = query
+                    .get("state")
+                    .map(|s| match s.as_ref() {
+                        "open" => vec![PullRequestStatus::Open, PullRequestStatus::Draft],
+                        "closed" => vec![PullRequestStatus::Closed, PullRequestStatus::Merged],
+                        _ => vec![],
+                    })
+                    .unwrap_or_default();
+                let prs = repo_clone.lock().pulls().clone();
+
                 ResponseTemplate::new(200).set_body_json(
                     prs.values()
+                        .filter(|pr| {
+                            if !filter_statuses.is_empty() {
+                                filter_statuses.contains(&pr.status)
+                            } else {
+                                true
+                            }
+                        })
                         .map(|pr| GitHubPullRequest::from(pr.clone()))
-                        .filter(|pr| pr.closed_at.is_none())
                         .collect::<Vec<_>>(),
                 )
             }
@@ -116,7 +166,7 @@ async fn mock_pr_comments(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
             let comment_payload: CommentCreatePayload = req.body_json().unwrap();
             let mut repo = repo.lock();
             let repo_name = repo.full_name();
-            let pr = repo.pull_requests.get_mut(&pr_number).unwrap_or_else(|| {
+            let pr = repo.pulls_mut().get_mut(&pr_number).unwrap_or_else(|| {
                 panic!("Received a comment for a non-existing PR {repo_name}/{pr_number}")
             });
             let (id, node_id) = pr.next_comment_ids();
@@ -155,7 +205,7 @@ async fn mock_pr_labels(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
 
             let data: CreateLabelsPayload = req.body_json().unwrap();
             let mut repo = repo.lock();
-            let Some(pr) = repo.pull_requests.get_mut(&pr_number) else {
+            let Some(pr) = repo.pulls_mut().get_mut(&pr_number) else {
                 return ResponseTemplate::new(404);
             };
             pr.labels_added_by_bors.extend(data.labels.clone());
@@ -188,7 +238,7 @@ async fn mock_pr_labels(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
             let pr_number: u64 = pr_number.parse().unwrap();
 
             let mut repo = repo2.lock();
-            let Some(pr) = repo.pull_requests.get_mut(&pr_number) else {
+            let Some(pr) = repo.pulls_mut().get_mut(&pr_number) else {
                 return ResponseTemplate::new(404);
             };
             pr.labels_removed_by_bors.push(label_name.to_string());
@@ -267,8 +317,8 @@ impl From<PullRequest> for GitHubPullRequest {
                 sha: head_sha,
             }),
             base: Box::new(GitHubBase {
-                ref_field: base_branch.get_name().to_string(),
-                sha: base_branch.get_sha().to_string(),
+                ref_field: base_branch.name().to_string(),
+                sha: base_branch.sha(),
             }),
             merged_at,
             closed_at,

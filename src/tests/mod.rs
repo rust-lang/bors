@@ -48,6 +48,7 @@ use crate::tests::mock::{
 };
 pub use github::Branch;
 pub use github::Comment;
+pub use github::Commit;
 pub use github::GitHub;
 pub use github::Permissions;
 pub use github::Repo;
@@ -103,9 +104,9 @@ impl BorsBuilder {
         self,
         f: F,
     ) -> GitHub {
-        // We return `tester` and `bors` separately, so that we can finish `bors`
+        // We return `ctx` and `bors` separately, so that we can finish `bors`
         // even if `f` returns an error or times out, for better error propagation.
-        let (mut tester, mut bors) = BorsTester::new(self.pool, self.github).await;
+        let (mut ctx, mut bors) = BorsTester::new(self.pool, self.github).await;
 
         tokio::select! {
             // If the service ends sooner than the test itself, then the service has panicked.
@@ -114,8 +115,8 @@ impl BorsBuilder {
                 let error = res.expect_err("Bors service ended unexpectedly without a panic");
                 panic!("Bors service has ended unexpectedly: {:?}", join_error_to_anyhow(error));
             }
-            result = tokio::time::timeout(TEST_TIMEOUT, f(&mut tester)) => {
-                let gh_state = tester.finish(bors).await;
+            result = tokio::time::timeout(TEST_TIMEOUT, f(&mut ctx)) => {
+                let gh_state = ctx.finish(bors).await;
 
                 match result {
                     Ok(res) => match res {
@@ -257,13 +258,8 @@ impl BorsTester {
         )
     }
 
-    //--- Getters for various test state ---//
     pub fn db(&self) -> Arc<PgDbClient> {
         self.db.clone()
-    }
-
-    pub fn gh(&self) -> Arc<Mutex<GitHub>> {
-        self.github.clone()
     }
 
     /// Return the default repo
@@ -287,13 +283,16 @@ impl BorsTester {
     }
 
     pub fn try_workflow(&self) -> RunId {
-        let mut gh = self.github.lock();
-        gh.new_workflow(&default_repo_name(), TRY_BRANCH)
+        self.create_workflow(default_repo_name(), TRY_BRANCH)
     }
 
     pub fn auto_workflow(&self) -> RunId {
+        self.create_workflow(default_repo_name(), AUTO_BRANCH)
+    }
+
+    pub fn create_workflow<Id: Into<RepoIdentifier>>(&self, id: Id, branch: &str) -> RunId {
         let mut gh = self.github.lock();
-        gh.new_workflow(&default_repo_name(), AUTO_BRANCH)
+        gh.new_workflow(&id.into().0, branch)
     }
 
     pub fn modify_workflow<F: FnOnce(&mut WorkflowRun)>(&mut self, run_id: RunId, func: F) {
@@ -303,20 +302,10 @@ impl BorsTester {
     }
 
     /// Get a PR proxy that can be used to assert various things about the PR.
-    pub async fn get_pr_copy<Id: Into<PrIdentifier>>(&self, id: Id) -> PullRequestProxy {
+    pub async fn pr<Id: Into<PrIdentifier>>(&self, id: Id) -> PullRequestProxy {
         let id = id.into();
         let pr = self.get_repo(id.repo).lock().get_pr(id.number).clone();
         PullRequestProxy::new(self, pr).await
-    }
-
-    async fn try_get_pr_from_db<Id: Into<PrIdentifier>>(
-        &self,
-        id: Id,
-    ) -> anyhow::Result<Option<PullRequestModel>> {
-        let id = id.into();
-        self.db()
-            .get_pull_request(&id.repo, PullRequestNumber(id.number))
-            .await
     }
 
     /// Wait until a pull request is in the database and satisfies a given condition.
@@ -343,6 +332,22 @@ impl BorsTester {
         .await
     }
 
+    pub fn try_branch(&self) -> Branch {
+        self.repo()
+            .lock()
+            .get_branch_by_name(TRY_BRANCH)
+            .unwrap()
+            .clone()
+    }
+
+    pub fn auto_branch(&self) -> Branch {
+        self.repo()
+            .lock()
+            .get_branch_by_name(AUTO_BRANCH)
+            .unwrap()
+            .clone()
+    }
+
     /// Creates a branch and returns a **copy** of it.
     pub fn create_branch(&mut self, name: &str) -> Branch {
         let repo = self
@@ -354,11 +359,14 @@ impl BorsTester {
             .clone();
         let mut repo = repo.lock();
 
-        repo.add_branch(Branch::new(name, &format!("{name}-initial")));
+        repo.add_branch(Branch::new(
+            name,
+            Commit::new("initial-sha", &format!("{name}-initial")),
+        ));
         repo.get_branch_by_name(name).unwrap().clone()
     }
 
-    /// Modifies an existing branch on the default repository.
+    /// Modifies a branch on the default repository.
     /// If it doesn't exist yet, it will be created.
     pub fn modify_branch<F: FnOnce(&mut Branch)>(&mut self, name: &str, func: F) {
         let repo = self
@@ -376,28 +384,15 @@ impl BorsTester {
         }
     }
 
-    pub fn get_branch_commit_message(&self, branch: &Branch) -> String {
-        self.github
-            .lock()
-            .default_repo()
-            .lock()
-            .get_commit_message(branch.get_sha())
-    }
-
-    pub async fn push_to_branch(&mut self, branch: &str, sha: &str) -> anyhow::Result<()> {
+    pub async fn push_to_branch(&mut self, branch: &str, commit: Commit) -> anyhow::Result<()> {
         let payload = {
             let gh = self.github.lock();
-            GitHubPushEventPayload::new(&gh.get_repo(default_repo_name()).lock(), branch, sha)
+            let repo = gh.get_repo(default_repo_name());
+            let mut repo = repo.lock();
+            repo.push_commit(branch, commit.clone());
+            GitHubPushEventPayload::new(&repo, branch, commit.sha())
         };
         self.send_webhook("push", payload).await
-    }
-
-    pub fn try_branch(&self) -> Branch {
-        self.repo().lock().try_branch()
-    }
-
-    pub fn auto_branch(&self) -> Branch {
-        self.repo().lock().auto_branch()
     }
 
     /// Wait until the next bot comment is received on the specified repo and PR, and return its
@@ -408,7 +403,7 @@ impl BorsTester {
     ) -> anyhow::Result<String> {
         Ok(GitHub::get_next_comment(self.github.clone(), id)
             .await?
-            .content)
+            .content())
     }
 
     /// Wait until the next bot comment is received on the specified repo and PR, and return it.
@@ -419,16 +414,15 @@ impl BorsTester {
         GitHub::get_next_comment(self.github.clone(), id).await
     }
 
-    //-- Generation of GitHub events --//
     pub async fn post_comment<C: Into<Comment>>(&mut self, comment: C) -> anyhow::Result<Comment> {
         let comment = comment.into();
 
         // Allocate comment IDs
         let comment = {
             let gh = self.github.lock();
-            let repo = gh.get_repo(&comment.pr_ident.repo);
+            let repo = gh.get_repo(&comment.pr_ident().repo);
             let mut repo = repo.lock();
-            let pr = repo.get_pr_mut(comment.pr_ident.number);
+            let pr = repo.get_pr_mut(comment.pr_ident().number);
             let (id, node_id) = pr.next_comment_ids();
             let comment = comment.with_ids(id, node_id);
             pr.add_comment_to_history(comment.clone());
@@ -583,21 +577,6 @@ impl BorsTester {
         self.workflow_event(WorkflowEvent::started(run_id)).await
     }
 
-    /// Performs all necessary events to complete a single workflow (start, success/fail).
-    #[inline]
-    pub async fn workflow_full(
-        &mut self,
-        run_id: RunId,
-        status: TestWorkflowStatus,
-    ) -> anyhow::Result<()> {
-        self.workflow_event(WorkflowEvent::started(run_id)).await?;
-        let event = match status {
-            TestWorkflowStatus::Success => WorkflowEvent::success(run_id),
-            TestWorkflowStatus::Failure => WorkflowEvent::failure(run_id),
-        };
-        self.workflow_event(event).await
-    }
-
     pub async fn workflow_full_success(&mut self, run_id: RunId) -> anyhow::Result<()> {
         self.workflow_full(run_id, TestWorkflowStatus::Success)
             .await
@@ -617,22 +596,18 @@ impl BorsTester {
         modify_pr: F,
     ) -> anyhow::Result<PullRequest> {
         let repo = repo.into();
-        let number = {
-            let repo = self.github.lock().get_repo(repo.clone());
-            let repo = repo.lock();
-            repo.pull_requests.keys().max().copied().unwrap_or(0) + 1
-        };
-
-        let mut pr = PullRequest::new(repo.0.clone(), number, User::default_pr_author());
-        modify_pr(&mut pr);
 
         // Add the PR to the repository
-        let payload = {
+        let (payload, pr) = {
             let gh = self.github.lock();
             let repo = gh.get_repo(repo);
             let mut repo = repo.lock();
-            repo.pull_requests.insert(number, pr.clone());
-            GitHubPullRequestEventPayload::new(&repo, pr.clone(), "opened", None)
+            let pr = repo.add_pr(User::default_pr_author());
+            modify_pr(pr);
+            let pr = pr.clone();
+
+            let payload = GitHubPullRequestEventPayload::new(&repo, pr.clone(), "opened", None);
+            (payload, pr)
         };
 
         self.send_webhook("pull_request", payload).await?;
@@ -641,7 +616,7 @@ impl BorsTester {
 
     /// Modifies the given PR state in the GitHub mock (**without sending a webhook**)
     /// and returns a copy of it.
-    pub fn modify_pr_state<Id: Into<PrIdentifier>, F: FnOnce(&mut PullRequest)>(
+    pub fn modify_pr<Id: Into<PrIdentifier>, F: FnOnce(&mut PullRequest)>(
         &mut self,
         id: Id,
         func: F,
@@ -649,17 +624,14 @@ impl BorsTester {
         let id = id.into();
         let repo = self.github.lock().get_repo(&id.repo);
         let mut repo = repo.lock();
-        let pr = repo
-            .pull_requests
-            .get_mut(&id.number)
-            .expect("PR must exist");
+        let pr = repo.pulls_mut().get_mut(&id.number).expect("PR must exist");
         func(pr);
         pr.clone()
     }
 
     pub async fn reopen_pr<Id: Into<PrIdentifier>>(&mut self, id: Id) -> anyhow::Result<()> {
         let id = id.into();
-        let pr = self.modify_pr_state(id, |pr| pr.reopen_pr());
+        let pr = self.modify_pr(id, |pr| pr.reopen());
 
         let payload = {
             let gh = self.github.lock();
@@ -674,7 +646,7 @@ impl BorsTester {
         &mut self,
         id: Id,
     ) -> anyhow::Result<()> {
-        let pr = self.modify_pr_state(id, |pr| pr.close_pr());
+        let pr = self.modify_pr(id, |pr| pr.close());
 
         let payload = {
             let gh = self.github.lock();
@@ -688,7 +660,7 @@ impl BorsTester {
         &mut self,
         id: Id,
     ) -> anyhow::Result<()> {
-        let pr = self.modify_pr_state(id, |pr| pr.convert_to_draft());
+        let pr = self.modify_pr(id, |pr| pr.convert_to_draft());
 
         let payload = {
             let gh = self.github.lock();
@@ -707,7 +679,7 @@ impl BorsTester {
         &mut self,
         id: Id,
     ) -> anyhow::Result<()> {
-        let pr = self.modify_pr_state(id, |pr| pr.ready_for_review());
+        let pr = self.modify_pr(id, |pr| pr.ready_for_review());
 
         let payload = {
             let gh = self.github.lock();
@@ -726,7 +698,7 @@ impl BorsTester {
         &mut self,
         id: Id,
     ) -> anyhow::Result<()> {
-        let pr = self.modify_pr_state(id, |pr| pr.merge_pr());
+        let pr = self.modify_pr(id, |pr| pr.merge());
 
         let payload = {
             let gh = self.github.lock();
@@ -757,7 +729,7 @@ impl BorsTester {
 
             let changes = if base_before != pr.base_branch {
                 Some(PullRequestChangeEvent {
-                    from_base_sha: Some(base_before.get_sha().to_string()),
+                    from_base_sha: Some(base_before.get_commit().sha().to_string()),
                 })
             } else {
                 None
@@ -778,7 +750,7 @@ impl BorsTester {
             let counter = repo.get_next_pr_push_counter();
 
             let pr = repo
-                .pull_requests
+                .pulls_mut()
                 .get_mut(&id.number)
                 .expect("PR must be initialized before pushing to it");
             pr.head_sha = format!("pr-{}-commit-{counter}", id.number);
@@ -795,7 +767,7 @@ impl BorsTester {
         id: Id,
         assignee: User,
     ) -> anyhow::Result<()> {
-        let pr = self.modify_pr_state(id, |pr| pr.assignees.push(assignee.clone()));
+        let pr = self.modify_pr(id, |pr| pr.assignees.push(assignee.clone()));
         let payload = {
             let gh = self.github.lock();
             GitHubPullRequestEventPayload::new(&gh.get_repo(&pr.repo).lock(), pr, "assigned", None)
@@ -808,7 +780,7 @@ impl BorsTester {
         id: Id,
         assignee: User,
     ) -> anyhow::Result<()> {
-        let pr = self.modify_pr_state(id, |pr| pr.assignees.retain(|a| a != &assignee));
+        let pr = self.modify_pr(id, |pr| pr.assignees.retain(|a| a != &assignee));
         let payload = {
             let gh = self.github.lock();
             GitHubPullRequestEventPayload::new(
@@ -831,12 +803,12 @@ impl BorsTester {
             .get_repo(&id.repo)
             .lock()
             .get_branch_by_name(AUTO_BRANCH)
-            .map(|b| b.sha.clone());
+            .map(|b| b.sha());
 
         self.run_merge_queue_now().await;
         let comment = self.get_next_comment_text(id).await?;
         assert!(comment.contains("Testing commit"));
-        let new_auto_sha = self.auto_branch().sha;
+        let new_auto_sha = self.auto_branch().sha();
         if let Some(previous_sha) = previous_sha {
             assert_ne!(previous_sha, new_auto_sha, "Auto SHA did not change");
         }
@@ -867,7 +839,6 @@ impl BorsTester {
         self.finish_auto_build(id).await
     }
 
-    //-- Test assertions --//
     /// Expect that `count` comments will be received, without checking their contents.
     pub async fn expect_comments<Id: Into<PrIdentifier>>(&mut self, id: Id, count: u64) {
         let id = id.into();
@@ -879,11 +850,23 @@ impl BorsTester {
         }
     }
 
+    /// Assert that (exactly) these workflows have been cancelled.
+    pub fn expect_cancelled_workflows<Id: Into<RepoIdentifier>>(&self, id: Id, ids: &[RunId]) {
+        self.github
+            .lock()
+            .check_cancelled_workflows(id.into().0, ids);
+    }
+
     /// Assert that the given comment has been hidden.
     pub fn expect_hidden_comment(&self, comment: &Comment, reason: HideCommentReason) {
         self.github
             .lock()
-            .check_comment_was_hidden(comment.node_id.as_deref().unwrap(), reason);
+            .check_comment_was_hidden(comment.node_id().as_deref().unwrap(), reason);
+    }
+
+    /// Get a GitHub comment that might have been modified by API calls from bors.
+    pub fn get_comment_by_node_id(&self, node_id: &str) -> Option<Comment> {
+        self.github.lock().get_comment_by_node_id(node_id).cloned()
     }
 
     pub fn expect_check_run(
@@ -897,7 +880,7 @@ impl BorsTester {
         let repo = self.repo();
         let repo = repo.lock();
         let check_runs: Vec<_> = repo
-            .check_runs
+            .check_runs()
             .iter()
             .filter(|check_run| check_run.head_sha == head_sha)
             .collect();
@@ -941,41 +924,6 @@ impl BorsTester {
         );
 
         self
-    }
-
-    /// Wait until the given condition is true.
-    /// Checks the condition every 500ms.
-    /// Times out if it takes too long (more than 5s).
-    ///
-    /// This method is useful if you execute a command that produces no comment as an output
-    /// and you need to wait until it has been processed by bors.
-    /// Prefer using [BorsTester::expect_comments] or [BorsTester::get_next_comment_text] to synchronize
-    /// if you are waiting for a comment to be posted to a PR.
-    pub async fn wait_for<F, Fut>(&self, condition: F) -> anyhow::Result<()>
-    where
-        F: Fn() -> Fut,
-        Fut: Future<Output = anyhow::Result<bool>>,
-    {
-        let wait_fut = async move {
-            loop {
-                let fut = condition();
-                match fut.await {
-                    Ok(res) => {
-                        if res {
-                            return Ok(());
-                        } else {
-                            tokio::time::sleep(TEST_CONDITION_CHECK).await;
-                        }
-                    }
-                    Err(error) => {
-                        return Err(error);
-                    }
-                }
-            }
-        };
-        tokio::time::timeout(TEST_CONDITION_TIMEOUT, wait_fut)
-            .await
-            .unwrap_or_else(|_| Err(anyhow::anyhow!("Timed out waiting for condition")))
     }
 
     /// Temporarily block sent webhooks, to emulate situation where webhooks could be lost,
@@ -1023,17 +971,61 @@ impl BorsTester {
         })
     }
 
-    /// Get a GitHub comment that might have been modified by API calls from bors.
-    pub fn get_comment_by_node_id(&self, node_id: &str) -> Option<Comment> {
-        self.github.lock().get_comment_by_node_id(node_id).cloned()
+    //-- Internal helper functions --/
+    /// Wait until the given condition is true.
+    /// Checks the condition every 500ms.
+    /// Times out if it takes too long (more than 5s).
+    ///
+    /// This method is useful if you execute a command that produces no comment as an output
+    /// and you need to wait until it has been processed by bors.
+    /// Prefer using [BorsTester::expect_comments] or [BorsTester::get_next_comment_text] to synchronize
+    /// if you are waiting for a comment to be posted to a PR.
+    async fn wait_for<F, Fut>(&self, condition: F) -> anyhow::Result<()>
+    where
+        F: Fn() -> Fut,
+        Fut: Future<Output = anyhow::Result<bool>>,
+    {
+        let wait_fut = async move {
+            loop {
+                let fut = condition();
+                match fut.await {
+                    Ok(res) => {
+                        if res {
+                            return Ok(());
+                        } else {
+                            tokio::time::sleep(TEST_CONDITION_CHECK).await;
+                        }
+                    }
+                    Err(error) => {
+                        return Err(error);
+                    }
+                }
+            }
+        };
+        tokio::time::timeout(TEST_CONDITION_TIMEOUT, wait_fut)
+            .await
+            .unwrap_or_else(|_| Err(anyhow::anyhow!("Timed out waiting for condition")))
     }
 
-    //-- Internal helper functions --/
+    /// Performs all necessary events to complete a single workflow (start, success/fail).
+    async fn workflow_full(
+        &mut self,
+        run_id: RunId,
+        status: TestWorkflowStatus,
+    ) -> anyhow::Result<()> {
+        self.workflow_event(WorkflowEvent::started(run_id)).await?;
+        let event = match status {
+            TestWorkflowStatus::Success => WorkflowEvent::success(run_id),
+            TestWorkflowStatus::Failure => WorkflowEvent::failure(run_id),
+        };
+        self.workflow_event(event).await
+    }
+
     async fn webhook_comment(&mut self, comment: Comment) -> anyhow::Result<()> {
         let payload = {
             let gh = self.github.lock();
             GitHubIssueCommentEventPayload::new(
-                &gh.get_repo(&comment.pr_ident.repo).lock(),
+                &gh.get_repo(&comment.pr_ident().repo).lock(),
                 comment,
             )
         };
@@ -1085,6 +1077,16 @@ impl BorsTester {
         )?;
         tracing::debug!("Received webhook with status {status} and response body `{body_text}`");
         Ok(())
+    }
+
+    async fn try_get_pr_from_db<Id: Into<PrIdentifier>>(
+        &self,
+        id: Id,
+    ) -> anyhow::Result<Option<PullRequestModel>> {
+        let id = id.into();
+        self.db()
+            .get_pull_request(&id.repo, PullRequestNumber(id.number))
+            .await
     }
 
     async fn finish(self, bors: JoinHandle<()>) -> anyhow::Result<GitHub> {
@@ -1200,8 +1202,8 @@ pub struct PullRequestProxy {
 }
 
 impl PullRequestProxy {
-    async fn new(tester: &BorsTester, gh_pr: PullRequest) -> Self {
-        let db_pr = tester
+    async fn new(ctx: &BorsTester, gh_pr: PullRequest) -> Self {
+        let db_pr = ctx
             .try_get_pr_from_db((gh_pr.repo.clone(), gh_pr.number.0))
             .await
             .unwrap();

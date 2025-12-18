@@ -368,29 +368,29 @@ mod tests {
 
     #[sqlx::test]
     async fn complete_build_missed_complete_webhook(pool: sqlx::PgPool) {
-        run_test(pool, async |tester: &mut BorsTester| {
+        run_test(pool, async |ctx: &mut BorsTester| {
             // Start an auto build
-            tester.approve(()).await?;
-            tester.start_auto_build(()).await?;
-            let run_id = tester.auto_workflow();
-            tester.workflow_start(run_id).await?;
+            ctx.approve(()).await?;
+            ctx.start_auto_build(()).await?;
+            let run_id = ctx.auto_workflow();
+            ctx.workflow_start(run_id).await?;
 
             // Now bors crashed and didn't receive a webhook about a build being completed
-            tester.modify_workflow(run_id, |w| {
+            ctx.modify_workflow(run_id, |w| {
                 w.change_status(WorkflowStatus::Success);
             });
-            tester.refresh_pending_builds().await;
-            tester.run_merge_queue_now().await;
+            ctx.refresh_pending_builds().await;
+            ctx.run_merge_queue_now().await;
 
             // The auto build should be completed
-            let comment = tester.get_next_comment_text(()).await?;
+            let comment = ctx.get_next_comment_text(()).await?;
             insta::assert_snapshot!(comment, @r"
             :sunny: Test successful - [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1)
             Approved by: `default-user`
             Pushing merge-0-pr-1 to `main`...
             ");
 
-            tester.get_pr_copy(()).await.expect_status(PullRequestStatus::Merged);
+            ctx.pr(()).await.expect_status(PullRequestStatus::Merged);
 
             Ok(())
         })
@@ -399,28 +399,28 @@ mod tests {
 
     #[sqlx::test]
     async fn complete_build_missed_all_webhooks(pool: sqlx::PgPool) {
-        run_test(pool, async |tester: &mut BorsTester| {
+        run_test(pool, async |ctx: &mut BorsTester| {
             // Start an auto build
-            tester.approve(()).await?;
-            tester.start_auto_build(()).await?;
-            let run_id = tester.auto_workflow();
+            ctx.approve(()).await?;
+            ctx.start_auto_build(()).await?;
+            let run_id = ctx.auto_workflow();
 
             // Now bors crashed and didn't receive a webhook about a build being started
-            tester.modify_workflow(run_id, |w| {
+            ctx.modify_workflow(run_id, |w| {
                 w.change_status(WorkflowStatus::Success);
             });
-            tester.refresh_pending_builds().await;
-            tester.run_merge_queue_now().await;
+            ctx.refresh_pending_builds().await;
+            ctx.run_merge_queue_now().await;
 
             // The auto build should be completed
-            let comment = tester.get_next_comment_text(()).await?;
+            let comment = ctx.get_next_comment_text(()).await?;
             insta::assert_snapshot!(comment, @r"
             :sunny: Test successful - [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1)
             Approved by: `default-user`
             Pushing merge-0-pr-1 to `main`...
             ");
 
-            tester.get_pr_copy(()).await.expect_status(PullRequestStatus::Merged);
+            ctx.pr(()).await.expect_status(PullRequestStatus::Merged);
 
             Ok(())
         })

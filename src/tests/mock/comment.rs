@@ -23,9 +23,9 @@ impl GitHubIssueCommentEventPayload {
         let time = Utc::now();
         let html_url = format!(
             "https://github.com/{}/pull/{}#issuecomment-{}",
-            comment.pr_ident.repo,
-            comment.pr_ident.number,
-            comment.id.unwrap()
+            comment.pr_ident().repo,
+            comment.pr_ident().number,
+            comment.id().unwrap()
         );
         let url = Url::parse(&html_url).unwrap();
         Self {
@@ -40,14 +40,14 @@ impl GitHubIssueCommentEventPayload {
                 comments_url: url.clone(),
                 events_url: url.clone(),
                 html_url: url.clone(),
-                number: comment.pr_ident.number,
+                number: comment.pr_ident().number,
                 state: IssueState::Open,
                 state_reason: None,
-                title: format!("PR #{}", comment.pr_ident.number),
+                title: format!("PR #{}", comment.pr_ident().number),
                 body: None,
                 body_text: None,
                 body_html: None,
-                user: comment.author.clone().into(),
+                user: comment.author().clone().into(),
                 labels: vec![],
                 assignees: vec![],
                 author_association: "OWNER".to_string(),
@@ -117,20 +117,20 @@ impl From<Comment> for GitHubComment {
         let time = Utc::now();
         let html_url = format!(
             "https://github.com/{}/pull/{}#issuecomment-{}",
-            value.pr_ident.repo,
-            value.pr_ident.number,
-            value.id.unwrap()
+            value.pr_ident().repo,
+            value.pr_ident().number,
+            value.id().unwrap()
         );
         let url = Url::parse(&html_url).unwrap();
         Self {
-            id: CommentId(value.id.unwrap()),
-            node_id: value.node_id.unwrap(),
+            id: CommentId(value.id().unwrap()),
+            node_id: value.node_id().unwrap(),
             url: url.clone(),
             html_url: url,
-            body: Some(value.content.clone()),
-            body_text: Some(value.content.clone()),
-            body_html: Some(value.content.clone()),
-            user: value.author.into(),
+            body: Some(value.content()),
+            body_text: Some(value.content()),
+            body_html: Some(value.content()),
+            user: value.author().into(),
             created_at: time,
             author_association: "OWNER".to_string(),
         }

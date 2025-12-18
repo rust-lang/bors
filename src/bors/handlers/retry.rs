@@ -51,12 +51,11 @@ mod tests {
 
     #[sqlx::test]
     async fn retry_command_insufficient_privileges(pool: sqlx::PgPool) {
-        run_test(pool, async |tester: &mut BorsTester| {
-            tester
-                .post_comment(Comment::from("@bors retry").with_author(User::unprivileged()))
+        run_test(pool, async |ctx: &mut BorsTester| {
+            ctx.post_comment(Comment::from("@bors retry").with_author(User::unprivileged()))
                 .await?;
             insta::assert_snapshot!(
-                tester.get_next_comment_text(()).await?,
+                ctx.get_next_comment_text(()).await?,
                 @"@unprivileged-user: :key: Insufficient privileges: not in review users"
             );
             Ok(())
@@ -66,10 +65,10 @@ mod tests {
 
     #[sqlx::test]
     async fn retry_invalid_state_error(pool: sqlx::PgPool) {
-        run_test(pool, async |tester: &mut BorsTester| {
-            tester.post_comment(Comment::from("@bors retry")).await?;
+        run_test(pool, async |ctx: &mut BorsTester| {
+            ctx.post_comment(Comment::from("@bors retry")).await?;
             insta::assert_snapshot!(
-                tester.get_next_comment_text(()).await?,
+                ctx.get_next_comment_text(()).await?,
                 @":exclamation: You can only retry pull requests that are approved and have a previously failed auto build"
             );
             Ok(())
@@ -79,16 +78,16 @@ mod tests {
 
     #[sqlx::test]
     async fn retry_auto_build(pool: sqlx::PgPool) {
-        run_test(pool, async |tester: &mut BorsTester| {
-            tester.approve(()).await?;
-            tester.start_auto_build(()).await?;
-            tester.workflow_full_failure(tester.auto_workflow()).await?;
-            tester.expect_comments((), 1).await;
-            tester.post_comment(Comment::from("@bors retry")).await?;
-            tester.wait_for_pr((), |pr| pr.auto_build.is_none()).await?;
-            tester.run_merge_queue_now().await;
+        run_test(pool, async |ctx: &mut BorsTester| {
+            ctx.approve(()).await?;
+            ctx.start_auto_build(()).await?;
+            ctx.workflow_full_failure(ctx.auto_workflow()).await?;
+            ctx.expect_comments((), 1).await;
+            ctx.post_comment(Comment::from("@bors retry")).await?;
+            ctx.wait_for_pr((), |pr| pr.auto_build.is_none()).await?;
+            ctx.run_merge_queue_now().await;
             insta::assert_snapshot!(
-                tester.get_next_comment_text(()).await?,
+                ctx.get_next_comment_text(()).await?,
                 @":hourglass: Testing commit pr-1-sha with merge merge-1-pr-1..."
             );
             Ok(())
