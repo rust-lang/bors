@@ -135,8 +135,15 @@ async fn create_rollup(
         anyhow::bail!("No pull requests are marked for rollup");
     }
 
-    // Sort PRs by number
-    rollup_prs.sort_by_key(|pr| pr.number.0);
+    // Sort PRs by priority and then PR number
+    // We want to try to merge PRs with higher priority first, so that in case of conflicts they
+    // get in, rather than being left out.
+    rollup_prs.sort_by(|a, b| {
+        a.priority
+            .cmp(&b.priority)
+            .reverse()
+            .then(a.number.cmp(&b.number))
+    });
 
     // Fetch the first PR from GitHub to determine the target base branch
     let first_pr_github = gh_client.get_pull_request(rollup_prs[0].number).await?;
@@ -247,11 +254,13 @@ async fn create_rollup(
 mod tests {
     use crate::github::rollup::OAuthRollupState;
     use crate::github::{GithubRepoName, PullRequestNumber};
-    use crate::tests::{ApiRequest, BorsTester, GitHub, Repo, User, default_repo_name, run_test};
+    use crate::tests::{
+        ApiRequest, BorsTester, Comment, GitHub, Repo, User, default_repo_name, run_test,
+    };
     use http::StatusCode;
 
     #[sqlx::test]
-    async fn create_rollup_missing_fork(pool: sqlx::PgPool) {
+    async fn rollup_missing_fork(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             let pr1 = ctx.open_pr(default_repo_name(), |_| {}).await?;
             let pr2 = ctx.open_pr(default_repo_name(), |_| {}).await?;
@@ -274,7 +283,7 @@ mod tests {
     }
 
     #[sqlx::test]
-    async fn create_rollup_non_rollupable_pr(pool: sqlx::PgPool) {
+    async fn rollup_non_rollupable_pr(pool: sqlx::PgPool) {
         run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
             let pr1 = ctx.open_pr(default_repo_name(), |_| {}).await?;
             let pr2 = ctx.open_pr(default_repo_name(), |_| {}).await?;
@@ -295,7 +304,7 @@ mod tests {
     }
 
     #[sqlx::test]
-    async fn create_rollup(pool: sqlx::PgPool) {
+    async fn rollup(pool: sqlx::PgPool) {
         let gh = run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
             let pr2 = ctx.open_pr(default_repo_name(), |_| {}).await?;
             let pr3 = ctx.open_pr(default_repo_name(), |_| {}).await?;
@@ -316,12 +325,53 @@ mod tests {
         })
         .await;
         let repo = gh.get_repo(());
-        let repo = repo.lock();
-        insta::assert_snapshot!(repo.get_pr(4).description, @r"
+        insta::assert_snapshot!(repo.lock().get_pr(4).description, @r"
         Successful merges:
 
          - #2 (Title of PR 2)
          - #3 (Title of PR 3)
+
+        r? @ghost
+        @rustbot modify labels: rollup
+        ");
+    }
+
+    #[sqlx::test]
+    async fn rollup_order_by_priority(pool: sqlx::PgPool) {
+        let gh = run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
+            let pr2 = ctx.open_pr(default_repo_name(), |_| {}).await?;
+            let pr3 = ctx.open_pr(default_repo_name(), |_| {}).await?;
+            let pr4 = ctx.open_pr(default_repo_name(), |_| {}).await?;
+            let pr5 = ctx.open_pr(default_repo_name(), |_| {}).await?;
+            ctx.approve(pr2.id()).await?;
+            ctx.approve(pr3.id()).await?;
+            ctx.post_comment(Comment::new(pr3.id(), "@bors p=5"))
+                .await?;
+            ctx.approve(pr4.id()).await?;
+            ctx.approve(pr4.id()).await?;
+            ctx.post_comment(Comment::new(pr4.id(), "@bors p=1"))
+                .await?;
+            ctx.approve(pr5.id()).await?;
+
+            let repo_name = default_repo_name();
+            ctx.api_request(rollup_request(
+                "rolluper",
+                repo_name.clone(),
+                &[pr2.number, pr3.number, pr4.number, pr5.number],
+            ))
+            .await?
+            .assert_status(StatusCode::TEMPORARY_REDIRECT);
+            Ok(())
+        })
+        .await;
+        let repo = gh.get_repo(());
+        insta::assert_snapshot!(repo.lock().get_pr(6).description, @r"
+        Successful merges:
+
+         - #3 (Title of PR 3)
+         - #4 (Title of PR 4)
+         - #2 (Title of PR 2)
+         - #5 (Title of PR 5)
 
         r? @ghost
         @rustbot modify labels: rollup
