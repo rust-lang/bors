@@ -1,3 +1,4 @@
+use anyhow::Context;
 use chrono::{DateTime, Utc};
 use octocrab::models::checks::CheckRun;
 use octocrab::params::checks::CheckRunStatus;
@@ -7,6 +8,7 @@ use tokio::sync::mpsc;
 use tracing::Instrument;
 
 use crate::BorsContext;
+use crate::bors::build::load_workflow_runs;
 use crate::bors::comment::{
     CommentTag, auto_build_push_failed_comment, auto_build_started_comment,
     auto_build_succeeded_comment, merge_conflict_comment,
@@ -166,9 +168,11 @@ async fn handle_successful_build(
     pr_num: PullRequestNumber,
 ) -> anyhow::Result<()> {
     let commit_sha = CommitSha(auto_build.commit_sha.clone());
-    let workflows = ctx.db.get_workflows_for_build(auto_build).await?;
+    let workflow_runs = load_workflow_runs(repo, &ctx.db, auto_build)
+        .await
+        .context("Cannot load workflow runs")?;
     let comment = auto_build_succeeded_comment(
-        &workflows,
+        &workflow_runs,
         &approval_info.approver,
         &commit_sha,
         &pr.base_branch,

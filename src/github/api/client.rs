@@ -1,7 +1,7 @@
 use anyhow::Context;
 use octocrab::Octocrab;
 use octocrab::models::checks::CheckRun;
-use octocrab::models::{CheckRunId, CheckSuiteId, Repository, RunId};
+use octocrab::models::{CheckRunId, Repository, RunId};
 use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
@@ -297,62 +297,6 @@ impl GithubRepositoryClient {
         Ok(check_run)
     }
 
-    /// Find all workflows attached to a specific check suite.
-    pub async fn get_workflow_runs_for_check_suite(
-        &self,
-        check_suite_id: CheckSuiteId,
-    ) -> anyhow::Result<Vec<WorkflowRun>> {
-        #[derive(serde::Deserialize, Debug)]
-        struct WorkflowRunResponse {
-            id: RunId,
-            status: String,
-            conclusion: Option<String>,
-        }
-
-        #[derive(serde::Deserialize, Debug)]
-        struct WorkflowRunsResponse {
-            workflow_runs: Vec<WorkflowRunResponse>,
-        }
-
-        let runs = perform_retryable("get_workflows_for_check_suite", RetryMethod::default(), || async {
-            // We use a manual query, because octocrab currently doesn't allow filtering by
-            // check_suite_id when listing workflow runs.
-            // Note: we don't handle paging here, as we don't expect to get more than 30 workflows
-            // per check suite.
-            let response: WorkflowRunsResponse = self
-                .get_request(&format!("actions/runs?check_suite_id={check_suite_id}"))
-                .await
-                .context("Cannot fetch workflow runs for a check suite")?;
-
-            fn get_status(run: &WorkflowRunResponse) -> WorkflowStatus {
-                match run.status.as_str() {
-                    "completed" => match run.conclusion.as_deref() {
-                        Some("success") => WorkflowStatus::Success,
-                        Some(_) => WorkflowStatus::Failure,
-                        None => {
-                            tracing::warn!("Received completed status with empty conclusion for workflow run {}", run.id);
-                            WorkflowStatus::Failure
-                        }
-                    },
-                    "failure" | "startup_failure" => WorkflowStatus::Failure,
-                    _ => WorkflowStatus::Pending
-                }
-            }
-
-            let runs: Vec<WorkflowRun> = response
-                .workflow_runs
-                .into_iter()
-                .map(|run| WorkflowRun {
-                    id: run.id,
-                    status: get_status(&run),
-                })
-                .collect();
-            anyhow::Ok(runs)
-        })
-        .await?;
-        Ok(runs)
-    }
-
     /// Find all workflows attached to a specific commit SHA.
     pub async fn get_workflow_runs_for_commit_sha(
         &self,
@@ -388,9 +332,12 @@ impl GithubRepositoryClient {
 
             let mut stream = std::pin::pin!(response.into_stream(&self.client));
             while let Some(run) = stream.try_next().await? {
+                let status = get_status(&run);
                 let run = WorkflowRun {
                     id: run.id,
-                    status: get_status(&run),
+                    name: run.name,
+                    url: run.url.to_string(),
+                    status,
                 };
                 runs.push(run);
             }

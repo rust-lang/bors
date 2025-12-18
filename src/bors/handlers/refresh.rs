@@ -137,7 +137,7 @@ mod tests {
     #[sqlx::test]
     async fn refresh_no_builds(pool: sqlx::PgPool) {
         run_test(pool, async |tester: &mut BorsTester| {
-            tester.cancel_timed_out_builds().await;
+            tester.refresh_pending_builds().await;
             Ok(())
         })
         .await;
@@ -168,7 +168,7 @@ timeout = 3600
                 tester.post_comment("@bors try").await?;
                 tester.expect_comments((), 1).await;
                 with_mocked_time(Duration::from_secs(10), async {
-                    tester.cancel_timed_out_builds().await;
+                    tester.refresh_pending_builds().await;
                 })
                 .await;
                 Ok(())
@@ -193,7 +193,7 @@ timeout = 3600
                             .len(),
                         1
                     );
-                    tester.cancel_timed_out_builds().await;
+                    tester.refresh_pending_builds().await;
                 })
                 .await;
                 insta::assert_snapshot!(tester.get_next_comment_text(()).await?, @":boom: Test timed out after `3600`s");
@@ -220,7 +220,7 @@ timeout = 3600
                 tester.expect_comments((), 1).await;
 
                 with_mocked_time(Duration::from_secs(4000), async {
-                    tester.cancel_timed_out_builds().await;
+                    tester.refresh_pending_builds().await;
                 })
                 .await;
                 tester.expect_comments((), 1).await;
@@ -250,7 +250,7 @@ timeout = 3600
                 tester.workflow_start(run_id).await?;
 
                 with_mocked_time(Duration::from_secs(4000), async {
-                    tester.cancel_timed_out_builds().await;
+                    tester.refresh_pending_builds().await;
                 })
                 .await;
                 tester.expect_comments((), 1).await;

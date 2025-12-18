@@ -3,14 +3,11 @@ use octocrab::models::workflows::{Conclusion, Job};
 use serde::Serialize;
 use std::time::Duration;
 
-use crate::bors::FailedWorkflowRun;
 use crate::bors::command::CommandPrefix;
+use crate::bors::{FailedWorkflowRun, WorkflowRun};
 use crate::github::{GithubRepoName, PullRequestNumber};
 use crate::utils::text::pluralize;
-use crate::{
-    database::{WorkflowModel, WorkflowStatus},
-    github::CommitSha,
-};
+use crate::{database::WorkflowStatus, github::CommitSha};
 
 /// A comment that can be posted to a pull request.
 pub struct Comment {
@@ -53,7 +50,7 @@ impl Comment {
 }
 
 pub fn try_build_succeeded_comment(
-    workflows: &[WorkflowModel],
+    workflows: &[WorkflowRun],
     commit_sha: CommitSha,
     parent_sha: CommitSha,
 ) -> Comment {
@@ -319,7 +316,7 @@ pub fn build_timed_out_comment(timeout: Duration) -> Comment {
     ))
 }
 
-fn list_workflows_status(workflows: &[WorkflowModel]) -> String {
+fn list_workflows_status(workflows: &[WorkflowRun]) -> String {
     workflows
         .iter()
         .map(|w| {
@@ -345,7 +342,7 @@ pub fn auto_build_started_comment(head_sha: &CommitSha, merge_sha: &CommitSha) -
 }
 
 pub fn auto_build_succeeded_comment(
-    workflows: &[WorkflowModel],
+    workflows: &[WorkflowRun],
     approved_by: &str,
     merge_sha: &CommitSha,
     base_ref: &str,
