@@ -254,10 +254,7 @@ timeout = 3600
                 })
                 .await;
                 tester.expect_comments((), 1).await;
-                tester
-                    .gh()
-                    .lock()
-                    .check_cancelled_workflows(default_repo_name(), &[run_id]);
+                tester.expect_cancelled_workflows((), &[run_id]);
                 Ok(())
             })
             .await;

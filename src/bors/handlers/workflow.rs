@@ -217,17 +217,14 @@ mod tests {
 
     use crate::database::WorkflowStatus;
     use crate::database::operations::get_all_workflows;
-    use crate::tests::{BorsBuilder, BorsTester, GitHub, default_repo_name};
+    use crate::tests::{BorsBuilder, BorsTester, GitHub};
     use crate::tests::{WorkflowEvent, run_test};
 
     #[sqlx::test]
     async fn workflow_started_unknown_build(pool: sqlx::PgPool) {
         run_test(pool.clone(), async |tester: &mut BorsTester| {
             tester.create_branch("unknown");
-            let run_id = tester
-                .gh()
-                .lock()
-                .new_workflow(&default_repo_name(), "unknown");
+            let run_id = tester.create_workflow((), "unknown");
             tester
                 .workflow_event(WorkflowEvent::started(run_id))
                 .await?;
@@ -241,10 +238,7 @@ mod tests {
     async fn workflow_completed_unknown_build(pool: sqlx::PgPool) {
         run_test(pool.clone(), async |tester: &mut BorsTester| {
             tester.create_branch("unknown");
-            let run_id = tester
-                .gh()
-                .lock()
-                .new_workflow(&default_repo_name(), "unknown");
+            let run_id = tester.create_workflow((), "unknown");
             tester
                 .workflow_event(WorkflowEvent::success(run_id))
                 .await?;

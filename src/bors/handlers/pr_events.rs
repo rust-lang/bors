@@ -854,7 +854,7 @@ report_merge_conflicts = true
 
             - https://github.com/rust-lang/borstest/actions/runs/1
             ");
-            tester.gh().lock().check_cancelled_workflows(default_repo_name(), &[run_id]);
+            tester.expect_cancelled_workflows((), &[run_id]);
             Ok(())
         })
             .await;

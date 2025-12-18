@@ -698,10 +698,7 @@ try-job: Bar
 
             To cancel the try build, run the command `@bors try cancel`.
             ");
-            tester
-                .gh()
-                .lock()
-                .check_cancelled_workflows(default_repo_name(), &[run_id]);
+            tester.expect_cancelled_workflows((), &[run_id]);
             Ok(())
         })
         .await;
@@ -763,10 +760,7 @@ try-job: Bar
             - https://github.com/rust-lang/borstest/actions/runs/1
             - https://github.com/rust-lang/borstest/actions/runs/2
             ");
-            tester
-                .gh()
-                .lock()
-                .check_cancelled_workflows(default_repo_name(), &[w1, w2]);
+            tester.expect_cancelled_workflows((), &[w1, w2]);
 
             Ok(())
         })
@@ -829,10 +823,7 @@ try-job: Bar
             Try build cancelled. Cancelled workflows:
             - https://github.com/rust-lang/borstest/actions/runs/3
             ");
-            tester
-                .gh()
-                .lock()
-                .check_cancelled_workflows(default_repo_name(), &[w3]);
+            tester.expect_cancelled_workflows((), &[w3]);
             Ok(())
         })
         .await;

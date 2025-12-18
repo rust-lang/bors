@@ -258,13 +258,8 @@ impl BorsTester {
         )
     }
 
-    //--- Getters for various test state ---//
     pub fn db(&self) -> Arc<PgDbClient> {
         self.db.clone()
-    }
-
-    pub fn gh(&self) -> Arc<Mutex<GitHub>> {
-        self.github.clone()
     }
 
     /// Return the default repo
@@ -288,13 +283,16 @@ impl BorsTester {
     }
 
     pub fn try_workflow(&self) -> RunId {
-        let mut gh = self.github.lock();
-        gh.new_workflow(&default_repo_name(), TRY_BRANCH)
+        self.create_workflow(default_repo_name(), TRY_BRANCH)
     }
 
     pub fn auto_workflow(&self) -> RunId {
+        self.create_workflow(default_repo_name(), AUTO_BRANCH)
+    }
+
+    pub fn create_workflow<Id: Into<RepoIdentifier>>(&self, id: Id, branch: &str) -> RunId {
         let mut gh = self.github.lock();
-        gh.new_workflow(&default_repo_name(), AUTO_BRANCH)
+        gh.new_workflow(&id.into().0, branch)
     }
 
     pub fn modify_workflow<F: FnOnce(&mut WorkflowRun)>(&mut self, run_id: RunId, func: F) {
@@ -334,6 +332,22 @@ impl BorsTester {
         .await
     }
 
+    pub fn try_branch(&self) -> Branch {
+        self.repo()
+            .lock()
+            .get_branch_by_name(TRY_BRANCH)
+            .unwrap()
+            .clone()
+    }
+
+    pub fn auto_branch(&self) -> Branch {
+        self.repo()
+            .lock()
+            .get_branch_by_name(AUTO_BRANCH)
+            .unwrap()
+            .clone()
+    }
+
     /// Creates a branch and returns a **copy** of it.
     pub fn create_branch(&mut self, name: &str) -> Branch {
         let repo = self
@@ -352,7 +366,7 @@ impl BorsTester {
         repo.get_branch_by_name(name).unwrap().clone()
     }
 
-    /// Modifies an existing branch on the default repository.
+    /// Modifies a branch on the default repository.
     /// If it doesn't exist yet, it will be created.
     pub fn modify_branch<F: FnOnce(&mut Branch)>(&mut self, name: &str, func: F) {
         let repo = self
@@ -373,25 +387,12 @@ impl BorsTester {
     pub async fn push_to_branch(&mut self, branch: &str, sha: &str) -> anyhow::Result<()> {
         let payload = {
             let gh = self.github.lock();
-            GitHubPushEventPayload::new(&gh.get_repo(default_repo_name()).lock(), branch, sha)
+            let repo = gh.get_repo(default_repo_name());
+            let mut repo = repo.lock();
+            repo.push_commit(branch, Commit::new(sha, "push"));
+            GitHubPushEventPayload::new(&repo, branch, sha)
         };
         self.send_webhook("push", payload).await
-    }
-
-    pub fn try_branch(&self) -> Branch {
-        self.repo()
-            .lock()
-            .get_branch_by_name(TRY_BRANCH)
-            .unwrap()
-            .clone()
-    }
-
-    pub fn auto_branch(&self) -> Branch {
-        self.repo()
-            .lock()
-            .get_branch_by_name(AUTO_BRANCH)
-            .unwrap()
-            .clone()
     }
 
     /// Wait until the next bot comment is received on the specified repo and PR, and return its
@@ -413,7 +414,6 @@ impl BorsTester {
         GitHub::get_next_comment(self.github.clone(), id).await
     }
 
-    //-- Generation of GitHub events --//
     pub async fn post_comment<C: Into<Comment>>(&mut self, comment: C) -> anyhow::Result<Comment> {
         let comment = comment.into();
 
@@ -575,21 +575,6 @@ impl BorsTester {
     /// Start a workflow and wait until the workflow has been handled by bors.
     pub async fn workflow_start(&mut self, run_id: RunId) -> anyhow::Result<()> {
         self.workflow_event(WorkflowEvent::started(run_id)).await
-    }
-
-    /// Performs all necessary events to complete a single workflow (start, success/fail).
-    #[inline]
-    pub async fn workflow_full(
-        &mut self,
-        run_id: RunId,
-        status: TestWorkflowStatus,
-    ) -> anyhow::Result<()> {
-        self.workflow_event(WorkflowEvent::started(run_id)).await?;
-        let event = match status {
-            TestWorkflowStatus::Success => WorkflowEvent::success(run_id),
-            TestWorkflowStatus::Failure => WorkflowEvent::failure(run_id),
-        };
-        self.workflow_event(event).await
     }
 
     pub async fn workflow_full_success(&mut self, run_id: RunId) -> anyhow::Result<()> {
@@ -861,7 +846,6 @@ impl BorsTester {
         self.finish_auto_build(id).await
     }
 
-    //-- Test assertions --//
     /// Expect that `count` comments will be received, without checking their contents.
     pub async fn expect_comments<Id: Into<PrIdentifier>>(&mut self, id: Id, count: u64) {
         let id = id.into();
@@ -873,11 +857,23 @@ impl BorsTester {
         }
     }
 
+    /// Assert that (exactly) these workflows have been cancelled.
+    pub fn expect_cancelled_workflows<Id: Into<RepoIdentifier>>(&self, id: Id, ids: &[RunId]) {
+        self.github
+            .lock()
+            .check_cancelled_workflows(id.into().0, ids);
+    }
+
     /// Assert that the given comment has been hidden.
     pub fn expect_hidden_comment(&self, comment: &Comment, reason: HideCommentReason) {
         self.github
             .lock()
             .check_comment_was_hidden(comment.node_id.as_deref().unwrap(), reason);
+    }
+
+    /// Get a GitHub comment that might have been modified by API calls from bors.
+    pub fn get_comment_by_node_id(&self, node_id: &str) -> Option<Comment> {
+        self.github.lock().get_comment_by_node_id(node_id).cloned()
     }
 
     pub fn expect_check_run(
@@ -937,41 +933,6 @@ impl BorsTester {
         self
     }
 
-    /// Wait until the given condition is true.
-    /// Checks the condition every 500ms.
-    /// Times out if it takes too long (more than 5s).
-    ///
-    /// This method is useful if you execute a command that produces no comment as an output
-    /// and you need to wait until it has been processed by bors.
-    /// Prefer using [BorsTester::expect_comments] or [BorsTester::get_next_comment_text] to synchronize
-    /// if you are waiting for a comment to be posted to a PR.
-    pub async fn wait_for<F, Fut>(&self, condition: F) -> anyhow::Result<()>
-    where
-        F: Fn() -> Fut,
-        Fut: Future<Output = anyhow::Result<bool>>,
-    {
-        let wait_fut = async move {
-            loop {
-                let fut = condition();
-                match fut.await {
-                    Ok(res) => {
-                        if res {
-                            return Ok(());
-                        } else {
-                            tokio::time::sleep(TEST_CONDITION_CHECK).await;
-                        }
-                    }
-                    Err(error) => {
-                        return Err(error);
-                    }
-                }
-            }
-        };
-        tokio::time::timeout(TEST_CONDITION_TIMEOUT, wait_fut)
-            .await
-            .unwrap_or_else(|_| Err(anyhow::anyhow!("Timed out waiting for condition")))
-    }
-
     /// Temporarily block sent webhooks, to emulate situation where webhooks could be lost,
     /// while `func` is executing.
     pub async fn with_blocked_webhooks<T, F>(&mut self, func: F) -> T
@@ -1017,12 +978,56 @@ impl BorsTester {
         })
     }
 
-    /// Get a GitHub comment that might have been modified by API calls from bors.
-    pub fn get_comment_by_node_id(&self, node_id: &str) -> Option<Comment> {
-        self.github.lock().get_comment_by_node_id(node_id).cloned()
+    //-- Internal helper functions --/
+    /// Wait until the given condition is true.
+    /// Checks the condition every 500ms.
+    /// Times out if it takes too long (more than 5s).
+    ///
+    /// This method is useful if you execute a command that produces no comment as an output
+    /// and you need to wait until it has been processed by bors.
+    /// Prefer using [BorsTester::expect_comments] or [BorsTester::get_next_comment_text] to synchronize
+    /// if you are waiting for a comment to be posted to a PR.
+    async fn wait_for<F, Fut>(&self, condition: F) -> anyhow::Result<()>
+    where
+        F: Fn() -> Fut,
+        Fut: Future<Output = anyhow::Result<bool>>,
+    {
+        let wait_fut = async move {
+            loop {
+                let fut = condition();
+                match fut.await {
+                    Ok(res) => {
+                        if res {
+                            return Ok(());
+                        } else {
+                            tokio::time::sleep(TEST_CONDITION_CHECK).await;
+                        }
+                    }
+                    Err(error) => {
+                        return Err(error);
+                    }
+                }
+            }
+        };
+        tokio::time::timeout(TEST_CONDITION_TIMEOUT, wait_fut)
+            .await
+            .unwrap_or_else(|_| Err(anyhow::anyhow!("Timed out waiting for condition")))
     }
 
-    //-- Internal helper functions --/
+    /// Performs all necessary events to complete a single workflow (start, success/fail).
+    async fn workflow_full(
+        &mut self,
+        run_id: RunId,
+        status: TestWorkflowStatus,
+    ) -> anyhow::Result<()> {
+        self.workflow_event(WorkflowEvent::started(run_id)).await?;
+        let event = match status {
+            TestWorkflowStatus::Success => WorkflowEvent::success(run_id),
+            TestWorkflowStatus::Failure => WorkflowEvent::failure(run_id),
+        };
+        self.workflow_event(event).await
+    }
+
     async fn webhook_comment(&mut self, comment: Comment) -> anyhow::Result<()> {
         let payload = {
             let gh = self.github.lock();
