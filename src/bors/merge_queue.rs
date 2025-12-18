@@ -247,9 +247,8 @@ async fn handle_start_auto_build(
             let gh_pr = repo.client.get_pull_request(pr.number).await?;
             tracing::debug!("Failed to start auto build for PR {pr_num} due to merge conflict");
 
-            // TODO: add PR to mergeability queue?
             ctx.db
-                .set_pr_mergeable_state(repo.repository(), pr.number, MergeableState::Unknown)
+                .set_pr_mergeable_state(repo.repository(), pr.number, MergeableState::HasConflicts)
                 .await?;
             repo.client
                 .post_comment(pr.number, merge_conflict_comment(&gh_pr.head.name))
@@ -937,7 +936,7 @@ merge_queue_enabled = false
             tester
                 .get_pr_copy(())
                 .await
-                .expect_mergeable_state(MergeableState::Unknown);
+                .expect_mergeable_state(MergeableState::HasConflicts);
             Ok(())
         })
         .await;
