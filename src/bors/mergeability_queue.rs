@@ -9,7 +9,7 @@
 //! be checked in increasing intervals (after 5s, then after 10s, then after 15s, etc.), until we
 //! either get a known mergeability status from GH or until we run out of retries.
 
-use super::{BorsContext, RepositoryState};
+use super::{BorsContext, PullRequestStatus, RepositoryState};
 use crate::PgDbClient;
 use crate::bors::comment::conflict_comment;
 use crate::bors::handlers::unapprove_pr;
@@ -394,9 +394,15 @@ pub async fn check_mergeability(
 
     // We don't know the mergeability state yet. Retry the PR after some delay
     if new_mergeable_state == OctocrabMergeableState::Unknown {
-        tracing::info!("Mergeability status unknown, scheduling retry.");
-
-        mq_tx.enqueue_retry(mq_item);
+        match fetched_pr.status {
+            PullRequestStatus::Open | PullRequestStatus::Draft => {
+                tracing::info!("Mergeability status unknown, scheduling retry.");
+                mq_tx.enqueue_retry(mq_item);
+            }
+            PullRequestStatus::Closed | PullRequestStatus::Merged => {
+                tracing::info!("Mergeability status unknown, but pull request is no longer open.");
+            }
+        }
 
         return Ok(());
     } else {
