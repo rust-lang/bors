@@ -1131,7 +1131,6 @@ impl ApiRequest {
     }
 }
 
-#[must_use]
 pub struct ApiResponse {
     status: StatusCode,
     body: String,
