@@ -1,11 +1,11 @@
 use super::{
-    GitHubUser, User, comment::GitHubComment, dynamic_mock_req, oauth_user_from_request,
-    repository::GitHubRepository,
+    GitHubUser, User, comment::GitHubComment, dynamic_mock_req, repository::GitHubRepository,
 };
 use crate::bors::PullRequestStatus;
+use crate::github::GithubRepoName;
 use crate::tests::Repo;
 use crate::tests::github::{CommentMsg, PullRequest};
-use crate::tests::{Branch, Comment};
+use crate::tests::{Comment, GitHub};
 use chrono::{DateTime, Utc};
 use octocrab::models::LabelId;
 use octocrab::models::pulls::MergeableState as OctocrabMergeableState;
@@ -18,10 +18,14 @@ use wiremock::{
     matchers::{method, path},
 };
 
-pub async fn mock_pull_requests(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
+pub async fn mock_pull_requests(
+    repo: Arc<Mutex<Repo>>,
+    github: Arc<Mutex<GitHub>>,
+    mock_server: &MockServer,
+) {
     mock_pr_list(repo.clone(), mock_server).await;
     mock_pr(repo.clone(), mock_server).await;
-    mock_pr_create(repo.clone(), mock_server).await;
+    mock_pr_create(repo.clone(), github, mock_server).await;
     mock_pr_comments(repo.clone(), mock_server).await;
     mock_pr_labels(repo, mock_server).await;
 }
@@ -47,7 +51,11 @@ async fn mock_pr(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
     .await;
 }
 
-async fn mock_pr_create(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
+async fn mock_pr_create(
+    repo: Arc<Mutex<Repo>>,
+    github: Arc<Mutex<GitHub>>,
+    mock_server: &MockServer,
+) {
     let repo_name = repo.lock().full_name();
     dynamic_mock_req(
         move |req: &Request, []: [&str; 0]| {
@@ -63,14 +71,38 @@ async fn mock_pr_create(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
 
             let data: RequestData = req.body_json::<RequestData>().unwrap();
 
-            let user = oauth_user_from_request(req);
-            let pr = repo.add_pr(user);
+            // We only support PRs from forks for now
+            assert!(data.head.contains(":"));
 
+            let (fork_owner, branch) = data.head.split_once(":").unwrap();
+            assert_ne!(fork_owner, repo.full_name().owner());
+            let fork = github
+                .lock()
+                .repos
+                .get(&GithubRepoName::new(fork_owner, repo.full_name().name()))
+                .expect("Fork not found")
+                .clone();
+            let commit = fork
+                .lock()
+                .get_branch_by_name(branch)
+                .expect("Fork PR source branch not found")
+                .get_commit()
+                .clone();
+
+            let pr_author = github
+                .lock()
+                .get_user(fork_owner)
+                .expect("PR author not found")
+                .clone();
+            let base_branch = repo
+                .get_branch_by_name(&data.base)
+                .expect("Base branch not found")
+                .clone();
+            let pr = repo.add_pr(pr_author);
             pr.title = data.title;
             pr.description = data.body;
-            // TODO: load this from GitHub state
-            pr.head_sha = data.head;
-            pr.base_branch = Branch::new(&data.base, "sha");
+            pr.head_sha = commit.sha().to_owned();
+            pr.base_branch = base_branch;
             ResponseTemplate::new(200).set_body_json(GitHubPullRequest::from(pr.clone()))
         },
         "POST",
@@ -268,7 +300,7 @@ impl From<PullRequest> for GitHubPullRequest {
             }),
             base: Box::new(GitHubBase {
                 ref_field: base_branch.get_name().to_string(),
-                sha: base_branch.get_sha().to_string(),
+                sha: base_branch.sha(),
             }),
             merged_at,
             closed_at,

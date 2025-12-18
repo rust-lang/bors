@@ -287,9 +287,9 @@ mod tests {
     use crate::database::{BuildStatus, WorkflowStatus};
     use crate::github::CommitSha;
     use crate::github::api::client::HideCommentReason;
-    use crate::tests::BorsTester;
     use crate::tests::default_repo_name;
     use crate::tests::{BorsBuilder, Comment, GitHub, User, WorkflowEvent, run_test};
+    use crate::tests::{BorsTester, Branch, Commit};
     use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
 
     #[sqlx::test]
@@ -421,7 +421,7 @@ It fixes so many issues, sir."
             tester.post_comment("@bors try").await?;
             tester.expect_comments((), 1).await;
 
-            insta::assert_snapshot!(tester.get_branch_commit_message(&tester.try_branch()), @r###"
+            insta::assert_snapshot!(tester.try_branch().get_commit().message(), @r###"
             Auto merge of #1 - pr-1, r=<try>
             Title of PR 1
             "###);
@@ -450,7 +450,7 @@ try-job: Bar
             tester.post_comment("@bors try").await?;
             tester.expect_comments((), 1).await;
 
-            insta::assert_snapshot!(tester.get_branch_commit_message(&tester.try_branch()), @r###"
+            insta::assert_snapshot!(tester.try_branch().get_commit().message(), @r###"
             Auto merge of #1 - pr-1, r=<try>
             Title of PR 1
 
@@ -479,7 +479,7 @@ try-job: Bar
             tester.post_comment("@bors try jobs=Baz,Baz2").await?;
             tester.expect_comments((), 1).await;
 
-            insta::assert_snapshot!(tester.get_branch_commit_message(&tester.try_branch()), @r###"
+            insta::assert_snapshot!(tester.try_branch().get_commit().message(), @r###"
             Auto merge of #1 - pr-1, r=<try>
             Title of PR 1
 
@@ -511,6 +511,12 @@ try-job: Bar
     #[sqlx::test]
     async fn try_merge_explicit_parent(pool: sqlx::PgPool) {
         let gh = run_test(pool, async |tester: &mut BorsTester| {
+            tester.modify_repo((), |repo| {
+                repo.add_branch(Branch::new(
+                    "test",
+                    Commit::new("ea9c1b050cc8b420c2c211d2177811e564a4dc60", "test"),
+                ));
+            });
             tester
                 .post_comment("@bors try parent=ea9c1b050cc8b420c2c211d2177811e564a4dc60")
                 .await?;
@@ -528,6 +534,12 @@ try-job: Bar
     #[sqlx::test]
     async fn try_merge_last_parent(pool: sqlx::PgPool) {
         let gh = run_test(pool, async |tester: &mut BorsTester| {
+            tester.modify_repo((), |repo| {
+                repo.add_branch(Branch::new(
+                    "test",
+                    Commit::new("ea9c1b050cc8b420c2c211d2177811e564a4dc60", "test"),
+                ));
+            });
             tester
                 .post_comment("@bors try parent=ea9c1b050cc8b420c2c211d2177811e564a4dc60")
                 .await?;
@@ -620,7 +632,7 @@ try-job: Bar
                     .find_build(
                         &default_repo_name(),
                         TRY_BRANCH_NAME,
-                        CommitSha(tester.try_branch().get_sha().to_string()),
+                        CommitSha(tester.try_branch().get_commit().sha().to_owned()),
                     )
                     .await?
                     .is_some()
@@ -775,7 +787,7 @@ try-job: Bar
             let build = tester.db().find_build(
                 &default_repo_name(),
                 tester.try_branch().get_name(),
-                tester.try_branch().get_sha().to_string().into()
+                tester.try_branch().get_commit().commit_sha()
             ).await?.expect("build not found");
             assert_eq!(build.status, BuildStatus::Cancelled);
 

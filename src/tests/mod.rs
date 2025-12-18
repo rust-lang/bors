@@ -48,6 +48,7 @@ use crate::tests::mock::{
 };
 pub use github::Branch;
 pub use github::Comment;
+pub use github::Commit;
 pub use github::GitHub;
 pub use github::Permissions;
 pub use github::Repo;
@@ -344,7 +345,10 @@ impl BorsTester {
             .clone();
         let mut repo = repo.lock();
 
-        repo.add_branch(Branch::new(name, &format!("{name}-initial")));
+        repo.add_branch(Branch::new(
+            name,
+            Commit::new("initial-sha", &format!("{name}-initial")),
+        ));
         repo.get_branch_by_name(name).unwrap().clone()
     }
 
@@ -364,14 +368,6 @@ impl BorsTester {
             self.create_branch(name);
             func(repo.lock().get_branch_by_name(name).unwrap());
         }
-    }
-
-    pub fn get_branch_commit_message(&self, branch: &Branch) -> String {
-        self.github
-            .lock()
-            .default_repo()
-            .lock()
-            .get_commit_message(branch.get_sha())
     }
 
     pub async fn push_to_branch(&mut self, branch: &str, sha: &str) -> anyhow::Result<()> {
@@ -755,7 +751,7 @@ impl BorsTester {
 
             let changes = if base_before != pr.base_branch {
                 Some(PullRequestChangeEvent {
-                    from_base_sha: Some(base_before.get_sha().to_string()),
+                    from_base_sha: Some(base_before.get_commit().sha().to_string()),
                 })
             } else {
                 None
@@ -829,12 +825,12 @@ impl BorsTester {
             .get_repo(&id.repo)
             .lock()
             .get_branch_by_name(AUTO_BRANCH)
-            .map(|b| b.sha.clone());
+            .map(|b| b.sha());
 
         self.run_merge_queue_now().await;
         let comment = self.get_next_comment_text(id).await?;
         assert!(comment.contains("Testing commit"));
-        let new_auto_sha = self.auto_branch().sha;
+        let new_auto_sha = self.auto_branch().sha();
         if let Some(previous_sha) = previous_sha {
             assert_ne!(previous_sha, new_auto_sha, "Auto SHA did not change");
         }

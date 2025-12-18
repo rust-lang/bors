@@ -560,7 +560,6 @@ mod tests {
             merge_queue::{AUTO_BRANCH_NAME, AUTO_BUILD_CHECK_RUN_NAME, AUTO_MERGE_BRANCH_NAME},
         },
         database::{BuildStatus, MergeableState, OctocrabMergeableState},
-        github::CommitSha,
         tests::{BorsTester, BranchPushBehaviour, BranchPushError, Comment},
     };
 
@@ -667,7 +666,7 @@ merge_queue_enabled = false
                     .find_build(
                         &default_repo_name(),
                         AUTO_BRANCH_NAME,
-                        CommitSha(tester.auto_branch().get_sha().to_string()),
+                        tester.auto_branch().get_commit().commit_sha(),
                     )
                     .await?
                     .is_some()

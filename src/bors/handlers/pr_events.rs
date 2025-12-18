@@ -766,7 +766,7 @@ report_merge_conflicts = true
             tester.approve(pr3.id()).await?;
 
             tester.start_and_finish_auto_build(pr3.id()).await?;
-            let sha = tester.auto_branch().get_sha().to_string();
+            let sha = tester.auto_branch().get_commit().sha().to_owned();
 
             tester
                 .modify_pr_state(pr2.id(), |pr| {

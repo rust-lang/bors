@@ -218,7 +218,7 @@ mod tests {
     use crate::database::WorkflowStatus;
     use crate::database::operations::get_all_workflows;
     use crate::tests::{BorsBuilder, BorsTester, GitHub, default_repo_name};
-    use crate::tests::{Branch, WorkflowEvent, run_test};
+    use crate::tests::{WorkflowEvent, run_test};
 
     #[sqlx::test]
     async fn workflow_started_unknown_build(pool: sqlx::PgPool) {

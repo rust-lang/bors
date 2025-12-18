@@ -151,7 +151,7 @@ impl GitHubMockServer {
             // pass comm. channels to them.
             let repos: Vec<_> = github.lock().repos.values().cloned().collect();
             for repo in repos {
-                mock_repo(repo.clone(), &mock_server).await;
+                mock_repo(repo.clone(), github.clone(), &mock_server).await;
             }
         }
 

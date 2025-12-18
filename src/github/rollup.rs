@@ -224,9 +224,8 @@ async fn create_rollup(
 
     let title = format!("Rollup of {} pull requests", successes.len());
 
-    // Create the rollup PR from the user's fork branch to the base branch
-    let pr = user_client
-        .client
+    // Create the rollup PR from the user's fork branch to the main repo base branch
+    let pr = gh_client
         .create_pr(
             &title,
             &format!("{username}:{rollup_branch}"),
@@ -300,28 +299,27 @@ mod tests {
     #[sqlx::test]
     async fn create_rollup(pool: sqlx::PgPool) {
         let gh = run_test((pool, rollup_state()), async |tester: &mut BorsTester| {
-            let pr1 = tester.open_pr(default_repo_name(), |_| {}).await?;
             let pr2 = tester.open_pr(default_repo_name(), |_| {}).await?;
-            tester.approve(pr1.id()).await?;
+            let pr3 = tester.open_pr(default_repo_name(), |_| {}).await?;
             tester.approve(pr2.id()).await?;
+            tester.approve(pr3.id()).await?;
 
-            let repo_name = default_repo_name();
             let pr_url = tester
                 .api_request(rollup_request(
                     "rolluper",
-                    repo_name.clone(),
-                    &[pr1.number, pr2.number],
+                    default_repo_name(),
+                    &[pr2.number, pr3.number],
                 ))
                 .await?
                 .assert_status(StatusCode::TEMPORARY_REDIRECT)
                 .get_header("location");
-            insta::assert_snapshot!(pr_url, @"https://github.com/rolluper/borstest/pull/1");
+            insta::assert_snapshot!(pr_url, @"https://github.com/rust-lang/borstest/pull/4");
             Ok(())
         })
         .await;
-        let repo = gh.get_repo(GithubRepoName::new("rolluper", default_repo_name().name()));
+        let repo = gh.get_repo(());
         let repo = repo.lock();
-        insta::assert_snapshot!(repo.get_pr(1).description, @r"
+        insta::assert_snapshot!(repo.get_pr(4).description, @r"
         Successful merges:
 
          - #2 (Title of PR 2)

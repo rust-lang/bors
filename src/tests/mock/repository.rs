@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use crate::database::WorkflowStatus;
 use crate::tests::BranchPushError;
-use crate::tests::github::{CheckRunData, WorkflowRun};
+use crate::tests::github::{CheckRunData, Commit, WorkflowRun};
 use crate::tests::mock::pull_request::mock_pull_requests;
 use crate::tests::mock::workflow::GitHubWorkflowRun;
 use crate::tests::mock::{GitHubUser, dynamic_mock_req};
@@ -12,7 +12,6 @@ use crate::tests::{Branch, GitHub, Repo, WorkflowJob};
 use base64::Engine;
 use chrono::{DateTime, Utc};
 use octocrab::models::repos::Object;
-use octocrab::models::repos::Object::Commit;
 use octocrab::models::workflows::{Conclusion, Status, Step};
 use octocrab::models::{JobId, RunId};
 use parking_lot::Mutex;
@@ -47,7 +46,11 @@ pub async fn mock_repo_list(github: Arc<Mutex<GitHub>>, mock_server: &MockServer
         .await;
 }
 
-pub async fn mock_repo(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
+pub async fn mock_repo(
+    repo: Arc<Mutex<Repo>>,
+    github: Arc<Mutex<GitHub>>,
+    mock_server: &MockServer,
+) {
     {
         let repo = repo.clone();
         Mock::given(method("GET"))
@@ -60,7 +63,7 @@ pub async fn mock_repo(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
             .await;
     }
 
-    mock_pull_requests(repo.clone(), mock_server).await;
+    mock_pull_requests(repo.clone(), github, mock_server).await;
     mock_branches(repo.clone(), mock_server).await;
     mock_cancel_workflow(repo.clone(), mock_server).await;
     mock_check_runs(repo.clone(), mock_server).await;
@@ -107,8 +110,8 @@ async fn mock_get_branch(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
             let branch = GitHubBranch {
                 name: branch.name.clone(),
                 commit: GitHubCommitObject {
-                    sha: branch.sha.clone(),
-                    url: format!("https://github.com/branch/{}-{}", branch.name, branch.sha)
+                    sha: branch.sha().clone(),
+                    url: format!("https://github.com/branch/{}-{}", branch.name, branch.sha())
                         .parse()
                         .unwrap(),
                 },
@@ -143,6 +146,7 @@ async fn mock_create_branch(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
                 .expect("Unexpected ref name");
 
             let sha = data.sha;
+            let commit = repo.get_commit_by_sha(&sha);
             match repo.get_branch_by_name(branch_name) {
                 Some(branch) => {
                     panic!(
@@ -152,7 +156,7 @@ async fn mock_create_branch(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
                 }
                 None => {
                     // Create a new branch
-                    repo.add_branch(Branch::new(branch_name, &sha));
+                    repo.add_branch(Branch::new(branch_name, commit));
                 }
             }
 
@@ -163,7 +167,7 @@ async fn mock_create_branch(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
                 ref_field: data.r#ref,
                 node_id: repo.branches().len().to_string(),
                 url: url.clone(),
-                object: Commit { sha, url },
+                object: Object::Commit { sha, url },
             };
             ResponseTemplate::new(200).set_body_json(response)
         })
@@ -208,14 +212,12 @@ async fn mock_update_branch(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
             }
 
             let sha = data.sha;
-            match repo.get_branch_by_name(branch_name) {
-                Some(branch) => {
-                    // Update branch
-                    branch.set_to_sha(&sha);
-                }
-                None => {
-                    return ResponseTemplate::new(404);
-                }
+            if repo.get_branch_by_name(branch_name).is_some() {
+                // Update branch
+                let commit = repo.get_commit_by_sha(&sha);
+                repo.push_commit(branch_name, commit);
+            } else {
+                return ResponseTemplate::new(404);
             }
 
             ResponseTemplate::new(200)
@@ -249,7 +251,7 @@ async fn mock_merge_branch(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
                 }
                 Some(branch) => {
                     // head is a branch
-                    branch.sha.clone()
+                    branch.sha()
                 }
             };
             let Some(base_branch) = repo.get_branch_by_name(&data.base) else {
@@ -268,9 +270,11 @@ async fn mock_merge_branch(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
             };
 
             let merge_sha = format!("merge-{}-{source_info}", base_branch.merge_counter);
+            let commit = Commit::new(&merge_sha, &data.commit_message);
             base_branch.merge_counter += 1;
-            base_branch.set_to_sha(&merge_sha);
-            repo.set_commit_message(&merge_sha, &data.commit_message);
+
+            let branch_name = base_branch.name.clone();
+            repo.push_commit(&branch_name, commit);
 
             #[derive(serde::Serialize)]
             struct MergeResponse {
