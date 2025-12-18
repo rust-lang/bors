@@ -267,7 +267,7 @@ async fn mock_graphql(github: Arc<Mutex<GitHub>>, mock_server: &MockServer) {
                     let data: Variables = serde_json::from_value(body.variables).unwrap();
                     github
                         .lock()
-                        .modify_comment(&data.node_id, |c| c.hide_reason = Some(data.reason));
+                        .modify_comment(&data.node_id, |c| c.hide(data.reason));
                     ResponseTemplate::new(200).set_body_json(HashMap::<String, String>::new())
                 }
                 "updateIssueComment" => {
@@ -286,7 +286,7 @@ async fn mock_graphql(github: Arc<Mutex<GitHub>>, mock_server: &MockServer) {
 
                     github
                         .lock()
-                        .modify_comment(&data.id, |c| c.content = data.body);
+                        .modify_comment(&data.id, |c| c.set_content(&data.body));
 
                     ResponseTemplate::new(200).set_body_json(response)
                 }
@@ -304,7 +304,7 @@ async fn mock_graphql(github: Arc<Mutex<GitHub>>, mock_server: &MockServer) {
                         .lock()
                         .get_comment_by_node_id(&data.node_id)
                         .unwrap()
-                        .content
+                        .content()
                         .clone();
                     let response = serde_json::json!({
                         "data": {

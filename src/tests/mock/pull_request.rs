@@ -317,7 +317,7 @@ impl From<PullRequest> for GitHubPullRequest {
                 sha: head_sha,
             }),
             base: Box::new(GitHubBase {
-                ref_field: base_branch.get_name().to_string(),
+                ref_field: base_branch.name().to_string(),
                 sha: base_branch.sha(),
             }),
             merged_at,

@@ -1,4 +1,3 @@
-use std::num::NonZeroU64;
 use std::ops::Deref;
 use std::sync::Arc;
 
@@ -108,12 +107,16 @@ async fn mock_get_branch(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
                 return ResponseTemplate::new(404);
             };
             let branch = GitHubBranch {
-                name: branch.name.clone(),
+                name: branch.name().to_owned(),
                 commit: GitHubCommitObject {
                     sha: branch.sha().clone(),
-                    url: format!("https://github.com/branch/{}-{}", branch.name, branch.sha())
-                        .parse()
-                        .unwrap(),
+                    url: format!(
+                        "https://github.com/branch/{}-{}",
+                        branch.name(),
+                        branch.sha()
+                    )
+                    .parse()
+                    .unwrap(),
                 },
                 protected: false,
             };
@@ -151,7 +154,7 @@ async fn mock_create_branch(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
                 Some(branch) => {
                     panic!(
                         "Trying to create an already existing branch {}",
-                        branch.name
+                        branch.name()
                     );
                 }
                 None => {
@@ -188,7 +191,7 @@ async fn mock_update_branch(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
 
             let data: SetRefRequest = req.body_json().unwrap();
 
-            if let Some((error_type, remaining)) = &mut repo.push_behaviour.error {
+            if let Some(error_type) = repo.push_behaviour.try_push() {
                 let (message, status) = match error_type {
                     BranchPushError::Conflict => ("Conflict", 409),
                     BranchPushError::ValidationFailed => {
@@ -197,16 +200,9 @@ async fn mock_update_branch(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
                     BranchPushError::InternalServerError => ("Internal server error", 500),
                 };
 
-                let current = remaining.get();
-                if current == 1 {
-                    repo.push_behaviour.error = None;
-                } else {
-                    *remaining = NonZeroU64::new(current - 1).unwrap();
-                }
-
                 return ResponseTemplate::new(status).set_body_json(serde_json::json!({
                     "message": message,
-                    "status": status.to_string(),
+                    "status": status,
                     "documentation_url": "https://docs.github.com/rest/git/refs#update-a-reference",
                 }));
             }
@@ -273,7 +269,7 @@ async fn mock_merge_branch(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
             let commit = Commit::new(&merge_sha, &data.commit_message);
             base_branch.merge_counter += 1;
 
-            let branch_name = base_branch.name.clone();
+            let branch_name = base_branch.name().to_owned();
             repo.push_commit(&branch_name, commit);
 
             #[derive(serde::Serialize)]

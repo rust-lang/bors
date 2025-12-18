@@ -403,7 +403,7 @@ impl BorsTester {
     ) -> anyhow::Result<String> {
         Ok(GitHub::get_next_comment(self.github.clone(), id)
             .await?
-            .content)
+            .content())
     }
 
     /// Wait until the next bot comment is received on the specified repo and PR, and return it.
@@ -420,9 +420,9 @@ impl BorsTester {
         // Allocate comment IDs
         let comment = {
             let gh = self.github.lock();
-            let repo = gh.get_repo(&comment.pr_ident.repo);
+            let repo = gh.get_repo(&comment.pr_ident().repo);
             let mut repo = repo.lock();
-            let pr = repo.get_pr_mut(comment.pr_ident.number);
+            let pr = repo.get_pr_mut(comment.pr_ident().number);
             let (id, node_id) = pr.next_comment_ids();
             let comment = comment.with_ids(id, node_id);
             pr.add_comment_to_history(comment.clone());
@@ -861,7 +861,7 @@ impl BorsTester {
     pub fn expect_hidden_comment(&self, comment: &Comment, reason: HideCommentReason) {
         self.github
             .lock()
-            .check_comment_was_hidden(comment.node_id.as_deref().unwrap(), reason);
+            .check_comment_was_hidden(comment.node_id().as_deref().unwrap(), reason);
     }
 
     /// Get a GitHub comment that might have been modified by API calls from bors.
@@ -1025,7 +1025,7 @@ impl BorsTester {
         let payload = {
             let gh = self.github.lock();
             GitHubIssueCommentEventPayload::new(
-                &gh.get_repo(&comment.pr_ident.repo).lock(),
+                &gh.get_repo(&comment.pr_ident().repo).lock(),
                 comment,
             )
         };

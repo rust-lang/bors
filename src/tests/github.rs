@@ -704,7 +704,7 @@ impl PullRequest {
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Branch {
-    pub name: String,
+    name: String,
     commits: Vec<Commit>,
     pub merge_counter: u64,
     pub merge_conflict: bool,
@@ -720,7 +720,7 @@ impl Branch {
         }
     }
 
-    pub fn get_name(&self) -> &str {
+    pub fn name(&self) -> &str {
         &self.name
     }
     pub fn get_commit(&self) -> &Commit {
@@ -783,7 +783,7 @@ pub enum BranchPushError {
 
 #[derive(Clone, Debug)]
 pub struct BranchPushBehaviour {
-    pub error: Option<(BranchPushError, NonZeroU64)>,
+    error: Option<(BranchPushError, NonZeroU64)>,
 }
 
 impl BranchPushBehaviour {
@@ -794,6 +794,19 @@ impl BranchPushBehaviour {
     pub fn always_fail(error_type: BranchPushError) -> Self {
         Self {
             error: Some((error_type, NonZeroU64::new(u64::MAX).unwrap())),
+        }
+    }
+
+    pub fn try_push(&mut self) -> Option<BranchPushError> {
+        if let Some((error, remaining)) = self.error.clone() {
+            if remaining.get() == 1 {
+                self.error = None;
+            } else {
+                self.error = Some((error.clone(), NonZeroU64::new(remaining.get() - 1).unwrap()));
+            }
+            Some(error)
+        } else {
+            None
         }
     }
 }
@@ -819,12 +832,12 @@ pub enum CommentMsg {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Comment {
-    pub pr_ident: PrIdentifier,
-    pub author: User,
-    pub content: String,
-    pub id: Option<u64>,
-    pub node_id: Option<String>,
-    pub hide_reason: Option<HideCommentReason>,
+    pr_ident: PrIdentifier,
+    author: User,
+    content: String,
+    id: Option<u64>,
+    node_id: Option<String>,
+    hide_reason: Option<HideCommentReason>,
 }
 
 impl Comment {
@@ -849,6 +862,33 @@ impl Comment {
             node_id: Some(node_id),
             ..self
         }
+    }
+
+    pub fn pr_ident(&self) -> PrIdentifier {
+        self.pr_ident.clone()
+    }
+
+    pub fn author(&self) -> User {
+        self.author.clone()
+    }
+
+    pub fn content(&self) -> String {
+        self.content.clone()
+    }
+    pub fn set_content(&mut self, content: &str) {
+        self.content = content.to_owned();
+    }
+
+    pub fn id(&self) -> Option<u64> {
+        self.id
+    }
+
+    pub fn node_id(&self) -> Option<String> {
+        self.node_id.clone()
+    }
+
+    pub fn hide(&mut self, reason: HideCommentReason) {
+        self.hide_reason = Some(reason);
     }
 }
 
@@ -953,7 +993,7 @@ impl WorkflowRun {
             name: "Workflow1".to_string(),
             run_id,
             check_suite_id: CheckSuiteId(run_id.0),
-            head_branch: branch.get_name().to_string(),
+            head_branch: branch.name().to_string(),
             jobs: vec![],
             head_sha: branch.sha(),
             duration: Duration::from_secs(3600),

@@ -1148,9 +1148,9 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
 
             // Check that the comment text has been updated with a link to the started workflow
             let updated_comment = ctx
-                .get_comment_by_node_id(&comment.node_id.unwrap())
+                .get_comment_by_node_id(&comment.node_id().unwrap())
                 .unwrap();
-            insta::assert_snapshot!(updated_comment.content, @r"
+            insta::assert_snapshot!(updated_comment.content(), @r"
             :hourglass: Testing commit pr-1-sha with merge merge-0-pr-1...
 
             **Workflow**: https://github.com/rust-lang/borstest/actions/runs/1

@@ -772,7 +772,7 @@ try-job: Bar
             insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"Try build was cancelled. It was not possible to cancel some workflows.");
             let build = ctx.db().find_build(
                 &default_repo_name(),
-                ctx.try_branch().get_name(),
+                ctx.try_branch().name(),
                 ctx.try_branch().get_commit().commit_sha()
             ).await?.expect("build not found");
             assert_eq!(build.status, BuildStatus::Cancelled);
@@ -1034,9 +1034,9 @@ try_failed = ["+foo", "+bar", "-baz"]
 
             // Check that the comment text has been updated with a link to the started workflow
             let updated_comment = ctx
-                .get_comment_by_node_id(&comment.node_id.unwrap())
+                .get_comment_by_node_id(&comment.node_id().unwrap())
                 .unwrap();
-            insta::assert_snapshot!(updated_comment.content, @r"
+            insta::assert_snapshot!(updated_comment.content(), @r"
             :hourglass: Trying commit pr-1-sha with merge merge-0-pr-1…
 
             To cancel the try build, run the command `@bors try cancel`.
