@@ -135,10 +135,7 @@ pub async fn handle_build_queue_event(
                 &build,
                 &pr,
                 &merge_queue_tx,
-                Some(CompletionTrigger {
-                    event,
-                    error_context,
-                }),
+                Some(CompletionTrigger { error_context }),
             )
             .await?;
         }
@@ -180,9 +177,9 @@ async fn maybe_timeout_build(
     Ok(())
 }
 
+/// Represents data that triggered build queue completion handling.
+/// Can be used to enrich the context of failure comments.
 struct CompletionTrigger {
-    #[allow(unused)]
-    event: WorkflowRunCompleted,
     /// An additional message that should be added to a comment if the build failed.
     error_context: Option<String>,
 }
