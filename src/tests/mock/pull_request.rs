@@ -11,6 +11,8 @@ use octocrab::models::LabelId;
 use octocrab::models::pulls::MergeableState as OctocrabMergeableState;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
+use std::collections::HashMap;
 use std::sync::Arc;
 use url::Url;
 use wiremock::{
@@ -116,16 +118,32 @@ async fn mock_pr_list(repo_clone: Arc<Mutex<Repo>>, mock_server: &MockServer) {
     let repo_name = repo_clone.lock().full_name();
     Mock::given(method("GET"))
         .and(path(format!("/repos/{repo_name}/pulls")))
-        .respond_with(move |_: &Request| {
+        .respond_with(move |req: &Request| {
             let pull_request_error = repo_clone.lock().pull_request_error;
             if pull_request_error {
                 ResponseTemplate::new(500)
             } else {
+                let query: HashMap<Cow<str>, Cow<str>> = req.url.query_pairs().collect();
+                let filter_statuses = query
+                    .get("state")
+                    .map(|s| match s.as_ref() {
+                        "open" => vec![PullRequestStatus::Open, PullRequestStatus::Draft],
+                        "closed" => vec![PullRequestStatus::Closed, PullRequestStatus::Merged],
+                        _ => vec![],
+                    })
+                    .unwrap_or_default();
                 let prs = repo_clone.lock().pull_requests.clone();
+
                 ResponseTemplate::new(200).set_body_json(
                     prs.values()
+                        .filter(|pr| {
+                            if !filter_statuses.is_empty() {
+                                filter_statuses.contains(&pr.status)
+                            } else {
+                                true
+                            }
+                        })
                         .map(|pr| GitHubPullRequest::from(pr.clone()))
-                        .filter(|pr| pr.closed_at.is_none())
                         .collect::<Vec<_>>(),
                 )
             }

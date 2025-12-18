@@ -315,13 +315,10 @@ timeout = 3600
     async fn refresh_pr_with_status_draft(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             let pr = ctx.open_pr((), |_| {}).await?;
-            ctx.with_blocked_webhooks(async |ctx: &mut BorsTester| {
-                ctx.set_pr_status_draft(pr.number).await
-            })
-            .await?;
+            ctx.modify_pr_state(pr.id(), |pr| pr.convert_to_draft());
 
             ctx.refresh_prs().await;
-            ctx.pr(pr.number)
+            ctx.pr(pr.id())
                 .await
                 .expect_status(PullRequestStatus::Draft);
             Ok(())
