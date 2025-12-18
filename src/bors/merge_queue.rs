@@ -198,16 +198,19 @@ async fn handle_successful_build(
                 )),
                 true,
             ),
+            BranchUpdateError::BranchNotFound(branch_name) => (
+                auto_build_push_failed_comment(&format!("the branch {branch_name} was not found")),
+                true,
+            ),
             error => (auto_build_push_failed_comment(&error.to_string()), false),
         };
 
-        // TODO: this might spam the PR. Do not send the comment if a 500 error occurs?
         if mark_as_failure {
             ctx.db
                 .update_build_status(auto_build, BuildStatus::Failure)
                 .await?;
+            repo.client.post_comment(pr_num, error_comment).await?;
         }
-        repo.client.post_comment(pr_num, error_comment).await?;
     } else {
         tracing::info!("Auto build succeeded and merged for PR {pr_num}");
         ctx.db
