@@ -384,13 +384,13 @@ impl BorsTester {
         }
     }
 
-    pub async fn push_to_branch(&mut self, branch: &str, sha: &str) -> anyhow::Result<()> {
+    pub async fn push_to_branch(&mut self, branch: &str, commit: Commit) -> anyhow::Result<()> {
         let payload = {
             let gh = self.github.lock();
             let repo = gh.get_repo(default_repo_name());
             let mut repo = repo.lock();
-            repo.push_commit(branch, Commit::new(sha, "push"));
-            GitHubPushEventPayload::new(&repo, branch, sha)
+            repo.push_commit(branch, commit.clone());
+            GitHubPushEventPayload::new(&repo, branch, commit.sha())
         };
         self.send_webhook("push", payload).await
     }

@@ -367,8 +367,8 @@ mod tests {
 
     use crate::bors::PullRequestStatus;
     use crate::bors::merge_queue::AUTO_BUILD_CHECK_RUN_NAME;
-    use crate::tests::default_repo_name;
     use crate::tests::{BorsBuilder, BorsTester, GitHub};
+    use crate::tests::{Commit, default_repo_name};
     use crate::{
         database::{MergeableState, OctocrabMergeableState},
         tests::{User, default_branch_name, run_test},
@@ -655,7 +655,9 @@ mod tests {
                     pr.mergeable_state = OctocrabMergeableState::Unknown;
                 })
                 .await?;
-            tester.push_to_branch(default_branch_name(), "sha").await?;
+            tester
+                .push_to_branch(default_branch_name(), Commit::new("sha", "push"))
+                .await?;
             tester.modify_pr_state(pr.id(), |pr| {
                 pr.mergeable_state = OctocrabMergeableState::Dirty;
             });
@@ -680,7 +682,9 @@ mod tests {
             tester.modify_pr_state(pr.id(), |pr| {
                 pr.mergeable_state = OctocrabMergeableState::Dirty;
             });
-            tester.push_to_branch(default_branch_name(), "sha").await?;
+            tester
+                .push_to_branch(default_branch_name(), Commit::new("sha", "push"))
+                .await?;
 
             Ok(())
         })
@@ -705,7 +709,7 @@ report_merge_conflicts = true
                 .modify_pr_state(pr.id(), |pr| {
                     pr.mergeable_state = OctocrabMergeableState::Dirty;
                 });
-            tester.push_to_branch(default_branch_name(), "sha").await?;
+            tester.push_to_branch(default_branch_name(), Commit::new("sha", "push")).await?;
             assert_snapshot!(tester.get_next_comment_text(pr).await?, @":umbrella: The latest upstream changes made this pull request unmergeable. Please [resolve the merge conflicts](https://rustc-dev-guide.rust-lang.org/git.html#rebasing-and-conflicts).");
 
             Ok(())
@@ -732,7 +736,7 @@ report_merge_conflicts = true
                 .modify_pr_state(pr.id(), |pr| {
                     pr.mergeable_state = OctocrabMergeableState::Dirty;
                 });
-            tester.push_to_branch(default_branch_name(), "sha").await?;
+            tester.push_to_branch(default_branch_name(), Commit::new("sha", "push")).await?;
             assert_snapshot!(tester.get_next_comment_text(pr.id()).await?, @r"
             :umbrella: The latest upstream changes made this pull request unmergeable. Please [resolve the merge conflicts](https://rustc-dev-guide.rust-lang.org/git.html#rebasing-and-conflicts).
 
@@ -755,24 +759,25 @@ report_merge_conflicts = true
 "#,
             )).run_test(async |tester: &mut BorsTester| {
             let pr2 = tester
-                .open_pr(default_repo_name(), |pr| {
-                    pr.mergeable_state = OctocrabMergeableState::Clean;
-                })
+                .open_pr((), |_| {})
                 .await?;
 
             let pr3 = tester
-                .open_pr(default_repo_name(), |_| {})
+                .open_pr((), |_| {})
                 .await?;
             tester.approve(pr3.id()).await?;
 
             tester.start_and_finish_auto_build(pr3.id()).await?;
-            let sha = tester.auto_branch().get_commit().sha().to_owned();
+            let commit = tester.auto_branch().get_commit().clone();
 
             tester
                 .modify_pr_state(pr2.id(), |pr| {
                     pr.mergeable_state = OctocrabMergeableState::Dirty;
                 });
-            tester.push_to_branch(default_branch_name(), &sha).await?;
+
+            // Repush the same commit again to generate a push webhook
+            // Ideally, the tests should do that automatically...
+            tester.push_to_branch(default_branch_name(), commit).await?;
             assert_snapshot!(tester.get_next_comment_text(pr2.id()).await?, @":umbrella: The latest upstream changes (presumably #3) made this pull request unmergeable. Please [resolve the merge conflicts](https://rustc-dev-guide.rust-lang.org/git.html#rebasing-and-conflicts).");
 
             Ok(())
