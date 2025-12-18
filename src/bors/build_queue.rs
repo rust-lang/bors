@@ -207,7 +207,7 @@ async fn maybe_complete_build(
         "Attempting to complete a non-pending build"
     );
 
-    let mut workflow_runs = load_workflow_runs(repo, db, build)
+    let workflow_runs = load_workflow_runs(repo, db, build)
         .await
         .context("Cannot load workflow runs")?;
 
@@ -306,15 +306,12 @@ async fn maybe_complete_build(
         merge_queue_tx.notify().await?;
     }
 
-    // TODO: do this sort in try/auto_build_succeeded_comment
-    workflow_runs.sort_by(|a, b| a.name.cmp(&b.name));
-
     let comment_opt = if build_succeeded {
         tracing::info!("Build succeeded for PR {pr_num}");
 
         if build.kind == BuildKind::Try {
             Some(try_build_succeeded_comment(
-                &workflow_runs,
+                workflow_runs,
                 CommitSha(build.commit_sha.clone()),
                 CommitSha(build.parent.clone()),
             ))

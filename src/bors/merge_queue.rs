@@ -172,7 +172,7 @@ async fn handle_successful_build(
         .await
         .context("Cannot load workflow runs")?;
     let comment = auto_build_succeeded_comment(
-        &workflow_runs,
+        workflow_runs,
         &approval_info.approver,
         &commit_sha,
         &pr.base_branch,

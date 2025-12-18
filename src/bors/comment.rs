@@ -50,7 +50,7 @@ impl Comment {
 }
 
 pub fn try_build_succeeded_comment(
-    workflows: &[WorkflowRun],
+    mut workflows: Vec<WorkflowRun>,
     commit_sha: CommitSha,
     parent_sha: CommitSha,
 ) -> Comment {
@@ -58,12 +58,14 @@ pub fn try_build_succeeded_comment(
 
     let mut text = String::from(":sunny: Try build successful");
 
+    workflows.sort_by(|a, b| a.name.cmp(&b.name));
+
     // If there is only a single workflow (the common case), compress the output
     // so that it doesn't take so much space
     if workflows.len() == 1 {
         writeln!(text, " ([{}]({}))", workflows[0].name, workflows[0].url).unwrap();
     } else {
-        let workflows_status = list_workflows_status(workflows);
+        let workflows_status = list_workflows_status(&workflows);
         writeln!(text, "\n{workflows_status}").unwrap();
     }
     writeln!(
@@ -342,11 +344,12 @@ pub fn auto_build_started_comment(head_sha: &CommitSha, merge_sha: &CommitSha) -
 }
 
 pub fn auto_build_succeeded_comment(
-    workflows: &[WorkflowRun],
+    mut workflows: Vec<WorkflowRun>,
     approved_by: &str,
     merge_sha: &CommitSha,
     base_ref: &str,
 ) -> Comment {
+    workflows.sort_by(|a, b| a.name.cmp(&b.name));
     let urls = workflows
         .iter()
         .map(|w| format!("[{}]({})", w.name, w.url))
