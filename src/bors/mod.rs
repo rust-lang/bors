@@ -33,7 +33,7 @@ pub mod mergeability_queue;
 pub mod process;
 
 use crate::bors::command::BorsCommand;
-use crate::database::{WorkflowModel, WorkflowStatus};
+use crate::database::WorkflowStatus;
 pub use command::CommandPrefix;
 
 /// Branch where CI checks run for auto builds.
@@ -158,11 +158,13 @@ fn elapsed_time_since(date: DateTime<Utc>) -> Duration {
 #[derive(Clone, Debug)]
 pub struct WorkflowRun {
     pub id: RunId,
+    pub name: String,
+    pub url: String,
     pub status: WorkflowStatus,
 }
 
 pub struct FailedWorkflowRun {
-    pub workflow_run: WorkflowModel,
+    pub workflow_run: WorkflowRun,
     pub failed_jobs: Vec<Job>,
 }
 

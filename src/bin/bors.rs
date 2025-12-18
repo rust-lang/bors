@@ -34,7 +34,8 @@ const MERGEABILITY_STATUS_INTERVAL: Duration = Duration::from_secs(60 * 10);
 const PR_STATE_PERIODIC_REFRESH: Duration = Duration::from_secs(60 * 10);
 
 /// How often should the bot try to process the merge queue.
-/// It won't actually be executed more often than `MERGE_QUEUE_MAX_INTERVAL`.
+/// It won't actually be executed more often than `MERGE_QUEUE_MAX_INTERVAL`, unless
+/// some notification has happened in the meantime.
 const MERGE_QUEUE_CHECK_INTERVAL: Duration = Duration::from_secs(5);
 
 /// Longest duration between two ticks of the merge queue.

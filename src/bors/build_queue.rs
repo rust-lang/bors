@@ -11,6 +11,7 @@
 
 use crate::bors::build::{
     CancelBuildError, cancel_build, get_failed_jobs, hide_build_started_comments,
+    load_workflow_runs,
 };
 use crate::bors::comment::{
     CommentTag, build_failed_comment, build_timed_out_comment, try_build_succeeded_comment,
@@ -18,10 +19,11 @@ use crate::bors::comment::{
 use crate::bors::event::WorkflowRunCompleted;
 use crate::bors::labels::handle_label_trigger;
 use crate::bors::merge_queue::MergeQueueSender;
-use crate::bors::{BuildKind, FailedWorkflowRun, RepositoryState, WorkflowRun, elapsed_time_since};
+use crate::bors::{BuildKind, FailedWorkflowRun, RepositoryState, elapsed_time_since};
 use crate::database::{BuildModel, BuildStatus, PullRequestModel, WorkflowStatus};
 use crate::github::{CommitSha, GithubRepoName, LabelTrigger};
 use crate::{BorsContext, PgDbClient};
+use anyhow::Context;
 use octocrab::models::CheckRunId;
 use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
 use std::sync::Arc;
@@ -205,51 +207,16 @@ async fn maybe_complete_build(
         "Attempting to complete a non-pending build"
     );
 
-    // Load the workflow runs that we know about from the DB. We know about workflow runs for
-    // which we have received a started or a completed event.
-    let mut db_workflow_runs = db.get_workflows_for_build(build).await?;
-    tracing::debug!("Workflow runs from DB: {db_workflow_runs:?}");
-
-    // Ask GitHub about all workflow runs attached to the build commit.
-    // This tells us for how many workflow runs we should wait.
-    // Note: we actually only need the number of workflow runs in this function, but we download
-    // some data about them to have better logging.
-    // TODO: if we have a completion trigger, load runs for a check suite ID instead?
-    let mut gh_workflow_runs: Vec<WorkflowRun> = repo
-        .client
-        .get_workflow_runs_for_commit_sha(CommitSha(build.commit_sha.clone()))
-        .await?;
-    tracing::debug!("Workflow runs from GitHub: {gh_workflow_runs:?}");
-
-    // It is possible that the GitHub state is not fully up-to-date, or that we have overridden
-    // it somehow in our DB (for example with the min_ci time mechanism).
-    // It is also possible that we learn here about new GitHub workflow state that hasn't been
-    // propagated to the DB yet.
-    // Here we reconcile the two world views.
-    for db_run in db_workflow_runs.iter_mut() {
-        if let Some(gh_run) = gh_workflow_runs
-            .iter_mut()
-            .find(|gh_run| gh_run.id == db_run.run_id.into() && gh_run.status != db_run.status)
-        {
-            // Two situations can happen here
-            if db_run.status.is_pending() {
-                // 1. DB state has not been updated yet, but we already have a conclusion on GitHub
-                // TODO: also update the workflow status in DB?
-                db_run.status = gh_run.status;
-            } else {
-                // 2. DB has a conclusion for the workflow that does not match GH state. We override
-                // GH state with DB state, because we could have stored something special in the DB.
-                gh_run.status = db_run.status;
-            }
-        }
-    }
+    let workflow_runs = load_workflow_runs(repo, db, build)
+        .await
+        .context("Cannot load workflow runs")?;
 
     // If we check build completion after a workflow run completion trigger,
     // there really should be at least a single workflow run returned from the call above.
     // If not, then we could have a race condition where we check the completion of this build
     // *just* after it has been inserted into the DB, but before CI had a chance to start the
     // workflow runs. In that case, bail out and wait for a later opportunity.
-    if gh_workflow_runs.is_empty() {
+    if workflow_runs.is_empty() {
         match &completion_trigger {
             Some(_) => {
                 panic!(
@@ -270,16 +237,16 @@ async fn maybe_complete_build(
     // At this point, we assume that the number of GH workflow runs is final, and after a single
     // workflow run has been completed, no other workflow runs attached to the same commit can
     // appear out of nowhere.
-    assert!(!gh_workflow_runs.is_empty());
+    assert!(!workflow_runs.is_empty());
 
-    let has_failure = gh_workflow_runs
+    let has_failure = workflow_runs
         .iter()
         .any(|run| matches!(run.status, WorkflowStatus::Failure));
     // If we have a failure, then we want to immediately finish the build with a failure.
     // If we don't have any failures, then we should check if we are still waiting for some
     // workflows to finish.
     if !has_failure
-        && gh_workflow_runs
+        && workflow_runs
             .iter()
             .any(|run| matches!(run.status, WorkflowStatus::Pending))
     {
@@ -339,14 +306,12 @@ async fn maybe_complete_build(
         merge_queue_tx.notify().await?;
     }
 
-    db_workflow_runs.sort_by(|a, b| a.name.cmp(&b.name));
-
     let comment_opt = if build_succeeded {
         tracing::info!("Build succeeded for PR {pr_num}");
 
         if build.kind == BuildKind::Try {
             Some(try_build_succeeded_comment(
-                &db_workflow_runs,
+                workflow_runs,
                 CommitSha(build.commit_sha.clone()),
                 CommitSha(build.parent.clone()),
             ))
@@ -358,19 +323,19 @@ async fn maybe_complete_build(
         tracing::info!("Build failed for PR {pr_num}");
 
         // Download failed jobs
-        let mut workflow_runs: Vec<FailedWorkflowRun> = vec![];
-        for workflow_run in db_workflow_runs {
-            let failed_jobs = match get_failed_jobs(repo, &workflow_run).await {
+        let mut failed_workflow_runs: Vec<FailedWorkflowRun> = vec![];
+        for workflow_run in workflow_runs {
+            let failed_jobs = match get_failed_jobs(repo, workflow_run.id).await {
                 Ok(jobs) => jobs,
                 Err(error) => {
                     tracing::error!(
                         "Cannot download jobs for workflow run {}: {error:?}",
-                        workflow_run.run_id
+                        workflow_run.id
                     );
                     vec![]
                 }
             };
-            workflow_runs.push(FailedWorkflowRun {
+            failed_workflow_runs.push(FailedWorkflowRun {
                 workflow_run,
                 failed_jobs,
             })
@@ -380,7 +345,7 @@ async fn maybe_complete_build(
         Some(build_failed_comment(
             repo.repository(),
             CommitSha(build.commit_sha.clone()),
-            workflow_runs,
+            failed_workflow_runs,
             error_context,
         ))
     };
@@ -396,4 +361,72 @@ async fn maybe_complete_build(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::bors::PullRequestStatus;
+    use crate::database::WorkflowStatus;
+    use crate::tests::{BorsTester, run_test};
+
+    #[sqlx::test]
+    async fn complete_build_missed_complete_webhook(pool: sqlx::PgPool) {
+        run_test(pool, async |tester: &mut BorsTester| {
+            // Start an auto build
+            tester.approve(()).await?;
+            tester.start_auto_build(()).await?;
+            let run_id = tester.auto_workflow();
+            tester.workflow_start(run_id).await?;
+
+            // Now bors crashed and didn't receive a webhook about a build being completed
+            tester.modify_workflow(run_id, |w| {
+                w.change_status(WorkflowStatus::Success);
+            });
+            tester.refresh_pending_builds().await;
+            tester.run_merge_queue_now().await;
+
+            // The auto build should be completed
+            let comment = tester.get_next_comment_text(()).await?;
+            insta::assert_snapshot!(comment, @r"
+            :sunny: Test successful - [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1)
+            Approved by: `default-user`
+            Pushing merge-0-pr-1 to `main`...
+            ");
+
+            tester.get_pr_copy(()).await.expect_status(PullRequestStatus::Merged);
+
+            Ok(())
+        })
+            .await;
+    }
+
+    #[sqlx::test]
+    async fn complete_build_missed_all_webhooks(pool: sqlx::PgPool) {
+        run_test(pool, async |tester: &mut BorsTester| {
+            // Start an auto build
+            tester.approve(()).await?;
+            tester.start_auto_build(()).await?;
+            let run_id = tester.auto_workflow();
+
+            // Now bors crashed and didn't receive a webhook about a build being started
+            tester.modify_workflow(run_id, |w| {
+                w.change_status(WorkflowStatus::Success);
+            });
+            tester.refresh_pending_builds().await;
+            tester.run_merge_queue_now().await;
+
+            // The auto build should be completed
+            let comment = tester.get_next_comment_text(()).await?;
+            insta::assert_snapshot!(comment, @r"
+            :sunny: Test successful - [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1)
+            Approved by: `default-user`
+            Pushing merge-0-pr-1 to `main`...
+            ");
+
+            tester.get_pr_copy(()).await.expect_status(PullRequestStatus::Merged);
+
+            Ok(())
+        })
+            .await;
+    }
 }

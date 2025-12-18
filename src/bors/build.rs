@@ -1,7 +1,8 @@
 use crate::PgDbClient;
-use crate::bors::RepositoryState;
 use crate::bors::comment::CommentTag;
+use crate::bors::{RepositoryState, WorkflowRun};
 use crate::database::{BuildModel, BuildStatus, PullRequestModel, WorkflowModel};
+use crate::github::CommitSha;
 use crate::github::api::client::{GithubRepositoryClient, HideCommentReason};
 use octocrab::models::CheckRunId;
 use octocrab::models::workflows::{Conclusion, Job, Status};
@@ -73,12 +74,9 @@ pub async fn cancel_build(
 /// Return failed jobs from the given workflow run.
 pub async fn get_failed_jobs(
     repo: &RepositoryState,
-    workflow_run: &WorkflowModel,
+    run_id: octocrab::models::RunId,
 ) -> anyhow::Result<Vec<Job>> {
-    let jobs = repo
-        .client
-        .get_jobs_for_workflow_run(workflow_run.run_id.into())
-        .await?;
+    let jobs = repo.client.get_jobs_for_workflow_run(run_id).await?;
     Ok(jobs
         .into_iter()
         .filter(|j| {
@@ -110,4 +108,59 @@ pub async fn hide_build_started_comments(
         db.delete_tagged_bot_comment(&comment).await?;
     }
     Ok(())
+}
+
+/// Load workflows for the given build both from the DB and GitHub, and consolidate their state.
+pub async fn load_workflow_runs(
+    repo: &RepositoryState,
+    db: &PgDbClient,
+    build: &BuildModel,
+) -> anyhow::Result<Vec<WorkflowRun>> {
+    // Load the workflow runs that we know about from the DB. We know about workflow runs for
+    // which we have received a started or a completed event.
+    let db_workflow_runs = db.get_workflows_for_build(build).await?;
+    tracing::debug!("Workflow runs from DB: {db_workflow_runs:?}");
+
+    // Ask GitHub about all workflow runs attached to the build commit.
+    // This tells us for how many workflow runs we should wait.
+    // TODO: if we have a completion trigger, load runs for a check suite ID instead?
+    let mut workflow_runs: Vec<WorkflowRun> = repo
+        .client
+        .get_workflow_runs_for_commit_sha(CommitSha(build.commit_sha.clone()))
+        .await?;
+    tracing::debug!("Workflow runs from GitHub: {workflow_runs:?}");
+
+    // It is possible that the GitHub state is not fully up-to-date, or that we have overridden
+    // it somehow in our DB (for example with the min_ci time mechanism).
+    // It is also possible that we learn here about new GitHub workflow state that hasn't been
+    // propagated to the DB yet.
+    // Here we reconcile the two world views.
+    for db_run in db_workflow_runs {
+        if let Some(gh_run) = workflow_runs
+            .iter_mut()
+            .find(|gh_run| gh_run.id == db_run.run_id.into())
+        {
+            if gh_run.status != db_run.status && !db_run.status.is_pending() {
+                // If our DB has a conclusion for the workflow that does not match GH state, we
+                // override GH state with DB state, because we could have stored something special
+                // in the DB, e.g. because of min_ci time check failing.
+                gh_run.status = db_run.status;
+            }
+        } else {
+            // For some reason, we have a workflow in the DB that is not on GitHub. This shouldn't
+            // really happen, but in any case we backfill it.
+            tracing::warn!(
+                "Found DB workflow {} with status {:?} that was not on GitHub",
+                db_run.run_id,
+                db_run.status
+            );
+            workflow_runs.push(WorkflowRun {
+                id: db_run.run_id.into(),
+                name: db_run.name,
+                url: db_run.url,
+                status: db_run.status,
+            });
+        }
+    }
+    Ok(workflow_runs)
 }
