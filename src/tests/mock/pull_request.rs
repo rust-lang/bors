@@ -40,7 +40,7 @@ async fn mock_pr(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
             let pull_request_error = repo.lock().pull_request_error;
             if pull_request_error {
                 ResponseTemplate::new(500)
-            } else if let Some(pr) = repo.lock().pull_requests.get(&pr_number) {
+            } else if let Some(pr) = repo.lock().pulls().get(&pr_number) {
                 ResponseTemplate::new(200).set_body_json(GitHubPullRequest::from(pr.clone()))
             } else {
                 ResponseTemplate::new(404)
@@ -132,7 +132,7 @@ async fn mock_pr_list(repo_clone: Arc<Mutex<Repo>>, mock_server: &MockServer) {
                         _ => vec![],
                     })
                     .unwrap_or_default();
-                let prs = repo_clone.lock().pull_requests.clone();
+                let prs = repo_clone.lock().pulls().clone();
 
                 ResponseTemplate::new(200).set_body_json(
                     prs.values()
@@ -166,7 +166,7 @@ async fn mock_pr_comments(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
             let comment_payload: CommentCreatePayload = req.body_json().unwrap();
             let mut repo = repo.lock();
             let repo_name = repo.full_name();
-            let pr = repo.pull_requests.get_mut(&pr_number).unwrap_or_else(|| {
+            let pr = repo.pulls_mut().get_mut(&pr_number).unwrap_or_else(|| {
                 panic!("Received a comment for a non-existing PR {repo_name}/{pr_number}")
             });
             let (id, node_id) = pr.next_comment_ids();
@@ -205,7 +205,7 @@ async fn mock_pr_labels(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
 
             let data: CreateLabelsPayload = req.body_json().unwrap();
             let mut repo = repo.lock();
-            let Some(pr) = repo.pull_requests.get_mut(&pr_number) else {
+            let Some(pr) = repo.pulls_mut().get_mut(&pr_number) else {
                 return ResponseTemplate::new(404);
             };
             pr.labels_added_by_bors.extend(data.labels.clone());
@@ -238,7 +238,7 @@ async fn mock_pr_labels(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
             let pr_number: u64 = pr_number.parse().unwrap();
 
             let mut repo = repo2.lock();
-            let Some(pr) = repo.pull_requests.get_mut(&pr_number) else {
+            let Some(pr) = repo.pulls_mut().get_mut(&pr_number) else {
                 return ResponseTemplate::new(404);
             };
             pr.labels_removed_by_bors.push(label_name.to_string());

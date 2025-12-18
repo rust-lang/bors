@@ -197,12 +197,7 @@ impl GitHubMockServer {
 
         let repos = self.github.lock().repos.clone();
         for (name, repo) in repos.iter() {
-            let prs = repo
-                .lock()
-                .pull_requests
-                .values()
-                .cloned()
-                .collect::<Vec<_>>();
+            let prs = repo.lock().pulls().values().cloned().collect::<Vec<_>>();
             for pr in prs {
                 // Send close message
                 pr.comment_queue_tx.send(CommentMsg::Close).await.unwrap();

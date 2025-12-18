@@ -596,22 +596,18 @@ impl BorsTester {
         modify_pr: F,
     ) -> anyhow::Result<PullRequest> {
         let repo = repo.into();
-        let number = {
-            let repo = self.github.lock().get_repo(repo.clone());
-            let repo = repo.lock();
-            repo.pull_requests.keys().max().copied().unwrap_or(0) + 1
-        };
-
-        let mut pr = PullRequest::new(repo.0.clone(), number, User::default_pr_author());
-        modify_pr(&mut pr);
 
         // Add the PR to the repository
-        let payload = {
+        let (payload, pr) = {
             let gh = self.github.lock();
             let repo = gh.get_repo(repo);
             let mut repo = repo.lock();
-            repo.pull_requests.insert(number, pr.clone());
-            GitHubPullRequestEventPayload::new(&repo, pr.clone(), "opened", None)
+            let pr = repo.add_pr(User::default_pr_author());
+            modify_pr(pr);
+            let pr = pr.clone();
+
+            let payload = GitHubPullRequestEventPayload::new(&repo, pr.clone(), "opened", None);
+            (payload, pr)
         };
 
         self.send_webhook("pull_request", payload).await?;
@@ -628,10 +624,7 @@ impl BorsTester {
         let id = id.into();
         let repo = self.github.lock().get_repo(&id.repo);
         let mut repo = repo.lock();
-        let pr = repo
-            .pull_requests
-            .get_mut(&id.number)
-            .expect("PR must exist");
+        let pr = repo.pulls_mut().get_mut(&id.number).expect("PR must exist");
         func(pr);
         pr.clone()
     }
@@ -757,7 +750,7 @@ impl BorsTester {
             let counter = repo.get_next_pr_push_counter();
 
             let pr = repo
-                .pull_requests
+                .pulls_mut()
                 .get_mut(&id.number)
                 .expect("PR must be initialized before pushing to it");
             pr.head_sha = format!("pr-{}-commit-{counter}", id.number);

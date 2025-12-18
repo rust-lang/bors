@@ -298,6 +298,7 @@ timeout = 3600
         run_test(pool, async |ctx: &mut BorsTester| {
             let pr = ctx.open_pr((), |_| {}).await?;
             ctx.wait_for_pr(pr.number, |_| true).await?;
+
             ctx.with_blocked_webhooks(async |ctx: &mut BorsTester| {
                 ctx.set_pr_status_closed(pr.number).await
             })
