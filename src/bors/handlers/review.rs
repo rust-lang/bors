@@ -394,7 +394,7 @@ mod tests {
             );
 
             tester
-                .get_pr_copy(())
+                .pr(())
                 .await
                 .expect_rollup(None)
                 .expect_approved_by(&User::default_pr_author().name);
@@ -419,10 +419,7 @@ mod tests {
             "
             );
 
-            tester
-                .get_pr_copy(())
-                .await
-                .expect_approved_by(approve_user);
+            tester.pr(()).await.expect_approved_by(approve_user);
             Ok(())
         })
         .await;
@@ -472,7 +469,7 @@ mod tests {
             ",
             );
             tester
-                .get_pr_copy(())
+                .pr(())
                 .await
                 .expect_approved_by(&User::default_pr_author().name);
             tester.post_comment("@bors r-").await?;
@@ -481,7 +478,7 @@ mod tests {
                 @"Commit pr-1-sha has been unapproved."
             );
 
-            tester.get_pr_copy(()).await.expect_unapproved();
+            tester.pr(()).await.expect_unapproved();
             Ok(())
         })
         .await;
@@ -500,7 +497,7 @@ mod tests {
             );
 
             tester
-                .get_pr_copy(())
+                .pr(())
                 .await
                 .expect_approved_by(&User::default_pr_author().name);
             Ok(())
@@ -520,7 +517,7 @@ mod tests {
             );
 
             tester
-                .get_pr_copy(())
+                .pr(())
                 .await
                 .expect_approved_by(&User::default_pr_author().name);
             Ok(())
@@ -535,7 +532,7 @@ mod tests {
             tester.expect_comments((), 1).await;
 
             tester
-                .get_pr_copy(())
+                .pr(())
                 .await
                 .expect_priority(Some(10))
                 .expect_approved_by(&User::default_pr_author().name);
@@ -551,7 +548,7 @@ mod tests {
             tester.expect_comments((), 1).await;
 
             tester
-                .get_pr_copy(())
+                .pr(())
                 .await
                 .expect_priority(Some(10))
                 .expect_approved_by("user1");
@@ -578,7 +575,7 @@ mod tests {
 
             tester.approve(()).await?;
 
-            tester.get_pr_copy(()).await.expect_priority(Some(5));
+            tester.pr(()).await.expect_priority(Some(5));
 
             Ok(())
         })
@@ -594,7 +591,7 @@ mod tests {
             tester.post_comment("@bors r+ p=10").await?;
             tester.expect_comments((), 1).await;
 
-            tester.get_pr_copy(()).await.expect_priority(Some(10));
+            tester.pr(()).await.expect_priority(Some(10));
 
             Ok(())
         })
@@ -682,7 +679,7 @@ mod tests {
                 );
 
                 tester
-                    .get_pr_copy(())
+                    .pr(())
                     .await
                     .expect_delegated(DelegatedPermission::Review);
                 Ok(())
@@ -703,7 +700,7 @@ mod tests {
                 tester.approve(()).await?;
 
                 tester
-                    .get_pr_copy(())
+                    .pr(())
                     .await
                     .expect_approved_by(&User::default_pr_author().name);
                 Ok(())
@@ -777,7 +774,7 @@ mod tests {
                     .await?;
                 tester.expect_comments((), 1).await;
                 tester
-                    .get_pr_copy(())
+                    .pr(())
                     .await
                     .expect_delegated(DelegatedPermission::Review);
 
@@ -825,14 +822,14 @@ mod tests {
 
                 tester.approve(()).await?;
                 tester
-                    .get_pr_copy(())
+                    .pr(())
                     .await
                     .expect_approved_by(&User::default_pr_author().name);
 
                 tester.post_comment(review_comment("@bors r-")).await?;
                 tester.expect_comments((), 1).await;
 
-                tester.get_pr_copy(()).await.expect_unapproved();
+                tester.pr(()).await.expect_unapproved();
 
                 Ok(())
             })
@@ -854,7 +851,7 @@ mod tests {
                     .await?;
                 tester.expect_comments((), 1).await;
 
-                tester.get_pr_copy(()).await.expect_unapproved();
+                tester.pr(()).await.expect_unapproved();
 
                 Ok(())
             })
@@ -884,7 +881,7 @@ mod tests {
             tester.expect_comments((), 1).await;
 
             tester
-                .get_pr_copy(())
+                .pr(())
                 .await
                 .expect_rollup(Some(RollupMode::Never))
                 .expect_approved_by(&User::default_pr_author().name);
@@ -900,7 +897,7 @@ mod tests {
             tester.expect_comments((), 1).await;
 
             tester
-                .get_pr_copy(())
+                .pr(())
                 .await
                 .expect_rollup(Some(RollupMode::Always))
                 .expect_approved_by(&User::default_pr_author().name);
@@ -915,7 +912,7 @@ mod tests {
             tester.post_comment("@bors r+ rollup-").await?;
             tester.expect_comments((), 1).await;
             tester
-                .get_pr_copy(())
+                .pr(())
                 .await
                 .expect_rollup(Some(RollupMode::Maybe))
                 .expect_approved_by(&User::default_pr_author().name);
@@ -931,7 +928,7 @@ mod tests {
             tester.expect_comments((), 1).await;
 
             tester
-                .get_pr_copy(())
+                .pr(())
                 .await
                 .expect_priority(Some(10))
                 .expect_rollup(Some(RollupMode::Never))
@@ -947,7 +944,7 @@ mod tests {
             tester.post_comment("@bors r=user1 rollup").await?;
             tester.expect_comments((), 1).await;
             tester
-                .get_pr_copy(())
+                .pr(())
                 .await
                 .expect_rollup(Some(RollupMode::Always))
                 .expect_approved_by("user1");
@@ -962,7 +959,7 @@ mod tests {
             tester.post_comment("@bors r=user1 rollup=always").await?;
             tester.expect_comments((), 1).await;
             tester
-                .get_pr_copy(())
+                .pr(())
                 .await
                 .expect_rollup(Some(RollupMode::Always))
                 .expect_approved_by("user1");
@@ -979,7 +976,7 @@ mod tests {
                 .await?;
             tester.expect_comments((), 1).await;
             tester
-                .get_pr_copy(())
+                .pr(())
                 .await
                 .expect_priority(Some(10))
                 .expect_rollup(Some(RollupMode::Always))
@@ -1024,7 +1021,7 @@ mod tests {
             tester.approve(()).await?;
 
             tester
-                .get_pr_copy(())
+                .pr(())
                 .await
                 .expect_rollup(Some(RollupMode::Always))
                 .expect_approved_by(&User::default_pr_author().name);
@@ -1046,7 +1043,7 @@ mod tests {
             tester.expect_comments((), 1).await;
 
             tester
-                .get_pr_copy(())
+                .pr(())
                 .await
                 .expect_rollup(Some(RollupMode::Always))
                 .expect_approved_by(&User::default_pr_author().name);
@@ -1059,13 +1056,10 @@ mod tests {
     #[sqlx::test]
     async fn approve_store_sha(pool: sqlx::PgPool) {
         run_test(pool, async |tester: &mut BorsTester| {
-            let pr = tester.get_pr_copy(()).await.get_gh_pr();
+            let pr = tester.pr(()).await.get_gh_pr();
             tester.approve(()).await?;
 
-            tester
-                .get_pr_copy(())
-                .await
-                .expect_approved_sha(&pr.head_sha);
+            tester.pr(()).await.expect_approved_sha(&pr.head_sha);
 
             Ok(())
         })
@@ -1075,26 +1069,20 @@ mod tests {
     #[sqlx::test]
     async fn reapproved_pr_uses_latest_sha(pool: sqlx::PgPool) {
         run_test(pool, async |tester: &mut BorsTester| {
-            let pr = tester.get_pr_copy(()).await.get_gh_pr();
+            let pr = tester.pr(()).await.get_gh_pr();
             tester.approve(()).await?;
 
-            tester
-                .get_pr_copy(())
-                .await
-                .expect_approved_sha(&pr.head_sha);
+            tester.pr(()).await.expect_approved_sha(&pr.head_sha);
 
             tester.push_to_pr(()).await?;
-            let pr2 = tester.get_pr_copy(()).await.get_gh_pr();
+            let pr2 = tester.pr(()).await.get_gh_pr();
             assert_ne!(pr.head_sha, pr2.head_sha);
 
             tester.expect_comments((), 1).await;
 
             tester.approve(()).await?;
 
-            tester
-                .get_pr_copy(())
-                .await
-                .expect_approved_sha(&pr2.head_sha);
+            tester.pr(()).await.expect_approved_sha(&pr2.head_sha);
 
             Ok(())
         })
@@ -1118,7 +1106,7 @@ mod tests {
                 "
                 );
                 tester
-                    .get_pr_copy(())
+                    .pr(())
                     .await
                     .expect_delegated(DelegatedPermission::Try);
                 Ok(())
@@ -1158,7 +1146,7 @@ mod tests {
                     .await?;
                 tester.expect_comments((), 1).await;
                 tester
-                    .get_pr_copy(())
+                    .pr(())
                     .await
                     .expect_delegated(DelegatedPermission::Try);
 
@@ -1167,7 +1155,7 @@ mod tests {
                     tester.get_next_comment_text(()).await?,
                     @"@default-user: :key: Insufficient privileges: not in review users"
                 );
-                tester.get_pr_copy(()).await.expect_unapproved();
+                tester.pr(()).await.expect_unapproved();
 
                 Ok(())
             })
@@ -1205,7 +1193,7 @@ mod tests {
                 .await?;
             tester.post_comment("@bors r+").await?;
             insta::assert_snapshot!(tester.get_next_comment_text(()).await?, @":clipboard: Only open, non-draft PRs can be approved.");
-            tester.get_pr_copy(()).await.expect_unapproved();
+            tester.pr(()).await.expect_unapproved();
             Ok(())
         })
         .await;
@@ -1219,7 +1207,7 @@ mod tests {
                 .await?;
             tester.post_comment("@bors r+").await?;
             insta::assert_snapshot!(tester.get_next_comment_text(()).await?, @":clipboard: Only open, non-draft PRs can be approved.");
-            tester.get_pr_copy(()).await.expect_unapproved();
+            tester.pr(()).await.expect_unapproved();
             Ok(())
         })
             .await;
@@ -1233,7 +1221,7 @@ mod tests {
                 .await?;
             tester.post_comment("@bors r+").await?;
             insta::assert_snapshot!(tester.get_next_comment_text(()).await?, @":clipboard: Only open, non-draft PRs can be approved.");
-            tester.get_pr_copy(()).await.expect_unapproved();
+            tester.pr(()).await.expect_unapproved();
             Ok(())
         })
             .await;
@@ -1253,7 +1241,7 @@ mod tests {
 
             Hint: Remove **[do not merge]** from this PR's title when it is ready for review.
             ");
-            tester.get_pr_copy(()).await.expect_unapproved();
+            tester.pr(()).await.expect_unapproved();
             Ok(())
         })
         .await;
@@ -1278,7 +1266,7 @@ labels_blocking_approval = ["proposed-final-comment-period"]
                     .await?;
                 tester.post_comment("@bors r+").await?;
                 insta::assert_snapshot!(tester.get_next_comment_text(()).await?, @":clipboard: This PR cannot be approved because it currently has the following label: `proposed-final-comment-period`.");
-                tester.get_pr_copy(()).await.expect_unapproved();
+                tester.pr(()).await.expect_unapproved();
                 Ok(())
             })
             .await;
@@ -1305,7 +1293,7 @@ labels_blocking_approval = ["proposed-final-comment-period", "final-comment-peri
                     .await?;
                 tester.post_comment("@bors r+").await?;
                 insta::assert_snapshot!(tester.get_next_comment_text(()).await?, @":clipboard: This PR cannot be approved because it currently has the following labels: `proposed-final-comment-period`, `final-comment-period`.");
-                tester.get_pr_copy(()).await.expect_unapproved();
+                tester.pr(()).await.expect_unapproved();
                 Ok(())
             })
             .await;
@@ -1316,7 +1304,7 @@ labels_blocking_approval = ["proposed-final-comment-period", "final-comment-peri
         run_test(pool, async |tester: &mut BorsTester| {
             tester.approve(()).await?;
             tester.start_auto_build(()).await?;
-            tester.get_pr_copy(()).await.expect_auto_build(|_| true);
+            tester.pr(()).await.expect_auto_build(|_| true);
             tester.workflow_start(tester.auto_workflow()).await?;
             tester.post_comment("@bors r-").await?;
             insta::assert_snapshot!(tester.get_next_comment_text(()).await?, @r"
@@ -1338,7 +1326,7 @@ labels_blocking_approval = ["proposed-final-comment-period", "final-comment-peri
 
             tester.approve(()).await?;
             tester.start_auto_build(()).await?;
-            tester.get_pr_copy(()).await.expect_auto_build(|_| true);
+            tester.pr(()).await.expect_auto_build(|_| true);
             tester.workflow_start(tester.auto_workflow()).await?;
             tester.post_comment("@bors r-").await?;
             insta::assert_snapshot!(tester.get_next_comment_text(()).await?, @r"
@@ -1356,13 +1344,13 @@ labels_blocking_approval = ["proposed-final-comment-period", "final-comment-peri
         run_test(pool, async |tester: &mut BorsTester| {
             tester.approve(()).await?;
             tester.start_auto_build(()).await?;
-            tester.get_pr_copy(()).await.expect_auto_build(|_| true);
+            tester.pr(()).await.expect_auto_build(|_| true);
 
             tester.workflow_start(tester.auto_workflow()).await?;
             tester.post_comment("@bors r-").await?;
             tester.expect_comments((), 1).await;
             tester.expect_check_run(
-                &tester.get_pr_copy(()).await.get_gh_pr().head_sha,
+                &tester.pr(()).await.get_gh_pr().head_sha,
                 AUTO_BUILD_CHECK_RUN_NAME,
                 AUTO_BUILD_CHECK_RUN_NAME,
                 CheckRunStatus::Completed,

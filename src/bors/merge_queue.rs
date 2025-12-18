@@ -594,7 +594,7 @@ merge_queue_enabled = false
             tester.approve(()).await?;
             tester.start_auto_build(()).await?;
             tester.expect_check_run(
-                &tester.get_pr_copy(()).await.get_gh_pr().head_sha,
+                &tester.pr(()).await.get_gh_pr().head_sha,
                 AUTO_BUILD_CHECK_RUN_NAME,
                 AUTO_BUILD_CHECK_RUN_NAME,
                 CheckRunStatus::InProgress,
@@ -683,7 +683,7 @@ merge_queue_enabled = false
             tester.approve(()).await?;
             tester.start_and_finish_auto_build(()).await?;
             tester
-                .get_pr_copy(())
+                .pr(())
                 .await
                 .expect_status(PullRequestStatus::Merged)
                 .expect_auto_build(|b| b.status == BuildStatus::Success);
@@ -713,7 +713,7 @@ merge_queue_enabled = false
     async fn merge_queue_sequential_order(pool: sqlx::PgPool) {
         let gh = run_test(pool, async |tester: &mut BorsTester| {
             let prs = [
-                tester.get_pr_copy(()).await.get_gh_pr(),
+                tester.pr(()).await.get_gh_pr(),
                 tester.open_pr((), |_| {}).await?,
                 tester.open_pr((), |_| {}).await?,
                 tester.open_pr((), |_| {}).await?,
@@ -847,7 +847,7 @@ merge_queue_enabled = false
             tester.expect_comments((), 1).await;
 
             tester
-                .get_pr_copy(())
+                .pr(())
                 .await
                 .expect_auto_build(|b| b.status == BuildStatus::Failure);
             Ok(())
@@ -878,10 +878,7 @@ merge_queue_enabled = false
             tester.run_merge_queue_now().await;
             tester.expect_comments((), 1).await;
 
-            tester
-                .get_pr_copy(())
-                .await
-                .expect_status(PullRequestStatus::Merged);
+            tester.pr(()).await.expect_status(PullRequestStatus::Merged);
             Ok(())
         })
         .await;
@@ -930,7 +927,7 @@ merge_queue_enabled = false
             "#
             );
             tester
-                .get_pr_copy(())
+                .pr(())
                 .await
                 .expect_mergeable_state(MergeableState::HasConflicts);
             Ok(())
@@ -947,7 +944,7 @@ merge_queue_enabled = false
                 pr.mergeable_state = OctocrabMergeableState::Dirty;
             });
             tester.run_merge_queue_now().await;
-            tester.get_pr_copy(pr.id()).await.expect_no_auto_build();
+            tester.pr(pr.id()).await.expect_no_auto_build();
             Ok(())
         })
         .await;
@@ -960,7 +957,7 @@ merge_queue_enabled = false
             tester.approve(pr.id()).await?;
             tester.modify_pr_state(pr.id(), |pr| pr.close_pr());
             tester.run_merge_queue_now().await;
-            tester.get_pr_copy(pr.id()).await.expect_no_auto_build();
+            tester.pr(pr.id()).await.expect_no_auto_build();
             Ok(())
         })
         .await;
@@ -977,7 +974,7 @@ merge_queue_enabled = false
                 })
                 .await?;
             tester.run_merge_queue_now().await;
-            tester.get_pr_copy(pr.id()).await.expect_no_auto_build();
+            tester.pr(pr.id()).await.expect_no_auto_build();
             Ok(())
         })
         .await;
@@ -989,7 +986,7 @@ merge_queue_enabled = false
             tester.approve(()).await?;
             tester.start_and_finish_auto_build(()).await?;
             tester.expect_check_run(
-                &tester.get_pr_copy(()).await.get_gh_pr().head_sha,
+                &tester.pr(()).await.get_gh_pr().head_sha,
                 AUTO_BUILD_CHECK_RUN_NAME,
                 AUTO_BUILD_CHECK_RUN_NAME,
                 CheckRunStatus::Completed,
@@ -1017,11 +1014,11 @@ auto_build_succeeded = ["+foo", "+bar", "-baz"]
                 tester.approve(()).await?;
                 tester.start_auto_build(()).await?;
 
-                tester.get_pr_copy(()).await.expect_added_labels(&[]);
+                tester.pr(()).await.expect_added_labels(&[]);
                 tester.finish_auto_build(()).await?;
 
                 tester
-                    .get_pr_copy(())
+                    .pr(())
                     .await
                     .expect_added_labels(&["foo", "bar"])
                     .expect_removed_labels(&["baz"]);
@@ -1047,12 +1044,12 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
                 tester.approve(()).await?;
                 tester.start_auto_build(()).await?;
 
-                tester.get_pr_copy(()).await.expect_added_labels(&[]);
+                tester.pr(()).await.expect_added_labels(&[]);
                 tester.workflow_full_failure(tester.auto_workflow()).await?;
                 tester.expect_comments((), 1).await;
 
                 tester
-                    .get_pr_copy(())
+                    .pr(())
                     .await
                     .expect_added_labels(&["foo", "bar"])
                     .expect_removed_labels(&["baz"]);
@@ -1071,7 +1068,7 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
             tester.workflow_full_failure(tester.auto_workflow()).await?;
             tester.expect_comments((), 1).await;
             tester.expect_check_run(
-                &tester.get_pr_copy(()).await.get_gh_pr().head_sha,
+                &tester.pr(()).await.get_gh_pr().head_sha,
                 AUTO_BUILD_CHECK_RUN_NAME,
                 AUTO_BUILD_CHECK_RUN_NAME,
                 CheckRunStatus::Completed,
@@ -1099,7 +1096,7 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
 
             // And ensure that the PR was indeed merged
             tester
-                .get_pr_copy(())
+                .pr(())
                 .await
                 .expect_status(PullRequestStatus::Merged)
                 .expect_auto_build(|b| b.status == BuildStatus::Success);
@@ -1126,7 +1123,7 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
 
             // And ensure that the PR was indeed merged
             tester
-                .get_pr_copy(())
+                .pr(())
                 .await
                 .expect_status(PullRequestStatus::Merged)
                 .expect_auto_build(|b| b.status == BuildStatus::Success);
@@ -1217,7 +1214,7 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
 
             // The merge queue should also unapprove PR1
             tester.wait_for_pr(pr2.id(), |pr| !pr.is_approved()).await?;
-            tester.get_pr_copy(pr2.id()).await.expect_no_auto_build();
+            tester.pr(pr2.id()).await.expect_no_auto_build();
 
             Ok(())
         })
@@ -1245,7 +1242,7 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
             let comment = tester.get_next_comment_text(pr3.id()).await?;
             insta::assert_snapshot!(comment, @":hourglass: Testing commit pr-3-sha with merge merge-0-pr-3...");
 
-            tester.get_pr_copy(pr2.id()).await.expect_no_auto_build();
+            tester.pr(pr2.id()).await.expect_no_auto_build();
 
             Ok(())
         })

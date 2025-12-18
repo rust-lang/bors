@@ -303,20 +303,10 @@ impl BorsTester {
     }
 
     /// Get a PR proxy that can be used to assert various things about the PR.
-    pub async fn get_pr_copy<Id: Into<PrIdentifier>>(&self, id: Id) -> PullRequestProxy {
+    pub async fn pr<Id: Into<PrIdentifier>>(&self, id: Id) -> PullRequestProxy {
         let id = id.into();
         let pr = self.get_repo(id.repo).lock().get_pr(id.number).clone();
         PullRequestProxy::new(self, pr).await
-    }
-
-    async fn try_get_pr_from_db<Id: Into<PrIdentifier>>(
-        &self,
-        id: Id,
-    ) -> anyhow::Result<Option<PullRequestModel>> {
-        let id = id.into();
-        self.db()
-            .get_pull_request(&id.repo, PullRequestNumber(id.number))
-            .await
     }
 
     /// Wait until a pull request is in the database and satisfies a given condition.
@@ -393,11 +383,19 @@ impl BorsTester {
     }
 
     pub fn try_branch(&self) -> Branch {
-        self.repo().lock().try_branch()
+        self.repo()
+            .lock()
+            .get_branch_by_name(TRY_BRANCH)
+            .unwrap()
+            .clone()
     }
 
     pub fn auto_branch(&self) -> Branch {
-        self.repo().lock().auto_branch()
+        self.repo()
+            .lock()
+            .get_branch_by_name(AUTO_BRANCH)
+            .unwrap()
+            .clone()
     }
 
     /// Wait until the next bot comment is received on the specified repo and PR, and return its
@@ -1085,6 +1083,16 @@ impl BorsTester {
         )?;
         tracing::debug!("Received webhook with status {status} and response body `{body_text}`");
         Ok(())
+    }
+
+    async fn try_get_pr_from_db<Id: Into<PrIdentifier>>(
+        &self,
+        id: Id,
+    ) -> anyhow::Result<Option<PullRequestModel>> {
+        let id = id.into();
+        self.db()
+            .get_pull_request(&id.repo, PullRequestNumber(id.number))
+            .await
     }
 
     async fn finish(self, bors: JoinHandle<()>) -> anyhow::Result<GitHub> {

@@ -392,7 +392,7 @@ mod tests {
             PR will need to be re-approved.
             "
             );
-            tester.get_pr_copy(()).await.expect_unapproved();
+            tester.pr(()).await.expect_unapproved();
             Ok(())
         })
         .await;
@@ -405,7 +405,7 @@ mod tests {
             tester.edit_pr((), |_| {}).await?;
 
             tester
-                .get_pr_copy(())
+                .pr(())
                 .await
                 .expect_approved_by(&User::default_pr_author().name);
             Ok(())
@@ -439,7 +439,7 @@ mod tests {
                 tester.get_next_comment_text(()).await?,
                 @":warning: A new commit `pr-1-commit-1` was pushed to the branch, the PR will need to be re-approved."
             );
-            tester.get_pr_copy(()).await.expect_unapproved();
+            tester.pr(()).await.expect_unapproved();
             Ok(())
         })
             .await;
@@ -738,7 +738,7 @@ report_merge_conflicts = true
 
             This pull request was unapproved.
             ");
-            tester.get_pr_copy(pr.id()).await.expect_unapproved();
+            tester.pr(pr.id()).await.expect_unapproved();
 
             Ok(())
         })
@@ -840,7 +840,7 @@ report_merge_conflicts = true
         run_test(pool, async |tester: &mut BorsTester| {
             tester.approve(()).await?;
             tester.start_auto_build(()).await?;
-            tester.get_pr_copy(()).await.expect_auto_build(|_| true);
+            tester.pr(()).await.expect_auto_build(|_| true);
 
             let run_id = tester.auto_workflow();
             tester
@@ -869,7 +869,7 @@ report_merge_conflicts = true
                 });
             tester.approve(()).await?;
             tester.start_auto_build(()).await?;
-            tester.get_pr_copy(()).await.expect_auto_build(|_| true);
+            tester.pr(()).await.expect_auto_build(|_| true);
 
             tester.workflow_start(tester.auto_workflow()).await?;
             tester.push_to_pr(()).await?;
@@ -890,7 +890,7 @@ report_merge_conflicts = true
             tester.start_auto_build(()).await?;
             tester.workflow_start(tester.auto_workflow()).await?;
 
-            let prev_commit = &tester.get_pr_copy(()).await.get_gh_pr().head_sha;
+            let prev_commit = &tester.pr(()).await.get_gh_pr().head_sha;
             tester.push_to_pr(()).await?;
             tester.expect_comments((), 1).await;
             tester.expect_check_run(

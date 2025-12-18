@@ -419,22 +419,6 @@ impl Repo {
         self.branches.push(branch);
     }
 
-    pub fn try_branch(&self) -> Branch {
-        self.branches
-            .iter()
-            .find(|b| b.name == TRY_BRANCH)
-            .expect("Try branch not found")
-            .clone()
-    }
-
-    pub fn auto_branch(&self) -> Branch {
-        self.branches
-            .iter()
-            .find(|b| b.name == AUTO_BRANCH)
-            .expect("Auto branch not found")
-            .clone()
-    }
-
     pub fn get_branch_by_name(&mut self, name: &str) -> Option<&mut Branch> {
         self.branches.iter_mut().find(|b| b.name == name)
     }

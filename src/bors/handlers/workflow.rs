@@ -223,10 +223,7 @@ mod tests {
     #[sqlx::test]
     async fn workflow_started_unknown_build(pool: sqlx::PgPool) {
         run_test(pool.clone(), async |tester: &mut BorsTester| {
-            tester.modify_repo((), |repo| {
-                let branch = Branch::new("unknown", "unknown-sha");
-                repo.add_branch(branch.clone());
-            });
+            tester.create_branch("unknown");
             let run_id = tester
                 .gh()
                 .lock()
@@ -243,9 +240,7 @@ mod tests {
     #[sqlx::test]
     async fn workflow_completed_unknown_build(pool: sqlx::PgPool) {
         run_test(pool.clone(), async |tester: &mut BorsTester| {
-            tester.modify_repo((), |repo| {
-                repo.add_branch(Branch::new("unknown", "unknown-sha").clone());
-            });
+            tester.create_branch("unknown");
             let run_id = tester
                 .gh()
                 .lock()

@@ -390,7 +390,7 @@ mod tests {
             Pushing merge-0-pr-1 to `main`...
             ");
 
-            tester.get_pr_copy(()).await.expect_status(PullRequestStatus::Merged);
+            tester.pr(()).await.expect_status(PullRequestStatus::Merged);
 
             Ok(())
         })
@@ -420,7 +420,7 @@ mod tests {
             Pushing merge-0-pr-1 to `main`...
             ");
 
-            tester.get_pr_copy(()).await.expect_status(PullRequestStatus::Merged);
+            tester.pr(()).await.expect_status(PullRequestStatus::Merged);
 
             Ok(())
         })
