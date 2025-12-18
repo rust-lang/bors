@@ -450,7 +450,7 @@ async fn mock_check_runs(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
                 let mut repo = repo.lock();
                 repo.add_check_run(check_run);
 
-                let check_run_id = (repo.check_runs.len() - 1) as u64;
+                let check_run_id = (repo.check_runs().len() - 1) as u64;
 
                 let response = CheckRunResponse {
                     id: check_run_id,
@@ -512,7 +512,7 @@ async fn mock_check_runs(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
                 let mut repo = repo.lock();
                 repo.update_check_run(check_run_id, data.status.clone(), data.conclusion.clone());
 
-                let check_run = &repo.check_runs[check_run_id as usize];
+                let check_run = &repo.check_runs()[check_run_id as usize];
 
                 let response = CheckRunResponse {
                     id: check_run_id,

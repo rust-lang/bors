@@ -887,7 +887,7 @@ impl BorsTester {
         let repo = self.repo();
         let repo = repo.lock();
         let check_runs: Vec<_> = repo
-            .check_runs
+            .check_runs()
             .iter()
             .filter(|check_run| check_run.head_sha == head_sha)
             .collect();

@@ -358,7 +358,7 @@ pub struct Repo {
     /// All workflows that we know about from the side of the test.
     workflow_runs: Vec<WorkflowRun>,
     pub pull_requests: HashMap<u64, PullRequest>,
-    pub check_runs: Vec<CheckRunData>,
+    check_runs: Vec<CheckRunData>,
     /// Cause pull request fetch to fail.
     pub pull_request_error: bool,
     /// Push error failure/success behaviour.
@@ -400,6 +400,10 @@ impl Repo {
 
     pub fn branches(&self) -> &[Branch] {
         &self.branches
+    }
+
+    pub fn check_runs(&self) -> &[CheckRunData] {
+        &self.check_runs
     }
 
     pub fn with_user_perms(mut self, user: User, permissions: &[PermissionType]) -> Self {
