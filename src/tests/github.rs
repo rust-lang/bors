@@ -674,17 +674,17 @@ impl PullRequest {
         )
     }
 
-    pub fn merge_pr(&mut self) {
+    pub fn merge(&mut self) {
         self.merged_at = Some(SystemTime::now().into());
         self.status = PullRequestStatus::Merged;
     }
 
-    pub fn close_pr(&mut self) {
+    pub fn close(&mut self) {
         self.closed_at = Some(SystemTime::now().into());
         self.status = PullRequestStatus::Closed;
     }
 
-    pub fn reopen_pr(&mut self) {
+    pub fn reopen(&mut self) {
         self.closed_at = None;
         self.status = PullRequestStatus::Open;
     }

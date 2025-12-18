@@ -269,7 +269,7 @@ timeout = 3600
             .await?;
             ctx.wait_for_pr((), |pr| pr.mergeable_state == MergeableState::Unknown)
                 .await?;
-            ctx.modify_pr_state((), |pr| pr.mergeable_state = OctocrabMergeableState::Dirty);
+            ctx.modify_pr((), |pr| pr.mergeable_state = OctocrabMergeableState::Dirty);
             ctx.update_mergeability_status().await;
             ctx.wait_for_pr((), |pr| pr.mergeable_state == MergeableState::HasConflicts)
                 .await?;
@@ -299,10 +299,9 @@ timeout = 3600
             let pr = ctx.open_pr((), |_| {}).await?;
             ctx.wait_for_pr(pr.number, |_| true).await?;
 
-            ctx.with_blocked_webhooks(async |ctx: &mut BorsTester| {
-                ctx.set_pr_status_closed(pr.number).await
-            })
-            .await?;
+            ctx.modify_pr(pr.id(), |pr| {
+                pr.close();
+            });
             ctx.refresh_prs().await;
             ctx.pr(pr.number)
                 .await
@@ -316,7 +315,7 @@ timeout = 3600
     async fn refresh_pr_with_status_draft(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             let pr = ctx.open_pr((), |_| {}).await?;
-            ctx.modify_pr_state(pr.id(), |pr| pr.convert_to_draft());
+            ctx.modify_pr(pr.id(), |pr| pr.convert_to_draft());
 
             ctx.refresh_prs().await;
             ctx.pr(pr.id())
