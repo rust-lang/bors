@@ -509,14 +509,31 @@ impl BorsTester {
     }
 
     /// Repeatedly trigger the merge queue until it attempts to perform a merge.
+    /// When that happens, wait until the merge queue completely finishes processing.
     pub async fn run_merge_queue_until_merge_attempt(&self) {
-        let run_merge_queue = async move {
-            loop {
+        WAIT_FOR_MERGE_QUEUE_MERGE_ATTEMPT.drain().await;
+
+        let make_merge_queue_fut = || {
+            Box::pin(async move {
                 self.run_merge_queue_now().await;
                 tokio::time::sleep(Duration::from_millis(500)).await;
-            }
+            })
         };
-        wait_for_marker_concurrent(run_merge_queue, &WAIT_FOR_MERGE_QUEUE_MERGE_ATTEMPT).await;
+        let mut wait_fut = std::pin::pin!(WAIT_FOR_MERGE_QUEUE_MERGE_ATTEMPT.sync());
+        let mut merge_queue_fut = make_merge_queue_fut();
+
+        loop {
+            tokio::select! {
+                _ = &mut merge_queue_fut => {
+                    merge_queue_fut = make_merge_queue_fut();
+                }
+                _ = &mut wait_fut => {
+                    // Now wait until the merge queue finishes
+                    merge_queue_fut.await;
+                    break;
+                }
+            }
+        }
     }
 
     /// Performs a single started/success/failure workflow event.
@@ -1321,17 +1338,4 @@ where
             .map_err(|_| anyhow::anyhow!("Timed out waiting for a test marker to be marked"))?;
     }
     res
-}
-
-/// Concurrenly run an async operation with the specific future, until the future finishes.
-/// `fut` is supposed to be a diverging future.
-async fn wait_for_marker_concurrent<Fut>(fut: Fut, marker: &TestSyncMarker)
-where
-    Fut: Future<Output = ()>,
-{
-    marker.drain().await;
-    tokio::select! {
-        _ = fut => {}
-        _ = marker.sync() => {}
-    }
 }

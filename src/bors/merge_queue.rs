@@ -185,27 +185,23 @@ async fn handle_successful_build(
     {
         tracing::error!("Failed to fast-forward base branch for PR {pr_num}: {error:?}");
 
-        let (error_comment, mark_as_failure) = match &error {
-            BranchUpdateError::Conflict(branch_name) => (
-                auto_build_push_failed_comment(&format!(
-                    "this PR has conflicts with the `{branch_name}` branch"
-                )),
-                true,
-            ),
-            BranchUpdateError::ValidationFailed(branch_name) => (
-                auto_build_push_failed_comment(&format!(
+        let error_comment = match &error {
+            BranchUpdateError::Conflict(branch_name) => Some(auto_build_push_failed_comment(
+                &format!("this PR has conflicts with the `{branch_name}` branch"),
+            )),
+            BranchUpdateError::ValidationFailed(branch_name) => {
+                Some(auto_build_push_failed_comment(&format!(
                     "the tested commit was behind the `{branch_name}` branch"
-                )),
-                true,
-            ),
-            BranchUpdateError::BranchNotFound(branch_name) => (
-                auto_build_push_failed_comment(&format!("the branch {branch_name} was not found")),
-                true,
-            ),
-            error => (auto_build_push_failed_comment(&error.to_string()), false),
+                )))
+            }
+            BranchUpdateError::BranchNotFound(branch_name) => Some(auto_build_push_failed_comment(
+                &format!("the branch {branch_name} was not found"),
+            )),
+            // If a transient error happened, try again next time
+            _ => None,
         };
 
-        if mark_as_failure {
+        if let Some(error_comment) = error_comment {
             ctx.db
                 .update_build_status(auto_build, BuildStatus::Failure)
                 .await?;
@@ -556,8 +552,8 @@ mod tests {
     use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
 
     use crate::github::api::client::HideCommentReason;
-    use crate::tests::default_repo_name;
     use crate::tests::{BorsBuilder, GitHub, run_test};
+    use crate::tests::{default_branch_name, default_repo_name};
     use crate::{
         bors::{
             PullRequestStatus,
@@ -820,8 +816,8 @@ merge_queue_enabled = false
     }
 
     #[sqlx::test]
-    async fn auto_build_push_error_details_failed(pool: sqlx::PgPool) {
-        run_test(pool, async |tester: &mut BorsTester| {
+    async fn auto_build_push_error_transient_error(pool: sqlx::PgPool) {
+        let gh = run_test(pool, async |tester: &mut BorsTester| {
             tester.approve(()).await?;
             tester.start_auto_build(()).await?;
             tester.modify_repo((), |repo| {
@@ -830,13 +826,11 @@ merge_queue_enabled = false
             });
             tester.workflow_full_success(tester.auto_workflow()).await?;
             tester.run_merge_queue_until_merge_attempt().await;
-            insta::assert_snapshot!(
-                tester.get_next_comment_text(()).await?,
-                @":eyes: Test was successful, but fast-forwarding failed: Unknown error: Unexpected status 500 Internal Server Error for branch main"
-            );
+            // Not comment should be posted, PR should not be merged
             Ok(())
         })
         .await;
+        gh.check_sha_history((), default_branch_name(), &["main-sha1"]);
     }
 
     #[sqlx::test]
@@ -875,7 +869,6 @@ merge_queue_enabled = false
 
             // This should fail
             tester.run_merge_queue_until_merge_attempt().await;
-            tester.expect_comments((), 1).await;
 
             tester.modify_repo((), |repo| {
                 repo.push_behaviour = BranchPushBehaviour::success();
