@@ -185,29 +185,28 @@ async fn handle_successful_build(
     {
         tracing::error!("Failed to fast-forward base branch for PR {pr_num}: {error:?}");
 
-        let (error_comment, mark_as_failure) = match &error {
-            BranchUpdateError::Conflict(branch_name) => (
-                auto_build_push_failed_comment(&format!(
-                    "this PR has conflicts with the `{branch_name}` branch"
-                )),
-                true,
-            ),
-            BranchUpdateError::ValidationFailed(branch_name) => (
-                auto_build_push_failed_comment(&format!(
+        let error_comment = match &error {
+            BranchUpdateError::Conflict(branch_name) => Some(auto_build_push_failed_comment(
+                &format!("this PR has conflicts with the `{branch_name}` branch"),
+            )),
+            BranchUpdateError::ValidationFailed(branch_name) => {
+                Some(auto_build_push_failed_comment(&format!(
                     "the tested commit was behind the `{branch_name}` branch"
-                )),
-                true,
-            ),
-            error => (auto_build_push_failed_comment(&error.to_string()), false),
+                )))
+            }
+            BranchUpdateError::BranchNotFound(branch_name) => Some(auto_build_push_failed_comment(
+                &format!("the branch {branch_name} was not found"),
+            )),
+            // If a transient error happened, try again next time
+            _ => None,
         };
 
-        // TODO: this might spam the PR. Do not send the comment if a 500 error occurs?
-        if mark_as_failure {
+        if let Some(error_comment) = error_comment {
             ctx.db
                 .update_build_status(auto_build, BuildStatus::Failure)
                 .await?;
+            repo.client.post_comment(pr_num, error_comment).await?;
         }
-        repo.client.post_comment(pr_num, error_comment).await?;
     } else {
         tracing::info!("Auto build succeeded and merged for PR {pr_num}");
         ctx.db
@@ -247,9 +246,8 @@ async fn handle_start_auto_build(
             let gh_pr = repo.client.get_pull_request(pr.number).await?;
             tracing::debug!("Failed to start auto build for PR {pr_num} due to merge conflict");
 
-            // TODO: add PR to mergeability queue?
             ctx.db
-                .set_pr_mergeable_state(repo.repository(), pr.number, MergeableState::Unknown)
+                .set_pr_mergeable_state(repo.repository(), pr.number, MergeableState::HasConflicts)
                 .await?;
             repo.client
                 .post_comment(pr.number, merge_conflict_comment(&gh_pr.head.name))
@@ -554,8 +552,8 @@ mod tests {
     use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
 
     use crate::github::api::client::HideCommentReason;
-    use crate::tests::default_repo_name;
     use crate::tests::{BorsBuilder, GitHub, run_test};
+    use crate::tests::{default_branch_name, default_repo_name};
     use crate::{
         bors::{
             PullRequestStatus,
@@ -818,8 +816,8 @@ merge_queue_enabled = false
     }
 
     #[sqlx::test]
-    async fn auto_build_push_error_details_failed(pool: sqlx::PgPool) {
-        run_test(pool, async |tester: &mut BorsTester| {
+    async fn auto_build_push_error_transient_error(pool: sqlx::PgPool) {
+        let gh = run_test(pool, async |tester: &mut BorsTester| {
             tester.approve(()).await?;
             tester.start_auto_build(()).await?;
             tester.modify_repo((), |repo| {
@@ -828,13 +826,11 @@ merge_queue_enabled = false
             });
             tester.workflow_full_success(tester.auto_workflow()).await?;
             tester.run_merge_queue_until_merge_attempt().await;
-            insta::assert_snapshot!(
-                tester.get_next_comment_text(()).await?,
-                @":eyes: Test was successful, but fast-forwarding failed: Unknown error: Unexpected status 500 Internal Server Error for branch main"
-            );
+            // Not comment should be posted, PR should not be merged
             Ok(())
         })
         .await;
+        gh.check_sha_history((), default_branch_name(), &["main-sha1"]);
     }
 
     #[sqlx::test]
@@ -873,7 +869,6 @@ merge_queue_enabled = false
 
             // This should fail
             tester.run_merge_queue_until_merge_attempt().await;
-            tester.expect_comments((), 1).await;
 
             tester.modify_repo((), |repo| {
                 repo.push_behaviour = BranchPushBehaviour::success();
@@ -937,7 +932,7 @@ merge_queue_enabled = false
             tester
                 .get_pr_copy(())
                 .await
-                .expect_mergeable_state(MergeableState::Unknown);
+                .expect_mergeable_state(MergeableState::HasConflicts);
             Ok(())
         })
         .await;
@@ -1255,5 +1250,21 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
             Ok(())
         })
             .await;
+    }
+
+    #[sqlx::test]
+    async fn try_build_while_auto_build_is_running(pool: sqlx::PgPool) {
+        run_test(pool, async |tester: &mut BorsTester| {
+            tester.approve(()).await?;
+            tester.start_auto_build(()).await?;
+            tester.post_comment("@bors try").await?;
+            tester.expect_comments((), 1).await;
+            tester.workflow_full_success(tester.try_workflow()).await?;
+            tester.expect_comments((), 1).await;
+            tester.finish_auto_build(()).await?;
+
+            Ok(())
+        })
+        .await;
     }
 }

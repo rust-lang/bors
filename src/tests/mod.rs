@@ -63,8 +63,14 @@ pub use utils::webhook::{TEST_WEBHOOK_SECRET, create_webhook_request};
 /// How long should we wait before we timeout a test.
 /// You can increase this if you want to do interactive debugging.
 const TEST_TIMEOUT: Duration = Duration::from_secs(15);
-const SYNC_MARKER_TIMEOUT: Duration = Duration::from_secs(10);
-const COMMENT_RECEIVE_TIMEOUT: Duration = Duration::from_secs(10);
+/// How long should we wait until a custom condition in a test is hit.
+const TEST_CONDITION_TIMEOUT: Duration = Duration::from_secs(10);
+/// How often should we check whether a custom condition in a test is hit.
+const TEST_CONDITION_CHECK: Duration = Duration::from_millis(100);
+/// How long should we wait for a sync marker to be hit.
+const SYNC_MARKER_TIMEOUT: Duration = TEST_CONDITION_TIMEOUT;
+/// How long should we wait for a comment to be received.
+const COMMENT_RECEIVE_TIMEOUT: Duration = TEST_CONDITION_TIMEOUT;
 
 const TRY_BRANCH: &str = "automation/bors/try";
 const AUTO_BRANCH: &str = "automation/bors/auto";
@@ -509,14 +515,31 @@ impl BorsTester {
     }
 
     /// Repeatedly trigger the merge queue until it attempts to perform a merge.
+    /// When that happens, wait until the merge queue completely finishes processing.
     pub async fn run_merge_queue_until_merge_attempt(&self) {
-        let run_merge_queue = async move {
-            loop {
+        WAIT_FOR_MERGE_QUEUE_MERGE_ATTEMPT.drain().await;
+
+        let make_merge_queue_fut = || {
+            Box::pin(async move {
                 self.run_merge_queue_now().await;
-                tokio::time::sleep(Duration::from_millis(500)).await;
-            }
+                tokio::time::sleep(TEST_CONDITION_CHECK).await;
+            })
         };
-        wait_for_marker_concurrent(run_merge_queue, &WAIT_FOR_MERGE_QUEUE_MERGE_ATTEMPT).await;
+        let mut wait_fut = std::pin::pin!(WAIT_FOR_MERGE_QUEUE_MERGE_ATTEMPT.sync());
+        let mut merge_queue_fut = make_merge_queue_fut();
+
+        loop {
+            tokio::select! {
+                _ = &mut merge_queue_fut => {
+                    merge_queue_fut = make_merge_queue_fut();
+                }
+                _ = &mut wait_fut => {
+                    // Now wait until the merge queue finishes
+                    merge_queue_fut.await;
+                    break;
+                }
+            }
+        }
     }
 
     /// Performs a single started/success/failure workflow event.
@@ -941,7 +964,7 @@ impl BorsTester {
                         if res {
                             return Ok(());
                         } else {
-                            tokio::time::sleep(Duration::from_millis(500)).await;
+                            tokio::time::sleep(TEST_CONDITION_CHECK).await;
                         }
                     }
                     Err(error) => {
@@ -950,7 +973,7 @@ impl BorsTester {
                 }
             }
         };
-        tokio::time::timeout(Duration::from_secs(5), wait_fut)
+        tokio::time::timeout(TEST_CONDITION_TIMEOUT, wait_fut)
             .await
             .unwrap_or_else(|_| Err(anyhow::anyhow!("Timed out waiting for condition")))
     }
@@ -1321,17 +1344,4 @@ where
             .map_err(|_| anyhow::anyhow!("Timed out waiting for a test marker to be marked"))?;
     }
     res
-}
-
-/// Concurrenly run an async operation with the specific future, until the future finishes.
-/// `fut` is supposed to be a diverging future.
-async fn wait_for_marker_concurrent<Fut>(fut: Fut, marker: &TestSyncMarker)
-where
-    Fut: Future<Output = ()>,
-{
-    marker.drain().await;
-    tokio::select! {
-        _ = fut => {}
-        _ = marker.sync() => {}
-    }
 }

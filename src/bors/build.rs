@@ -123,7 +123,6 @@ pub async fn load_workflow_runs(
 
     // Ask GitHub about all workflow runs attached to the build commit.
     // This tells us for how many workflow runs we should wait.
-    // TODO: if we have a completion trigger, load runs for a check suite ID instead?
     let mut workflow_runs: Vec<WorkflowRun> = repo
         .client
         .get_workflow_runs_for_commit_sha(CommitSha(build.commit_sha.clone()))
