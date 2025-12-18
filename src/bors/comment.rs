@@ -1,13 +1,13 @@
-use itertools::Itertools;
-use octocrab::models::workflows::{Conclusion, Job};
-use serde::Serialize;
-use std::time::Duration;
-
 use crate::bors::command::CommandPrefix;
 use crate::bors::{FailedWorkflowRun, WorkflowRun};
 use crate::github::{GithubRepoName, PullRequestNumber};
 use crate::utils::text::pluralize;
-use crate::{database::WorkflowStatus, github::CommitSha};
+use crate::{TreeState, database::WorkflowStatus, github::CommitSha};
+use itertools::Itertools;
+use octocrab::models::workflows::{Conclusion, Job};
+use serde::Serialize;
+use std::fmt::Write;
+use std::time::Duration;
 
 /// A comment that can be posted to a pull request.
 pub struct Comment {
@@ -54,8 +54,6 @@ pub fn try_build_succeeded_comment(
     commit_sha: CommitSha,
     parent_sha: CommitSha,
 ) -> Comment {
-    use std::fmt::Write;
-
     let mut text = String::from(":sunny: Try build successful");
 
     workflows.sort_by(|a, b| a.name.cmp(&b.name));
@@ -111,8 +109,6 @@ pub fn build_failed_comment(
     failed_workflows: Vec<FailedWorkflowRun>,
     error_context: Option<String>,
 ) -> Comment {
-    use std::fmt::Write;
-
     let mut msg = format!(":broken_heart: Test for {commit_sha} failed");
     let mut workflow_links = failed_workflows
         .iter()
@@ -178,7 +174,6 @@ pub fn try_build_started_comment(
     bot_prefix: &CommandPrefix,
     cancelled_workflow_urls: Vec<String>,
 ) -> Comment {
-    use std::fmt::Write;
     let mut msg = format!(":hourglass: Trying commit {head_sha} with merge {merge_sha}…\n\n");
 
     if !cancelled_workflow_urls.is_empty() {
@@ -253,14 +248,30 @@ pub fn approved_comment(
     repo: &GithubRepoName,
     commit_sha: &CommitSha,
     reviewer: &str,
+    tree_state: TreeState,
 ) -> Comment {
-    Comment::new(format!(
-        r":pushpin: Commit {commit_sha} has been approved by `{reviewer}`
+    let approve_emoji = if is_holiday_season() {
+        "star2"
+    } else {
+        "pushpin"
+    };
+    let mut comment = format!(
+        r":{approve_emoji}: Commit {commit_sha} has been approved by `{reviewer}`
 
 It is now in the [queue]({web_url}/queue/{}) for this repository.
 ",
         repo.name()
-    ))
+    );
+    if let TreeState::Closed { priority, source } = tree_state {
+        let tree_emoji = if is_holiday_season() {
+            "christmas_tree"
+        } else {
+            "evergreen_tree"
+        };
+        writeln!(comment, "\n:{tree_emoji}: The tree is currently [closed]({source}) for pull requests below priority {priority}. This pull request will be tested once the tree is reopened.").unwrap();
+    }
+
+    Comment::new(comment)
 }
 
 pub fn approve_non_open_pr_comment() -> Comment {
@@ -381,4 +392,16 @@ pub fn conflict_comment(source: Option<PullRequestNumber>, was_unapproved: bool)
             ""
         }
     ))
+}
+
+// :-)
+fn is_holiday_season() -> bool {
+    #[cfg(test)]
+    return false;
+    #[cfg(not(test))]
+    {
+        use chrono::{Datelike, Utc};
+        let now = Utc::now();
+        now.month() == 12 && now.day() <= 25
+    }
 }

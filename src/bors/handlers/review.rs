@@ -59,10 +59,13 @@ pub(super) async fn command_approve(
     };
 
     db.approve(pr.db, approval_info, priority, rollup).await?;
-    handle_label_trigger(&repo_state, pr.number(), LabelTrigger::Approved).await?;
+
+    let priority = priority.or(pr.db.priority.map(|p| p as u32));
 
     merge_queue_tx.notify().await?;
-    notify_of_approval(ctx, &repo_state, pr, approver.as_str()).await
+    handle_label_trigger(&repo_state, pr.number(), LabelTrigger::Approved).await?;
+
+    notify_of_approval(ctx, &repo_state, pr, priority, approver.as_str()).await
 }
 
 /// Keywords that will prevent an approval if they appear in the PR's title.
@@ -333,8 +336,27 @@ async fn notify_of_approval(
     ctx: Arc<BorsContext>,
     repo: &RepositoryState,
     pr: PullRequestData<'_>,
+    priority: Option<u32>,
     approver: &str,
 ) -> anyhow::Result<()> {
+    let mut tree_state = ctx
+        .db
+        .repo_db(repo.repository())
+        .await?
+        .map(|r| r.tree_state.clone())
+        .unwrap_or(TreeState::Open);
+
+    // If the PR has high enough priority, do not post the tree closed message
+    if let TreeState::Closed {
+        priority: tree_priority,
+        ..
+    } = &tree_state
+        && let Some(priority) = priority
+        && priority >= *tree_priority
+    {
+        tree_state = TreeState::Open;
+    }
+
     repo.client
         .post_comment(
             pr.db.number,
@@ -343,6 +365,7 @@ async fn notify_of_approval(
                 repo.repository(),
                 &pr.github.head.sha,
                 approver,
+                tree_state,
             ),
         )
         .await?;
@@ -446,6 +469,46 @@ mod tests {
             insta::assert_snapshot!(
                 ctx.get_next_comment_text(()).await?,
                 @"@unprivileged-user: :key: Insufficient privileges: not in review users"
+            );
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn approve_while_tree_is_closed(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            ctx.post_comment("@bors treeclosed=100").await?;
+            ctx.expect_comments((), 1).await;
+            ctx.post_comment("@bors r+").await?;
+            insta::assert_snapshot!(
+                ctx.get_next_comment_text(()).await?,
+                @r"
+            :pushpin: Commit pr-1-sha has been approved by `default-user`
+
+            It is now in the [queue](https://test.com/bors/queue/borstest) for this repository.
+
+            :evergreen_tree: The tree is currently [closed](https://github.com/rust-lang/borstest/pull/1#issuecomment-1) for pull requests below priority 100. This pull request will be tested once the tree is reopened.
+            "
+            );
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn approve_while_tree_is_closed_high_priority(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            ctx.post_comment("@bors treeclosed=100").await?;
+            ctx.expect_comments((), 1).await;
+            ctx.post_comment("@bors r+ p=101").await?;
+            insta::assert_snapshot!(
+                ctx.get_next_comment_text(()).await?,
+                @r"
+            :pushpin: Commit pr-1-sha has been approved by `default-user`
+
+            It is now in the [queue](https://test.com/bors/queue/borstest) for this repository.
+            "
             );
             Ok(())
         })
