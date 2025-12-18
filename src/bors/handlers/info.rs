@@ -90,10 +90,10 @@ mod tests {
 
     #[sqlx::test]
     async fn info_for_unapproved_pr(pool: sqlx::PgPool) {
-        run_test(pool, async |tester: &mut BorsTester| {
-            tester.post_comment("@bors info").await?;
+        run_test(pool, async |ctx: &mut BorsTester| {
+            ctx.post_comment("@bors info").await?;
             insta::assert_snapshot!(
-                tester.get_next_comment_text(()).await?,
+                ctx.get_next_comment_text(()).await?,
                 @r"
             ## Status of PR `1`
             - Not Approved
@@ -108,12 +108,12 @@ mod tests {
 
     #[sqlx::test]
     async fn info_for_approved_pr(pool: sqlx::PgPool) {
-        run_test(pool, async |tester: &mut BorsTester| {
-            tester.approve(()).await?;
+        run_test(pool, async |ctx: &mut BorsTester| {
+            ctx.approve(()).await?;
 
-            tester.post_comment("@bors info").await?;
+            ctx.post_comment("@bors info").await?;
             insta::assert_snapshot!(
-                tester.get_next_comment_text(()).await?,
+                ctx.get_next_comment_text(()).await?,
                 @r"
             ## Status of PR `1`
             - Approved by: `default-user`
@@ -128,13 +128,13 @@ mod tests {
 
     #[sqlx::test]
     async fn info_for_pr_with_priority(pool: sqlx::PgPool) {
-        run_test(pool, async |tester: &mut BorsTester| {
-            tester.post_comment("@bors p=5").await?;
-            tester.wait_for_pr((), |pr| pr.priority == Some(5)).await?;
+        run_test(pool, async |ctx: &mut BorsTester| {
+            ctx.post_comment("@bors p=5").await?;
+            ctx.wait_for_pr((), |pr| pr.priority == Some(5)).await?;
 
-            tester.post_comment("@bors info").await?;
+            ctx.post_comment("@bors info").await?;
             insta::assert_snapshot!(
-                tester.get_next_comment_text(()).await?,
+                ctx.get_next_comment_text(()).await?,
                 @r"
             ## Status of PR `1`
             - Not Approved
@@ -149,13 +149,13 @@ mod tests {
 
     #[sqlx::test]
     async fn info_for_pr_with_try_build(pool: sqlx::PgPool) {
-        run_test(pool, async |tester: &mut BorsTester| {
-            tester.post_comment("@bors try").await?;
-            tester.expect_comments((), 1).await;
+        run_test(pool, async |ctx: &mut BorsTester| {
+            ctx.post_comment("@bors try").await?;
+            ctx.expect_comments((), 1).await;
 
-            tester.post_comment("@bors info").await?;
+            ctx.post_comment("@bors info").await?;
             insta::assert_snapshot!(
-                tester.get_next_comment_text(()).await?,
+                ctx.get_next_comment_text(()).await?,
                 @r"
             ## Status of PR `1`
             - Not Approved
@@ -171,20 +171,19 @@ mod tests {
 
     #[sqlx::test]
     async fn info_for_pr_with_everything(pool: sqlx::PgPool) {
-        run_test(pool, async |tester: &mut BorsTester| {
-            tester.post_comment("@bors r+ p=10").await?;
-            tester.expect_comments((), 1).await;
+        run_test(pool, async |ctx: &mut BorsTester| {
+            ctx.post_comment("@bors r+ p=10").await?;
+            ctx.expect_comments((), 1).await;
 
-            tester.post_comment("@bors try").await?;
-            tester.expect_comments((), 1).await;
+            ctx.post_comment("@bors try").await?;
+            ctx.expect_comments((), 1).await;
 
-            tester
-                .workflow_event(WorkflowEvent::started(tester.try_workflow()))
+            ctx.workflow_event(WorkflowEvent::started(ctx.try_workflow()))
                 .await?;
 
-            tester.post_comment("@bors info").await?;
+            ctx.post_comment("@bors info").await?;
             insta::assert_snapshot!(
-                tester.get_next_comment_text(()).await?,
+                ctx.get_next_comment_text(()).await?,
                 @r"
             ## Status of PR `1`
             - Approved by: `default-user`

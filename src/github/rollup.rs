@@ -252,23 +252,22 @@ mod tests {
 
     #[sqlx::test]
     async fn create_rollup_missing_fork(pool: sqlx::PgPool) {
-        run_test(pool, async |tester: &mut BorsTester| {
-            let pr1 = tester.open_pr(default_repo_name(), |_| {}).await?;
-            let pr2 = tester.open_pr(default_repo_name(), |_| {}).await?;
+        run_test(pool, async |ctx: &mut BorsTester| {
+            let pr1 = ctx.open_pr(default_repo_name(), |_| {}).await?;
+            let pr2 = ctx.open_pr(default_repo_name(), |_| {}).await?;
 
             let repo_name = default_repo_name();
-            tester
-                .api_request(rollup_request(
-                    "rolluper",
-                    repo_name.clone(),
-                    &[pr1.number, pr2.number],
-                ))
-                .await?
-                .assert_status(StatusCode::INTERNAL_SERVER_ERROR)
-                .assert_body_contains(&format!(
-                    "You must have a fork of rolluper/{} named borstest under your account",
-                    repo_name.name()
-                ));
+            ctx.api_request(rollup_request(
+                "rolluper",
+                repo_name.clone(),
+                &[pr1.number, pr2.number],
+            ))
+            .await?
+            .assert_status(StatusCode::INTERNAL_SERVER_ERROR)
+            .assert_body_contains(&format!(
+                "You must have a fork of rolluper/{} named borstest under your account",
+                repo_name.name()
+            ));
             Ok(())
         })
         .await;
@@ -276,21 +275,20 @@ mod tests {
 
     #[sqlx::test]
     async fn create_rollup_non_rollupable_pr(pool: sqlx::PgPool) {
-        run_test((pool, rollup_state()), async |tester: &mut BorsTester| {
-            let pr1 = tester.open_pr(default_repo_name(), |_| {}).await?;
-            let pr2 = tester.open_pr(default_repo_name(), |_| {}).await?;
-            tester.wait_for_pr(pr2.id(), |_| true).await?;
+        run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
+            let pr1 = ctx.open_pr(default_repo_name(), |_| {}).await?;
+            let pr2 = ctx.open_pr(default_repo_name(), |_| {}).await?;
+            ctx.wait_for_pr(pr2.id(), |_| true).await?;
 
             let repo_name = default_repo_name();
-            tester
-                .api_request(rollup_request(
-                    "rolluper",
-                    repo_name.clone(),
-                    &[pr1.number, pr2.number],
-                ))
-                .await?
-                .assert_status(StatusCode::INTERNAL_SERVER_ERROR)
-                .assert_body_contains(&format!("PR #{} cannot be included in rollup", pr1.number));
+            ctx.api_request(rollup_request(
+                "rolluper",
+                repo_name.clone(),
+                &[pr1.number, pr2.number],
+            ))
+            .await?
+            .assert_status(StatusCode::INTERNAL_SERVER_ERROR)
+            .assert_body_contains(&format!("PR #{} cannot be included in rollup", pr1.number));
             Ok(())
         })
         .await;
@@ -298,13 +296,13 @@ mod tests {
 
     #[sqlx::test]
     async fn create_rollup(pool: sqlx::PgPool) {
-        let gh = run_test((pool, rollup_state()), async |tester: &mut BorsTester| {
-            let pr2 = tester.open_pr(default_repo_name(), |_| {}).await?;
-            let pr3 = tester.open_pr(default_repo_name(), |_| {}).await?;
-            tester.approve(pr2.id()).await?;
-            tester.approve(pr3.id()).await?;
+        let gh = run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
+            let pr2 = ctx.open_pr(default_repo_name(), |_| {}).await?;
+            let pr3 = ctx.open_pr(default_repo_name(), |_| {}).await?;
+            ctx.approve(pr2.id()).await?;
+            ctx.approve(pr3.id()).await?;
 
-            let pr_url = tester
+            let pr_url = ctx
                 .api_request(rollup_request(
                     "rolluper",
                     default_repo_name(),

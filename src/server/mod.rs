@@ -351,9 +351,9 @@ mod tests {
 
     #[sqlx::test]
     async fn api_queue_page(pool: sqlx::PgPool) {
-        run_test(pool, async |tester: &mut BorsTester| {
-            tester.approve(()).await?;
-            let response = tester
+        run_test(pool, async |ctx: &mut BorsTester| {
+            ctx.approve(()).await?;
+            let response = ctx
                 .api_request(ApiRequest::get(&format!("/api/queue/{}", default_repo_name().name())))
                 .await?
                 .assert_ok()

@@ -104,9 +104,9 @@ impl BorsBuilder {
         self,
         f: F,
     ) -> GitHub {
-        // We return `tester` and `bors` separately, so that we can finish `bors`
+        // We return `ctx` and `bors` separately, so that we can finish `bors`
         // even if `f` returns an error or times out, for better error propagation.
-        let (mut tester, mut bors) = BorsTester::new(self.pool, self.github).await;
+        let (mut ctx, mut bors) = BorsTester::new(self.pool, self.github).await;
 
         tokio::select! {
             // If the service ends sooner than the test itself, then the service has panicked.
@@ -115,8 +115,8 @@ impl BorsBuilder {
                 let error = res.expect_err("Bors service ended unexpectedly without a panic");
                 panic!("Bors service has ended unexpectedly: {:?}", join_error_to_anyhow(error));
             }
-            result = tokio::time::timeout(TEST_TIMEOUT, f(&mut tester)) => {
-                let gh_state = tester.finish(bors).await;
+            result = tokio::time::timeout(TEST_TIMEOUT, f(&mut ctx)) => {
+                let gh_state = ctx.finish(bors).await;
 
                 match result {
                     Ok(res) => match res {
@@ -1209,8 +1209,8 @@ pub struct PullRequestProxy {
 }
 
 impl PullRequestProxy {
-    async fn new(tester: &BorsTester, gh_pr: PullRequest) -> Self {
-        let db_pr = tester
+    async fn new(ctx: &BorsTester, gh_pr: PullRequest) -> Self {
+        let db_pr = ctx
             .try_get_pr_from_db((gh_pr.repo.clone(), gh_pr.number.0))
             .await
             .unwrap();

@@ -222,12 +222,10 @@ mod tests {
 
     #[sqlx::test]
     async fn workflow_started_unknown_build(pool: sqlx::PgPool) {
-        run_test(pool.clone(), async |tester: &mut BorsTester| {
-            tester.create_branch("unknown");
-            let run_id = tester.create_workflow((), "unknown");
-            tester
-                .workflow_event(WorkflowEvent::started(run_id))
-                .await?;
+        run_test(pool.clone(), async |ctx: &mut BorsTester| {
+            ctx.create_branch("unknown");
+            let run_id = ctx.create_workflow((), "unknown");
+            ctx.workflow_event(WorkflowEvent::started(run_id)).await?;
             Ok(())
         })
         .await;
@@ -236,12 +234,10 @@ mod tests {
 
     #[sqlx::test]
     async fn workflow_completed_unknown_build(pool: sqlx::PgPool) {
-        run_test(pool.clone(), async |tester: &mut BorsTester| {
-            tester.create_branch("unknown");
-            let run_id = tester.create_workflow((), "unknown");
-            tester
-                .workflow_event(WorkflowEvent::success(run_id))
-                .await?;
+        run_test(pool.clone(), async |ctx: &mut BorsTester| {
+            ctx.create_branch("unknown");
+            let run_id = ctx.create_workflow((), "unknown");
+            ctx.workflow_event(WorkflowEvent::success(run_id)).await?;
             Ok(())
         })
         .await;
@@ -250,11 +246,10 @@ mod tests {
 
     #[sqlx::test]
     async fn try_workflow_started(pool: sqlx::PgPool) {
-        run_test(pool.clone(), async |tester: &mut BorsTester| {
-            tester.post_comment("@bors try").await?;
-            tester.expect_comments((), 1).await;
-            tester
-                .workflow_event(WorkflowEvent::started(tester.try_workflow()))
+        run_test(pool.clone(), async |ctx: &mut BorsTester| {
+            ctx.post_comment("@bors try").await?;
+            ctx.expect_comments((), 1).await;
+            ctx.workflow_event(WorkflowEvent::started(ctx.try_workflow()))
                 .await?;
             Ok(())
         })
@@ -265,15 +260,13 @@ mod tests {
 
     #[sqlx::test]
     async fn try_workflow_start_twice(pool: sqlx::PgPool) {
-        run_test(pool.clone(), async |tester: &mut BorsTester| {
-            tester.post_comment("@bors try").await?;
-            tester.expect_comments((), 1).await;
+        run_test(pool.clone(), async |ctx: &mut BorsTester| {
+            ctx.post_comment("@bors try").await?;
+            ctx.expect_comments((), 1).await;
 
-            tester
-                .workflow_event(WorkflowEvent::started(tester.try_workflow()))
+            ctx.workflow_event(WorkflowEvent::started(ctx.try_workflow()))
                 .await?;
-            tester
-                .workflow_event(WorkflowEvent::started(tester.try_workflow()))
+            ctx.workflow_event(WorkflowEvent::started(ctx.try_workflow()))
                 .await?;
             Ok(())
         })
@@ -284,19 +277,19 @@ mod tests {
     // First start both workflows, then finish both of them.
     #[sqlx::test]
     async fn try_success_multiple_workflows_per_suite_1(pool: sqlx::PgPool) {
-        run_test(pool, async |tester: &mut BorsTester| {
-            tester.post_comment("@bors try").await?;
-            tester.expect_comments((), 1).await;
+        run_test(pool, async |ctx: &mut BorsTester| {
+            ctx.post_comment("@bors try").await?;
+            ctx.expect_comments((), 1).await;
 
-            let w1 = tester.try_workflow();
-            let w2 = tester.try_workflow();
+            let w1 = ctx.try_workflow();
+            let w2 = ctx.try_workflow();
 
             // Finish w1 while w2 is not yet in the DB
-            tester.workflow_full_success(w1).await?;
-            tester.workflow_full_success(w2).await?;
+            ctx.workflow_full_success(w1).await?;
+            ctx.workflow_full_success(w2).await?;
 
             insta::assert_snapshot!(
-                tester.get_next_comment_text(()).await?,
+                ctx.get_next_comment_text(()).await?,
                 @r#"
             :sunny: Try build successful
             - [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1) :white_check_mark:
@@ -314,19 +307,19 @@ mod tests {
     // First start and finish the first workflow, then do the same for the second one.
     #[sqlx::test]
     async fn try_success_multiple_workflows_per_suite_2(pool: sqlx::PgPool) {
-        run_test(pool, async |tester: &mut BorsTester| {
-            tester.post_comment("@bors try").await?;
-            tester.expect_comments((), 1).await;
+        run_test(pool, async |ctx: &mut BorsTester| {
+            ctx.post_comment("@bors try").await?;
+            ctx.expect_comments((), 1).await;
 
-            let w1 = tester.try_workflow();
-            let w2 = tester.try_workflow();
-            tester.workflow_start(w1).await?;
-            tester.workflow_start(w2).await?;
+            let w1 = ctx.try_workflow();
+            let w2 = ctx.try_workflow();
+            ctx.workflow_start(w1).await?;
+            ctx.workflow_start(w2).await?;
 
-            tester.workflow_event(WorkflowEvent::success(w1)).await?;
-            tester.workflow_event(WorkflowEvent::success(w2)).await?;
+            ctx.workflow_event(WorkflowEvent::success(w1)).await?;
+            ctx.workflow_event(WorkflowEvent::success(w2)).await?;
             insta::assert_snapshot!(
-                tester.get_next_comment_text(()).await?,
+                ctx.get_next_comment_text(()).await?,
                 @r#"
             :sunny: Try build successful
             - [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1) :white_check_mark:
@@ -344,18 +337,18 @@ mod tests {
     // Finish the build early when we encounter the first failure
     #[sqlx::test]
     async fn try_failure_multiple_workflows_early(pool: sqlx::PgPool) {
-        run_test(pool, async |tester: &mut BorsTester| {
-            tester.post_comment("@bors try").await?;
-            tester.expect_comments((), 1).await;
+        run_test(pool, async |ctx: &mut BorsTester| {
+            ctx.post_comment("@bors try").await?;
+            ctx.expect_comments((), 1).await;
 
-            let w1 = tester.try_workflow();
-            let w2 = tester.try_workflow();
-            tester.workflow_start(w1).await?;
-            tester.workflow_start(w2).await?;
+            let w1 = ctx.try_workflow();
+            let w2 = ctx.try_workflow();
+            ctx.workflow_start(w1).await?;
+            ctx.workflow_start(w2).await?;
 
-            tester.workflow_event(WorkflowEvent::failure(w2)).await?;
+            ctx.workflow_event(WorkflowEvent::failure(w2)).await?;
             insta::assert_snapshot!(
-                tester.get_next_comment_text(()).await?,
+                ctx.get_next_comment_text(()).await?,
                 @":broken_heart: Test for merge-0-pr-1 failed: [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1), [Workflow1](https://github.com/rust-lang/borstest/actions/runs/2)"
             );
             Ok(())
@@ -371,18 +364,18 @@ mod tests {
 min_ci_time = 10
 "#,
             ))
-            .run_test(async |tester: &mut BorsTester| {
-                tester.post_comment("@bors try").await?;
-                tester.expect_comments((), 1).await;
+            .run_test(async |ctx: &mut BorsTester| {
+                ctx.post_comment("@bors try").await?;
+                ctx.expect_comments((), 1).await;
 
-                let w1 = tester.try_workflow();
-                tester.modify_workflow(w1, |w| w.set_duration(Duration::from_secs(1)));
+                let w1 = ctx.try_workflow();
+                ctx.modify_workflow(w1, |w| w.set_duration(Duration::from_secs(1)));
 
                 // Too short workflow, it should be marked as a failure
-                tester
+                ctx
                     .workflow_full_success(w1)
                     .await?;
-                insta::assert_snapshot!(tester.get_next_comment_text(()).await?, @r"
+                insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @r"
                 :broken_heart: Test for merge-0-pr-1 failed: [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1)
                 A workflow was considered to be a failure because it took only `1s`. The minimum duration for CI workflows is configured to be `10s`.
                 ");
@@ -399,16 +392,16 @@ min_ci_time = 10
 min_ci_time = 20
 "#,
             ))
-            .run_test(async |tester: &mut BorsTester| {
-                tester.post_comment("@bors try").await?;
-                tester.expect_comments((), 1).await;
+            .run_test(async |ctx: &mut BorsTester| {
+                ctx.post_comment("@bors try").await?;
+                ctx.expect_comments((), 1).await;
 
-                let w1 = tester.try_workflow();
-                tester.modify_workflow(w1, |w| w.set_duration(Duration::from_secs(100)));
-                tester
+                let w1 = ctx.try_workflow();
+                ctx.modify_workflow(w1, |w| w.set_duration(Duration::from_secs(100)));
+                ctx
                     .workflow_full_success(w1)
                     .await?;
-                insta::assert_snapshot!(tester.get_next_comment_text(()).await?, @r#"
+                insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @r#"
                 :sunny: Try build successful ([Workflow1](https://github.com/rust-lang/borstest/actions/runs/1))
                 Build commit: merge-0-pr-1 (`merge-0-pr-1`, parent: `main-sha1`)
 
