@@ -39,7 +39,7 @@ use crate::bors::process::QueueSenders;
 use crate::github::api::client::HideCommentReason;
 use crate::server::{ServerState, create_app};
 use crate::tests::github::{
-    PrIdentifier, PullRequest, RepoIdentifier, TestWorkflowStatus, WorkflowEventKind, WorkflowRun,
+    PrIdentifier, RepoIdentifier, TestWorkflowStatus, WorkflowEventKind, WorkflowRun,
     default_oauth_config,
 };
 use crate::tests::mock::{
@@ -51,9 +51,10 @@ pub use github::Comment;
 pub use github::Commit;
 pub use github::GitHub;
 pub use github::Permissions;
+pub use github::PullRequest;
 pub use github::Repo;
 pub use github::User;
-pub use github::{BranchPushBehaviour, BranchPushError};
+pub use github::{BranchPushBehaviour, BranchPushError, MergeBehavior};
 pub use github::{WorkflowEvent, WorkflowJob};
 pub use github::{default_branch_name, default_repo_name};
 pub use mock::ExternalHttpMock;
@@ -1156,10 +1157,10 @@ impl ApiResponse {
         }
         self
     }
-    pub fn assert_body_contains(&self, needle: &str) {
-        if !self.body.contains(needle) {
+    pub fn assert_body(&self, body: &str) {
+        if self.body != body {
             panic!(
-                "HTTP response did not contain needle `{needle}`. Body:\n{}",
+                "Expected HTTP response body `{body}`. Actual body:\n{}",
                 self.body
             );
         }

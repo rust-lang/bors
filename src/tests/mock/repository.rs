@@ -238,6 +238,11 @@ async fn mock_merge_branch(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
                 commit_message: String,
             }
 
+            // Simulate conflicts
+            if !repo.merge_behavior.try_merge() {
+                return ResponseTemplate::new(409);
+            }
+
             let data: MergeRequest = request.body_json().unwrap();
             let head = repo.get_branch_by_name(&data.head);
             let head_sha = match head {
@@ -250,9 +255,11 @@ async fn mock_merge_branch(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
                     branch.sha()
                 }
             };
+
             let Some(base_branch) = repo.get_branch_by_name(&data.base) else {
                 return ResponseTemplate::new(404);
             };
+
             if base_branch.merge_conflict {
                 // Conflict
                 return ResponseTemplate::new(409);

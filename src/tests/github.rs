@@ -12,7 +12,6 @@ use octocrab::models::{CheckSuiteId, JobId, RunId};
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
-use std::num::NonZeroU64;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 use tokio::sync::mpsc::{Receiver, Sender};
@@ -345,7 +344,22 @@ impl User {
     }
 }
 
-#[derive(Clone)]
+#[derive(Default)]
+pub enum MergeBehavior {
+    #[default]
+    Succeed,
+    Custom(Box<dyn FnMut() -> bool + Send + Sync>),
+}
+
+impl MergeBehavior {
+    pub fn try_merge(&mut self) -> bool {
+        match self {
+            MergeBehavior::Succeed => true,
+            MergeBehavior::Custom(func) => func(),
+        }
+    }
+}
+
 pub struct Repo {
     name: String,
     owner: User,
@@ -365,6 +379,7 @@ pub struct Repo {
     pub push_behaviour: BranchPushBehaviour,
     pub pr_push_counter: u64,
     pub fork: bool,
+    pub merge_behavior: MergeBehavior,
 }
 
 impl Repo {
@@ -385,6 +400,7 @@ impl Repo {
             check_runs: vec![],
             push_behaviour: BranchPushBehaviour::default(),
             fork: false,
+            merge_behavior: MergeBehavior::default(),
         };
         repo.add_branch(Branch::default());
         repo
@@ -782,31 +798,24 @@ pub enum BranchPushError {
 }
 
 #[derive(Clone, Debug)]
-pub struct BranchPushBehaviour {
-    error: Option<(BranchPushError, NonZeroU64)>,
+pub enum BranchPushBehaviour {
+    Succeed,
+    Fail(BranchPushError),
 }
 
 impl BranchPushBehaviour {
     pub fn success() -> Self {
-        Self { error: None }
+        Self::Succeed
     }
 
-    pub fn always_fail(error_type: BranchPushError) -> Self {
-        Self {
-            error: Some((error_type, NonZeroU64::new(u64::MAX).unwrap())),
-        }
+    pub fn always_fail(error: BranchPushError) -> Self {
+        Self::Fail(error)
     }
 
     pub fn try_push(&mut self) -> Option<BranchPushError> {
-        if let Some((error, remaining)) = self.error.clone() {
-            if remaining.get() == 1 {
-                self.error = None;
-            } else {
-                self.error = Some((error.clone(), NonZeroU64::new(remaining.get() - 1).unwrap()));
-            }
-            Some(error)
-        } else {
-            None
+        match self {
+            BranchPushBehaviour::Succeed => None,
+            BranchPushBehaviour::Fail(error) => Some(error.clone()),
         }
     }
 }
