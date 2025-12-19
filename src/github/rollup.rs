@@ -8,6 +8,7 @@ use anyhow::Context;
 use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Redirect, Response};
+use futures::StreamExt;
 use rand::{Rng, distr::Alphanumeric};
 use std::sync::Arc;
 use tracing::Instrument;
@@ -173,7 +174,7 @@ async fn create_rollup(
 
     // Validate PRs
     let mut rollup_prs = Vec::new();
-    for num in pr_nums {
+    for &num in &pr_nums {
         match db
             .get_pull_request(
                 &GithubRepoName::new(&repo_owner, &repo_name),
@@ -238,15 +239,23 @@ async fn create_rollup(
     let mut successes = Vec::new();
     let mut failures = Vec::new();
 
-    // Merge each PR's commits into the rollup branch
-    for (index, pr) in rollup_prs.iter().enumerate() {
-        // TODO: download the PRs in parallel
-        // Avoid fetching the first PR twice
-        let pr_github = match index {
-            0 => first_pr_github.clone(),
-            _ => gh_client.get_pull_request(pr.number).await?,
-        };
+    let mut github_prs = Vec::with_capacity(pr_nums.len());
+    github_prs.push(first_pr_github);
 
+    // Download the rest of the PRs concurrently, with at most 10 concurrent requests in-flight
+    let mut pr_stream = futures::stream::iter(
+        pr_nums
+            .into_iter()
+            .skip(1)
+            .map(|pr_num| gh_client.get_pull_request(PullRequestNumber(pr_num as u64))),
+    )
+    .buffer_unordered(10);
+    while let Some(pr) = pr_stream.next().await {
+        github_prs.push(pr?);
+    }
+
+    // Merge each PR's commits into the rollup branch
+    for (pr, pr_github) in rollup_prs.into_iter().zip(github_prs) {
         // Skip PRs that don't target the same base branch
         if pr_github.base.name != *base_branch {
             failures.push(pr);
