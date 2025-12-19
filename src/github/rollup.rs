@@ -12,6 +12,9 @@ use rand::{Rng, distr::Alphanumeric};
 use std::sync::Arc;
 use tracing::Instrument;
 
+/// Maximum number of PRs that can be rolled up at once.
+const ROLLUP_PR_LIMIT: u64 = 50;
+
 /// Query parameters received from GitHub's OAuth callback.
 ///
 /// Documentation: https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps#2-users-are-redirected-back-to-your-site-by-github
@@ -38,6 +41,7 @@ pub enum RollupError {
     PullRequestNotRollupable { pr: PullRequestNumber },
     PullRequestNotFound { pr: PullRequestNumber },
     NoPullRequestsSelected,
+    TooManyPullRequests,
 }
 
 impl IntoResponse for RollupError {
@@ -63,6 +67,10 @@ impl IntoResponse for RollupError {
             RollupError::NoPullRequestsSelected => (
                 StatusCode::BAD_REQUEST,
                 "No pull requests were selected".to_string(),
+            ),
+            RollupError::TooManyPullRequests => (
+                StatusCode::BAD_REQUEST,
+                format!("Rolling up too many pull requests, at most {ROLLUP_PR_LIMIT} is allowed"),
             ),
         }
         .into_response()
@@ -148,6 +156,10 @@ async fn create_rollup(
     let username = user_client.username;
 
     tracing::info!("User {username} is creating a rollup with PRs: {pr_nums:?}");
+
+    if pr_nums.len() as u64 > ROLLUP_PR_LIMIT {
+        return Err(RollupError::TooManyPullRequests);
+    }
 
     // Ensure user has a fork
     match user_client.client.get_repo().await {
@@ -362,6 +374,23 @@ mod tests {
             .await?
             .assert_status(StatusCode::BAD_REQUEST)
             .assert_body("Pull request #50 was not found");
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn rollup_too_many_prs(pool: sqlx::PgPool) {
+        run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
+            let prs = (1..60).map(PullRequestNumber).collect::<Vec<_>>();
+            ctx.api_request(rollup_request(
+                &rollup_user().name,
+                default_repo_name(),
+                &prs,
+            ))
+            .await?
+            .assert_status(StatusCode::BAD_REQUEST)
+            .assert_body("Rolling up too many pull requests, at most 50 is allowed");
             Ok(())
         })
         .await;
