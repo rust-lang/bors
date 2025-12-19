@@ -12,7 +12,6 @@ use octocrab::models::{CheckSuiteId, JobId, RunId};
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
-use std::num::NonZeroU64;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 use tokio::sync::mpsc::{Receiver, Sender};
@@ -782,31 +781,24 @@ pub enum BranchPushError {
 }
 
 #[derive(Clone, Debug)]
-pub struct BranchPushBehaviour {
-    error: Option<(BranchPushError, NonZeroU64)>,
+pub enum BranchPushBehaviour {
+    Succeed,
+    Fail(BranchPushError),
 }
 
 impl BranchPushBehaviour {
     pub fn success() -> Self {
-        Self { error: None }
+        Self::Succeed
     }
 
-    pub fn always_fail(error_type: BranchPushError) -> Self {
-        Self {
-            error: Some((error_type, NonZeroU64::new(u64::MAX).unwrap())),
-        }
+    pub fn always_fail(error: BranchPushError) -> Self {
+        Self::Fail(error)
     }
 
     pub fn try_push(&mut self) -> Option<BranchPushError> {
-        if let Some((error, remaining)) = self.error.clone() {
-            if remaining.get() == 1 {
-                self.error = None;
-            } else {
-                self.error = Some((error.clone(), NonZeroU64::new(remaining.get() - 1).unwrap()));
-            }
-            Some(error)
-        } else {
-            None
+        match self {
+            BranchPushBehaviour::Succeed => None,
+            BranchPushBehaviour::Fail(error) => Some(error.clone()),
         }
     }
 }
