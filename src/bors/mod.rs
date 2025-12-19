@@ -128,6 +128,9 @@ pub static WAIT_FOR_WORKFLOW_STARTED: TestSyncMarker = TestSyncMarker::new();
 pub static WAIT_FOR_WORKFLOW_COMPLETED: TestSyncMarker = TestSyncMarker::new();
 
 #[cfg(test)]
+pub static WAIT_FOR_PR_OPEN: TestSyncMarker = TestSyncMarker::new();
+
+#[cfg(test)]
 pub static WAIT_FOR_MERGE_QUEUE: TestSyncMarker = TestSyncMarker::new();
 
 /// The merge queue has attempted to merge a PR.

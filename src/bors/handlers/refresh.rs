@@ -126,8 +126,8 @@ mod tests {
     use crate::bors::handlers::trybuild::TRY_BUILD_CHECK_RUN_NAME;
     use crate::bors::{MOCK_TIME, PullRequestStatus};
     use crate::database::{MergeableState, OctocrabMergeableState};
-    use crate::tests::default_repo_name;
     use crate::tests::{BorsBuilder, BorsTester, GitHub, run_test};
+    use crate::tests::{User, default_repo_name};
     use chrono::Utc;
     use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
     use std::future::Future;
@@ -281,13 +281,9 @@ timeout = 3600
     #[sqlx::test]
     async fn refresh_new_pr(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
-            let pr = ctx
-                .with_blocked_webhooks(async |ctx: &mut BorsTester| ctx.open_pr((), |_| {}).await)
-                .await?;
+            let number = ctx.repo().lock().add_pr(User::default_pr_author()).number;
             ctx.refresh_prs().await;
-            ctx.pr(pr.number)
-                .await
-                .expect_status(PullRequestStatus::Open);
+            ctx.pr(number).await.expect_status(PullRequestStatus::Open);
             Ok(())
         })
         .await;
