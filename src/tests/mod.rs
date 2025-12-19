@@ -1156,10 +1156,10 @@ impl ApiResponse {
         }
         self
     }
-    pub fn assert_body_contains(&self, needle: &str) {
-        if !self.body.contains(needle) {
+    pub fn assert_body(&self, body: &str) {
+        if self.body != body {
             panic!(
-                "HTTP response did not contain needle `{needle}`. Body:\n{}",
+                "Expected HTTP response body `{body}`. Actual body:\n{}",
                 self.body
             );
         }

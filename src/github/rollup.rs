@@ -1,5 +1,4 @@
-use super::GithubRepoName;
-use super::error::AppError;
+use super::{GithubRepoName, PullRequest, PullRequestNumber};
 use crate::PgDbClient;
 use crate::github::api::client::GithubRepositoryClient;
 use crate::github::api::operations::{ForcePush, MergeError};
@@ -8,7 +7,7 @@ use crate::server::ServerStateRef;
 use anyhow::Context;
 use axum::extract::{Query, State};
 use axum::http::StatusCode;
-use axum::response::{IntoResponse, Redirect};
+use axum::response::{IntoResponse, Redirect, Response};
 use rand::{Rng, distr::Alphanumeric};
 use std::sync::Arc;
 use tracing::Instrument;
@@ -31,12 +30,60 @@ struct OAuthRollupState {
     repo_owner: String,
 }
 
+#[derive(Debug)]
+pub enum RollupError {
+    BaseRepoNotFound { repo_name: GithubRepoName },
+    ForkNotFound { repo_name: GithubRepoName },
+    Generic(anyhow::Error),
+    PullRequestNotRollupable { pr: PullRequestNumber },
+    PullRequestNotFound { pr: PullRequestNumber },
+    NoPullRequestsSelected,
+}
+
+impl IntoResponse for RollupError {
+    fn into_response(self) -> Response {
+        match self {
+            RollupError::Generic(error) => (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
+            RollupError::BaseRepoNotFound { repo_name } => (
+                StatusCode::BAD_REQUEST,
+                format!("Repository {repo_name} was not found"),
+            ),
+            RollupError::ForkNotFound { repo_name } => (
+                StatusCode::BAD_REQUEST,
+                format!("Fork {repo_name} not found, create it before opening the rollup"),
+            ),
+            RollupError::PullRequestNotRollupable { pr } => (
+                StatusCode::BAD_REQUEST,
+                format!("Pull request #{pr} cannot be included in a rollup"),
+            ),
+            RollupError::PullRequestNotFound { pr } => (
+                StatusCode::BAD_REQUEST,
+                format!("Pull request #{pr} was not found"),
+            ),
+            RollupError::NoPullRequestsSelected => (
+                StatusCode::BAD_REQUEST,
+                "No pull requests were selected".to_string(),
+            ),
+        }
+        .into_response()
+    }
+}
+
+impl<E> From<E> for RollupError
+where
+    E: Into<anyhow::Error>,
+{
+    fn from(err: E) -> Self {
+        Self::Generic(err.into())
+    }
+}
+
 pub async fn oauth_callback_handler(
     State(db): State<Arc<PgDbClient>>,
     State(oauth): State<Option<OAuthClient>>,
     State(ServerStateRef(state)): State<ServerStateRef>,
     Query(callback): Query<OAuthCallbackQuery>,
-) -> Result<impl IntoResponse, AppError> {
+) -> Result<impl IntoResponse, RollupError> {
     let Some(oauth_client) = oauth else {
         let error =
             anyhow::anyhow!("OAuth not configured. Please set CLIENT_ID and CLIENT_SECRET.");
@@ -49,7 +96,7 @@ pub async fn oauth_callback_handler(
 
     let repo_name = GithubRepoName::new(&oauth_state.repo_owner, &oauth_state.repo_name);
     let Some(repo_state) = state.get_repo(&repo_name) else {
-        return Err(anyhow::anyhow!("Repository {repo_name} not found").into());
+        return Err(RollupError::ForkNotFound { repo_name });
     };
 
     let user_client = oauth_client
@@ -62,23 +109,26 @@ pub async fn oauth_callback_handler(
         pr_nums = ?oauth_state.pr_nums
     );
 
-    match create_rollup(db, oauth_state, &repo_state.client, user_client)
-        .instrument(span)
+    let pr = match create_rollup(db, oauth_state, &repo_state.client, user_client)
+        .instrument(span.clone())
         .await
     {
-        Ok(pr_url) => {
-            tracing::info!("Rollup created successfully, redirecting to: {pr_url}");
-            Ok(Redirect::temporary(&pr_url).into_response())
+        Ok(pr) => pr,
+        Err(err) => {
+            tracing::error!("Failed to create rollup: {err:?}");
+            return Err(err);
         }
-        Err(error) => {
-            tracing::error!("Failed to create rollup: {error:?}");
-            Ok((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to create rollup: {error:?}"),
-            )
-                .into_response())
-        }
-    }
+    };
+
+    let _guard = span.enter();
+    let pr_url = pr
+        .html_url
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("GitHub returned PR without html_url"))?
+        .to_string();
+
+    tracing::info!("Rollup created successfully, redirecting to: {pr_url}");
+    Ok(Redirect::temporary(&pr_url).into_response())
 }
 
 /// Creates a rollup PR by merging multiple approved PRs into a single branch
@@ -88,7 +138,7 @@ async fn create_rollup(
     rollup_state: OAuthRollupState,
     gh_client: &GithubRepositoryClient,
     user_client: UserGitHubClient,
-) -> anyhow::Result<String> {
+) -> Result<PullRequest, RollupError> {
     let OAuthRollupState {
         repo_name,
         repo_owner,
@@ -103,9 +153,9 @@ async fn create_rollup(
     match user_client.client.get_repo().await {
         Ok(repo) => repo,
         Err(_) => {
-            anyhow::bail!(
-                "You must have a fork of {username}/{repo_name} named {repo_name} under your account",
-            );
+            return Err(RollupError::BaseRepoNotFound {
+                repo_name: user_client.client.repository().clone(),
+            });
         }
     };
 
@@ -121,18 +171,22 @@ async fn create_rollup(
         {
             Some(pr) => {
                 if !pr.is_rollupable() {
-                    let error = format!("PR #{num} cannot be included in rollup");
-                    tracing::error!("{error}");
-                    anyhow::bail!(error);
+                    return Err(RollupError::PullRequestNotRollupable {
+                        pr: PullRequestNumber(num as u64),
+                    });
                 }
                 rollup_prs.push(pr);
             }
-            None => anyhow::bail!("PR #{num} not found in database"),
+            None => {
+                return Err(RollupError::PullRequestNotFound {
+                    pr: PullRequestNumber(num as u64),
+                });
+            }
         }
     }
 
     if rollup_prs.is_empty() {
-        anyhow::bail!("No pull requests are marked for rollup");
+        return Err(RollupError::NoPullRequestsSelected);
     }
 
     // Sort PRs by priority and then PR number
@@ -210,7 +264,8 @@ async fn create_rollup(
                     return Err(anyhow::anyhow!(
                         "Merge of #{} failed with error: {error:?}",
                         pr.number
-                    ));
+                    )
+                    .into());
                 }
             },
         }
@@ -241,13 +296,8 @@ async fn create_rollup(
         )
         .await
         .context("Cannot create PR")?;
-    let pr_url = pr
-        .html_url
-        .as_ref()
-        .ok_or_else(|| anyhow::anyhow!("GitHub returned PR without html_url"))?
-        .to_string();
 
-    Ok(pr_url)
+    Ok(pr)
 }
 
 #[cfg(test)]
@@ -262,8 +312,8 @@ mod tests {
     #[sqlx::test]
     async fn rollup_missing_fork(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
-            let pr1 = ctx.open_pr(default_repo_name(), |_| {}).await?;
-            let pr2 = ctx.open_pr(default_repo_name(), |_| {}).await?;
+            let pr1 = ctx.open_pr((), |_| {}).await?;
+            let pr2 = ctx.open_pr((), |_| {}).await?;
 
             let repo_name = default_repo_name();
             ctx.api_request(rollup_request(
@@ -272,10 +322,10 @@ mod tests {
                 &[pr1.number, pr2.number],
             ))
             .await?
-            .assert_status(StatusCode::INTERNAL_SERVER_ERROR)
-            .assert_body_contains(&format!(
-                "You must have a fork of rolluper/{} named borstest under your account",
-                repo_name.name()
+            .assert_status(StatusCode::BAD_REQUEST)
+            .assert_body(&format!(
+                "Repository rolluper/{} was not found",
+                pr1.repo.name()
             ));
             Ok(())
         })
@@ -285,8 +335,8 @@ mod tests {
     #[sqlx::test]
     async fn rollup_non_rollupable_pr(pool: sqlx::PgPool) {
         run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
-            let pr1 = ctx.open_pr(default_repo_name(), |_| {}).await?;
-            let pr2 = ctx.open_pr(default_repo_name(), |_| {}).await?;
+            let pr1 = ctx.open_pr((), |_| {}).await?;
+            let pr2 = ctx.open_pr((), |_| {}).await?;
             ctx.wait_for_pr(pr2.id(), |_| true).await?;
 
             let repo_name = default_repo_name();
@@ -296,8 +346,27 @@ mod tests {
                 &[pr1.number, pr2.number],
             ))
             .await?
-            .assert_status(StatusCode::INTERNAL_SERVER_ERROR)
-            .assert_body_contains(&format!("PR #{} cannot be included in rollup", pr1.number));
+            .assert_status(StatusCode::BAD_REQUEST)
+            .assert_body(&format!(
+                "Pull request #{} cannot be included in a rollup",
+                pr1.number
+            ));
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn rollup_nonexistent_pr(pool: sqlx::PgPool) {
+        run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
+            ctx.api_request(rollup_request(
+                "rolluper",
+                default_repo_name(),
+                &[50u64.into()],
+            ))
+            .await?
+            .assert_status(StatusCode::BAD_REQUEST)
+            .assert_body("Pull request #50 was not found");
             Ok(())
         })
         .await;
@@ -306,8 +375,8 @@ mod tests {
     #[sqlx::test]
     async fn rollup(pool: sqlx::PgPool) {
         let gh = run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
-            let pr2 = ctx.open_pr(default_repo_name(), |_| {}).await?;
-            let pr3 = ctx.open_pr(default_repo_name(), |_| {}).await?;
+            let pr2 = ctx.open_pr((), |_| {}).await?;
+            let pr3 = ctx.open_pr((), |_| {}).await?;
             ctx.approve(pr2.id()).await?;
             ctx.approve(pr3.id()).await?;
 
