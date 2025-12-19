@@ -344,7 +344,22 @@ impl User {
     }
 }
 
-#[derive(Clone)]
+#[derive(Default)]
+pub enum MergeBehavior {
+    #[default]
+    Succeed,
+    Custom(Box<dyn FnMut() -> bool + Send + Sync>),
+}
+
+impl MergeBehavior {
+    pub fn try_merge(&mut self) -> bool {
+        match self {
+            MergeBehavior::Succeed => true,
+            MergeBehavior::Custom(func) => func(),
+        }
+    }
+}
+
 pub struct Repo {
     name: String,
     owner: User,
@@ -364,6 +379,7 @@ pub struct Repo {
     pub push_behaviour: BranchPushBehaviour,
     pub pr_push_counter: u64,
     pub fork: bool,
+    pub merge_behavior: MergeBehavior,
 }
 
 impl Repo {
@@ -384,6 +400,7 @@ impl Repo {
             check_runs: vec![],
             push_behaviour: BranchPushBehaviour::default(),
             fork: false,
+            merge_behavior: MergeBehavior::default(),
         };
         repo.add_branch(Branch::default());
         repo

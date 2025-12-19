@@ -305,7 +305,8 @@ mod tests {
     use crate::github::rollup::OAuthRollupState;
     use crate::github::{GithubRepoName, PullRequestNumber};
     use crate::tests::{
-        ApiRequest, BorsTester, Comment, GitHub, Repo, User, default_repo_name, run_test,
+        ApiRequest, ApiResponse, BorsTester, Comment, GitHub, MergeBehavior, PullRequest, Repo,
+        User, default_repo_name, run_test,
     };
     use http::StatusCode;
 
@@ -315,18 +316,13 @@ mod tests {
             let pr1 = ctx.open_pr((), |_| {}).await?;
             let pr2 = ctx.open_pr((), |_| {}).await?;
 
-            let repo_name = default_repo_name();
-            ctx.api_request(rollup_request(
-                "rolluper",
-                repo_name.clone(),
-                &[pr1.number, pr2.number],
-            ))
-            .await?
-            .assert_status(StatusCode::BAD_REQUEST)
-            .assert_body(&format!(
-                "Repository rolluper/{} was not found",
-                pr1.repo.name()
-            ));
+            make_rollup(ctx, &[&pr1, &pr2])
+                .await?
+                .assert_status(StatusCode::BAD_REQUEST)
+                .assert_body(&format!(
+                    "Repository rolluper/{} was not found",
+                    pr1.repo.name()
+                ));
             Ok(())
         })
         .await;
@@ -337,20 +333,14 @@ mod tests {
         run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
             let pr1 = ctx.open_pr((), |_| {}).await?;
             let pr2 = ctx.open_pr((), |_| {}).await?;
-            ctx.wait_for_pr(pr2.id(), |_| true).await?;
 
-            let repo_name = default_repo_name();
-            ctx.api_request(rollup_request(
-                "rolluper",
-                repo_name.clone(),
-                &[pr1.number, pr2.number],
-            ))
-            .await?
-            .assert_status(StatusCode::BAD_REQUEST)
-            .assert_body(&format!(
-                "Pull request #{} cannot be included in a rollup",
-                pr1.number
-            ));
+            make_rollup(ctx, &[&pr1, &pr2])
+                .await?
+                .assert_status(StatusCode::BAD_REQUEST)
+                .assert_body(&format!(
+                    "Pull request #{} cannot be included in a rollup",
+                    pr1.number
+                ));
             Ok(())
         })
         .await;
@@ -360,7 +350,7 @@ mod tests {
     async fn rollup_nonexistent_pr(pool: sqlx::PgPool) {
         run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
             ctx.api_request(rollup_request(
-                "rolluper",
+                &rollup_user().name,
                 default_repo_name(),
                 &[50u64.into()],
             ))
@@ -373,6 +363,48 @@ mod tests {
     }
 
     #[sqlx::test]
+    async fn rollup_merge_conflict(pool: sqlx::PgPool) {
+        let gh = run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
+            ctx.modify_repo(fork_repo(), |repo| {
+                let mut n = 0;
+                repo.merge_behavior = MergeBehavior::Custom(Box::new(move || {
+                    n += 1;
+                    // Fail the third merge
+                    n != 3
+                }));
+            });
+            let pr2 = ctx.open_pr((), |_| {}).await?;
+            let pr3 = ctx.open_pr((), |_| {}).await?;
+            let pr4 = ctx.open_pr((), |_| {}).await?;
+            let pr5 = ctx.open_pr((), |_| {}).await?;
+            for pr in &[&pr2, &pr3, &pr4, &pr5] {
+                ctx.approve(pr.id()).await?;
+            }
+
+            make_rollup(ctx, &[&pr2, &pr3, &pr4, &pr5])
+                .await?
+                .assert_status(StatusCode::TEMPORARY_REDIRECT);
+            Ok(())
+        })
+        .await;
+        let repo = gh.get_repo(());
+        insta::assert_snapshot!(repo.lock().get_pr(6).description, @r"
+        Successful merges:
+
+         - #2 (Title of PR 2)
+         - #3 (Title of PR 3)
+         - #5 (Title of PR 5)
+
+        Failed merges:
+
+         - #4 (Title of PR 4)
+
+        r? @ghost
+        @rustbot modify labels: rollup
+        ");
+    }
+
+    #[sqlx::test]
     async fn rollup(pool: sqlx::PgPool) {
         let gh = run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
             let pr2 = ctx.open_pr((), |_| {}).await?;
@@ -380,12 +412,7 @@ mod tests {
             ctx.approve(pr2.id()).await?;
             ctx.approve(pr3.id()).await?;
 
-            let pr_url = ctx
-                .api_request(rollup_request(
-                    "rolluper",
-                    default_repo_name(),
-                    &[pr2.number, pr3.number],
-                ))
+            let pr_url = make_rollup(ctx, &[&pr2, &pr3])
                 .await?
                 .assert_status(StatusCode::TEMPORARY_REDIRECT)
                 .get_header("location");
@@ -422,14 +449,9 @@ mod tests {
                 .await?;
             ctx.approve(pr5.id()).await?;
 
-            let repo_name = default_repo_name();
-            ctx.api_request(rollup_request(
-                "rolluper",
-                repo_name.clone(),
-                &[pr2.number, pr3.number, pr4.number, pr5.number],
-            ))
-            .await?
-            .assert_status(StatusCode::TEMPORARY_REDIRECT);
+            make_rollup(ctx, &[&pr2, &pr3, &pr4, &pr5])
+                .await?
+                .assert_status(StatusCode::TEMPORARY_REDIRECT);
             Ok(())
         })
         .await;
@@ -447,14 +469,35 @@ mod tests {
         ");
     }
 
+    async fn make_rollup(
+        ctx: &mut BorsTester,
+        prs: &[&PullRequest],
+    ) -> anyhow::Result<ApiResponse> {
+        let prs = prs.iter().map(|pr| pr.number).collect::<Vec<_>>();
+        ctx.api_request(rollup_request(
+            &rollup_user().name,
+            default_repo_name(),
+            &prs,
+        ))
+        .await
+    }
+
     fn rollup_state() -> GitHub {
         let mut gh = GitHub::default();
-        let rolluper = User::new(2000, "rolluper");
+        let rolluper = rollup_user();
         gh.add_user(rolluper.clone());
         // Create fork
-        let mut repo = Repo::new(rolluper, default_repo_name().name());
+        let mut repo = Repo::new(rolluper, fork_repo().name());
         repo.fork = true;
         gh.with_repo(repo)
+    }
+
+    fn rollup_user() -> User {
+        User::new(2000, "rolluper")
+    }
+
+    fn fork_repo() -> GithubRepoName {
+        GithubRepoName::new(&rollup_user().name, default_repo_name().name())
     }
 
     fn rollup_request(code: &str, repo: GithubRepoName, prs: &[PullRequestNumber]) -> ApiRequest {
