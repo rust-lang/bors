@@ -201,11 +201,11 @@ async fn create_rollup(
 
     // Fetch the first PR from GitHub to determine the target base branch
     let first_pr_github = gh_client.get_pull_request(rollup_prs[0].number).await?;
-    let base_branch = &first_pr_github.base.name;
+    let base_branch = first_pr_github.base.name.clone();
 
     // Fetch the current SHA of the base branch - this is the commit our
     // rollup branch starts from.
-    let base_branch_sha = gh_client.get_branch_sha(base_branch).await?;
+    let base_branch_sha = gh_client.get_branch_sha(&base_branch).await?;
 
     let branch_suffix: String = rand::rng()
         .sample_iter(Alphanumeric)
@@ -227,8 +227,13 @@ async fn create_rollup(
     let mut failures = Vec::new();
 
     // Merge each PR's commits into the rollup branch
-    for pr in rollup_prs {
-        let pr_github = gh_client.get_pull_request(pr.number).await?;
+    for (index, pr) in rollup_prs.iter().enumerate() {
+        // TODO: download the PRs in parallel
+        // Avoid fetching the first PR twice
+        let pr_github = match index {
+            0 => first_pr_github.clone(),
+            _ => gh_client.get_pull_request(pr.number).await?,
+        };
 
         // Skip PRs that don't target the same base branch
         if pr_github.base.name != *base_branch {
@@ -291,7 +296,7 @@ async fn create_rollup(
         .create_pr(
             &title,
             &format!("{username}:{rollup_branch}"),
-            base_branch,
+            &base_branch,
             &body,
         )
         .await
@@ -398,6 +403,43 @@ mod tests {
         Failed merges:
 
          - #4 (Title of PR 4)
+
+        r? @ghost
+        @rustbot modify labels: rollup
+        ");
+    }
+
+    #[sqlx::test]
+    async fn rollup_different_base_branch(pool: sqlx::PgPool) {
+        let gh = run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
+            let beta = ctx.create_branch("beta");
+            let pr2 = ctx.open_pr((), |_| {}).await?;
+            let pr3 = ctx
+                .open_pr((), |pr| {
+                    pr.base_branch = beta;
+                })
+                .await?;
+            let pr4 = ctx.open_pr((), |_| {}).await?;
+            for pr in &[&pr2, &pr3, &pr4] {
+                ctx.approve(pr.id()).await?;
+            }
+
+            make_rollup(ctx, &[&pr2, &pr3, &pr4])
+                .await?
+                .assert_status(StatusCode::TEMPORARY_REDIRECT);
+            Ok(())
+        })
+        .await;
+        let repo = gh.get_repo(());
+        insta::assert_snapshot!(repo.lock().get_pr(5).description, @r"
+        Successful merges:
+
+         - #2 (Title of PR 2)
+         - #4 (Title of PR 4)
+
+        Failed merges:
+
+         - #3 (Title of PR 3)
 
         r? @ghost
         @rustbot modify labels: rollup
