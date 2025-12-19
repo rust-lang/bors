@@ -410,6 +410,43 @@ mod tests {
     }
 
     #[sqlx::test]
+    async fn rollup_different_base_branch(pool: sqlx::PgPool) {
+        let gh = run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
+            let beta = ctx.create_branch("beta");
+            let pr2 = ctx.open_pr((), |_| {}).await?;
+            let pr3 = ctx
+                .open_pr((), |pr| {
+                    pr.base_branch = beta;
+                })
+                .await?;
+            let pr4 = ctx.open_pr((), |_| {}).await?;
+            for pr in &[&pr2, &pr3, &pr4] {
+                ctx.approve(pr.id()).await?;
+            }
+
+            make_rollup(ctx, &[&pr2, &pr3, &pr4])
+                .await?
+                .assert_status(StatusCode::TEMPORARY_REDIRECT);
+            Ok(())
+        })
+        .await;
+        let repo = gh.get_repo(());
+        insta::assert_snapshot!(repo.lock().get_pr(5).description, @r"
+        Successful merges:
+
+         - #2 (Title of PR 2)
+         - #4 (Title of PR 4)
+
+        Failed merges:
+
+         - #3 (Title of PR 3)
+
+        r? @ghost
+        @rustbot modify labels: rollup
+        ");
+    }
+
+    #[sqlx::test]
     async fn rollup(pool: sqlx::PgPool) {
         let gh = run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
             let pr2 = ctx.open_pr((), |_| {}).await?;
