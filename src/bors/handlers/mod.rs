@@ -149,6 +149,9 @@ pub async fn handle_bors_repository_event(
             handle_pull_request_opened(repo, db, ctx, &senders, payload)
                 .instrument(span.clone())
                 .await?;
+
+            #[cfg(test)]
+            super::WAIT_FOR_PR_OPEN.mark();
         }
         BorsRepositoryEvent::PullRequestClosed(payload) => {
             let span =

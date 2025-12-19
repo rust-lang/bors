@@ -1,6 +1,6 @@
 use crate::bors::{
     CommandPrefix, PullRequestStatus, RollupMode, WAIT_FOR_BUILD_QUEUE, WAIT_FOR_MERGE_QUEUE,
-    WAIT_FOR_MERGE_QUEUE_MERGE_ATTEMPT, WAIT_FOR_MERGEABILITY_STATUS_REFRESH,
+    WAIT_FOR_MERGE_QUEUE_MERGE_ATTEMPT, WAIT_FOR_MERGEABILITY_STATUS_REFRESH, WAIT_FOR_PR_OPEN,
     WAIT_FOR_PR_STATUS_REFRESH, WAIT_FOR_WORKFLOW_COMPLETED, WAIT_FOR_WORKFLOW_STARTED,
 };
 use crate::database::{
@@ -186,8 +186,6 @@ pub struct BorsTester {
     db: Arc<PgDbClient>,
     // Sender for bors global events
     global_tx: Sender<BorsGlobalEvent>,
-    // When this field is false, no webhooks should be generated from BorsTester methods
-    webhooks_active: bool,
     senders: QueueSenders,
 }
 
@@ -253,7 +251,6 @@ impl BorsTester {
                 db,
                 senders,
                 global_tx,
-                webhooks_active: true,
             },
             bors,
         )
@@ -611,7 +608,11 @@ impl BorsTester {
             (payload, pr)
         };
 
-        self.send_webhook("pull_request", payload).await?;
+        wait_for_marker(
+            async || self.send_webhook("pull_request", payload).await,
+            &WAIT_FOR_PR_OPEN,
+        )
+        .await?;
         Ok(pr)
     }
 
@@ -927,19 +928,6 @@ impl BorsTester {
         self
     }
 
-    /// Temporarily block sent webhooks, to emulate situation where webhooks could be lost,
-    /// while `func` is executing.
-    pub async fn with_blocked_webhooks<T, F>(&mut self, func: F) -> T
-    where
-        F: AsyncFnOnce(&mut BorsTester) -> T,
-    {
-        let orig_webhooks = self.webhooks_active;
-        self.webhooks_active = false;
-        let result = func(self).await;
-        self.webhooks_active = orig_webhooks;
-        result
-    }
-
     pub async fn api_request(&mut self, request: ApiRequest) -> anyhow::Result<ApiResponse> {
         let mut path = request.path;
         for (index, (key, value)) in request.query.iter().enumerate() {
@@ -1054,10 +1042,6 @@ impl BorsTester {
     }
 
     async fn send_webhook<S: Serialize>(&mut self, event: &str, content: S) -> anyhow::Result<()> {
-        if !self.webhooks_active {
-            return Ok(());
-        }
-
         let serialized = serde_json::to_string(&content)?;
         let webhook = create_webhook_request(event, &serialized);
         let response = self
