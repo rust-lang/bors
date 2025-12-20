@@ -336,7 +336,7 @@ impl GithubRepositoryClient {
                 let run = WorkflowRun {
                     id: run.id,
                     name: run.name,
-                    url: run.url.to_string(),
+                    url: run.html_url.to_string(),
                     status,
                 };
                 runs.push(run);

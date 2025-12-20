@@ -17,73 +17,15 @@ pub struct GitHubWorkflowEventPayload {
 
 impl GitHubWorkflowEventPayload {
     pub fn new(repo: &Repo, run: WorkflowRun, event: WorkflowEventKind) -> Self {
-        let url: Url = format!(
-            "https://github.com/{}/actions/runs/{}",
-            repo.full_name(),
-            run.run_id()
-        )
-        .parse()
-        .unwrap();
-
-        let completed_at = Utc::now();
-        let created_at = completed_at - run.duration();
-
-        let status = match &event {
-            WorkflowEventKind::Started => Status::Pending,
-            WorkflowEventKind::Completed { status: _ } => Status::Completed,
-        };
+        let repository = GitHubRepository::from(repo);
         let action = match &event {
             WorkflowEventKind::Started => "requested",
             WorkflowEventKind::Completed { .. } => "completed",
         }
         .to_string();
-        let conclusion = match event {
-            WorkflowEventKind::Started => None,
-            WorkflowEventKind::Completed { status } => Some(status),
-        };
-
-        let repository = GitHubRepository::from(repo);
         Self {
             action,
-            workflow_run: GitHubWorkflowRun {
-                id: run.run_id(),
-                workflow_id: 1.into(),
-                node_id: "".to_string(),
-                name: run.name().to_owned(),
-                head_branch: run.head_branch().to_owned(),
-                head_sha: run.head_sha().to_owned(),
-                run_number: 0,
-                event: "".to_string(),
-                status,
-                conclusion,
-                created_at,
-                updated_at: completed_at,
-                url: url.clone(),
-                html_url: url.clone(),
-                jobs_url: url.clone(),
-                logs_url: url.clone(),
-                check_suite_url: url.clone(),
-                check_suite_id: run.check_suite_id(),
-                artifacts_url: url.clone(),
-                cancel_url: url.clone(),
-                rerun_url: url.clone(),
-                workflow_url: url.clone(),
-                head_commit: GitHubHeadCommit {
-                    id: "".to_string(),
-                    tree_id: "".to_string(),
-                    message: "".to_string(),
-                    timestamp: Default::default(),
-                    author: GitHubCommitAuthor {
-                        name: "".to_string(),
-                        email: "".to_string(),
-                    },
-                    committer: GitHubCommitAuthor {
-                        name: "".to_string(),
-                        email: "".to_string(),
-                    },
-                },
-                repository: repository.clone(),
-            },
+            workflow_run: GitHubWorkflowRun::new(repo, run),
             repository,
         }
     }
@@ -120,13 +62,15 @@ pub struct GitHubWorkflowRun {
 
 impl GitHubWorkflowRun {
     pub fn new(repo: &Repo, run: WorkflowRun) -> Self {
-        let url: Url = format!(
-            "https://github.com/{}/actions/runs/{}",
-            repo.full_name(),
-            run.run_id()
-        )
-        .parse()
-        .unwrap();
+        let make_url = |prefix: &str| -> Url {
+            format!(
+                "https://{prefix}github.com/{}/actions/runs/{}",
+                repo.full_name(),
+                run.run_id()
+            )
+            .parse()
+            .unwrap()
+        };
 
         let completed_at = Utc::now();
         let created_at = completed_at - run.duration();
@@ -156,16 +100,16 @@ impl GitHubWorkflowRun {
             conclusion,
             created_at,
             updated_at: completed_at,
-            url: url.clone(),
-            html_url: url.clone(),
-            jobs_url: url.clone(),
-            logs_url: url.clone(),
-            check_suite_url: url.clone(),
+            url: make_url("api."),
+            html_url: make_url(""),
+            jobs_url: make_url("jobs."),
+            logs_url: make_url("logs."),
+            check_suite_url: make_url("check-suite."),
             check_suite_id: run.check_suite_id(),
-            artifacts_url: url.clone(),
-            cancel_url: url.clone(),
-            rerun_url: url.clone(),
-            workflow_url: url.clone(),
+            artifacts_url: make_url("artifacts."),
+            cancel_url: make_url("cancel."),
+            rerun_url: make_url("rerun."),
+            workflow_url: make_url("workflow."),
             head_commit: GitHubHeadCommit {
                 id: "".to_string(),
                 tree_id: "".to_string(),
