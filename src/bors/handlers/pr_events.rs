@@ -41,7 +41,7 @@ pub(super) async fn handle_pull_request_edited(
         return Ok(());
     }
 
-    unapprove_pr(&repo_state, &db, &pr_model).await?;
+    unapprove_pr(&repo_state, &db, &pr_model, pr).await?;
     notify_of_edited_pr(&repo_state, pr_number, &payload.pull_request.base.name).await
 }
 
@@ -76,7 +76,7 @@ pub(super) async fn handle_push_to_pull_request(
         .as_ref()
         .map(|b| b.status.is_failure())
         .unwrap_or(false);
-    unapprove_pr(&repo_state, &db, &pr_model).await?;
+    unapprove_pr(&repo_state, &db, &pr_model, pr).await?;
 
     // If we had an approved PR with a failed build, there's not much point in sending this warning
     if !had_failed_build {
