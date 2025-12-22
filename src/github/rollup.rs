@@ -10,6 +10,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Redirect, Response};
 use futures::StreamExt;
 use rand::{Rng, distr::Alphanumeric};
+use std::collections::HashSet;
 use std::sync::Arc;
 use tracing::Instrument;
 
@@ -151,15 +152,22 @@ async fn create_rollup(
     let OAuthRollupState {
         repo_name,
         repo_owner,
-        pr_nums,
+        mut pr_nums,
     } = rollup_state;
 
     let username = user_client.username;
 
     tracing::info!("User {username} is creating a rollup with PRs: {pr_nums:?}");
 
+    // Filter out duplicates
+    let mut pr_set = HashSet::new();
+    pr_nums.retain(|&pr| pr_set.insert(pr));
+
     if pr_nums.len() as u64 > ROLLUP_PR_LIMIT {
         return Err(RollupError::TooManyPullRequests);
+    }
+    if pr_nums.is_empty() {
+        return Err(RollupError::NoPullRequestsSelected);
     }
 
     // Ensure user has a fork
@@ -196,10 +204,6 @@ async fn create_rollup(
                 });
             }
         }
-    }
-
-    if rollup_prs.is_empty() {
-        return Err(RollupError::NoPullRequestsSelected);
     }
 
     // Sort PRs by priority and then PR number
@@ -548,6 +552,31 @@ mod tests {
          - #4 (Title of PR 4)
          - #2 (Title of PR 2)
          - #5 (Title of PR 5)
+
+        r? @ghost
+        ");
+    }
+
+    #[sqlx::test]
+    async fn rollup_duplicates(pool: sqlx::PgPool) {
+        let gh = run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
+            let pr2 = ctx.open_pr(default_repo_name(), |_| {}).await?;
+            let pr3 = ctx.open_pr(default_repo_name(), |_| {}).await?;
+            ctx.approve(pr2.id()).await?;
+            ctx.approve(pr3.id()).await?;
+
+            make_rollup(ctx, &[&pr3, &pr2, &pr3, &pr2])
+                .await?
+                .assert_status(StatusCode::TEMPORARY_REDIRECT);
+            Ok(())
+        })
+        .await;
+        let repo = gh.get_repo(());
+        insta::assert_snapshot!(repo.lock().get_pr(4).description, @r"
+        Successful merges:
+
+         - #2 (Title of PR 2)
+         - #3 (Title of PR 3)
 
         r? @ghost
         ");
