@@ -288,8 +288,8 @@ mod tests {
     use crate::github::CommitSha;
     use crate::github::api::client::HideCommentReason;
     use crate::tests::default_repo_name;
-    use crate::tests::{BorsBuilder, Comment, GitHub, User, WorkflowEvent, run_test};
     use crate::tests::{BorsTester, Branch, Commit};
+    use crate::tests::{Comment, GitHub, User, WorkflowEvent, run_test};
     use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
 
     #[sqlx::test]
@@ -839,30 +839,29 @@ try-job: Bar
 
     #[sqlx::test]
     async fn try_build_failed_modify_labels(pool: sqlx::PgPool) {
-        BorsBuilder::new(pool)
-            .github(GitHub::default().with_default_config(
-                r#"
+        let gh = GitHub::default().with_default_config(
+            r#"
 [labels]
 try_failed = ["+foo", "+bar", "-baz"]
 "#,
-            ))
-            .run_test(async |ctx: &mut BorsTester| {
-                ctx.post_comment("@bors try").await?;
-                insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @r"
+        );
+        run_test((pool, gh), async |ctx: &mut BorsTester| {
+            ctx.post_comment("@bors try").await?;
+            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @r"
                 :hourglass: Trying commit pr-1-sha with merge merge-0-pr-1…
 
                 To cancel the try build, run the command `@bors try cancel`.
                 ");
-                ctx.pr(()).await.expect_added_labels(&[]);
-                ctx.workflow_full_failure(ctx.try_workflow()).await?;
-                ctx.expect_comments((), 1).await;
-                ctx.pr(())
-                    .await
-                    .expect_added_labels(&["foo", "bar"])
-                    .expect_removed_labels(&["baz"]);
-                Ok(())
-            })
-            .await;
+            ctx.pr(()).await.expect_added_labels(&[]);
+            ctx.workflow_full_failure(ctx.try_workflow()).await?;
+            ctx.expect_comments((), 1).await;
+            ctx.pr(())
+                .await
+                .expect_added_labels(&["foo", "bar"])
+                .expect_removed_labels(&["baz"]);
+            Ok(())
+        })
+        .await;
     }
 
     #[sqlx::test]
