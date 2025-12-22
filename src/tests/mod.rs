@@ -210,12 +210,12 @@ impl BorsTester {
             }
         }
 
-        let ctx = BorsContext::new(
+        let ctx = Arc::new(BorsContext::new(
             CommandParser::new("@bors".to_string().into()),
             db.clone(),
             repos.clone(),
-            "https://test.com/bors",
-        );
+            "https://bors-test.com",
+        ));
 
         let BorsProcess {
             repository_tx,
@@ -223,7 +223,7 @@ impl BorsTester {
             senders,
             bors_process,
         } = create_bors_process(
-            ctx,
+            ctx.clone(),
             mock.github_client(),
             mock.team_api_client(),
             chrono::Duration::seconds(1),
@@ -237,9 +237,7 @@ impl BorsTester {
             global_tx.clone(),
             WebhookSecret::new(TEST_WEBHOOK_SECRET.to_string()),
             Some(oauth_client),
-            repos,
-            db.clone(),
-            default_cmd_prefix(),
+            ctx,
         );
         let app = create_app(state);
         let bors = tokio::spawn(bors_process);

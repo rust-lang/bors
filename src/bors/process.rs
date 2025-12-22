@@ -25,7 +25,7 @@ pub struct BorsProcess {
 /// Creates a future with a Bors process that continuously receives webhook events and reacts to
 /// them.
 pub fn create_bors_process(
-    ctx: BorsContext,
+    ctx: Arc<BorsContext>,
     gh_client: Octocrab,
     team_api: TeamApiClient,
     merge_queue_max_interval: chrono::Duration,
@@ -33,8 +33,6 @@ pub fn create_bors_process(
     let (repository_tx, repository_rx) = mpsc::channel::<BorsRepositoryEvent>(1024);
     let (global_tx, global_rx) = mpsc::channel::<BorsGlobalEvent>(1024);
     let (mergeability_queue_tx, mergeability_queue_rx) = create_mergeability_queue();
-
-    let ctx = Arc::new(ctx);
 
     let (merge_queue_tx, merge_queue_fut) =
         start_merge_queue(ctx.clone(), merge_queue_max_interval);

@@ -161,19 +161,19 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
     }
 
     let db = Arc::new(db);
-    let ctx = BorsContext::new(
+    let ctx = Arc::new(BorsContext::new(
         CommandParser::new(opts.cmd_prefix.clone().into()),
         db.clone(),
         repos.clone(),
         &opts.web_url,
-    );
+    ));
     let BorsProcess {
         repository_tx,
         global_tx,
         bors_process,
         ..
     } = create_bors_process(
-        ctx,
+        ctx.clone(),
         client,
         team_api,
         chrono::Duration::from_std(MERGE_QUEUE_MAX_INTERVAL).unwrap(),
@@ -254,9 +254,7 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
         global_tx,
         WebhookSecret::new(opts.webhook_secret),
         oauth_client,
-        repos,
-        db,
-        opts.cmd_prefix.into(),
+        ctx,
     );
     let server_process = webhook_server(state);
 

@@ -7,7 +7,7 @@ use crate::templates::{
 };
 use crate::utils::sort_queue::sort_queue_prs;
 use crate::{
-    AppError, BorsGlobalEvent, BorsRepositoryEvent, OAuthClient, PgDbClient, RepositoryStore,
+    AppError, BorsContext, BorsGlobalEvent, BorsRepositoryEvent, OAuthClient, PgDbClient,
     WebhookSecret, bors, database,
 };
 use axum::extract::{FromRef, Path, Query, State};
@@ -33,9 +33,7 @@ pub struct ServerState {
     global_event_queue: mpsc::Sender<BorsGlobalEvent>,
     webhook_secret: WebhookSecret,
     oauth: Option<OAuthClient>,
-    repositories: Arc<RepositoryStore>,
-    db: Arc<PgDbClient>,
-    cmd_prefix: CommandPrefix,
+    ctx: Arc<BorsContext>,
 }
 
 impl ServerState {
@@ -44,18 +42,14 @@ impl ServerState {
         global_event_queue: mpsc::Sender<BorsGlobalEvent>,
         webhook_secret: WebhookSecret,
         oauth: Option<OAuthClient>,
-        repositories: Arc<RepositoryStore>,
-        db: Arc<PgDbClient>,
-        cmd_prefix: CommandPrefix,
+        ctx: Arc<BorsContext>,
     ) -> Self {
         Self {
             repository_event_queue,
             global_event_queue,
             webhook_secret,
             oauth,
-            repositories,
-            db,
-            cmd_prefix,
+            ctx,
         }
     }
 
@@ -64,11 +58,15 @@ impl ServerState {
     }
 
     pub fn get_cmd_prefix(&self) -> &CommandPrefix {
-        &self.cmd_prefix
+        &self.ctx.parser.prefix()
+    }
+
+    pub fn get_web_url(&self) -> &str {
+        self.ctx.get_web_url()
     }
 
     pub fn get_repo(&self, repo: &GithubRepoName) -> Option<Arc<RepositoryState>> {
-        self.repositories.get(repo)
+        self.ctx.repositories.get(repo)
     }
 }
 
@@ -80,7 +78,7 @@ impl FromRef<ServerStateRef> for Option<OAuthClient> {
 
 impl FromRef<ServerStateRef> for Arc<PgDbClient> {
     fn from_ref(state: &ServerStateRef) -> Self {
-        state.0.db.clone()
+        state.0.ctx.db.clone()
     }
 }
 
@@ -227,8 +225,8 @@ async fn health_handler() -> impl IntoResponse {
 
 async fn index_handler(State(ServerStateRef(state)): State<ServerStateRef>) -> impl IntoResponse {
     // If we manage exactly one repo, redirect to its queue page directly
-    if let Some(repo_name) = state.repositories.repository_names().pop()
-        && state.repositories.repo_count() == 1
+    if let Some(repo_name) = state.ctx.repositories.repository_names().pop()
+        && state.ctx.repositories.repo_count() == 1
     {
         return Redirect::temporary(&format!("/queue/{}", repo_name.name())).into_response();
     };
@@ -238,9 +236,10 @@ async fn index_handler(State(ServerStateRef(state)): State<ServerStateRef>) -> i
 }
 
 async fn help_handler(State(ServerStateRef(state)): State<ServerStateRef>) -> impl IntoResponse {
-    let mut repos = Vec::with_capacity(state.repositories.repo_count());
-    for repo in state.repositories.repository_names() {
+    let mut repos = Vec::with_capacity(state.ctx.repositories.repo_count());
+    for repo in state.ctx.repositories.repository_names() {
         let treeclosed = state
+            .ctx
             .db
             .repo_db(&repo)
             .await
