@@ -14,7 +14,7 @@ use crate::PgDbClient;
 use crate::bors::comment::conflict_comment;
 use crate::bors::handlers::unapprove_pr;
 use crate::database::{MergeableState, OctocrabMergeableState, PullRequestModel};
-use crate::github::{GithubRepoName, PullRequestNumber};
+use crate::github::{GithubRepoName, PullRequest, PullRequestNumber};
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BinaryHeap};
 use std::sync::atomic::AtomicBool;
@@ -390,11 +390,11 @@ pub async fn check_mergeability(
         .client
         .get_pull_request(pull_request.pr_number)
         .await?;
-    let new_mergeable_state = fetched_pr.mergeable_state;
+    let new_mergeable_state = fetched_pr.mergeable_state.clone();
 
     // We don't know the mergeability state yet. Retry the PR after some delay
     if new_mergeable_state == OctocrabMergeableState::Unknown {
-        match fetched_pr.status {
+        match &fetched_pr.status {
             PullRequestStatus::Open | PullRequestStatus::Draft => {
                 tracing::info!("Mergeability status unknown, scheduling retry.");
                 mq_tx.enqueue_retry(mq_item);
@@ -420,7 +420,7 @@ pub async fn check_mergeability(
         .await?;
 
     if new_mergeable_state == MergeableState::HasConflicts && was_previously_mergeable {
-        handle_pr_conflict(&repo_state, &ctx.db, pull_request, conflict_source).await?;
+        handle_pr_conflict(&repo_state, &ctx.db, &fetched_pr, conflict_source).await?;
     }
 
     Ok(())
@@ -429,7 +429,7 @@ pub async fn check_mergeability(
 async fn handle_pr_conflict(
     repo_state: &RepositoryState,
     db: &PgDbClient,
-    pr: &PullRequestData,
+    pr: &PullRequest,
     conflict_source: Option<PullRequestNumber>,
 ) -> anyhow::Result<()> {
     tracing::info!("Pull request {pr:?} was likely unmergeable (source: {conflict_source:?})");
@@ -439,20 +439,23 @@ async fn handle_pr_conflict(
         return Ok(());
     }
 
-    let Some(pr) = db.get_pull_request(&pr.repo, pr.pr_number).await? else {
+    let Some(pr_db) = db
+        .get_pull_request(repo_state.repository(), pr.number)
+        .await?
+    else {
         return Err(anyhow::anyhow!("Pull request {pr:?} was not found"));
     };
 
     // Unapprove PR
-    let unapproved = if pr.is_approved() {
-        unapprove_pr(repo_state, db, &pr).await?;
+    let unapproved = if pr_db.is_approved() {
+        unapprove_pr(repo_state, db, &pr_db, pr).await?;
         true
     } else {
         false
     };
     repo_state
         .client
-        .post_comment(pr.number, conflict_comment(conflict_source, unapproved))
+        .post_comment(pr_db.number, conflict_comment(conflict_source, unapproved))
         .await?;
     Ok(())
 }

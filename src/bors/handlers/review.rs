@@ -63,7 +63,13 @@ pub(super) async fn command_approve(
     let priority = priority.or(pr.db.priority.map(|p| p as u32));
 
     merge_queue_tx.notify().await?;
-    handle_label_trigger(&repo_state, pr.number(), LabelTrigger::Approved).await?;
+    handle_label_trigger(
+        &repo_state,
+        pr.number(),
+        Some(pr.github),
+        LabelTrigger::Approved,
+    )
+    .await?;
 
     notify_of_approval(ctx, &repo_state, pr, priority, approver.as_str()).await
 }
@@ -145,7 +151,7 @@ pub(super) async fn command_unapprove(
         AutoBuildCancelReason::Unapproval,
     )
     .await?;
-    unapprove_pr(&repo_state, &db, pr.db).await?;
+    unapprove_pr(&repo_state, &db, pr.db, pr.github).await?;
     notify_of_unapproval(&repo_state, pr, auto_build_cancel_message).await?;
 
     Ok(())

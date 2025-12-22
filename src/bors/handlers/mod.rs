@@ -643,10 +643,17 @@ async fn has_permission(
 pub async fn unapprove_pr(
     repo_state: &RepositoryState,
     db: &PgDbClient,
-    pr: &PullRequestModel,
+    pr_db: &PullRequestModel,
+    pr_gh: &PullRequest,
 ) -> anyhow::Result<()> {
-    db.unapprove(pr).await?;
-    handle_label_trigger(repo_state, pr.number, LabelTrigger::Unapproved).await
+    db.unapprove(pr_db).await?;
+    handle_label_trigger(
+        repo_state,
+        pr_db.number,
+        Some(pr_gh),
+        LabelTrigger::Unapproved,
+    )
+    .await
 }
 
 /// Is this branch interesting for the bot?
