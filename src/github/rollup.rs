@@ -471,6 +471,8 @@ mod tests {
          - #4 (Title of PR 4)
 
         r? @ghost
+
+        [Create a similar rollup](https://bors-test.com/queue/borstest?prs=2,3,4,5)
         ");
     }
 
@@ -507,6 +509,8 @@ mod tests {
          - #3 (Title of PR 3)
 
         r? @ghost
+
+        [Create a similar rollup](https://bors-test.com/queue/borstest?prs=2,3,4)
         ");
     }
 
@@ -537,6 +541,8 @@ mod tests {
          - #3 (Title of PR 3)
 
         r? @ghost
+
+        [Create a similar rollup](https://bors-test.com/queue/borstest?prs=2,3)
         ");
     }
 
@@ -573,6 +579,8 @@ mod tests {
          - #5 (Title of PR 5)
 
         r? @ghost
+
+        [Create a similar rollup](https://bors-test.com/queue/borstest?prs=2,3,4,5)
         ");
     }
 
@@ -598,6 +606,8 @@ mod tests {
          - #3 (Title of PR 3)
 
         r? @ghost
+
+        [Create a similar rollup](https://bors-test.com/queue/borstest?prs=3,2)
         ");
     }
 

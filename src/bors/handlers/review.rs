@@ -418,7 +418,7 @@ mod tests {
                 @r"
             :pushpin: Commit pr-1-sha has been approved by `default-user`
 
-            It is now in the [queue](https://test.com/bors/queue/borstest) for this repository.
+            It is now in the [queue](https://bors-test.com/queue/borstest) for this repository.
             "
             );
 
@@ -442,7 +442,7 @@ mod tests {
                 @r"
             :pushpin: Commit pr-1-sha has been approved by `user1`
 
-            It is now in the [queue](https://test.com/bors/queue/borstest) for this repository.
+            It is now in the [queue](https://bors-test.com/queue/borstest) for this repository.
             "
             );
 
@@ -492,7 +492,7 @@ mod tests {
                 @r"
             :pushpin: Commit pr-1-sha has been approved by `default-user`
 
-            It is now in the [queue](https://test.com/bors/queue/borstest) for this repository.
+            It is now in the [queue](https://bors-test.com/queue/borstest) for this repository.
 
             :evergreen_tree: The tree is currently [closed](https://github.com/rust-lang/borstest/pull/1#issuecomment-1) for pull requests below priority 100. This pull request will be tested once the tree is reopened.
             "
@@ -513,7 +513,7 @@ mod tests {
                 @r"
             :pushpin: Commit pr-1-sha has been approved by `default-user`
 
-            It is now in the [queue](https://test.com/bors/queue/borstest) for this repository.
+            It is now in the [queue](https://bors-test.com/queue/borstest) for this repository.
             "
             );
             Ok(())
@@ -530,7 +530,7 @@ mod tests {
                 @r"
             :pushpin: Commit pr-1-sha has been approved by `default-user`
 
-            It is now in the [queue](https://test.com/bors/queue/borstest) for this repository.
+            It is now in the [queue](https://bors-test.com/queue/borstest) for this repository.
             ",
             );
             ctx.pr(())

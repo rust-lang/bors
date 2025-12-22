@@ -58,7 +58,7 @@ impl ServerState {
     }
 
     pub fn get_cmd_prefix(&self) -> &CommandPrefix {
-        &self.ctx.parser.prefix()
+        self.ctx.parser.prefix()
     }
 
     pub fn get_web_url(&self) -> &str {
