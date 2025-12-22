@@ -1251,4 +1251,47 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
         })
         .await;
     }
+
+    #[sqlx::test]
+    async fn commit_message_skip_ignore_block(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            ctx.edit_pr((), |pr| {
+                pr.description = r"This is a very good PR.
+
+<!-- homu-ignore:start -->
+ignore this 1
+<!-- homu-ignore:end -->
+
+include this
+
+<!-- homu-ignore:start -->
+ignore this 2
+<!-- homu-ignore:end -->
+
+also include this pls"
+                    .to_string();
+            })
+            .await?;
+
+            ctx.approve(()).await?;
+            ctx.start_and_finish_auto_build(()).await?;
+
+            insta::assert_snapshot!(ctx.auto_branch().get_commit().message(), @r"
+            Auto merge of #1 - pr-1, r=default-user
+            Title of PR 1
+
+            This is a very good PR.
+
+
+
+            include this
+
+
+
+            also include this pls
+            ");
+            Ok(())
+        })
+        .await;
+    }
 }

@@ -1,3 +1,9 @@
+use crate::config::RepositoryConfig;
+use crate::github::GithubRepoName;
+use crate::github::api::client::GithubRepositoryClient;
+use crate::permissions::UserPermissions;
+#[cfg(test)]
+use crate::tests::TestSyncMarker;
 use arc_swap::ArcSwap;
 use chrono::{DateTime, Utc};
 pub use command::CommandParser;
@@ -8,19 +14,13 @@ pub use handlers::{handle_bors_global_event, handle_bors_repository_event};
 use itertools::Itertools;
 use octocrab::models::RunId;
 use octocrab::models::workflows::Job;
+use regex::{Regex, RegexBuilder};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::fmt;
 use std::str::FromStr;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, LazyLock, RwLock};
 use std::time::Duration;
-
-use crate::config::RepositoryConfig;
-use crate::github::GithubRepoName;
-use crate::github::api::client::GithubRepositoryClient;
-use crate::permissions::UserPermissions;
-#[cfg(test)]
-use crate::tests::TestSyncMarker;
 
 mod build;
 mod build_queue;
@@ -258,16 +258,37 @@ impl FromStr for PullRequestStatus {
     }
 }
 
-/// Prefix used to specify custom try jobs in PR descriptions.
-pub const CUSTOM_TRY_JOB_PREFIX: &str = "try-job:";
-
 #[derive(Debug, Clone)]
 pub enum MergeType {
     Try { try_jobs: Vec<String> },
     Auto,
 }
 
+/// HTML comment that marks the start of a bors ignore block.
+/// The block is called "homu" to maintain compatibility with the old bors implementation
+/// (called homu).
+const IGNORE_BLOCK_START: &str = "<!-- homu-ignore:start -->";
+/// HTML comment that marks the end of a bors ignore block.
+const IGNORE_BLOCK_END: &str = "<!-- homu-ignore:end -->";
+
+/// Returns a string with the given content that will be ignored by bors on GitHub.
+pub fn make_text_ignored_by_bors(text: &str) -> String {
+    format!("{IGNORE_BLOCK_START}\n{text}\n{IGNORE_BLOCK_END}")
+}
+
 pub fn create_merge_commit_message(pr: handlers::PullRequestData, merge_type: MergeType) -> String {
+    /// Prefix used to specify custom try jobs in PR descriptions.
+    const CUSTOM_TRY_JOB_PREFIX: &str = "try-job:";
+
+    static IGNORE_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+        RegexBuilder::new(r"<!--\s*homu-ignore:start\s*-->.*?<!--\s*homu-ignore:end\s*-->")
+            .multi_line(true)
+            .case_insensitive(true)
+            .dot_matches_new_line(true)
+            .build()
+            .unwrap()
+    });
+
     let pr_number = pr.number();
 
     let reviewer = match &merge_type {
@@ -290,6 +311,7 @@ pub fn create_merge_commit_message(pr: handlers::PullRequestData, merge_type: Me
         MergeType::Try { .. } => String::new(),
         MergeType::Auto => pr.github.message.clone(),
     };
+    let pr_description = IGNORE_REGEX.replace_all(&pr_description, "");
 
     let mut message = format!(
         r#"Auto merge of #{pr_number} - {pr_label}, r={reviewer}

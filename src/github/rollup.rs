@@ -1,5 +1,6 @@
 use super::{GithubRepoName, PullRequest, PullRequestNumber};
 use crate::PgDbClient;
+use crate::bors::make_text_ignored_by_bors;
 use crate::github::api::client::GithubRepositoryClient;
 use crate::github::api::operations::{ForcePush, MergeError};
 use crate::github::oauth::{OAuthClient, UserGitHubClient};
@@ -325,12 +326,13 @@ async fn create_rollup(
     body.push_str("\nr? @ghost");
 
     let similar_rollup_link = format!(
-        "{web_url}/queue/{repo_name}?prs={}",
+        "[Create a similar rollup]({web_url}/queue/{repo_name}?prs={})",
         pr_nums.iter().copied().map(|s| s.to_string()).join(",")
     );
     writeln!(
         body,
-        "\n\n[Create a similar rollup]({similar_rollup_link})\n"
+        "\n\n{}\n",
+        make_text_ignored_by_bors(&similar_rollup_link)
     )?;
 
     let title = format!("Rollup of {} pull requests", successes.len());
@@ -472,7 +474,9 @@ mod tests {
 
         r? @ghost
 
+        <!-- homu-ignore:start -->
         [Create a similar rollup](https://bors-test.com/queue/borstest?prs=2,3,4,5)
+        <!-- homu-ignore:end -->
         ");
     }
 
@@ -510,7 +514,9 @@ mod tests {
 
         r? @ghost
 
+        <!-- homu-ignore:start -->
         [Create a similar rollup](https://bors-test.com/queue/borstest?prs=2,3,4)
+        <!-- homu-ignore:end -->
         ");
     }
 
@@ -542,7 +548,9 @@ mod tests {
 
         r? @ghost
 
+        <!-- homu-ignore:start -->
         [Create a similar rollup](https://bors-test.com/queue/borstest?prs=2,3)
+        <!-- homu-ignore:end -->
         ");
     }
 
@@ -580,7 +588,9 @@ mod tests {
 
         r? @ghost
 
+        <!-- homu-ignore:start -->
         [Create a similar rollup](https://bors-test.com/queue/borstest?prs=2,3,4,5)
+        <!-- homu-ignore:end -->
         ");
     }
 
@@ -607,7 +617,9 @@ mod tests {
 
         r? @ghost
 
+        <!-- homu-ignore:start -->
         [Create a similar rollup](https://bors-test.com/queue/borstest?prs=3,2)
+        <!-- homu-ignore:end -->
         ");
     }
 
