@@ -445,7 +445,6 @@ fn verify_gh_signature(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
     use std::sync::Arc;
 
     use axum::extract::FromRequest;
@@ -453,14 +452,13 @@ mod tests {
     use sqlx::PgPool;
     use tokio::sync::mpsc;
 
-    use crate::PgDbClient;
     use crate::bors::event::{BorsEvent, BorsGlobalEvent};
     use crate::server::webhook::GitHubWebhook;
     use crate::server::webhook::WebhookSecret;
     use crate::server::{ServerState, ServerStateRef};
-    use crate::tests::default_cmd_prefix;
-    use crate::tests::load_test_file;
     use crate::tests::{TEST_WEBHOOK_SECRET, create_webhook_request};
+    use crate::tests::{default_cmd_prefix, load_test_file};
+    use crate::{BorsContext, CommandParser, PgDbClient, RepositoryStore};
 
     #[tokio::test]
     async fn installation_suspend() {
@@ -1722,7 +1720,6 @@ mod tests {
 
         let (repository_tx, _) = mpsc::channel(1024);
         let (global_tx, _) = mpsc::channel(1024);
-        let repos = HashMap::new();
         // We do not need an actual database
         let db = Arc::new(PgDbClient::new(
             PgPool::connect_lazy("postgres://").unwrap(),
@@ -1732,9 +1729,12 @@ mod tests {
             global_tx,
             WebhookSecret::new(TEST_WEBHOOK_SECRET.to_string()),
             None,
-            repos,
-            db,
-            default_cmd_prefix(),
+            Arc::new(BorsContext::new(
+                CommandParser::new(default_cmd_prefix()),
+                db,
+                Arc::new(RepositoryStore::default()),
+                "",
+            )),
         )));
         GitHubWebhook::from_request(request, &server_ref).await
     }

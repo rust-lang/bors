@@ -148,7 +148,8 @@
 
         <tbody>
             {% for pr in prs %}
-            <tr data-rollupable="{{ pr.is_rollupable() }}">
+            <tr data-rollupable="{{ pr.is_rollupable() }}"
+                data-preselected="{{ selected_rollup_prs.contains(pr.number.0 as u32) }}">
                 <td class="select-checkbox"></td>
                 <td data-pr-number="{{ pr.number.0 }}">
                     <a href="{{ repo_url }}/pull/{{ pr.number }}">{{ pr.number.0 }}</a>
@@ -265,6 +266,12 @@
                 selectable: (rowData, tr, index) => {
                     return tr && tr.dataset && tr.dataset.rollupable === "true";
                 }
+            },
+            initComplete: function() {
+              // Pre-select nodes based on query parameter
+              this.api().rows((idx, data, node) => {
+                return node.dataset.preselected === "true";
+              }).select();
             }
         };
 

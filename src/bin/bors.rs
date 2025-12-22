@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::io::IsTerminal;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -8,8 +7,8 @@ use anyhow::Context;
 use bors::server::{ServerState, create_app};
 use bors::{
     BorsContext, BorsGlobalEvent, BorsProcess, CommandParser, OAuthClient, OAuthConfig, PgDbClient,
-    TeamApiClient, TreeState, WebhookSecret, create_bors_process, create_github_client,
-    load_repositories,
+    RepositoryStore, TeamApiClient, TreeState, WebhookSecret, create_bors_process,
+    create_github_client, load_repositories,
 };
 use clap::Parser;
 use sqlx::postgres::PgConnectOptions;
@@ -138,7 +137,7 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
         Ok::<_, anyhow::Error>((client, repos))
     })?;
 
-    let mut repos = HashMap::default();
+    let repos = Arc::new(RepositoryStore::default());
     for (name, repo) in loaded_repos {
         let repo = match repo {
             Ok(repo) => {
@@ -158,23 +157,23 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
             }
         });
 
-        repos.insert(name, Arc::new(repo));
+        repos.insert(repo);
     }
 
     let db = Arc::new(db);
-    let ctx = BorsContext::new(
+    let ctx = Arc::new(BorsContext::new(
         CommandParser::new(opts.cmd_prefix.clone().into()),
         db.clone(),
         repos.clone(),
         &opts.web_url,
-    );
+    ));
     let BorsProcess {
         repository_tx,
         global_tx,
         bors_process,
         ..
     } = create_bors_process(
-        ctx,
+        ctx.clone(),
         client,
         team_api,
         chrono::Duration::from_std(MERGE_QUEUE_MAX_INTERVAL).unwrap(),
@@ -255,9 +254,7 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
         global_tx,
         WebhookSecret::new(opts.webhook_secret),
         oauth_client,
-        repos,
-        db,
-        opts.cmd_prefix.into(),
+        ctx,
     );
     let server_process = webhook_server(state);
 

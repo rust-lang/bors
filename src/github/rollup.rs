@@ -9,8 +9,10 @@ use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Redirect, Response};
 use futures::StreamExt;
+use itertools::Itertools;
 use rand::{Rng, distr::Alphanumeric};
 use std::collections::HashSet;
+use std::fmt::Write;
 use std::sync::Arc;
 use tracing::Instrument;
 
@@ -119,9 +121,15 @@ pub async fn oauth_callback_handler(
         pr_nums = ?oauth_state.pr_nums
     );
 
-    let pr = match create_rollup(db, oauth_state, &repo_state.client, user_client)
-        .instrument(span.clone())
-        .await
+    let pr = match create_rollup(
+        db,
+        oauth_state,
+        state.get_web_url(),
+        &repo_state.client,
+        user_client,
+    )
+    .instrument(span.clone())
+    .await
     {
         Ok(pr) => pr,
         Err(err) => {
@@ -146,6 +154,7 @@ pub async fn oauth_callback_handler(
 async fn create_rollup(
     db: Arc<PgDbClient>,
     rollup_state: OAuthRollupState,
+    web_url: &str,
     gh_client: &GithubRepositoryClient,
     user_client: UserGitHubClient,
 ) -> Result<PullRequest, RollupError> {
@@ -249,8 +258,9 @@ async fn create_rollup(
     // Download the rest of the PRs concurrently, with at most 10 concurrent requests in-flight
     let mut pr_stream = futures::stream::iter(
         pr_nums
-            .into_iter()
+            .iter()
             .skip(1)
+            .copied()
             .map(|pr_num| gh_client.get_pull_request(PullRequestNumber(pr_num as u64))),
     )
     .buffer_unordered(10);
@@ -313,6 +323,15 @@ async fn create_rollup(
         }
     }
     body.push_str("\nr? @ghost");
+
+    let similar_rollup_link = format!(
+        "{web_url}/queue/{repo_name}?prs={}",
+        pr_nums.iter().copied().map(|s| s.to_string()).join(",")
+    );
+    writeln!(
+        body,
+        "\n\n[Create a similar rollup]({similar_rollup_link})\n"
+    )?;
 
     let title = format!("Rollup of {} pull requests", successes.len());
 
@@ -452,6 +471,8 @@ mod tests {
          - #4 (Title of PR 4)
 
         r? @ghost
+
+        [Create a similar rollup](https://bors-test.com/queue/borstest?prs=2,3,4,5)
         ");
     }
 
@@ -488,6 +509,8 @@ mod tests {
          - #3 (Title of PR 3)
 
         r? @ghost
+
+        [Create a similar rollup](https://bors-test.com/queue/borstest?prs=2,3,4)
         ");
     }
 
@@ -518,6 +541,8 @@ mod tests {
          - #3 (Title of PR 3)
 
         r? @ghost
+
+        [Create a similar rollup](https://bors-test.com/queue/borstest?prs=2,3)
         ");
     }
 
@@ -554,6 +579,8 @@ mod tests {
          - #5 (Title of PR 5)
 
         r? @ghost
+
+        [Create a similar rollup](https://bors-test.com/queue/borstest?prs=2,3,4,5)
         ");
     }
 
@@ -579,6 +606,8 @@ mod tests {
          - #3 (Title of PR 3)
 
         r? @ghost
+
+        [Create a similar rollup](https://bors-test.com/queue/borstest?prs=3,2)
         ");
     }
 

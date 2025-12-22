@@ -7,17 +7,18 @@ use crate::templates::{
 };
 use crate::utils::sort_queue::sort_queue_prs;
 use crate::{
-    AppError, BorsGlobalEvent, BorsRepositoryEvent, OAuthClient, PgDbClient, WebhookSecret, bors,
-    database,
+    AppError, BorsContext, BorsGlobalEvent, BorsRepositoryEvent, OAuthClient, PgDbClient,
+    WebhookSecret, bors, database,
 };
-use axum::extract::{FromRef, Path, State};
+use axum::extract::{FromRef, Path, Query, State};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use http::StatusCode;
 use pulldown_cmark::Parser;
+use serde::de::Error;
+use serde::{Deserialize, Deserializer};
 use std::any::Any;
-use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tower::limit::ConcurrencyLimitLayer;
@@ -32,9 +33,7 @@ pub struct ServerState {
     global_event_queue: mpsc::Sender<BorsGlobalEvent>,
     webhook_secret: WebhookSecret,
     oauth: Option<OAuthClient>,
-    repositories: HashMap<GithubRepoName, Arc<RepositoryState>>,
-    db: Arc<PgDbClient>,
-    cmd_prefix: CommandPrefix,
+    ctx: Arc<BorsContext>,
 }
 
 impl ServerState {
@@ -43,18 +42,14 @@ impl ServerState {
         global_event_queue: mpsc::Sender<BorsGlobalEvent>,
         webhook_secret: WebhookSecret,
         oauth: Option<OAuthClient>,
-        repositories: HashMap<GithubRepoName, Arc<RepositoryState>>,
-        db: Arc<PgDbClient>,
-        cmd_prefix: CommandPrefix,
+        ctx: Arc<BorsContext>,
     ) -> Self {
         Self {
             repository_event_queue,
             global_event_queue,
             webhook_secret,
             oauth,
-            repositories,
-            db,
-            cmd_prefix,
+            ctx,
         }
     }
 
@@ -63,11 +58,15 @@ impl ServerState {
     }
 
     pub fn get_cmd_prefix(&self) -> &CommandPrefix {
-        &self.cmd_prefix
+        self.ctx.parser.prefix()
+    }
+
+    pub fn get_web_url(&self) -> &str {
+        self.ctx.get_web_url()
     }
 
     pub fn get_repo(&self, repo: &GithubRepoName) -> Option<Arc<RepositoryState>> {
-        self.repositories.get(repo).cloned()
+        self.ctx.repositories.get(repo)
     }
 }
 
@@ -79,7 +78,7 @@ impl FromRef<ServerStateRef> for Option<OAuthClient> {
 
 impl FromRef<ServerStateRef> for Arc<PgDbClient> {
     fn from_ref(state: &ServerStateRef) -> Self {
-        state.0.db.clone()
+        state.0.ctx.db.clone()
     }
 }
 
@@ -226,22 +225,23 @@ async fn health_handler() -> impl IntoResponse {
 
 async fn index_handler(State(ServerStateRef(state)): State<ServerStateRef>) -> impl IntoResponse {
     // If we manage exactly one repo, redirect to its queue page directly
-    if let Some(repo_name) = state.repositories.keys().next()
-        && state.repositories.len() == 1
+    if let Some(repo_name) = state.ctx.repositories.repository_names().pop()
+        && state.ctx.repositories.repo_count() == 1
     {
         return Redirect::temporary(&format!("/queue/{}", repo_name.name())).into_response();
-    }
+    };
     help_handler(State(ServerStateRef(state)))
         .await
         .into_response()
 }
 
 async fn help_handler(State(ServerStateRef(state)): State<ServerStateRef>) -> impl IntoResponse {
-    let mut repos = Vec::with_capacity(state.repositories.len());
-    for repo in state.repositories.keys() {
+    let mut repos = Vec::with_capacity(state.ctx.repositories.repo_count());
+    for repo in state.ctx.repositories.repository_names() {
         let treeclosed = state
+            .ctx
             .db
-            .repo_db(repo)
+            .repo_db(&repo)
             .await
             .ok()
             .flatten()
@@ -265,10 +265,36 @@ async fn help_handler(State(ServerStateRef(state)): State<ServerStateRef>) -> im
     })
 }
 
+#[derive(serde::Deserialize)]
+pub struct QueueParams {
+    #[serde(rename = "prs")]
+    pull_requests: Option<PullRequestList>,
+}
+
+pub struct PullRequestList(Vec<u32>);
+
+impl<'de> Deserialize<'de> for PullRequestList {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let prs = <&str>::deserialize(deserializer)?;
+        let prs = prs
+            .split(",")
+            .map(|pr| {
+                pr.parse::<u32>()
+                    .map_err(|e| D::Error::custom(e.to_string()))
+            })
+            .collect::<Result<Vec<u32>, D::Error>>()?;
+        Ok(Self(prs))
+    }
+}
+
 pub async fn queue_handler(
     Path(repo_name): Path<String>,
     State(db): State<Arc<PgDbClient>>,
     State(oauth): State<Option<OAuthClient>>,
+    Query(params): Query<QueueParams>,
 ) -> Result<impl IntoResponse, AppError> {
     let repo = match db.repo_by_name(&repo_name).await? {
         Some(repo) => repo,
@@ -317,6 +343,7 @@ pub async fn queue_handler(
             rolled_up_count,
         },
         prs,
+        selected_rollup_prs: params.pull_requests.map(|prs| prs.0).unwrap_or_default(),
     })
     .into_response())
 }
