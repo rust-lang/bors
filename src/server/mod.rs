@@ -10,12 +10,14 @@ use crate::{
     AppError, BorsGlobalEvent, BorsRepositoryEvent, OAuthClient, PgDbClient, WebhookSecret, bors,
     database,
 };
-use axum::extract::{FromRef, Path, State};
+use axum::extract::{FromRef, Path, Query, State};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use http::StatusCode;
 use pulldown_cmark::Parser;
+use serde::de::Error;
+use serde::{Deserialize, Deserializer};
 use std::any::Any;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -265,10 +267,36 @@ async fn help_handler(State(ServerStateRef(state)): State<ServerStateRef>) -> im
     })
 }
 
+#[derive(serde::Deserialize)]
+pub struct QueueParams {
+    #[serde(rename = "prs")]
+    pull_requests: Option<PullRequestList>,
+}
+
+pub struct PullRequestList(Vec<u32>);
+
+impl<'de> Deserialize<'de> for PullRequestList {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let prs = <&str>::deserialize(deserializer)?;
+        let prs = prs
+            .split(",")
+            .map(|pr| {
+                pr.parse::<u32>()
+                    .map_err(|e| D::Error::custom(e.to_string()))
+            })
+            .collect::<Result<Vec<u32>, D::Error>>()?;
+        Ok(Self(prs))
+    }
+}
+
 pub async fn queue_handler(
     Path(repo_name): Path<String>,
     State(db): State<Arc<PgDbClient>>,
     State(oauth): State<Option<OAuthClient>>,
+    Query(params): Query<QueueParams>,
 ) -> Result<impl IntoResponse, AppError> {
     let repo = match db.repo_by_name(&repo_name).await? {
         Some(repo) => repo,
@@ -317,6 +345,7 @@ pub async fn queue_handler(
             rolled_up_count,
         },
         prs,
+        selected_rollup_prs: params.pull_requests.map(|prs| prs.0).unwrap_or_default(),
     })
     .into_response())
 }

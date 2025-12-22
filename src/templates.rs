@@ -69,6 +69,8 @@ pub struct QueueTemplate {
     pub prs: Vec<PullRequestModel>,
     pub tree_state: TreeState,
     pub oauth_client_id: Option<String>,
+    // PRs that should be pre-selected for being included in a rollup
+    pub selected_rollup_prs: Vec<u32>,
 }
 
 impl QueueTemplate {
