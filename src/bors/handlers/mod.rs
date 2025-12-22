@@ -56,13 +56,7 @@ pub async fn handle_bors_repository_event(
     senders: QueueSenders,
 ) -> anyhow::Result<()> {
     let db = Arc::clone(&ctx.db);
-    let Some(repo) = ctx
-        .repositories
-        .read()
-        .unwrap()
-        .get(event.repository())
-        .cloned()
-    else {
+    let Some(repo) = ctx.repositories.get(event.repository()) else {
         return Err(anyhow::anyhow!(
             "Repository {} not found in the bot state",
             event.repository()
@@ -315,8 +309,7 @@ where
     MakeFut: Fn(Arc<RepositoryState>) -> Fut,
     Fut: Future<Output = anyhow::Result<()>>,
 {
-    let repos: Vec<Arc<RepositoryState>> =
-        ctx.repositories.read().unwrap().values().cloned().collect();
+    let repos: Vec<Arc<RepositoryState>> = ctx.repositories.repositories();
     futures::future::join_all(repos.into_iter().map(make_fut))
         .await
         .into_iter()
@@ -560,8 +553,7 @@ async fn reload_repos(
     team_api_client: &TeamApiClient,
 ) -> anyhow::Result<()> {
     let reloaded_repos = load_repositories(gh_client, team_api_client).await?;
-    let mut repositories = ctx.repositories.write().unwrap();
-    for repo in repositories.values() {
+    for repo in ctx.repositories.repositories() {
         if !reloaded_repos.contains_key(repo.repository()) {
             tracing::warn!("Repository {} was not reloaded", repo.repository());
         }
@@ -575,10 +567,10 @@ async fn reload_repos(
             }
         };
 
-        if repositories.insert(name.clone(), Arc::new(repo)).is_some() {
-            tracing::info!("Repository {name} was reloaded");
-        } else {
+        if ctx.repositories.insert(repo) {
             tracing::info!("Repository {name} was added");
+        } else {
+            tracing::info!("Repository {name} was reloaded");
         }
     }
     Ok(())

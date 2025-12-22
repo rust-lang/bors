@@ -9,8 +9,10 @@ use itertools::Itertools;
 use octocrab::models::RunId;
 use octocrab::models::workflows::Job;
 use serde::Serialize;
+use std::collections::HashMap;
 use std::fmt;
 use std::str::FromStr;
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use crate::config::RepositoryConfig;
@@ -183,6 +185,41 @@ pub struct RepositoryState {
 impl RepositoryState {
     pub fn repository(&self) -> &GithubRepoName {
         self.client.repository()
+    }
+}
+
+#[derive(Default)]
+pub struct RepositoryStore {
+    repositories: RwLock<HashMap<GithubRepoName, Arc<RepositoryState>>>,
+}
+
+impl RepositoryStore {
+    pub fn get(&self, name: &GithubRepoName) -> Option<Arc<RepositoryState>> {
+        self.repositories.read().unwrap().get(name).cloned()
+    }
+
+    /// Adds a new repository to the store or updates the previous one.
+    /// Returns true if a new repository was added.
+    pub fn insert(&self, repo: RepositoryState) -> bool {
+        self.repositories
+            .write()
+            .unwrap()
+            .insert(repo.repository().clone(), Arc::new(repo))
+            .is_none()
+    }
+    pub fn repo_count(&self) -> usize {
+        self.repositories.read().unwrap().len()
+    }
+    pub fn repositories(&self) -> Vec<Arc<RepositoryState>> {
+        self.repositories
+            .read()
+            .unwrap()
+            .values()
+            .cloned()
+            .collect()
+    }
+    pub fn repository_names(&self) -> Vec<GithubRepoName> {
+        self.repositories.read().unwrap().keys().cloned().collect()
     }
 }
 

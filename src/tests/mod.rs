@@ -9,8 +9,8 @@ use crate::database::{
 };
 use crate::github::PullRequestNumber;
 use crate::{
-    BorsContext, BorsGlobalEvent, BorsProcess, CommandParser, PgDbClient, TreeState, WebhookSecret,
-    create_bors_process, load_repositories,
+    BorsContext, BorsGlobalEvent, BorsProcess, CommandParser, PgDbClient, RepositoryStore,
+    TreeState, WebhookSecret, create_bors_process, load_repositories,
 };
 use anyhow::Context;
 use axum::Router;
@@ -21,7 +21,7 @@ use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
 use parking_lot::Mutex;
 use serde::Serialize;
 use sqlx::PgPool;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::fmt::Write;
 use std::future::Future;
 use std::sync::Arc;
@@ -198,14 +198,14 @@ impl BorsTester {
         let loaded_repos = load_repositories(&mock.github_client(), &mock.team_api_client())
             .await
             .unwrap();
-        let mut repos = HashMap::default();
-        for (name, repo) in loaded_repos {
+        let repos = Arc::new(RepositoryStore::default());
+        for (_, repo) in loaded_repos {
             let repo = repo.unwrap();
-            repos.insert(name.clone(), Arc::new(repo));
+            repos.insert(repo);
         }
 
-        for name in repos.keys() {
-            if let Err(error) = db.insert_repo_if_not_exists(name, TreeState::Open).await {
+        for name in repos.repository_names() {
+            if let Err(error) = db.insert_repo_if_not_exists(&name, TreeState::Open).await {
                 tracing::warn!("Failed to insert repository {name} in test: {error:?}");
             }
         }
@@ -237,7 +237,7 @@ impl BorsTester {
             global_tx.clone(),
             WebhookSecret::new(TEST_WEBHOOK_SECRET.to_string()),
             Some(oauth_client),
-            repos.clone(),
+            repos,
             db.clone(),
             default_cmd_prefix(),
         );

@@ -1,16 +1,13 @@
-use std::{
-    collections::HashMap,
-    sync::{Arc, RwLock},
-};
+use std::sync::Arc;
 
 use crate::{PgDbClient, bors::command::CommandParser, github::GithubRepoName};
 
-use super::RepositoryState;
+use super::{RepositoryState, RepositoryStore};
 
 pub struct BorsContext {
     pub parser: CommandParser,
     pub db: Arc<PgDbClient>,
-    pub repositories: RwLock<HashMap<GithubRepoName, Arc<RepositoryState>>>,
+    pub repositories: Arc<RepositoryStore>,
     web_url: String,
 }
 
@@ -18,10 +15,9 @@ impl BorsContext {
     pub fn new(
         parser: CommandParser,
         db: Arc<PgDbClient>,
-        repositories: HashMap<GithubRepoName, Arc<RepositoryState>>,
+        repositories: Arc<RepositoryStore>,
         web_url: &str,
     ) -> Self {
-        let repositories = RwLock::new(repositories);
         Self {
             parser,
             db,
@@ -36,17 +32,10 @@ impl BorsContext {
     }
 
     pub fn get_repo(&self, name: &GithubRepoName) -> anyhow::Result<Arc<RepositoryState>> {
-        let repo_state = match self.repositories.read() {
-            Ok(guard) => match guard.get(name) {
-                Some(state) => state.clone(),
-                None => {
-                    return Err(anyhow::anyhow!("Repository not found: {name}"));
-                }
-            },
-            Err(err) => {
-                return Err(anyhow::anyhow!(
-                    "Failed to acquire read lock on repositories: {err:?}",
-                ));
+        let repo_state = match self.repositories.get(name) {
+            Some(state) => state.clone(),
+            None => {
+                return Err(anyhow::anyhow!("Repository not found: {name}"));
             }
         };
         Ok(repo_state)

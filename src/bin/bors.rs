@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::io::IsTerminal;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -8,8 +7,8 @@ use anyhow::Context;
 use bors::server::{ServerState, create_app};
 use bors::{
     BorsContext, BorsGlobalEvent, BorsProcess, CommandParser, OAuthClient, OAuthConfig, PgDbClient,
-    TeamApiClient, TreeState, WebhookSecret, create_bors_process, create_github_client,
-    load_repositories,
+    RepositoryStore, TeamApiClient, TreeState, WebhookSecret, create_bors_process,
+    create_github_client, load_repositories,
 };
 use clap::Parser;
 use sqlx::postgres::PgConnectOptions;
@@ -138,7 +137,7 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
         Ok::<_, anyhow::Error>((client, repos))
     })?;
 
-    let mut repos = HashMap::default();
+    let repos = Arc::new(RepositoryStore::default());
     for (name, repo) in loaded_repos {
         let repo = match repo {
             Ok(repo) => {
@@ -158,7 +157,7 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
             }
         });
 
-        repos.insert(name, Arc::new(repo));
+        repos.insert(repo);
     }
 
     let db = Arc::new(db);

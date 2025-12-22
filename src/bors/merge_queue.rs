@@ -85,8 +85,7 @@ pub(super) const AUTO_BUILD_CHECK_RUN_NAME: &str = "Bors auto build";
 /// Try to finish and merge a successful auto build, if any.
 /// If there is a PR ready to be merged, starts an auto build for it.
 pub async fn merge_queue_tick(ctx: Arc<BorsContext>) -> anyhow::Result<()> {
-    let repos: Vec<Arc<RepositoryState>> =
-        ctx.repositories.read().unwrap().values().cloned().collect();
+    let repos: Vec<Arc<RepositoryState>> = ctx.repositories.repositories();
 
     for repo in repos {
         let repo_name = repo.repository().to_string();
