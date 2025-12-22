@@ -522,6 +522,35 @@ mod tests {
     }
 
     #[sqlx::test]
+    async fn approve_do_not_unnecessarily_modify_labels(pool: sqlx::PgPool) {
+        let gh = GitHub::default().with_default_config(
+            r#"
+[labels]
+approved = ["+foo", "+baz", "-bar", "-foo2"]
+"#,
+        );
+        run_test((pool, gh), async |ctx: &mut BorsTester| {
+            let pr = ctx
+                .open_pr((), |pr| {
+                    pr.labels.push("foo".to_string());
+                    pr.labels.push("foo2".to_string());
+                })
+                .await?;
+            ctx.post_comment(Comment::new(pr.id(), "@bors r+")).await?;
+            ctx.expect_comments(pr.id(), 1).await;
+
+            // Do not add already present labels
+            // Do not remove non-present labels
+            ctx.pr(pr.id())
+                .await
+                .expect_added_labels(&["baz"])
+                .expect_removed_labels(&["foo2"]);
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
     async fn unapprove(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.post_comment("@bors r+").await?;
