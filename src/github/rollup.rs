@@ -308,7 +308,7 @@ async fn create_rollup(
             body.push_str(&format!(" - #{} ({})\n", pr.number.0, pr.title));
         }
     }
-    body.push_str("\nr? @ghost\n@rustbot modify labels: rollup");
+    body.push_str("\nr? @ghost");
 
     let title = format!("Rollup of {} pull requests", successes.len());
 
@@ -322,6 +322,11 @@ async fn create_rollup(
         )
         .await
         .context("Cannot create PR")?;
+
+    // Set the rollup label
+    gh_client
+        .add_labels(pr.number, &["rollup".to_string()])
+        .await?;
 
     Ok(pr)
 }
@@ -443,7 +448,6 @@ mod tests {
          - #4 (Title of PR 4)
 
         r? @ghost
-        @rustbot modify labels: rollup
         ");
     }
 
@@ -480,7 +484,6 @@ mod tests {
          - #3 (Title of PR 3)
 
         r? @ghost
-        @rustbot modify labels: rollup
         ");
     }
 
@@ -497,6 +500,9 @@ mod tests {
                 .assert_status(StatusCode::TEMPORARY_REDIRECT)
                 .get_header("location");
             insta::assert_snapshot!(pr_url, @"https://github.com/rust-lang/borstest/pull/4");
+
+            ctx.pr(4).await.expect_added_labels(&["rollup"]);
+
             Ok(())
         })
         .await;
@@ -508,7 +514,6 @@ mod tests {
          - #3 (Title of PR 3)
 
         r? @ghost
-        @rustbot modify labels: rollup
         ");
     }
 
@@ -545,7 +550,6 @@ mod tests {
          - #5 (Title of PR 5)
 
         r? @ghost
-        @rustbot modify labels: rollup
         ");
     }
 
