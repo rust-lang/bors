@@ -1,5 +1,5 @@
 # Bors
-Home of a (WIP) rewrite of the [`homu`](https://github.com/rust-lang/homu) bors implementation in Rust.
+Home of a rewrite of the [`homu`](https://github.com/rust-lang/homu) bors implementation in Rust.
 
 There are a few documents that should help with understanding the bot:
 - [Design](docs/design.md) of the bot.
@@ -72,6 +72,8 @@ describes the file can be found in `src/config.rs`. [Here](rust-bors.example.tom
 We are happy to receive contributions to bors! You can check out our list of [good first issues](https://github.com/rust-lang/bors/issues?q=is%3Aissue%20state%3Aopen%20label%3A%22good%20first%20issue%22).
 
 Note that sometimes the issues can get stale or they might not contain enough information that you would need to implement a feature or fix a bug. If you would like to work on something non-trivial, it would be great to open a topic on our [Zulip channel](https://rust-lang.zulipchat.com/#narrow/channel/496228-t-infra.2Fbors/topic/bors.20down/with/542683375) so that we can discuss it.
+
+We would like to thank all [contributors](https://github.com/rust-lang/bors/graphs/contributors) who contributed to the creation of bors. Notably, we are very grateful to [Võ Hoàng Long](https://github.com/rust-lang/bors/pulls?q=is%3Apr+is%3Aclosed+author%3Al0ngvh), who implemented a lot of the base functionality of the bot, and [Sakibul Islam](https://github.com/rust-lang/bors/pulls?q=is%3Apr+is%3Aclosed+author%3Asakib25800), who implemented the merge queue and rollups as part of his [GSoC 2025 project](https://blog.rust-lang.org/2025/11/18/gsoc-2025-results/#implement-merge-functionality-in-bors).
 
 ## License
 Bors is dual-licensed under [MIT](LICENSE-MIT) and [Apache 2.0](LICENSE-APACHE).
