@@ -2,7 +2,10 @@ use sqlx::PgPool;
 
 use crate::bors::comment::CommentTag;
 use crate::bors::{BuildKind, PullRequestStatus, RollupMode};
-use crate::database::operations::update_pr_auto_build_id;
+use crate::database::operations::{
+    create_rollup_pr_content, get_rollup_pr_contents, get_rollups_for_pr,
+    update_pr_auto_build_id,
+};
 use crate::database::{
     BuildModel, BuildStatus, CommentModel, PullRequestModel, RepoModel, TreeState, WorkflowModel,
     WorkflowStatus, WorkflowType,
@@ -335,5 +338,40 @@ impl PgDbClient {
 
     pub async fn delete_tagged_bot_comment(&self, comment: &CommentModel) -> anyhow::Result<()> {
         delete_tagged_bot_comment(&self.pool, comment.id).await
+    }
+
+    /// Register the contents of a rollup in the DB.
+    /// The contents are stored as rollup PR number - member PR number records, scoped under a specific repository.
+    /// All records are inserted in a single transaction.
+    pub async fn create_rollup(
+        &self,
+        repo: &GithubRepoName,
+        rollup_pr_number: &PullRequestNumber,
+        member_pr_numbers: &[PullRequestNumber],
+    ) -> anyhow::Result<()> {
+        let mut tx = self.pool.begin().await?;
+        for member_pr_number in member_pr_numbers {
+            create_rollup_pr_content(&mut *tx, repo, rollup_pr_number, member_pr_number).await?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+
+    /// Returns the numbers of all the PRs associated with the requested rollup.
+    pub async fn get_rollup_pr_contents(
+        &self,
+        repo: &GithubRepoName,
+        rollup_pr_number: &PullRequestNumber,
+    ) -> anyhow::Result<Vec<PullRequestNumber>> {
+        get_rollup_pr_contents(&self.pool, repo, rollup_pr_number).await
+    }
+
+    /// Returns all the rollups associated with the requested PR.
+    pub async fn get_rollups_for_pr(
+        &self,
+        repo: &GithubRepoName,
+        pr_number: &PullRequestNumber,
+    ) -> anyhow::Result<Vec<PullRequestNumber>> {
+        get_rollups_for_pr(&self.pool, repo, pr_number).await
     }
 }

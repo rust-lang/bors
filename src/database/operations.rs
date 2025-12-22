@@ -1064,3 +1064,80 @@ pub(crate) async fn clear_auto_build(
     })
     .await
 }
+
+pub(crate) async fn create_rollup_pr_content(
+    executor: impl PgExecutor<'_>,
+    repo: &GithubRepoName,
+    rollup_pr_number: &PullRequestNumber,
+    member_pr_number: &PullRequestNumber,
+) -> anyhow::Result<()> {
+    measure_db_query("create_rollup_pr", || async {
+        sqlx::query!(
+            r#"
+        INSERT INTO rollup_contents (repository, rollup_pr_number, member_pr_number)
+        VALUES ($1, $2, $3)
+        "#,
+            repo as &GithubRepoName,
+            rollup_pr_number.0 as i32,
+            member_pr_number.0 as i32
+        )
+        .execute(executor)
+        .await?;
+        Ok(())
+    })
+    .await
+}
+
+pub(crate) async fn get_rollup_pr_contents(
+    executor: impl PgExecutor<'_>,
+    repo: &GithubRepoName,
+    rollup_pr_number: &PullRequestNumber,
+) -> anyhow::Result<Vec<PullRequestNumber>> {
+    measure_db_query("get_rollup_pr_contents", || async {
+        let pr_numbers = sqlx::query_scalar!(
+            r#"
+            SELECT
+                member_pr_number as "member_pr_number: i64"
+            FROM rollup_contents
+            WHERE repository = $1
+              AND rollup_pr_number = $2
+            "#,
+            repo as &GithubRepoName,
+            rollup_pr_number.0 as i32,
+        )
+        .fetch_all(executor)
+        .await?
+        .into_iter()
+        .map(|num| PullRequestNumber(num as u64))
+        .collect();
+        Ok(pr_numbers)
+    })
+    .await
+}
+
+pub(crate) async fn get_rollups_for_pr(
+    executor: impl PgExecutor<'_>,
+    repo: &GithubRepoName,
+    pr_number: &PullRequestNumber,
+) -> anyhow::Result<Vec<PullRequestNumber>> {
+    measure_db_query("get_rollups_for_pr", || async {
+        let rollup_pr_numbers = sqlx::query_scalar!(
+            r#"
+            SELECT
+                rollup_pr_number as "rollup_pr_number: i64"
+            FROM rollup_contents
+            WHERE repository = $1
+              AND member_pr_number = $2
+            "#,
+            repo as &GithubRepoName,
+            pr_number.0 as i32,
+        )
+        .fetch_all(executor)
+        .await?
+        .into_iter()
+        .map(|num| PullRequestNumber(num as u64))
+        .collect();
+        Ok(rollup_pr_numbers)
+    })
+    .await
+}

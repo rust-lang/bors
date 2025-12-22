@@ -183,7 +183,6 @@ async fn create_rollup(
         repo_owner,
         mut pr_nums,
     } = rollup_state;
-
     // Repository where we will create the PR
     let base_repo = GithubRepoName::new(&repo_owner, &repo_name);
 
@@ -387,6 +386,14 @@ async fn create_rollup(
         )
         .await
         .context("Cannot create PR")?;
+    
+    db.create_rollup(
+        &repo,
+        &pr.number,
+        &successes.iter().map(|pr| pr.number).collect::<Vec<_>>(),
+    )
+    .await
+    .context("Cannot create rollup contents record - ensure there are no duplicates in the pr_nums input")?;
 
     // Set the rollup label
     gh_client
@@ -528,6 +535,19 @@ mod tests {
             make_rollup(ctx, &[&pr2, &pr3, &pr4, &pr5])
                 .await?
                 .assert_status(StatusCode::SEE_OTHER);
+            assert_eq!(
+                ctx.db()
+                    .get_rollup_pr_contents(&default_repo_name(), &PullRequestNumber(6))
+                    .await?,
+                vec![pr2.number, pr3.number, pr5.number]
+            );
+            // Failed merges never make it to the rollup, so this PR shouldn't be present
+            assert_eq!(
+                ctx.db()
+                    .get_rollups_for_pr(&default_repo_name(), &PullRequestNumber(4))
+                    .await?,
+                vec![]
+            );
             Ok(())
         })
         .await;
@@ -650,6 +670,16 @@ mod tests {
             insta::assert_snapshot!(pr_url, @"https://github.com/rust-lang/borstest/pull/4");
 
             ctx.pr(4).await.expect_added_labels(&["rollup"]);
+            assert_eq!(
+                ctx.db()
+                    .get_rollup_pr_contents(&pr2.repo, &PullRequestNumber(4))
+                    .await?,
+                vec![pr2.number, pr3.number]
+            );
+            assert_eq!(
+                ctx.db().get_rollups_for_pr(&pr2.repo, &pr2.number).await?,
+                vec![PullRequestNumber(4)]
+            );
 
             Ok(())
         })
@@ -668,6 +698,59 @@ mod tests {
         <!-- homu-ignore:end -->
         ");
     }
+
+    /// Ensure that a PR can be associated to multiple rollups in case of CI failure in the initial rollup
+    #[sqlx::test]
+    async fn multiple_rollups_same_pr(pool: sqlx::PgPool) {
+        let gh = run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
+            let pr2 = ctx.open_pr((), |_| {}).await?;
+            let pr3 = ctx.open_pr((), |_| {}).await?;
+            ctx.approve(pr2.id()).await?;
+            ctx.approve(pr3.id()).await?;
+
+            make_rollup(ctx, &[&pr2, &pr3]).await?;
+            // Simulate a maintainer closing the rollup due to a CI failure requiring popping a PR from the contents
+            ctx.set_pr_status_closed(4).await?;
+            make_rollup(ctx, &[&pr3]).await?;
+            // Ensure both rollups have the requested PRs
+            assert_eq!(
+                ctx.db()
+                    .get_rollup_pr_contents(&pr2.repo, &PullRequestNumber(4))
+                    .await?,
+                vec![pr2.number, pr3.number]
+            );
+            assert_eq!(
+                ctx.db()
+                    .get_rollup_pr_contents(&pr2.repo, &PullRequestNumber(5))
+                    .await?,
+                vec![pr3.number]
+            );
+            // And ensure PR 3 is associated to both rollups
+            assert_eq!(
+                ctx.db().get_rollups_for_pr(&pr3.repo, &pr3.number).await?,
+                vec![PullRequestNumber(4), PullRequestNumber(5)]
+            );
+            Ok(())
+        })
+            .await;
+        let repo = gh.get_repo(());
+        insta::assert_snapshot!(repo.lock().get_pr(4).description, @r"
+        Successful merges:
+
+         - #2 (Title of PR 2)
+         - #3 (Title of PR 3)
+
+        r? @ghost
+        @rustbot modify labels: rollup
+        ");
+        insta::assert_snapshot!(repo.lock().get_pr(5).description, @r"
+        Successful merges:
+
+         - #3 (Title of PR 3)
+
+        r? @ghost
+        @rustbot modify labels: rollup
+        ");
 
     #[sqlx::test]
     async fn rollup_order_by_priority(pool: sqlx::PgPool) {
