@@ -42,7 +42,7 @@ pub async fn mock_oauth(github: Arc<Mutex<GitHub>>, mock_server: &MockServer) {
     Mock::given(method("GET"))
         .and(path("/user"))
         .respond_with(move |req: &Request| {
-            let user = oauth_user_from_request(req);
+            let user = oauth_user_from_request(github.clone(), req);
             ResponseTemplate::new(200).set_body_json(GitHubUser::from(user))
         })
         .mount(mock_server)
