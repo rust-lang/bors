@@ -144,6 +144,8 @@ const DEFAULT_PARSERS: &[ParserFn] = &[
     parser_ping,
     parser_retry,
     parser_tree_ops,
+    parser_pause,
+    parser_resume,
 ];
 
 const ONLY_TRY_PARSERS: &[ParserFn] = &[parser_try_cancel, parser_try];
@@ -437,6 +439,22 @@ fn parser_tree_ops(command: &CommandPart<'_>, _parts: &[CommandPart<'_>]) -> Par
             };
             Some(Ok(BorsCommand::TreeClosed(priority)))
         }
+        _ => None,
+    }
+}
+
+/// Parses `@bors pause` command.
+fn parser_pause(command: &CommandPart<'_>, _parts: &[CommandPart<'_>]) -> ParseResult {
+    match command {
+        CommandPart::Bare("pause") => Some(Ok(BorsCommand::Pause)),
+        _ => None,
+    }
+}
+
+/// Parses `@bors resume` command.
+fn parser_resume(command: &CommandPart<'_>, _parts: &[CommandPart<'_>]) -> ParseResult {
+    match command {
+        CommandPart::Bare("resume") => Some(Ok(BorsCommand::Resume)),
         _ => None,
     }
 }

@@ -25,7 +25,7 @@ pub(super) async fn command_retry(
     if matches!(pr_model.queue_status(), QueueStatus::Failed(_, _)) {
         db.clear_auto_build(pr_model).await?;
         merge_queue_tx.notify().await?;
-    } else {
+    } else if !repo_state.is_paused() {
         notify_of_invalid_retry_state(&repo_state, pr.number()).await?;
     }
 
