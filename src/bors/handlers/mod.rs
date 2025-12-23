@@ -507,6 +507,16 @@ async fn handle_comment(
                             .instrument(span)
                             .await
                     }
+                    BorsCommand::Pause => {
+                        tracing::info!("Pausing {}", repo.repository());
+                        repo.set_paused(true);
+                        Ok(())
+                    }
+                    BorsCommand::Resume => {
+                        tracing::info!("Resuming {}", repo.repository());
+                        repo.set_paused(false);
+                        Ok(())
+                    }
                 };
                 if result.is_err() {
                     return result.context("Cannot execute Bors command");
