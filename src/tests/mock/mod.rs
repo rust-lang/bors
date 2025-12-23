@@ -354,7 +354,7 @@ EjQJOzV2OIk4waurl+BsbOHP7C0Zhp7rpyWx4fUCgYEAp/4UceUfbJZGa8CcWZ8F
 34PVnCZP7HB3k2eBSpDp4vk=
 -----END PRIVATE KEY-----"###;
 
-fn oauth_user_from_request(request: &Request) -> User {
+fn oauth_user_from_request(github: Arc<Mutex<GitHub>>, request: &Request) -> User {
     let auth: &HeaderValue = request
         .headers
         .get(AUTHORIZATION)
@@ -362,8 +362,9 @@ fn oauth_user_from_request(request: &Request) -> User {
     let (_bearer, token) = auth.to_str().unwrap().split_once(" ").unwrap();
     let (user, rest) = token.split_once("-").unwrap();
     assert_eq!(rest, "access-token");
-    // TODO: load this from GitHub state
-    User::new(10000, user)
+
+    let gh = github.lock();
+    gh.get_user(user).expect("User not found").clone()
 }
 
 /// Create a mock that dynamically responds to its requests using the given function `f`.

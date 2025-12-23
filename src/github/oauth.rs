@@ -1,6 +1,6 @@
-use crate::github::GithubRepoName;
 use crate::github::api::DEFAULT_REQUEST_TIMEOUT;
 use crate::github::api::client::GithubRepositoryClient;
+use crate::github::{GithubRepoName, GithubUser};
 use anyhow::Context;
 use octocrab::OctocrabBuilder;
 use octocrab::service::middleware::retry::RetryConfig;
@@ -76,9 +76,9 @@ impl OAuthClient {
             .context("Cannot get user authenticated with OAuth")?;
 
         let client_repo = GithubRepoName::new(&user.login, repo.name());
-        let client = GithubRepositoryClient::new(user.html_url, user_client, client_repo);
+        let client = GithubRepositoryClient::new(user.html_url.clone(), user_client, client_repo);
         Ok(UserGitHubClient {
-            username: user.login,
+            user: user.into(),
             client,
         })
     }
@@ -86,7 +86,7 @@ impl OAuthClient {
 
 /// GitHub client authenticated to work with a user's fork of a repository managed by bors.
 pub struct UserGitHubClient {
-    pub username: String,
+    pub user: GithubUser,
     pub client: GithubRepositoryClient,
 }
 

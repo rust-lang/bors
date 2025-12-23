@@ -4,6 +4,7 @@ use crate::bors::make_text_ignored_by_bors;
 use crate::github::api::client::GithubRepositoryClient;
 use crate::github::api::operations::{ForcePush, MergeError};
 use crate::github::oauth::{OAuthClient, UserGitHubClient};
+use crate::permissions::PermissionType;
 use crate::server::ServerStateRef;
 use anyhow::Context;
 use axum::extract::{Query, State};
@@ -47,6 +48,7 @@ pub enum RollupError {
     PullRequestNotFound { pr: PullRequestNumber },
     NoPullRequestsSelected,
     TooManyPullRequests,
+    NotAuthenticated,
 }
 
 impl IntoResponse for RollupError {
@@ -76,6 +78,11 @@ impl IntoResponse for RollupError {
             RollupError::TooManyPullRequests => (
                 StatusCode::BAD_REQUEST,
                 format!("Rolling up too many pull requests, at most {ROLLUP_PR_LIMIT} is allowed"),
+            ),
+            RollupError::NotAuthenticated => (
+                StatusCode::FORBIDDEN,
+                "You are not allowed to create rollups. Review permissions are required."
+                    .to_string(),
             ),
         }
         .into_response()
@@ -115,6 +122,16 @@ pub async fn oauth_callback_handler(
     let user_client = oauth_client
         .get_authenticated_client(repo_name.clone(), &callback.code)
         .await?;
+
+    // The rollup author is expected to r+ the rollup, so they must have review permissions to
+    // create it in the first place.
+    if !repo_state
+        .permissions
+        .load()
+        .has_permission(user_client.user.id, PermissionType::Review)
+    {
+        return Err(RollupError::NotAuthenticated);
+    }
 
     let span = tracing::info_span!(
         "create_rollup",
@@ -165,7 +182,7 @@ async fn create_rollup(
         mut pr_nums,
     } = rollup_state;
 
-    let username = user_client.username;
+    let username = user_client.user.username;
 
     tracing::info!("User {username} is creating a rollup with PRs: {pr_nums:?}");
 
@@ -360,6 +377,7 @@ async fn create_rollup(
 mod tests {
     use crate::github::rollup::OAuthRollupState;
     use crate::github::{GithubRepoName, PullRequestNumber};
+    use crate::permissions::PermissionType;
     use crate::tests::{
         ApiRequest, ApiResponse, BorsTester, Comment, GitHub, MergeBehavior, PullRequest, Repo,
         User, default_repo_name, run_test,
@@ -368,7 +386,15 @@ mod tests {
 
     #[sqlx::test]
     async fn rollup_missing_fork(pool: sqlx::PgPool) {
-        run_test(pool, async |ctx: &mut BorsTester| {
+        let mut gh = GitHub::default();
+        gh.add_user(rollup_user());
+        gh.get_repo(())
+            .lock()
+            .permissions
+            .users
+            .insert(rollup_user(), vec![PermissionType::Review]);
+
+        run_test((pool, gh), async |ctx: &mut BorsTester| {
             let pr1 = ctx.open_pr((), |_| {}).await?;
             let pr2 = ctx.open_pr((), |_| {}).await?;
 
@@ -430,6 +456,24 @@ mod tests {
             .await?
             .assert_status(StatusCode::BAD_REQUEST)
             .assert_body("Rolling up too many pull requests, at most 50 is allowed");
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn rollup_missing_review_permissions(pool: sqlx::PgPool) {
+        let mut gh = GitHub::default();
+        gh.add_user(rollup_user());
+        run_test((pool, gh), async |ctx: &mut BorsTester| {
+            let pr1 = ctx.open_pr((), |_| {}).await?;
+
+            make_rollup(ctx, &[&pr1])
+                .await?
+                .assert_status(StatusCode::FORBIDDEN)
+                .assert_body(
+                    "You are not allowed to create rollups. Review permissions are required.",
+                );
             Ok(())
         })
         .await;
@@ -640,6 +684,12 @@ mod tests {
         let mut gh = GitHub::default();
         let rolluper = rollup_user();
         gh.add_user(rolluper.clone());
+        gh.get_repo(())
+            .lock()
+            .permissions
+            .users
+            .insert(rolluper.clone(), vec![PermissionType::Review]);
+
         // Create fork
         let mut repo = Repo::new(rolluper, fork_repo().name());
         repo.fork = true;
