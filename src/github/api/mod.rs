@@ -162,11 +162,19 @@ async fn create_repo_state(
 
     let config = load_config(&client).await?;
 
+    // Start paused for now, as a cautionary measure
+    let paused = AtomicBool::new(true);
+
+    #[cfg(test)]
+    {
+        paused.store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+
     Ok(RepositoryState {
         client,
         config: ArcSwap::new(Arc::new(config)),
         permissions: ArcSwap::new(Arc::new(permissions)),
-        paused: AtomicBool::new(false),
+        paused,
     })
 }
 
