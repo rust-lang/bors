@@ -63,15 +63,19 @@ pub(super) async fn command_approve(
     let priority = priority.or(pr.db.priority.map(|p| p as u32));
 
     merge_queue_tx.notify().await?;
-    handle_label_trigger(
-        &repo_state,
-        pr.number(),
-        Some(pr.github),
-        LabelTrigger::Approved,
-    )
-    .await?;
 
-    notify_of_approval(ctx, &repo_state, pr, priority, approver.as_str()).await
+    if !repo_state.is_paused() {
+        handle_label_trigger(
+            &repo_state,
+            pr.number(),
+            Some(pr.github),
+            LabelTrigger::Approved,
+        )
+        .await?;
+
+        notify_of_approval(ctx, &repo_state, pr, priority, approver.as_str()).await?;
+    }
+    Ok(())
 }
 
 /// Keywords that will prevent an approval if they appear in the PR's title.
@@ -152,7 +156,10 @@ pub(super) async fn command_unapprove(
     )
     .await?;
     unapprove_pr(&repo_state, &db, pr.db, pr.github).await?;
-    notify_of_unapproval(&repo_state, pr, auto_build_cancel_message).await?;
+
+    if !repo_state.is_paused() {
+        notify_of_unapproval(&repo_state, pr, auto_build_cancel_message).await?;
+    }
 
     Ok(())
 }
@@ -193,15 +200,19 @@ pub(super) async fn command_delegate(
     }
 
     db.delegate(pr.db, delegated_permission).await?;
-    notify_of_delegation(
-        &repo_state,
-        pr.number(),
-        &pr.github.author.username,
-        &author.username,
-        delegated_permission,
-        bot_prefix,
-    )
-    .await
+
+    if !repo_state.is_paused() {
+        notify_of_delegation(
+            &repo_state,
+            pr.number(),
+            &pr.github.author.username,
+            &author.username,
+            delegated_permission,
+            bot_prefix,
+        )
+        .await?;
+    }
+    Ok(())
 }
 
 /// Revoke any previously granted delegation.
@@ -258,7 +269,11 @@ pub(super) async fn command_close_tree(
     .await?;
 
     merge_queue_tx.notify().await?;
-    notify_of_tree_closed(&repo_state, pr.number(), priority).await
+
+    if !repo_state.is_paused() {
+        notify_of_tree_closed(&repo_state, pr.number(), priority).await?;
+    }
+    Ok(())
 }
 
 pub(super) async fn command_open_tree(
@@ -277,7 +292,11 @@ pub(super) async fn command_open_tree(
         .await?;
 
     merge_queue_tx.notify().await?;
-    notify_of_tree_open(&repo_state, pr.number()).await
+
+    if !repo_state.is_paused() {
+        notify_of_tree_open(&repo_state, pr.number()).await?;
+    }
+    Ok(())
 }
 
 fn sufficient_approve_permission(repo: Arc<RepositoryState>, author: &GithubUser) -> bool {
@@ -1395,6 +1414,27 @@ labels_blocking_approval = ["proposed-final-comment-period", "final-comment-peri
                 CheckRunStatus::Completed,
                 Some(CheckRunConclusion::Cancelled),
             );
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn pause_resume(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            ctx.post_comment("@bors pause").await?;
+            ctx.post_comment("@bors r+").await?;
+            ctx.wait_for_pr((), |pr| pr.is_approved()).await?;
+            ctx.run_merge_queue_now().await;
+            ctx.pr(()).await.expect_no_auto_build();
+            ctx.post_comment("@bors resume").await?;
+
+            // Sync
+            ctx.post_comment("@bors info").await?;
+            ctx.expect_comments((), 1).await;
+
+            ctx.start_and_finish_auto_build(()).await?;
+
             Ok(())
         })
         .await;

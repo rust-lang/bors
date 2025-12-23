@@ -98,7 +98,7 @@ pub async fn merge_queue_tick(ctx: Arc<BorsContext>) -> anyhow::Result<()> {
 }
 
 async fn process_repository(repo: &RepositoryState, ctx: &BorsContext) -> anyhow::Result<()> {
-    if !repo.config.load().merge_queue_enabled {
+    if !repo.config.load().merge_queue_enabled || repo.is_paused() {
         return Ok(());
     }
 
