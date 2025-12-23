@@ -508,13 +508,25 @@ async fn handle_comment(
                             .await
                     }
                     BorsCommand::Pause => {
-                        tracing::info!("Pausing {}", repo.repository());
-                        repo.set_paused(true);
+                        if repo
+                            .permissions
+                            .load()
+                            .has_permission(comment.author.id, PermissionType::Review)
+                        {
+                            tracing::info!("Pausing {}", repo.repository());
+                            repo.set_paused(true);
+                        }
                         Ok(())
                     }
                     BorsCommand::Resume => {
-                        tracing::info!("Resuming {}", repo.repository());
-                        repo.set_paused(false);
+                        if repo
+                            .permissions
+                            .load()
+                            .has_permission(comment.author.id, PermissionType::Review)
+                        {
+                            tracing::info!("Resuming {}", repo.repository());
+                            repo.set_paused(false);
+                        }
                         Ok(())
                     }
                 };
