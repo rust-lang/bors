@@ -9,16 +9,12 @@ use http::StatusCode;
 
 /// Build status to display on the queue page.
 pub fn status_text(pr: &PullRequestModel) -> String {
-    if let Some(try_build) = &pr.try_build {
-        try_build.status.to_string()
-    } else {
-        match pr.queue_status() {
-            QueueStatus::Approved(_) => "approved".to_string(),
-            QueueStatus::ReadyForMerge(_, _) => "ready for merge".to_string(),
-            QueueStatus::Pending(_, _) => "pending".to_string(),
-            QueueStatus::Failed(_, _) => "failed".to_string(),
-            QueueStatus::NotApproved => String::new(),
-        }
+    match pr.queue_status() {
+        QueueStatus::Approved(_) => "approved".to_string(),
+        QueueStatus::ReadyForMerge(_, _) => "ready for merge".to_string(),
+        QueueStatus::Pending(_, _) => "pending".to_string(),
+        QueueStatus::Failed(_, _) => "failed".to_string(),
+        QueueStatus::NotApproved => String::new(),
     }
 }
 
