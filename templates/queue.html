@@ -23,7 +23,7 @@
         }
     }
     main {
-        max-width: 100rem;
+        max-width: 120rem;
         width: 100%;
         margin: 0 auto;
     }
@@ -46,15 +46,22 @@
         padding: 0.5rem;
     }
 
+    .treeclosed {
+        opacity: 0.5;
+    }
+
     th.select-checkbox,
     td.select-checkbox {
         width: 2.5rem;
     }
-    table.dataTable > tbody > tr > td.status {
+    table > tbody > tr > td.status {
         position: relative;
         overflow: hidden;
         padding-left: 16px;
         white-space: nowrap;
+    }
+    table > tbody > tr > th, table > tbody > tr > td {
+        padding: 6px 8px;
     }
     td.status:before {
         content: " ";
@@ -73,6 +80,39 @@
         background-color: #F0DE57;
         background-image: repeating-linear-gradient(135deg, #F0DE57 0, #F0DE57 4px, #FBEE97 4px, #FBEE97 8px, #F0DE57 0);
         animation: barber-pole 1s linear infinite;
+    }
+    td.status[data-status="approved"]:before {
+        background-color: #85DB7B;
+    }
+    .marker {
+        white-space: nowrap;
+    }
+    .marker:before {
+        content: "";
+        display: inline-block;
+        font-size: 18px;
+        width: 0.4em;
+        height: 0.4em;
+        border-radius: 50% 50%;
+        margin-right: 0.3em;
+        border: 1px solid transparent;
+    }
+    .positive { color: #004200; }
+    .positive:before {
+        background: #01ce01;
+        border-color: #016c01;
+    }
+    .negative { color: #660000; }
+    .negative:before {
+        background: #f97070;
+        border-color: #ab0a0a;
+    }
+    .neutral {
+        color: #8C7E14;
+    }
+    .neutral:before {
+        background: #F0DE57;
+        border-color: #8C7E14;
     }
 
     #rollupModal {
@@ -135,7 +175,7 @@
             <tr>
                 <th class="select-checkbox"></th>
                 <th>#</th>
-                <th>Status</th>
+                <th style="padding-left: 16px;">Status</th>
                 <th>Mergeable</th>
                 <th>Title</th>
                 <th>Author</th>
@@ -149,7 +189,10 @@
         <tbody>
             {% for pr in prs %}
             <tr data-rollupable="{{ pr.is_rollupable() }}"
-                data-preselected="{{ selected_rollup_prs.contains(pr.number.0 as u32) }}">
+                data-preselected="{{ selected_rollup_prs.contains(pr.number.0 as u32) }}"
+                {% if let Some(priority) = tree_state.priority() && pr.priority.unwrap_or(0) < *priority as i32 %}
+                class="treeclosed"
+                {% endif %}>
                 <td class="select-checkbox"></td>
                 <td data-pr-number="{{ pr.number.0 }}">
                     <a href="{{ repo_url }}/pull/{{ pr.number }}">{{ pr.number.0 }}</a>
@@ -168,7 +211,13 @@
                     {% endif %}
                     <span class="elapsed-time-display"></span>
                 </td>
-                <td>
+                <td class="marker {%~ match pr.mergeable_state -%}
+                    {%- when Mergeable -%}
+                    positive
+                    {%- when HasConflicts -%}
+                    negative
+                    {%- when Unknown -%}
+                    {%- endmatch -%}">
                     {% match pr.mergeable_state %}
                     {% when Mergeable %}
                     yes
@@ -186,9 +235,28 @@
                     {% endif %}
                 </td>
                 <td>{{ pr.priority.unwrap_or(0) }}</td>
-                <td>
+                <td class="marker {%~ if let Some(rollup) = pr.rollup -%}
+                      {%- match rollup -%}
+                        {%- when Always -%}
+                          positive
+                        {%- when Iffy -%}
+                          neutral
+                        {%- when Maybe -%}
+                        {%- when Never -%}
+                          negative
+                      {%- endmatch -%}
+                    {%- endif -%}
+                ">
                     {% if let Some(rollup) = pr.rollup %}
-                    {{ rollup }}
+                      {% match rollup %}
+                        {% when Always %}
+                          always
+                        {% when Iffy %}
+                          iffy
+                        {% when Maybe %}
+                        {% when Never %}
+                          never
+                      {% endmatch %}
                     {% endif %}
                 </td>
             </tr>

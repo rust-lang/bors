@@ -1,3 +1,4 @@
+use crate::bors::RollupMode::*;
 use crate::database::{
     BuildModel, BuildStatus, MergeableState::*, PullRequestModel, QueueStatus, TreeState,
 };
