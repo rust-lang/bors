@@ -23,6 +23,7 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use tower::limit::ConcurrencyLimitLayer;
 use tower_http::catch_panic::CatchPanicLayer;
+use tower_http::compression::CompressionLayer;
 use webhook::GitHubWebhook;
 
 pub mod webhook;
@@ -86,11 +87,16 @@ impl FromRef<ServerStateRef> for Arc<PgDbClient> {
 pub struct ServerStateRef(pub Arc<ServerState>);
 
 pub fn create_app(state: ServerState) -> Router {
+    let compression_layer = CompressionLayer::new().br(true).gzip(true);
+
     let api = create_api_router();
     Router::new()
         .route("/", get(index_handler))
         .route("/help", get(help_handler))
-        .route("/queue/{repo_name}", get(queue_handler))
+        .route(
+            "/queue/{repo_name}",
+            get(queue_handler).layer(compression_layer),
+        )
         .route("/github", post(github_webhook_handler))
         .route("/health", get(health_handler))
         .route("/oauth/callback", get(rollup::oauth_callback_handler))

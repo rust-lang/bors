@@ -61,7 +61,7 @@ pub struct PullRequestStats {
 }
 
 #[derive(Template)]
-#[template(path = "queue.html")]
+#[template(path = "queue.html", whitespace = "minimize")]
 pub struct QueueTemplate {
     pub repo_name: String,
     pub repo_owner: String,
