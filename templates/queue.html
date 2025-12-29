@@ -170,7 +170,8 @@
   </div>
 
   <div class="table-wrapper">
-    <table id="table" class="stripe">
+    <div id="loading">Loading...</div>
+    <table id="table" class="stripe" style="display: none;">
         <thead>
             <tr>
                 <th class="select-checkbox"></th>
@@ -342,6 +343,8 @@
               this.api().rows((idx, data, node) => {
                 return node.dataset.preselected === "true";
               }).select();
+              $("#table").show();
+              $("#loading").hide();
             }
         };
 
