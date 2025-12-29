@@ -3,8 +3,8 @@
 {% block title %}Bors queue - {{ repo_name }} {% if tree_state.is_closed() %} [TREECLOSED] {% endif %}{% endblock %}
 
 {% block head %}
-<link rel="stylesheet" href="https://cdn.datatables.net/2.3.4/css/dataTables.dataTables.min.css" />
-<link rel="stylesheet" href="https://cdn.datatables.net/rowgroup/1.5.1/css/rowGroup.dataTables.min.css" />
+<!-- Note: this excludes CSS for the select plugin, which styles checkboxes in a weird way -->
+<link href="https://cdn.datatables.net/v/dt/jq-3.7.0/dt-2.3.6/rg-1.6.0/datatables.min.css" rel="stylesheet" integrity="sha384-V9KIGWtLkheSMHZfFlFgPt7A85E4US+zFPLgLUTkHUPq1Nw/f7FIEpvVAO1RBBID" crossorigin="anonymous">
 <style>
     @keyframes barber-pole {
         /* This animation is used to make the status indicator next to
@@ -276,10 +276,8 @@
   </div>
 </main>
 
-<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
-<script src="https://cdn.datatables.net/2.3.4/js/dataTables.min.js"></script>
-<script src="https://cdn.datatables.net/rowgroup/1.6.0/js/dataTables.rowGroup.min.js"></script>
-<script src="https://cdn.datatables.net/select/3.1.3/js/dataTables.select.min.js"></script>
+<!-- JQuery, DataTables, RowGroup, Select -->
+<script src="https://cdn.datatables.net/v/dt/jq-3.7.0/dt-2.3.6/rg-1.6.0/sl-3.1.3/datatables.min.js" integrity="sha384-x5PDx0+Bi/nLVi+pl77eiLmOvCysH7ebT44qgqRjp/odqlL5DmpLBcuRZ4u5segE" crossorigin="anonymous"></script>
 
 <script>
     const getDataStatusFromCell = (cell) => cell?.dataset?.status || "";
