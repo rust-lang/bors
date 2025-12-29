@@ -216,10 +216,10 @@ async fn maybe_complete_build(
     if workflow_runs.is_empty() {
         match &completion_trigger {
             Some(_) => {
-                panic!(
+                return Err(anyhow::anyhow!(
                     "No workflow runs attached to SHA {} found, even though we received workflow run completed event. GitHub returned inconsistent data?",
                     build.commit_sha
-                );
+                ));
             }
             None => {
                 tracing::warn!(
