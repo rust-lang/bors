@@ -18,6 +18,7 @@ use client::GithubRepositoryClient;
 pub mod client;
 pub(crate) mod operations;
 
+/// GitHub requests will be timed out after this time by default
 pub const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub fn create_github_client(

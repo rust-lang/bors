@@ -5,6 +5,7 @@ use octocrab::models::{CheckRunId, Repository, RunId};
 use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
+use std::time::Duration;
 use tracing::log;
 
 use crate::bors::event::PullRequestComment;
@@ -458,7 +459,8 @@ impl GithubRepositoryClient {
     pub async fn fetch_nonclosed_pull_requests(&self) -> anyhow::Result<Vec<PullRequest>> {
         let prs = perform_retryable(
             "fetch_nonclosed_pull_requests",
-            RetryMethod::default(),
+            // This operation can take a long time
+            RetryMethod::default().with_timeout(Duration::from_secs(40)),
             || async {
                 let stream = self
                     .client

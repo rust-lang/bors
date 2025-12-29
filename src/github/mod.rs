@@ -8,6 +8,7 @@ use octocrab::{
 };
 use std::fmt::{Debug, Display, Formatter};
 use std::str::FromStr;
+use std::time::Duration;
 use url::Url;
 
 pub mod api;
@@ -24,7 +25,6 @@ pub use error::AppError;
 pub use labels::{LabelModification, LabelTrigger};
 
 use crate::bors::PullRequestStatus;
-use crate::github::api::DEFAULT_REQUEST_TIMEOUT;
 
 /// Unique identifier of a GitHub repository
 #[derive(Debug, PartialEq, Eq, Hash, Clone, PartialOrd, Ord)]
@@ -196,11 +196,12 @@ impl Display for PullRequestNumber {
 fn prepare_octocrab_client(
     base_uri: &str,
 ) -> anyhow::Result<OctocrabBuilder<NoSvc, DefaultOctocrabBuilderConfig, NoAuth, NotLayerReady>> {
+    let timeout = Duration::from_secs(10);
     Ok(Octocrab::builder()
         .base_uri(base_uri)?
-        .set_read_timeout(Some(DEFAULT_REQUEST_TIMEOUT))
-        .set_write_timeout(Some(DEFAULT_REQUEST_TIMEOUT))
-        .set_connect_timeout(Some(DEFAULT_REQUEST_TIMEOUT))
+        .set_read_timeout(Some(timeout))
+        .set_write_timeout(Some(timeout))
+        .set_connect_timeout(Some(timeout))
         // Disable retrying, as we do our own retries
         .add_retry_config(RetryConfig::None))
 }
