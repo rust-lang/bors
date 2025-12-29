@@ -285,8 +285,13 @@
 
     function initializeTable(groupByColumnName) {
         let config = {
-            paging: false,
-            info: false,
+            layout: {
+                topEnd: null,
+                topStart: "search",
+                bottomStart: "info",
+                bottomEnd: "paging"
+            },
+            pageLength: 75,
             columns: [
                 { name: "select", orderable: false, className: "select-checkbox" },
                 { name: "number" },
