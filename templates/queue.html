@@ -46,17 +46,21 @@
         padding: 0.5rem;
     }
 
+    .treeclosed {
+        opacity: 0.5;
+    }
+
     th.select-checkbox,
     td.select-checkbox {
         width: 2.5rem;
     }
-    table.dataTable > tbody > tr > td.status {
+    table > tbody > tr > td.status {
         position: relative;
         overflow: hidden;
         padding-left: 16px;
         white-space: nowrap;
     }
-    table.dataTable>tbody>tr>th, table.dataTable>tbody>tr>td {
+    table > tbody > tr > th, table > tbody > tr > td {
         padding: 6px 8px;
     }
     td.status:before {
@@ -155,7 +159,10 @@
         <tbody>
             {% for pr in prs %}
             <tr data-rollupable="{{ pr.is_rollupable() }}"
-                data-preselected="{{ selected_rollup_prs.contains(pr.number.0 as u32) }}">
+                data-preselected="{{ selected_rollup_prs.contains(pr.number.0 as u32) }}"
+                {% if let Some(priority) = tree_state.priority() && pr.priority.unwrap_or(0) < *priority as i32 %}
+                class="treeclosed"
+                {% endif %}>
                 <td class="select-checkbox"></td>
                 <td data-pr-number="{{ pr.number.0 }}">
                     <a href="{{ repo_url }}/pull/{{ pr.number }}">{{ pr.number.0 }}</a>
