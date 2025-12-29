@@ -5,35 +5,30 @@ use std::time::{Duration, Instant};
 use tokio::time;
 use tracing::Instrument;
 
-/// Measure the duration of an async operation and logs it using tracing.
-pub async fn measure_operation<T, F, Fut>(operation_name: &str, f: F) -> T
-where
-    F: FnOnce() -> Fut,
-    Fut: Future<Output = T>,
-{
-    let start = Instant::now();
-
-    tracing::trace!(operation = operation_name, "Starting operation");
-
-    let result = f().await;
-    let duration = start.elapsed();
-
-    tracing::trace!(
-        operation = operation_name,
-        duration_ms = format!("{:.2}", duration.as_secs_f64() * 1000.0),
-        "Operation completed"
-    );
-
-    result
-}
-
 /// Measures the duration of a database query and logs it using tracing.
 pub async fn measure_db_query<T, F, Fut>(query_name: &str, f: F) -> T
 where
     F: FnOnce() -> Fut,
     Fut: Future<Output = T>,
 {
-    measure_operation(&format!("db_query:{query_name}"), f).await
+    let start = Instant::now();
+
+    let span = tracing::trace_span!("Query", query = query_name);
+    span.in_scope(|| {
+        tracing::trace!("Starting");
+    });
+
+    let result = f().instrument(span.clone()).await;
+    let duration = start.elapsed();
+
+    span.in_scope(|| {
+        tracing::trace!(
+            duration = format!("{:.2}ms", duration.as_secs_f64() * 1000.0),
+            "Completed"
+        );
+    });
+
+    result
 }
 
 /// Signals if a retryable operation should be retried or not.
@@ -133,11 +128,7 @@ where
     R: Into<ShouldRetry<E>>,
     E: Debug,
 {
-    let span = tracing::trace_span!(
-        "Retryable operation",
-        operation = operation_name,
-        ?retry_method,
-    );
+    let span = tracing::trace_span!("Retryable op", operation = operation_name);
 
     let mut errors = vec![];
     for attempt in 1..=retry_method.max_retry_count {
@@ -146,38 +137,38 @@ where
         let start = Instant::now();
 
         span.in_scope(|| {
-            tracing::trace!("Attempt number #{attempt}");
+            tracing::trace!(attempt = attempt, "Starting");
         });
 
         let future =
             tokio::time::timeout(retry_method.timeout_after, func()).instrument(span.clone());
-        let duration = start.elapsed();
 
         let result: Option<Result<T, ShouldRetry<E>>> = match future.await {
             Ok(res) => Some(res.map_err(|e| e.into())),
             Err(_) => None,
         };
-        let is_err = match &result {
-            Some(Ok(_)) => false,
-            Some(Err(_)) => true,
-            None => true,
-        };
 
-        span.in_scope(|| {
-            tracing::trace!(
-                attempt = attempt,
-                duration_ms = format!("{:.2}", duration.as_secs_f64() * 1000.0),
-                "Operation completed {}successfully",
-                if is_err { "un" } else { "" }
-            );
-        });
+        let duration = start.elapsed();
 
         match result {
             Some(Ok(res)) => {
+                span.in_scope(|| {
+                    tracing::trace!(
+                        attempt = attempt,
+                        duration = format!("{:.2}ms", duration.as_secs_f64() * 1000.0),
+                        "Completed",
+                    );
+                });
                 return Ok(res);
             }
             Some(Err(ShouldRetry::Yes(error))) => {
-                tracing::error!("Operation failed with error: {error:?}");
+                span.in_scope(|| {
+                    tracing::trace!(
+                        attempt = attempt,
+                        duration = format!("{:.2}ms", duration.as_secs_f64() * 1000.0),
+                        "Failed: {error:?}",
+                    );
+                });
                 if last_attempt || !retry_method.retry_on_error {
                     return Err(RetryableOpError::Err(error));
                 }
@@ -186,7 +177,13 @@ where
             }
             Some(Err(ShouldRetry::No(error))) => return Err(RetryableOpError::Err(error)),
             None => {
-                tracing::error!("Operation timeouted");
+                span.in_scope(|| {
+                    tracing::trace!(
+                        attempt = attempt,
+                        duration = format!("{:.2}ms", duration.as_secs_f64() * 1000.0),
+                        "Timeouted",
+                    );
+                });
                 errors.push(anyhow::anyhow!(
                     "Timeout after {}s",
                     retry_method.timeout_after.as_secs_f64()
