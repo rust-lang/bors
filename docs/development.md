@@ -115,7 +115,7 @@ can still be done if needed.
 - Create your own [GitHub app](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/registering-a-github-app).
   - Configure its webhook secret and private key and write them down.
   - Give it permissions for `Actions` (r/w), `Checks` (r/w), `Contents` (r/w), `Issues` (r/w) and `Pull requests` (r/w).
-  - Subscribe it to webhook events `Issue comment`, `Pull request`, `Pull request review`, `Pull request review comment` and `Workflow run`.
+  - Subscribe it to webhook events `Issue comment`, `Push`, `Pull request`, `Pull request review`, `Pull request review comment` and `Workflow run`.
 - Install your GitHub app on some test repository where you want to test bors.
 - Add `rust-bors.toml` in the root of the repository, and also add some example CI workflows.
 - Create try/review permissions for GitHub users
