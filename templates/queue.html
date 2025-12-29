@@ -204,11 +204,7 @@
                     title="Started at {{ to_local_time(*build.created_at).format("%d.%m.%Y %H:%M:%S") }}"
                     data-created-at="{{ build.created_at.timestamp_millis() }}"
                     {%- endif -%}>
-                    {%- if let Some(try_build) = pr.try_build -%}
-                    <a href="../results/{{ repo_name }}/{{ pr.number }}">{{ crate::templates::status_text(pr) }}</a> (try)
-                    {%- else -%}
                     {{ crate::templates::status_text(pr) }}
-                    {%- endif -%}
                     <span class="elapsed-time-display"></span>
                 </td>
                 <td class="marker {%~ match pr.mergeable_state -%}
