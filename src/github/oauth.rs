@@ -1,9 +1,6 @@
-use crate::github::api::DEFAULT_REQUEST_TIMEOUT;
 use crate::github::api::client::GithubRepositoryClient;
-use crate::github::{GithubRepoName, GithubUser};
+use crate::github::{GithubRepoName, GithubUser, prepare_octocrab_client};
 use anyhow::Context;
-use octocrab::OctocrabBuilder;
-use octocrab::service::middleware::retry::RetryConfig;
 use secrecy::{ExposeSecret, SecretString};
 use std::collections::HashMap;
 
@@ -59,15 +56,8 @@ impl OAuthClient {
 
         tracing::info!("Retrieved OAuth access token");
 
-        let user_client = OctocrabBuilder::new()
-            .base_uri(&self.github_base_url)?
+        let user_client = prepare_octocrab_client(&self.github_base_url)?
             .user_access_token(access_token.clone())
-            .set_read_timeout(Some(DEFAULT_REQUEST_TIMEOUT))
-            .set_write_timeout(Some(DEFAULT_REQUEST_TIMEOUT))
-            .set_connect_timeout(Some(DEFAULT_REQUEST_TIMEOUT))
-            // Octocrab retrying is buggy as of 0.48
-            // When it duplicates PATCH requests, it does not re-send their body
-            .add_retry_config(RetryConfig::None)
             .build()?;
         let user = user_client
             .current()

@@ -11,10 +11,9 @@ use secrecy::{ExposeSecret, SecretString};
 
 use crate::bors::RepositoryState;
 use crate::config::RepositoryConfig;
-use crate::github::GithubRepoName;
+use crate::github::{GithubRepoName, prepare_octocrab_client};
 use crate::permissions::TeamApiClient;
 use client::GithubRepositoryClient;
-use octocrab::service::middleware::retry::RetryConfig;
 
 pub mod client;
 pub(crate) mod operations;
@@ -29,15 +28,8 @@ pub fn create_github_client(
     let key = jsonwebtoken::EncodingKey::from_rsa_pem(private_key.expose_secret().as_bytes())
         .context("Could not encode private key")?;
 
-    Octocrab::builder()
-        .base_uri(github_url)?
+    prepare_octocrab_client(&github_url)?
         .app(app_id, key)
-        .set_read_timeout(Some(DEFAULT_REQUEST_TIMEOUT))
-        .set_write_timeout(Some(DEFAULT_REQUEST_TIMEOUT))
-        .set_connect_timeout(Some(DEFAULT_REQUEST_TIMEOUT))
-        // Octocrab retrying is buggy as of 0.48
-        // When it duplicates PATCH requests, it does not re-send their body
-        .add_retry_config(RetryConfig::None)
         .build()
         .context("Could not create octocrab builder")
 }

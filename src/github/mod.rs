@@ -2,6 +2,10 @@
 //! for working with (GitHub) repositories.
 use octocrab::models::UserId;
 use octocrab::models::pulls::MergeableState;
+use octocrab::service::middleware::retry::RetryConfig;
+use octocrab::{
+    DefaultOctocrabBuilderConfig, NoAuth, NoSvc, NotLayerReady, Octocrab, OctocrabBuilder,
+};
 use std::fmt::{Debug, Display, Formatter};
 use std::str::FromStr;
 use url::Url;
@@ -20,6 +24,7 @@ pub use error::AppError;
 pub use labels::{LabelModification, LabelTrigger};
 
 use crate::bors::PullRequestStatus;
+use crate::github::api::DEFAULT_REQUEST_TIMEOUT;
 
 /// Unique identifier of a GitHub repository
 #[derive(Debug, PartialEq, Eq, Hash, Clone, PartialOrd, Ord)]
@@ -185,4 +190,17 @@ impl Display for PullRequestNumber {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         <u64 as Display>::fmt(&self.0, f)
     }
+}
+
+/// Creates a new Octocrab client with the proper shared defaults configured.
+fn prepare_octocrab_client(
+    base_uri: &str,
+) -> anyhow::Result<OctocrabBuilder<NoSvc, DefaultOctocrabBuilderConfig, NoAuth, NotLayerReady>> {
+    Ok(Octocrab::builder()
+        .base_uri(base_uri)?
+        .set_read_timeout(Some(DEFAULT_REQUEST_TIMEOUT))
+        .set_write_timeout(Some(DEFAULT_REQUEST_TIMEOUT))
+        .set_connect_timeout(Some(DEFAULT_REQUEST_TIMEOUT))
+        // Disable retrying, as we do our own retries
+        .add_retry_config(RetryConfig::None))
 }
