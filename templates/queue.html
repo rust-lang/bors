@@ -187,7 +187,7 @@
         </thead>
 
         <tbody>
-            {% for pr in prs %}
+            {%- for pr in prs %}
             <tr data-rollupable="{{ pr.is_rollupable() }}"
                 data-preselected="{{ selected_rollup_prs.contains(pr.number.0 as u32) }}"
                 {% if let Some(priority) = tree_state.priority() && pr.priority.unwrap_or(0) < *priority as i32 %}
@@ -199,16 +199,15 @@
                 </td>
                 {% let pending_build = crate::templates::get_pending_build(pr) %}
                 <td class="status" data-status="{{ crate::templates::status_text(pr) }}"
-                    {% if let Some(build) = pending_build %}
+                    {%- if let Some(build) = pending_build -%}
                     title="Started at {{ to_local_time(*build.created_at).format("%d.%m.%Y %H:%M:%S") }}"
                     data-created-at="{{ build.created_at.timestamp_millis() }}"
-                    {% endif %}>
-
-                    {% if let Some(try_build) = pr.try_build %}
+                    {%- endif -%}>
+                    {%- if let Some(try_build) = pr.try_build -%}
                     <a href="../results/{{ repo_name }}/{{ pr.number }}">{{ crate::templates::status_text(pr) }}</a> (try)
-                    {% else %}
+                    {%- else -%}
                     {{ crate::templates::status_text(pr) }}
-                    {% endif %}
+                    {%- endif -%}
                     <span class="elapsed-time-display"></span>
                 </td>
                 <td class="marker {%~ match pr.mergeable_state -%}
@@ -218,21 +217,21 @@
                     negative
                     {%- when Unknown -%}
                     {%- endmatch -%}">
-                    {% match pr.mergeable_state %}
-                    {% when Mergeable %}
+                    {%- match pr.mergeable_state -%}
+                    {%- when Mergeable -%}
                     yes
-                    {% when HasConflicts %}
+                    {%- when HasConflicts -%}
                     no
-                    {% when Unknown %}
-                    {% endmatch %}
+                    {%- when Unknown -%}
+                    {%- endmatch -%}
                 </td>
                 <td>{{ pr.title }}</td>
                 <td>{{ pr.author }}</td>
                 <td>{{ pr.assignees|join(", ") }}</td>
                 <td>
-                    {% if let Some(approver) = pr.approver() %}
+                    {%- if let Some(approver) = pr.approver() -%}
                     {{ approver }}
-                    {% endif %}
+                    {%- endif -%}
                 </td>
                 <td>{{ pr.priority.unwrap_or(0) }}</td>
                 <td class="marker {%~ if let Some(rollup) = pr.rollup -%}
@@ -247,20 +246,20 @@
                       {%- endmatch -%}
                     {%- endif -%}
                 ">
-                    {% if let Some(rollup) = pr.rollup %}
-                      {% match rollup %}
-                        {% when Always %}
+                    {%- if let Some(rollup) = pr.rollup -%}
+                      {%- match rollup -%}
+                        {%- when Always -%}
                           always
-                        {% when Iffy %}
+                        {%- when Iffy -%}
                           iffy
-                        {% when Maybe %}
-                        {% when Never %}
+                        {%- when Maybe -%}
+                        {%- when Never -%}
                           never
-                      {% endmatch %}
-                    {% endif %}
+                      {%- endmatch -%}
+                    {%- endif -%}
                 </td>
             </tr>
-            {% endfor %}
+            {% endfor -%}
         </tbody>
     </table>
   </div>
