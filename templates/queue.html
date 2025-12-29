@@ -74,6 +74,9 @@
         background-image: repeating-linear-gradient(135deg, #F0DE57 0, #F0DE57 4px, #FBEE97 4px, #FBEE97 8px, #F0DE57 0);
         animation: barber-pole 1s linear infinite;
     }
+    td.status[data-status="approved"]:before {
+        background-color: #85DB7B;
+    }
 
     #rollupModal {
         display: none;
@@ -135,7 +138,7 @@
             <tr>
                 <th class="select-checkbox"></th>
                 <th>#</th>
-                <th>Status</th>
+                <th style="padding-left: 16px;">Status</th>
                 <th>Mergeable</th>
                 <th>Title</th>
                 <th>Author</th>
