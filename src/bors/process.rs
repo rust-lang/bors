@@ -141,7 +141,6 @@ async fn consume_global_events(
 ) {
     while let Some(event) = global_rx.recv().await {
         let span = tracing::info_span!("GlobalEvent");
-        tracing::trace!("Received global event: {event:?}");
         if let Err(error) =
             handle_bors_global_event(event, ctx.clone(), &gh_client, &team_api, senders.clone())
                 .instrument(span.clone())
