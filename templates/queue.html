@@ -84,6 +84,36 @@
     td.status[data-status="approved"]:before {
         background-color: #85DB7B;
     }
+    .marker {
+        white-space: nowrap;
+    }
+    .marker:before {
+        content: "";
+        display: inline-block;
+        font-size: 18px;
+        width: 0.4em;
+        height: 0.4em;
+        border-radius: 50% 50%;
+        margin-right: 0.3em;
+        border: 1px solid transparent;
+    }
+    .positive { color: #004200; }
+    .positive:before {
+        background: #01ce01;
+        border-color: #016c01;
+    }
+    .negative { color: #660000; }
+    .negative:before {
+        background: #f97070;
+        border-color: #ab0a0a;
+    }
+    .neutral {
+        color: #8C7E14;
+    }
+    .neutral:before {
+        background: #F0DE57;
+        border-color: #8C7E14;
+    }
 
     #rollupModal {
         display: none;
@@ -181,7 +211,13 @@
                     {% endif %}
                     <span class="elapsed-time-display"></span>
                 </td>
-                <td>
+                <td class="marker {%~ match pr.mergeable_state -%}
+                    {%- when Mergeable -%}
+                    positive
+                    {%- when HasConflicts -%}
+                    negative
+                    {%- when Unknown -%}
+                    {%- endmatch -%}">
                     {% match pr.mergeable_state %}
                     {% when Mergeable %}
                     yes
@@ -199,9 +235,28 @@
                     {% endif %}
                 </td>
                 <td>{{ pr.priority.unwrap_or(0) }}</td>
-                <td>
+                <td class="marker {%~ if let Some(rollup) = pr.rollup -%}
+                      {%- match rollup -%}
+                        {%- when Always -%}
+                          positive
+                        {%- when Iffy -%}
+                          neutral
+                        {%- when Maybe -%}
+                        {%- when Never -%}
+                          negative
+                      {%- endmatch -%}
+                    {%- endif -%}
+                ">
                     {% if let Some(rollup) = pr.rollup %}
-                    {{ rollup }}
+                      {% match rollup %}
+                        {% when Always %}
+                          always
+                        {% when Iffy %}
+                          iffy
+                        {% when Maybe %}
+                        {% when Never %}
+                          never
+                      {% endmatch %}
                     {% endif %}
                 </td>
             </tr>
