@@ -68,6 +68,11 @@ impl RetryMethod {
             ..Default::default()
         }
     }
+
+    pub fn with_timeout(mut self, timeout: Duration) -> Self {
+        self.timeout_after = timeout;
+        self
+    }
 }
 
 impl Default for RetryMethod {
