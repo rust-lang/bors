@@ -13,18 +13,18 @@ use bors::{
 use clap::Parser;
 use sqlx::postgres::PgConnectOptions;
 use sqlx::{ConnectOptions, PgPool};
-use tokio::time::Interval;
+use tokio::time::{Interval, MissedTickBehavior};
 use tracing::log::LevelFilter;
 use tracing_subscriber::filter::EnvFilter;
 
 /// How often should the bot refresh repository configurations from GitHub.
-const CONFIG_REFRESH_INTERVAL: Duration = Duration::from_secs(120);
+const CONFIG_REFRESH_INTERVAL: Duration = Duration::from_secs(60 * 10);
 
 /// How often should the bot refresh repository permissions from the team DB.
-const PERMISSIONS_REFRESH_INTERVAL: Duration = Duration::from_secs(120);
+const PERMISSIONS_REFRESH_INTERVAL: Duration = Duration::from_secs(60 * 10);
 
 /// How often should the bot attempt to time out CI builds that ran for too long.
-const PENDING_BUILDS_REFRESH_INTERVAL: Duration = Duration::from_secs(60 * 5);
+const PENDING_BUILDS_REFRESH_INTERVAL: Duration = Duration::from_secs(60 * 10);
 
 /// How often should the bot reload the mergeability status of PRs?
 const MERGEABILITY_STATUS_INTERVAL: Duration = Duration::from_secs(60 * 10);
@@ -185,6 +185,10 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
         let mut interval = tokio::time::interval(interval);
         // Do not immediately trigger the interval
         interval.reset();
+        // Perform the tick in periods since the last call to tick().
+        // This will naturally stagger the intervals, so that they do not fire at the exact
+        // same time.
+        interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
         interval
     }
 
