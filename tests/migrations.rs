@@ -1,7 +1,7 @@
 use itertools::Itertools;
 use sqlparser::ast::{
-    AlterColumnOperation, AlterTableOperation, ColumnOption, Ident, ObjectName, Statement, Visit,
-    Visitor,
+    AlterColumnOperation, AlterTable, AlterTableOperation, ColumnOption, Ident, ObjectName,
+    Statement, Visit, Visitor,
 };
 use sqlparser::dialect::PostgreSqlDialect;
 use sqlparser::parser::Parser;
@@ -21,9 +21,9 @@ impl Visitor for CheckNotNullWithoutDefault {
     type Break = ();
 
     fn pre_visit_statement(&mut self, statement: &Statement) -> ControlFlow<Self::Break> {
-        if let Statement::AlterTable {
+        if let Statement::AlterTable(AlterTable {
             operations, name, ..
-        } = statement
+        }) = statement
         {
             for op in operations {
                 match op {
