@@ -38,7 +38,7 @@ tower = { version = "0.5", features = ["limit"] }
 tower-http = { version = "0.6.4", features = ["catch-panic", "compression-br", "compression-gzip"] }
 jsonwebtoken = "10"
 url = "2"
-reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+reqwest = { version = "0.13", features = ["json", "form"], default-features = false }
 http = "1"
 askama = "0.15.0"
 
