@@ -94,7 +94,7 @@ mod tests {
             ctx.post_comment("@bors info").await?;
             insta::assert_snapshot!(
                 ctx.get_next_comment_text(()).await?,
-                @r"
+                @"
             ## Status of PR `1`
             - Not Approved
             - Priority: unset
@@ -114,7 +114,7 @@ mod tests {
             ctx.post_comment("@bors info").await?;
             insta::assert_snapshot!(
                 ctx.get_next_comment_text(()).await?,
-                @r"
+                @"
             ## Status of PR `1`
             - Approved by: `default-user`
             - Priority: unset
@@ -135,7 +135,7 @@ mod tests {
             ctx.post_comment("@bors info").await?;
             insta::assert_snapshot!(
                 ctx.get_next_comment_text(()).await?,
-                @r"
+                @"
             ## Status of PR `1`
             - Not Approved
             - Priority: 5
@@ -156,7 +156,7 @@ mod tests {
             ctx.post_comment("@bors info").await?;
             insta::assert_snapshot!(
                 ctx.get_next_comment_text(()).await?,
-                @r"
+                @"
             ## Status of PR `1`
             - Not Approved
             - Priority: unset
@@ -184,7 +184,7 @@ mod tests {
             ctx.post_comment("@bors info").await?;
             insta::assert_snapshot!(
                 ctx.get_next_comment_text(()).await?,
-                @r"
+                @"
             ## Status of PR `1`
             - Approved by: `default-user`
             - Priority: 10

@@ -386,7 +386,7 @@ mod tests {
 
             insta::assert_snapshot!(
                 ctx.get_next_comment_text(()).await?,
-                @r"
+                @"
             :warning: The base branch changed to `beta`, and the
             PR will need to be re-approved.
             "
@@ -709,7 +709,7 @@ report_merge_conflicts = true
                     pr.mergeable_state = OctocrabMergeableState::Dirty;
                 });
             ctx.push_to_branch(default_branch_name(), Commit::new("sha", "push")).await?;
-            assert_snapshot!(ctx.get_next_comment_text(pr.id()).await?, @r"
+            assert_snapshot!(ctx.get_next_comment_text(pr.id()).await?, @"
             :umbrella: The latest upstream changes made this pull request unmergeable. Please [resolve the merge conflicts](https://rustc-dev-guide.rust-lang.org/git.html#rebasing-and-conflicts).
 
             This pull request was unapproved.
@@ -819,7 +819,7 @@ report_merge_conflicts = true
                 .workflow_start(run_id)
                 .await?;
             ctx.push_to_pr(()).await?;
-            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @r"
+            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
             :warning: A new commit `pr-1-commit-1` was pushed to the branch, the PR will need to be re-approved.
 
             Auto build cancelled due to push. Cancelled workflows:
@@ -845,7 +845,7 @@ report_merge_conflicts = true
 
             ctx.workflow_start(ctx.auto_workflow()).await?;
             ctx.push_to_pr(()).await?;
-            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @r"
+            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
             :warning: A new commit `pr-1-commit-1` was pushed to the branch, the PR will need to be re-approved.
 
             Auto build cancelled due to push. It was not possible to cancel some workflows.

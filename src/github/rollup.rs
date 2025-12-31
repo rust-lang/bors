@@ -505,7 +505,7 @@ mod tests {
         })
         .await;
         let repo = gh.get_repo(());
-        insta::assert_snapshot!(repo.lock().get_pr(6).description, @r"
+        insta::assert_snapshot!(repo.lock().get_pr(6).description, @"
         Successful merges:
 
          - #2 (Title of PR 2)
@@ -546,7 +546,7 @@ mod tests {
         })
         .await;
         let repo = gh.get_repo(());
-        insta::assert_snapshot!(repo.lock().get_pr(5).description, @r"
+        insta::assert_snapshot!(repo.lock().get_pr(5).description, @"
         Successful merges:
 
          - #2 (Title of PR 2)
@@ -584,7 +584,7 @@ mod tests {
         })
         .await;
         let repo = gh.get_repo(());
-        insta::assert_snapshot!(repo.lock().get_pr(4).description, @r"
+        insta::assert_snapshot!(repo.lock().get_pr(4).description, @"
         Successful merges:
 
          - #2 (Title of PR 2)
@@ -622,7 +622,7 @@ mod tests {
         })
         .await;
         let repo = gh.get_repo(());
-        insta::assert_snapshot!(repo.lock().get_pr(6).description, @r"
+        insta::assert_snapshot!(repo.lock().get_pr(6).description, @"
         Successful merges:
 
          - #3 (Title of PR 3)
@@ -653,7 +653,7 @@ mod tests {
         })
         .await;
         let repo = gh.get_repo(());
-        insta::assert_snapshot!(repo.lock().get_pr(4).description, @r"
+        insta::assert_snapshot!(repo.lock().get_pr(4).description, @"
         Successful merges:
 
          - #2 (Title of PR 2)

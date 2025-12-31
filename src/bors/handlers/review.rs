@@ -434,7 +434,7 @@ mod tests {
             ctx.post_comment("@bors r+").await?;
             insta::assert_snapshot!(
                 ctx.get_next_comment_text(()).await?,
-                @r"
+                @"
             :pushpin: Commit pr-1-sha has been approved by `default-user`
 
             It is now in the [queue](https://bors-test.com/queue/borstest) for this repository.
@@ -458,7 +458,7 @@ mod tests {
                 .await?;
             insta::assert_snapshot!(
                 ctx.get_next_comment_text(()).await?,
-                @r"
+                @"
             :pushpin: Commit pr-1-sha has been approved by `user1`
 
             It is now in the [queue](https://bors-test.com/queue/borstest) for this repository.
@@ -508,7 +508,7 @@ mod tests {
             ctx.post_comment("@bors r+").await?;
             insta::assert_snapshot!(
                 ctx.get_next_comment_text(()).await?,
-                @r"
+                @"
             :pushpin: Commit pr-1-sha has been approved by `default-user`
 
             It is now in the [queue](https://bors-test.com/queue/borstest) for this repository.
@@ -529,7 +529,7 @@ mod tests {
             ctx.post_comment("@bors r+ p=101").await?;
             insta::assert_snapshot!(
                 ctx.get_next_comment_text(()).await?,
-                @r"
+                @"
             :pushpin: Commit pr-1-sha has been approved by `default-user`
 
             It is now in the [queue](https://bors-test.com/queue/borstest) for this repository.
@@ -575,7 +575,7 @@ approved = ["+foo", "+baz", "-bar", "-foo2"]
             ctx.post_comment("@bors r+").await?;
             insta::assert_snapshot!(
                 ctx.get_next_comment_text(()).await?,
-                @r"
+                @"
             :pushpin: Commit pr-1-sha has been approved by `default-user`
 
             It is now in the [queue](https://bors-test.com/queue/borstest) for this repository.
@@ -1168,7 +1168,7 @@ approved = ["+foo", "+baz", "-bar", "-foo2"]
                     .await?;
                 insta::assert_snapshot!(
                     ctx.get_next_comment_text(()).await?,
-                    @r"
+                    @"
                 :v: @default-user, you can now perform try builds on this pull request!
 
                 You can now post `@bors try` to start a try build.
@@ -1190,7 +1190,7 @@ approved = ["+foo", "+baz", "-bar", "-foo2"]
                 ctx.expect_comments((), 1).await;
 
                 ctx.post_comment("@bors try").await?;
-                insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @r"
+                insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
                 :hourglass: Trying commit pr-1-sha with merge merge-0-pr-1…
 
                 To cancel the try build, run the command `@bors try cancel`.
@@ -1294,7 +1294,7 @@ approved = ["+foo", "+baz", "-bar", "-foo2"]
             })
             .await?;
             ctx.post_comment("@bors r+").await?;
-            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @r"
+            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
             :clipboard: Looks like this PR is still in progress, ignoring approval.
 
             Hint: Remove **[do not merge]** from this PR's title when it is ready for review.
@@ -1365,13 +1365,13 @@ labels_blocking_approval = ["proposed-final-comment-period", "final-comment-peri
             ctx.pr(()).await.expect_auto_build(|_| true);
             ctx.workflow_start(ctx.auto_workflow()).await?;
             ctx.post_comment("@bors r-").await?;
-            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @r"
-                Commit pr-1-sha has been unapproved.
+            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
+            Commit pr-1-sha has been unapproved.
 
-                Auto build cancelled due to unapproval. Cancelled workflows:
+            Auto build cancelled due to unapproval. Cancelled workflows:
 
-                - https://github.com/rust-lang/borstest/actions/runs/1
-                ");
+            - https://github.com/rust-lang/borstest/actions/runs/1
+            ");
             Ok(())
         })
         .await;
@@ -1387,7 +1387,7 @@ labels_blocking_approval = ["proposed-final-comment-period", "final-comment-peri
             ctx.pr(()).await.expect_auto_build(|_| true);
             ctx.workflow_start(ctx.auto_workflow()).await?;
             ctx.post_comment("@bors r-").await?;
-            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @r"
+            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
             Commit pr-1-sha has been unapproved.
 
             Auto build cancelled due to unapproval. It was not possible to cancel some workflows.
