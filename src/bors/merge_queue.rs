@@ -626,7 +626,7 @@ merge_queue_enabled = false
 
             insta::assert_snapshot!(
                 ctx.get_next_comment_text(()).await?,
-                @r"
+                @"
             :sunny: Test successful - [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1)
             Approved by: `default-user`
             Pushing merge-0-pr-1 to `main`...
@@ -1149,7 +1149,7 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
             let updated_comment = ctx
                 .get_comment_by_node_id(&comment.node_id().unwrap())
                 .unwrap();
-            insta::assert_snapshot!(updated_comment.content(), @r"
+            insta::assert_snapshot!(updated_comment.content(), @"
             :hourglass: Testing commit pr-1-sha with merge merge-0-pr-1...
 
             **Workflow**: https://github.com/rust-lang/borstest/actions/runs/1
@@ -1276,7 +1276,7 @@ also include this pls"
             ctx.approve(()).await?;
             ctx.start_and_finish_auto_build(()).await?;
 
-            insta::assert_snapshot!(ctx.auto_branch().get_commit().message(), @r"
+            insta::assert_snapshot!(ctx.auto_branch().get_commit().message(), @"
             Auto merge of #1 - pr-1, r=default-user
             Title of PR 1
 

@@ -343,7 +343,7 @@ mod tests {
             ctx.workflow_full_failure(run_id).await?;
             insta::assert_snapshot!(
                 ctx.get_next_comment_text(()).await?,
-                @r"
+                @"
             :broken_heart: Test for merge-0-pr-1 failed: [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1). Failed jobs:
 
             - `Job 1000` ([web logs](https://github.com/job-logs/1000), [enhanced plaintext logs](https://triage.rust-lang.org/gha-logs/rust-lang/borstest/1000))
@@ -376,7 +376,7 @@ mod tests {
                 .await?;
             insta::assert_snapshot!(
                 ctx.get_next_comment_text(()).await?,
-                @r"
+                @"
             :hourglass: Trying commit pr-1-sha with merge merge-0-pr-1…
 
             To cancel the try build, run the command `@bors try cancel`.
@@ -393,7 +393,7 @@ mod tests {
             ctx.post_comment("@bors try").await?;
             insta::assert_snapshot!(
                 ctx.get_next_comment_text(()).await?,
-                @r"
+                @"
             :hourglass: Trying commit pr-1-sha with merge merge-0-pr-1…
 
             To cancel the try build, run the command `@bors try cancel`.
@@ -418,10 +418,10 @@ It fixes so many issues, sir."
             ctx.post_comment("@bors try").await?;
             ctx.expect_comments((), 1).await;
 
-            insta::assert_snapshot!(ctx.try_branch().get_commit().message(), @r###"
+            insta::assert_snapshot!(ctx.try_branch().get_commit().message(), @"
             Auto merge of #1 - pr-1, r=<try>
             Title of PR 1
-            "###);
+            ");
             Ok(())
         })
         .await;
@@ -446,13 +446,13 @@ try-job: Bar
             ctx.post_comment("@bors try").await?;
             ctx.expect_comments((), 1).await;
 
-            insta::assert_snapshot!(ctx.try_branch().get_commit().message(), @r###"
+            insta::assert_snapshot!(ctx.try_branch().get_commit().message(), @"
             Auto merge of #1 - pr-1, r=<try>
             Title of PR 1
 
             try-job: Foo
             try-job: Bar
-            "###);
+            ");
             Ok(())
         })
         .await;
@@ -474,14 +474,14 @@ try-job: Bar
             ctx.post_comment("@bors try jobs=Baz,Baz2").await?;
             ctx.expect_comments((), 1).await;
 
-            insta::assert_snapshot!(ctx.try_branch().get_commit().message(), @r###"
+            insta::assert_snapshot!(ctx.try_branch().get_commit().message(), @"
             Auto merge of #1 - pr-1, r=<try>
             Title of PR 1
 
 
             try-job: Baz
             try-job: Baz2
-            "###);
+            ");
             Ok(())
         })
         .await;
@@ -540,7 +540,7 @@ try-job: Bar
             ctx.workflow_full_success(ctx.try_workflow()).await?;
             ctx.expect_comments((), 1).await;
             ctx.post_comment("@bors try parent=last").await?;
-            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @r"
+            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
             :hourglass: Trying commit pr-1-sha with merge merge-1-pr-1…
 
             To cancel the try build, run the command `@bors try cancel`.
@@ -579,7 +579,7 @@ try-job: Bar
             ctx
                 .post_comment("@bors try")
                 .await?;
-            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @r###"
+            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @r#"
             :lock: Merge conflict
 
             This pull request and the base branch diverged in a way that cannot
@@ -608,7 +608,7 @@ try-job: Bar
             handled during merge and rebase. This is normal, and you should still perform step 5 to update this PR.
 
             </details>
-            "###);
+            "#);
             Ok(())
         })
             .await;
@@ -640,7 +640,7 @@ try-job: Bar
             ctx.post_comment("@bors try").await?;
             ctx.expect_comments((), 1).await;
             ctx.post_comment("@bors try").await?;
-            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @r"
+            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
             :hourglass: Trying commit pr-1-sha with merge merge-1-pr-1…
 
             To cancel the try build, run the command `@bors try cancel`.
@@ -662,7 +662,7 @@ try-job: Bar
 "#,
                 )
                 .await?;
-            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @r"
+            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
             :hourglass: Trying commit pr-1-sha with merge merge-0-pr-1…
 
             To cancel the try build, run the command `@bors try cancel`.
@@ -683,7 +683,7 @@ try-job: Bar
             ctx.workflow_start(run_id).await?;
 
             ctx.post_comment("@bors try").await?;
-            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @r"
+            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
             :hourglass: Trying commit pr-1-sha with merge merge-1-pr-1…
 
             (The previously running try build was automatically cancelled.)
@@ -707,7 +707,7 @@ try-job: Bar
             ctx.expect_comments((), 1).await;
 
             ctx.post_comment("@bors try").await?;
-            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @r"
+            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
             :hourglass: Trying commit pr-1-sha with merge merge-1-pr-1…
 
             To cancel the try build, run the command `@bors try cancel`.
@@ -747,7 +747,7 @@ try-job: Bar
             ctx.workflow_event(WorkflowEvent::started(w1)).await?;
             ctx.workflow_event(WorkflowEvent::started(w2)).await?;
             ctx.post_comment("@bors try cancel").await?;
-            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @r"
+            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
             Try build cancelled. Cancelled workflows:
             - https://github.com/rust-lang/borstest/actions/runs/1
             - https://github.com/rust-lang/borstest/actions/runs/2
@@ -811,7 +811,7 @@ try-job: Bar
             ctx.workflow_full_success(w2).await?;
             ctx.workflow_start(w3).await?;
             ctx.post_comment("@bors try cancel").await?;
-            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @r"
+            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
             Try build cancelled. Cancelled workflows:
             - https://github.com/rust-lang/borstest/actions/runs/3
             ");
@@ -847,11 +847,11 @@ try_failed = ["+foo", "+bar", "-baz"]
         );
         run_test((pool, gh), async |ctx: &mut BorsTester| {
             ctx.post_comment("@bors try").await?;
-            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @r"
-                :hourglass: Trying commit pr-1-sha with merge merge-0-pr-1…
+            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
+            :hourglass: Trying commit pr-1-sha with merge merge-0-pr-1…
 
-                To cancel the try build, run the command `@bors try cancel`.
-                ");
+            To cancel the try build, run the command `@bors try cancel`.
+            ");
             ctx.pr(()).await.expect_added_labels(&[]);
             ctx.workflow_full_failure(ctx.try_workflow()).await?;
             ctx.expect_comments((), 1).await;
@@ -1035,7 +1035,7 @@ try_failed = ["+foo", "+bar", "-baz"]
             let updated_comment = ctx
                 .get_comment_by_node_id(&comment.node_id().unwrap())
                 .unwrap();
-            insta::assert_snapshot!(updated_comment.content(), @r"
+            insta::assert_snapshot!(updated_comment.content(), @"
             :hourglass: Trying commit pr-1-sha with merge merge-0-pr-1…
 
             To cancel the try build, run the command `@bors try cancel`.

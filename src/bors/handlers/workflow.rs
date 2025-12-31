@@ -375,7 +375,7 @@ min_ci_time = 10
                 ctx
                     .workflow_full_success(w1)
                     .await?;
-                insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @r"
+                insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
                 :broken_heart: Test for merge-0-pr-1 failed: [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1)
                 A workflow was considered to be a failure because it took only `1s`. The minimum duration for CI workflows is configured to be `10s`.
                 ");

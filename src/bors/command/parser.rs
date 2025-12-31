@@ -644,13 +644,13 @@ mod tests {
     fn parse_approve_negative_priority_invalid() {
         let cmds = parse_commands("@bors r+ p=-1");
         assert_eq!(cmds.len(), 1);
-        insta::assert_debug_snapshot!(cmds[0], @r###"
+        insta::assert_debug_snapshot!(cmds[0], @r#"
         Err(
             ValidationError(
                 "Priority must be a non-negative integer",
             ),
         )
-        "###);
+        "#);
     }
 
     #[test]
@@ -671,39 +671,39 @@ mod tests {
     fn parse_approve_priority_invalid() {
         let cmds = parse_commands("@bors r+ p=abc");
         assert_eq!(cmds.len(), 1);
-        insta::assert_debug_snapshot!(cmds[0], @r###"
+        insta::assert_debug_snapshot!(cmds[0], @r#"
         Err(
             ValidationError(
                 "Priority must be a non-negative integer",
             ),
         )
-        "###);
+        "#);
     }
 
     #[test]
     fn parse_approve_priority_empty() {
         let cmds = parse_commands("@bors r+ p=");
         assert_eq!(cmds.len(), 1);
-        insta::assert_debug_snapshot!(cmds[0], @r###"
+        insta::assert_debug_snapshot!(cmds[0], @r#"
         Err(
             MissingArgValue {
                 arg: "p",
             },
         )
-        "###);
+        "#);
     }
 
     #[test]
     fn parse_priority_exceeds_max_u32() {
         let cmds = parse_commands("@bors p=4294967296");
         assert_eq!(cmds.len(), 1);
-        insta::assert_debug_snapshot!(cmds[0], @r###"
+        insta::assert_debug_snapshot!(cmds[0], @r#"
         Err(
             ValidationError(
                 "Priority must be a non-negative integer",
             ),
         )
-        "###);
+        "#);
     }
 
     #[test]
@@ -724,39 +724,39 @@ mod tests {
     fn parse_priority_empty() {
         let cmds = parse_commands("@bors p=");
         assert_eq!(cmds.len(), 1);
-        insta::assert_debug_snapshot!(cmds[0], @r###"
+        insta::assert_debug_snapshot!(cmds[0], @r#"
         Err(
             MissingArgValue {
                 arg: "p",
             },
         )
-        "###);
+        "#);
     }
 
     #[test]
     fn parse_priority_invalid() {
         let cmds = parse_commands("@bors p=abc");
         assert_eq!(cmds.len(), 1);
-        insta::assert_debug_snapshot!(cmds[0], @r###"
+        insta::assert_debug_snapshot!(cmds[0], @r#"
         Err(
             ValidationError(
                 "Priority must be a non-negative integer",
             ),
         )
-        "###);
+        "#);
     }
 
     #[test]
     fn parse_priority_negative() {
         let cmds = parse_commands("@bors p=-1");
         assert_eq!(cmds.len(), 1);
-        insta::assert_debug_snapshot!(cmds[0], @r###"
+        insta::assert_debug_snapshot!(cmds[0], @r#"
         Err(
             ValidationError(
                 "Priority must be a non-negative integer",
             ),
         )
-        "###);
+        "#);
     }
 
     #[test]
@@ -876,13 +876,13 @@ mod tests {
     fn parse_approve_rollup_empty() {
         let cmds = parse_commands("@bors r+ rollup=");
         assert_eq!(cmds.len(), 1);
-        insta::assert_debug_snapshot!(cmds[0], @r###"
+        insta::assert_debug_snapshot!(cmds[0], @r#"
         Err(
             MissingArgValue {
                 arg: "rollup",
             },
         )
-        "###);
+        "#);
     }
 
     #[test]
@@ -910,13 +910,13 @@ mod tests {
     fn parse_rollup_empty() {
         let cmds = parse_commands("@bors rollup=");
         assert_eq!(cmds.len(), 1);
-        insta::assert_debug_snapshot!(cmds[0], @r###"
+        insta::assert_debug_snapshot!(cmds[0], @r#"
         Err(
             MissingArgValue {
                 arg: "rollup",
             },
         )
-        "###);
+        "#);
     }
 
     #[test]
@@ -1012,28 +1012,28 @@ line two
 "#,
         );
         assert_eq!(cmds.len(), 1);
-        insta::assert_debug_snapshot!(cmds[0], @r###"
+        insta::assert_debug_snapshot!(cmds[0], @"
         Ok(
             Try {
                 parent: None,
                 jobs: [],
             },
         )
-        "###);
+        ");
     }
 
     #[test]
     fn parse_try() {
         let cmds = parse_commands("@bors try");
         assert_eq!(cmds.len(), 1);
-        insta::assert_debug_snapshot!(cmds[0], @r###"
+        insta::assert_debug_snapshot!(cmds[0], @"
         Ok(
             Try {
                 parent: None,
                 jobs: [],
             },
         )
-        "###);
+        ");
     }
 
     #[test]
@@ -1068,13 +1068,13 @@ line two
     fn parse_try_parent_invalid() {
         let cmds = parse_commands("@bors try parent=foo");
         assert_eq!(cmds.len(), 1);
-        insta::assert_debug_snapshot!(cmds[0], @r###"
+        insta::assert_debug_snapshot!(cmds[0], @r#"
         Err(
             ValidationError(
                 "Try parent has to be a valid commit SHA: SHA must have exactly 40 characters",
             ),
         )
-        "###);
+        "#);
     }
 
     #[test]
@@ -1136,13 +1136,13 @@ line two
     fn parse_try_jobs_empty() {
         let cmds = parse_commands("@bors try jobs=");
         assert_eq!(cmds.len(), 1);
-        insta::assert_debug_snapshot!(cmds[0], @r###"
+        insta::assert_debug_snapshot!(cmds[0], @r#"
         Err(
             MissingArgValue {
                 arg: "jobs",
             },
         )
-        "###);
+        "#);
     }
 
     #[test]
@@ -1150,13 +1150,13 @@ line two
         let cmds =
             parse_commands("@bors try jobs=ci,lint,foo,bar,baz,qux,quux,corge,grault,garply,waldo");
         assert_eq!(cmds.len(), 1);
-        insta::assert_debug_snapshot!(cmds[0], @r###"
+        insta::assert_debug_snapshot!(cmds[0], @r#"
         Err(
             ValidationError(
                 "Try jobs must not have more than 10 jobs",
             ),
         )
-        "###);
+        "#);
     }
 
     #[test]
@@ -1167,7 +1167,7 @@ line two
 for the crater",
         );
         assert_eq!(cmds.len(), 1);
-        insta::assert_debug_snapshot!(cmds[0], @r"
+        insta::assert_debug_snapshot!(cmds[0], @"
         Ok(
             Try {
                 parent: None,
@@ -1199,14 +1199,14 @@ for the crater",
 "#,
         );
         assert_eq!(cmds.len(), 1);
-        insta::assert_debug_snapshot!(cmds[0], @r###"
+        insta::assert_debug_snapshot!(cmds[0], @"
         Ok(
             Try {
                 parent: None,
                 jobs: [],
             },
         )
-        "###)
+        ")
     }
 
     #[test]
@@ -1295,13 +1295,13 @@ for the crater",
     fn parse_delegate_invalid_value() {
         let cmds = parse_commands("@bors delegate=invalid");
         assert_eq!(cmds.len(), 1);
-        insta::assert_debug_snapshot!(cmds[0], @r###"
+        insta::assert_debug_snapshot!(cmds[0], @r#"
         Err(
             ValidationError(
                 "Invalid delegation type `invalid`. Possible values are try/review",
             ),
         )
-        "###);
+        "#);
     }
 
     #[test]

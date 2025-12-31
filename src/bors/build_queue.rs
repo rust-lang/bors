@@ -384,7 +384,7 @@ mod tests {
 
             // The auto build should be completed
             let comment = ctx.get_next_comment_text(()).await?;
-            insta::assert_snapshot!(comment, @r"
+            insta::assert_snapshot!(comment, @"
             :sunny: Test successful - [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1)
             Approved by: `default-user`
             Pushing merge-0-pr-1 to `main`...
@@ -414,7 +414,7 @@ mod tests {
 
             // The auto build should be completed
             let comment = ctx.get_next_comment_text(()).await?;
-            insta::assert_snapshot!(comment, @r"
+            insta::assert_snapshot!(comment, @"
             :sunny: Test successful - [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1)
             Approved by: `default-user`
             Pushing merge-0-pr-1 to `main`...
