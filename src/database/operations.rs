@@ -1,6 +1,7 @@
 use chrono::DateTime;
 use chrono::Utc;
 use sqlx::postgres::PgExecutor;
+use std::collections::{HashMap, HashSet};
 
 use super::ApprovalInfo;
 use super::ApprovalStatus;
@@ -1065,16 +1066,16 @@ pub(crate) async fn clear_auto_build(
     .await
 }
 
-pub(crate) async fn create_rollup_pr_content(
+pub(crate) async fn register_rollup_pr_member(
     executor: impl PgExecutor<'_>,
     repo: &GithubRepoName,
     rollup_pr_number: &PullRequestNumber,
     member_pr_number: &PullRequestNumber,
 ) -> anyhow::Result<()> {
-    measure_db_query("create_rollup_pr", || async {
+    measure_db_query("register_rollup_pr_member", || async {
         sqlx::query!(
             r#"
-        INSERT INTO rollup_contents (repository, rollup_pr_number, member_pr_number)
+        INSERT INTO rollup_member (repository, rollup_pr_number, member_pr_number)
         VALUES ($1, $2, $3)
         "#,
             repo as &GithubRepoName,
@@ -1088,56 +1089,36 @@ pub(crate) async fn create_rollup_pr_content(
     .await
 }
 
-pub(crate) async fn get_rollup_pr_contents(
+pub(crate) async fn get_nonclosed_rollups(
     executor: impl PgExecutor<'_>,
     repo: &GithubRepoName,
-    rollup_pr_number: &PullRequestNumber,
-) -> anyhow::Result<Vec<PullRequestNumber>> {
-    measure_db_query("get_rollup_pr_contents", || async {
-        let pr_numbers = sqlx::query_scalar!(
+) -> anyhow::Result<HashMap<PullRequestNumber, HashSet<PullRequestNumber>>> {
+    measure_db_query("get_nonclosed_rollups", || async {
+        let mut stream = sqlx::query!(
             r#"
-            SELECT
-                member_pr_number as "member_pr_number: i64"
-            FROM rollup_contents
-            WHERE repository = $1
-              AND rollup_pr_number = $2
-            "#,
+        SELECT rm.rollup_pr_number, rm.member_pr_number
+        FROM rollup_member rm
+        JOIN pull_request pr
+          ON pr.repository = rm.repository
+         AND pr.number = rm.rollup_pr_number
+        WHERE rm.repository = $1
+          AND pr.status IN ('open', 'draft')
+        ORDER BY rm.rollup_pr_number;
+                "#,
             repo as &GithubRepoName,
-            rollup_pr_number.0 as i32,
         )
-        .fetch_all(executor)
-        .await?
-        .into_iter()
-        .map(|num| PullRequestNumber(num as u64))
-        .collect();
-        Ok(pr_numbers)
-    })
-    .await
-}
+        .fetch(executor);
 
-pub(crate) async fn get_rollups_for_pr(
-    executor: impl PgExecutor<'_>,
-    repo: &GithubRepoName,
-    pr_number: &PullRequestNumber,
-) -> anyhow::Result<Vec<PullRequestNumber>> {
-    measure_db_query("get_rollups_for_pr", || async {
-        let rollup_pr_numbers = sqlx::query_scalar!(
-            r#"
-            SELECT
-                rollup_pr_number as "rollup_pr_number: i64"
-            FROM rollup_contents
-            WHERE repository = $1
-              AND member_pr_number = $2
-            "#,
-            repo as &GithubRepoName,
-            pr_number.0 as i32,
-        )
-        .fetch_all(executor)
-        .await?
-        .into_iter()
-        .map(|num| PullRequestNumber(num as u64))
-        .collect();
-        Ok(rollup_pr_numbers)
+        let mut rollups_map: HashMap<PullRequestNumber, HashSet<PullRequestNumber>> =
+            HashMap::new();
+        while let Some(row) = stream.try_next().await? {
+            let rollup_pr = PullRequestNumber(row.rollup_pr_number as u64);
+            let member_pr = PullRequestNumber(row.member_pr_number as u64);
+
+            rollups_map.entry(rollup_pr).or_default().insert(member_pr);
+        }
+
+        Ok(rollups_map)
     })
     .await
 }

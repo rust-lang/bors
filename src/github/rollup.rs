@@ -386,14 +386,14 @@ async fn create_rollup(
         )
         .await
         .context("Cannot create PR")?;
-    
-    db.create_rollup(
-        &repo,
+
+    db.register_rollup_members(
+        &base_repo,
         &pr.number,
         &successes.iter().map(|pr| pr.number).collect::<Vec<_>>(),
     )
     .await
-    .context("Cannot create rollup contents record - ensure there are no duplicates in the pr_nums input")?;
+    .context("Cannot register rollup member record")?;
 
     // Set the rollup label
     gh_client
@@ -413,6 +413,7 @@ mod tests {
         User, default_repo_name, run_test,
     };
     use http::StatusCode;
+    use std::collections::{HashMap, HashSet};
 
     #[sqlx::test]
     async fn rollup_missing_fork(pool: sqlx::PgPool) {
@@ -536,17 +537,15 @@ mod tests {
                 .await?
                 .assert_status(StatusCode::SEE_OTHER);
             assert_eq!(
-                ctx.db()
-                    .get_rollup_pr_contents(&default_repo_name(), &PullRequestNumber(6))
-                    .await?,
-                vec![pr2.number, pr3.number, pr5.number]
-            );
-            // Failed merges never make it to the rollup, so this PR shouldn't be present
-            assert_eq!(
-                ctx.db()
-                    .get_rollups_for_pr(&default_repo_name(), &PullRequestNumber(4))
-                    .await?,
-                vec![]
+                ctx.db().get_nonclosed_rollups(&default_repo_name()).await?,
+                HashMap::from([(
+                    PullRequestNumber(6),
+                    HashSet::from_iter(vec![
+                        PullRequestNumber(2),
+                        PullRequestNumber(3),
+                        PullRequestNumber(5)
+                    ])
+                )])
             );
             Ok(())
         })
@@ -671,14 +670,11 @@ mod tests {
 
             ctx.pr(4).await.expect_added_labels(&["rollup"]);
             assert_eq!(
-                ctx.db()
-                    .get_rollup_pr_contents(&pr2.repo, &PullRequestNumber(4))
-                    .await?,
-                vec![pr2.number, pr3.number]
-            );
-            assert_eq!(
-                ctx.db().get_rollups_for_pr(&pr2.repo, &pr2.number).await?,
-                vec![PullRequestNumber(4)]
+                ctx.db().get_nonclosed_rollups(&pr2.repo).await?,
+                HashMap::from([(
+                    PullRequestNumber(4),
+                    HashSet::from_iter(vec![PullRequestNumber(3), PullRequestNumber(2)])
+                )])
             );
 
             Ok(())
@@ -714,43 +710,29 @@ mod tests {
             make_rollup(ctx, &[&pr3]).await?;
             // Ensure both rollups have the requested PRs
             assert_eq!(
-                ctx.db()
-                    .get_rollup_pr_contents(&pr2.repo, &PullRequestNumber(4))
-                    .await?,
-                vec![pr2.number, pr3.number]
-            );
-            assert_eq!(
-                ctx.db()
-                    .get_rollup_pr_contents(&pr2.repo, &PullRequestNumber(5))
-                    .await?,
-                vec![pr3.number]
-            );
-            // And ensure PR 3 is associated to both rollups
-            assert_eq!(
-                ctx.db().get_rollups_for_pr(&pr3.repo, &pr3.number).await?,
-                vec![PullRequestNumber(4), PullRequestNumber(5)]
+                ctx.db().get_nonclosed_rollups(&pr2.repo).await?,
+                HashMap::from([(
+                    PullRequestNumber(5),
+                    HashSet::from_iter(vec![PullRequestNumber(3)])
+                )])
             );
             Ok(())
         })
-            .await;
+        .await;
         let repo = gh.get_repo(());
-        insta::assert_snapshot!(repo.lock().get_pr(4).description, @r"
+        insta::assert_snapshot!(repo.lock().get_pr(4).description, @"
         Successful merges:
 
          - #2 (Title of PR 2)
          - #3 (Title of PR 3)
 
         r? @ghost
-        @rustbot modify labels: rollup
-        ");
-        insta::assert_snapshot!(repo.lock().get_pr(5).description, @r"
-        Successful merges:
 
-         - #3 (Title of PR 3)
-
-        r? @ghost
-        @rustbot modify labels: rollup
+        <!-- homu-ignore:start -->
+        [Create a similar rollup](https://bors-test.com/queue/borstest?prs=2,3)
+        <!-- homu-ignore:end -->
         ");
+    }
 
     #[sqlx::test]
     async fn rollup_order_by_priority(pool: sqlx::PgPool) {
@@ -882,12 +864,16 @@ also include this pls"
         prs: &[&PullRequest],
     ) -> anyhow::Result<ApiResponse> {
         let prs = prs.iter().map(|pr| pr.number).collect::<Vec<_>>();
-        ctx.api_request(rollup_request(
-            &rollup_user().name,
-            default_repo_name(),
-            &prs,
-        ))
-        .await
+        let response = ctx
+            .api_request(rollup_request(
+                &rollup_user().name,
+                default_repo_name(),
+                &prs,
+            ))
+            .await;
+        // Trigger a refresh so that the new rollup PR can be upserted in the pull_request table
+        ctx.refresh_prs().await;
+        response
     }
 
     fn rollup_state() -> GitHub {

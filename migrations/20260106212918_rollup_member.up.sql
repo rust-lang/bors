@@ -1,4 +1,5 @@
-CREATE TABLE IF NOT EXISTS rollup_contents
+-- Add up migration script here
+CREATE TABLE IF NOT EXISTS rollup_member
 (
     -- We have to store the PR through their numbers rather than a FK to the pull_request table. This is due to the rollup PR
     -- being created at the time of record insertion in this table, so we won't have an entry in pull_request for it
@@ -8,4 +9,3 @@ CREATE TABLE IF NOT EXISTS rollup_contents
 
     PRIMARY KEY (repository, rollup_pr_number, member_pr_number)
 );
-CREATE INDEX rollup_contents_member_pr_number_idx ON rollup_contents (repository, member_pr_number);

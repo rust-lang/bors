@@ -1,10 +1,10 @@
 use sqlx::PgPool;
+use std::collections::{HashMap, HashSet};
 
 use crate::bors::comment::CommentTag;
 use crate::bors::{BuildKind, PullRequestStatus, RollupMode};
 use crate::database::operations::{
-    create_rollup_pr_content, get_rollup_pr_contents, get_rollups_for_pr,
-    update_pr_auto_build_id,
+    get_nonclosed_rollups, register_rollup_pr_member, update_pr_auto_build_id,
 };
 use crate::database::{
     BuildModel, BuildStatus, CommentModel, PullRequestModel, RepoModel, TreeState, WorkflowModel,
@@ -343,7 +343,7 @@ impl PgDbClient {
     /// Register the contents of a rollup in the DB.
     /// The contents are stored as rollup PR number - member PR number records, scoped under a specific repository.
     /// All records are inserted in a single transaction.
-    pub async fn create_rollup(
+    pub async fn register_rollup_members(
         &self,
         repo: &GithubRepoName,
         rollup_pr_number: &PullRequestNumber,
@@ -351,27 +351,17 @@ impl PgDbClient {
     ) -> anyhow::Result<()> {
         let mut tx = self.pool.begin().await?;
         for member_pr_number in member_pr_numbers {
-            create_rollup_pr_content(&mut *tx, repo, rollup_pr_number, member_pr_number).await?;
+            register_rollup_pr_member(&mut *tx, repo, rollup_pr_number, member_pr_number).await?;
         }
         tx.commit().await?;
         Ok(())
     }
 
-    /// Returns the numbers of all the PRs associated with the requested rollup.
-    pub async fn get_rollup_pr_contents(
+    /// Returns a map of rollup PR numbers to the set of member PR numbers that are part of that rollup.
+    pub async fn get_nonclosed_rollups(
         &self,
         repo: &GithubRepoName,
-        rollup_pr_number: &PullRequestNumber,
-    ) -> anyhow::Result<Vec<PullRequestNumber>> {
-        get_rollup_pr_contents(&self.pool, repo, rollup_pr_number).await
-    }
-
-    /// Returns all the rollups associated with the requested PR.
-    pub async fn get_rollups_for_pr(
-        &self,
-        repo: &GithubRepoName,
-        pr_number: &PullRequestNumber,
-    ) -> anyhow::Result<Vec<PullRequestNumber>> {
-        get_rollups_for_pr(&self.pool, repo, pr_number).await
+    ) -> anyhow::Result<HashMap<PullRequestNumber, HashSet<PullRequestNumber>>> {
+        get_nonclosed_rollups(&self.pool, repo).await
     }
 }
