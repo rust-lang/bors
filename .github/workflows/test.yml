@@ -24,6 +24,9 @@ jobs:
           toolchain: 1.88.0
           components: clippy, rustfmt
 
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2.8.2
+
       - name: Install sqlx-cli
         run: cargo install sqlx-cli@0.7.4 --locked --no-default-features --features native-tls,postgres
 
