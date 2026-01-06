@@ -152,6 +152,7 @@ async fn api_merge_queue(
         title: String,
         author: String,
         status: PullRequestStatus,
+        head_branch: String,
         base_branch: String,
         priority: Option<u64>,
         approver: Option<String>,
@@ -182,6 +183,7 @@ async fn api_merge_queue(
                 author,
                 assignees: _,
                 pr_status,
+                head_branch,
                 base_branch,
                 mergeable_state: _,
                 approval_status,
@@ -202,6 +204,7 @@ async fn api_merge_queue(
                     bors::PullRequestStatus::Merged => PullRequestStatus::Merged,
                     bors::PullRequestStatus::Open => PullRequestStatus::Open,
                 },
+                head_branch,
                 base_branch,
                 priority: priority.map(|p| p as u64),
                 approver: match approval_status {
@@ -391,7 +394,7 @@ mod tests {
                 .await?
                 .assert_ok()
                 .into_body();
-            insta::assert_snapshot!(response, @r#"[{"number":1,"title":"Title of PR 1","author":"default-user","status":"open","base_branch":"main","priority":null,"approver":"default-user","try_build":null,"auto_build":null}]"#);
+            insta::assert_snapshot!(response, @r#"[{"number":1,"title":"Title of PR 1","author":"default-user","status":"open","head_branch":"pr-1","base_branch":"main","priority":null,"approver":"default-user","try_build":null,"auto_build":null}]"#);
             Ok(())
         })
         .await;

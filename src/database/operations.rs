@@ -52,6 +52,7 @@ pub(crate) async fn get_pull_request(
         pr.priority,
         pr.rollup as "rollup: RollupMode",
         pr.delegated_permission as "delegated_permission: DelegatedPermission",
+        pr.head_branch,
         pr.base_branch,
         pr.mergeable_state as "mergeable_state: MergeableState",
         pr.created_at as "created_at: DateTime<Utc>",
@@ -100,21 +101,43 @@ pub(crate) async fn upsert_pull_request(
     repo: &GithubRepoName,
     params: &UpsertPullRequestParams,
 ) -> anyhow::Result<PullRequestModel> {
+    let UpsertPullRequestParams {
+        pr_number,
+        title,
+        author,
+        assignees,
+        head_branch,
+        base_branch,
+        mergeable_state,
+        pr_status,
+    } = params;
+
     measure_db_query("upsert_pull_request", || async {
         let record = sqlx::query_as!(
             PullRequestModel,
             r#"
             WITH upserted_pr AS (
-                INSERT INTO pull_request (repository, number, title, author, assignees, base_branch, mergeable_state, status)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                INSERT INTO pull_request (
+                    repository,
+                    number,
+                    title,
+                    author,
+                    assignees,
+                    head_branch,
+                    base_branch,
+                    mergeable_state,
+                    status
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
                 ON CONFLICT (repository, number)
                 DO UPDATE SET
                     title = $3,
                     author = $4,
                     assignees = $5,
-                    base_branch = $6,
-                    mergeable_state = $7,
-                    status = $8
+                    head_branch = $6,
+                    base_branch = $7,
+                    mergeable_state = $8,
+                    status = $9
                 RETURNING *
             )
             SELECT
@@ -132,6 +155,7 @@ pub(crate) async fn upsert_pull_request(
                 pr.priority,
                 pr.rollup as "rollup: RollupMode",
                 pr.delegated_permission as "delegated_permission: DelegatedPermission",
+                pr.head_branch,
                 pr.base_branch,
                 pr.mergeable_state as "mergeable_state: MergeableState",
                 pr.created_at as "created_at: DateTime<Utc>",
@@ -142,13 +166,14 @@ pub(crate) async fn upsert_pull_request(
             LEFT JOIN build AS auto_build ON pr.auto_build_id = auto_build.id
             "#,
             repo as &GithubRepoName,
-            params.pr_number.0 as i32,
-            &params.title,
-            &params.author,
-            params.assignees.join(","),
-            &params.base_branch,
-            params.mergeable_state as _,
-            params.pr_status as _,
+            pr_number.0 as i32,
+            title,
+            author,
+            assignees.join(","),
+            head_branch,
+            base_branch,
+            mergeable_state as _,
+            pr_status as _,
         )
         .fetch_one(executor)
         .await?;
@@ -180,6 +205,7 @@ pub(crate) async fn get_nonclosed_pull_requests(
                 pr.priority,
                 pr.rollup as "rollup: RollupMode",
                 pr.delegated_permission as "delegated_permission: DelegatedPermission",
+                pr.head_branch,
                 pr.base_branch,
                 pr.mergeable_state as "mergeable_state: MergeableState",
                 pr.created_at as "created_at: DateTime<Utc>",
@@ -246,6 +272,7 @@ pub(crate) async fn get_prs_with_unknown_mergeability_state(
                 pr.priority,
                 pr.rollup as "rollup: RollupMode",
                 pr.delegated_permission as "delegated_permission: DelegatedPermission",
+                pr.head_branch,
                 pr.base_branch,
                 pr.mergeable_state as "mergeable_state: MergeableState",
                 pr.created_at as "created_at: DateTime<Utc>",
@@ -306,6 +333,7 @@ pub(crate) async fn update_mergeable_states_by_base_branch(
                 pr.priority,
                 pr.rollup as "rollup: RollupMode",
                 pr.delegated_permission as "delegated_permission: DelegatedPermission",
+                pr.head_branch,
                 pr.base_branch,
                 pr.mergeable_state as "mergeable_state: MergeableState",
                 pr.created_at as "created_at: DateTime<Utc>",
@@ -436,6 +464,7 @@ SELECT
     pr.status as "pr_status: PullRequestStatus",
     pr.delegated_permission as "delegated_permission: DelegatedPermission",
     pr.priority,
+    pr.head_branch,
     pr.base_branch,
     pr.mergeable_state as "mergeable_state: MergeableState",
     pr.rollup as "rollup: RollupMode",
@@ -976,6 +1005,7 @@ pub(crate) async fn get_merge_queue_prs(
                 pr.priority,
                 pr.rollup as "rollup: RollupMode",
                 pr.delegated_permission as "delegated_permission: DelegatedPermission",
+                pr.head_branch,
                 pr.base_branch,
                 pr.mergeable_state as "mergeable_state: MergeableState",
                 pr.created_at as "created_at: DateTime<Utc>",

@@ -118,6 +118,7 @@ pub(super) async fn handle_pull_request_opened(
                 title: payload.pull_request.title.clone(),
                 author: payload.pull_request.author.username.clone(),
                 assignees,
+                head_branch: payload.pull_request.head.name.clone(),
                 base_branch: payload.pull_request.base.name.clone(),
                 mergeable_state: payload.pull_request.mergeable_state.clone().into(),
                 pr_status,
