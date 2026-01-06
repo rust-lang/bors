@@ -1,8 +1,12 @@
 name: Test
 
 on:
-  pull_request:
-  merge_group:
+  pull_request: { }
+  merge_group: { }
+  # We only run this on push to main to prime CI cache
+  push:
+    branches:
+      - main
 
 jobs:
   test:
