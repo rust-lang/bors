@@ -44,4 +44,7 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Kick ECS to deploy new version
-        run: aws ecs update-service --service bors --cluster bors --force-new-deployment
+        run: |
+          aws ecs update-service --service bors --cluster bors --force-new-deployment
+          # Poll every 15 seconds until a successful state has been reached. Fail after 40 failed checks.
+          aws ecs wait services-stable --services bors --cluster bors
