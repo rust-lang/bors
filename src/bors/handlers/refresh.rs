@@ -322,6 +322,25 @@ timeout = 3600
         .await;
     }
 
+    #[sqlx::test]
+    async fn refresh_pr_with_status_closed_draft(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            let pr = ctx.open_pr((), |_| {}).await?;
+            ctx.modify_pr(pr.id(), |pr| {
+                // Both mark as closed as draft
+                pr.close();
+                pr.convert_to_draft();
+            });
+
+            ctx.refresh_prs().await;
+            ctx.pr(pr.id())
+                .await
+                .expect_status(PullRequestStatus::Closed);
+            Ok(())
+        })
+        .await;
+    }
+
     async fn with_mocked_time<Fut: Future<Output = ()>>(in_future: Duration, future: Fut) {
         // It is important to use this function only with a single threaded runtime,
         // otherwise the `MOCK_TIME` variable might get mixed up between different threads.

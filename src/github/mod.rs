@@ -157,12 +157,12 @@ impl From<octocrab::models::pulls::PullRequest> for PullRequest {
             title: pr.title.unwrap_or_default(),
             message: pr.body.unwrap_or_default(),
             mergeable_state: pr.mergeable_state.unwrap_or(MergeableState::Unknown),
-            status: if pr.draft == Some(true) {
-                PullRequestStatus::Draft
-            } else if pr.merged_at.is_some() {
+            status: if pr.merged_at.is_some() {
                 PullRequestStatus::Merged
             } else if pr.closed_at.is_some() {
                 PullRequestStatus::Closed
+            } else if pr.draft == Some(true) {
+                PullRequestStatus::Draft
             } else {
                 PullRequestStatus::Open
             },
