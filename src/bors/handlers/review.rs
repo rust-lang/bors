@@ -239,8 +239,10 @@ pub(super) async fn command_set_rollup(
     author: &GithubUser,
     rollup: RollupMode,
 ) -> anyhow::Result<()> {
-    if !has_permission(&repo_state, author, pr, PermissionType::Review).await? {
-        deny_request(&repo_state, pr.number(), author, PermissionType::Review).await?;
+    // Require only try for rollup commands, because rust-timer uses them, and we don't want to
+    // grant it approve permissions.
+    if !has_permission(&repo_state, author, pr, PermissionType::Try).await? {
+        deny_request(&repo_state, pr.number(), author, PermissionType::Try).await?;
         return Ok(());
     }
     db.set_rollup(pr.db, rollup).await
@@ -1078,6 +1080,18 @@ approved = ["+foo", "+baz", "-bar", "-foo2"]
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.post_comment("@bors rollup=maybe").await?;
             ctx.wait_for_pr((), |pr| pr.rollup == Some(RollupMode::Maybe))
+                .await?;
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn set_rollup_try_permissions(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            ctx.post_comment(Comment::new((), "@bors rollup=never").with_author(User::try_user()))
+                .await?;
+            ctx.wait_for_pr((), |pr| pr.rollup == Some(RollupMode::Never))
                 .await?;
             Ok(())
         })
