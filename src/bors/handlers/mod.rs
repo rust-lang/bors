@@ -71,6 +71,12 @@ pub async fn handle_bors_repository_event(
                 return Ok(());
             }
 
+            // Also ignore comments made by homu
+            if comment.author.username == "bors" {
+                tracing::trace!("Ignoring comment {comment:?} because it was authored by homu");
+                return Ok(());
+            }
+
             let span = tracing::info_span!(
                 "Comment",
                 pr = format!("{}#{}", comment.repository, comment.pr_number),
