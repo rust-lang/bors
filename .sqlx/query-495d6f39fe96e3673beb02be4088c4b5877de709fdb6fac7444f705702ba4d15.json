@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n    SELECT\n        pr.id,\n        pr.repository as \"repository: GithubRepoName\",\n        pr.number as \"number!: i64\",\n        pr.title,\n        pr.author,\n        pr.assignees as \"assignees: Assignees\",\n        (\n            pr.approved_by,\n            pr.approved_sha\n        ) AS \"approval_status!: ApprovalStatus\",\n        pr.status as \"pr_status: PullRequestStatus\",\n        pr.priority,\n        pr.rollup as \"rollup: RollupMode\",\n        pr.delegated_permission as \"delegated_permission: DelegatedPermission\",\n        pr.base_branch,\n        pr.mergeable_state as \"mergeable_state: MergeableState\",\n        pr.created_at as \"created_at: DateTime<Utc>\",\n        try_build AS \"try_build: BuildModel\",\n        auto_build AS \"auto_build: BuildModel\"\n    FROM pull_request as pr\n    LEFT JOIN build AS try_build ON pr.try_build_id = try_build.id\n    LEFT JOIN build AS auto_build ON pr.auto_build_id = auto_build.id\n    WHERE pr.repository = $1 AND\n          pr.number = $2\n    ",
+  "query": "\n            WITH upserted_pr AS (\n                INSERT INTO pull_request (\n                    repository,\n                    number,\n                    title,\n                    author,\n                    assignees,\n                    head_branch,\n                    base_branch,\n                    mergeable_state,\n                    status\n                )\n                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)\n                ON CONFLICT (repository, number)\n                DO UPDATE SET\n                    title = $3,\n                    author = $4,\n                    assignees = $5,\n                    head_branch = $6,\n                    base_branch = $7,\n                    mergeable_state = $8,\n                    status = $9\n                RETURNING *\n            )\n            SELECT\n                pr.id,\n                pr.repository as \"repository: GithubRepoName\",\n                pr.number as \"number!: i64\",\n                pr.title,\n                pr.author,\n                pr.assignees as \"assignees: Assignees\",\n                (\n                    pr.approved_by,\n                    pr.approved_sha\n                ) AS \"approval_status!: ApprovalStatus\",\n                pr.status as \"pr_status: PullRequestStatus\",\n                pr.priority,\n                pr.rollup as \"rollup: RollupMode\",\n                pr.delegated_permission as \"delegated_permission: DelegatedPermission\",\n                pr.head_branch,\n                pr.base_branch,\n                pr.mergeable_state as \"mergeable_state: MergeableState\",\n                pr.created_at as \"created_at: DateTime<Utc>\",\n                try_build AS \"try_build: BuildModel\",\n                auto_build AS \"auto_build: BuildModel\"\n            FROM upserted_pr as pr\n            LEFT JOIN build AS try_build ON pr.try_build_id = try_build.id\n            LEFT JOIN build AS auto_build ON pr.auto_build_id = auto_build.id\n            ",
   "describe": {
     "columns": [
       {
@@ -60,21 +60,26 @@
       },
       {
         "ordinal": 11,
-        "name": "base_branch",
+        "name": "head_branch",
         "type_info": "Text"
       },
       {
         "ordinal": 12,
-        "name": "mergeable_state: MergeableState",
+        "name": "base_branch",
         "type_info": "Text"
       },
       {
         "ordinal": 13,
+        "name": "mergeable_state: MergeableState",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 14,
         "name": "created_at: DateTime<Utc>",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 14,
+        "ordinal": 15,
         "name": "try_build: BuildModel",
         "type_info": {
           "Custom": {
@@ -123,7 +128,7 @@
         }
       },
       {
-        "ordinal": 15,
+        "ordinal": 16,
         "name": "auto_build: BuildModel",
         "type_info": {
           "Custom": {
@@ -175,7 +180,14 @@
     "parameters": {
       "Left": [
         "Text",
-        "Int8"
+        "Int8",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text"
       ]
     },
     "nullable": [
@@ -193,9 +205,10 @@
       false,
       false,
       false,
-      null,
-      null
+      false,
+      true,
+      true
     ]
   },
-  "hash": "62763d313a8278147d0f6fea3dd3d945e77bbdcf50e3fcfba029f24ce7481618"
+  "hash": "495d6f39fe96e3673beb02be4088c4b5877de709fdb6fac7444f705702ba4d15"
 }

@@ -390,6 +390,8 @@ pub struct PullRequestModel {
     pub assignees: Vec<String>,
     /// The GitHub PR state: open, closed, draft, or merged.
     pub pr_status: PullRequestStatus,
+    /// The source branch of the PR.
+    pub head_branch: String,
     /// The target branch this PR will be merged into.
     pub base_branch: String,
     /// GitHub's determination of PR mergeability.
@@ -572,6 +574,7 @@ pub struct UpsertPullRequestParams {
     pub title: String,
     pub author: String,
     pub assignees: Vec<String>,
+    pub head_branch: String,
     pub base_branch: String,
     pub mergeable_state: MergeableState,
     pub pr_status: PullRequestStatus,
@@ -584,6 +587,7 @@ impl From<PullRequest> for UpsertPullRequestParams {
             title: pr.title,
             author: pr.author.username,
             assignees: pr.assignees.into_iter().map(|a| a.username).collect(),
+            head_branch: pr.head.name,
             base_branch: pr.base.name,
             mergeable_state: pr.mergeable_state.into(),
             pr_status: pr.status,

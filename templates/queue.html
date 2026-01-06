@@ -180,6 +180,8 @@
                 <th>Mergeable</th>
                 <th>Title</th>
                 <th>Author</th>
+                <th>Head branch</th>
+                <th>Base branch</th>
                 <th>Assignees</th>
                 <th>Approved by</th>
                 <th>Priority</th>
@@ -224,6 +226,8 @@
                 </td>
                 <td>{{ pr.title }}</td>
                 <td>{{ pr.author }}</td>
+                <td>{{ pr.head_branch }}</td>
+                <td>{{ pr.base_branch }}</td>
                 <td>{{ pr.assignees|join(", ") }}</td>
                 <td>
                     {%- if let Some(approver) = pr.approver() -%}
@@ -290,12 +294,14 @@
             },
             pageLength: 75,
             columns: [
-                { name: "select", orderable: false, className: "select-checkbox" },
+                { name: "select", orderable: false, className: "select-checkbox", width: "10px" },
                 { name: "number" },
                 { name: "status" },
                 { name: "mergeable" },
-                { name: "title" },
+                { name: "title", width: "40%" },
                 { name: "author" },
+                { name: "head-branch" },
+                { name: "base-branch" },
                 { name: "assignees" },
                 { name: "approved_by" },
                 { name: "priority" },
@@ -325,6 +331,7 @@
                     }
                 }
             ],
+          autoWidth: false,
             order: [],
             select: {
                 style: "multi",

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n                pr.id,\n                pr.repository as \"repository: GithubRepoName\",\n                pr.number as \"number!: i64\",\n                pr.title,\n                pr.author,\n                pr.assignees as \"assignees: Assignees\",\n                (\n                    pr.approved_by,\n                    pr.approved_sha\n                ) AS \"approval_status!: ApprovalStatus\",\n                pr.status as \"pr_status: PullRequestStatus\",\n                pr.priority,\n                pr.rollup as \"rollup: RollupMode\",\n                pr.delegated_permission as \"delegated_permission: DelegatedPermission\",\n                pr.base_branch,\n                pr.mergeable_state as \"mergeable_state: MergeableState\",\n                pr.created_at as \"created_at: DateTime<Utc>\",\n                try_build AS \"try_build: BuildModel\",\n                auto_build AS \"auto_build: BuildModel\"\n            FROM pull_request as pr\n            LEFT JOIN build AS try_build ON pr.try_build_id = try_build.id\n            LEFT JOIN build AS auto_build ON pr.auto_build_id = auto_build.id\n            WHERE pr.repository = $1\n              AND pr.mergeable_state = 'unknown'\n              AND pr.status IN ('open', 'draft')\n            ",
+  "query": "\n            SELECT\n                pr.id,\n                pr.repository as \"repository: GithubRepoName\",\n                pr.number as \"number!: i64\",\n                pr.title,\n                pr.author,\n                pr.assignees as \"assignees: Assignees\",\n                (\n                    pr.approved_by,\n                    pr.approved_sha\n                ) AS \"approval_status!: ApprovalStatus\",\n                pr.status as \"pr_status: PullRequestStatus\",\n                pr.priority,\n                pr.rollup as \"rollup: RollupMode\",\n                pr.delegated_permission as \"delegated_permission: DelegatedPermission\",\n                pr.head_branch,\n                pr.base_branch,\n                pr.mergeable_state as \"mergeable_state: MergeableState\",\n                pr.created_at as \"created_at: DateTime<Utc>\",\n                try_build AS \"try_build: BuildModel\",\n                auto_build AS \"auto_build: BuildModel\"\n            FROM pull_request as pr\n            LEFT JOIN build AS try_build ON pr.try_build_id = try_build.id\n            LEFT JOIN build AS auto_build ON pr.auto_build_id = auto_build.id\n            WHERE pr.repository = $1\n              AND pr.status = 'open'\n              AND pr.approved_by IS NOT NULL\n              AND pr.mergeable_state = 'mergeable'\n              AND (\n                -- We ALWAYS need to return pending and successful PRs, regardless of tree state\n                auto_build.status IN ('pending', 'success') OR (\n                    -- For PRs without a build status, we check if they pass the tree state\n                    -- priority check, if the tree is closed\n                    auto_build.status IS NULL AND ($2::int IS NULL OR pr.priority >= $2)\n                )\n              )\n            ",
   "describe": {
     "columns": [
       {
@@ -60,21 +60,26 @@
       },
       {
         "ordinal": 11,
-        "name": "base_branch",
+        "name": "head_branch",
         "type_info": "Text"
       },
       {
         "ordinal": 12,
-        "name": "mergeable_state: MergeableState",
+        "name": "base_branch",
         "type_info": "Text"
       },
       {
         "ordinal": 13,
+        "name": "mergeable_state: MergeableState",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 14,
         "name": "created_at: DateTime<Utc>",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 14,
+        "ordinal": 15,
         "name": "try_build: BuildModel",
         "type_info": {
           "Custom": {
@@ -123,7 +128,7 @@
         }
       },
       {
-        "ordinal": 15,
+        "ordinal": 16,
         "name": "auto_build: BuildModel",
         "type_info": {
           "Custom": {
@@ -174,7 +179,8 @@
     ],
     "parameters": {
       "Left": [
-        "Text"
+        "Text",
+        "Int4"
       ]
     },
     "nullable": [
@@ -192,9 +198,10 @@
       false,
       false,
       false,
+      false,
       null,
       null
     ]
   },
-  "hash": "483efa3070e78c109d493533ca114433d1228427b35742760521487a9bc0be51"
+  "hash": "e66ce225996569c4a13190630dd352f4f811561028917aa513d2cfe3db6a4fe5"
 }
