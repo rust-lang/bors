@@ -319,6 +319,16 @@ pub async fn queue_handler(
     let prs = db.get_nonclosed_pull_requests(&repo.name).await?;
     let prs = sort_queue_prs(prs);
 
+    // Note: this assumed that there is ever at most a single pending build
+    let pending_build = prs.iter().find_map(|pr| match pr.queue_status() {
+        QueueStatus::Pending(_, build) => Some(build),
+        _ => None,
+    });
+    let pending_workflow = match pending_build {
+        Some(build) => db.get_workflows_for_build(&build).await?.into_iter().next(),
+        None => None,
+    };
+
     let (in_queue_count, failed_count) = prs.iter().fold((0, 0), |(in_queue, failed), pr| {
         let (in_queue_inc, failed_inc) = match pr.queue_status() {
             QueueStatus::Approved(..) => (1, 0),
@@ -345,6 +355,7 @@ pub async fn queue_handler(
             failed_count,
         },
         prs,
+        pending_workflow,
         selected_rollup_prs: params.pull_requests.map(|prs| prs.0).unwrap_or_default(),
     })
     .into_response())

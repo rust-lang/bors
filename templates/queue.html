@@ -212,7 +212,21 @@
                     {%- if let Some(build) = pending_build -%}
                     data-created-at="{{ build.created_at.timestamp_millis() }}"
                     {%- endif -%}>
-                    {{ crate::templates::status_text(pr) }}
+                    {%- match pr.queue_status() -%}
+                      {%- when QueueStatus::Approved(_) -%}
+                        approved
+                      {%- when QueueStatus::ReadyForMerge(_, _) -%}
+                        ready for merge
+                      {%- when QueueStatus::Pending(_, _) -%}
+                        {%- if let Some(workflow) = pending_workflow -%}
+                        <a href="{{ workflow.url }}">pending</a>
+                        {%- else -%}
+                          pending
+                        {%- endif -%}
+                      {%- when QueueStatus::Failed(_, _) -%}
+                        failed
+                      {%- when QueueStatus::NotApproved -%}
+                    {%- endmatch -%}
                     <span class="elapsed-time-display"></span>
                 </td>
                 <td class="marker {%~ match pr.mergeable_state -%}
@@ -512,6 +526,8 @@
                 output += ' ';
             }
             output += `${minutes}m`;
+        } else if (output.length === 0) {
+            output = '<1m';
         }
         if (output.length > 0) {
             return ` (${output})`;
