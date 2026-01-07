@@ -7,7 +7,7 @@ use crate::bors::RepositoryState;
 use crate::bors::mergeability_queue::MergeabilityQueueSender;
 use crate::database::PullRequestModel;
 use crate::github::PullRequest;
-use crate::{PgDbClient, TeamApiClient, database};
+use crate::{PgDbClient, TeamApiClient};
 
 /// Reload the team DB bors permissions for the given repository.
 pub async fn reload_repository_permissions(
@@ -139,7 +139,7 @@ fn needs_update_in_db(db_pr: &PullRequestModel, gh_pr: &PullRequest) -> bool {
         pr_status: db_status,
         head_branch: db_head_branch,
         base_branch: db_base_branch,
-        mergeable_state: db_mergeable_state,
+        mergeable_state: _,
         approval_status: _,
         delegated_permission: _,
         priority: _,
@@ -154,7 +154,9 @@ fn needs_update_in_db(db_pr: &PullRequestModel, gh_pr: &PullRequest) -> bool {
         head,
         base,
         title,
-        mergeable_state,
+        // It seems that when we query PRs in bulk from GitHub, the mergeability status is
+        // unknown.. so we do not check it here.
+        mergeable_state: _,
         message: _,
         author: _,
         assignees,
@@ -166,9 +168,6 @@ fn needs_update_in_db(db_pr: &PullRequestModel, gh_pr: &PullRequest) -> bool {
         return true;
     }
     if title != db_title {
-        return true;
-    }
-    if database::MergeableState::from(mergeable_state.clone()) != *db_mergeable_state {
         return true;
     }
     if assignees
