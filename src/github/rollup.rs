@@ -203,7 +203,7 @@ async fn create_rollup(
     }
 
     // Ensure user has a fork
-    if let Err(_) = user_client.client.get_repo().await {
+    if user_client.client.get_repo().await.is_err() {
         return Err(RollupError::ForkNotFound {
             repo_name: user_client.client.repository().clone(),
         });
