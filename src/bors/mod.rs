@@ -287,10 +287,8 @@ pub fn make_text_ignored_by_bors(text: &str) -> String {
     format!("{IGNORE_BLOCK_START}\n{text}\n{IGNORE_BLOCK_END}")
 }
 
-pub fn create_merge_commit_message(pr: handlers::PullRequestData, merge_type: MergeType) -> String {
-    /// Prefix used to specify custom try jobs in PR descriptions.
-    const CUSTOM_TRY_JOB_PREFIX: &str = "try-job:";
-
+/// Remove homu-ignore blocks from the merge message
+pub fn normalize_merge_message(message: &str) -> String {
     static IGNORE_REGEX: LazyLock<Regex> = LazyLock::new(|| {
         RegexBuilder::new(r"<!--\s*homu-ignore:start\s*-->.*?<!--\s*homu-ignore:end\s*-->")
             .multi_line(true)
@@ -299,6 +297,12 @@ pub fn create_merge_commit_message(pr: handlers::PullRequestData, merge_type: Me
             .build()
             .unwrap()
     });
+    IGNORE_REGEX.replace_all(message, "").to_string()
+}
+
+pub fn create_merge_commit_message(pr: handlers::PullRequestData, merge_type: MergeType) -> String {
+    /// Prefix used to specify custom try jobs in PR descriptions.
+    const CUSTOM_TRY_JOB_PREFIX: &str = "try-job:";
 
     let pr_number = pr.number();
 
@@ -322,7 +326,7 @@ pub fn create_merge_commit_message(pr: handlers::PullRequestData, merge_type: Me
         MergeType::Try { .. } => String::new(),
         MergeType::Auto => pr.github.message.clone(),
     };
-    let pr_description = IGNORE_REGEX.replace_all(&pr_description, "");
+    let pr_description = normalize_merge_message(&pr_description);
 
     let mut message = format!(
         r#"Auto merge of #{pr_number} - {pr_label}, r={reviewer}

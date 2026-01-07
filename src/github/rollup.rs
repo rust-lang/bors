@@ -1,6 +1,6 @@
 use super::{GithubRepoName, PullRequest, PullRequestNumber};
 use crate::PgDbClient;
-use crate::bors::make_text_ignored_by_bors;
+use crate::bors::{make_text_ignored_by_bors, normalize_merge_message};
 use crate::github::api::client::GithubRepositoryClient;
 use crate::github::api::operations::MergeError;
 use crate::github::oauth::{OAuthClient, UserGitHubClient};
@@ -299,6 +299,7 @@ async fn create_rollup(
             pr.title,
             pr_github.message
         );
+        let merge_msg = normalize_merge_message(&merge_msg);
 
         // Merge the PR's head commit into the rollup branch
         let merge_attempt = user_client
@@ -662,6 +663,62 @@ mod tests {
         <!-- homu-ignore:start -->
         [Create a similar rollup](https://bors-test.com/queue/borstest?prs=3,2)
         <!-- homu-ignore:end -->
+        ");
+    }
+
+    #[sqlx::test]
+    async fn rollup_remove_homu_ignore_block(pool: sqlx::PgPool) {
+        let gh = run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
+            let pr2 = ctx
+                .open_pr(default_repo_name(), |pr| {
+                    pr.description = r"This is a very good PR.
+
+<!-- homu-ignore:start -->
+ignore this 1
+<!-- homu-ignore:end -->
+
+include this
+
+<!-- homu-ignore:start -->
+ignore this 2
+<!-- homu-ignore:end -->
+
+also include this pls"
+                        .to_string();
+                })
+                .await?;
+            ctx.approve(pr2.id()).await?;
+
+            make_rollup(ctx, &[&pr2])
+                .await?
+                .assert_status(StatusCode::TEMPORARY_REDIRECT);
+            Ok(())
+        })
+        .await;
+        let rollup_branch = gh
+            .get_repo(fork_repo())
+            .lock()
+            .branches()
+            .iter()
+            .find(|branch| branch.name().starts_with("rollup"))
+            .unwrap()
+            .clone();
+        // Find the rollup merge commit
+        let rollup_merge_commit = rollup_branch.get_commit_history().last().unwrap().clone();
+        insta::assert_snapshot!(rollup_merge_commit.message(), @"
+        Rollup merge of #2 - pr-2, r=default-user
+
+        Title of PR 2
+
+        This is a very good PR.
+
+
+
+        include this
+
+
+
+        also include this pls
         ");
     }
 
