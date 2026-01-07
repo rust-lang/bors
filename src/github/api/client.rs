@@ -78,22 +78,14 @@ impl GithubRepositoryClient {
         Ok(repo)
     }
 
-    /// Create a new pull request.
-    ///
-    /// - `title` — The title of the new pull request.
-    /// - `head` — The name of the branch where your changes are implemented.
-    ///   For cross-repository pull requests in the same network, namespace head
-    ///   with a user like this: `username:branch`.
-    /// - `base` — The name of the branch you want the changes pulled into. This
-    ///   should be an existing branch on the current repository. You cannot
-    ///   submit a pull request to one repository that requests a merge to a
-    ///   base of another repository.
+    /// Create a new pull request at the specified repository.
     pub async fn create_pr(
         &self,
+        repo: &GithubRepoName,
         title: &str,
         head: &str,
         base: &str,
-        body: &str,
+        description: &str,
     ) -> anyhow::Result<PullRequest> {
         let pr = perform_retryable::<PullRequest, anyhow::Error, _, _, _>(
             "create_pr",
@@ -101,15 +93,14 @@ impl GithubRepositoryClient {
             || async {
                 let pr = self
                     .client
-                    .pulls(&self.repo_name.owner, &self.repo_name.name)
+                    .pulls(repo.owner(), repo.name())
                     .create(title, head, base)
-                    .body(body)
+                    .body(description)
                     .send()
                     .await
                     .map_err(|error| {
                         anyhow::anyhow!(
-                            "Could not create pull request `{title}` in `{}`: {error:?}",
-                            self.repo_name
+                            "Could not create pull request `{title}` in `{repo}`: {error:?}",
                         )
                     })?;
                 anyhow::Ok(pr.into())
