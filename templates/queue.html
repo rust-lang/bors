@@ -513,6 +513,8 @@
                 output += ' ';
             }
             output += `${minutes}m`;
+        } else if (output.length === 0) {
+            output = '<1m';
         }
         if (output.length > 0) {
             return ` (${output})`;
