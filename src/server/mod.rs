@@ -1,5 +1,5 @@
 use crate::bors::event::BorsEvent;
-use crate::bors::{CommandPrefix, RepositoryState, RollupMode, format_help};
+use crate::bors::{CommandPrefix, RepositoryState, format_help};
 use crate::database::{ApprovalStatus, PullRequestModel, QueueStatus};
 use crate::github::{GithubRepoName, rollup};
 use crate::templates::{
@@ -319,23 +319,17 @@ pub async fn queue_handler(
     let prs = db.get_nonclosed_pull_requests(&repo.name).await?;
     let prs = sort_queue_prs(prs);
 
-    let (in_queue_count, failed_count, rolled_up_count) =
-        prs.iter()
-            .fold((0, 0, 0), |(in_queue, failed, rolled_up), pr| {
-                let (in_queue_inc, failed_inc) = match pr.queue_status() {
-                    QueueStatus::Approved(..) => (1, 0),
-                    QueueStatus::ReadyForMerge(..) => (1, 0),
-                    QueueStatus::Pending(..) => (1, 0),
-                    QueueStatus::Failed(..) => (0, 1),
-                    QueueStatus::NotApproved => (0, 0),
-                };
+    let (in_queue_count, failed_count) = prs.iter().fold((0, 0), |(in_queue, failed), pr| {
+        let (in_queue_inc, failed_inc) = match pr.queue_status() {
+            QueueStatus::Approved(..) => (1, 0),
+            QueueStatus::ReadyForMerge(..) => (1, 0),
+            QueueStatus::Pending(..) => (1, 0),
+            QueueStatus::Failed(..) => (0, 1),
+            QueueStatus::NotApproved => (0, 0),
+        };
 
-                (
-                    in_queue + in_queue_inc,
-                    failed + failed_inc,
-                    rolled_up + usize::from(matches!(pr.rollup, Some(RollupMode::Always))),
-                )
-            });
+        (in_queue + in_queue_inc, failed + failed_inc)
+    });
 
     Ok(HtmlTemplate(QueueTemplate {
         oauth_client_id: oauth
@@ -349,7 +343,6 @@ pub async fn queue_handler(
             total_count: prs.len(),
             in_queue_count,
             failed_count,
-            rolled_up_count,
         },
         prs,
         selected_rollup_prs: params.pull_requests.map(|prs| prs.0).unwrap_or_default(),
