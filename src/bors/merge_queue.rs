@@ -1121,6 +1121,42 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
     }
 
     #[sqlx::test]
+    async fn tree_closed_merge_open(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            ctx.post_comment("@bors treeclosed=100").await?;
+            ctx.expect_comments((), 1).await;
+
+            let pr2 = ctx.open_pr((), |_| {}).await?;
+            let pr3 = ctx.open_pr((), |_| {}).await?;
+
+            // This should not start an auto build yet
+            ctx.approve(()).await?;
+            ctx.run_merge_queue_now().await;
+            ctx.pr(()).await.expect_no_auto_build();
+
+            ctx.approve(pr3.id()).await?;
+            ctx.post_comment(Comment::new(pr2.id(), "@bors r+ p=100"))
+                .await?;
+            insta::assert_snapshot!(ctx.get_next_comment_text(pr2.id()).await?, @"
+            :pushpin: Commit pr-2-sha has been approved by `default-user`
+
+            It is now in the [queue](https://bors-test.com/queue/borstest) for this repository.
+            ");
+
+            ctx.start_and_finish_auto_build(pr2.id()).await?;
+
+            ctx.post_comment("@bors treeopen").await?;
+            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"Tree is now open for merging.");
+
+            ctx.start_and_finish_auto_build(()).await?;
+            ctx.start_and_finish_auto_build(pr3.id()).await?;
+
+            Ok(())
+        })
+            .await;
+    }
+
+    #[sqlx::test]
     async fn run_empty_queue(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             // This PR should not be in the queue
