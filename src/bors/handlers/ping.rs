@@ -8,12 +8,8 @@ pub(super) async fn command_ping(
     repo: Arc<RepositoryState>,
     pr_number: PullRequestNumber,
 ) -> anyhow::Result<()> {
-    let mut msg = "Pong 🏓!".to_string();
-    if repo.is_paused() {
-        msg.push_str(" (bors is paused)");
-    }
     repo.client
-        .post_comment(pr_number, Comment::new(msg))
+        .post_comment(pr_number, Comment::new("Pong 🏓!".to_string()))
         .await?;
     Ok(())
 }

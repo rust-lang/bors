@@ -521,28 +521,6 @@ async fn handle_comment(
                             .instrument(span)
                             .await
                     }
-                    BorsCommand::Pause => {
-                        if repo
-                            .permissions
-                            .load()
-                            .has_permission(comment.author.id, PermissionType::Review)
-                        {
-                            tracing::info!("Pausing {}", repo.repository());
-                            repo.set_paused(true);
-                        }
-                        Ok(())
-                    }
-                    BorsCommand::Resume => {
-                        if repo
-                            .permissions
-                            .load()
-                            .has_permission(comment.author.id, PermissionType::Review)
-                        {
-                            tracing::info!("Resuming {}", repo.repository());
-                            repo.set_paused(false);
-                        }
-                        Ok(())
-                    }
                 };
                 if result.is_err() {
                     return result.context("Cannot execute Bors command");
