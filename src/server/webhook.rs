@@ -150,9 +150,8 @@ fn parse_webhook_event(request: Parts, body: &[u8]) -> anyhow::Result<Option<Bor
     };
 
     tracing::trace!(
-        "Webhook: event_type `{}`, payload\n{}",
+        "Received webhook with event_type `{}`",
         event_type.to_str().unwrap_or_default(),
-        std::str::from_utf8(body).unwrap_or_default()
     );
 
     match event_type.as_bytes() {
@@ -166,7 +165,10 @@ fn parse_webhook_event(request: Parts, body: &[u8]) -> anyhow::Result<Option<Bor
         ))),
         b"workflow_run" => parse_workflow_run_events(body),
         _ => {
-            tracing::debug!("Ignoring unknown event type {:?}", event_type.to_str());
+            tracing::debug!(
+                "Ignoring unknown webhook event type {:?}",
+                event_type.to_str()
+            );
             Ok(None)
         }
     }
