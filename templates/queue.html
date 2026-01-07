@@ -134,13 +134,22 @@
         max-width: 500px;
     }
 
+    @media screen and (min-width: 800px) {
+        .wrapped {
+            text-wrap: wrap;
+            word-break: break-word;
+        }
+    }
+    .limited-width {
+        max-width: 250px;
+    }
 </style>
 {% endblock %}
 
 {% block body %}
 <main>
   <h1>
-    Bors queue - <a href="{{ repo_url }}" target="_blank">{{ repo_name }}</a>
+    <a href="/help">Bors</a> queue - <a href="{{ repo_url }}" target="_blank">{{ repo_name }}</a>
     {% if tree_state.is_closed() %}
     {% if let Some(comment_source) = tree_state.comment_source() %}
     {% if let Some(priority) = tree_state.priority() %}
@@ -150,11 +159,11 @@
     {% endif %}
   </h1>
 
-  <p><a href="/help">Help page</a></p>
+  <button id="showRollupSelection" style="margin-bottom: 1rem">Create rollup</button>
 
   <p>
     {{ stats.total_count }} total, {{ stats.in_queue_count }} in queue,
-    {{ stats.failed_count }} failed, {{ stats.rolled_up_count }} rolled up
+    {{ stats.failed_count }} failed
   </p>
 
   <div style="margin-bottom: 1rem;">
@@ -166,7 +175,6 @@
       <option value="author">Author</option>
       <option value="priority">Priority</option>
     </select>
-    <button id="showRollupSelection" style="margin-left: 1rem;">Create rollup</button>
   </div>
 
   <div class="table-wrapper">
@@ -181,7 +189,6 @@
                 <th>Title</th>
                 <th>Author</th>
                 <th>Head branch</th>
-                <th>Base branch</th>
                 <th>Assignees</th>
                 <th>Approved by</th>
                 <th>Priority</th>
@@ -224,11 +231,10 @@
                     {%- when Unknown -%}
                     {%- endmatch -%}
                 </td>
-                <td>{{ pr.title }}</td>
+                <td class="wrapped">{{ pr.title }}</td>
                 <td>{{ pr.author }}</td>
-                <td>{{ pr.head_branch }}</td>
-                <td>{{ pr.base_branch }}</td>
-                <td>{{ pr.assignees|join(", ") }}</td>
+                <td class="wrapped limited-width">{{ pr.head_branch }}</td>
+                <td class="wrapped limited-width">{{ pr.assignees|join(", ") }}</td>
                 <td>
                     {%- if let Some(approver) = pr.approver() -%}
                     {{ approver }}
@@ -301,7 +307,6 @@
                 { name: "title", width: "40%" },
                 { name: "author" },
                 { name: "head-branch" },
-                { name: "base-branch" },
                 { name: "assignees" },
                 { name: "approved_by" },
                 { name: "priority" },
@@ -331,7 +336,7 @@
                     }
                 }
             ],
-          autoWidth: false,
+            autoWidth: false,
             order: [],
             select: {
                 style: "multi",
