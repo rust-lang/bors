@@ -2,7 +2,7 @@ use super::{GithubRepoName, PullRequest, PullRequestNumber};
 use crate::PgDbClient;
 use crate::bors::make_text_ignored_by_bors;
 use crate::github::api::client::GithubRepositoryClient;
-use crate::github::api::operations::{ForcePush, MergeError};
+use crate::github::api::operations::MergeError;
 use crate::github::oauth::{OAuthClient, UserGitHubClient};
 use crate::permissions::PermissionType;
 use crate::server::ServerStateRef;
@@ -54,7 +54,9 @@ pub enum RollupError {
 impl IntoResponse for RollupError {
     fn into_response(self) -> Response {
         match self {
-            RollupError::Generic(error) => (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
+            RollupError::Generic(error) => {
+                (StatusCode::INTERNAL_SERVER_ERROR, format!("{error:?}"))
+            }
             RollupError::BaseRepoNotFound { repo_name } => (
                 StatusCode::BAD_REQUEST,
                 format!("Repository {repo_name} was not found"),
@@ -116,7 +118,7 @@ pub async fn oauth_callback_handler(
 
     let repo_name = GithubRepoName::new(&oauth_state.repo_owner, &oauth_state.repo_name);
     let Some(repo_state) = state.get_repo(&repo_name) else {
-        return Err(RollupError::ForkNotFound { repo_name });
+        return Err(RollupError::BaseRepoNotFound { repo_name });
     };
 
     let user_client = oauth_client
@@ -182,6 +184,9 @@ async fn create_rollup(
         mut pr_nums,
     } = rollup_state;
 
+    // Repository where we will create the PR
+    let base_repo = GithubRepoName::new(&repo_owner, &repo_name);
+
     let username = user_client.user.username;
 
     tracing::info!("User {username} is creating a rollup with PRs: {pr_nums:?}");
@@ -198,25 +203,16 @@ async fn create_rollup(
     }
 
     // Ensure user has a fork
-    match user_client.client.get_repo().await {
-        Ok(repo) => repo,
-        Err(_) => {
-            return Err(RollupError::BaseRepoNotFound {
-                repo_name: user_client.client.repository().clone(),
-            });
-        }
+    if user_client.client.get_repo().await.is_err() {
+        return Err(RollupError::ForkNotFound {
+            repo_name: user_client.client.repository().clone(),
+        });
     };
 
     // Validate PRs
     let mut rollup_prs = Vec::new();
     for &num in &pr_nums {
-        match db
-            .get_pull_request(
-                &GithubRepoName::new(&repo_owner, &repo_name),
-                (num as u64).into(),
-            )
-            .await?
-        {
+        match db.get_pull_request(&base_repo, (num as u64).into()).await? {
             Some(pr) => {
                 if !pr.is_rollupable() {
                     return Err(RollupError::PullRequestNotRollupable {
@@ -261,7 +257,7 @@ async fn create_rollup(
     // Create the branch on the user's fork
     user_client
         .client
-        .set_branch_to_sha(&rollup_branch, &base_branch_sha, ForcePush::Yes)
+        .create_branch(&rollup_branch, &base_branch_sha)
         .await
         .map_err(|error| {
             anyhow::anyhow!("Could not create rollup branch {rollup_branch}: {error:?}")
@@ -355,8 +351,10 @@ async fn create_rollup(
     let title = format!("Rollup of {} pull requests", successes.len());
 
     // Create the rollup PR from the user's fork branch to the main repo base branch
-    let pr = gh_client
+    let pr = user_client
+        .client
         .create_pr(
+            &base_repo,
             &title,
             &format!("{username}:{rollup_branch}"),
             &base_branch,
@@ -402,7 +400,7 @@ mod tests {
                 .await?
                 .assert_status(StatusCode::BAD_REQUEST)
                 .assert_body(&format!(
-                    "Repository rolluper/{} was not found",
+                    "Fork rolluper/{} not found, create it before opening the rollup",
                     pr1.repo.name()
                 ));
             Ok(())

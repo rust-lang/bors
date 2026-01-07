@@ -13,7 +13,7 @@ use crate::bors::{Comment, WorkflowRun};
 use crate::config::{CONFIG_FILE_PATH, RepositoryConfig, deserialize_config};
 use crate::database::WorkflowStatus;
 use crate::github::api::operations::{
-    BranchUpdateError, ForcePush, MergeError, create_check_run, merge_branches,
+    BranchUpdateError, ForcePush, MergeError, create_branch, create_check_run, merge_branches,
     set_branch_to_commit, update_check_run,
 };
 use crate::github::{CommitSha, GithubRepoName, PullRequest, PullRequestNumber};
@@ -78,22 +78,14 @@ impl GithubRepositoryClient {
         Ok(repo)
     }
 
-    /// Create a new pull request.
-    ///
-    /// - `title` — The title of the new pull request.
-    /// - `head` — The name of the branch where your changes are implemented.
-    ///   For cross-repository pull requests in the same network, namespace head
-    ///   with a user like this: `username:branch`.
-    /// - `base` — The name of the branch you want the changes pulled into. This
-    ///   should be an existing branch on the current repository. You cannot
-    ///   submit a pull request to one repository that requests a merge to a
-    ///   base of another repository.
+    /// Create a new pull request at the specified repository.
     pub async fn create_pr(
         &self,
+        repo: &GithubRepoName,
         title: &str,
         head: &str,
         base: &str,
-        body: &str,
+        description: &str,
     ) -> anyhow::Result<PullRequest> {
         let pr = perform_retryable::<PullRequest, anyhow::Error, _, _, _>(
             "create_pr",
@@ -101,15 +93,14 @@ impl GithubRepositoryClient {
             || async {
                 let pr = self
                     .client
-                    .pulls(&self.repo_name.owner, &self.repo_name.name)
+                    .pulls(repo.owner(), repo.name())
                     .create(title, head, base)
-                    .body(body)
+                    .body(description)
                     .send()
                     .await
                     .map_err(|error| {
                         anyhow::anyhow!(
-                            "Could not create pull request `{title}` in `{}`: {error:?}",
-                            self.repo_name
+                            "Could not create pull request `{title}` in `{repo}`: {error:?}",
                         )
                     })?;
                 anyhow::Ok(pr.into())
@@ -235,6 +226,19 @@ impl GithubRepositoryClient {
             RetryableOpError::Err(error) => error,
             RetryableOpError::AllAttemptsExhausted(_) => BranchUpdateError::Timeout,
         })
+    }
+
+    /// Creates a new branch and pushes the given `sha` to it.
+    pub async fn create_branch(&self, branch: &str, sha: &CommitSha) -> anyhow::Result<()> {
+        perform_retryable("create_branch", RetryMethod::default(), || async {
+            anyhow::Ok(
+                create_branch(self, branch.to_string(), sha)
+                    .await
+                    .map_err(|err| anyhow::anyhow!("{err}"))?,
+            )
+        })
+        .await?;
+        Ok(())
     }
 
     /// Merge `head` into `base`. Returns the SHA of the merge commit.
