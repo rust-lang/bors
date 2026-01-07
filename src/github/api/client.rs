@@ -13,7 +13,7 @@ use crate::bors::{Comment, WorkflowRun};
 use crate::config::{CONFIG_FILE_PATH, RepositoryConfig, deserialize_config};
 use crate::database::WorkflowStatus;
 use crate::github::api::operations::{
-    BranchUpdateError, ForcePush, MergeError, create_check_run, merge_branches,
+    BranchUpdateError, ForcePush, MergeError, create_branch, create_check_run, merge_branches,
     set_branch_to_commit, update_check_run,
 };
 use crate::github::{CommitSha, GithubRepoName, PullRequest, PullRequestNumber};
@@ -235,6 +235,19 @@ impl GithubRepositoryClient {
             RetryableOpError::Err(error) => error,
             RetryableOpError::AllAttemptsExhausted(_) => BranchUpdateError::Timeout,
         })
+    }
+
+    /// Creates a new branch and pushes the given `sha` to it.
+    pub async fn create_branch(&self, branch: &str, sha: &CommitSha) -> anyhow::Result<()> {
+        perform_retryable("create_branch", RetryMethod::default(), || async {
+            anyhow::Ok(
+                create_branch(self, branch.to_string(), sha)
+                    .await
+                    .map_err(|err| anyhow::anyhow!("{err}"))?,
+            )
+        })
+        .await?;
+        Ok(())
     }
 
     /// Merge `head` into `base`. Returns the SHA of the merge commit.

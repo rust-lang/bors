@@ -125,7 +125,7 @@ pub async fn set_branch_to_commit(
     }
 }
 
-async fn create_branch(
+pub async fn create_branch(
     repo: &GithubRepositoryClient,
     name: String,
     sha: &CommitSha,

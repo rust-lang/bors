@@ -2,7 +2,7 @@ use super::{GithubRepoName, PullRequest, PullRequestNumber};
 use crate::PgDbClient;
 use crate::bors::make_text_ignored_by_bors;
 use crate::github::api::client::GithubRepositoryClient;
-use crate::github::api::operations::{ForcePush, MergeError};
+use crate::github::api::operations::MergeError;
 use crate::github::oauth::{OAuthClient, UserGitHubClient};
 use crate::permissions::PermissionType;
 use crate::server::ServerStateRef;
@@ -263,7 +263,7 @@ async fn create_rollup(
     // Create the branch on the user's fork
     user_client
         .client
-        .set_branch_to_sha(&rollup_branch, &base_branch_sha, ForcePush::Yes)
+        .create_branch(&rollup_branch, &base_branch_sha)
         .await
         .map_err(|error| {
             anyhow::anyhow!("Could not create rollup branch {rollup_branch}: {error:?}")
