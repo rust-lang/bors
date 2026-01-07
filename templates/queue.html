@@ -149,7 +149,7 @@
 {% block body %}
 <main>
   <h1>
-    Bors queue - <a href="{{ repo_url }}" target="_blank">{{ repo_name }}</a>
+    <a href="/help">Bors</a> queue - <a href="{{ repo_url }}" target="_blank">{{ repo_name }}</a>
     {% if tree_state.is_closed() %}
     {% if let Some(comment_source) = tree_state.comment_source() %}
     {% if let Some(priority) = tree_state.priority() %}
@@ -158,8 +158,6 @@
     {% endif %}
     {% endif %}
   </h1>
-
-  <p><a href="/help">Help page</a></p>
 
   <p>
     {{ stats.total_count }} total, {{ stats.in_queue_count }} in queue,
