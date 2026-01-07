@@ -4,15 +4,28 @@
     "config:recommended",
     ":maintainLockFilesMonthly",
     "docker:disable",
+    "helpers:pinGitHubActionDigests"
   ],
   packageRules: [
     {
-      matchCategories: ["rust"],
-      updateTypes: ["patch"],
+      matchCategories: [
+        "rust"
+      ],
+      updateTypes: [
+        "patch"
+      ],
       // Disable patch updates for single dependencies because patches
       // are updated periodically with lockfile maintainance.
       enabled: false,
     },
+    {
+      matchManagers: [
+        "github-actions"
+      ],
+      // Every month
+      schedule: "0 0 1 * *",
+      groupName: "Github Actions",
+    }
   ],
   // Receive any update that fixes security vulnerabilities.
   // We need this because we disabled "patch" updates for Rust.

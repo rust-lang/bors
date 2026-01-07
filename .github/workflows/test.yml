@@ -1,8 +1,12 @@
 name: Test
 
 on:
-  pull_request:
-  merge_group:
+  pull_request: { }
+  merge_group: { }
+  # We only run this on push to main to prime CI cache
+  push:
+    branches:
+      - main
 
 jobs:
   test:
@@ -23,6 +27,9 @@ jobs:
         with:
           toolchain: 1.88.0
           components: clippy, rustfmt
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
 
       - name: Install sqlx-cli
         run: cargo install sqlx-cli@0.7.4 --locked --no-default-features --features native-tls,postgres
