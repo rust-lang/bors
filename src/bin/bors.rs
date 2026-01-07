@@ -51,11 +51,11 @@ struct Opts {
     private_key: String,
 
     /// GitHub OAuth client ID for rollups.
-    #[arg(long, env = "CLIENT_ID")]
+    #[arg(long, env = "OAUTH_CLIENT_ID")]
     client_id: Option<String>,
 
     /// GitHub OAuth client secret for rollups.
-    #[arg(long, env = "CLIENT_SECRET")]
+    #[arg(long, env = "OAUTH_CLIENT_SECRET")]
     client_secret: Option<String>,
 
     /// Secret used to authenticate webhooks.
