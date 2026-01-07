@@ -327,13 +327,23 @@ async fn create_rollup(
 
     let mut body = "Successful merges:\n\n".to_string();
     for pr in &successes {
-        body.push_str(&format!(" - #{} ({})\n", pr.number.0, pr.title));
+        body.push_str(&format!(
+            " - {}#{} ({})\n",
+            gh_client.repository(),
+            pr.number.0,
+            pr.title
+        ));
     }
 
     if !failures.is_empty() {
         body.push_str("\nFailed merges:\n\n");
         for pr in &failures {
-            body.push_str(&format!(" - #{} ({})\n", pr.number.0, pr.title));
+            body.push_str(&format!(
+                " - {}#{} ({})\n",
+                gh_client.repository(),
+                pr.number.0,
+                pr.title
+            ));
         }
     }
     body.push_str("\nr? @ghost");
@@ -506,13 +516,13 @@ mod tests {
         insta::assert_snapshot!(repo.lock().get_pr(6).description, @"
         Successful merges:
 
-         - #2 (Title of PR 2)
-         - #3 (Title of PR 3)
-         - #5 (Title of PR 5)
+         - rust-lang/borstest#2 (Title of PR 2)
+         - rust-lang/borstest#3 (Title of PR 3)
+         - rust-lang/borstest#5 (Title of PR 5)
 
         Failed merges:
 
-         - #4 (Title of PR 4)
+         - rust-lang/borstest#4 (Title of PR 4)
 
         r? @ghost
 
@@ -547,12 +557,12 @@ mod tests {
         insta::assert_snapshot!(repo.lock().get_pr(5).description, @"
         Successful merges:
 
-         - #2 (Title of PR 2)
-         - #4 (Title of PR 4)
+         - rust-lang/borstest#2 (Title of PR 2)
+         - rust-lang/borstest#4 (Title of PR 4)
 
         Failed merges:
 
-         - #3 (Title of PR 3)
+         - rust-lang/borstest#3 (Title of PR 3)
 
         r? @ghost
 
@@ -585,8 +595,8 @@ mod tests {
         insta::assert_snapshot!(repo.lock().get_pr(4).description, @"
         Successful merges:
 
-         - #2 (Title of PR 2)
-         - #3 (Title of PR 3)
+         - rust-lang/borstest#2 (Title of PR 2)
+         - rust-lang/borstest#3 (Title of PR 3)
 
         r? @ghost
 
@@ -623,10 +633,10 @@ mod tests {
         insta::assert_snapshot!(repo.lock().get_pr(6).description, @"
         Successful merges:
 
-         - #3 (Title of PR 3)
-         - #4 (Title of PR 4)
-         - #2 (Title of PR 2)
-         - #5 (Title of PR 5)
+         - rust-lang/borstest#3 (Title of PR 3)
+         - rust-lang/borstest#4 (Title of PR 4)
+         - rust-lang/borstest#2 (Title of PR 2)
+         - rust-lang/borstest#5 (Title of PR 5)
 
         r? @ghost
 
@@ -654,8 +664,8 @@ mod tests {
         insta::assert_snapshot!(repo.lock().get_pr(4).description, @"
         Successful merges:
 
-         - #2 (Title of PR 2)
-         - #3 (Title of PR 3)
+         - rust-lang/borstest#2 (Title of PR 2)
+         - rust-lang/borstest#3 (Title of PR 3)
 
         r? @ghost
 
