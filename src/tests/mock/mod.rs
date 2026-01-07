@@ -129,7 +129,11 @@ impl ExternalHttpMock {
     }
 
     pub fn oauth_client(&self, config: OAuthConfig) -> OAuthClient {
-        OAuthClient::new(config, self.gh_server.mock_server.uri())
+        OAuthClient::new(
+            config,
+            self.gh_server.mock_server.uri(),
+            self.gh_server.mock_server.uri(),
+        )
     }
 }
 

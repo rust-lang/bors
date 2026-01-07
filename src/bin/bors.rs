@@ -238,7 +238,11 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
     let oauth_client = match (opts.client_id.clone(), opts.client_secret.clone()) {
         (Some(client_id), Some(client_secret)) => {
             let config = OAuthConfig::new(client_id, client_secret);
-            Some(OAuthClient::new(config, "https://github.com".to_string()))
+            Some(OAuthClient::new(
+                config,
+                "https://github.com".to_string(),
+                "https://api.github.com".to_string(),
+            ))
         }
         (None, None) => None,
         (Some(_), None) => {

@@ -10,13 +10,15 @@ use std::collections::HashMap;
 pub struct OAuthClient {
     config: OAuthConfig,
     github_base_url: String,
+    github_api_base_url: String,
 }
 
 impl OAuthClient {
-    pub fn new(config: OAuthConfig, github_base_url: String) -> Self {
+    pub fn new(config: OAuthConfig, github_base_url: String, github_api_base_url: String) -> Self {
         Self {
             config,
             github_base_url,
+            github_api_base_url,
         }
     }
 
@@ -56,7 +58,7 @@ impl OAuthClient {
 
         tracing::info!("Retrieved OAuth access token");
 
-        let user_client = prepare_octocrab_client(&self.github_base_url)?
+        let user_client = prepare_octocrab_client(&self.github_api_base_url)?
             .user_access_token(access_token.clone())
             .build()?;
         let user = user_client
