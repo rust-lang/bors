@@ -54,7 +54,9 @@ pub enum RollupError {
 impl IntoResponse for RollupError {
     fn into_response(self) -> Response {
         match self {
-            RollupError::Generic(error) => (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
+            RollupError::Generic(error) => {
+                (StatusCode::INTERNAL_SERVER_ERROR, format!("{error:?}"))
+            }
             RollupError::BaseRepoNotFound { repo_name } => (
                 StatusCode::BAD_REQUEST,
                 format!("Repository {repo_name} was not found"),
