@@ -134,6 +134,15 @@
         max-width: 500px;
     }
 
+    @media screen and (min-width: 800px) {
+        .wrapped {
+            text-wrap: wrap;
+            word-break: break-word;
+        }
+    }
+    .limited-width {
+        max-width: 250px;
+    }
 </style>
 {% endblock %}
 
@@ -181,7 +190,6 @@
                 <th>Title</th>
                 <th>Author</th>
                 <th>Head branch</th>
-                <th>Base branch</th>
                 <th>Assignees</th>
                 <th>Approved by</th>
                 <th>Priority</th>
@@ -224,11 +232,10 @@
                     {%- when Unknown -%}
                     {%- endmatch -%}
                 </td>
-                <td>{{ pr.title }}</td>
+                <td class="wrapped">{{ pr.title }}</td>
                 <td>{{ pr.author }}</td>
-                <td>{{ pr.head_branch }}</td>
-                <td>{{ pr.base_branch }}</td>
-                <td>{{ pr.assignees|join(", ") }}</td>
+                <td class="wrapped limited-width">{{ pr.head_branch }}</td>
+                <td class="wrapped limited-width">{{ pr.assignees|join(", ") }}</td>
                 <td>
                     {%- if let Some(approver) = pr.approver() -%}
                     {{ approver }}
@@ -301,7 +308,6 @@
                 { name: "title", width: "40%" },
                 { name: "author" },
                 { name: "head-branch" },
-                { name: "base-branch" },
                 { name: "assignees" },
                 { name: "approved_by" },
                 { name: "priority" },
@@ -331,7 +337,7 @@
                     }
                 }
             ],
-          autoWidth: false,
+            autoWidth: false,
             order: [],
             select: {
                 style: "multi",
