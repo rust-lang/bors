@@ -118,7 +118,7 @@ pub async fn oauth_callback_handler(
 
     let repo_name = GithubRepoName::new(&oauth_state.repo_owner, &oauth_state.repo_name);
     let Some(repo_state) = state.get_repo(&repo_name) else {
-        return Err(RollupError::ForkNotFound { repo_name });
+        return Err(RollupError::BaseRepoNotFound { repo_name });
     };
 
     let user_client = oauth_client
@@ -200,13 +200,10 @@ async fn create_rollup(
     }
 
     // Ensure user has a fork
-    match user_client.client.get_repo().await {
-        Ok(repo) => repo,
-        Err(_) => {
-            return Err(RollupError::BaseRepoNotFound {
-                repo_name: user_client.client.repository().clone(),
-            });
-        }
+    if let Err(_) = user_client.client.get_repo().await {
+        return Err(RollupError::ForkNotFound {
+            repo_name: user_client.client.repository().clone(),
+        });
     };
 
     // Validate PRs
