@@ -1,6 +1,7 @@
 use crate::bors::RollupMode::*;
 use crate::database::{
     BuildModel, BuildStatus, MergeableState::*, PullRequestModel, QueueStatus, TreeState,
+    WorkflowModel,
 };
 use askama::Template;
 use axum::response::{Html, IntoResponse, Response};
@@ -67,6 +68,8 @@ pub struct QueueTemplate {
     pub oauth_client_id: Option<String>,
     // PRs that should be pre-selected for being included in a rollup
     pub selected_rollup_prs: Vec<u32>,
+    // Active workflow for an active pending auto build
+    pub pending_workflow: Option<WorkflowModel>,
 }
 
 impl QueueTemplate {
