@@ -39,13 +39,6 @@ impl CommandParser {
         }
     }
 
-    pub fn new_try_only(prefix: CommandPrefix) -> Self {
-        Self {
-            prefix,
-            parsers: ONLY_TRY_PARSERS.to_vec(),
-        }
-    }
-
     /// Prefix of the bot, used to invoke commands from PR comments.
     /// For example `@bors`.
     pub fn prefix(&self) -> &CommandPrefix {
@@ -147,8 +140,6 @@ const DEFAULT_PARSERS: &[ParserFn] = &[
     parser_pause,
     parser_resume,
 ];
-
-const ONLY_TRY_PARSERS: &[ParserFn] = &[parser_try_cancel, parser_try];
 
 fn parse_command(input: &str, parsers: &[ParserFn]) -> ParseResult {
     match parse_parts(input) {
