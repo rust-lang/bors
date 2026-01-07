@@ -4,7 +4,6 @@ use crate::database::{
 };
 use askama::Template;
 use axum::response::{Html, IntoResponse, Response};
-use chrono::{DateTime, Local, Utc};
 use http::StatusCode;
 
 /// Build status to display on the queue page.
@@ -67,12 +66,6 @@ pub struct QueueTemplate {
     pub oauth_client_id: Option<String>,
     // PRs that should be pre-selected for being included in a rollup
     pub selected_rollup_prs: Vec<u32>,
-}
-
-impl QueueTemplate {
-    fn to_local_time(&self, time: DateTime<Utc>) -> DateTime<Local> {
-        time.into()
-    }
 }
 
 #[derive(Template)]

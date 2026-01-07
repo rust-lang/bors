@@ -210,7 +210,6 @@
                 {% let pending_build = crate::templates::get_pending_build(pr) %}
                 <td class="status" data-status="{{ crate::templates::status_text(pr) }}"
                     {%- if let Some(build) = pending_build -%}
-                    title="Started at {{ to_local_time(*build.created_at).format("%d.%m.%Y %H:%M:%S") }}"
                     data-created-at="{{ build.created_at.timestamp_millis() }}"
                     {%- endif -%}>
                     {{ crate::templates::status_text(pr) }}
@@ -529,6 +528,9 @@
                 const formattedTime = formatElapsedTime(elapsedMs);
                 let display = td.querySelector('.elapsed-time-display');
                 display.textContent = formattedTime;
+
+                const startedAt = new Date(createdAtMs);
+                td.title = `Started at ${startedAt.toLocaleString()}`;
             }
         });
     }
