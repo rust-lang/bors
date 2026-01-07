@@ -19,6 +19,7 @@ pub struct Comment {
 #[serde(tag = "type")]
 pub enum CommentMetadata {
     TryBuildCompleted { merge_sha: String },
+    BuildCompleted { base_ref: String, merge_sha: String },
 }
 
 /// A tag for a comment, used to identify the comment.
@@ -367,11 +368,17 @@ pub fn auto_build_succeeded_comment(
         .collect::<Vec<_>>()
         .join(", ");
 
-    Comment::new(format!(
-        r#":sunny: Test successful - {urls}
+    Comment {
+        text: format!(
+            r#":sunny: Test successful - {urls}
 Approved by: `{approved_by}`
 Pushing {merge_sha} to `{base_ref}`..."#
-    ))
+        ),
+        metadata: Some(CommentMetadata::BuildCompleted {
+            base_ref: base_ref.to_owned(),
+            merge_sha: merge_sha.0.clone(),
+        }),
+    }
 }
 
 pub fn auto_build_push_failed_comment(error: &str) -> Comment {

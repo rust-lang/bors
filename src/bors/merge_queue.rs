@@ -626,11 +626,12 @@ merge_queue_enabled = false
 
             insta::assert_snapshot!(
                 ctx.get_next_comment_text(()).await?,
-                @"
+                @r#"
             :sunny: Test successful - [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1)
             Approved by: `default-user`
             Pushing merge-0-pr-1 to `main`...
-            "
+            <!-- homu: {"type":"BuildCompleted","base_ref":"main","merge_sha":"merge-0-pr-1"} -->
+            "#
             );
             Ok(())
         })
