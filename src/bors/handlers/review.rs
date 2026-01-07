@@ -322,7 +322,7 @@ async fn notify_of_tree_closed(
         .post_comment(
             pr_number,
             Comment::new(format!(
-                "Tree closed for PRs with priority less than {priority}"
+                "Tree closed for PRs with priority less than {priority}."
             )),
         )
         .await?;
@@ -336,7 +336,7 @@ async fn notify_of_tree_open(
     repo.client
         .post_comment(
             pr_number,
-            Comment::new("Tree is now open for merging".to_string()),
+            Comment::new("Tree is now open for merging.".to_string()),
         )
         .await?;
     Ok(())
@@ -713,7 +713,7 @@ approved = ["+foo", "+baz", "-bar", "-foo2"]
             ctx.post_comment("@bors treeclosed=5").await?;
             insta::assert_snapshot!(
                 ctx.get_next_comment_text(()).await?,
-                @"Tree closed for PRs with priority less than 5"
+                @"Tree closed for PRs with priority less than 5."
             );
 
             let repo = ctx.db().repo_db(&default_repo_name()).await?;

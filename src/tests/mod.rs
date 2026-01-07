@@ -123,8 +123,6 @@ impl BorsBuilder {
                     Ok(res) => match res {
                         Ok(_) => gh_state
                             .context("Bors service has failed")
-                            // This makes the error nicer
-                            .map_err(|e| e.to_string())
                             .unwrap(),
                         Err(error) => {
                             panic!(
