@@ -115,7 +115,9 @@ pub(super) async fn handle_workflow_completed(
     }
 
     let mut error_context = None;
-    if let Some(running_time) = payload.running_time {
+    if payload.status == WorkflowStatus::Success
+        && let Some(running_time) = payload.running_time
+    {
         let running_time =
             chrono::Duration::to_std(&running_time).unwrap_or(Duration::from_secs(0));
         if let Some(min_ci_time) = repo.config.load().min_ci_time
@@ -379,6 +381,31 @@ min_ci_time = 10
                 :broken_heart: Test for merge-0-pr-1 failed: [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1)
                 A workflow was considered to be a failure because it took only `1s`. The minimum duration for CI workflows is configured to be `10s`.
                 ");
+                Ok(())
+            })
+            .await;
+    }
+
+    #[sqlx::test]
+    async fn min_ci_time_ignore_failed_workflow(pool: sqlx::PgPool) {
+        BorsBuilder::new(pool)
+            .github(GitHub::default().with_default_config(
+                r#"
+min_ci_time = 10
+"#,
+            ))
+            .run_test(async |ctx: &mut BorsTester| {
+                ctx.post_comment("@bors try").await?;
+                ctx.expect_comments((), 1).await;
+
+                let w1 = ctx.try_workflow();
+                ctx.modify_workflow(w1, |w| w.set_duration(Duration::from_secs(1)));
+
+                // Too short workflow that failed anyway
+                ctx
+                    .workflow_full_failure(w1)
+                    .await?;
+                insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @":broken_heart: Test for merge-0-pr-1 failed: [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1)");
                 Ok(())
             })
             .await;
