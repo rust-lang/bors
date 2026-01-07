@@ -1233,6 +1233,27 @@ impl PullRequestProxy {
     }
 
     #[track_caller]
+    pub fn expect_title(&self, title: &str) -> &Self {
+        assert_eq!(self.require_db_pr().title, title);
+        self
+    }
+
+    #[track_caller]
+    pub fn expect_assignees(&self, assignees: &[&str]) -> &Self {
+        assert_eq!(
+            self.require_db_pr().assignees,
+            assignees.iter().map(|s| s.to_string()).collect::<Vec<_>>()
+        );
+        self
+    }
+
+    #[track_caller]
+    pub fn expect_base_branch(&self, branch: &str) -> &Self {
+        assert_eq!(self.require_db_pr().base_branch, branch);
+        self
+    }
+
+    #[track_caller]
     pub fn expect_rollup(&self, rollup: Option<RollupMode>) -> &Self {
         assert_eq!(self.require_db_pr().rollup, rollup);
         self
