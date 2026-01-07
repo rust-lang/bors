@@ -5,7 +5,9 @@ use std::collections::BTreeMap;
 
 use crate::bors::RepositoryState;
 use crate::bors::mergeability_queue::MergeabilityQueueSender;
-use crate::{PgDbClient, TeamApiClient};
+use crate::database::PullRequestModel;
+use crate::github::PullRequest;
+use crate::{PgDbClient, TeamApiClient, database};
 
 /// Reload the team DB bors permissions for the given repository.
 pub async fn reload_repository_permissions(
@@ -81,22 +83,24 @@ pub async fn sync_pull_requests_state(
 
     for (pr_num, gh_pr) in &nonclosed_gh_prs_num {
         let db_pr = nonclosed_db_prs_num.get(pr_num);
-        if let Some(db_pr) = db_pr {
-            if db_pr.pr_status != gh_pr.status {
-                // PR status changed in GitHub
+        match db_pr {
+            Some(db_pr) if needs_update_in_db(db_pr, gh_pr) => {
+                // Nonclosed PR that needs to be updated in the DB
                 tracing::debug!(
-                    "PR {} status changed from {:?} to {:?}",
-                    pr_num,
-                    db_pr.pr_status,
-                    gh_pr.status
+                    "PR {pr_num} has changed on GitHub, updating in DB (from {gh_pr:?} to {db_pr:?})",
                 );
-                db.set_pr_status(repo_name, *pr_num, gh_pr.status).await?;
+                db.upsert_pull_request(repo_name, gh_pr.clone().into())
+                    .await?;
             }
-        } else {
-            // Nonclosed PRs in GitHub that are either not in the DB or marked as closed
-            tracing::debug!("PR {} not found in open PRs in DB, upserting it", pr_num);
-            db.upsert_pull_request(repo_name, gh_pr.clone().into())
-                .await?;
+            Some(_) => {
+                // Nothing to be done here, the common case
+            }
+            None => {
+                // Nonclosed PRs in GitHub that are either not in the DB or marked as closed
+                tracing::debug!("PR {} not found in open PRs in DB, upserting it", pr_num);
+                db.upsert_pull_request(repo_name, gh_pr.clone().into())
+                    .await?;
+            }
         }
     }
     // PRs that are closed in GitHub but not in the DB. In theory PR could also be merged
@@ -114,11 +118,74 @@ pub async fn sync_pull_requests_state(
                 "PR {pr_num} not found in open/draft prs in GitHub, marking it as {} in DB",
                 gh_pr.status,
             );
-            db.set_pr_status(repo_name, *pr_num, gh_pr.status).await?;
+            db.upsert_pull_request(repo_name, gh_pr.into()).await?;
         }
     }
 
     Ok(())
+}
+
+/// Returns true if the DB and GitHub representation of a PR do not match, and we need to update
+/// the PR in the DB. This is an optimization to avoid writing e.g. ~1000 PRs to the DB everytime
+/// we do a refresh.
+fn needs_update_in_db(db_pr: &PullRequestModel, gh_pr: &PullRequest) -> bool {
+    let PullRequestModel {
+        id: _,
+        repository: _,
+        number: _,
+        title: db_title,
+        author: _,
+        assignees: db_assignees,
+        pr_status: db_status,
+        head_branch: db_head_branch,
+        base_branch: db_base_branch,
+        mergeable_state: db_mergeable_state,
+        approval_status: _,
+        delegated_permission: _,
+        priority: _,
+        rollup: _,
+        try_build: _,
+        auto_build: _,
+        created_at: _,
+    } = db_pr;
+    let PullRequest {
+        number: _,
+        head_label: _,
+        head,
+        base,
+        title,
+        mergeable_state,
+        message: _,
+        author: _,
+        assignees,
+        status,
+        labels: _,
+        html_url: _,
+    } = gh_pr;
+    if status != db_status {
+        return true;
+    }
+    if title != db_title {
+        return true;
+    }
+    if database::MergeableState::from(mergeable_state.clone()) != *db_mergeable_state {
+        return true;
+    }
+    if assignees
+        .iter()
+        .map(|a| a.username.clone())
+        .collect::<Vec<_>>()
+        != *db_assignees
+    {
+        return true;
+    }
+    if head.name != *db_head_branch {
+        return true;
+    }
+    if base.name != *db_base_branch {
+        return true;
+    }
+    false
 }
 
 #[cfg(test)]
@@ -336,6 +403,30 @@ timeout = 3600
             ctx.pr(pr.id())
                 .await
                 .expect_status(PullRequestStatus::Closed);
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn refresh_pr_properties(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            let pr = ctx.open_pr((), |_| {}).await?;
+            let branch = ctx.create_branch("stable");
+            ctx.modify_pr(pr.id(), |pr| {
+                pr.title = "Foobar".to_string();
+                pr.assignees = vec![User::try_user()];
+                pr.base_branch = branch;
+                pr.mergeable_state = octocrab::models::pulls::MergeableState::Dirty;
+            });
+
+            ctx.refresh_prs().await;
+            ctx.pr(pr.id())
+                .await
+                .expect_mergeable_state(MergeableState::HasConflicts)
+                .expect_title("Foobar")
+                .expect_assignees(&[&User::try_user().name])
+                .expect_base_branch("stable");
             Ok(())
         })
         .await;
