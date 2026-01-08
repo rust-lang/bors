@@ -166,7 +166,7 @@ pub async fn oauth_callback_handler(
         .to_string();
 
     tracing::info!("Rollup created successfully, redirecting to: {pr_url}");
-    Ok(Redirect::temporary(&pr_url).into_response())
+    Ok(Redirect::to(&pr_url).into_response())
 }
 
 /// Creates a rollup PR by merging multiple approved PRs into a single branch
@@ -509,7 +509,7 @@ mod tests {
 
             make_rollup(ctx, &[&pr2, &pr3, &pr4, &pr5])
                 .await?
-                .assert_status(StatusCode::TEMPORARY_REDIRECT);
+                .assert_status(StatusCode::SEE_OTHER);
             Ok(())
         })
         .await;
@@ -550,7 +550,7 @@ mod tests {
 
             make_rollup(ctx, &[&pr2, &pr3, &pr4])
                 .await?
-                .assert_status(StatusCode::TEMPORARY_REDIRECT);
+                .assert_status(StatusCode::SEE_OTHER);
             Ok(())
         })
         .await;
@@ -583,7 +583,7 @@ mod tests {
 
             let pr_url = make_rollup(ctx, &[&pr2, &pr3])
                 .await?
-                .assert_status(StatusCode::TEMPORARY_REDIRECT)
+                .assert_status(StatusCode::SEE_OTHER)
                 .get_header("location");
             insta::assert_snapshot!(pr_url, @"https://github.com/rust-lang/borstest/pull/4");
 
@@ -626,7 +626,7 @@ mod tests {
 
             make_rollup(ctx, &[&pr2, &pr3, &pr4, &pr5])
                 .await?
-                .assert_status(StatusCode::TEMPORARY_REDIRECT);
+                .assert_status(StatusCode::SEE_OTHER);
             Ok(())
         })
         .await;
@@ -657,7 +657,7 @@ mod tests {
 
             make_rollup(ctx, &[&pr3, &pr2, &pr3, &pr2])
                 .await?
-                .assert_status(StatusCode::TEMPORARY_REDIRECT);
+                .assert_status(StatusCode::SEE_OTHER);
             Ok(())
         })
         .await;
@@ -701,7 +701,7 @@ also include this pls"
 
             make_rollup(ctx, &[&pr2])
                 .await?
-                .assert_status(StatusCode::TEMPORARY_REDIRECT);
+                .assert_status(StatusCode::SEE_OTHER);
             Ok(())
         })
         .await;
