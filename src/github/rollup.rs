@@ -270,20 +270,30 @@ async fn create_rollup(
     github_prs.push(first_pr_github);
 
     // Download the rest of the PRs concurrently, with at most 10 concurrent requests in-flight
-    let mut pr_stream = futures::stream::iter(
-        pr_nums
+    {
+        // The collect here is because of implementation of `FnOnce` is not general enough :(
+        let pr_nums = rollup_prs
             .iter()
             .skip(1)
-            .copied()
-            .map(|pr_num| gh_client.get_pull_request(PullRequestNumber(pr_num as u64))),
-    )
-    .buffer_unordered(10);
-    while let Some(pr) = pr_stream.next().await {
-        github_prs.push(pr?);
+            .map(|pr| pr.number)
+            .collect::<Vec<_>>();
+        let mut pr_stream = futures::stream::iter(
+            pr_nums
+                .into_iter()
+                .map(|pr_num| gh_client.get_pull_request(pr_num)),
+        )
+        .buffered(10);
+        while let Some(pr) = pr_stream.next().await {
+            github_prs.push(pr?);
+        }
     }
+
+    assert_eq!(rollup_prs.len(), github_prs.len());
 
     // Merge each PR's commits into the rollup branch
     for (pr, pr_github) in rollup_prs.into_iter().zip(github_prs) {
+        assert_eq!(pr.number, pr_github.number);
+
         // Skip PRs that don't target the same base branch
         if pr_github.base.name != *base_branch {
             failures.push(pr);
