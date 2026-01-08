@@ -8,7 +8,8 @@
 
 {% block head %}
 <!-- Note: this excludes CSS for the select plugin, which styles checkboxes in a weird way -->
-<link href="https://cdn.datatables.net/v/dt/jq-3.7.0/dt-2.3.6/rg-1.6.0/datatables.min.css" rel="stylesheet" integrity="sha384-V9KIGWtLkheSMHZfFlFgPt7A85E4US+zFPLgLUTkHUPq1Nw/f7FIEpvVAO1RBBID" crossorigin="anonymous">
+<!-- Vendored from https://cdn.datatables.net/v/dt/jq-3.7.0/dt-2.3.6/rg-1.6.0/datatables.min.css -->
+<link href="/assets/css/datatables-dt-jq-3.7.0-dt-2.3.6-rg-1.6.0.min.css" rel="stylesheet">
 <style>
     @keyframes barber-pole {
         /* This animation is used to make the status indicator next to
@@ -309,7 +310,8 @@
 </main>
 
 <!-- JQuery, DataTables, RowGroup, Select -->
-<script src="https://cdn.datatables.net/v/dt/jq-3.7.0/dt-2.3.6/rg-1.6.0/sl-3.1.3/datatables.min.js" integrity="sha384-x5PDx0+Bi/nLVi+pl77eiLmOvCysH7ebT44qgqRjp/odqlL5DmpLBcuRZ4u5segE" crossorigin="anonymous"></script>
+<!-- Vendored from https://cdn.datatables.net/v/dt/jq-3.7.0/dt-2.3.6/rg-1.6.0/sl-3.1.3/datatables.min.js -->
+<script src="/assets/js/datatables-dt-jq-3.7.0-dt-2.3.6-rg-1.6.0-sl-3.1.3.min.js"></script>
 
 <script>
     const getDataStatusFromCell = (cell) => cell?.dataset?.status || "";
