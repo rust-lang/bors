@@ -250,7 +250,7 @@ pub async fn handle_bors_global_event(
         BorsGlobalEvent::RefreshConfig => {
             let span = tracing::info_span!("Refresh config");
             for_each_repo(&ctx, |repo| {
-                let span = tracing::info_span!("Repo", repo = repo.repository().to_string());
+                let span = tracing::info_span!("Repo", "{}", repo.repository());
                 reload_repository_config(repo).instrument(span)
             })
             .instrument(span)
@@ -259,7 +259,7 @@ pub async fn handle_bors_global_event(
         BorsGlobalEvent::RefreshPermissions => {
             let span = tracing::info_span!("Refresh permissions");
             for_each_repo(&ctx, |repo| {
-                let span = tracing::info_span!("Repo", repo = repo.repository().to_string());
+                let span = tracing::info_span!("Repo", "{}", repo.repository());
                 reload_repository_permissions(repo, team_api_client).instrument(span)
             })
             .instrument(span)
@@ -280,7 +280,7 @@ pub async fn handle_bors_global_event(
         BorsGlobalEvent::RefreshPullRequestMergeability => {
             let span = tracing::info_span!("Refresh PR mergeability status");
             for_each_repo(&ctx, |repo| {
-                let span = tracing::info_span!("Repo", repo = repo.repository().to_string());
+                let span = tracing::info_span!("Repo", "{}", repo.repository());
                 reload_mergeability_status(repo, &db, senders.mergeability_queue().clone())
                     .instrument(span)
             })
@@ -293,7 +293,7 @@ pub async fn handle_bors_global_event(
         BorsGlobalEvent::RefreshPullRequestState => {
             let span = tracing::info_span!("Refresh PR status");
             for_each_repo(&ctx, |repo| {
-                let subspan = tracing::info_span!("Repo", repo = repo.repository().to_string());
+                let subspan = tracing::info_span!("Repo", "{}", repo.repository());
                 sync_pull_requests_state(repo, Arc::clone(&db)).instrument(subspan)
             })
             .instrument(span)

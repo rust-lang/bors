@@ -492,10 +492,7 @@ mod tests {
                 Repository(
                     PushToBranch(
                         PushToBranch {
-                            repository: GithubRepoName {
-                                owner: "kobzol",
-                                name: "bors-kindergarten",
-                            },
+                            repository: kobzol/bors-kindergarten,
                             branch: "main",
                             sha: "bc7370e473896a94d40a7dff71f197a3ff0208f5",
                         },
@@ -517,10 +514,7 @@ mod tests {
                 Repository(
                     Comment(
                         PullRequestComment {
-                            repository: GithubRepoName {
-                                owner: "kobzol",
-                                name: "bors-kindergarten",
-                            },
+                            repository: kobzol/bors-kindergarten,
                             author: GithubUser {
                                 id: UserId(
                                     4539057,
@@ -566,10 +560,7 @@ mod tests {
                 Repository(
                     PullRequestEdited(
                         PullRequestEdited {
-                            repository: GithubRepoName {
-                                owner: "vohoanglong0107",
-                                name: "test-bors",
-                            },
+                            repository: vohoanglong0107/test-bors,
                             pull_request: PullRequest {
                                 number: PullRequestNumber(
                                     1,
@@ -660,10 +651,7 @@ mod tests {
                 Repository(
                     PullRequestCommitPushed(
                         PullRequestPushed {
-                            repository: GithubRepoName {
-                                owner: "vohoanglong0107",
-                                name: "test-bors",
-                            },
+                            repository: vohoanglong0107/test-bors,
                             pull_request: PullRequest {
                                 number: PullRequestNumber(
                                     1,
@@ -749,10 +737,7 @@ mod tests {
                 Repository(
                     Comment(
                         PullRequestComment {
-                            repository: GithubRepoName {
-                                owner: "kobzol",
-                                name: "bors-kindergarten",
-                            },
+                            repository: kobzol/bors-kindergarten,
                             author: GithubUser {
                                 id: UserId(
                                     4539057,
@@ -798,10 +783,7 @@ mod tests {
                 Repository(
                     PullRequestOpened(
                         PullRequestOpened {
-                            repository: GithubRepoName {
-                                owner: "sakib25800",
-                                name: "bors-test",
-                            },
+                            repository: sakib25800/bors-test,
                             pull_request: PullRequest {
                                 number: PullRequestNumber(
                                     2,
@@ -884,10 +866,7 @@ mod tests {
                 Repository(
                     PullRequestClosed(
                         PullRequestClosed {
-                            repository: GithubRepoName {
-                                owner: "geetanshjuneja",
-                                name: "test-bors",
-                            },
+                            repository: geetanshjuneja/test-bors,
                             pull_request: PullRequest {
                                 number: PullRequestNumber(
                                     3,
@@ -971,10 +950,7 @@ mod tests {
                 Repository(
                     PullRequestMerged(
                         PullRequestMerged {
-                            repository: GithubRepoName {
-                                owner: "geetanshjuneja",
-                                name: "test-bors",
-                            },
+                            repository: geetanshjuneja/test-bors,
                             pull_request: PullRequest {
                                 number: PullRequestNumber(
                                     5,
@@ -1056,10 +1032,7 @@ mod tests {
                 Repository(
                     PullRequestReopened(
                         PullRequestReopened {
-                            repository: GithubRepoName {
-                                owner: "geetanshjuneja",
-                                name: "test-bors",
-                            },
+                            repository: geetanshjuneja/test-bors,
                             pull_request: PullRequest {
                                 number: PullRequestNumber(
                                     3,
@@ -1143,10 +1116,7 @@ mod tests {
                 Repository(
                     PullRequestOpened(
                         PullRequestOpened {
-                            repository: GithubRepoName {
-                                owner: "geetanshjuneja",
-                                name: "test-bors",
-                            },
+                            repository: geetanshjuneja/test-bors,
                             pull_request: PullRequest {
                                 number: PullRequestNumber(
                                     5,
@@ -1229,10 +1199,7 @@ mod tests {
                 Repository(
                     PullRequestConvertedToDraft(
                         PullRequestConvertedToDraft {
-                            repository: GithubRepoName {
-                                owner: "geetanshjuneja",
-                                name: "test-bors",
-                            },
+                            repository: geetanshjuneja/test-bors,
                             pull_request: PullRequest {
                                 number: PullRequestNumber(
                                     5,
@@ -1314,10 +1281,7 @@ mod tests {
                 Repository(
                     PullRequestReadyForReview(
                         PullRequestReadyForReview {
-                            repository: GithubRepoName {
-                                owner: "geetanshjuneja",
-                                name: "test-bors",
-                            },
+                            repository: geetanshjuneja/test-bors,
                             pull_request: PullRequest {
                                 number: PullRequestNumber(
                                     5,
@@ -1399,10 +1363,7 @@ mod tests {
                 Repository(
                     Comment(
                         PullRequestComment {
-                            repository: GithubRepoName {
-                                owner: "kobzol",
-                                name: "bors-kindergarten",
-                            },
+                            repository: kobzol/bors-kindergarten,
                             author: GithubUser {
                                 id: UserId(
                                     4539057,
@@ -1448,10 +1409,7 @@ mod tests {
                 Repository(
                     PullRequestAssigned(
                         PullRequestAssigned {
-                            repository: GithubRepoName {
-                                owner: "sakib25800",
-                                name: "bors-test-2",
-                            },
+                            repository: sakib25800/bors-test-2,
                             pull_request: PullRequest {
                                 number: PullRequestNumber(
                                     3,
@@ -1555,10 +1513,7 @@ mod tests {
                 Repository(
                     PullRequestUnassigned(
                         PullRequestUnassigned {
-                            repository: GithubRepoName {
-                                owner: "sakib25800",
-                                name: "bors-test-2",
-                            },
+                            repository: sakib25800/bors-test-2,
                             pull_request: PullRequest {
                                 number: PullRequestNumber(
                                     3,
@@ -1640,10 +1595,7 @@ mod tests {
                 Repository(
                     WorkflowStarted(
                         WorkflowRunStarted {
-                            repository: GithubRepoName {
-                                owner: "kobzol",
-                                name: "bors-kindergarten",
-                            },
+                            repository: kobzol/bors-kindergarten,
                             name: "Workflow 2",
                             branch: "automation/bors/try",
                             commit_sha: CommitSha(
@@ -1673,10 +1625,7 @@ mod tests {
                 Repository(
                     WorkflowCompleted(
                         WorkflowRunCompleted {
-                            repository: GithubRepoName {
-                                owner: "kobzol",
-                                name: "bors-kindergarten",
-                            },
+                            repository: kobzol/bors-kindergarten,
                             branch: "automation/bors/try",
                             commit_sha: CommitSha(
                                 "c9abcadf285659684c0975cead8bf982fa84e123",

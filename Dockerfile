@@ -17,12 +17,13 @@ COPY --from=planner /app/recipe.json recipe.json
 
 RUN cargo chef cook --release --recipe-path recipe.json
 
+COPY askama.toml .
 COPY Cargo.toml .
 COPY Cargo.lock .
 COPY migrations migrations
 COPY .sqlx .sqlx
 COPY src src
-COPY templates templates
+COPY web web
 
 RUN cargo build --release
 

@@ -13,10 +13,7 @@ where
 {
     let start = Instant::now();
 
-    let span = tracing::trace_span!("Query", query = query_name);
-    span.in_scope(|| {
-        tracing::trace!("Starting");
-    });
+    let span = tracing::trace_span!("Query", "{query_name}");
 
     let result = f().instrument(span.clone()).await;
     let duration = start.elapsed();

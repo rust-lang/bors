@@ -182,10 +182,7 @@ async fn consume_build_queue_events(
     while let Some(event) = build_queue_rx.recv().await {
         let ctx = ctx.clone();
 
-        let span = tracing::debug_span!(
-            "Build queue event",
-            event = ?event
-        );
+        let span = tracing::debug_span!("Build queue event", "{event:?}");
         if let Err(error) = handle_build_queue_event(ctx, event, merge_queue_tx.clone())
             .instrument(span.clone())
             .await
