@@ -81,7 +81,10 @@ impl Default for RetryMethod {
             timeout_after: DEFAULT_REQUEST_TIMEOUT,
             max_retry_count: 3,
             retry_on_error: true,
-            backoff_time: Duration::from_secs(2),
+            #[cfg(not(test))]
+            backoff_time: Duration::from_secs(5),
+            #[cfg(test)]
+            backoff_time: Duration::from_millis(500),
         }
     }
 }
