@@ -14,16 +14,19 @@ use axum::extract::{FromRef, Path, Query, State};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use http::StatusCode;
+use http::{Request, StatusCode};
 use pulldown_cmark::Parser;
 use serde::de::Error;
 use serde::{Deserialize, Deserializer};
 use std::any::Any;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::mpsc;
 use tower::limit::ConcurrencyLimitLayer;
 use tower_http::catch_panic::CatchPanicLayer;
 use tower_http::compression::CompressionLayer;
+use tower_http::trace::TraceLayer;
+use tracing::Span;
 use webhook::GitHubWebhook;
 
 pub mod webhook;
@@ -88,6 +91,23 @@ pub struct ServerStateRef(pub Arc<ServerState>);
 
 pub fn create_app(state: ServerState) -> Router {
     let compression_layer = CompressionLayer::new().br(true).gzip(true);
+    let trace_layer = TraceLayer::new_for_http()
+        .make_span_with(|request: &Request<_>| {
+            tracing::debug_span!("request", "{} {}", request.method(), request.uri().path())
+        })
+        .on_request(())
+        .on_body_chunk(())
+        .on_eos(())
+        .on_failure(())
+        .on_response(
+            |response: &http::Response<_>, latency: Duration, _span: &Span| {
+                tracing::debug!(
+                    "response: {} ({}ms)",
+                    response.status().as_u16(),
+                    latency.as_millis()
+                )
+            },
+        );
 
     let api = create_api_router();
     Router::new()
@@ -103,6 +123,7 @@ pub fn create_app(state: ServerState) -> Router {
         .nest("/api", api)
         .layer(ConcurrencyLimitLayer::new(100))
         .layer(CatchPanicLayer::custom(handle_panic))
+        .layer(trace_layer)
         .with_state(ServerStateRef(Arc::new(state)))
         .fallback(not_found_handler)
 }
@@ -219,8 +240,8 @@ async fn api_merge_queue(
     Ok(Json(prs).into_response())
 }
 
-fn handle_panic(err: Box<dyn Any + Send + 'static>) -> Response {
-    tracing::error!("Router panicked: {err:?}");
+fn handle_panic(_err: Box<dyn Any + Send + 'static>) -> Response {
+    tracing::error!("Router panicked");
     (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error").into_response()
 }
 

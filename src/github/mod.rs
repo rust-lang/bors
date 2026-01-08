@@ -27,7 +27,7 @@ pub use labels::{LabelModification, LabelTrigger};
 use crate::bors::PullRequestStatus;
 
 /// Unique identifier of a GitHub repository
-#[derive(Debug, PartialEq, Eq, Hash, Clone, PartialOrd, Ord)]
+#[derive(PartialEq, Eq, Hash, Clone, PartialOrd, Ord)]
 pub struct GithubRepoName {
     owner: String,
     name: String,
@@ -53,6 +53,12 @@ impl GithubRepoName {
 impl Display for GithubRepoName {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.write_fmt(format_args!("{}/{}", self.owner, self.name))
+    }
+}
+
+impl Debug for GithubRepoName {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        <Self as Display>::fmt(self, f)
     }
 }
 
