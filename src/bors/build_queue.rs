@@ -387,8 +387,8 @@ mod tests {
             insta::assert_snapshot!(comment, @r#"
             :sunny: Test successful - [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1)
             Approved by: `default-user`
-            Pushing merge-0-pr-1 to `main`...
-            <!-- homu: {"type":"BuildCompleted","base_ref":"main","merge_sha":"merge-0-pr-1"} -->
+            Pushing merge-0-pr-1-577acb30 to `main`...
+            <!-- homu: {"type":"BuildCompleted","base_ref":"main","merge_sha":"merge-0-pr-1-577acb30"} -->
             "#);
 
             ctx.pr(()).await.expect_status(PullRequestStatus::Merged);
@@ -418,8 +418,8 @@ mod tests {
             insta::assert_snapshot!(comment, @r#"
             :sunny: Test successful - [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1)
             Approved by: `default-user`
-            Pushing merge-0-pr-1 to `main`...
-            <!-- homu: {"type":"BuildCompleted","base_ref":"main","merge_sha":"merge-0-pr-1"} -->
+            Pushing merge-0-pr-1-577acb30 to `main`...
+            <!-- homu: {"type":"BuildCompleted","base_ref":"main","merge_sha":"merge-0-pr-1-577acb30"} -->
             "#);
 
             ctx.pr(()).await.expect_status(PullRequestStatus::Merged);

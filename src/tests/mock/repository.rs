@@ -15,6 +15,7 @@ use octocrab::models::workflows::{Conclusion, Status, Step};
 use octocrab::models::{JobId, RunId};
 use parking_lot::Mutex;
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 use url::Url;
 use wiremock::{
     Mock, MockServer, Request, ResponseTemplate,
@@ -272,7 +273,12 @@ async fn mock_merge_branch(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
                 &data.head
             };
 
-            let merge_sha = format!("merge-{}-{source_info}", base_branch.merge_counter);
+            // Ensure that we have a unique-ish hash if we do both a try and auto build merge from the
+            // same PR.
+            let hash = hex::encode(Sha256::digest(&data.commit_message));
+            let hash = &hash[..8];
+
+            let merge_sha = format!("merge-{}-{source_info}-{hash}", base_branch.merge_counter);
             let commit = Commit::new(&merge_sha, &data.commit_message);
             base_branch.merge_counter += 1;
 

@@ -296,9 +296,9 @@ mod tests {
             :sunny: Try build successful
             - [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1) :white_check_mark:
             - [Workflow1](https://github.com/rust-lang/borstest/actions/runs/2) :white_check_mark:
-            Build commit: merge-0-pr-1 (`merge-0-pr-1`, parent: `main-sha1`)
+            Build commit: merge-0-pr-1-42cd8de2 (`merge-0-pr-1-42cd8de2`, parent: `main-sha1`)
 
-            <!-- homu: {"type":"TryBuildCompleted","merge_sha":"merge-0-pr-1"} -->
+            <!-- homu: {"type":"TryBuildCompleted","merge_sha":"merge-0-pr-1-42cd8de2"} -->
             "#
             );
             Ok(())
@@ -326,9 +326,9 @@ mod tests {
             :sunny: Try build successful
             - [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1) :white_check_mark:
             - [Workflow1](https://github.com/rust-lang/borstest/actions/runs/2) :white_check_mark:
-            Build commit: merge-0-pr-1 (`merge-0-pr-1`, parent: `main-sha1`)
+            Build commit: merge-0-pr-1-42cd8de2 (`merge-0-pr-1-42cd8de2`, parent: `main-sha1`)
 
-            <!-- homu: {"type":"TryBuildCompleted","merge_sha":"merge-0-pr-1"} -->
+            <!-- homu: {"type":"TryBuildCompleted","merge_sha":"merge-0-pr-1-42cd8de2"} -->
             "#
             );
             Ok(())
@@ -351,7 +351,7 @@ mod tests {
             ctx.workflow_event(WorkflowEvent::failure(w2)).await?;
             insta::assert_snapshot!(
                 ctx.get_next_comment_text(()).await?,
-                @":broken_heart: Test for merge-0-pr-1 failed: [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1), [Workflow1](https://github.com/rust-lang/borstest/actions/runs/2)"
+                @":broken_heart: Test for merge-0-pr-1-42cd8de2 failed: [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1), [Workflow1](https://github.com/rust-lang/borstest/actions/runs/2)"
             );
             Ok(())
         })
@@ -378,7 +378,7 @@ min_ci_time = 10
                     .workflow_full_success(w1)
                     .await?;
                 insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
-                :broken_heart: Test for merge-0-pr-1 failed: [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1)
+                :broken_heart: Test for merge-0-pr-1-42cd8de2 failed: [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1)
                 A workflow was considered to be a failure because it took only `1s`. The minimum duration for CI workflows is configured to be `10s`.
                 ");
                 Ok(())
@@ -405,7 +405,7 @@ min_ci_time = 10
                 ctx
                     .workflow_full_failure(w1)
                     .await?;
-                insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @":broken_heart: Test for merge-0-pr-1 failed: [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1)");
+                insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @":broken_heart: Test for merge-0-pr-1-42cd8de2 failed: [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1)");
                 Ok(())
             })
             .await;
@@ -430,9 +430,9 @@ min_ci_time = 20
                     .await?;
                 insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @r#"
                 :sunny: Try build successful ([Workflow1](https://github.com/rust-lang/borstest/actions/runs/1))
-                Build commit: merge-0-pr-1 (`merge-0-pr-1`, parent: `main-sha1`)
+                Build commit: merge-0-pr-1-42cd8de2 (`merge-0-pr-1-42cd8de2`, parent: `main-sha1`)
 
-                <!-- homu: {"type":"TryBuildCompleted","merge_sha":"merge-0-pr-1"} -->
+                <!-- homu: {"type":"TryBuildCompleted","merge_sha":"merge-0-pr-1-42cd8de2"} -->
                 "#);
                 Ok(())
             })
