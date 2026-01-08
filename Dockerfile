@@ -22,7 +22,7 @@ COPY Cargo.lock .
 COPY migrations migrations
 COPY .sqlx .sqlx
 COPY src src
-COPY templates templates
+COPY web web
 
 RUN cargo build --release
 
