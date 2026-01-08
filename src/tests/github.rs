@@ -6,6 +6,7 @@ use crate::github::{CommitSha, GithubRepoName, PullRequestNumber};
 use crate::permissions::PermissionType;
 use crate::tests::COMMENT_RECEIVE_TIMEOUT;
 use chrono::{DateTime, Utc};
+use http::StatusCode;
 use octocrab::models::pulls::MergeableState;
 use octocrab::models::workflows::Conclusion;
 use octocrab::models::{CheckSuiteId, JobId, RunId};
@@ -348,13 +349,15 @@ impl User {
 pub enum MergeBehavior {
     #[default]
     Succeed,
-    Custom(Box<dyn FnMut() -> bool + Send + Sync>),
+    /// Return HTTP status of the merge if it should fail immediately or `None` if it should
+    /// continue.
+    Custom(Box<dyn FnMut() -> Option<StatusCode> + Send + Sync>),
 }
 
 impl MergeBehavior {
-    pub fn try_merge(&mut self) -> bool {
+    pub fn get_failure_status_code(&mut self) -> Option<StatusCode> {
         match self {
-            MergeBehavior::Succeed => true,
+            MergeBehavior::Succeed => None,
             MergeBehavior::Custom(func) => func(),
         }
     }

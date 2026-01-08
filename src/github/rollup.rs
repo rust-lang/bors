@@ -505,8 +505,12 @@ mod tests {
                 let mut n = 0;
                 repo.merge_behavior = MergeBehavior::Custom(Box::new(move || {
                     n += 1;
-                    // Fail the third merge
-                    n != 3
+                    // Cause a conflict on the third merge
+                    if n == 3 {
+                        Some(StatusCode::CONFLICT)
+                    } else {
+                        None
+                    }
                 }));
             });
             let pr2 = ctx.open_pr((), |_| {}).await?;
@@ -579,6 +583,50 @@ mod tests {
 
         <!-- homu-ignore:start -->
         [Create a similar rollup](https://bors-test.com/queue/borstest?prs=2,3,4)
+        <!-- homu-ignore:end -->
+        ");
+    }
+
+    #[sqlx::test]
+    async fn rollup_recover_merge_error(pool: sqlx::PgPool) {
+        let gh = run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
+            let pr2 = ctx.open_pr((), |_| {}).await?;
+            let pr3 = ctx.open_pr((), |_| {}).await?;
+            ctx.approve(pr2.id()).await?;
+            ctx.approve(pr3.id()).await?;
+
+            let mut fail_counter = 2u32;
+            ctx.modify_repo(fork_repo(), |repo| {
+                repo.merge_behavior = MergeBehavior::Custom(Box::new(move || {
+                    fail_counter = fail_counter.saturating_sub(1);
+                    if fail_counter == 0 {
+                        None
+                    } else {
+                        Some(StatusCode::INTERNAL_SERVER_ERROR)
+                    }
+                }))
+            });
+
+            let pr_url = make_rollup(ctx, &[&pr2, &pr3])
+                .await?
+                .assert_status(StatusCode::SEE_OTHER)
+                .get_header("location");
+            insta::assert_snapshot!(pr_url, @"https://github.com/rust-lang/borstest/pull/4");
+
+            Ok(())
+        })
+        .await;
+        let repo = gh.get_repo(());
+        insta::assert_snapshot!(repo.lock().get_pr(4).description, @"
+        Successful merges:
+
+         - rust-lang/borstest#2 (Title of PR 2)
+         - rust-lang/borstest#3 (Title of PR 3)
+
+        r? @ghost
+
+        <!-- homu-ignore:start -->
+        [Create a similar rollup](https://bors-test.com/queue/borstest?prs=2,3)
         <!-- homu-ignore:end -->
         ");
     }
