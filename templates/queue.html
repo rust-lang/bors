@@ -2,6 +2,10 @@
 
 {% block title %}Bors queue - {{ repo_name }} {% if tree_state.is_closed() %} [TREECLOSED] {% endif %}{% endblock %}
 
+{% block viewport %}
+<meta name="viewport" content="width=1920, initial-scale=0.5"/>
+{% endblock %}
+
 {% block head %}
 <!-- Note: this excludes CSS for the select plugin, which styles checkboxes in a weird way -->
 <link href="https://cdn.datatables.net/v/dt/jq-3.7.0/dt-2.3.6/rg-1.6.0/datatables.min.css" rel="stylesheet" integrity="sha384-V9KIGWtLkheSMHZfFlFgPt7A85E4US+zFPLgLUTkHUPq1Nw/f7FIEpvVAO1RBBID" crossorigin="anonymous">
@@ -23,7 +27,7 @@
         }
     }
     main {
-        max-width: 120rem;
+        max-width: 1920px;
         width: 100%;
         margin: 0 auto;
     }
