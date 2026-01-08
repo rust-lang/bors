@@ -250,7 +250,7 @@ impl GithubRepositoryClient {
     ) -> Result<CommitSha, MergeError> {
         perform_retryable(
             "merge_branches",
-            RetryMethod::no_retry().with_timeout(Duration::from_secs(30)),
+            RetryMethod::default().with_timeout(Duration::from_secs(30)),
             || async {
                 merge_branches(self, base, head, commit_message)
                     .await

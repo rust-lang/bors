@@ -239,9 +239,9 @@ async fn mock_merge_branch(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
                 commit_message: String,
             }
 
-            // Simulate conflicts
-            if !repo.merge_behavior.try_merge() {
-                return ResponseTemplate::new(409);
+            // Simulate merge failures
+            if let Some(status) = repo.merge_behavior.get_failure_status_code() {
+                return ResponseTemplate::new(status);
             }
 
             let data: MergeRequest = request.body_json().unwrap();
