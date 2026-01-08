@@ -248,16 +248,20 @@ impl GithubRepositoryClient {
         head: &CommitSha,
         commit_message: &str,
     ) -> Result<CommitSha, MergeError> {
-        perform_retryable("merge_branches", RetryMethod::default(), || async {
-            merge_branches(self, base, head, commit_message)
-                .await
-                .map_err(|e| match e {
-                    error @ (MergeError::AlreadyMerged
-                    | MergeError::Conflict
-                    | MergeError::NotFound) => ShouldRetry::No(error),
-                    error => ShouldRetry::Yes(error),
-                })
-        })
+        perform_retryable(
+            "merge_branches",
+            RetryMethod::no_retry().with_timeout(Duration::from_secs(30)),
+            || async {
+                merge_branches(self, base, head, commit_message)
+                    .await
+                    .map_err(|e| match e {
+                        error @ (MergeError::AlreadyMerged
+                        | MergeError::Conflict
+                        | MergeError::NotFound) => ShouldRetry::No(error),
+                        error => ShouldRetry::Yes(error),
+                    })
+            },
+        )
         .await
         .map_err(|error| match error {
             RetryableOpError::Err(error) => error,

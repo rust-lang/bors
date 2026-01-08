@@ -609,7 +609,7 @@ merge_queue_enabled = false
             ctx.run_merge_queue_now().await;
             insta::assert_snapshot!(
                 ctx.get_next_comment_text(()).await?,
-                @":hourglass: Testing commit pr-1-sha with merge merge-0-pr-1..."
+                @":hourglass: Testing commit pr-1-sha with merge merge-0-pr-1-577acb30..."
             );
             Ok(())
         })
@@ -629,8 +629,8 @@ merge_queue_enabled = false
                 @r#"
             :sunny: Test successful - [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1)
             Approved by: `default-user`
-            Pushing merge-0-pr-1 to `main`...
-            <!-- homu: {"type":"BuildCompleted","base_ref":"main","merge_sha":"merge-0-pr-1"} -->
+            Pushing merge-0-pr-1-577acb30 to `main`...
+            <!-- homu: {"type":"BuildCompleted","base_ref":"main","merge_sha":"merge-0-pr-1-577acb30"} -->
             "#
             );
             Ok(())
@@ -647,7 +647,7 @@ merge_queue_enabled = false
 
             insta::assert_snapshot!(
                 ctx.get_next_comment_text(()).await?,
-                @":broken_heart: Test for merge-0-pr-1 failed: [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1)"
+                @":broken_heart: Test for merge-0-pr-1-577acb30 failed: [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1)"
             );
             Ok(())
         })
@@ -696,13 +696,21 @@ merge_queue_enabled = false
             Ok(())
         })
         .await;
-        gh.check_sha_history(default_repo_name(), "main", &["main-sha1", "merge-0-pr-1"]);
+        gh.check_sha_history(
+            default_repo_name(),
+            "main",
+            &["main-sha1", "merge-0-pr-1-577acb30"],
+        );
         gh.check_sha_history(
             default_repo_name(),
             AUTO_MERGE_BRANCH_NAME,
-            &["main-sha1", "merge-0-pr-1"],
+            &["main-sha1", "merge-0-pr-1-577acb30"],
         );
-        gh.check_sha_history(default_repo_name(), AUTO_BRANCH_NAME, &["merge-0-pr-1"]);
+        gh.check_sha_history(
+            default_repo_name(),
+            AUTO_BRANCH_NAME,
+            &["merge-0-pr-1-577acb30"],
+        );
     }
 
     #[sqlx::test]
@@ -734,10 +742,10 @@ merge_queue_enabled = false
             "main",
             &[
                 "main-sha1",
-                "merge-0-pr-1",
-                "merge-1-pr-2",
-                "merge-2-pr-3",
-                "merge-3-pr-4",
+                "merge-0-pr-1-577acb30",
+                "merge-1-pr-2-5f8fa650",
+                "merge-2-pr-3-2ded0de1",
+                "merge-3-pr-4-0d736c05",
             ],
         );
     }
@@ -766,7 +774,12 @@ merge_queue_enabled = false
         gh.check_sha_history(
             default_repo_name(),
             "main",
-            &["main-sha1", "merge-0-pr-4", "merge-1-pr-2", "merge-2-pr-3"],
+            &[
+                "main-sha1",
+                "merge-0-pr-4-0d736c05",
+                "merge-1-pr-2-5f8fa650",
+                "merge-2-pr-3-2ded0de1",
+            ],
         );
     }
 
@@ -1187,7 +1200,7 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
                 .get_comment_by_node_id(&comment.node_id().unwrap())
                 .unwrap();
             insta::assert_snapshot!(updated_comment.content(), @"
-            :hourglass: Testing commit pr-1-sha with merge merge-0-pr-1...
+            :hourglass: Testing commit pr-1-sha with merge merge-0-pr-1-577acb30...
 
             **Workflow**: https://github.com/rust-lang/borstest/actions/runs/1
             ");
@@ -1234,7 +1247,7 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
             // Run the merge queue. It should recover and start merging PR3
             ctx.run_merge_queue_now().await;
             let comment = ctx.get_next_comment_text(pr3.id()).await?;
-            insta::assert_snapshot!(comment, @":hourglass: Testing commit pr-3-sha with merge merge-0-pr-3...");
+            insta::assert_snapshot!(comment, @":hourglass: Testing commit pr-3-sha with merge merge-0-pr-3-2ded0de1...");
 
             // The merge queue should also unapprove PR1
             ctx.wait_for_pr(pr2.id(), |pr| !pr.is_approved()).await?;
@@ -1264,7 +1277,7 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
             // Run the merge queue. It should recover and start merging PR3
             ctx.run_merge_queue_now().await;
             let comment = ctx.get_next_comment_text(pr3.id()).await?;
-            insta::assert_snapshot!(comment, @":hourglass: Testing commit pr-3-sha with merge merge-0-pr-3...");
+            insta::assert_snapshot!(comment, @":hourglass: Testing commit pr-3-sha with merge merge-0-pr-3-2ded0de1...");
 
             ctx.pr(pr2.id()).await.expect_no_auto_build();
 
