@@ -7,7 +7,6 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::Instrument;
 
-use crate::BorsContext;
 use crate::bors::build::load_workflow_runs;
 use crate::bors::comment::{
     CommentTag, auto_build_push_failed_comment, auto_build_started_comment,
@@ -22,6 +21,7 @@ use crate::github::api::operations::{BranchUpdateError, ForcePush};
 use crate::github::{CommitSha, PullRequest, PullRequestNumber};
 use crate::github::{MergeResult, attempt_merge};
 use crate::utils::sort_queue::sort_queue_prs;
+use crate::{BorsContext, PgDbClient};
 
 use super::{MergeType, create_merge_commit_message};
 
@@ -154,6 +154,25 @@ async fn process_repository(repo: &RepositoryState, ctx: &BorsContext) -> anyhow
     }
 
     Ok(())
+}
+
+/// Return a pull request that will be likely tested the next time the merge queue runs (if any).
+pub async fn get_pr_at_front_of_merge_queue(
+    repo_state: &RepositoryState,
+    db: &PgDbClient,
+) -> anyhow::Result<Option<PullRequestModel>> {
+    let repo_name = repo_state.repository();
+    let repo_db = match db.repo_db(repo_name).await? {
+        Some(repo) => repo,
+        None => {
+            return Ok(None);
+        }
+    };
+
+    let priority = repo_db.tree_state.priority();
+    let prs = db.get_merge_queue_prs(repo_name, priority).await?;
+
+    Ok(sort_queue_prs(prs).into_iter().next())
 }
 
 /// Handle a successful auto build by pointing the base branch to the merged commit.
@@ -1380,7 +1399,13 @@ also include this pls"
 
             // Cancel the running build
             ctx.post_comment("@bors cancel").await?;
-            ctx.expect_comments((), 1).await;
+            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
+            Auto build cancelled. Cancelled workflows:
+
+            - https://github.com/rust-lang/borstest/actions/runs/1
+
+            The next pull request likely to be tested is https://github.com/rust-lang/borstest/pull/2.
+            ");
 
             // Now PR 2 should get priority
             ctx.start_and_finish_auto_build(pr2.id()).await?;

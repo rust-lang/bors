@@ -1,10 +1,11 @@
+use std::fmt::Write;
 use std::sync::Arc;
 
 use crate::PgDbClient;
 use crate::bors::comment::no_auto_build_in_progress_comment;
 use crate::bors::handlers::workflow::{AutoBuildCancelReason, maybe_cancel_auto_build};
 use crate::bors::handlers::{PullRequestData, deny_request, has_permission};
-use crate::bors::merge_queue::MergeQueueSender;
+use crate::bors::merge_queue::{MergeQueueSender, get_pr_at_front_of_merge_queue};
 use crate::bors::{CommandPrefix, Comment, RepositoryState};
 use crate::database::{BuildStatus, QueueStatus};
 use crate::github::{GithubUser, PullRequestNumber};
@@ -56,8 +57,23 @@ pub(super) async fn command_cancel(
     .await?;
 
     let comment = match auto_build_cancel_message {
-        Some(message) => {
+        Some(mut message) => {
             tracing::info!("Cancelled auto build");
+
+            let next_pr = get_pr_at_front_of_merge_queue(&repo_state, &db)
+                .await
+                .ok()
+                .flatten();
+            if let Some(next_pr) = next_pr {
+                writeln!(
+                    message,
+                    "\n\nThe next pull request likely to be tested is https://github.com/{}/pull/{}.",
+                    repo_state.repository(),
+                    next_pr.number
+                )
+                .unwrap();
+            }
+
             merge_queue_tx.notify().await?;
             Comment::new(message)
         }
@@ -181,6 +197,8 @@ mod tests {
 
             - https://github.com/rust-lang/borstest/actions/runs/1
             - https://github.com/rust-lang/borstest/actions/runs/2
+
+            The next pull request likely to be tested is https://github.com/rust-lang/borstest/pull/1.
             ");
             ctx.expect_cancelled_workflows((), &[w1, w2]);
             ctx.pr(()).await.expect_auto_build_cancelled();
@@ -199,7 +217,11 @@ mod tests {
             ctx.modify_repo((), |repo| repo.workflow_cancel_error = true);
             ctx.workflow_start(ctx.auto_workflow()).await?;
             ctx.post_comment("@bors cancel").await?;
-            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"Auto build cancelled. It was not possible to cancel some workflows.");
+            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
+            Auto build cancelled. It was not possible to cancel some workflows.
+
+            The next pull request likely to be tested is https://github.com/rust-lang/borstest/pull/1.
+            ");
             Ok(())
         })
         .await;
