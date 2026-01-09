@@ -70,7 +70,7 @@ pub(super) async fn command_try_build(
     };
 
     // Try to cancel any previously running try build workflows
-    let cancelled_workflow_urls = if let Some(build) = get_pending_build(pr.db) {
+    let cancelled_workflow_urls = if let Some(build) = get_pending_try_build(pr.db) {
         let res = cancel_previous_try_build(repo, &db, build).await?;
         // Also try to hide previous "Try build started" comments that weren't hidden yet
         if let Err(error) =
@@ -226,7 +226,7 @@ pub(super) async fn command_try_cancel(
     }
 
     let pr_number: PullRequestNumber = pr.number();
-    let Some(build) = get_pending_build(pr.db) else {
+    let Some(build) = get_pending_try_build(pr.db) else {
         tracing::info!("No try build found when trying to cancel a try build");
         repo.client
             .post_comment(pr_number, no_try_build_in_progress_comment())
@@ -272,7 +272,7 @@ pub(super) async fn command_try_cancel(
     Ok(())
 }
 
-fn get_pending_build(pr: &PullRequestModel) -> Option<&BuildModel> {
+fn get_pending_try_build(pr: &PullRequestModel) -> Option<&BuildModel> {
     pr.try_build
         .as_ref()
         .and_then(|b| (b.status == BuildStatus::Pending).then_some(b))

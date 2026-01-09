@@ -75,7 +75,7 @@ pub struct QueueTemplate {
 #[template(path = "not_found.html")]
 pub struct NotFoundTemplate {}
 
-pub fn get_pending_build(pr: &PullRequestModel) -> Option<&BuildModel> {
+pub fn get_pending_auto_build(pr: &PullRequestModel) -> Option<&BuildModel> {
     if let Some(auto_build) = &pr.auto_build
         && auto_build.status == BuildStatus::Pending
     {
