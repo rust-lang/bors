@@ -25,6 +25,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tower::limit::ConcurrencyLimitLayer;
+use tower_http::CompressionLevel;
 use tower_http::catch_panic::CatchPanicLayer;
 use tower_http::compression::CompressionLayer;
 use tower_http::trace::TraceLayer;
@@ -92,7 +93,12 @@ impl FromRef<ServerStateRef> for Arc<PgDbClient> {
 pub struct ServerStateRef(pub Arc<ServerState>);
 
 pub fn create_app(state: ServerState) -> Router {
-    let compression_layer = CompressionLayer::new().br(true).gzip(true);
+    let compression_layer = CompressionLayer::new()
+        .br(true)
+        .gzip(true)
+        // The production bors machine is relatively weak, prefer faster compression, rather than
+        // minimum file sizes
+        .quality(CompressionLevel::Fastest);
     let trace_layer = TraceLayer::new_for_http()
         .make_span_with(|request: &Request<_>| {
             tracing::debug_span!("request", "{} {}", request.method(), request.uri().path())
