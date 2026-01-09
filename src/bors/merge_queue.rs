@@ -7,7 +7,6 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::Instrument;
 
-use crate::BorsContext;
 use crate::bors::build::load_workflow_runs;
 use crate::bors::comment::{
     CommentTag, auto_build_push_failed_comment, auto_build_started_comment,
@@ -22,6 +21,7 @@ use crate::github::api::operations::{BranchUpdateError, ForcePush};
 use crate::github::{CommitSha, PullRequest, PullRequestNumber};
 use crate::github::{MergeResult, attempt_merge};
 use crate::utils::sort_queue::sort_queue_prs;
+use crate::{BorsContext, PgDbClient};
 
 use super::{MergeType, create_merge_commit_message};
 
@@ -139,8 +139,7 @@ async fn process_repository(repo: &RepositoryState, ctx: &BorsContext) -> anyhow
                 #[cfg(test)]
                 crate::bors::WAIT_FOR_MERGE_QUEUE_MERGE_ATTEMPT.mark();
 
-                handle_successful_build(repo, ctx, &pr, &auto_build, &approval_info, pr_num)
-                    .await?;
+                handle_successful_build(repo, ctx, &pr, auto_build, approval_info, pr_num).await?;
                 break;
             }
             QueueStatus::Approved(approval_info) => {
@@ -155,6 +154,25 @@ async fn process_repository(repo: &RepositoryState, ctx: &BorsContext) -> anyhow
     }
 
     Ok(())
+}
+
+/// Return a pull request that will be likely tested the next time the merge queue runs (if any).
+pub async fn get_pr_at_front_of_merge_queue(
+    repo_state: &RepositoryState,
+    db: &PgDbClient,
+) -> anyhow::Result<Option<PullRequestModel>> {
+    let repo_name = repo_state.repository();
+    let repo_db = match db.repo_db(repo_name).await? {
+        Some(repo) => repo,
+        None => {
+            return Ok(None);
+        }
+    };
+
+    let priority = repo_db.tree_state.priority();
+    let prs = db.get_merge_queue_prs(repo_name, priority).await?;
+
+    Ok(sort_queue_prs(prs).into_iter().next())
 }
 
 /// Handle a successful auto build by pointing the base branch to the merged commit.
@@ -230,7 +248,7 @@ async fn handle_start_auto_build(
     ctx: &BorsContext,
     pr: &PullRequestModel,
     pr_num: PullRequestNumber,
-    approval_info: ApprovalInfo,
+    approval_info: &ApprovalInfo,
 ) -> anyhow::Result<AutoBuildStartOutcome> {
     let Err(error) = start_auto_build(repo, ctx, pr, approval_info).await else {
         tracing::info!("Started auto build for PR {pr_num}");
@@ -324,10 +342,8 @@ enum SanityCheckError {
 
 async fn sanity_check_pr(
     gh_pr: &PullRequest,
-    approval_info: ApprovalInfo,
+    approval_info: &ApprovalInfo,
 ) -> Result<(), SanityCheckError> {
-    let approved_sha = approval_info.sha;
-
     if gh_pr.status != PullRequestStatus::Open {
         return Err(SanityCheckError::WrongStatus {
             status: gh_pr.status,
@@ -339,10 +355,9 @@ async fn sanity_check_pr(
         return Err(SanityCheckError::NotMergeable { mergeable_state });
     }
 
-    let expected_sha = CommitSha(approved_sha.to_string());
-    if gh_pr.head.sha != expected_sha {
+    if gh_pr.head.sha.as_ref() != approval_info.sha {
         return Err(SanityCheckError::ApprovedShaMismatch {
-            approved: expected_sha,
+            approved: CommitSha(approval_info.sha.clone()),
             actual: gh_pr.head.sha.clone(),
         });
     }
@@ -354,7 +369,7 @@ async fn start_auto_build(
     repo: &RepositoryState,
     ctx: &BorsContext,
     pr: &PullRequestModel,
-    approval_info: ApprovalInfo,
+    approval_info: &ApprovalInfo,
 ) -> anyhow::Result<(), StartAutoBuildError> {
     let client = &repo.client;
 
@@ -1340,6 +1355,66 @@ also include this pls"
 
             also include this pls
             ");
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn cancel_try_again(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            ctx.approve(()).await?;
+
+            // Start a build
+            ctx.start_auto_build(()).await?;
+            ctx.workflow_start(ctx.auto_workflow()).await?;
+
+            // Cancel it
+            ctx.post_comment("@bors cancel").await?;
+            ctx.expect_comments((), 1).await;
+
+            // Start it again and finish it
+            ctx.start_and_finish_auto_build(()).await?;
+
+            ctx.pr(()).await.expect_status(PullRequestStatus::Merged);
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn cancel_change_order(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            let pr2 = ctx.open_pr((), |_| {}).await?;
+            ctx.approve(()).await?;
+            ctx.approve(pr2.id()).await?;
+
+            // Start a build
+            ctx.start_auto_build(()).await?;
+            ctx.workflow_start(ctx.auto_workflow()).await?;
+
+            // Now increase the priority of the second PR
+            ctx.post_comment(Comment::new(pr2.id(), "@bors p=1"))
+                .await?;
+
+            // Cancel the running build
+            ctx.post_comment("@bors cancel").await?;
+            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
+            Auto build cancelled. Cancelled workflows:
+
+            - https://github.com/rust-lang/borstest/actions/runs/1
+
+            The next pull request likely to be tested is https://github.com/rust-lang/borstest/pull/2.
+            ");
+
+            // Now PR 2 should get priority
+            ctx.start_and_finish_auto_build(pr2.id()).await?;
+            ctx.start_and_finish_auto_build(()).await?;
+
+            ctx.pr(()).await.expect_status(PullRequestStatus::Merged);
+            ctx.pr(pr2.id())
+                .await
+                .expect_status(PullRequestStatus::Merged);
             Ok(())
         })
         .await;

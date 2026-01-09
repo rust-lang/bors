@@ -153,11 +153,15 @@ pub enum AutoBuildCancelReason {
     PushToPR,
     /// A PR was unapproved while it was being tested in an auto build.
     Unapproval,
+    /// An auto build was manually cancelled with `@bors cancel`.
+    Cancel,
 }
 
 /// Cancel an auto build attached to the PR, if there is any.
 /// Returns an optional string that can be attached to a PR comment, which describes the result of
 /// the workflow cancellation.
+///
+/// If the function returns `None`, there was no pending build happening on the PR.
 pub async fn maybe_cancel_auto_build(
     client: &GithubRepositoryClient,
     db: &PgDbClient,
@@ -171,7 +175,7 @@ pub async fn maybe_cancel_auto_build(
 
     tracing::info!("Cancelling auto build {auto_build:?}");
 
-    match build::cancel_build(client, db, &auto_build, CheckRunConclusion::Cancelled).await {
+    match build::cancel_build(client, db, auto_build, CheckRunConclusion::Cancelled).await {
         Ok(workflows) => {
             tracing::info!("Auto build cancelled");
             let workflow_urls = workflows.into_iter().map(|w| w.url).collect();
@@ -196,10 +200,11 @@ fn auto_build_cancelled_msg(
     use std::fmt::Write;
 
     let reason = match reason {
-        AutoBuildCancelReason::PushToPR => "push",
-        AutoBuildCancelReason::Unapproval => "unapproval",
+        AutoBuildCancelReason::PushToPR => " due to push",
+        AutoBuildCancelReason::Unapproval => " due to unapproval",
+        AutoBuildCancelReason::Cancel => "",
     };
-    let mut comment = format!("Auto build cancelled due to {reason}.");
+    let mut comment = format!("Auto build cancelled{reason}.");
     match cancelled_workflow_urls {
         Some(workflow_urls) => {
             comment.push_str(" Cancelled workflows:\n");

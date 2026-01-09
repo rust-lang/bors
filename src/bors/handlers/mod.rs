@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use crate::bors::command::{BorsCommand, CommandParseError};
 use crate::bors::event::{BorsGlobalEvent, BorsRepositoryEvent, PullRequestComment};
+use crate::bors::handlers::autobuild::{command_cancel, command_retry};
 use crate::bors::handlers::help::command_help;
 use crate::bors::handlers::info::command_info;
 use crate::bors::handlers::ping::command_ping;
@@ -11,7 +12,6 @@ use crate::bors::handlers::pr_events::{
 use crate::bors::handlers::refresh::{
     reload_mergeability_status, reload_repository_config, reload_repository_permissions,
 };
-use crate::bors::handlers::retry::command_retry;
 use crate::bors::handlers::review::{
     command_approve, command_close_tree, command_open_tree, command_unapprove,
 };
@@ -39,12 +39,12 @@ use refresh::sync_pull_requests_state;
 use review::{command_delegate, command_set_priority, command_set_rollup, command_undelegate};
 use tracing::Instrument;
 
+mod autobuild;
 mod help;
 mod info;
 mod ping;
 mod pr_events;
 mod refresh;
-mod retry;
 mod review;
 mod trybuild;
 mod workflow;
@@ -378,12 +378,6 @@ async fn handle_comment(
                 let repo = Arc::clone(&repo);
                 let database = Arc::clone(&database);
                 let result = match command {
-                    BorsCommand::Retry => {
-                        let span = tracing::info_span!("Retry");
-                        command_retry(repo, database, pr, &comment.author, merge_queue_tx)
-                            .instrument(span)
-                            .await
-                    }
                     BorsCommand::Approve {
                         approver,
                         priority,
@@ -496,6 +490,25 @@ async fn handle_comment(
                         command_set_rollup(repo, database, pr, &comment.author, rollup)
                             .instrument(span)
                             .await
+                    }
+                    BorsCommand::Retry => {
+                        let span = tracing::info_span!("Retry");
+                        command_retry(repo, database, pr, &comment.author, merge_queue_tx)
+                            .instrument(span)
+                            .await
+                    }
+                    BorsCommand::Cancel => {
+                        let span = tracing::info_span!("Cancel");
+                        command_cancel(
+                            repo,
+                            database,
+                            pr,
+                            &comment.author,
+                            ctx.parser.prefix(),
+                            merge_queue_tx,
+                        )
+                        .instrument(span)
+                        .await
                     }
                 };
                 if result.is_err() {

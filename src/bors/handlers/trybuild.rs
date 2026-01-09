@@ -283,8 +283,8 @@ mod tests {
     use crate::bors::handlers::trybuild::{
         TRY_BRANCH_NAME, TRY_BUILD_CHECK_RUN_NAME, TRY_MERGE_BRANCH_NAME,
     };
+    use crate::database::WorkflowStatus;
     use crate::database::operations::get_all_workflows;
-    use crate::database::{BuildStatus, WorkflowStatus};
     use crate::github::CommitSha;
     use crate::github::api::client::HideCommentReason;
     use crate::tests::default_repo_name;
@@ -736,7 +736,7 @@ try-job: Bar
     async fn try_cancel_no_running_build(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.post_comment("@bors try cancel").await?;
-            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @":exclamation: There is currently no try build in progress.");
+            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @":exclamation: There is currently no try build in progress on this PR.");
             Ok(())
         })
             .await;
@@ -776,12 +776,7 @@ try-job: Bar
                 .await?;
             ctx.post_comment("@bors try cancel").await?;
             insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"Try build was cancelled. It was not possible to cancel some workflows.");
-            let build = ctx.db().find_build(
-                &default_repo_name(),
-                ctx.try_branch().name(),
-                ctx.try_branch().get_commit().commit_sha()
-            ).await?.expect("build not found");
-            assert_eq!(build.status, BuildStatus::Cancelled);
+            ctx.pr(()).await.expect_try_build_cancelled();
 
             Ok(())
         })

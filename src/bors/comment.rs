@@ -86,7 +86,25 @@ pub fn cant_find_last_parent_comment() -> Comment {
 }
 
 pub fn no_try_build_in_progress_comment() -> Comment {
-    Comment::new(":exclamation: There is currently no try build in progress.".to_string())
+    Comment::new(
+        ":exclamation: There is currently no try build in progress on this PR.".to_string(),
+    )
+}
+
+pub fn no_auto_build_in_progress_comment(
+    bot_prefix: &CommandPrefix,
+    has_pending_try_build: bool,
+) -> Comment {
+    let mut msg =
+        ":exclamation: There is currently no auto build in progress on this PR.".to_string();
+    if has_pending_try_build {
+        writeln!(
+            msg,
+            "\n\n*Hint*: There is a pending try build on this PR. Maybe you meant to cancel it? You can do that using `{bot_prefix} try cancel`."
+        )
+            .unwrap();
+    }
+    Comment::new(msg)
 }
 
 pub fn try_build_cancelled_with_failed_workflow_cancel_comment() -> Comment {

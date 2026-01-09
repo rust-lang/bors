@@ -74,7 +74,7 @@ pub(super) async fn handle_push_to_pull_request(
     let had_failed_build = pr_model
         .auto_build
         .as_ref()
-        .map(|b| b.status.is_failure())
+        .map(|b| b.status.is_failure_or_cancel())
         .unwrap_or(false);
     unapprove_pr(&repo_state, &db, &pr_model, pr).await?;
 
