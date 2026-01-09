@@ -230,7 +230,7 @@ async fn handle_start_auto_build(
     ctx: &BorsContext,
     pr: &PullRequestModel,
     pr_num: PullRequestNumber,
-    approval_info: ApprovalInfo,
+    approval_info: &ApprovalInfo,
 ) -> anyhow::Result<AutoBuildStartOutcome> {
     let Err(error) = start_auto_build(repo, ctx, pr, approval_info).await else {
         tracing::info!("Started auto build for PR {pr_num}");
@@ -324,10 +324,8 @@ enum SanityCheckError {
 
 async fn sanity_check_pr(
     gh_pr: &PullRequest,
-    approval_info: ApprovalInfo,
+    approval_info: &ApprovalInfo,
 ) -> Result<(), SanityCheckError> {
-    let approved_sha = approval_info.sha;
-
     if gh_pr.status != PullRequestStatus::Open {
         return Err(SanityCheckError::WrongStatus {
             status: gh_pr.status,
@@ -339,10 +337,9 @@ async fn sanity_check_pr(
         return Err(SanityCheckError::NotMergeable { mergeable_state });
     }
 
-    let expected_sha = CommitSha(approved_sha.to_string());
-    if gh_pr.head.sha != expected_sha {
+    if gh_pr.head.sha.as_ref() != &approval_info.sha {
         return Err(SanityCheckError::ApprovedShaMismatch {
-            approved: expected_sha,
+            approved: CommitSha(approval_info.sha.clone()),
             actual: gh_pr.head.sha.clone(),
         });
     }
@@ -354,7 +351,7 @@ async fn start_auto_build(
     repo: &RepositoryState,
     ctx: &BorsContext,
     pr: &PullRequestModel,
-    approval_info: ApprovalInfo,
+    approval_info: &ApprovalInfo,
 ) -> anyhow::Result<(), StartAutoBuildError> {
     let client = &repo.client;
 

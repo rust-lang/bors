@@ -183,16 +183,16 @@ pub struct ApprovalInfo {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum QueueStatus {
+pub enum QueueStatus<'a> {
     /// Approved with running auto build.
-    Pending(ApprovalInfo, BuildModel),
+    Pending(&'a ApprovalInfo, &'a BuildModel),
     /// Approved with failed auto build.
-    Failed(ApprovalInfo, BuildModel),
+    Failed(&'a ApprovalInfo, &'a BuildModel),
     /// Approved with no auto build started yet or a failed auto build was reset
     /// with `@bors retry`.
-    Approved(ApprovalInfo),
+    Approved(&'a ApprovalInfo),
     /// Approved with passing CI.
-    ReadyForMerge(ApprovalInfo, BuildModel),
+    ReadyForMerge(&'a ApprovalInfo, &'a BuildModel),
     NotApproved,
 }
 
@@ -286,7 +286,7 @@ impl FromStr for DelegatedPermission {
 }
 
 /// Status of a GitHub build.
-#[derive(Debug, Clone, PartialEq, sqlx::Type)]
+#[derive(Debug, PartialEq, sqlx::Type)]
 #[sqlx(type_name = "TEXT")]
 #[sqlx(rename_all = "lowercase")]
 pub enum BuildStatus {
@@ -324,7 +324,7 @@ impl Display for BuildStatus {
 }
 
 /// Represents a single (merged) commit.
-#[derive(Debug, Clone, PartialEq, sqlx::Type)]
+#[derive(Debug, PartialEq, sqlx::Type)]
 #[sqlx(type_name = "build")]
 pub struct BuildModel {
     pub id: PrimaryKey,
@@ -431,22 +431,18 @@ impl PullRequestModel {
     }
 
     /// Get the merge queue status of this pull request.
-    pub fn queue_status(&self) -> QueueStatus {
+    pub fn queue_status(&self) -> QueueStatus<'_> {
         match &self.approval_status {
             ApprovalStatus::NotApproved => QueueStatus::NotApproved,
             ApprovalStatus::Approved(approval_info) => match &self.auto_build {
                 Some(build) => match build.status {
-                    BuildStatus::Pending => {
-                        QueueStatus::Pending(approval_info.clone(), build.clone())
-                    }
-                    BuildStatus::Success => {
-                        QueueStatus::ReadyForMerge(approval_info.clone(), build.clone())
-                    }
+                    BuildStatus::Pending => QueueStatus::Pending(approval_info, build),
+                    BuildStatus::Success => QueueStatus::ReadyForMerge(approval_info, build),
                     BuildStatus::Failure | BuildStatus::Cancelled | BuildStatus::Timeouted => {
-                        QueueStatus::Failed(approval_info.clone(), build.clone())
+                        QueueStatus::Failed(approval_info, build)
                     }
                 },
-                None => QueueStatus::Approved(approval_info.clone()),
+                None => QueueStatus::Approved(approval_info),
             },
         }
     }
