@@ -433,10 +433,11 @@ fn parser_tree_ops(command: &CommandPart<'_>, _parts: &[CommandPart<'_>]) -> Par
     }
 }
 
-/// Parses `@bors cancel` command`
+/// Parses `@bors cancel` command.
+/// Also has an alias of `@bors yield`.
 fn parser_cancel(command: &CommandPart<'_>, _parts: &[CommandPart<'_>]) -> ParseResult {
     match command {
-        CommandPart::Bare("cancel") => Some(Ok(BorsCommand::Cancel)),
+        CommandPart::Bare("cancel" | "yield") => Some(Ok(BorsCommand::Cancel)),
         _ => None,
     }
 }
@@ -1342,6 +1343,13 @@ for the crater",
     #[test]
     fn parse_cancel() {
         let cmds = parse_commands("@bors cancel");
+        assert_eq!(cmds.len(), 1);
+        assert_eq!(cmds[0], Ok(BorsCommand::Cancel));
+    }
+
+    #[test]
+    fn parse_yield() {
+        let cmds = parse_commands("@bors yield");
         assert_eq!(cmds.len(), 1);
         assert_eq!(cmds[0], Ok(BorsCommand::Cancel));
     }
