@@ -3,13 +3,12 @@ use std::collections::HashSet;
 use tracing::log;
 
 use crate::bors::RepositoryState;
-use crate::github::{LabelModification, LabelTrigger, PullRequest, PullRequestNumber};
+use crate::github::{LabelModification, LabelTrigger, PullRequest};
 
 /// If there are any label modifications that should be performed on the given PR when `trigger`
 /// happens, this function will perform them.
 pub async fn handle_label_trigger(
     repo: &RepositoryState,
-    pr_number: PullRequestNumber,
     pr: &PullRequest,
     trigger: LabelTrigger,
 ) -> anyhow::Result<()> {
@@ -43,11 +42,11 @@ pub async fn handle_label_trigger(
 
     if !add.is_empty() {
         log::info!("Adding label(s) {add:?}");
-        repo.client.add_labels(pr_number, &add).await?;
+        repo.client.add_labels(pr.number, &add).await?;
     }
     if !remove.is_empty() {
         log::info!("Removing label(s) {remove:?}");
-        repo.client.remove_labels(pr_number, &remove).await?;
+        repo.client.remove_labels(pr.number, &remove).await?;
     }
     Ok(())
 }
