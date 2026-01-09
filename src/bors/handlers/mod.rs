@@ -26,7 +26,7 @@ use crate::bors::{
 use crate::database::{DelegatedPermission, PullRequestModel};
 use crate::github::{GithubUser, LabelTrigger, PullRequest, PullRequestNumber};
 use crate::permissions::PermissionType;
-use crate::{CommandParser, PgDbClient, TeamApiClient, load_repositories};
+use crate::{PgDbClient, TeamApiClient, load_repositories};
 use anyhow::Context;
 use futures::TryFutureExt;
 use octocrab::Octocrab;
@@ -345,31 +345,7 @@ async fn handle_comment(
     use std::fmt::Write;
 
     let pr_number = comment.pr_number;
-    let mut commands = ctx.parser.parse_commands(&comment.text);
-
-    // Temporary special cases for migration from homu on rust-lang/rust.
-    // Try to parse `@bors try` commands with a hardcoded prefix normally assigned to homu.
-    if ctx.parser.prefix().as_ref() != "@bors" {
-        let homu_commands = CommandParser::new_try_only(CommandPrefix::from("@bors".to_string()))
-            .parse_commands(&comment.text)
-            .into_iter()
-            .filter(|res| match res {
-                // Let homu handle unknown and missing commands
-                Err(CommandParseError::UnknownCommand(_) | CommandParseError::MissingCommand) => {
-                    false
-                }
-                _ => true,
-            });
-        commands.extend(homu_commands);
-    }
-    // Try to parse `@bors2` commands to allow passing commands *only* to bors, and not to homu,
-    // once we switch bors from `@bors2` to `@bors`.
-    if ctx.parser.prefix().as_ref() != "@bors2" {
-        commands.extend(
-            CommandParser::new(CommandPrefix::from("@bors2".to_string()))
-                .parse_commands(&comment.text),
-        );
-    }
+    let commands = ctx.parser.parse_commands(&comment.text);
 
     // Bail if no commands
     if commands.is_empty() {
