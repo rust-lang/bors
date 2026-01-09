@@ -93,12 +93,8 @@ impl GitHub {
         func(self.comments.get_mut(node_id).unwrap());
     }
 
-    pub fn check_sha_history<Id: Into<RepoIdentifier>>(
-        &self,
-        repo: Id,
-        branch: &str,
-        expected_shas: &[&str],
-    ) {
+    /// Get SHA history as a list of lines, for easier snapshot testing.
+    pub fn get_sha_history<Id: Into<RepoIdentifier>>(&self, repo: Id, branch: &str) -> String {
         let actual_shas = self
             .get_repo(repo)
             .lock()
@@ -108,8 +104,7 @@ impl GitHub {
             .into_iter()
             .map(|b| b.sha)
             .collect::<Vec<_>>();
-        let actual_shas: Vec<&str> = actual_shas.iter().map(|s| s.as_str()).collect();
-        assert_eq!(actual_shas, expected_shas);
+        actual_shas.join("\n")
     }
 
     pub fn check_cancelled_workflows(&self, repo: GithubRepoName, expected_run_ids: &[RunId]) {

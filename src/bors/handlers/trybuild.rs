@@ -495,16 +495,17 @@ try-job: Bar
             Ok(())
         })
         .await;
-        gh.check_sha_history(
-            default_repo_name(),
+        insta::assert_snapshot!(gh.get_sha_history(
+            (),
             TRY_MERGE_BRANCH_NAME,
-            &["main-sha1", "merge-0-pr-1-42cd8de2"],
-        );
-        gh.check_sha_history(
-            default_repo_name(),
+        ), @"
+        main-sha1
+        merge-0-pr-1-42cd8de2
+        ");
+        insta::assert_snapshot!(gh.get_sha_history(
+            (),
             TRY_BRANCH_NAME,
-            &["merge-0-pr-1-42cd8de2"],
-        );
+        ), @"merge-0-pr-1-42cd8de2");
     }
 
     #[sqlx::test]
@@ -522,14 +523,13 @@ try-job: Bar
             Ok(())
         })
         .await;
-        gh.check_sha_history(
-            default_repo_name(),
+        insta::assert_snapshot!(gh.get_sha_history(
+            (),
             TRY_MERGE_BRANCH_NAME,
-            &[
-                "ea9c1b050cc8b420c2c211d2177811e564a4dc60",
-                "merge-0-pr-1-42cd8de2",
-            ],
-        );
+        ), @"
+        ea9c1b050cc8b420c2c211d2177811e564a4dc60
+        merge-0-pr-1-42cd8de2
+        ");
     }
 
     #[sqlx::test]
@@ -555,16 +555,15 @@ try-job: Bar
             Ok(())
         })
         .await;
-        gh.check_sha_history(
+        insta::assert_snapshot!(gh.get_sha_history(
             (),
             TRY_MERGE_BRANCH_NAME,
-            &[
-                "ea9c1b050cc8b420c2c211d2177811e564a4dc60",
-                "merge-0-pr-1-42cd8de2",
-                "ea9c1b050cc8b420c2c211d2177811e564a4dc60",
-                "merge-1-pr-1-42cd8de2",
-            ],
-        );
+        ), @"
+        ea9c1b050cc8b420c2c211d2177811e564a4dc60
+        merge-0-pr-1-42cd8de2
+        ea9c1b050cc8b420c2c211d2177811e564a4dc60
+        merge-1-pr-1-42cd8de2
+        ");
     }
 
     #[sqlx::test]

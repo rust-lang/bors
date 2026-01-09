@@ -693,21 +693,24 @@ merge_queue_enabled = false
             Ok(())
         })
         .await;
-        gh.check_sha_history(
-            default_repo_name(),
+        insta::assert_snapshot!(gh.get_sha_history(
+            (),
             "main",
-            &["main-sha1", "merge-0-pr-1-577acb30"],
-        );
-        gh.check_sha_history(
-            default_repo_name(),
-            AUTO_MERGE_BRANCH_NAME,
-            &["main-sha1", "merge-0-pr-1-577acb30"],
-        );
-        gh.check_sha_history(
-            default_repo_name(),
+        ), @"
+        main-sha1
+        merge-0-pr-1-577acb30
+        ");
+        insta::assert_snapshot!(gh.get_sha_history(
+            (),
+            AUTO_MERGE_BRANCH_NAME
+        ), @"
+        main-sha1
+        merge-0-pr-1-577acb30
+        ");
+        insta::assert_snapshot!(gh.get_sha_history(
+            (),
             AUTO_BRANCH_NAME,
-            &["merge-0-pr-1-577acb30"],
-        );
+        ), @"merge-0-pr-1-577acb30");
     }
 
     #[sqlx::test]
@@ -734,17 +737,17 @@ merge_queue_enabled = false
         })
         .await;
 
-        gh.check_sha_history(
-            default_repo_name(),
+        insta::assert_snapshot!(gh.get_sha_history(
+            (),
             "main",
-            &[
-                "main-sha1",
-                "merge-0-pr-1-577acb30",
-                "merge-1-pr-2-5f8fa650",
-                "merge-2-pr-3-2ded0de1",
-                "merge-3-pr-4-0d736c05",
-            ],
-        );
+
+        ), @"
+        main-sha1
+        merge-0-pr-1-577acb30
+        merge-1-pr-2-5f8fa650
+        merge-2-pr-3-2ded0de1
+        merge-3-pr-4-0d736c05
+        ");
     }
 
     #[sqlx::test]
@@ -768,16 +771,16 @@ merge_queue_enabled = false
         })
         .await;
 
-        gh.check_sha_history(
-            default_repo_name(),
+        insta::assert_snapshot!(gh.get_sha_history(
+            (),
             "main",
-            &[
-                "main-sha1",
-                "merge-0-pr-4-0d736c05",
-                "merge-1-pr-2-5f8fa650",
-                "merge-2-pr-3-2ded0de1",
-            ],
-        );
+
+        ), @"
+        main-sha1
+        merge-0-pr-4-0d736c05
+        merge-1-pr-2-5f8fa650
+        merge-2-pr-3-2ded0de1
+        ");
     }
 
     #[sqlx::test]
@@ -835,7 +838,7 @@ merge_queue_enabled = false
             Ok(())
         })
         .await;
-        gh.check_sha_history((), default_branch_name(), &["main-sha1"]);
+        insta::assert_snapshot!(gh.get_sha_history((), default_branch_name()), @"main-sha1");
     }
 
     #[sqlx::test]

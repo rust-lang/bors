@@ -827,16 +827,14 @@ approved = ["+foo", "+baz", "-bar", "-foo2"]
                 Ok(())
             })
             .await;
-        gh.check_sha_history(
-            default_repo_name(),
+        insta::assert_snapshot!(gh.get_sha_history(
+            (),
             TRY_MERGE_BRANCH_NAME,
-            &["main-sha1", "merge-0-pr-1-42cd8de2"],
-        );
-        gh.check_sha_history(
-            default_repo_name(),
-            TRY_BRANCH_NAME,
-            &["merge-0-pr-1-42cd8de2"],
-        );
+        ), @"
+        main-sha1
+        merge-0-pr-1-42cd8de2
+        ");
+        insta::assert_snapshot!(gh.get_sha_history((), TRY_BRANCH_NAME), @"merge-0-pr-1-42cd8de2");
     }
 
     #[sqlx::test]
