@@ -499,9 +499,16 @@ async fn handle_comment(
                     }
                     BorsCommand::Cancel => {
                         let span = tracing::info_span!("Cancel");
-                        command_cancel(repo, database, pr, &comment.author, merge_queue_tx)
-                            .instrument(span)
-                            .await
+                        command_cancel(
+                            repo,
+                            database,
+                            pr,
+                            &comment.author,
+                            ctx.parser.prefix(),
+                            merge_queue_tx,
+                        )
+                        .instrument(span)
+                        .await
                     }
                 };
                 if result.is_err() {

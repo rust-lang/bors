@@ -5,8 +5,8 @@ use crate::bors::comment::no_auto_build_in_progress_comment;
 use crate::bors::handlers::workflow::{AutoBuildCancelReason, maybe_cancel_auto_build};
 use crate::bors::handlers::{PullRequestData, deny_request, has_permission};
 use crate::bors::merge_queue::MergeQueueSender;
-use crate::bors::{Comment, RepositoryState};
-use crate::database::QueueStatus;
+use crate::bors::{CommandPrefix, Comment, RepositoryState};
+use crate::database::{BuildStatus, QueueStatus};
 use crate::github::{GithubUser, PullRequestNumber};
 use crate::permissions::PermissionType;
 
@@ -39,6 +39,7 @@ pub(super) async fn command_cancel(
     db: Arc<PgDbClient>,
     pr: PullRequestData<'_>,
     author: &GithubUser,
+    bot_prefix: &CommandPrefix,
     merge_queue_tx: &MergeQueueSender,
 ) -> anyhow::Result<()> {
     if !has_permission(&repo_state, author, pr, PermissionType::Review).await? {
@@ -62,7 +63,13 @@ pub(super) async fn command_cancel(
         }
         None => {
             tracing::info!("No auto build found when trying to cancel an auto build");
-            no_auto_build_in_progress_comment()
+            let has_pending_try_build = pr
+                .db
+                .try_build
+                .as_ref()
+                .map(|build| build.status == BuildStatus::Pending)
+                .unwrap_or(false);
+            no_auto_build_in_progress_comment(bot_prefix, has_pending_try_build)
         }
     };
     repo_state.client.post_comment(pr.number(), comment).await?;
@@ -137,6 +144,22 @@ mod tests {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.post_comment("@bors cancel").await?;
             insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @":exclamation: There is currently no auto build in progress on this PR.");
+            Ok(())
+        })
+            .await;
+    }
+
+    #[sqlx::test]
+    async fn cancel_while_try_build_is_running(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            ctx.post_comment("@bors try").await?;
+            ctx.expect_comments((), 1).await;
+            ctx.post_comment("@bors cancel").await?;
+            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
+            :exclamation: There is currently no auto build in progress on this PR.
+
+            *Hint*: There is a pending try build on this PR. Maybe you meant to cancel it? You can do that using `@bors try cancel`.
+            ");
             Ok(())
         })
             .await;
