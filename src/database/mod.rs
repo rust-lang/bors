@@ -297,13 +297,15 @@ pub enum BuildStatus {
     /// The build has failed.
     Failure,
     /// The build has been manually cancelled by a user.
+    /// Note that this state is not considered a failure, rather it is considered similarly to
+    /// no build being present at all.
     Cancelled,
     /// The build ran for too long and was timeouted by the bot.
     Timeouted,
 }
 
 impl BuildStatus {
-    pub fn is_failure(&self) -> bool {
+    pub fn is_failure_or_cancel(&self) -> bool {
         match self {
             BuildStatus::Failure | BuildStatus::Cancelled | BuildStatus::Timeouted => true,
             BuildStatus::Pending | BuildStatus::Success => false,
@@ -438,9 +440,10 @@ impl PullRequestModel {
                 Some(build) => match build.status {
                     BuildStatus::Pending => QueueStatus::Pending(approval_info, build),
                     BuildStatus::Success => QueueStatus::ReadyForMerge(approval_info, build),
-                    BuildStatus::Failure | BuildStatus::Cancelled | BuildStatus::Timeouted => {
+                    BuildStatus::Failure | BuildStatus::Timeouted => {
                         QueueStatus::Failed(approval_info, build)
                     }
+                    BuildStatus::Cancelled => QueueStatus::Approved(approval_info),
                 },
                 None => QueueStatus::Approved(approval_info),
             },

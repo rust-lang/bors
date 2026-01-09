@@ -361,7 +361,7 @@ pub async fn queue_handler(
         _ => None,
     });
     let pending_workflow = match pending_build {
-        Some(build) => db.get_workflows_for_build(&build).await?.into_iter().next(),
+        Some(build) => db.get_workflows_for_build(build).await?.into_iter().next(),
         None => None,
     };
 

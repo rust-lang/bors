@@ -1019,11 +1019,14 @@ pub(crate) async fn get_merge_queue_prs(
               AND pr.approved_by IS NOT NULL
               AND pr.mergeable_state = 'mergeable'
               AND (
-                -- We ALWAYS need to return pending and successful PRs, regardless of tree state
-                auto_build.status IN ('pending', 'success') OR (
-                    -- For PRs without a build status, we check if they pass the tree state
-                    -- priority check, if the tree is closed
-                    auto_build.status IS NULL AND ($2::int IS NULL OR pr.priority >= $2)
+                -- We ALWAYS need to return PRs that:
+                -- 1. Are ready for a merge (success)
+                -- 2. Can block the queue (pending)
+                auto_build.status IN ('success', 'pending') OR (
+                    -- For PRs without a (failed) build status, we check if they pass
+                    -- the tree state priority check if the tree is closed
+                    (auto_build.status IS NULL OR auto_build.status = 'cancelled')
+                    AND ($2::int IS NULL OR pr.priority >= $2)
                 )
               )
             "#,

@@ -61,8 +61,11 @@ pub(super) async fn command_info(
             BuildStatus::Pending => {
                 writeln!(message, "is in progress")?;
             }
-            BuildStatus::Failure | BuildStatus::Cancelled | BuildStatus::Timeouted => {
+            BuildStatus::Failure | BuildStatus::Timeouted => {
                 writeln!(message, "has failed")?;
+            }
+            BuildStatus::Cancelled => {
+                writeln!(message, "has been cancelled")?;
             }
             BuildStatus::Success => {
                 writeln!(message, "was successful")?;
@@ -191,6 +194,29 @@ mod tests {
             - Mergeable: yes
             - Try build is in progress
             	- Workflow URL: https://github.com/rust-lang/borstest/actions/runs/1
+            "
+            );
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn info_cancelled_auto_build(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            ctx.approve(()).await?;
+            ctx.start_auto_build(()).await?;
+            ctx.post_comment("@bors cancel").await?;
+            ctx.expect_comments((), 1).await;
+            ctx.post_comment("@bors info").await?;
+            insta::assert_snapshot!(
+                ctx.get_next_comment_text(()).await?,
+                @"
+            ## Status of PR `1`
+            - Approved by: `default-user`
+            - Priority: unset
+            - Mergeable: yes
+            - Auto build has been cancelled
             "
             );
             Ok(())

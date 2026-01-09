@@ -75,6 +75,7 @@ pub fn format_help() -> &'static str {
         BorsCommand::OpenTree => {}
         BorsCommand::TreeClosed(_) => {}
         BorsCommand::Retry => {}
+        BorsCommand::Cancel => {}
     }
 
     r#"
@@ -100,8 +101,9 @@ You can use the following commands:
 - `try [parent=<parent>] [job|jobs=<jobs>]`: Start a try build.
     - Optionally, you can specify a `<parent>` SHA with which will the PR be merged. You can specify `parent=last` to use the same parent SHA as the previous try build.
     - Optionally, you can select a comma-separated list of CI `<jobs>` to run in the try build.
-- `try cancel`: Cancel a running try build
-- `retry`: Clear a failed auto build status from an approved PR. This will cause the merge queue to attempt to start a new auto build and retry merging the PR again.
+- `try cancel`: Cancel a running try build on the current PR.
+- `retry`: Clear a failed auto build status from an approved PR. This will cause the merge queue to eventually attempt to merge the PR again.
+- `cancel`: Cancel a running auto build on the current PR.
 - `info`: Get information about the current PR
 
 ## Repository management

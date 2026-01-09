@@ -137,6 +137,7 @@ const DEFAULT_PARSERS: &[ParserFn] = &[
     parser_ping,
     parser_retry,
     parser_tree_ops,
+    parser_cancel,
 ];
 
 fn parse_command(input: &str, parsers: &[ParserFn]) -> ParseResult {
@@ -428,6 +429,14 @@ fn parser_tree_ops(command: &CommandPart<'_>, _parts: &[CommandPart<'_>]) -> Par
             };
             Some(Ok(BorsCommand::TreeClosed(priority)))
         }
+        _ => None,
+    }
+}
+
+/// Parses `@bors cancel` command`
+fn parser_cancel(command: &CommandPart<'_>, _parts: &[CommandPart<'_>]) -> ParseResult {
+    match command {
+        CommandPart::Bare("cancel") => Some(Ok(BorsCommand::Cancel)),
         _ => None,
     }
 }
@@ -1328,6 +1337,13 @@ for the crater",
             cmds[0],
             Err(CommandParseError::UnknownCommand("tree".to_string()))
         );
+    }
+
+    #[test]
+    fn parse_cancel() {
+        let cmds = parse_commands("@bors cancel");
+        assert_eq!(cmds.len(), 1);
+        assert_eq!(cmds[0], Ok(BorsCommand::Cancel));
     }
 
     #[test]

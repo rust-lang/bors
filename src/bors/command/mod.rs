@@ -113,7 +113,7 @@ pub enum BorsCommand {
         /// The CI workflow to run.
         jobs: Vec<String>,
     },
-    /// Cancel a try build.
+    /// Cancel a try build currently running on a given PR.
     TryCancel,
     /// Set the priority of a PR.
     SetPriority(Priority),
@@ -130,6 +130,8 @@ pub enum BorsCommand {
     /// Set the tree closed with a priority level.
     TreeClosed(Priority),
     /// Clear a failed auto build status from an approved PR.
-    /// This will cause the merge queue to attempt to start a new auto build and retry merging the PR again.
+    /// This will cause the merge queue to eventually attempt to try to test the PR again.
     Retry,
+    /// Cancel an auto build currently running on a given PR.
+    Cancel,
 }

@@ -139,8 +139,7 @@ async fn process_repository(repo: &RepositoryState, ctx: &BorsContext) -> anyhow
                 #[cfg(test)]
                 crate::bors::WAIT_FOR_MERGE_QUEUE_MERGE_ATTEMPT.mark();
 
-                handle_successful_build(repo, ctx, &pr, &auto_build, &approval_info, pr_num)
-                    .await?;
+                handle_successful_build(repo, ctx, &pr, auto_build, approval_info, pr_num).await?;
                 break;
             }
             QueueStatus::Approved(approval_info) => {
@@ -337,7 +336,7 @@ async fn sanity_check_pr(
         return Err(SanityCheckError::NotMergeable { mergeable_state });
     }
 
-    if gh_pr.head.sha.as_ref() != &approval_info.sha {
+    if gh_pr.head.sha.as_ref() != approval_info.sha {
         return Err(SanityCheckError::ApprovedShaMismatch {
             approved: CommitSha(approval_info.sha.clone()),
             actual: gh_pr.head.sha.clone(),
@@ -1337,6 +1336,60 @@ also include this pls"
 
             also include this pls
             ");
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn cancel_try_again(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            ctx.approve(()).await?;
+
+            // Start a build
+            ctx.start_auto_build(()).await?;
+            ctx.workflow_start(ctx.auto_workflow()).await?;
+
+            // Cancel it
+            ctx.post_comment("@bors cancel").await?;
+            ctx.expect_comments((), 1).await;
+
+            // Start it again and finish it
+            ctx.start_and_finish_auto_build(()).await?;
+
+            ctx.pr(()).await.expect_status(PullRequestStatus::Merged);
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn cancel_change_order(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            let pr2 = ctx.open_pr((), |_| {}).await?;
+            ctx.approve(()).await?;
+            ctx.approve(pr2.id()).await?;
+
+            // Start a build
+            ctx.start_auto_build(()).await?;
+            ctx.workflow_start(ctx.auto_workflow()).await?;
+
+            // Now increase the priority of the second PR
+            ctx.post_comment(Comment::new(pr2.id(), "@bors p=1"))
+                .await?;
+
+            // Cancel the running build
+            ctx.post_comment("@bors cancel").await?;
+            ctx.expect_comments((), 1).await;
+
+            // Now PR 2 should get priority
+            ctx.start_and_finish_auto_build(pr2.id()).await?;
+            ctx.start_and_finish_auto_build(()).await?;
+
+            ctx.pr(()).await.expect_status(PullRequestStatus::Merged);
+            ctx.pr(pr2.id())
+                .await
+                .expect_status(PullRequestStatus::Merged);
             Ok(())
         })
         .await;

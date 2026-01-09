@@ -91,6 +91,12 @@ pub fn no_try_build_in_progress_comment() -> Comment {
     )
 }
 
+pub fn no_auto_build_in_progress_comment() -> Comment {
+    Comment::new(
+        ":exclamation: There is currently no auto build in progress on this PR.".to_string(),
+    )
+}
+
 pub fn try_build_cancelled_with_failed_workflow_cancel_comment() -> Comment {
     Comment::new(
         "Try build was cancelled. It was not possible to cancel some workflows.".to_string(),

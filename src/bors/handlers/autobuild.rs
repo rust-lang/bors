@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
 use crate::PgDbClient;
+use crate::bors::comment::no_auto_build_in_progress_comment;
+use crate::bors::handlers::workflow::{AutoBuildCancelReason, maybe_cancel_auto_build};
 use crate::bors::handlers::{PullRequestData, deny_request, has_permission};
 use crate::bors::merge_queue::MergeQueueSender;
 use crate::bors::{Comment, RepositoryState};
@@ -29,6 +31,41 @@ pub(super) async fn command_retry(
         notify_of_invalid_retry_state(&repo_state, pr.number()).await?;
     }
 
+    Ok(())
+}
+
+pub(super) async fn command_cancel(
+    repo_state: Arc<RepositoryState>,
+    db: Arc<PgDbClient>,
+    pr: PullRequestData<'_>,
+    author: &GithubUser,
+    merge_queue_tx: &MergeQueueSender,
+) -> anyhow::Result<()> {
+    if !has_permission(&repo_state, author, pr, PermissionType::Review).await? {
+        deny_request(&repo_state, pr.number(), author, PermissionType::Review).await?;
+        return Ok(());
+    }
+
+    let auto_build_cancel_message = maybe_cancel_auto_build(
+        &repo_state.client,
+        &db,
+        pr.db,
+        AutoBuildCancelReason::Cancel,
+    )
+    .await?;
+
+    let comment = match auto_build_cancel_message {
+        Some(message) => {
+            tracing::info!("Cancelled auto build");
+            merge_queue_tx.notify().await?;
+            Comment::new(message)
+        }
+        None => {
+            tracing::info!("No auto build found when trying to cancel an auto build");
+            no_auto_build_in_progress_comment()
+        }
+    };
+    repo_state.client.post_comment(pr.number(), comment).await?;
     Ok(())
 }
 
@@ -90,6 +127,56 @@ mod tests {
                 ctx.get_next_comment_text(()).await?,
                 @":hourglass: Testing commit pr-1-sha with merge merge-1-pr-1-577acb30..."
             );
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn cancel_no_running_build(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            ctx.post_comment("@bors cancel").await?;
+            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @":exclamation: There is currently no auto build in progress on this PR.");
+            Ok(())
+        })
+            .await;
+    }
+
+    #[sqlx::test]
+    async fn cancel_cancel_workflows(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            ctx.approve(()).await?;
+            ctx.start_auto_build(()).await?;
+
+            let w1 = ctx.auto_workflow();
+            let w2 = ctx.auto_workflow();
+            ctx.workflow_start(w1).await?;
+            ctx.workflow_start(w2).await?;
+            ctx.post_comment("@bors cancel").await?;
+            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
+            Auto build cancelled. Cancelled workflows:
+
+            - https://github.com/rust-lang/borstest/actions/runs/1
+            - https://github.com/rust-lang/borstest/actions/runs/2
+            ");
+            ctx.expect_cancelled_workflows((), &[w1, w2]);
+            ctx.pr(()).await.expect_auto_build_cancelled();
+
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn cancel_error(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            ctx.approve(()).await?;
+            ctx.start_auto_build(()).await?;
+
+            ctx.modify_repo((), |repo| repo.workflow_cancel_error = true);
+            ctx.workflow_start(ctx.auto_workflow()).await?;
+            ctx.post_comment("@bors cancel").await?;
+            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"Auto build cancelled. It was not possible to cancel some workflows.");
             Ok(())
         })
         .await;

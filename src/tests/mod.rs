@@ -1299,6 +1299,14 @@ impl PullRequestProxy {
     }
 
     #[track_caller]
+    pub fn expect_auto_build_cancelled(&self) {
+        assert_eq!(
+            self.require_db_pr().auto_build.as_ref().unwrap().status,
+            BuildStatus::Cancelled
+        );
+    }
+
+    #[track_caller]
     pub fn expect_added_labels(&self, labels: &[&str]) -> &Self {
         let added_labels = self
             .gh_pr
