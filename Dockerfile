@@ -1,7 +1,5 @@
 FROM rust:1.92 AS base
 
-ENV CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse
-
 RUN cargo install cargo-chef
 
 FROM base AS planner
@@ -24,6 +22,9 @@ COPY migrations migrations
 COPY .sqlx .sqlx
 COPY src src
 COPY web web
+
+# Precompress static web assets with gzip to avoid paying for their compression cost at runtime
+RUN gzip --keep --best --force --recursive web/assets
 
 RUN cargo build --release
 
