@@ -262,17 +262,16 @@ pub async fn attempt_merge(
     base_sha: &CommitSha,
     merge_message: &str,
 ) -> anyhow::Result<MergeResult> {
-    tracing::debug!("Attempting to merge with base SHA {base_sha} using branch {branch_name}");
+    tracing::debug!(
+        "Attempting to merge {head_sha} into base SHA {base_sha} using branch {branch_name}"
+    );
 
     // Reset the merge branch to point to base branch
     client
         .set_branch_to_sha(branch_name, base_sha, ForcePush::Yes)
         .await
         .map_err(|error| {
-            anyhow::anyhow!(
-                "Cannot set merge branch {branch_name} to {}: {error:?}",
-                base_sha.0
-            )
+            anyhow::anyhow!("Cannot set merge branch {branch_name} to {base_sha}: {error:?}",)
         })?;
 
     // then merge PR head commit into the merge branch.

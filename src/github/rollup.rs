@@ -254,6 +254,10 @@ async fn create_rollup(
         .collect();
     let rollup_branch = format!("rollup-{branch_suffix}");
 
+    tracing::debug!(
+        "Setting rollup branch {rollup_branch} to SHA {base_branch_sha} ({base_branch})"
+    );
+
     // Create the branch on the user's fork
     user_client
         .client
