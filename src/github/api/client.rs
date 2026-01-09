@@ -216,8 +216,7 @@ impl GithubRepositoryClient {
                 .await
                 .map_err(|e| match e {
                     error @ (BranchUpdateError::Conflict(_)
-                    | BranchUpdateError::ValidationFailed(_)
-                    | BranchUpdateError::BranchNotFound(_)) => ShouldRetry::No(error),
+                    | BranchUpdateError::ValidationFailed(_)) => ShouldRetry::No(error),
                     error => ShouldRetry::Yes(error),
                 })
         })
