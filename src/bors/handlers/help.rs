@@ -49,7 +49,7 @@ mod tests {
                 - Optionally, you can select a comma-separated list of CI `<jobs>` to run in the try build.
             - `try cancel`: Cancel a running try build on the current PR.
             - `retry`: Clear a failed auto build status from an approved PR. This will cause the merge queue to eventually attempt to merge the PR again.
-            - `cancel`: Cancel a running auto build on the current PR.
+            - `cancel` | `yield`: Cancel a running auto build on the current PR.
             - `info`: Get information about the current PR
 
             ## Repository management
