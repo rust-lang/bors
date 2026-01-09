@@ -4,7 +4,7 @@ use std::time::Duration;
 use serde::de::Error;
 use serde::{Deserialize, Deserializer};
 
-use crate::github::{LabelModification, LabelTrigger};
+use crate::github::{LabelModification, LabelTrigger, PullRequest};
 
 pub const CONFIG_FILE_PATH: &str = "rust-bors.toml";
 
@@ -22,9 +22,11 @@ pub struct RepositoryConfig {
     pub timeout: Duration,
     /// Label modifications to apply when specific events occur.
     /// Maps trigger events (approve, try, etc.) to label additions/removals.
-    /// Format: `trigger = ["+label_to_add", "-label_to_remove"]`
+    /// Format (one of):
+    /// - `<trigger> = ["+label_to_add", "-label_to_remove"]`
+    /// - `<trigger> = { modifications = ["+add", "-remove"], unless = ["label1", "label"] }
     #[serde(default, deserialize_with = "deserialize_labels")]
-    pub labels: HashMap<LabelTrigger, Vec<LabelModification>>,
+    pub labels: HashMap<LabelTrigger, LabelOperation>,
     /// Labels that will block a PR from being approved when present on the PR.
     #[serde(default)]
     pub labels_blocking_approval: Vec<String>,
@@ -68,9 +70,32 @@ where
     Ok(Duration::from_secs(seconds))
 }
 
+/// Describes a set of label operations that should be performed.
+#[derive(Debug)]
+pub struct LabelOperation {
+    /// Perform the following modifications...
+    modifications: Vec<LabelModification>,
+    /// ...unless the PR already has one of these labels.
+    unless_has_labels: Vec<String>,
+}
+
+impl LabelOperation {
+    pub fn modifications(&self) -> &[LabelModification] {
+        &self.modifications
+    }
+
+    pub fn should_apply_to(&self, pr: &PullRequest) -> bool {
+        // If there is any overlap, do not apply the operation
+        !self
+            .unless_has_labels
+            .iter()
+            .any(|label| pr.labels.contains(label))
+    }
+}
+
 fn deserialize_labels<'de, D>(
     deserializer: D,
-) -> Result<HashMap<LabelTrigger, Vec<LabelModification>>, D::Error>
+) -> Result<HashMap<LabelTrigger, LabelOperation>, D::Error>
 where
     D: Deserializer<'de>,
 {
@@ -136,24 +161,55 @@ where
         }
     }
 
-    let mut triggers = HashMap::<Trigger, Vec<Modification>>::deserialize(deserializer)?;
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum LabelConfigRecord {
+        Bare(Vec<Modification>),
+        Complex {
+            modifications: Vec<Modification>,
+            unless: Vec<String>,
+        },
+    }
+
+    let triggers = HashMap::<Trigger, LabelConfigRecord>::deserialize(deserializer)?;
+    let mut triggers: HashMap<LabelTrigger, LabelOperation> = triggers
+        .into_iter()
+        .map(|(k, v)| {
+            let (modifications, unless_has_labels) = match v {
+                LabelConfigRecord::Bare(modifications) => (modifications, Vec::new()),
+                LabelConfigRecord::Complex {
+                    modifications,
+                    unless,
+                } => (modifications, unless),
+            };
+            (
+                k.into(),
+                LabelOperation {
+                    modifications: modifications.into_iter().map(|v| v.into()).collect(),
+                    unless_has_labels,
+                },
+            )
+        })
+        .collect();
+
     // If there are any `approve` triggers, add `unapprove` triggers as well.
-    if let Some(modifications) = triggers.get(&Trigger::Approved) {
-        let unapprove_modifications = modifications
+    if let Some(config) = triggers.get(&LabelTrigger::Approved) {
+        let unapprove_modifications = config
+            .modifications
             .iter()
             .map(|m| match m {
-                Modification::Add(label) => Modification::Remove(label.clone()),
-                Modification::Remove(label) => Modification::Add(label.clone()),
+                LabelModification::Add(label) => LabelModification::Remove(label.clone()),
+                LabelModification::Remove(label) => LabelModification::Add(label.clone()),
             })
             .collect::<Vec<_>>();
+        let unless_has_labels = config.unless_has_labels.clone();
         triggers
-            .entry(Trigger::Unapproved)
-            .or_insert_with(|| unapprove_modifications);
+            .entry(LabelTrigger::Unapproved)
+            .or_insert_with(|| LabelOperation {
+                modifications: unapprove_modifications,
+                unless_has_labels,
+            });
     }
-    let triggers = triggers
-        .into_iter()
-        .map(|(k, v)| (k.into(), v.into_iter().map(|v| v.into()).collect()))
-        .collect();
     Ok(triggers)
 }
 
@@ -224,44 +280,97 @@ auto_build_failed = ["+bar", "+baz"]
         let config = load_config(content);
         insta::assert_debug_snapshot!(config.labels.into_iter().collect::<BTreeMap<_, _>>(), @r#"
         {
-            Approved: [
-                Add(
-                    "approved",
-                ),
-            ],
-            Unapproved: [
-                Remove(
-                    "approved",
-                ),
-            ],
-            TryBuildFailed: [],
-            AutoBuildSucceeded: [
-                Add(
-                    "foobar",
-                ),
-                Remove(
-                    "foo",
-                ),
-            ],
-            AutoBuildFailed: [
-                Add(
-                    "bar",
-                ),
-                Add(
-                    "baz",
-                ),
-            ],
+            Approved: LabelOperation {
+                modifications: [
+                    Add(
+                        "approved",
+                    ),
+                ],
+                unless_has_labels: [],
+            },
+            Unapproved: LabelOperation {
+                modifications: [
+                    Remove(
+                        "approved",
+                    ),
+                ],
+                unless_has_labels: [],
+            },
+            TryBuildFailed: LabelOperation {
+                modifications: [],
+                unless_has_labels: [],
+            },
+            AutoBuildSucceeded: LabelOperation {
+                modifications: [
+                    Add(
+                        "foobar",
+                    ),
+                    Remove(
+                        "foo",
+                    ),
+                ],
+                unless_has_labels: [],
+            },
+            AutoBuildFailed: LabelOperation {
+                modifications: [
+                    Add(
+                        "bar",
+                    ),
+                    Add(
+                        "baz",
+                    ),
+                ],
+                unless_has_labels: [],
+            },
         }
         "#);
     }
 
     #[test]
-    #[should_panic(expected = "Label modification must start with `+` or `-`")]
+    #[should_panic(expected = "data did not match any variant of untagged enum")]
     fn deserialize_labels_missing_prefix() {
         let content = r#"[labels]
 approved = ["foo"]
 "#;
         load_config(content);
+    }
+
+    #[test]
+    fn deserialize_labels_complex() {
+        let content = r#"[labels]
+approved = { modifications = ["+add", "-remove"], unless = ["bar"] }
+"#;
+        let config = load_config(content);
+        insta::assert_debug_snapshot!(config.labels.into_iter().collect::<BTreeMap<_, _>>(), @r#"
+        {
+            Approved: LabelOperation {
+                modifications: [
+                    Add(
+                        "add",
+                    ),
+                    Remove(
+                        "remove",
+                    ),
+                ],
+                unless_has_labels: [
+                    "bar",
+                ],
+            },
+            Unapproved: LabelOperation {
+                modifications: [
+                    Remove(
+                        "add",
+                    ),
+                    Add(
+                        "remove",
+                    ),
+                ],
+                unless_has_labels: [
+                    "bar",
+                ],
+            },
+        }
+        "#);
     }
 
     #[test]

@@ -28,5 +28,7 @@ labels_blocking_approval = ["final-comment-period", "proposed-final-comment-peri
 approved = ["+approved"]
 unapproved = ["-approved"]
 try_failed = []
-auto_build_succeeded = ["+foo", "+bar"]
+# You can also use this form, which allows specifying a set of labels (`unless`). If any of those
+# is present on the PR, the modifications will not be applied.
+auto_build_succeeded = { modifications = ["+foo", "+bar"], unless = ["baz"] }
 auto_build_failed = ["+foo", "+bar"]

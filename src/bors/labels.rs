@@ -10,14 +10,21 @@ use crate::github::{LabelModification, LabelTrigger, PullRequest, PullRequestNum
 pub async fn handle_label_trigger(
     repo: &RepositoryState,
     pr_number: PullRequestNumber,
-    pr: Option<&PullRequest>,
+    pr: &PullRequest,
     trigger: LabelTrigger,
 ) -> anyhow::Result<()> {
     let mut add: Vec<String> = Vec::new();
     let mut remove: Vec<String> = Vec::new();
-    if let Some(modifications) = repo.config.load().labels.get(&trigger) {
-        log::debug!("Performing label modifications {modifications:?}");
-        (add, remove) = modifications
+    if let Some(operation) = repo.config.load().labels.get(&trigger) {
+        log::debug!("Performing label operation {operation:?}");
+
+        if !operation.should_apply_to(pr) {
+            log::debug!("Skipping operation (pr labels={:?})", pr.labels);
+            return Ok(());
+        }
+
+        (add, remove) = operation
+            .modifications()
             .iter()
             .partition_map(|modification| match modification {
                 LabelModification::Add(label) => itertools::Either::Left(label.clone()),
@@ -26,14 +33,12 @@ pub async fn handle_label_trigger(
 
         // If we know the GitHub state, only remove/add labels that will actually have any effect on the
         // PR.
-        if let Some(pr) = pr {
-            let existing_labels: HashSet<&str> = pr.labels.iter().map(|s| s.as_str()).collect();
-            add.retain(|l| !existing_labels.contains(l.as_str()));
-            remove.retain(|l| existing_labels.contains(l.as_str()));
-            log::info!(
-                "Filtered labels: requested = {modifications:?}, pr = {existing_labels:?}, add = {add:?}, remove = {remove:?}"
-            );
-        }
+        let existing_labels: HashSet<&str> = pr.labels.iter().map(|s| s.as_str()).collect();
+        add.retain(|l| !existing_labels.contains(l.as_str()));
+        remove.retain(|l| existing_labels.contains(l.as_str()));
+        log::info!(
+            "Filtered labels: requested = {operation:?}, pr = {existing_labels:?}, add = {add:?}, remove = {remove:?}"
+        );
     }
 
     if !add.is_empty() {

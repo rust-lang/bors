@@ -63,13 +63,7 @@ pub(super) async fn command_approve(
     let priority = priority.or(pr.db.priority.map(|p| p as u32));
 
     merge_queue_tx.notify().await?;
-    handle_label_trigger(
-        &repo_state,
-        pr.number(),
-        Some(pr.github),
-        LabelTrigger::Approved,
-    )
-    .await?;
+    handle_label_trigger(&repo_state, pr.number(), pr.github, LabelTrigger::Approved).await?;
 
     notify_of_approval(ctx, &repo_state, pr, priority, approver.as_str()).await
 }
@@ -547,6 +541,33 @@ approved = ["+foo", "+baz", "-bar", "-foo2"]
                 .await
                 .expect_added_labels(&["baz"])
                 .expect_removed_labels(&["foo2"]);
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn label_respect_unless(pool: sqlx::PgPool) {
+        let gh = GitHub::default().with_default_config(
+            r#"
+[labels]
+approved = { modifications = ["+foo", "+baz"], unless = ["label1", "label2"] }
+"#,
+        );
+        run_test((pool, gh), async |ctx: &mut BorsTester| {
+            let pr2 = ctx
+                .open_pr((), |pr| {
+                    pr.labels.push("label2".to_string());
+                })
+                .await?;
+            ctx.post_comment(Comment::new(pr2.id(), "@bors r+")).await?;
+            ctx.expect_comments(pr2.id(), 1).await;
+            ctx.pr(pr2.id()).await.expect_added_labels(&[]);
+
+            ctx.edit_pr(pr2.id(), |pr| pr.labels.clear()).await?;
+            ctx.post_comment(Comment::new(pr2.id(), "@bors r+")).await?;
+            ctx.expect_comments(pr2.id(), 1).await;
+            ctx.pr(pr2.id()).await.expect_added_labels(&["foo", "baz"]);
             Ok(())
         })
         .await;

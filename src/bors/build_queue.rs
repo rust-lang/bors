@@ -279,7 +279,8 @@ async fn maybe_complete_build(
 
     db.update_build_status(build, status).await?;
     if let Some(trigger) = trigger {
-        handle_label_trigger(repo, pr_num, None, trigger).await?;
+        let pr = repo.client.get_pull_request(pr_num).await?;
+        handle_label_trigger(repo, pr_num, &pr, trigger).await?;
     }
 
     if let Some(check_run_id) = build.check_run_id {
