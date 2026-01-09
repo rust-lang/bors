@@ -13,8 +13,9 @@ use super::{BorsContext, PullRequestStatus, RepositoryState};
 use crate::PgDbClient;
 use crate::bors::comment::conflict_comment;
 use crate::bors::handlers::unapprove_pr;
+use crate::bors::labels::handle_label_trigger;
 use crate::database::{MergeableState, OctocrabMergeableState, PullRequestModel};
-use crate::github::{GithubRepoName, PullRequest, PullRequestNumber};
+use crate::github::{GithubRepoName, LabelTrigger, PullRequest, PullRequestNumber};
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BinaryHeap};
 use std::sync::atomic::AtomicBool;
@@ -453,6 +454,7 @@ async fn handle_pr_conflict(
     } else {
         false
     };
+    handle_label_trigger(repo_state, pr, LabelTrigger::Conflict).await?;
     repo_state
         .client
         .post_comment(pr_db.number, conflict_comment(conflict_source, unapproved))

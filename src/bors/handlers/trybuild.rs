@@ -847,6 +847,8 @@ try_failed = ["+foo", "+bar", "-baz"]
 "#,
         );
         run_test((pool, gh), async |ctx: &mut BorsTester| {
+            ctx.edit_pr((), |pr| pr.labels.push("baz".to_string()))
+                .await?;
             ctx.post_comment("@bors try").await?;
             insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
             :hourglass: Trying commit pr-1-sha with merge merge-0-pr-1-42cd8de2…

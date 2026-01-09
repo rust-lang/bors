@@ -642,13 +642,7 @@ pub async fn unapprove_pr(
     pr_gh: &PullRequest,
 ) -> anyhow::Result<()> {
     db.unapprove(pr_db).await?;
-    handle_label_trigger(
-        repo_state,
-        pr_db.number,
-        Some(pr_gh),
-        LabelTrigger::Unapproved,
-    )
-    .await
+    handle_label_trigger(repo_state, pr_gh, LabelTrigger::Unapproved).await
 }
 
 /// Is this branch interesting for the bot?
