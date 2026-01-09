@@ -132,6 +132,6 @@ pub enum BorsCommand {
     /// Clear a failed auto build status from an approved PR.
     /// This will cause the merge queue to eventually attempt to try to test the PR again.
     Retry,
-    /// Cancel an auto build currently running on a given PR.
+    /// Cancel an auto build currently running on a given PR (without removing it from the queue).
     Cancel,
 }
