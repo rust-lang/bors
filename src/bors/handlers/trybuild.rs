@@ -736,7 +736,7 @@ try-job: Bar
     async fn try_cancel_no_running_build(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.post_comment("@bors try cancel").await?;
-            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @":exclamation: There is currently no try build in progress.");
+            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @":exclamation: There is currently no try build in progress on this PR.");
             Ok(())
         })
             .await;

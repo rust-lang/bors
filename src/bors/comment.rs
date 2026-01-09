@@ -86,7 +86,9 @@ pub fn cant_find_last_parent_comment() -> Comment {
 }
 
 pub fn no_try_build_in_progress_comment() -> Comment {
-    Comment::new(":exclamation: There is currently no try build in progress.".to_string())
+    Comment::new(
+        ":exclamation: There is currently no try build in progress on this PR.".to_string(),
+    )
 }
 
 pub fn try_build_cancelled_with_failed_workflow_cancel_comment() -> Comment {
