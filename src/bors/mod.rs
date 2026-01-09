@@ -19,7 +19,6 @@ use serde::Serialize;
 use std::collections::HashMap;
 use std::fmt;
 use std::str::FromStr;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, RwLock};
 use std::time::Duration;
 
@@ -76,8 +75,6 @@ pub fn format_help() -> &'static str {
         BorsCommand::OpenTree => {}
         BorsCommand::TreeClosed(_) => {}
         BorsCommand::Retry => {}
-        BorsCommand::Pause => {}
-        BorsCommand::Resume => {}
     }
 
     r#"
@@ -183,19 +180,11 @@ pub struct RepositoryState {
     pub client: GithubRepositoryClient,
     pub permissions: ArcSwap<UserPermissions>,
     pub config: ArcSwap<RepositoryConfig>,
-    pub paused: AtomicBool,
 }
 
 impl RepositoryState {
     pub fn repository(&self) -> &GithubRepoName {
         self.client.repository()
-    }
-
-    pub fn set_paused(&self, state: bool) {
-        self.paused.store(state, Ordering::SeqCst);
-    }
-    pub fn is_paused(&self) -> bool {
-        self.paused.load(Ordering::SeqCst)
     }
 }
 
