@@ -107,6 +107,7 @@ where
         TryFailed,
         AutoBuildSucceeded,
         AutoBuildFailed,
+        Conflict,
     }
 
     impl From<Trigger> for LabelTrigger {
@@ -117,6 +118,7 @@ where
                 Trigger::TryFailed => LabelTrigger::TryBuildFailed,
                 Trigger::AutoBuildSucceeded => LabelTrigger::AutoBuildSucceeded,
                 Trigger::AutoBuildFailed => LabelTrigger::AutoBuildFailed,
+                Trigger::Conflict => LabelTrigger::Conflict,
             }
         }
     }
@@ -276,6 +278,7 @@ unapproved = ["-approved"]
 try_failed = []
 auto_build_succeeded = ["+foobar", "-foo"]
 auto_build_failed = ["+bar", "+baz"]
+conflict = ["+conflict"]
 "#;
         let config = load_config(content);
         insta::assert_debug_snapshot!(config.labels.into_iter().collect::<BTreeMap<_, _>>(), @r#"
@@ -318,6 +321,14 @@ auto_build_failed = ["+bar", "+baz"]
                     ),
                     Add(
                         "baz",
+                    ),
+                ],
+                unless_has_labels: [],
+            },
+            Conflict: LabelOperation {
+                modifications: [
+                    Add(
+                        "conflict",
                     ),
                 ],
                 unless_has_labels: [],

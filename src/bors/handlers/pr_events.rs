@@ -759,6 +759,37 @@ report_merge_conflicts = true
     }
 
     #[sqlx::test]
+    async fn conflict_label(pool: sqlx::PgPool) {
+        BorsBuilder::new(pool)
+            .github(GitHub::default().with_default_config(
+                r#"
+merge_queue_enabled = true
+report_merge_conflicts = true
+
+[labels]
+conflict = ["+conflict"]
+"#,
+            ))
+            .run_test(async |ctx: &mut BorsTester| {
+                let pr = ctx
+                    .open_pr(default_repo_name(), |pr| {
+                        pr.mergeable_state = OctocrabMergeableState::Clean;
+                    })
+                    .await?;
+                ctx.modify_pr(pr.id(), |pr| {
+                    pr.mergeable_state = OctocrabMergeableState::Dirty;
+                });
+                ctx.push_to_branch(default_branch_name(), Commit::new("sha", "push"))
+                    .await?;
+                ctx.expect_comments(pr.id(), 1).await;
+                ctx.pr(pr.id()).await.expect_added_labels(&["conflict"]);
+
+                Ok(())
+            })
+            .await;
+    }
+
+    #[sqlx::test]
     async fn enqueue_prs_on_pr_opened(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             let pr = ctx

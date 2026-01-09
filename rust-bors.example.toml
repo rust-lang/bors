@@ -32,3 +32,4 @@ try_failed = []
 # is present on the PR, the modifications will not be applied.
 auto_build_succeeded = { modifications = ["+foo", "+bar"], unless = ["baz"] }
 auto_build_failed = ["+foo", "+bar"]
+conflict = ["+conflict"]

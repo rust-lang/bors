@@ -11,6 +11,8 @@ pub enum LabelTrigger {
     AutoBuildSucceeded,
     /// An auto build triggered from the merge queue has failed.
     AutoBuildFailed,
+    /// A merge conflict was detected on a pull request.
+    Conflict,
 }
 
 #[derive(Debug, Eq, PartialEq)]

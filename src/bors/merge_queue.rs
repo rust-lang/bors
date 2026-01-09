@@ -1032,6 +1032,9 @@ auto_build_succeeded = ["+foo", "+bar", "-baz"]
         BorsBuilder::new(pool)
             .github(github)
             .run_test(async |ctx: &mut BorsTester| {
+                ctx.edit_pr((), |pr| pr.labels.push("baz".to_string()))
+                    .await?;
+
                 ctx.approve(()).await?;
                 ctx.start_auto_build(()).await?;
 
@@ -1061,6 +1064,9 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
         BorsBuilder::new(pool)
             .github(github)
             .run_test(async |ctx: &mut BorsTester| {
+                ctx.edit_pr((), |pr| pr.labels.push("baz".to_string()))
+                    .await?;
+
                 ctx.approve(()).await?;
                 ctx.start_auto_build(()).await?;
 
