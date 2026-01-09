@@ -213,14 +213,16 @@
             {%- for pr in prs %}
             <tr data-rollupable="{{ pr.is_rollupable() }}"
                 data-preselected="{{ selected_rollup_prs.contains(pr.number.0 as u32) }}"
-                {% if let Some(priority) = tree_state.priority() && pr.priority.unwrap_or(0) < *priority as i32 %}
+                {% if let Some(priority) = tree_state.priority() &&
+                      pr.priority.unwrap_or(0) < *priority as i32 &&
+                      crate::templates::get_pending_auto_build(pr).is_none() %}
                 class="treeclosed"
                 {% endif %}>
                 <td class="select-checkbox"></td>
                 <td data-pr-number="{{ pr.number.0 }}">
                     <a href="{{ repo_url }}/pull/{{ pr.number }}">{{ pr.number.0 }}</a>
                 </td>
-                {% let pending_build = crate::templates::get_pending_build(pr) %}
+                {% let pending_build = crate::templates::get_pending_auto_build(pr) %}
                 <td class="status" data-status="{{ crate::templates::status_text(pr) }}"
                     {%- if let Some(build) = pending_build -%}
                     data-created-at="{{ build.created_at.timestamp_millis() }}"
