@@ -1,7 +1,5 @@
 FROM rust:1.92 AS base
 
-ENV CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse
-
 RUN cargo install cargo-chef
 
 FROM base AS planner
