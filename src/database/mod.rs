@@ -451,11 +451,9 @@ impl PullRequestModel {
     }
 
     /// Determines if this PR can be included in a rollup.
-    /// A PR is rollupable if it has been approved, does not have a pending build and rollup is not `RollupMode::Never`.
+    /// A PR is rollupable if it has been approved and is not marked as `RollupMode::Never`.
     pub fn is_rollupable(&self) -> bool {
-        self.is_approved()
-            && !matches!(self.rollup, Some(RollupMode::Never))
-            && !matches!(self.queue_status(), QueueStatus::Pending(..))
+        self.is_approved() && !matches!(self.rollup, Some(RollupMode::Never))
     }
 }
 
