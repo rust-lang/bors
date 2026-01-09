@@ -214,7 +214,8 @@ async fn mock_update_branch(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
                 let commit = repo.get_commit_by_sha(&sha);
                 repo.push_commit(branch_name, commit);
             } else {
-                return ResponseTemplate::new(404);
+                // GitHub uses this error code in this endpoint when the branch does not exist
+                return ResponseTemplate::new(422);
             }
 
             ResponseTemplate::new(200)

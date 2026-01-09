@@ -193,9 +193,6 @@ async fn handle_successful_build(
                     "the tested commit was behind the `{branch_name}` branch"
                 )))
             }
-            BranchUpdateError::BranchNotFound(branch_name) => Some(auto_build_push_failed_comment(
-                &format!("the branch {branch_name} was not found"),
-            )),
             // If a transient error happened, try again next time
             _ => None,
         };

@@ -8,7 +8,7 @@ use thiserror::Error;
 use crate::github::CommitSha;
 use crate::github::api::client::{CheckRunOutput, GithubRepositoryClient};
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, PartialEq, Eq)]
 pub enum ForcePush {
     Yes,
     No,
@@ -114,8 +114,9 @@ pub async fn set_branch_to_commit(
     // Fast-path: assume that the branch exists
     match update_branch(repo, branch_name.clone(), sha, force).await {
         Ok(_) => Ok(()),
-        Err(BranchUpdateError::BranchNotFound(_)) => {
-            // Branch does not exist yet, try to create it
+        // Branch does not exist yet or there was some other error.
+        // Try to create it instead if we are force pushing.
+        Err(BranchUpdateError::ValidationFailed(_)) if force == ForcePush::Yes => {
             match create_branch(repo, branch_name.clone(), sha).await {
                 Ok(_) => Ok(()),
                 Err(error) => Err(BranchUpdateError::Custom(error)),
@@ -140,8 +141,6 @@ pub async fn create_branch(
 
 #[derive(Error, Debug)]
 pub enum BranchUpdateError {
-    #[error("Branch {0} was not found")]
-    BranchNotFound(String),
     #[error("Conflict while updating branch {0}")]
     Conflict(String),
     #[error("Validation failed for branch {0}")]
@@ -195,7 +194,6 @@ async fn update_branch(
 
     match status {
         StatusCode::OK => Ok(()),
-        StatusCode::NOT_FOUND => Err(BranchUpdateError::BranchNotFound(branch_name)),
         StatusCode::CONFLICT => Err(BranchUpdateError::Conflict(branch_name)),
         StatusCode::UNPROCESSABLE_ENTITY => Err(BranchUpdateError::ValidationFailed(branch_name)),
         _ => Err(BranchUpdateError::Custom(format!(
