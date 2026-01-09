@@ -123,19 +123,13 @@ pub fn create_app(state: ServerState) -> Router {
         .route("/help", get(help_handler))
         .route(
             "/queue/{repo_name}",
-            get(queue_handler).layer(compression_layer.clone()),
+            get(queue_handler).layer(compression_layer),
         )
         .route("/github", post(github_webhook_handler))
         .route("/health", get(health_handler))
         .route("/oauth/callback", get(rollup::oauth_callback_handler))
         .nest("/api", api)
-        // The merge is used because .layer cannot be called on `serve_assets` directly, and we
-        // only want to apply compression to the assets, not the whole router chain
-        .merge(
-            Router::new()
-                .nest_service("/assets", serve_assets)
-                .layer(compression_layer),
-        )
+        .nest_service("/assets", serve_assets)
         .layer(ConcurrencyLimitLayer::new(100))
         .layer(CatchPanicLayer::custom(handle_panic))
         .layer(trace_layer)

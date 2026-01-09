@@ -25,6 +25,9 @@ COPY .sqlx .sqlx
 COPY src src
 COPY web web
 
+# Precompress static web assets with gzip to avoid paying for their compression cost at runtime
+RUN gzip --keep --best --force --recursive web/assets
+
 RUN cargo build --release
 
 FROM ubuntu:24.04 AS runtime
