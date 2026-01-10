@@ -191,7 +191,7 @@ fn needs_update_in_db(db_pr: &PullRequestModel, gh_pr: &PullRequest) -> bool {
 mod tests {
     use crate::bors::handlers::trybuild::TRY_BUILD_CHECK_RUN_NAME;
     use crate::bors::{MOCK_TIME, PullRequestStatus};
-    use crate::database::{MergeableState, OctocrabMergeableState};
+    use crate::database::{MergeableState, OctocrabMergeableState, WorkflowStatus};
     use crate::tests::{BorsBuilder, BorsTester, GitHub, run_test};
     use crate::tests::{User, default_repo_name};
     use chrono::Utc;
@@ -429,6 +429,103 @@ timeout = 3600
             Ok(())
         })
         .await;
+    }
+
+    #[sqlx::test]
+    async fn refresh_complete_before_timeout(pool: sqlx::PgPool) {
+        run_test(
+            (pool, gh_state_with_long_timeout()),
+            async |ctx: &mut BorsTester| {
+                ctx.post_comment("@bors try").await?;
+                ctx.expect_comments((), 1).await;
+
+                let workflow = ctx.try_workflow();
+                ctx.workflow_start(workflow).await?;
+
+                // Bors crashed and didn't start for some time
+                with_mocked_time(Duration::from_secs(7200), async {
+                    // Finish the workflow
+                    ctx.modify_workflow(workflow, |w| {
+                        w.change_status(WorkflowStatus::Success);
+                    });
+
+                    ctx.refresh_pending_builds().await;
+                })
+                .await;
+                insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @r#"
+                :sunny: Try build successful ([Workflow1](https://github.com/rust-lang/borstest/actions/runs/1))
+                Build commit: merge-0-pr-1-e54ad984 (`merge-0-pr-1-e54ad984`, parent: `main-sha1`)
+
+                <!-- homu: {"type":"TryBuildCompleted","merge_sha":"merge-0-pr-1-e54ad984"} -->
+                "#);
+
+                Ok(())
+            },
+        )
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn complete_build_missed_complete_webhook(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            // Start an auto build
+            ctx.approve(()).await?;
+            ctx.start_auto_build(()).await?;
+            let run_id = ctx.auto_workflow();
+            ctx.workflow_start(run_id).await?;
+
+            // Now bors crashed and didn't receive a webhook about a build being completed
+            ctx.modify_workflow(run_id, |w| {
+                w.change_status(WorkflowStatus::Success);
+            });
+            ctx.refresh_pending_builds().await;
+            ctx.run_merge_queue_now().await;
+
+            // The auto build should be completed
+            let comment = ctx.get_next_comment_text(()).await?;
+            insta::assert_snapshot!(comment, @r#"
+            :sunny: Test successful - [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1)
+            Approved by: `default-user`
+            Pushing merge-0-pr-1-bc4b41f8 to `main`...
+            <!-- homu: {"type":"BuildCompleted","base_ref":"main","merge_sha":"merge-0-pr-1-bc4b41f8"} -->
+            "#);
+
+            ctx.pr(()).await.expect_status(PullRequestStatus::Merged);
+
+            Ok(())
+        })
+            .await;
+    }
+
+    #[sqlx::test]
+    async fn complete_build_missed_all_webhooks(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            // Start an auto build
+            ctx.approve(()).await?;
+            ctx.start_auto_build(()).await?;
+            let run_id = ctx.auto_workflow();
+
+            // Now bors crashed and didn't receive a webhook about a build being started
+            ctx.modify_workflow(run_id, |w| {
+                w.change_status(WorkflowStatus::Success);
+            });
+            ctx.refresh_pending_builds().await;
+            ctx.run_merge_queue_now().await;
+
+            // The auto build should be completed
+            let comment = ctx.get_next_comment_text(()).await?;
+            insta::assert_snapshot!(comment, @r#"
+            :sunny: Test successful - [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1)
+            Approved by: `default-user`
+            Pushing merge-0-pr-1-bc4b41f8 to `main`...
+            <!-- homu: {"type":"BuildCompleted","base_ref":"main","merge_sha":"merge-0-pr-1-bc4b41f8"} -->
+            "#);
+
+            ctx.pr(()).await.expect_status(PullRequestStatus::Merged);
+
+            Ok(())
+        })
+            .await;
     }
 
     async fn with_mocked_time<Fut: Future<Output = ()>>(in_future: Duration, future: Fut) {
