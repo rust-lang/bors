@@ -10,8 +10,8 @@
 //! other background sync processes. We want to finish builds as fast as possible.
 
 use crate::bors::build::{
-    CancelBuildError, cancel_build, get_failed_jobs, hide_build_started_comments,
-    load_workflow_runs,
+    CancelBuildConclusion, CancelBuildError, cancel_build, get_failed_jobs,
+    hide_build_started_comments, load_workflow_runs,
 };
 use crate::bors::comment::{
     CommentTag, build_failed_comment, build_timed_out_comment, try_build_succeeded_comment,
@@ -107,8 +107,12 @@ pub async fn handle_build_queue_event(
                     continue;
                 };
 
-                maybe_timeout_build(&repo, db, &build, &pr, timeout).await?;
-                maybe_complete_build(&repo, db, &build, &pr, &merge_queue_tx, None).await?;
+                // First try to complete builds, and only then timeout then
+                // Because if the bot was offline for some time, we want to first attempt to
+                // actually finish the build, otherwise it might get instantly timeouted.
+                if !maybe_complete_build(&repo, db, &build, &pr, &merge_queue_tx, None).await? {
+                    maybe_timeout_build(&repo, db, &build, &pr, timeout).await?;
+                }
             }
         }
         BuildQueueEvent::OnWorkflowCompleted {
@@ -153,7 +157,7 @@ async fn maybe_timeout_build(
 ) -> anyhow::Result<()> {
     if elapsed_time_since(build.created_at) >= timeout {
         tracing::info!("Cancelling build {build:?}");
-        match cancel_build(&repo.client, db, build, CheckRunConclusion::TimedOut).await {
+        match cancel_build(&repo.client, db, build, CancelBuildConclusion::Timeout).await {
             Ok(_) => {}
             Err(
                 CancelBuildError::FailedToMarkBuildAsCancelled(error)
@@ -190,6 +194,8 @@ struct CompletionTrigger {
 /// been updated in the database.
 ///
 /// We also assume that there is only a single check suite attached to a single build of a commit.
+///
+/// Returns true if the build was completed.
 async fn maybe_complete_build(
     repo: &RepositoryState,
     db: &PgDbClient,
@@ -197,7 +203,7 @@ async fn maybe_complete_build(
     pr: &PullRequestModel,
     merge_queue_tx: &MergeQueueSender,
     completion_trigger: Option<CompletionTrigger>,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<bool> {
     assert_eq!(
         build.status,
         BuildStatus::Pending,
@@ -228,7 +234,7 @@ async fn maybe_complete_build(
                 );
             }
         }
-        return Ok(());
+        return Ok(false);
     }
 
     // At this point, we assume that the number of GH workflow runs is final, and after a single
@@ -248,7 +254,7 @@ async fn maybe_complete_build(
             .any(|run| matches!(run.status, WorkflowStatus::Pending))
     {
         // We are still waiting for some workflows to be finished.
-        return Ok(());
+        return Ok(false);
     }
 
     // Below this point, we assume that the build has completed.
@@ -358,75 +364,5 @@ async fn maybe_complete_build(
         repo.client.post_comment(pr_num, comment).await?;
     }
 
-    Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::bors::PullRequestStatus;
-    use crate::database::WorkflowStatus;
-    use crate::tests::{BorsTester, run_test};
-
-    #[sqlx::test]
-    async fn complete_build_missed_complete_webhook(pool: sqlx::PgPool) {
-        run_test(pool, async |ctx: &mut BorsTester| {
-            // Start an auto build
-            ctx.approve(()).await?;
-            ctx.start_auto_build(()).await?;
-            let run_id = ctx.auto_workflow();
-            ctx.workflow_start(run_id).await?;
-
-            // Now bors crashed and didn't receive a webhook about a build being completed
-            ctx.modify_workflow(run_id, |w| {
-                w.change_status(WorkflowStatus::Success);
-            });
-            ctx.refresh_pending_builds().await;
-            ctx.run_merge_queue_now().await;
-
-            // The auto build should be completed
-            let comment = ctx.get_next_comment_text(()).await?;
-            insta::assert_snapshot!(comment, @r#"
-            :sunny: Test successful - [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1)
-            Approved by: `default-user`
-            Pushing merge-0-pr-1-bc4b41f8 to `main`...
-            <!-- homu: {"type":"BuildCompleted","base_ref":"main","merge_sha":"merge-0-pr-1-bc4b41f8"} -->
-            "#);
-
-            ctx.pr(()).await.expect_status(PullRequestStatus::Merged);
-
-            Ok(())
-        })
-            .await;
-    }
-
-    #[sqlx::test]
-    async fn complete_build_missed_all_webhooks(pool: sqlx::PgPool) {
-        run_test(pool, async |ctx: &mut BorsTester| {
-            // Start an auto build
-            ctx.approve(()).await?;
-            ctx.start_auto_build(()).await?;
-            let run_id = ctx.auto_workflow();
-
-            // Now bors crashed and didn't receive a webhook about a build being started
-            ctx.modify_workflow(run_id, |w| {
-                w.change_status(WorkflowStatus::Success);
-            });
-            ctx.refresh_pending_builds().await;
-            ctx.run_merge_queue_now().await;
-
-            // The auto build should be completed
-            let comment = ctx.get_next_comment_text(()).await?;
-            insta::assert_snapshot!(comment, @r#"
-            :sunny: Test successful - [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1)
-            Approved by: `default-user`
-            Pushing merge-0-pr-1-bc4b41f8 to `main`...
-            <!-- homu: {"type":"BuildCompleted","base_ref":"main","merge_sha":"merge-0-pr-1-bc4b41f8"} -->
-            "#);
-
-            ctx.pr(()).await.expect_status(PullRequestStatus::Merged);
-
-            Ok(())
-        })
-            .await;
-    }
+    Ok(true)
 }

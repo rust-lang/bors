@@ -561,7 +561,9 @@ pub fn start_merge_queue(
 #[cfg(test)]
 mod tests {
     use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
+    use std::time::Duration;
 
+    use crate::bors::with_mocked_time;
     use crate::github::api::client::HideCommentReason;
     use crate::tests::{BorsBuilder, GitHub, run_test};
     use crate::tests::{default_branch_name, default_repo_name};
@@ -1422,6 +1424,31 @@ also include this pls"
             ctx.pr(pr2.id())
                 .await
                 .expect_status(PullRequestStatus::Merged);
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn do_not_merge_timed_out_pr(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            ctx.approve(()).await?;
+
+            // Start a build
+            ctx.start_auto_build(()).await?;
+            ctx.workflow_start(ctx.auto_workflow()).await?;
+
+            // Let it be timed out
+            with_mocked_time(Duration::from_secs(7200), async {
+                ctx.refresh_pending_builds().await;
+                insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @":boom: Test timed out after `3600`s");
+                anyhow::Ok(())
+            })
+            .await?;
+            // Ensure that the PR does not receive any more comments and that it is not tested again
+            ctx.run_merge_queue_now().await;
+            ctx.pr(()).await.expect_auto_build(|build| build.status == BuildStatus::Timeouted);
+
             Ok(())
         })
         .await;

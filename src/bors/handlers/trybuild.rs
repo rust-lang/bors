@@ -3,7 +3,9 @@ use std::sync::Arc;
 use super::has_permission;
 use super::{PullRequestData, deny_request};
 use crate::PgDbClient;
-use crate::bors::build::{CancelBuildError, cancel_build, hide_build_started_comments};
+use crate::bors::build::{
+    CancelBuildConclusion, CancelBuildError, cancel_build, hide_build_started_comments,
+};
 use crate::bors::command::{CommandPrefix, Parent};
 use crate::bors::comment::try_build_cancelled_comment;
 use crate::bors::comment::try_build_cancelled_with_failed_workflow_cancel_comment;
@@ -19,7 +21,6 @@ use crate::github::{CommitSha, GithubUser, PullRequestNumber};
 use crate::github::{MergeResult, attempt_merge};
 use crate::permissions::PermissionType;
 use anyhow::{Context, anyhow};
-use octocrab::params::checks::CheckRunConclusion;
 use octocrab::params::checks::CheckRunStatus;
 use tracing::log;
 
@@ -162,7 +163,7 @@ async fn cancel_previous_try_build(
 ) -> anyhow::Result<Vec<String>> {
     assert_eq!(build.status, BuildStatus::Pending);
 
-    match cancel_build(&repo.client, db, build, CheckRunConclusion::Cancelled).await {
+    match cancel_build(&repo.client, db, build, CancelBuildConclusion::Cancel).await {
         Ok(workflows) => {
             tracing::info!("Try build cancelled");
             Ok(workflows.into_iter().map(|w| w.url).collect())
@@ -238,7 +239,7 @@ pub(super) async fn command_try_cancel(
         &repo.client,
         db.as_ref(),
         build,
-        CheckRunConclusion::Cancelled,
+        CancelBuildConclusion::Cancel,
     )
     .await
     {

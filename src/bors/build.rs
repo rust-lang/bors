@@ -20,6 +20,16 @@ pub enum CancelBuildError {
     FailedToCancelWorkflows(anyhow::Error),
 }
 
+/// How should we treat the cancellation of a build.
+pub enum CancelBuildConclusion {
+    /// The build ran for too long, so we cancel it because of a timeout.
+    /// It will be marked as timeouted.
+    Timeout,
+    /// The build was explicitly cancelled by the user.
+    /// It will be marked as cancelled.
+    Cancel,
+}
+
 /// Attempt to cancel a pending build.
 /// It also tries to cancel its pending workflows and check run status, but that has a lesser
 /// priority.
@@ -27,7 +37,7 @@ pub async fn cancel_build(
     client: &GithubRepositoryClient,
     db: &PgDbClient,
     build: &BuildModel,
-    check_run_conclusion: CheckRunConclusion,
+    conclusion: CancelBuildConclusion,
 ) -> Result<Vec<WorkflowModel>, CancelBuildError> {
     assert_eq!(
         build.status,
@@ -36,8 +46,12 @@ pub async fn cancel_build(
     );
 
     // This is the most important part: we need to ensure that the status of the build is switched
-    // to cancelled.
-    db.update_build_status(build, BuildStatus::Cancelled)
+    // to cancelled or timeouted.
+    let status = match &conclusion {
+        CancelBuildConclusion::Timeout => BuildStatus::Timeouted,
+        CancelBuildConclusion::Cancel => BuildStatus::Cancelled,
+    };
+    db.update_build_status(build, status)
         .await
         .map_err(CancelBuildError::FailedToMarkBuildAsCancelled)?;
 
@@ -56,6 +70,10 @@ pub async fn cancel_build(
         .await
         .map_err(CancelBuildError::FailedToCancelWorkflows)?;
 
+    let check_run_conclusion = match conclusion {
+        CancelBuildConclusion::Timeout => CheckRunConclusion::TimedOut,
+        CancelBuildConclusion::Cancel => CheckRunConclusion::Cancelled,
+    };
     if let Some(check_run_id) = build.check_run_id
         && let Err(error) = client
             .update_check_run(
