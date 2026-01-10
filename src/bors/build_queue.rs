@@ -10,8 +10,8 @@
 //! other background sync processes. We want to finish builds as fast as possible.
 
 use crate::bors::build::{
-    CancelBuildError, cancel_build, get_failed_jobs, hide_build_started_comments,
-    load_workflow_runs,
+    CancelBuildConclusion, CancelBuildError, cancel_build, get_failed_jobs,
+    hide_build_started_comments, load_workflow_runs,
 };
 use crate::bors::comment::{
     CommentTag, build_failed_comment, build_timed_out_comment, try_build_succeeded_comment,
@@ -157,7 +157,7 @@ async fn maybe_timeout_build(
 ) -> anyhow::Result<()> {
     if elapsed_time_since(build.created_at) >= timeout {
         tracing::info!("Cancelling build {build:?}");
-        match cancel_build(&repo.client, db, build, CheckRunConclusion::TimedOut).await {
+        match cancel_build(&repo.client, db, build, CancelBuildConclusion::Timeout).await {
             Ok(_) => {}
             Err(
                 CancelBuildError::FailedToMarkBuildAsCancelled(error)

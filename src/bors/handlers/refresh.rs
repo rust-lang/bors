@@ -190,15 +190,12 @@ fn needs_update_in_db(db_pr: &PullRequestModel, gh_pr: &PullRequest) -> bool {
 #[cfg(test)]
 mod tests {
     use crate::bors::handlers::trybuild::TRY_BUILD_CHECK_RUN_NAME;
-    use crate::bors::{MOCK_TIME, PullRequestStatus};
+    use crate::bors::{PullRequestStatus, with_mocked_time};
     use crate::database::{MergeableState, OctocrabMergeableState, WorkflowStatus};
     use crate::tests::{BorsBuilder, BorsTester, GitHub, run_test};
     use crate::tests::{User, default_repo_name};
-    use chrono::Utc;
     use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
-    use std::future::Future;
     use std::time::Duration;
-    use tokio::runtime::RuntimeFlavor;
 
     #[sqlx::test]
     async fn refresh_no_builds(pool: sqlx::PgPool) {
@@ -443,7 +440,7 @@ timeout = 3600
                 ctx.workflow_start(workflow).await?;
 
                 // Bors crashed and didn't start for some time
-                with_mocked_time(Duration::from_secs(7200), async {
+                with_mocked_time(Duration::from_secs(4000), async {
                     // Finish the workflow
                     ctx.modify_workflow(workflow, |w| {
                         w.change_status(WorkflowStatus::Success);
@@ -452,6 +449,8 @@ timeout = 3600
                     ctx.refresh_pending_builds().await;
                 })
                 .await;
+
+                // The try build was completed successfully, not timed out
                 insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @r#"
                 :sunny: Try build successful ([Workflow1](https://github.com/rust-lang/borstest/actions/runs/1))
                 Build commit: merge-0-pr-1-e54ad984 (`merge-0-pr-1-e54ad984`, parent: `main-sha1`)
@@ -526,21 +525,5 @@ timeout = 3600
             Ok(())
         })
             .await;
-    }
-
-    async fn with_mocked_time<Fut: Future<Output = ()>>(in_future: Duration, future: Fut) {
-        // It is important to use this function only with a single threaded runtime,
-        // otherwise the `MOCK_TIME` variable might get mixed up between different threads.
-        assert_eq!(
-            tokio::runtime::Handle::current().runtime_flavor(),
-            RuntimeFlavor::CurrentThread
-        );
-        MOCK_TIME.with(|time| {
-            *time.borrow_mut() = Some(Utc::now() + chrono::Duration::from_std(in_future).unwrap());
-        });
-        future.await;
-        MOCK_TIME.with(|time| {
-            *time.borrow_mut() = None;
-        });
     }
 }

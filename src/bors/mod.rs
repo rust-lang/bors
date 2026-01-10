@@ -156,6 +156,26 @@ fn now() -> DateTime<Utc> {
     MOCK_TIME.with(|time| time.borrow_mut().unwrap_or_else(Utc::now))
 }
 
+#[cfg(test)]
+async fn with_mocked_time<Fut: Future<Output = R>, R>(in_future: Duration, future: Fut) -> R {
+    use tokio::runtime::RuntimeFlavor;
+
+    // It is important to use this function only with a single threaded runtime,
+    // otherwise the `MOCK_TIME` variable might get mixed up between different threads.
+    assert_eq!(
+        tokio::runtime::Handle::current().runtime_flavor(),
+        RuntimeFlavor::CurrentThread
+    );
+    MOCK_TIME.with(|time| {
+        *time.borrow_mut() = Some(Utc::now() + chrono::Duration::from_std(in_future).unwrap());
+    });
+    let res = future.await;
+    MOCK_TIME.with(|time| {
+        *time.borrow_mut() = None;
+    });
+    res
+}
+
 fn elapsed_time_since(date: DateTime<Utc>) -> Duration {
     let time: DateTime<Utc> = now();
     (time - date).to_std().unwrap_or(Duration::ZERO)

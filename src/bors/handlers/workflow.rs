@@ -1,6 +1,6 @@
 use crate::PgDbClient;
 use crate::bors::RepositoryState;
-use crate::bors::build::CancelBuildError;
+use crate::bors::build::{CancelBuildConclusion, CancelBuildError};
 use crate::bors::build_queue::BuildQueueSender;
 use crate::bors::comment::{CommentTag, append_workflow_links_to_comment};
 use crate::bors::event::{WorkflowRunCompleted, WorkflowRunStarted};
@@ -8,7 +8,6 @@ use crate::bors::handlers::is_bors_observed_branch;
 use crate::bors::{BuildKind, build};
 use crate::database::{BuildModel, BuildStatus, PullRequestModel, QueueStatus, WorkflowStatus};
 use crate::github::api::client::GithubRepositoryClient;
-use octocrab::params::checks::CheckRunConclusion;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -175,7 +174,7 @@ pub async fn maybe_cancel_auto_build(
 
     tracing::info!("Cancelling auto build {auto_build:?}");
 
-    match build::cancel_build(client, db, auto_build, CheckRunConclusion::Cancelled).await {
+    match build::cancel_build(client, db, auto_build, CancelBuildConclusion::Cancel).await {
         Ok(workflows) => {
             tracing::info!("Auto build cancelled");
             let workflow_urls = workflows.into_iter().map(|w| w.url).collect();
