@@ -7,11 +7,13 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::Instrument;
 
+use super::{MergeType, create_merge_commit_message};
 use crate::bors::build::load_workflow_runs;
 use crate::bors::comment::{
     CommentTag, auto_build_push_failed_comment, auto_build_started_comment,
     auto_build_succeeded_comment, merge_conflict_comment,
 };
+use crate::bors::mergeability_queue::MergeabilityQueueSender;
 use crate::bors::{AUTO_BRANCH_NAME, PullRequestStatus, RepositoryState};
 use crate::database::{
     ApprovalInfo, BuildModel, BuildStatus, MergeableState, PullRequestModel, QueueStatus,
@@ -22,8 +24,6 @@ use crate::github::{CommitSha, PullRequest, PullRequestNumber};
 use crate::github::{MergeResult, attempt_merge};
 use crate::utils::sort_queue::sort_queue_prs;
 use crate::{BorsContext, PgDbClient};
-
-use super::{MergeType, create_merge_commit_message};
 
 #[derive(Debug)]
 enum MergeQueueEvent {
@@ -84,12 +84,15 @@ pub(super) const AUTO_BUILD_CHECK_RUN_NAME: &str = "Bors auto build";
 /// Process the merge queue.
 /// Try to finish and merge a successful auto build, if any.
 /// If there is a PR ready to be merged, starts an auto build for it.
-pub async fn merge_queue_tick(ctx: Arc<BorsContext>) -> anyhow::Result<()> {
+pub async fn merge_queue_tick(
+    ctx: Arc<BorsContext>,
+    mergeability_sender: &MergeabilityQueueSender,
+) -> anyhow::Result<()> {
     let repos: Vec<Arc<RepositoryState>> = ctx.repositories.repositories();
 
     for repo in repos {
         let repo_name = repo.repository().to_string();
-        if let Err(error) = process_repository(&repo, &ctx).await {
+        if let Err(error) = process_repository(&repo, &ctx, mergeability_sender).await {
             tracing::error!("Error running merge queue for {repo_name}: {error:?}");
         }
     }
@@ -97,7 +100,11 @@ pub async fn merge_queue_tick(ctx: Arc<BorsContext>) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn process_repository(repo: &RepositoryState, ctx: &BorsContext) -> anyhow::Result<()> {
+async fn process_repository(
+    repo: &RepositoryState,
+    ctx: &BorsContext,
+    mergeability_sender: &MergeabilityQueueSender,
+) -> anyhow::Result<()> {
     if !repo.config.load().merge_queue_enabled {
         return Ok(());
     }
@@ -139,14 +146,16 @@ async fn process_repository(repo: &RepositoryState, ctx: &BorsContext) -> anyhow
                 #[cfg(test)]
                 crate::bors::WAIT_FOR_MERGE_QUEUE_MERGE_ATTEMPT.mark();
 
-                handle_successful_build(repo, ctx, &pr, auto_build, approval_info, pr_num).await?;
+                handle_successful_build(repo, ctx, pr, auto_build, approval_info, pr_num).await?;
                 break;
             }
             QueueStatus::Approved(approval_info) => {
                 tracing::info!(
                     "Attempting to start auto build for {pr_num}. Current queue: {prs:?}"
                 );
-                match handle_start_auto_build(repo, ctx, &pr, pr_num, approval_info).await? {
+                match handle_start_auto_build(repo, ctx, pr, approval_info, mergeability_sender)
+                    .await?
+                {
                     AutoBuildStartOutcome::BuildStarted | AutoBuildStartOutcome::PauseQueue => {
                         break;
                     }
@@ -247,14 +256,15 @@ enum AutoBuildStartOutcome {
 }
 
 /// Handle starting a new auto build for an approved PR.
-#[tracing::instrument(skip(repo, ctx, pr))]
+#[tracing::instrument(skip(repo, ctx, pr, mergeability_sender))]
 async fn handle_start_auto_build(
     repo: &RepositoryState,
     ctx: &BorsContext,
     pr: &PullRequestModel,
-    pr_num: PullRequestNumber,
     approval_info: &ApprovalInfo,
+    mergeability_sender: &MergeabilityQueueSender,
 ) -> anyhow::Result<AutoBuildStartOutcome> {
+    let pr_num = pr.number;
     let Err(error) = start_auto_build(repo, ctx, pr, approval_info).await else {
         tracing::info!("Started auto build for PR {pr_num}");
         return Ok(AutoBuildStartOutcome::BuildStarted);
@@ -287,11 +297,25 @@ async fn handle_start_auto_build(
             tracing::info!(
                 "Sanity check failed for PR {pr_num}: it was not mergeable (mergeable state: {mergeable_state:?})"
             );
-            // The DB mergeability status was wrong, let's update it.
-            ctx.db
-                .set_pr_mergeable_state(&pr.repository, pr.number, mergeable_state)
-                .await?;
-            Ok(AutoBuildStartOutcome::ContinueToNextPr)
+            // Either the mergeability status is unknown, which can most often happen if another PR
+            // was *just* merged, and the base branch was pushed to, or it is unmergeable.
+            let outcome = match mergeable_state {
+                MergeableState::Mergeable => {
+                    unreachable!("Mergeable status received as the result of a failed sanity check")
+                }
+                // If it has conflicts, we still want the mergeability queue to post the conflict
+                // message, to avoid racing with it and posting the comment multiple times.
+                // But if GitHub claims that there are conflicts, we should continue to the next
+                // pull request in the queue.
+                MergeableState::HasConflicts => AutoBuildStartOutcome::ContinueToNextPr,
+                // If it's unknown, we want to wait until the mergeability queue reloads the status,
+                // so we pause the merge queue.
+                MergeableState::Unknown => AutoBuildStartOutcome::PauseQueue,
+            };
+            // In both cases, we want to enqueue the pull request for mergeability check
+            mergeability_sender.enqueue_pr(pr, None);
+
+            Ok(outcome)
         }
         StartAutoBuildError::SanityCheckFailed(SanityCheckError::ApprovedShaMismatch {
             approved,
@@ -382,15 +406,16 @@ async fn start_auto_build(
         .get_pull_request(pr.number)
         .await
         .map_err(StartAutoBuildError::GitHubError)?;
+
+    sanity_check_pr(&gh_pr, approval_info)
+        .await
+        .map_err(StartAutoBuildError::SanityCheckFailed)?;
+
     let base_sha = client
         .get_branch_sha(&pr.base_branch)
         .await
         .map_err(StartAutoBuildError::GitHubError)?;
     let head_sha = gh_pr.head.sha.clone();
-
-    sanity_check_pr(&gh_pr, approval_info)
-        .await
-        .map_err(StartAutoBuildError::SanityCheckFailed)?;
 
     let pr_data = super::handlers::PullRequestData {
         db: pr,
@@ -508,6 +533,7 @@ async fn start_auto_build(
 pub fn start_merge_queue(
     ctx: Arc<BorsContext>,
     max_interval: chrono::Duration,
+    mergeability_sender: MergeabilityQueueSender,
 ) -> (MergeQueueSender, impl Future<Output = ()>) {
     let (tx, mut rx) = mpsc::channel::<MergeQueueEvent>(1024);
     let sender = MergeQueueSender { inner: tx };
@@ -520,13 +546,17 @@ pub fn start_merge_queue(
             ctx: &Arc<BorsContext>,
             notified: &mut bool,
             last_executed_at: &mut DateTime<Utc>,
+            mergeability_sender: &MergeabilityQueueSender,
         ) {
             *notified = false;
             *last_executed_at = Utc::now();
 
             let span = tracing::info_span!("MergeQueue");
             tracing::debug!("Processing merge queue");
-            if let Err(error) = merge_queue_tick(ctx.clone()).instrument(span.clone()).await {
+            if let Err(error) = merge_queue_tick(ctx.clone(), mergeability_sender)
+                .instrument(span.clone())
+                .await
+            {
                 // In tests, we want to panic on all errors.
                 #[cfg(test)]
                 {
@@ -544,13 +574,25 @@ pub fn start_merge_queue(
             match event {
                 #[cfg(test)]
                 MergeQueueEvent::PerformTick => {
-                    run_tick(&ctx, &mut notified, &mut last_executed_at).await;
+                    run_tick(
+                        &ctx,
+                        &mut notified,
+                        &mut last_executed_at,
+                        &mergeability_sender,
+                    )
+                    .await;
                     crate::bors::WAIT_FOR_MERGE_QUEUE.mark();
                 }
                 MergeQueueEvent::MaybePerformTick => {
                     // Note: this is not executed at all in tests
                     if notified || (Utc::now() - last_executed_at) >= max_interval {
-                        run_tick(&ctx, &mut notified, &mut last_executed_at).await;
+                        run_tick(
+                            &ctx,
+                            &mut notified,
+                            &mut last_executed_at,
+                            &mergeability_sender,
+                        )
+                        .await;
                     }
                 }
                 MergeQueueEvent::Notify => {
@@ -1453,6 +1495,34 @@ also include this pls"
             // Ensure that the PR does not receive any more comments and that it is not tested again
             ctx.run_merge_queue_now().await;
             ctx.pr(()).await.expect_auto_build(|build| build.status == BuildStatus::Timeouted);
+
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn wait_for_unknown_mergeability_status(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            let pr2 = ctx.open_pr((), |_| {}).await?;
+            ctx.approve(pr2.id()).await?;
+
+            ctx.approve(()).await?;
+            ctx.modify_pr((), |pr| {
+                pr.mergeable_state = OctocrabMergeableState::Unknown
+            });
+
+            // Try to merge, this shouldn't succeed, but it should add the PR to the mergeability
+            // check queue. It should also not continue to PR2
+            ctx.run_merge_queue_now().await;
+
+            ctx.modify_pr((), |pr| pr.mergeable_state = OctocrabMergeableState::Clean);
+            ctx.update_mergeability_status().await;
+            ctx.wait_for_pr((), |pr| pr.mergeable_state == MergeableState::Mergeable)
+                .await?;
+
+            ctx.start_and_finish_auto_build(()).await?;
+            ctx.start_and_finish_auto_build(pr2.id()).await?;
 
             Ok(())
         })
