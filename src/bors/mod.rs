@@ -321,6 +321,7 @@ pub fn create_merge_commit_message(pr: handlers::PullRequestData, merge_type: Me
 
     let mut message = format!(
         r#"Auto merge of #{pr_number} - {pr_label}, r={reviewer}
+
 {pr_title}
 
 {pr_description}"#,
