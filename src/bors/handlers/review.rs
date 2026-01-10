@@ -834,9 +834,9 @@ approved = { modifications = ["+foo", "+baz"], unless = ["label1", "label2"] }
             TRY_MERGE_BRANCH_NAME,
         ), @"
         main-sha1
-        merge-0-pr-1-42cd8de2
+        merge-0-pr-1-e54ad984
         ");
-        insta::assert_snapshot!(gh.get_sha_history((), TRY_BRANCH_NAME), @"merge-0-pr-1-42cd8de2");
+        insta::assert_snapshot!(gh.get_sha_history((), TRY_BRANCH_NAME), @"merge-0-pr-1-e54ad984");
     }
 
     #[sqlx::test]
@@ -1209,7 +1209,7 @@ approved = { modifications = ["+foo", "+baz"], unless = ["label1", "label2"] }
 
                 ctx.post_comment("@bors try").await?;
                 insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
-                :hourglass: Trying commit pr-1-sha with merge merge-0-pr-1-42cd8de2…
+                :hourglass: Trying commit pr-1-sha with merge merge-0-pr-1-e54ad984…
 
                 To cancel the try build, run the command `@bors try cancel`.
                 ");
