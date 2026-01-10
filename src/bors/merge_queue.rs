@@ -119,7 +119,7 @@ async fn process_repository(repo: &RepositoryState, ctx: &BorsContext) -> anyhow
     // then pending builds (which block the queue to prevent starting simultaneous auto-builds).
     let prs = sort_queue_prs(prs);
 
-    for pr in prs {
+    for pr in &prs {
         let pr_num = pr.number;
 
         match pr.queue_status() {
@@ -143,11 +143,16 @@ async fn process_repository(repo: &RepositoryState, ctx: &BorsContext) -> anyhow
                 break;
             }
             QueueStatus::Approved(approval_info) => {
+                tracing::info!(
+                    "Attempting to start auto build for {pr_num}. Current queue: {prs:?}"
+                );
                 match handle_start_auto_build(repo, ctx, &pr, pr_num, approval_info).await? {
                     AutoBuildStartOutcome::BuildStarted | AutoBuildStartOutcome::PauseQueue => {
                         break;
                     }
-                    AutoBuildStartOutcome::ContinueToNextPr => {}
+                    AutoBuildStartOutcome::ContinueToNextPr => {
+                        tracing::warn!("Continuing to next pull request in the merge queue");
+                    }
                 }
             }
         }
