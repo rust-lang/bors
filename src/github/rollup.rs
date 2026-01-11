@@ -695,7 +695,8 @@ mod tests {
         ");
     }
 
-    /// Ensure that a PR can be associated to multiple rollups in case of CI failure in the initial rollup
+    /// Ensure that a PR can be associated to multiple rollups.
+    /// This can happen when opening a new rollup similar to an existing one, before closing the old one.
     #[sqlx::test]
     async fn multiple_rollups_same_pr(pool: sqlx::PgPool) {
         let gh = run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
@@ -705,16 +706,19 @@ mod tests {
             ctx.approve(pr3.id()).await?;
 
             make_rollup(ctx, &[&pr2, &pr3]).await?;
-            // Simulate a maintainer closing the rollup due to a CI failure requiring popping a PR from the contents
-            ctx.set_pr_status_closed(4).await?;
             make_rollup(ctx, &[&pr3]).await?;
-            // Ensure both rollups have the requested PRs
             assert_eq!(
                 ctx.db().get_nonclosed_rollups(&pr2.repo).await?,
-                HashMap::from([(
-                    PullRequestNumber(5),
-                    HashSet::from_iter(vec![PullRequestNumber(3)])
-                )])
+                HashMap::from([
+                    (
+                        PullRequestNumber(4),
+                        HashSet::from_iter(vec![PullRequestNumber(2), PullRequestNumber(3)])
+                    ),
+                    (
+                        PullRequestNumber(5),
+                        HashSet::from_iter(vec![PullRequestNumber(3)])
+                    )
+                ])
             );
             Ok(())
         })
@@ -723,8 +727,8 @@ mod tests {
         insta::assert_snapshot!(repo.lock().get_pr(4).description, @"
         Successful merges:
 
-         - #2 (Title of PR 2)
-         - #3 (Title of PR 3)
+         - rust-lang/borstest#2 (Title of PR 2)
+         - rust-lang/borstest#3 (Title of PR 3)
 
         r? @ghost
 
