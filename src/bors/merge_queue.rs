@@ -1044,7 +1044,7 @@ merge_queue_enabled = false
         run_test(pool, async |ctx: &mut BorsTester| {
             let pr = ctx.open_pr((), |_| {}).await?;
             ctx.approve(pr.id()).await?;
-            ctx.modify_pr(pr.id(), |pr| {
+            ctx.modify_pr_in_gh(pr.id(), |pr| {
                 pr.mergeable_state = OctocrabMergeableState::Dirty;
             });
             ctx.run_merge_queue_now().await;
@@ -1059,7 +1059,7 @@ merge_queue_enabled = false
         run_test(pool, async |ctx: &mut BorsTester| {
             let pr = ctx.open_pr((), |_| {}).await?;
             ctx.approve(pr.id()).await?;
-            ctx.modify_pr(pr.id(), |pr| pr.close());
+            ctx.modify_pr_in_gh(pr.id(), |pr| pr.close());
             ctx.run_merge_queue_now().await;
             ctx.pr(pr.id()).await.expect_no_auto_build();
             Ok(())
@@ -1343,7 +1343,7 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
 
             // Change its head SHA, but don't tell bors about it
             ctx
-                .modify_pr(pr2.id(), |pr| {
+                .modify_pr_in_gh(pr2.id(), |pr| {
                     pr.head_sha = format!("{}-modified", pr.head_sha);
                 });
 
@@ -1373,7 +1373,7 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
 
             // Change its status, but don't tell bors about it
             ctx
-                .modify_pr(pr2.id(), |pr| {
+                .modify_pr_in_gh(pr2.id(), |pr| {
                     pr.close();
                 });
 
@@ -1541,7 +1541,7 @@ also include this pls"
             ctx.approve(pr2.id()).await?;
 
             ctx.approve(()).await?;
-            ctx.modify_pr((), |pr| {
+            ctx.modify_pr_in_gh((), |pr| {
                 pr.mergeable_state = OctocrabMergeableState::Unknown
             });
 
@@ -1549,7 +1549,7 @@ also include this pls"
             // check queue. It should also not continue to PR2
             ctx.run_merge_queue_now().await;
 
-            ctx.modify_pr((), |pr| pr.mergeable_state = OctocrabMergeableState::Clean);
+            ctx.modify_pr_in_gh((), |pr| pr.mergeable_state = OctocrabMergeableState::Clean);
             ctx.update_mergeability_status().await;
             ctx.wait_for_pr((), |pr| pr.mergeable_state == MergeableState::Mergeable)
                 .await?;

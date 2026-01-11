@@ -615,7 +615,7 @@ mod tests {
             .await?;
             ctx.wait_for_pr((), |pr| pr.mergeable_state == MergeableState::Unknown)
                 .await?;
-            ctx.modify_pr((), |pr| pr.mergeable_state = OctocrabMergeableState::Dirty);
+            ctx.modify_pr_in_gh((), |pr| pr.mergeable_state = OctocrabMergeableState::Dirty);
             ctx.wait_for_pr((), |pr| pr.mergeable_state == MergeableState::HasConflicts)
                 .await?;
             Ok(())
@@ -633,7 +633,7 @@ mod tests {
                 .await?;
             ctx.push_to_branch(default_branch_name(), Commit::new("sha", "push"))
                 .await?;
-            ctx.modify_pr(pr.id(), |pr| {
+            ctx.modify_pr_in_gh(pr.id(), |pr| {
                 pr.mergeable_state = OctocrabMergeableState::Dirty;
             });
             ctx.wait_for_pr(pr.id(), |pr| {
@@ -653,7 +653,7 @@ mod tests {
                     pr.mergeable_state = OctocrabMergeableState::Clean;
                 })
                 .await?;
-            ctx.modify_pr(pr.id(), |pr| {
+            ctx.modify_pr_in_gh(pr.id(), |pr| {
                 pr.mergeable_state = OctocrabMergeableState::Dirty;
             });
             ctx.push_to_branch(default_branch_name(), Commit::new("sha", "push"))
@@ -679,7 +679,7 @@ report_merge_conflicts = true
                 })
                 .await?;
             ctx
-                .modify_pr(pr.id(), |pr| {
+                .modify_pr_in_gh(pr.id(), |pr| {
                     pr.mergeable_state = OctocrabMergeableState::Dirty;
                 });
             ctx.push_to_branch(default_branch_name(), Commit::new("sha", "push")).await?;
@@ -706,7 +706,7 @@ report_merge_conflicts = true
                 .await?;
             ctx.approve(pr.id()).await?;
             ctx
-                .modify_pr(pr.id(), |pr| {
+                .modify_pr_in_gh(pr.id(), |pr| {
                     pr.mergeable_state = OctocrabMergeableState::Dirty;
                 });
             ctx.push_to_branch(default_branch_name(), Commit::new("sha", "push")).await?;
@@ -744,7 +744,7 @@ report_merge_conflicts = true
             let commit = ctx.auto_branch().get_commit().clone();
 
             ctx
-                .modify_pr(pr2.id(), |pr| {
+                .modify_pr_in_gh(pr2.id(), |pr| {
                     pr.mergeable_state = OctocrabMergeableState::Dirty;
                 });
 
@@ -776,7 +776,7 @@ conflict = ["+conflict"]
                         pr.mergeable_state = OctocrabMergeableState::Clean;
                     })
                     .await?;
-                ctx.modify_pr(pr.id(), |pr| {
+                ctx.modify_pr_in_gh(pr.id(), |pr| {
                     pr.mergeable_state = OctocrabMergeableState::Dirty;
                 });
                 ctx.push_to_branch(default_branch_name(), Commit::new("sha", "push"))
@@ -809,13 +809,13 @@ conflict = ["+conflict"]
     #[sqlx::test]
     async fn enqueue_prs_on_pr_reopened(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
-            ctx.modify_pr((), |pr| {
+            ctx.modify_pr_in_gh((), |pr| {
                 pr.mergeable_state = OctocrabMergeableState::Unknown;
             });
             ctx.reopen_pr(()).await?;
             ctx.wait_for_pr((), |pr| pr.mergeable_state == MergeableState::Unknown)
                 .await?;
-            ctx.modify_pr((), |pr| {
+            ctx.modify_pr_in_gh((), |pr| {
                 pr.mergeable_state = OctocrabMergeableState::Dirty;
             });
             ctx.wait_for_pr((), |pr| pr.mergeable_state == MergeableState::HasConflicts)
@@ -831,7 +831,7 @@ conflict = ["+conflict"]
             ctx.push_to_pr(()).await?;
             ctx.wait_for_pr((), |pr| pr.mergeable_state == MergeableState::Unknown)
                 .await?;
-            ctx.modify_pr((), |pr| pr.mergeable_state = OctocrabMergeableState::Dirty);
+            ctx.modify_pr_in_gh((), |pr| pr.mergeable_state = OctocrabMergeableState::Dirty);
             ctx.wait_for_pr((), |pr| pr.mergeable_state == MergeableState::HasConflicts)
                 .await?;
             Ok(())
