@@ -107,9 +107,9 @@ By default, logs are disabled in tests. To enable them, add the `#[traced_test]`
 Before you make a commit that changes SQL queries in the bors codebase, you should regenerate the stored `sqlx` metadata files in the `.sqlx` directory:
 
 ```console
-$ rm -rf .sqlx
-$ cargo sqlx prepare -- --all-targets
-$ git add .sqlx
+rm -rf .sqlx
+cargo sqlx prepare -- --all-targets
+git add .sqlx
 ```
 
 > Make sure to remove the `.sqlx` directory before running the `prepare` command, to ensure that leftover queries do not remain committed in the repository.

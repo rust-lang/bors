@@ -1017,7 +1017,7 @@ pub(crate) async fn get_merge_queue_prs(
             WHERE pr.repository = $1
               AND pr.status = 'open'
               AND pr.approved_by IS NOT NULL
-              AND pr.mergeable_state = 'mergeable'
+              AND pr.mergeable_state IN ('mergeable', 'unknown')
               AND (
                 -- We ALWAYS need to return PRs that:
                 -- 1. Are ready for a merge (success)
