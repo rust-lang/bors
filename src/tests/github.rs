@@ -463,9 +463,13 @@ impl Repo {
     }
 
     pub fn push_commit(&mut self, branch_name: &str, commit: Commit) {
+        self.create_commit(commit.clone());
         self.get_branch_by_name(branch_name)
             .expect("Pushing to a non-existing branch")
-            .push_commit(commit.clone());
+            .push_commit(commit);
+    }
+
+    pub fn create_commit(&mut self, commit: Commit) {
         if let Some(old) = self.commits.insert(commit.commit_sha(), commit.clone()) {
             assert_eq!(old, commit);
         }
@@ -763,9 +767,25 @@ impl Default for Branch {
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]
+pub struct GitUser {
+    pub name: String,
+    pub email: String,
+}
+
+impl Default for GitUser {
+    fn default() -> Self {
+        Self {
+            name: "git-user".to_string(),
+            email: "git-user@git.com".to_string(),
+        }
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Commit {
     sha: String,
     message: String,
+    author: GitUser,
 }
 
 impl Commit {
@@ -773,7 +793,13 @@ impl Commit {
         Self {
             sha: sha.to_owned(),
             message: message.to_owned(),
+            author: GitUser::default(),
         }
+    }
+
+    pub fn with_author(mut self, author: GitUser) -> Self {
+        self.author = author;
+        self
     }
 
     pub fn sha(&self) -> &str {
@@ -781,6 +807,9 @@ impl Commit {
     }
     pub fn commit_sha(&self) -> CommitSha {
         CommitSha(self.sha.to_owned())
+    }
+    pub fn author(&self) -> &GitUser {
+        &self.author
     }
 
     pub fn message(&self) -> &str {

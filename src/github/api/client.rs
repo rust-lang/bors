@@ -13,10 +13,10 @@ use crate::bors::{Comment, WorkflowRun};
 use crate::config::{CONFIG_FILE_PATH, RepositoryConfig, deserialize_config};
 use crate::database::WorkflowStatus;
 use crate::github::api::operations::{
-    BranchUpdateError, ForcePush, MergeError, create_branch, create_check_run, merge_branches,
-    set_branch_to_commit, update_check_run,
+    BranchUpdateError, Commit, CommitCreateError, ForcePush, MergeError, create_branch,
+    create_check_run, create_commit, merge_branches, set_branch_to_commit, update_check_run,
 };
-use crate::github::{CommitSha, GithubRepoName, PullRequest, PullRequestNumber};
+use crate::github::{CommitSha, GithubRepoName, PullRequest, PullRequestNumber, TreeSha};
 use crate::utils::timing::{RetryMethod, RetryableOpError, ShouldRetry, perform_retryable};
 use futures::TryStreamExt;
 use octocrab::models::workflows::{Job, Run};
@@ -246,7 +246,7 @@ impl GithubRepositoryClient {
         base: &str,
         head: &CommitSha,
         commit_message: &str,
-    ) -> Result<CommitSha, MergeError> {
+    ) -> Result<Commit, MergeError> {
         perform_retryable(
             "merge_branches",
             RetryMethod::default().with_timeout(Duration::from_secs(30)),
@@ -265,6 +265,31 @@ impl GithubRepositoryClient {
         .map_err(|error| match error {
             RetryableOpError::Err(error) => error,
             RetryableOpError::AllAttemptsExhausted(_) => MergeError::Timeout,
+        })
+    }
+
+    /// Create a new commit with the given author.
+    pub async fn create_commit(
+        &self,
+        tree: &TreeSha,
+        parents: &[CommitSha],
+        message: &str,
+        author: &CommitAuthor,
+    ) -> Result<CommitSha, CommitCreateError> {
+        perform_retryable("create_commit", RetryMethod::default(), || async {
+            create_commit(self, tree, parents, message, author)
+                .await
+                .map_err(|e| match e {
+                    error @ (CommitCreateError::ValidationFailed
+                    | CommitCreateError::Conflict
+                    | CommitCreateError::TreeOrParentsNotFound) => ShouldRetry::No(error),
+                    error => ShouldRetry::Yes(error),
+                })
+        })
+        .await
+        .map_err(|error| match error {
+            RetryableOpError::Err(error) => error,
+            RetryableOpError::AllAttemptsExhausted(_) => CommitCreateError::Timeout,
         })
     }
 
@@ -694,6 +719,12 @@ pub enum HideCommentReason {
 pub struct CheckRunOutput {
     pub title: String,
     pub summary: String,
+}
+
+#[derive(Debug)]
+pub struct CommitAuthor {
+    pub name: String,
+    pub email: String,
 }
 
 #[cfg(test)]

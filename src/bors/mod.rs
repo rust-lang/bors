@@ -1,6 +1,6 @@
 use crate::config::RepositoryConfig;
 use crate::github::GithubRepoName;
-use crate::github::api::client::GithubRepositoryClient;
+use crate::github::api::client::{CommitAuthor, GithubRepositoryClient};
 use crate::permissions::UserPermissions;
 #[cfg(test)]
 use crate::tests::TestSyncMarker;
@@ -284,6 +284,14 @@ impl FromStr for PullRequestStatus {
 pub enum MergeType {
     Try { try_jobs: Vec<String> },
     Auto,
+}
+
+/// Commit author used to emulate old bors (homu).
+fn bors_commit_author() -> CommitAuthor {
+    CommitAuthor {
+        name: "bors".to_string(),
+        email: "bors@rust-lang.org".to_string(),
+    }
 }
 
 /// HTML comment that marks the start of a bors ignore block.

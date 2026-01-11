@@ -148,7 +148,7 @@ mod tests {
             ctx.run_merge_queue_now().await;
             insta::assert_snapshot!(
                 ctx.get_next_comment_text(()).await?,
-                @":hourglass: Testing commit pr-1-sha with merge merge-1-pr-1-bc4b41f8..."
+                @":hourglass: Testing commit pr-1-sha with merge merge-1-pr-1-d7d45f1f-reauthored-to-bors..."
             );
             Ok(())
         })
