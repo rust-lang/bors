@@ -394,7 +394,6 @@ async fn notify_of_delegation(
 #[cfg(test)]
 mod tests {
     use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
-    use tracing_test::traced_test;
 
     use crate::bors::TRY_BRANCH_NAME;
     use crate::bors::merge_queue::AUTO_BUILD_CHECK_RUN_NAME;
@@ -800,7 +799,6 @@ approved = { modifications = ["+foo", "+baz"], unless = ["label1", "label2"] }
     }
 
     #[sqlx::test]
-    #[traced_test]
     async fn delegatee_can_approve(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
             .github(GitHub::unauthorized_pr_author())
