@@ -651,7 +651,7 @@ impl BorsTester {
 
     /// Modifies the given PR state in the GitHub mock (**without sending a webhook**)
     /// and returns a copy of it.
-    pub fn modify_pr<Id: Into<PrIdentifier>, F: FnOnce(&mut PullRequest)>(
+    pub fn modify_pr_in_gh<Id: Into<PrIdentifier>, F: FnOnce(&mut PullRequest)>(
         &mut self,
         id: Id,
         func: F,
@@ -666,7 +666,7 @@ impl BorsTester {
 
     pub async fn reopen_pr<Id: Into<PrIdentifier>>(&mut self, id: Id) -> anyhow::Result<()> {
         let id = id.into();
-        let pr = self.modify_pr(id, |pr| pr.reopen());
+        let pr = self.modify_pr_in_gh(id, |pr| pr.reopen());
 
         let payload = {
             let gh = self.github.lock();
@@ -681,7 +681,7 @@ impl BorsTester {
         &mut self,
         id: Id,
     ) -> anyhow::Result<()> {
-        let pr = self.modify_pr(id, |pr| pr.close());
+        let pr = self.modify_pr_in_gh(id, |pr| pr.close());
 
         let payload = {
             let gh = self.github.lock();
@@ -695,7 +695,7 @@ impl BorsTester {
         &mut self,
         id: Id,
     ) -> anyhow::Result<()> {
-        let pr = self.modify_pr(id, |pr| pr.convert_to_draft());
+        let pr = self.modify_pr_in_gh(id, |pr| pr.convert_to_draft());
 
         let payload = {
             let gh = self.github.lock();
@@ -714,7 +714,7 @@ impl BorsTester {
         &mut self,
         id: Id,
     ) -> anyhow::Result<()> {
-        let pr = self.modify_pr(id, |pr| pr.ready_for_review());
+        let pr = self.modify_pr_in_gh(id, |pr| pr.ready_for_review());
 
         let payload = {
             let gh = self.github.lock();
@@ -733,7 +733,7 @@ impl BorsTester {
         &mut self,
         id: Id,
     ) -> anyhow::Result<()> {
-        let pr = self.modify_pr(id, |pr| pr.merge());
+        let pr = self.modify_pr_in_gh(id, |pr| pr.merge());
 
         let payload = {
             let gh = self.github.lock();
@@ -802,7 +802,7 @@ impl BorsTester {
         id: Id,
         assignee: User,
     ) -> anyhow::Result<()> {
-        let pr = self.modify_pr(id, |pr| pr.assignees.push(assignee.clone()));
+        let pr = self.modify_pr_in_gh(id, |pr| pr.assignees.push(assignee.clone()));
         let payload = {
             let gh = self.github.lock();
             GitHubPullRequestEventPayload::new(&gh.get_repo(&pr.repo).lock(), pr, "assigned", None)
@@ -815,7 +815,7 @@ impl BorsTester {
         id: Id,
         assignee: User,
     ) -> anyhow::Result<()> {
-        let pr = self.modify_pr(id, |pr| pr.assignees.retain(|a| a != &assignee));
+        let pr = self.modify_pr_in_gh(id, |pr| pr.assignees.retain(|a| a != &assignee));
         let payload = {
             let gh = self.github.lock();
             GitHubPullRequestEventPayload::new(

@@ -342,7 +342,7 @@ auto_build_failed = ["+failed"]
             ctx.pr(())
                 .await
                 .expect_mergeable_state(MergeableState::Unknown);
-            ctx.modify_pr((), |pr| pr.mergeable_state = OctocrabMergeableState::Dirty);
+            ctx.modify_pr_in_gh((), |pr| pr.mergeable_state = OctocrabMergeableState::Dirty);
             ctx.refresh_mergeability_queue().await;
             ctx.run_mergeability_check().await?;
             ctx.pr(())
@@ -370,7 +370,7 @@ auto_build_failed = ["+failed"]
             let pr = ctx.open_pr((), |_| {}).await?;
             ctx.wait_for_pr(pr.number, |_| true).await?;
 
-            ctx.modify_pr(pr.id(), |pr| {
+            ctx.modify_pr_in_gh(pr.id(), |pr| {
                 pr.close();
             });
             ctx.refresh_prs().await;
@@ -386,7 +386,7 @@ auto_build_failed = ["+failed"]
     async fn refresh_pr_with_status_draft(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             let pr = ctx.open_pr((), |_| {}).await?;
-            ctx.modify_pr(pr.id(), |pr| pr.convert_to_draft());
+            ctx.modify_pr_in_gh(pr.id(), |pr| pr.convert_to_draft());
 
             ctx.refresh_prs().await;
             ctx.pr(pr.id())
@@ -401,7 +401,7 @@ auto_build_failed = ["+failed"]
     async fn refresh_pr_with_status_closed_draft(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             let pr = ctx.open_pr((), |_| {}).await?;
-            ctx.modify_pr(pr.id(), |pr| {
+            ctx.modify_pr_in_gh(pr.id(), |pr| {
                 // Both mark as closed as draft
                 pr.close();
                 pr.convert_to_draft();
@@ -421,7 +421,7 @@ auto_build_failed = ["+failed"]
         run_test(pool, async |ctx: &mut BorsTester| {
             let pr = ctx.open_pr((), |_| {}).await?;
             let branch = ctx.create_branch("stable");
-            ctx.modify_pr(pr.id(), |pr| {
+            ctx.modify_pr_in_gh(pr.id(), |pr| {
                 pr.title = "Foobar".to_string();
                 pr.assignees = vec![User::try_user()];
                 pr.base_branch = branch;

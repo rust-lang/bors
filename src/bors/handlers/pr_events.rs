@@ -615,7 +615,7 @@ mod tests {
             .await?;
             ctx.wait_for_pr((), |pr| pr.mergeable_state == MergeableState::Unknown)
                 .await?;
-            ctx.modify_pr((), |pr| pr.mergeable_state = OctocrabMergeableState::Dirty);
+            ctx.modify_pr_in_gh((), |pr| pr.mergeable_state = OctocrabMergeableState::Dirty);
             ctx.run_mergeability_check().await?;
             ctx.pr(())
                 .await
@@ -637,7 +637,7 @@ mod tests {
             ctx.drain_mergeability_queue().await?;
             ctx.push_to_branch(default_branch_name(), Commit::new("sha", "push"))
                 .await?;
-            ctx.modify_pr(pr.id(), |pr| {
+            ctx.modify_pr_in_gh(pr.id(), |pr| {
                 pr.mergeable_state = OctocrabMergeableState::Dirty;
             });
             ctx.run_mergeability_check().await?;
@@ -662,7 +662,7 @@ report_merge_conflicts = false
                     pr.mergeable_state = OctocrabMergeableState::Clean;
                 })
                 .await?;
-            ctx.modify_pr(pr.id(), |pr| {
+            ctx.modify_pr_in_gh(pr.id(), |pr| {
                 pr.mergeable_state = OctocrabMergeableState::Dirty;
             });
             ctx.push_to_branch(default_branch_name(), Commit::new("sha", "push"))
@@ -682,7 +682,7 @@ report_merge_conflicts = false
                 })
                 .await?;
             ctx
-                .modify_pr(pr.id(), |pr| {
+                .modify_pr_in_gh(pr.id(), |pr| {
                     pr.mergeable_state = OctocrabMergeableState::Dirty;
                 });
 
@@ -706,7 +706,7 @@ report_merge_conflicts = false
                 .await?;
             ctx.approve(pr.id()).await?;
             ctx
-                .modify_pr(pr.id(), |pr| {
+                .modify_pr_in_gh(pr.id(), |pr| {
                     pr.mergeable_state = OctocrabMergeableState::Dirty;
                 });
 
@@ -745,7 +745,7 @@ report_merge_conflicts = false
             ctx.run_mergeability_checks(2).await?;
 
             ctx
-                .modify_pr(pr2.id(), |pr| {
+                .modify_pr_in_gh(pr2.id(), |pr| {
                     pr.mergeable_state = OctocrabMergeableState::Dirty;
                 });
 
@@ -810,7 +810,7 @@ conflict = ["+conflict"]
                         pr.mergeable_state = OctocrabMergeableState::Clean;
                     })
                     .await?;
-                ctx.modify_pr(pr.id(), |pr| {
+                ctx.modify_pr_in_gh(pr.id(), |pr| {
                     pr.mergeable_state = OctocrabMergeableState::Dirty;
                 });
                 ctx.push_to_branch(default_branch_name(), Commit::new("sha", "push"))
@@ -844,13 +844,13 @@ conflict = ["+conflict"]
     #[sqlx::test]
     async fn enqueue_prs_on_pr_reopened(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
-            ctx.modify_pr((), |pr| {
+            ctx.modify_pr_in_gh((), |pr| {
                 pr.mergeable_state = OctocrabMergeableState::Unknown;
             });
             ctx.reopen_pr(()).await?;
             ctx.wait_for_pr((), |pr| pr.mergeable_state == MergeableState::Unknown)
                 .await?;
-            ctx.modify_pr((), |pr| {
+            ctx.modify_pr_in_gh((), |pr| {
                 pr.mergeable_state = OctocrabMergeableState::Dirty;
             });
             ctx.run_mergeability_check().await?;
@@ -868,7 +868,7 @@ conflict = ["+conflict"]
             ctx.push_to_pr(()).await?;
             ctx.wait_for_pr((), |pr| pr.mergeable_state == MergeableState::Unknown)
                 .await?;
-            ctx.modify_pr((), |pr| pr.mergeable_state = OctocrabMergeableState::Dirty);
+            ctx.modify_pr_in_gh((), |pr| pr.mergeable_state = OctocrabMergeableState::Dirty);
             ctx.run_mergeability_check().await?;
             ctx.pr(())
                 .await
