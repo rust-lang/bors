@@ -89,29 +89,36 @@ pub async fn handle_build_queue_event(
 
             let timeout = repo.config.load().timeout;
             for build in running_builds {
-                let Some(pr) = db.find_pr_by_build(&build).await? else {
-                    // This is an orphaned build. It should never be created, unless we have some bug or
-                    // unexpected race condition in bors.
-                    // When we do encounter such a build, we can mark it as timeouted, as it is no longer
-                    // relevant.
-                    // Note that we could write an explicit query for finding these orphaned builds,
-                    // but that could be quite expensive. Instead we piggyback on the existing logic
-                    // for timed out builds; if a build is still pending and has no PR attached, then
-                    // there likely won't be any additional event that could mark it as finished.
-                    // So eventually all such builds will arrive here
-                    tracing::warn!(
-                        "Detected orphaned pending without a PR, marking it as time outed: {build:?}"
-                    );
-                    db.update_build_status(&build, BuildStatus::Timeouted)
-                        .await?;
-                    continue;
+                let handle = async {
+                    if let Some(pr) = db.find_pr_by_build(&build).await? {
+                        // First try to complete builds, and only then timeout then
+                        // Because if the bot was offline for some time, we want to first attempt to
+                        // actually finish the build, otherwise it might get instantly timeouted.
+                        if !maybe_complete_build(&repo, db, &build, &pr, &merge_queue_tx, None)
+                            .await?
+                        {
+                            maybe_timeout_build(&repo, db, &build, &pr, timeout).await?;
+                        }
+                    } else {
+                        // This is an orphaned build. It should never be created, unless we have some bug or
+                        // unexpected race condition in bors.
+                        // When we do encounter such a build, we can mark it as timeouted, as it is no longer
+                        // relevant.
+                        // Note that we could write an explicit query for finding these orphaned builds,
+                        // but that could be quite expensive. Instead we piggyback on the existing logic
+                        // for timed out builds; if a build is still pending and has no PR attached, then
+                        // there likely won't be any additional event that could mark it as finished.
+                        // So eventually all such builds will arrive here
+                        tracing::warn!(
+                            "Detected orphaned pending without a PR, marking it as timeouted: {build:?}"
+                        );
+                        db.update_build_status(&build, BuildStatus::Timeouted)
+                            .await?;
+                    }
+                    anyhow::Ok(())
                 };
-
-                // First try to complete builds, and only then timeout then
-                // Because if the bot was offline for some time, we want to first attempt to
-                // actually finish the build, otherwise it might get instantly timeouted.
-                if !maybe_complete_build(&repo, db, &build, &pr, &merge_queue_tx, None).await? {
-                    maybe_timeout_build(&repo, db, &build, &pr, timeout).await?;
+                if let Err(error) = handle.await {
+                    tracing::error!("Failed to handle pending build {build:?}: {error:?}")
                 }
             }
         }
@@ -169,6 +176,14 @@ async fn maybe_timeout_build(
                 );
             }
         }
+
+        // Also handle label triggers
+        let trigger = match build.kind {
+            BuildKind::Try => LabelTrigger::TryBuildFailed,
+            BuildKind::Auto => LabelTrigger::AutoBuildFailed,
+        };
+        let gh_pr = repo.client.get_pull_request(pr.number).await?;
+        handle_label_trigger(repo, &gh_pr, trigger).await?;
 
         if let Err(error) = repo
             .client
