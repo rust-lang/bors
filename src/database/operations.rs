@@ -186,7 +186,7 @@ pub(crate) async fn get_nonclosed_pull_requests(
     executor: impl PgExecutor<'_>,
     repo: &GithubRepoName,
 ) -> anyhow::Result<Vec<PullRequestModel>> {
-    measure_db_query("fetch_pull_requests", || async {
+    measure_db_query("get_nonclosed_pull_requests", || async {
         let mut stream = sqlx::query_as!(
             PullRequestModel,
             r#"
@@ -973,69 +973,6 @@ pub(crate) async fn update_build_check_run_id(
         .execute(executor)
         .await?;
         Ok(())
-    })
-    .await
-}
-
-/// Fetches pull requests eligible for merge:
-/// - Only approved PRs that are open and mergeable
-/// - Includes only PRs with pending or successful auto builds
-/// - Excludes non-pending PRs that do not meet the tree closure priority threshold (if tree closed)
-pub(crate) async fn get_merge_queue_prs(
-    executor: impl PgExecutor<'_>,
-    repo: &GithubRepoName,
-    tree_priority: Option<i32>,
-) -> anyhow::Result<Vec<PullRequestModel>> {
-    measure_db_query("get_merge_queue_prs", || async {
-        let records = sqlx::query_as!(
-            PullRequestModel,
-            r#"
-            SELECT
-                pr.id,
-                pr.repository as "repository: GithubRepoName",
-                pr.number as "number!: i64",
-                pr.title,
-                pr.author,
-                pr.assignees as "assignees: Assignees",
-                (
-                    pr.approved_by,
-                    pr.approved_sha
-                ) AS "approval_status!: ApprovalStatus",
-                pr.status as "pr_status: PullRequestStatus",
-                pr.priority,
-                pr.rollup as "rollup: RollupMode",
-                pr.delegated_permission as "delegated_permission: DelegatedPermission",
-                pr.head_branch,
-                pr.base_branch,
-                pr.mergeable_state as "mergeable_state: MergeableState",
-                pr.created_at as "created_at: DateTime<Utc>",
-                try_build AS "try_build: BuildModel",
-                auto_build AS "auto_build: BuildModel"
-            FROM pull_request as pr
-            LEFT JOIN build AS try_build ON pr.try_build_id = try_build.id
-            LEFT JOIN build AS auto_build ON pr.auto_build_id = auto_build.id
-            WHERE pr.repository = $1
-              AND pr.status = 'open'
-              AND pr.approved_by IS NOT NULL
-              AND pr.mergeable_state IN ('mergeable', 'unknown')
-              AND (
-                -- We ALWAYS need to return PRs that:
-                -- 1. Are ready for a merge (success)
-                -- 2. Can block the queue (pending)
-                auto_build.status IN ('success', 'pending') OR (
-                    -- For PRs without a (failed) build status, we check if they pass
-                    -- the tree state priority check if the tree is closed
-                    (auto_build.status IS NULL OR auto_build.status = 'cancelled')
-                    AND ($2::int IS NULL OR pr.priority >= $2)
-                )
-              )
-            "#,
-            repo as &GithubRepoName,
-            tree_priority
-        )
-        .fetch_all(executor)
-        .await?;
-        Ok(records)
     })
     .await
 }

@@ -2,7 +2,7 @@ use sqlx::PgPool;
 
 use crate::bors::comment::CommentTag;
 use crate::bors::{BuildKind, PullRequestStatus, RollupMode};
-use crate::database::operations::{get_merge_queue_prs, update_pr_auto_build_id};
+use crate::database::operations::update_pr_auto_build_id;
 use crate::database::{
     BuildModel, BuildStatus, CommentModel, PullRequestModel, RepoModel, TreeState, WorkflowModel,
     WorkflowStatus, WorkflowType,
@@ -312,14 +312,6 @@ impl PgDbClient {
         tree_state: TreeState,
     ) -> anyhow::Result<()> {
         upsert_repository(&self.pool, repo, tree_state).await
-    }
-
-    pub async fn get_merge_queue_prs(
-        &self,
-        repo: &GithubRepoName,
-        tree_priority: Option<u32>,
-    ) -> anyhow::Result<Vec<PullRequestModel>> {
-        get_merge_queue_prs(&self.pool, repo, tree_priority.map(|p| p as i32)).await
     }
 
     pub async fn get_tagged_bot_comments(
