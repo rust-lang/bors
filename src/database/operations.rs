@@ -249,11 +249,11 @@ pub(crate) async fn set_pr_mergeability_state(
     .await
 }
 
-pub(crate) async fn get_prs_with_unknown_mergeability_state(
+pub(crate) async fn get_prs_with_unknown_mergeability_or_approved(
     executor: impl PgExecutor<'_>,
     repo: &GithubRepoName,
 ) -> anyhow::Result<Vec<PullRequestModel>> {
-    measure_db_query("get_prs_with_unknown_mergeable_state", || async {
+    measure_db_query("get_prs_with_unknown_mergeability_or_approved", || async {
         let records = sqlx::query_as!(
             PullRequestModel,
             r#"
@@ -282,7 +282,7 @@ pub(crate) async fn get_prs_with_unknown_mergeability_state(
             LEFT JOIN build AS try_build ON pr.try_build_id = try_build.id
             LEFT JOIN build AS auto_build ON pr.auto_build_id = auto_build.id
             WHERE pr.repository = $1
-              AND pr.mergeable_state = 'unknown'
+              AND (pr.mergeable_state = 'unknown' OR pr.approved_by IS NOT NULL)
               AND pr.status IN ('open', 'draft')
             "#,
             repo as &GithubRepoName
