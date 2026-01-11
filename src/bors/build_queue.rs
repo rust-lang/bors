@@ -177,6 +177,14 @@ async fn maybe_timeout_build(
             }
         }
 
+        // Also handle label triggers
+        let trigger = match build.kind {
+            BuildKind::Try => LabelTrigger::TryBuildFailed,
+            BuildKind::Auto => LabelTrigger::AutoBuildFailed,
+        };
+        let gh_pr = repo.client.get_pull_request(pr.number).await?;
+        handle_label_trigger(repo, &gh_pr, trigger).await?;
+
         if let Err(error) = repo
             .client
             .post_comment(pr.number, build_timed_out_comment(timeout))

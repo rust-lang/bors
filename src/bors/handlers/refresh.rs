@@ -275,6 +275,33 @@ timeout = 3600
     }
 
     #[sqlx::test]
+    async fn refresh_cancel_build_apply_timeout(pool: sqlx::PgPool) {
+        let gh = GitHub::default().with_default_config(
+            r#"
+timeout = 3600
+merge_queue_enabled = true
+
+[labels]
+auto_build_failed = ["+failed"]
+"#,
+        );
+        run_test((pool, gh), async |ctx: &mut BorsTester| {
+            ctx.approve(()).await?;
+            ctx.start_auto_build(()).await?;
+            ctx.workflow_start(ctx.auto_workflow()).await?;
+
+            with_mocked_time(Duration::from_secs(4000), async {
+                ctx.refresh_pending_builds().await;
+            })
+                .await;
+            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @":boom: Test timed out after `3600`s");
+            ctx.pr(()).await.expect_added_labels(&["failed"]);
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
     async fn refresh_cancel_build_updates_check_run(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
             .github(gh_state_with_long_timeout())
