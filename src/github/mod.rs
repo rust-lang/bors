@@ -115,6 +115,25 @@ impl Display for CommitSha {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct TreeSha(pub String);
+
+impl From<String> for TreeSha {
+    fn from(value: String) -> Self {
+        Self(value)
+    }
+}
+impl AsRef<str> for TreeSha {
+    fn as_ref(&self) -> &str {
+        self.0.as_str()
+    }
+}
+impl Display for TreeSha {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        Display::fmt(&self.0, f)
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Branch {
     pub name: String,

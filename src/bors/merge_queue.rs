@@ -7,7 +7,7 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::Instrument;
 
-use super::{MergeType, create_merge_commit_message};
+use super::{MergeType, bors_commit_author, create_merge_commit_message};
 use crate::bors::build::load_workflow_runs;
 use crate::bors::comment::{
     CommentTag, auto_build_push_failed_comment, auto_build_started_comment,
@@ -422,23 +422,37 @@ async fn start_auto_build(
     let auto_merge_commit_message = create_merge_commit_message(pr_data, MergeType::Auto);
 
     // 1. Merge PR head with base branch on `AUTO_MERGE_BRANCH_NAME`
-    let merge_sha = match attempt_merge(
+    // Use a temporary message to not reference/spam any issue
+    let merged_commit = match attempt_merge(
         client,
         AUTO_MERGE_BRANCH_NAME,
         &head_sha,
         &base_sha,
-        &auto_merge_commit_message,
+        "merge commit",
     )
     .await
     {
-        Ok(MergeResult::Success(merge_sha)) => merge_sha,
+        Ok(MergeResult::Success(merged_commit)) => merged_commit,
         Ok(MergeResult::Conflict) => return Err(StartAutoBuildError::MergeConflict),
         Err(error) => return Err(StartAutoBuildError::GitHubError(error)),
     };
+    // Then, create the actual merge commit with an explicit author, so that we can override
+    // the author information to the bors account, to keep compatibility with various tools
+    // that depend on it.
+    let merged_commit = repo
+        .client
+        .create_commit(
+            &merged_commit.tree,
+            &merged_commit.parents,
+            &auto_merge_commit_message,
+            &bors_commit_author(),
+        )
+        .await
+        .map_err(|error| StartAutoBuildError::GitHubError(anyhow::anyhow!("{error}")))?;
 
-    // 2. Push merge commit to `AUTO_BRANCH_NAME` where CI runs
+    // 2. Push that merge commit to `AUTO_BRANCH_NAME` where CI runs
     client
-        .set_branch_to_sha(AUTO_BRANCH_NAME, &merge_sha, ForcePush::Yes)
+        .set_branch_to_sha(AUTO_BRANCH_NAME, &merged_commit, ForcePush::Yes)
         .await
         .map_err(|e| StartAutoBuildError::GitHubError(e.into()))?;
 
@@ -448,7 +462,7 @@ async fn start_auto_build(
         .attach_auto_build(
             pr,
             AUTO_BRANCH_NAME.to_string(),
-            merge_sha.clone(),
+            merged_commit.clone(),
             base_sha,
         )
         .await
@@ -488,7 +502,7 @@ async fn start_auto_build(
     }
 
     // 5. Post status comment
-    let comment = auto_build_started_comment(&head_sha, &merge_sha);
+    let comment = auto_build_started_comment(&head_sha, &merged_commit);
     match client.post_comment(pr.number, comment).await {
         Ok(comment) => {
             if let Err(error) = ctx
@@ -667,7 +681,7 @@ merge_queue_enabled = false
             ctx.run_merge_queue_now().await;
             insta::assert_snapshot!(
                 ctx.get_next_comment_text(()).await?,
-                @":hourglass: Testing commit pr-1-sha with merge merge-0-pr-1-bc4b41f8..."
+                @":hourglass: Testing commit pr-1-sha with merge merge-0-pr-1-d7d45f1f-reauthored-to-bors..."
             );
             Ok(())
         })
@@ -687,8 +701,8 @@ merge_queue_enabled = false
                 @r#"
             :sunny: Test successful - [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1)
             Approved by: `default-user`
-            Pushing merge-0-pr-1-bc4b41f8 to `main`...
-            <!-- homu: {"type":"BuildCompleted","base_ref":"main","merge_sha":"merge-0-pr-1-bc4b41f8"} -->
+            Pushing merge-0-pr-1-d7d45f1f-reauthored-to-bors to `main`...
+            <!-- homu: {"type":"BuildCompleted","base_ref":"main","merge_sha":"merge-0-pr-1-d7d45f1f-reauthored-to-bors"} -->
             "#
             );
             Ok(())
@@ -705,7 +719,7 @@ merge_queue_enabled = false
 
             insta::assert_snapshot!(
                 ctx.get_next_comment_text(()).await?,
-                @":broken_heart: Test for merge-0-pr-1-bc4b41f8 failed: [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1)"
+                @":broken_heart: Test for merge-0-pr-1-d7d45f1f-reauthored-to-bors failed: [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1)"
             );
             Ok(())
         })
@@ -759,19 +773,41 @@ merge_queue_enabled = false
             "main",
         ), @"
         main-sha1
-        merge-0-pr-1-bc4b41f8
+        merge-0-pr-1-d7d45f1f-reauthored-to-bors
         ");
         insta::assert_snapshot!(gh.get_sha_history(
             (),
             AUTO_MERGE_BRANCH_NAME
         ), @"
         main-sha1
-        merge-0-pr-1-bc4b41f8
+        merge-0-pr-1-d7d45f1f
         ");
         insta::assert_snapshot!(gh.get_sha_history(
             (),
             AUTO_BRANCH_NAME,
-        ), @"merge-0-pr-1-bc4b41f8");
+        ), @"merge-0-pr-1-d7d45f1f-reauthored-to-bors");
+    }
+
+    #[sqlx::test]
+    async fn auto_build_commit_author(pool: sqlx::PgPool) {
+        let gh = run_test(pool, async |ctx: &mut BorsTester| {
+            ctx.approve(()).await?;
+            ctx.start_and_finish_auto_build(()).await?;
+            Ok(())
+        })
+        .await;
+        let branch = gh
+            .default_repo()
+            .lock()
+            .get_branch_by_name(default_branch_name())
+            .unwrap()
+            .clone();
+        insta::assert_debug_snapshot!(branch.get_commit().author(), @r#"
+        GitUser {
+            name: "bors",
+            email: "bors@rust-lang.org",
+        }
+        "#);
     }
 
     #[sqlx::test]
@@ -804,10 +840,10 @@ merge_queue_enabled = false
 
         ), @"
         main-sha1
-        merge-0-pr-1-bc4b41f8
-        merge-1-pr-2-9416d849
-        merge-2-pr-3-cc84caa2
-        merge-3-pr-4-00e7613e
+        merge-0-pr-1-d7d45f1f-reauthored-to-bors
+        merge-1-pr-2-d7d45f1f-reauthored-to-bors
+        merge-2-pr-3-d7d45f1f-reauthored-to-bors
+        merge-3-pr-4-d7d45f1f-reauthored-to-bors
         ");
     }
 
@@ -838,9 +874,9 @@ merge_queue_enabled = false
 
         ), @"
         main-sha1
-        merge-0-pr-4-00e7613e
-        merge-1-pr-2-9416d849
-        merge-2-pr-3-cc84caa2
+        merge-0-pr-4-d7d45f1f-reauthored-to-bors
+        merge-1-pr-2-d7d45f1f-reauthored-to-bors
+        merge-2-pr-3-d7d45f1f-reauthored-to-bors
         ");
     }
 
@@ -1267,7 +1303,7 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
                 .get_comment_by_node_id(&comment.node_id().unwrap())
                 .unwrap();
             insta::assert_snapshot!(updated_comment.content(), @"
-            :hourglass: Testing commit pr-1-sha with merge merge-0-pr-1-bc4b41f8...
+            :hourglass: Testing commit pr-1-sha with merge merge-0-pr-1-d7d45f1f-reauthored-to-bors...
 
             **Workflow**: https://github.com/rust-lang/borstest/actions/runs/1
             ");
@@ -1314,7 +1350,7 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
             // Run the merge queue. It should recover and start merging PR3
             ctx.run_merge_queue_now().await;
             let comment = ctx.get_next_comment_text(pr3.id()).await?;
-            insta::assert_snapshot!(comment, @":hourglass: Testing commit pr-3-sha with merge merge-0-pr-3-cc84caa2...");
+            insta::assert_snapshot!(comment, @":hourglass: Testing commit pr-3-sha with merge merge-0-pr-3-d7d45f1f-reauthored-to-bors...");
 
             // The merge queue should also unapprove PR1
             ctx.wait_for_pr(pr2.id(), |pr| !pr.is_approved()).await?;
@@ -1344,7 +1380,7 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
             // Run the merge queue. It should recover and start merging PR3
             ctx.run_merge_queue_now().await;
             let comment = ctx.get_next_comment_text(pr3.id()).await?;
-            insta::assert_snapshot!(comment, @":hourglass: Testing commit pr-3-sha with merge merge-0-pr-3-cc84caa2...");
+            insta::assert_snapshot!(comment, @":hourglass: Testing commit pr-3-sha with merge merge-0-pr-3-d7d45f1f-reauthored-to-bors...");
 
             ctx.pr(pr2.id()).await.expect_no_auto_build();
 

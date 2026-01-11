@@ -5,8 +5,8 @@ use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
 use octocrab::params::repos::Reference;
 use thiserror::Error;
 
-use crate::github::CommitSha;
-use crate::github::api::client::{CheckRunOutput, GithubRepositoryClient};
+use crate::github::api::client::{CheckRunOutput, CommitAuthor, GithubRepositoryClient};
+use crate::github::{CommitSha, TreeSha};
 
 #[derive(Copy, Clone, PartialEq, Eq)]
 pub enum ForcePush {
@@ -32,7 +32,7 @@ pub enum MergeError {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MergeResult {
-    Success(CommitSha),
+    Success(Commit),
     Conflict,
 }
 
@@ -43,9 +43,11 @@ struct MergeRequest<'a, 'b, 'c> {
     commit_message: &'c str,
 }
 
-#[derive(serde::Deserialize)]
-struct MergeResponse {
-    sha: String,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Commit {
+    pub sha: CommitSha,
+    pub parents: Vec<CommitSha>,
+    pub tree: TreeSha,
 }
 
 /// Creates a merge commit on the given repository.
@@ -56,7 +58,7 @@ pub async fn merge_branches(
     base_ref: &str,
     head_sha: &CommitSha,
     commit_message: &str,
-) -> Result<CommitSha, MergeError> {
+) -> Result<Commit, MergeError> {
     let client = repo.client();
     let merge_url = format!("/repos/{}/merges", repo.repository());
 
@@ -66,6 +68,41 @@ pub async fn merge_branches(
         commit_message,
     };
     let response = client._post(merge_url, Some(&request)).await;
+
+    #[derive(serde::Deserialize)]
+    struct TreeResponse {
+        sha: String,
+    }
+
+    #[derive(serde::Deserialize)]
+    struct ParentResponse {
+        sha: String,
+    }
+
+    #[derive(serde::Deserialize)]
+    struct CommitResponse {
+        tree: TreeResponse,
+    }
+
+    #[derive(serde::Deserialize)]
+    struct MergeCommitResponse {
+        sha: String,
+        commit: CommitResponse,
+        parents: Vec<ParentResponse>,
+    }
+
+    impl From<MergeCommitResponse> for Commit {
+        fn from(response: MergeCommitResponse) -> Self {
+            let sha: CommitSha = response.sha.into();
+            let tree: TreeSha = response.commit.tree.sha.into();
+            let parents = response
+                .parents
+                .into_iter()
+                .map(|parent| CommitSha(parent.sha))
+                .collect();
+            Commit { sha, tree, parents }
+        }
+    }
 
     match response {
         Ok(response) => {
@@ -79,13 +116,12 @@ pub async fn merge_branches(
 
             match status {
                 StatusCode::CREATED => {
-                    let response: MergeResponse =
+                    let response: MergeCommitResponse =
                         serde_json::from_str(&text).map_err(|error| MergeError::Unknown {
                             status,
                             text: format!("{error:?}"),
                         })?;
-                    let sha: CommitSha = response.sha.into();
-                    Ok(sha)
+                    Ok(response.into())
                 }
                 StatusCode::NOT_FOUND => Err(MergeError::NotFound),
                 StatusCode::CONFLICT => Err(MergeError::Conflict),
@@ -202,6 +238,93 @@ async fn update_branch(
     }
 }
 
+#[derive(Error, Debug)]
+pub enum CommitCreateError {
+    #[error("Conflict while creating a commit")]
+    Conflict,
+    #[error("Validation failed for creating commit")]
+    ValidationFailed,
+    #[error("Tree or parents not found")]
+    TreeOrParentsNotFound,
+    #[error("Request timed out")]
+    Timeout,
+    #[error("IO error")]
+    OctocrabError(#[from] octocrab::Error),
+    #[error("Unknown error: {0}")]
+    Custom(String),
+}
+
+/// Create a new commit with the given tree SHA and author.
+/// https://docs.github.com/en/rest/git/commits?apiVersion=2022-11-28#create-a-commit
+pub(super) async fn create_commit(
+    repo: &GithubRepositoryClient,
+    tree: &TreeSha,
+    parents: &[CommitSha],
+    message: &str,
+    author: &CommitAuthor,
+) -> Result<CommitSha, CommitCreateError> {
+    let url = format!("/repos/{}/git/commits", repo.repository(),);
+
+    tracing::debug!("Creating commit with tree {tree}, message {message} and author {author:?}");
+
+    #[derive(serde::Serialize)]
+    struct Author<'a> {
+        name: &'a str,
+        email: &'a str,
+    }
+
+    #[derive(serde::Serialize)]
+    struct Request<'a> {
+        message: &'a str,
+        tree: &'a str,
+        parents: &'a [&'a str],
+        author: Author<'a>,
+    }
+
+    let parents = parents.iter().map(|sha| sha.as_ref()).collect::<Vec<_>>();
+    let res = repo
+        .client()
+        ._post(
+            url.as_str(),
+            Some(&Request {
+                message,
+                tree: tree.as_ref(),
+                parents: &parents,
+                author: Author {
+                    name: &author.name,
+                    email: &author.email,
+                },
+            }),
+        )
+        .await?;
+
+    let status = res.status();
+    let text = repo.client().body_to_string(res).await.unwrap_or_default();
+    tracing::trace!("Creating commit response: status={status}, text={text}");
+
+    #[derive(serde::Deserialize)]
+    struct CreateCommitResponse {
+        sha: String,
+    }
+
+    match status {
+        StatusCode::CREATED => {
+            let response: CreateCommitResponse = serde_json::from_str(&text).map_err(|error| {
+                CommitCreateError::Custom(format!(
+                    "Cannot deserialize create commit response: {error:?}"
+                ))
+            })?;
+            Ok(CommitSha(response.sha))
+        }
+        StatusCode::CONFLICT => Err(CommitCreateError::Conflict),
+        StatusCode::UNPROCESSABLE_ENTITY => Err(CommitCreateError::ValidationFailed),
+        StatusCode::NOT_FOUND => Err(CommitCreateError::TreeOrParentsNotFound),
+        _ => Err(CommitCreateError::Custom(format!(
+            "Unexpected status {status} for creating a commit with message {message}",
+        ))),
+    }
+}
+
 pub async fn create_check_run(
     repo: &GithubRepositoryClient,
     name: &str,
@@ -277,9 +400,9 @@ pub async fn attempt_merge(
         .merge_branches(branch_name, head_sha, merge_message)
         .await
     {
-        Ok(merge_sha) => {
-            tracing::debug!("Merge successful, SHA: {merge_sha}");
-            Ok(MergeResult::Success(merge_sha))
+        Ok(merged_commit) => {
+            tracing::debug!("Merge successful, SHA: {}", merged_commit.sha);
+            Ok(MergeResult::Success(merged_commit))
         }
         Err(MergeError::Conflict) => {
             tracing::warn!("Merge conflict");

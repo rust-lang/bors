@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use crate::database::WorkflowStatus;
 use crate::tests::BranchPushError;
-use crate::tests::github::{CheckRunData, Commit, WorkflowRun};
+use crate::tests::github::{CheckRunData, Commit, GitUser, WorkflowRun};
 use crate::tests::mock::pull_request::mock_pull_requests;
 use crate::tests::mock::workflow::GitHubWorkflowRun;
 use crate::tests::mock::{GitHubUser, dynamic_mock_req};
@@ -64,7 +64,7 @@ pub async fn mock_repo(
     }
 
     mock_pull_requests(repo.clone(), github, mock_server).await;
-    mock_branches(repo.clone(), mock_server).await;
+    mock_branches_and_commits(repo.clone(), mock_server).await;
     mock_cancel_workflow(repo.clone(), mock_server).await;
     mock_check_runs(repo.clone(), mock_server).await;
     mock_workflow_runs(repo.clone(), mock_server).await;
@@ -72,11 +72,12 @@ pub async fn mock_repo(
     mock_config(repo.clone(), mock_server).await;
 }
 
-async fn mock_branches(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
+async fn mock_branches_and_commits(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
     mock_get_branch(repo.clone(), mock_server).await;
     mock_create_branch(repo.clone(), mock_server).await;
     mock_update_branch(repo.clone(), mock_server).await;
     mock_merge_branch(repo.clone(), mock_server).await;
+    mock_create_commit(repo.clone(), mock_server).await;
 }
 
 async fn mock_cancel_workflow(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
@@ -283,15 +284,92 @@ async fn mock_merge_branch(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
             let commit = Commit::new(&merge_sha, &data.commit_message);
             base_branch.merge_counter += 1;
 
+            let base_sha = base_branch.sha();
             let branch_name = base_branch.name().to_owned();
             repo.push_commit(&branch_name, commit);
 
             #[derive(serde::Serialize)]
-            struct MergeResponse {
+            struct TreeResponse {
                 sha: String,
             }
-            let response = MergeResponse { sha: merge_sha };
+
+            #[derive(serde::Serialize)]
+            struct CommitResponse {
+                tree: TreeResponse,
+            }
+
+            #[derive(serde::Serialize)]
+            struct ParentResponse {
+                sha: String,
+            }
+
+            #[derive(serde::Serialize)]
+            struct MergeResponse {
+                sha: String,
+                commit: CommitResponse,
+                parents: Vec<ParentResponse>,
+            }
+
+            let tree_sha = format!("{merge_sha}-tree");
+            let response = MergeResponse {
+                sha: merge_sha,
+                commit: CommitResponse {
+                    tree: TreeResponse { sha: tree_sha },
+                },
+                parents: vec![
+                    ParentResponse { sha: base_sha },
+                    ParentResponse { sha: head_sha },
+                ],
+            };
             ResponseTemplate::new(201).set_body_json(response)
+        })
+        .mount(mock_server)
+        .await;
+}
+
+async fn mock_create_commit(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
+    Mock::given(method("POST"))
+        .and(path(format!(
+            "/repos/{}/git/commits",
+            repo.lock().full_name()
+        )))
+        .respond_with(move |request: &Request| {
+            let mut repo = repo.lock();
+
+            #[derive(serde::Deserialize)]
+            struct Author {
+                name: String,
+                email: String,
+            }
+
+            #[derive(serde::Deserialize)]
+            struct Request {
+                message: String,
+                tree: String,
+                parents: Vec<String>,
+                author: Author,
+            }
+
+            let data: Request = request.body_json().unwrap();
+
+            // Check that we re-author a merge commit
+            assert_eq!(data.parents.len(), 2);
+
+            let original_sha = data.tree.strip_suffix("-tree").expect("not a tree SHA");
+            let commit_sha = format!("{original_sha}-reauthored-to-{}", data.author.name);
+            repo.create_commit(
+                Commit::new(&commit_sha, &data.message).with_author(GitUser {
+                    name: data.author.name,
+                    email: data.author.email,
+                }),
+            );
+
+            #[derive(serde::Serialize)]
+            struct Response<'a> {
+                sha: &'a str,
+            }
+
+            ResponseTemplate::new(201).set_body_json(Response { sha: &commit_sha })
         })
         .mount(mock_server)
         .await;

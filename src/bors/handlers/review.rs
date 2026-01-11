@@ -394,6 +394,7 @@ async fn notify_of_delegation(
 #[cfg(test)]
 mod tests {
     use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
+    use tracing_test::traced_test;
 
     use crate::bors::TRY_BRANCH_NAME;
     use crate::bors::merge_queue::AUTO_BUILD_CHECK_RUN_NAME;
@@ -799,6 +800,7 @@ approved = { modifications = ["+foo", "+baz"], unless = ["label1", "label2"] }
     }
 
     #[sqlx::test]
+    #[traced_test]
     async fn delegatee_can_approve(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
             .github(GitHub::unauthorized_pr_author())
@@ -834,9 +836,9 @@ approved = { modifications = ["+foo", "+baz"], unless = ["label1", "label2"] }
             TRY_MERGE_BRANCH_NAME,
         ), @"
         main-sha1
-        merge-0-pr-1-e54ad984
+        merge-0-pr-1-d7d45f1f
         ");
-        insta::assert_snapshot!(gh.get_sha_history((), TRY_BRANCH_NAME), @"merge-0-pr-1-e54ad984");
+        insta::assert_snapshot!(gh.get_sha_history((), TRY_BRANCH_NAME), @"merge-0-pr-1-d7d45f1f-reauthored-to-bors");
     }
 
     #[sqlx::test]
@@ -1209,7 +1211,7 @@ approved = { modifications = ["+foo", "+baz"], unless = ["label1", "label2"] }
 
                 ctx.post_comment("@bors try").await?;
                 insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
-                :hourglass: Trying commit pr-1-sha with merge merge-0-pr-1-e54ad984…
+                :hourglass: Trying commit pr-1-sha with merge merge-0-pr-1-d7d45f1f-reauthored-to-bors…
 
                 To cancel the try build, run the command `@bors try cancel`.
                 ");

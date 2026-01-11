@@ -480,9 +480,9 @@ auto_build_failed = ["+failed"]
                 // The try build was completed successfully, not timed out
                 insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @r#"
                 :sunny: Try build successful ([Workflow1](https://github.com/rust-lang/borstest/actions/runs/1))
-                Build commit: merge-0-pr-1-e54ad984 (`merge-0-pr-1-e54ad984`, parent: `main-sha1`)
+                Build commit: merge-0-pr-1-d7d45f1f-reauthored-to-bors (`merge-0-pr-1-d7d45f1f-reauthored-to-bors`, parent: `main-sha1`)
 
-                <!-- homu: {"type":"TryBuildCompleted","merge_sha":"merge-0-pr-1-e54ad984"} -->
+                <!-- homu: {"type":"TryBuildCompleted","merge_sha":"merge-0-pr-1-d7d45f1f-reauthored-to-bors"} -->
                 "#);
 
                 Ok(())
@@ -512,8 +512,8 @@ auto_build_failed = ["+failed"]
             insta::assert_snapshot!(comment, @r#"
             :sunny: Test successful - [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1)
             Approved by: `default-user`
-            Pushing merge-0-pr-1-bc4b41f8 to `main`...
-            <!-- homu: {"type":"BuildCompleted","base_ref":"main","merge_sha":"merge-0-pr-1-bc4b41f8"} -->
+            Pushing merge-0-pr-1-d7d45f1f-reauthored-to-bors to `main`...
+            <!-- homu: {"type":"BuildCompleted","base_ref":"main","merge_sha":"merge-0-pr-1-d7d45f1f-reauthored-to-bors"} -->
             "#);
 
             ctx.pr(()).await.expect_status(PullRequestStatus::Merged);
@@ -543,8 +543,8 @@ auto_build_failed = ["+failed"]
             insta::assert_snapshot!(comment, @r#"
             :sunny: Test successful - [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1)
             Approved by: `default-user`
-            Pushing merge-0-pr-1-bc4b41f8 to `main`...
-            <!-- homu: {"type":"BuildCompleted","base_ref":"main","merge_sha":"merge-0-pr-1-bc4b41f8"} -->
+            Pushing merge-0-pr-1-d7d45f1f-reauthored-to-bors to `main`...
+            <!-- homu: {"type":"BuildCompleted","base_ref":"main","merge_sha":"merge-0-pr-1-d7d45f1f-reauthored-to-bors"} -->
             "#);
 
             ctx.pr(()).await.expect_status(PullRequestStatus::Merged);
