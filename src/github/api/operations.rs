@@ -124,7 +124,37 @@ pub async fn merge_branches(
                     Ok(response.into())
                 }
                 StatusCode::NOT_FOUND => Err(MergeError::NotFound),
-                StatusCode::CONFLICT => Err(MergeError::Conflict),
+                StatusCode::CONFLICT => {
+                    // It seems that GitHub sometimes returns 409 even if the error is a
+                    // "permission issue" (see https://github.com/rust-lang/rust/pull/150925#issuecomment-3734359600).
+                    // We try to detect this situation, and treat it as a transient error.
+                    #[derive(serde::Deserialize)]
+                    struct MessageResponse {
+                        message: String,
+                    }
+                    match serde_json::from_str::<MessageResponse>(&text) {
+                        Ok(response) => {
+                            if response
+                                .message
+                                .contains("not authorized to push to this branch")
+                            {
+                                tracing::error!(
+                                    "Encountered transient merge permission error: `{text}`"
+                                );
+                                // In this case, it might be a transient GitHub error?
+                                Err(MergeError::Unknown { status, text })
+                            } else {
+                                Err(MergeError::Conflict)
+                            }
+                        }
+                        Err(error) => {
+                            tracing::error!(
+                                "Could not deserialize merge conflict response `{text}`: {error:?}"
+                            );
+                            Err(MergeError::Conflict)
+                        }
+                    }
+                }
                 StatusCode::NO_CONTENT => Err(MergeError::AlreadyMerged),
                 _ => Err(MergeError::Unknown { status, text }),
             }
