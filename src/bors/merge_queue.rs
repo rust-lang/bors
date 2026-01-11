@@ -155,6 +155,10 @@ async fn process_repository(
                     break;
                 }
 
+                // Note that we do NOT check the mergeability status from the DB here.
+                // Unmergeable PRs should be ordered after mergeable ones, but we still try to merge
+                // approved unmergeable PRs, just in case our DB data is stale. That should
+                // hopefully happen only very rarely.
                 tracing::info!(
                     "Attempting to start auto build for {pr_num}. Current queue: {prs:?}"
                 );
@@ -264,22 +268,31 @@ async fn handle_start_auto_build(
     mergeability_sender: &MergeabilityQueueSender,
 ) -> anyhow::Result<AutoBuildStartOutcome> {
     let pr_num = pr.number;
+    if let MergeableState::HasConflicts = pr.mergeable_state {
+        tracing::warn!("Attempting to start auto build for unmergeable PR {pr_num}");
+    }
+
     let Err(error) = start_auto_build(repo, ctx, pr, approval_info).await else {
         tracing::info!("Started auto build for PR {pr_num}");
         return Ok(AutoBuildStartOutcome::BuildStarted);
     };
 
     match error {
-        StartAutoBuildError::MergeConflict => {
-            let gh_pr = repo.client.get_pull_request(pr.number).await?;
+        StartAutoBuildError::MergeConflict(gh_pr) => {
             tracing::debug!("Failed to start auto build for PR {pr_num} due to merge conflict");
 
             ctx.db
                 .set_pr_mergeable_state(repo.repository(), pr.number, MergeableState::HasConflicts)
                 .await?;
+
+            // Post a merge attempt merge conflict message, so that there is at least
+            // some indication of what has happened.
             repo.client
                 .post_comment(pr.number, merge_conflict_comment(&gh_pr.head.name))
                 .await?;
+            // Enqueue mergeability check to post the usual merge conflict message and unapprove the
+            // PR.
+            mergeability_sender.enqueue_pr(pr, None);
             Ok(AutoBuildStartOutcome::ContinueToNextPr)
         }
         StartAutoBuildError::SanityCheckFailed {
@@ -295,7 +308,7 @@ async fn handle_start_auto_build(
         }
         StartAutoBuildError::SanityCheckFailed {
             error: SanityCheckError::NotMergeable { mergeable_state },
-            pr: gh_pr,
+            pr: _,
         } => {
             tracing::info!(
                 "Sanity check failed for PR {pr_num}: it was not mergeable (mergeable state: {mergeable_state:?})"
@@ -360,7 +373,7 @@ async fn handle_start_auto_build(
 #[must_use]
 enum StartAutoBuildError {
     /// Merge conflict between PR head and base branch.
-    MergeConflict,
+    MergeConflict(PullRequest),
     /// Failed to perform required database operation.
     DatabaseError(anyhow::Error),
     /// GitHub API error.
@@ -454,7 +467,7 @@ async fn start_auto_build(
     .await
     {
         Ok(MergeResult::Success(merged_commit)) => merged_commit,
-        Ok(MergeResult::Conflict) => return Err(StartAutoBuildError::MergeConflict),
+        Ok(MergeResult::Conflict) => return Err(StartAutoBuildError::MergeConflict(gh_pr)),
         Err(error) => return Err(StartAutoBuildError::GitHubError(error)),
     };
     // Then, create the actual merge commit with an explicit author, so that we can override
@@ -1023,9 +1036,8 @@ merge_queue_enabled = false
                 @r#"
             :lock: Merge conflict
 
-            This pull request and the base branch diverged in a way that cannot
-             be automatically merged. Please rebase on top of the latest base
-             branch, and let the reviewer approve again.
+            A merge attempt failed due to a merge conflict. Please rebase on top of the latest base
+            branch, and let the reviewer approve again.
 
             <details><summary>How do I rebase?</summary>
 
