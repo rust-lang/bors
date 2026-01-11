@@ -9,7 +9,7 @@ pub fn sort_queue_prs(mut prs: Vec<PullRequestModel>) -> Vec<PullRequestModel> {
         // 1. Compare queue status (ready for merge > pending > approved > failed > not approved)
         get_queue_status_priority(&a.queue_status())
             .cmp(&get_queue_status_priority(&b.queue_status()))
-            // 2. Compare mergeability state (0 = mergeable, 1 = conflicts/unknown)
+            // 2. Compare mergeability state (0 = mergeable/unknown, 1 = conflicts)
             .then_with(|| get_mergeable_priority(a).cmp(&get_mergeable_priority(b)))
             // 3. Compare priority numbers (higher priority should come first)
             .then_with(|| {
@@ -40,9 +40,8 @@ fn get_queue_status_priority(status: &QueueStatus) -> u32 {
 
 fn get_mergeable_priority(pr: &PullRequestModel) -> u32 {
     match pr.mergeable_state {
-        MergeableState::Mergeable => 0,
+        MergeableState::Mergeable | MergeableState::Unknown => 0,
         MergeableState::HasConflicts => 1,
-        MergeableState::Unknown => 1,
     }
 }
 
