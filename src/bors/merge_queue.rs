@@ -118,8 +118,8 @@ async fn process_repository(
         }
     };
 
-    let priority = repo_db.tree_state.priority();
-    let prs = ctx.db.get_merge_queue_prs(repo_name, priority).await?;
+    let tree_min_priority = repo_db.tree_state.priority();
+    let prs = ctx.db.get_nonclosed_pull_requests(repo_name).await?;
 
     // Sort PRs according to merge queue priority rules.
     // Successful builds come first so they can be merged immediately,
@@ -130,12 +130,6 @@ async fn process_repository(
         let pr_num = pr.number;
 
         match pr.queue_status() {
-            QueueStatus::NotApproved => unreachable!(
-                "PR {pr:?} is not approved. It should not have been returned by `get_merge_queue_prs`, this is a bug."
-            ),
-            QueueStatus::Failed(..) => unreachable!(
-                "Build of PR {pr:?} has failed. It should not have been returned by `get_merge_queue_prs`, this is a bug."
-            ),
             QueueStatus::Pending(..) => {
                 // Build in progress - stop queue. We can only have one PR being built
                 // at a time.
@@ -150,6 +144,15 @@ async fn process_repository(
                 break;
             }
             QueueStatus::Approved(approval_info) => {
+                // Respect tree closure
+                if let Some(tree_min_priority) = tree_min_priority
+                    && tree_min_priority > pr.priority.unwrap_or(0) as u32
+                {
+                    // End processing the queue here; all following PRs should have a lower
+                    // priority
+                    break;
+                }
+
                 tracing::info!(
                     "Attempting to start auto build for {pr_num}. Current queue: {prs:?}"
                 );
@@ -164,6 +167,8 @@ async fn process_repository(
                     }
                 }
             }
+            // We got to the end of the merge queue, stop going through the rest of the PRs
+            QueueStatus::NotApproved | QueueStatus::Failed(..) => break,
         }
     }
 
@@ -175,17 +180,9 @@ pub async fn get_pr_at_front_of_merge_queue(
     repo_state: &RepositoryState,
     db: &PgDbClient,
 ) -> anyhow::Result<Option<PullRequestModel>> {
-    let repo_name = repo_state.repository();
-    let repo_db = match db.repo_db(repo_name).await? {
-        Some(repo) => repo,
-        None => {
-            return Ok(None);
-        }
-    };
-
-    let priority = repo_db.tree_state.priority();
-    let prs = db.get_merge_queue_prs(repo_name, priority).await?;
-
+    let prs = db
+        .get_nonclosed_pull_requests(repo_state.repository())
+        .await?;
     Ok(sort_queue_prs(prs).into_iter().next())
 }
 
