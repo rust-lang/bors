@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO rollup_member (repository, rollup_pr_number, member_pr_number)\n        VALUES ($1, $2, $3)\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "3aad4de196f2db3dc32f475c33283bba5922ad8d47c0dab0a31f0661fcc6bf4b"
+}

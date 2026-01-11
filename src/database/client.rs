@@ -1,8 +1,11 @@
 use sqlx::PgPool;
+use std::collections::{HashMap, HashSet};
 
 use crate::bors::comment::CommentTag;
 use crate::bors::{BuildKind, PullRequestStatus, RollupMode};
-use crate::database::operations::update_pr_auto_build_id;
+use crate::database::operations::{
+    get_nonclosed_rollups, register_rollup_pr_member, update_pr_auto_build_id,
+};
 use crate::database::{
     BuildModel, BuildStatus, CommentModel, PullRequestModel, RepoModel, TreeState, WorkflowModel,
     WorkflowStatus, WorkflowType,
@@ -335,5 +338,30 @@ impl PgDbClient {
 
     pub async fn delete_tagged_bot_comment(&self, comment: &CommentModel) -> anyhow::Result<()> {
         delete_tagged_bot_comment(&self.pool, comment.id).await
+    }
+
+    /// Register the contents of a rollup in the DB.
+    /// The contents are stored as rollup PR number - member PR number records, scoped under a specific repository.
+    /// All records are inserted in a single transaction.
+    pub async fn register_rollup_members(
+        &self,
+        repo: &GithubRepoName,
+        rollup_pr_number: &PullRequestNumber,
+        member_pr_numbers: &[PullRequestNumber],
+    ) -> anyhow::Result<()> {
+        let mut tx = self.pool.begin().await?;
+        for member_pr_number in member_pr_numbers {
+            register_rollup_pr_member(&mut *tx, repo, rollup_pr_number, member_pr_number).await?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+
+    /// Returns a map of rollup PR numbers to the set of member PR numbers that are part of that rollup.
+    pub async fn get_nonclosed_rollups(
+        &self,
+        repo: &GithubRepoName,
+    ) -> anyhow::Result<HashMap<PullRequestNumber, HashSet<PullRequestNumber>>> {
+        get_nonclosed_rollups(&self.pool, repo).await
     }
 }

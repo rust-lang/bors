@@ -3,9 +3,12 @@ use crate::database::{
     BuildModel, BuildStatus, MergeableState::*, PullRequestModel, QueueStatus, TreeState,
     WorkflowModel,
 };
+use crate::github::PullRequestNumber;
 use askama::Template;
 use axum::response::{Html, IntoResponse, Response};
 use http::StatusCode;
+use itertools::Itertools;
+use std::collections::{HashMap, HashSet};
 
 /// Build status to display on the queue page.
 pub fn status_text(pr: &PullRequestModel) -> String {
@@ -55,6 +58,17 @@ pub struct PullRequestStats {
     pub failed_count: usize,
 }
 
+/// A displayable view of a map of rollups to their members, meant to be used with data attributes
+pub struct RollupsInfo {
+    pub rollups: HashMap<PullRequestNumber, HashSet<PullRequestNumber>>,
+}
+
+impl From<HashMap<PullRequestNumber, HashSet<PullRequestNumber>>> for RollupsInfo {
+    fn from(rollups: HashMap<PullRequestNumber, HashSet<PullRequestNumber>>) -> Self {
+        Self { rollups }
+    }
+}
+
 #[derive(Template)]
 #[template(path = "queue.html", whitespace = "minimize")]
 pub struct QueueTemplate {
@@ -63,6 +77,7 @@ pub struct QueueTemplate {
     pub repo_url: String,
     pub stats: PullRequestStats,
     pub prs: Vec<PullRequestModel>,
+    pub rollups_info: RollupsInfo,
     pub tree_state: TreeState,
     pub oauth_client_id: Option<String>,
     // PRs that should be pre-selected for being included in a rollup
