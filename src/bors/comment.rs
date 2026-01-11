@@ -262,6 +262,18 @@ handled during merge and rebase. This is normal, and you should still perform st
     Comment::new(message)
 }
 
+pub fn unapproved_because_of_sha_mismatch_comment(
+    expected_sha: &CommitSha,
+    actual_sha: &CommitSha,
+) -> Comment {
+    Comment::new(format!(
+        r#"The pull request was unapproved, because its SHA did not match the approved SHA during a merge attempt.
+Approved commit SHA: {expected_sha}
+Actual head SHA: {actual_sha}
+"#
+    ))
+}
+
 pub fn approved_comment(
     web_url: &str,
     repo: &GithubRepoName,

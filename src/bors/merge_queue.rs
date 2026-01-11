@@ -12,7 +12,9 @@ use crate::bors::build::load_workflow_runs;
 use crate::bors::comment::{
     CommentTag, auto_build_push_failed_comment, auto_build_started_comment,
     auto_build_succeeded_comment, merge_conflict_comment,
+    unapproved_because_of_sha_mismatch_comment,
 };
+use crate::bors::handlers::unapprove_pr;
 use crate::bors::mergeability_queue::MergeabilityQueueSender;
 use crate::bors::{AUTO_BRANCH_NAME, PullRequestStatus, RepositoryState};
 use crate::database::{
@@ -280,7 +282,10 @@ async fn handle_start_auto_build(
                 .await?;
             Ok(AutoBuildStartOutcome::ContinueToNextPr)
         }
-        StartAutoBuildError::SanityCheckFailed(SanityCheckError::WrongStatus { status }) => {
+        StartAutoBuildError::SanityCheckFailed {
+            error: SanityCheckError::WrongStatus { status },
+            pr: _,
+        } => {
             tracing::info!("Sanity check failed for PR {pr_num}: its status was {status}");
             // The DB PR status was wrong, let's update it.
             ctx.db
@@ -288,9 +293,10 @@ async fn handle_start_auto_build(
                 .await?;
             Ok(AutoBuildStartOutcome::ContinueToNextPr)
         }
-        StartAutoBuildError::SanityCheckFailed(SanityCheckError::NotMergeable {
-            mergeable_state,
-        }) => {
+        StartAutoBuildError::SanityCheckFailed {
+            error: SanityCheckError::NotMergeable { mergeable_state },
+            pr: gh_pr,
+        } => {
             tracing::info!(
                 "Sanity check failed for PR {pr_num}: it was not mergeable (mergeable state: {mergeable_state:?})"
             );
@@ -314,17 +320,26 @@ async fn handle_start_auto_build(
 
             Ok(outcome)
         }
-        StartAutoBuildError::SanityCheckFailed(SanityCheckError::ApprovedShaMismatch {
-            approved,
-            actual,
-        }) => {
+        StartAutoBuildError::SanityCheckFailed {
+            error: SanityCheckError::ApprovedShaMismatch { approved, actual },
+            pr: gh_pr,
+        } => {
             tracing::info!(
                 "Sanity check failed for PR {pr_num}: approved SHA ({approved}) did not match actual SHA ({actual})"
             );
             // The PR head SHA does not match the approved SHA.
             // This should only happen if we missed a PR push webhook (which would normally unapprove
             // the PR). Let's unapprove it here instead to unblock the queue.
-            ctx.db.unapprove(pr).await?;
+            unapprove_pr(repo, &ctx.db, pr, &gh_pr).await?;
+            repo.client
+                .post_comment(
+                    pr.number,
+                    unapproved_because_of_sha_mismatch_comment(
+                        &CommitSha(pr.approved_sha().unwrap_or("<missing>").to_owned()),
+                        &gh_pr.head.sha,
+                    ),
+                )
+                .await?;
             Ok(AutoBuildStartOutcome::ContinueToNextPr)
         }
         StartAutoBuildError::GitHubError(error) => {
@@ -351,7 +366,10 @@ enum StartAutoBuildError {
     /// GitHub API error.
     GitHubError(anyhow::Error),
     /// Sanity checks failed - PR state doesn't match requirements.
-    SanityCheckFailed(SanityCheckError),
+    SanityCheckFailed {
+        error: SanityCheckError,
+        pr: PullRequest,
+    },
 }
 
 enum SanityCheckError {
@@ -406,7 +424,10 @@ async fn start_auto_build(
 
     sanity_check_pr(&gh_pr, approval_info)
         .await
-        .map_err(StartAutoBuildError::SanityCheckFailed)?;
+        .map_err(|error| StartAutoBuildError::SanityCheckFailed {
+            error,
+            pr: gh_pr.clone(),
+        })?;
 
     let base_sha = client
         .get_branch_sha(&pr.base_branch)
@@ -1070,17 +1091,19 @@ merge_queue_enabled = false
     #[sqlx::test]
     async fn auto_build_sha_mismatch_sanity_check_fails(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
-            let pr = ctx.open_pr((), |_| {}).await?;
-            ctx.approve(pr.id()).await?;
-            ctx.edit_pr(pr.id(), |pr| {
-                pr.head_sha = "different-sha".to_string();
-            })
-            .await?;
+            ctx.approve(()).await?;
+            ctx.modify_pr_in_gh((), |pr| pr.head_sha = format!("{}-modified", pr.head_sha));
             ctx.run_merge_queue_now().await;
-            ctx.pr(pr.id()).await.expect_no_auto_build();
+            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
+            The pull request was unapproved, because its SHA did not match the approved SHA during a merge attempt.
+            Approved commit SHA: pr-1-sha
+            Actual head SHA: pr-1-sha-modified
+            ");
+            ctx.pr(()).await.expect_unapproved();
+
             Ok(())
         })
-        .await;
+            .await;
     }
 
     #[sqlx::test]
@@ -1337,7 +1360,7 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
             let pr2 = ctx.open_pr(default_repo_name(), |_| {}).await?;
             let pr3 = ctx.open_pr(default_repo_name(), |_| {}).await?;
 
-            // Approve a PR
+            // Approve both PRs
             ctx.approve(pr2.id()).await?;
             ctx.approve(pr3.id()).await?;
 
@@ -1352,7 +1375,8 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
             let comment = ctx.get_next_comment_text(pr3.id()).await?;
             insta::assert_snapshot!(comment, @":hourglass: Testing commit pr-3-sha with merge merge-0-pr-3-d7d45f1f-reauthored-to-bors...");
 
-            // The merge queue should also unapprove PR1
+            // The merge queue should also unapprove PR2
+            ctx.expect_comments(pr2.id(), 1).await;
             ctx.wait_for_pr(pr2.id(), |pr| !pr.is_approved()).await?;
             ctx.pr(pr2.id()).await.expect_no_auto_build();
 
@@ -1555,6 +1579,35 @@ also include this pls"
                 .await?;
 
             ctx.start_and_finish_auto_build(()).await?;
+            ctx.start_and_finish_auto_build(pr2.id()).await?;
+
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn jump_over_conflicted_pr(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            let pr2 = ctx.open_pr((), |_| {}).await?;
+            ctx.post_comment(Comment::new(pr2.id(), "@bors r+ p=1"))
+                .await?;
+            ctx.expect_comments(pr2.id(), 1).await;
+            ctx.approve(()).await?;
+
+            ctx.edit_pr(pr2.id(), |pr| {
+                pr.mergeable_state = OctocrabMergeableState::Dirty
+            })
+            .await?;
+
+            // Jump over PR2
+            ctx.start_and_finish_auto_build(()).await?;
+
+            // Reset the conflict state to clean, without creating a webhook
+            // The merge queue should try to merge the PR, even if it is marked as dirty in the DB
+            ctx.modify_pr_in_gh(pr2.id(), |pr| {
+                pr.mergeable_state = OctocrabMergeableState::Clean;
+            });
             ctx.start_and_finish_auto_build(pr2.id()).await?;
 
             Ok(())
