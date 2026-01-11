@@ -633,9 +633,8 @@ try-job: Bar
             insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @r#"
             :lock: Merge conflict
 
-            This pull request and the base branch diverged in a way that cannot
-             be automatically merged. Please rebase on top of the latest base
-             branch, and let the reviewer approve again.
+            A merge attempt failed due to a merge conflict. Please rebase on top of the latest base
+            branch, and let the reviewer approve again.
 
             <details><summary>How do I rebase?</summary>
 
