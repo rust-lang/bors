@@ -28,18 +28,18 @@ pub async fn reload_repository_permissions(
 }
 
 /// Reloads the mergeability status from GitHub for PRs that have an unknown
-/// mergeability status in the DB.
+/// mergeability status in the DB or that are approved.
 pub async fn reload_mergeability_status(
     repo: Arc<RepositoryState>,
     db: &PgDbClient,
     mergeability_queue: MergeabilityQueueSender,
 ) -> anyhow::Result<()> {
     let prs = db
-        .get_prs_with_unknown_mergeability_state(repo.repository())
+        .get_prs_with_unknown_mergeability_or_approved(repo.repository())
         .await?;
 
     tracing::info!(
-        "Refreshing {} PR(s) with unknown mergeable state",
+        "Refreshing {} PR(s) that have unknown mergeability or that are approved",
         prs.len()
     );
 
@@ -360,6 +360,21 @@ auto_build_failed = ["+failed"]
             ctx.wait_for_pr((), |pr| pr.mergeable_state == MergeableState::Unknown)
                 .await?;
             ctx.modify_pr((), |pr| pr.mergeable_state = OctocrabMergeableState::Dirty);
+            ctx.update_mergeability_status().await;
+            ctx.wait_for_pr((), |pr| pr.mergeable_state == MergeableState::HasConflicts)
+                .await?;
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn refresh_enqueues_approved_prs(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            ctx.approve(()).await?;
+            ctx.modify_pr((), |pr| {
+                pr.mergeable_state = OctocrabMergeableState::Dirty;
+            });
             ctx.update_mergeability_status().await;
             ctx.wait_for_pr((), |pr| pr.mergeable_state == MergeableState::HasConflicts)
                 .await?;
