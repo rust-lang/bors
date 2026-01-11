@@ -17,9 +17,9 @@ use super::operations::{
     get_repository, get_repository_by_name, get_tagged_bot_comments, get_workflow_urls_for_build,
     get_workflows_for_build, insert_repo_if_not_exists, record_tagged_bot_comment,
     set_pr_assignees, set_pr_mergeability_state, set_pr_priority, set_pr_rollup, set_pr_status,
-    unapprove_pull_request, undelegate_pull_request, update_build_check_run_id,
-    update_build_status, update_mergeable_states_by_base_branch, update_pr_try_build_id,
-    update_workflow_status, upsert_pull_request, upsert_repository,
+    set_unknown_mergeability_by_base_branch, unapprove_pull_request, undelegate_pull_request,
+    update_build_check_run_id, update_build_status, update_pr_try_build_id, update_workflow_status,
+    upsert_pull_request, upsert_repository,
 };
 use super::{ApprovalInfo, DelegatedPermission, MergeableState, RunId, UpsertPullRequestParams};
 
@@ -88,17 +88,15 @@ impl PgDbClient {
     }
 
     /// Sets the mergeability status of all PRs that were not marked as unmergeable before
-    /// with the given `base_branch` to `mergeability_state`.
+    /// with the given `base_branch` to unknown.
     /// Returns the list of pull requests that target this base branch.
     /// Their state will be set to BEFORE the mergeability change was made.
-    pub async fn update_mergeable_states_by_base_branch(
+    pub async fn set_unknown_mergeability_by_base_branch(
         &self,
         repo: &GithubRepoName,
         base_branch: &str,
-        mergeability_state: MergeableState,
     ) -> anyhow::Result<Vec<PullRequestModel>> {
-        update_mergeable_states_by_base_branch(&self.pool, repo, base_branch, mergeability_state)
-            .await
+        set_unknown_mergeability_by_base_branch(&self.pool, repo, base_branch).await
     }
 
     pub async fn set_rollup(

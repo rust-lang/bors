@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n                pr.id,\n                pr.repository as \"repository: GithubRepoName\",\n                pr.number as \"number!: i64\",\n                pr.title,\n                pr.author,\n                pr.assignees as \"assignees: Assignees\",\n                (\n                    pr.approved_by,\n                    pr.approved_sha\n                ) AS \"approval_status!: ApprovalStatus\",\n                pr.status as \"pr_status: PullRequestStatus\",\n                pr.priority,\n                pr.rollup as \"rollup: RollupMode\",\n                pr.delegated_permission as \"delegated_permission: DelegatedPermission\",\n                pr.head_branch,\n                pr.base_branch,\n                pr.mergeable_state as \"mergeable_state: MergeableState\",\n                pr.created_at as \"created_at: DateTime<Utc>\",\n                try_build AS \"try_build: BuildModel\",\n                auto_build AS \"auto_build: BuildModel\"\n            FROM pull_request as pr\n            LEFT JOIN build AS try_build ON pr.try_build_id = try_build.id\n            LEFT JOIN build AS auto_build ON pr.auto_build_id = auto_build.id\n            WHERE pr.repository = $1\n              AND pr.status = 'open'\n              AND pr.approved_by IS NOT NULL\n              AND pr.mergeable_state IN ('mergeable', 'unknown')\n              AND (\n                -- We ALWAYS need to return PRs that:\n                -- 1. Are ready for a merge (success)\n                -- 2. Can block the queue (pending)\n                auto_build.status IN ('success', 'pending') OR (\n                    -- For PRs without a (failed) build status, we check if they pass\n                    -- the tree state priority check if the tree is closed\n                    (auto_build.status IS NULL OR auto_build.status = 'cancelled')\n                    AND ($2::int IS NULL OR pr.priority >= $2)\n                )\n              )\n            ",
+  "query": "\n            SELECT\n                pr.id,\n                pr.repository as \"repository: GithubRepoName\",\n                pr.number as \"number!: i64\",\n                pr.title,\n                pr.author,\n                pr.assignees as \"assignees: Assignees\",\n                (\n                    pr.approved_by,\n                    pr.approved_sha\n                ) AS \"approval_status!: ApprovalStatus\",\n                pr.status as \"pr_status: PullRequestStatus\",\n                pr.priority,\n                pr.rollup as \"rollup: RollupMode\",\n                pr.delegated_permission as \"delegated_permission: DelegatedPermission\",\n                pr.head_branch,\n                pr.base_branch,\n                pr.mergeable_state as \"mergeable_state: MergeableState\",\n                pr.created_at as \"created_at: DateTime<Utc>\",\n                try_build AS \"try_build: BuildModel\",\n                auto_build AS \"auto_build: BuildModel\"\n            FROM pull_request as pr\n            LEFT JOIN build AS try_build ON pr.try_build_id = try_build.id\n            LEFT JOIN build AS auto_build ON pr.auto_build_id = auto_build.id\n            WHERE pr.repository = $1\n              AND (pr.mergeable_state = 'unknown' OR pr.approved_by IS NOT NULL)\n              AND pr.status IN ('open', 'draft')\n            ",
   "describe": {
     "columns": [
       {
@@ -179,8 +179,7 @@
     ],
     "parameters": {
       "Left": [
-        "Text",
-        "Int4"
+        "Text"
       ]
     },
     "nullable": [
@@ -203,5 +202,5 @@
       null
     ]
   },
-  "hash": "f0ca4d55d3724b5ca80a091df18cd1db6ecce85654577a1172239eefe7697649"
+  "hash": "820792e7a47bda43cea868345566fc758179fc7acb31de17b2b65ca3de7632b0"
 }

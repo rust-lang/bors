@@ -295,11 +295,10 @@ pub(crate) async fn get_prs_with_unknown_mergeability_or_approved(
     .await
 }
 
-pub(crate) async fn update_mergeable_states_by_base_branch(
+pub(crate) async fn set_unknown_mergeability_by_base_branch(
     executor: impl PgExecutor<'_>,
     repo: &GithubRepoName,
     base_branch: &str,
-    mergeability_state: MergeableState,
 ) -> anyhow::Result<Vec<PullRequestModel>> {
     measure_db_query("update_mergeable_states_by_base_branch", || async {
         let result = sqlx::query_as!(
@@ -310,11 +309,12 @@ pub(crate) async fn update_mergeable_states_by_base_branch(
             r#"
             WITH pr AS (
                 UPDATE pull_request AS pr1
-                SET mergeable_state = $1
+                SET mergeable_state = 'unknown'
                 FROM pull_request AS pr2
                 WHERE pr1.id = pr2.id
-                    AND pr1.repository = $2
-                    AND pr1.base_branch = $3
+                    AND pr1.repository = $1
+                    AND pr1.base_branch = $2
+                    AND pr1.mergeable_state = 'mergeable'
                     AND pr1.status IN ('open', 'draft')
                 RETURNING pr2.*
             )
@@ -343,7 +343,6 @@ pub(crate) async fn update_mergeable_states_by_base_branch(
             LEFT JOIN build AS try_build ON pr.try_build_id = try_build.id
             LEFT JOIN build AS auto_build ON pr.auto_build_id = auto_build.id
             "#,
-            mergeability_state as _,
             repo as &GithubRepoName,
             base_branch,
         )

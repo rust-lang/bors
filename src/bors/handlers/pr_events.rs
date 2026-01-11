@@ -13,7 +13,7 @@ use crate::bors::mergeability_queue::MergeabilityQueueSender;
 use crate::bors::process::QueueSenders;
 use crate::bors::{AUTO_BRANCH_NAME, BorsContext};
 use crate::bors::{Comment, PullRequestStatus, RepositoryState};
-use crate::database::{MergeableState, PullRequestModel, UpsertPullRequestParams};
+use crate::database::{PullRequestModel, UpsertPullRequestParams};
 use crate::github::{CommitSha, PullRequestNumber};
 use crate::utils::text::pluralize;
 use std::sync::Arc;
@@ -247,11 +247,7 @@ pub(super) async fn handle_push_to_branch(
     payload: PushToBranch,
 ) -> anyhow::Result<()> {
     let affected_prs = db
-        .update_mergeable_states_by_base_branch(
-            repo_state.repository(),
-            &payload.branch,
-            MergeableState::Unknown,
-        )
+        .set_unknown_mergeability_by_base_branch(repo_state.repository(), &payload.branch)
         .await?;
 
     if !affected_prs.is_empty() {
