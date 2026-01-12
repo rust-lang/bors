@@ -5,9 +5,7 @@ use std::collections::BTreeMap;
 
 use crate::bors::RepositoryState;
 use crate::bors::mergeability_queue::MergeabilityQueueSender;
-use crate::database::PullRequestModel;
-use crate::github::PullRequest;
-use crate::{PgDbClient, TeamApiClient};
+use crate::{PgDbClient, TeamApiClient, database};
 
 /// Reload the team DB bors permissions for the given repository.
 pub async fn reload_repository_permissions(
@@ -84,7 +82,7 @@ pub async fn sync_pull_requests_state(
     for (pr_num, gh_pr) in &nonclosed_gh_prs_num {
         let db_pr = nonclosed_db_prs_num.get(pr_num);
         match db_pr {
-            Some(db_pr) if needs_update_in_db(db_pr, gh_pr) => {
+            Some(db_pr) if database::pr_needs_update_in_db(db_pr, gh_pr) => {
                 // Nonclosed PR that needs to be updated in the DB
                 tracing::debug!(
                     "PR {pr_num} has changed on GitHub, updating in DB (from {gh_pr:?} to {db_pr:?})",
@@ -123,68 +121,6 @@ pub async fn sync_pull_requests_state(
     }
 
     Ok(())
-}
-
-/// Returns true if the DB and GitHub representation of a PR do not match, and we need to update
-/// the PR in the DB. This is an optimization to avoid writing e.g. ~1000 PRs to the DB everytime
-/// we do a refresh.
-fn needs_update_in_db(db_pr: &PullRequestModel, gh_pr: &PullRequest) -> bool {
-    let PullRequestModel {
-        id: _,
-        repository: _,
-        number: _,
-        title: db_title,
-        author: _,
-        assignees: db_assignees,
-        pr_status: db_status,
-        head_branch: db_head_branch,
-        base_branch: db_base_branch,
-        mergeable_state: _,
-        approval_status: _,
-        delegated_permission: _,
-        priority: _,
-        rollup: _,
-        try_build: _,
-        auto_build: _,
-        created_at: _,
-    } = db_pr;
-    let PullRequest {
-        number: _,
-        head_label: _,
-        head,
-        base,
-        title,
-        // It seems that when we query PRs in bulk from GitHub, the mergeability status is
-        // unknown.. so we do not check it here.
-        mergeable_state: _,
-        message: _,
-        author: _,
-        assignees,
-        status,
-        labels: _,
-        html_url: _,
-    } = gh_pr;
-    if status != db_status {
-        return true;
-    }
-    if title != db_title {
-        return true;
-    }
-    if assignees
-        .iter()
-        .map(|a| a.username.clone())
-        .collect::<Vec<_>>()
-        != *db_assignees
-    {
-        return true;
-    }
-    if head.name != *db_head_branch {
-        return true;
-    }
-    if base.name != *db_base_branch {
-        return true;
-    }
-    false
 }
 
 #[cfg(test)]
@@ -447,13 +383,15 @@ auto_build_failed = ["+failed"]
             });
 
             ctx.refresh_prs().await;
+            // Refreshing PRs does not update mergeability!
             ctx.pr(pr.id())
                 .await
-                .expect_mergeable_state(MergeableState::HasConflicts)
+                .expect_mergeable_state(MergeableState::Mergeable)
                 .expect_title("Foobar")
                 .expect_assignees(&[&User::try_user().name])
                 .expect_base_branch("stable");
 
+            // Although it should add the PR to the mergeability queue
             ctx.run_mergeability_check().await?;
             // Mergeability notification
             ctx.expect_comments(pr.id(), 1).await;

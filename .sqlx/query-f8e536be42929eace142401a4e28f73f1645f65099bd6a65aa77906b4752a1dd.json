@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            WITH upserted_pr AS (\n                INSERT INTO pull_request (\n                    repository,\n                    number,\n                    title,\n                    author,\n                    assignees,\n                    head_branch,\n                    base_branch,\n                    mergeable_state,\n                    status\n                )\n                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)\n                ON CONFLICT (repository, number)\n                DO UPDATE SET\n                    title = $3,\n                    author = $4,\n                    assignees = $5,\n                    head_branch = $6,\n                    base_branch = $7,\n                    mergeable_state = $8,\n                    status = $9\n                RETURNING *\n            )\n            SELECT\n                pr.id,\n                pr.repository as \"repository: GithubRepoName\",\n                pr.number as \"number!: i64\",\n                pr.title,\n                pr.author,\n                pr.assignees as \"assignees: Assignees\",\n                (\n                    pr.approved_by,\n                    pr.approved_sha\n                ) AS \"approval_status!: ApprovalStatus\",\n                pr.status as \"pr_status: PullRequestStatus\",\n                pr.priority,\n                pr.rollup as \"rollup: RollupMode\",\n                pr.delegated_permission as \"delegated_permission: DelegatedPermission\",\n                pr.head_branch,\n                pr.base_branch,\n                pr.mergeable_state as \"mergeable_state: MergeableState\",\n                pr.created_at as \"created_at: DateTime<Utc>\",\n                try_build AS \"try_build: BuildModel\",\n                auto_build AS \"auto_build: BuildModel\"\n            FROM upserted_pr as pr\n            LEFT JOIN build AS try_build ON pr.try_build_id = try_build.id\n            LEFT JOIN build AS auto_build ON pr.auto_build_id = auto_build.id\n            ",
+  "query": "\n            WITH upserted_pr AS (\n                INSERT INTO pull_request (\n                    repository,\n                    number,\n                    title,\n                    author,\n                    assignees,\n                    head_branch,\n                    base_branch,\n                    mergeable_state,\n                    mergeable_state_is_stale,\n                    status\n                )\n                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)\n                ON CONFLICT (repository, number)\n                DO UPDATE SET\n                    title = $3,\n                    author = $4,\n                    assignees = $5,\n                    head_branch = $6,\n                    base_branch = $7,\n                    -- Note that we do NOT update mergeable_state here, it is updated explicitly elsewhere,\n                    -- to properly handle unmergeability notifications.\n                    mergeable_state_is_stale =\n                          -- Only set the stale flag here, but do not clear it!\n                          -- This is important for the mergeability queue to work properly, so that we can\n                          -- detect whether something is stale or not.\n                          CASE\n                            WHEN $9 = true THEN true\n                            ELSE pull_request.mergeable_state_is_stale\n                          END,\n                    status = $10\n                RETURNING *\n            )\n            SELECT\n                pr.id,\n                pr.repository as \"repository: GithubRepoName\",\n                pr.number as \"number!: i64\",\n                pr.title,\n                pr.author,\n                pr.assignees as \"assignees: Assignees\",\n                (\n                    pr.approved_by,\n                    pr.approved_sha\n                ) AS \"approval_status!: ApprovalStatus\",\n                pr.status as \"pr_status: PullRequestStatus\",\n                pr.priority,\n                pr.rollup as \"rollup: RollupMode\",\n                pr.delegated_permission as \"delegated_permission: DelegatedPermission\",\n                pr.head_branch,\n                pr.base_branch,\n                pr.mergeable_state as \"mergeable_state: MergeableState\",\n                pr.mergeable_state_is_stale,\n                pr.created_at as \"created_at: DateTime<Utc>\",\n                try_build AS \"try_build: BuildModel\",\n                auto_build AS \"auto_build: BuildModel\"\n            FROM upserted_pr as pr\n            LEFT JOIN build AS try_build ON pr.try_build_id = try_build.id\n            LEFT JOIN build AS auto_build ON pr.auto_build_id = auto_build.id\n            ",
   "describe": {
     "columns": [
       {
@@ -75,11 +75,16 @@
       },
       {
         "ordinal": 14,
+        "name": "mergeable_state_is_stale",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 15,
         "name": "created_at: DateTime<Utc>",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 15,
+        "ordinal": 16,
         "name": "try_build: BuildModel",
         "type_info": {
           "Custom": {
@@ -128,7 +133,7 @@
         }
       },
       {
-        "ordinal": 16,
+        "ordinal": 17,
         "name": "auto_build: BuildModel",
         "type_info": {
           "Custom": {
@@ -187,6 +192,7 @@
         "Text",
         "Text",
         "Text",
+        "Bool",
         "Text"
       ]
     },
@@ -206,9 +212,10 @@
       false,
       false,
       false,
+      false,
       true,
       true
     ]
   },
-  "hash": "495d6f39fe96e3673beb02be4088c4b5877de709fdb6fac7444f705702ba4d15"
+  "hash": "f8e536be42929eace142401a4e28f73f1645f65099bd6a65aa77906b4752a1dd"
 }

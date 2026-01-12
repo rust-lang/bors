@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n    UPDATE pull_request AS pr1\n    SET\n        mergeable_state = $3,\n        mergeable_state_is_stale = false\n    FROM pull_request AS pr2\n    WHERE pr1.id = pr2.id\n      AND pr1.repository = $1\n      AND pr1.number = $2\n        RETURNING pr2.mergeable_state as \"mergeable_state: MergeableState\"\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "mergeable_state: MergeableState",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "830e951d837f900228d656843f0c98e1a0e8b374d460628afddb712149f9567f"
+}

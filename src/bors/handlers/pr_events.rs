@@ -8,12 +8,13 @@ use crate::bors::event::{
 use crate::bors::handlers::handle_comment;
 use crate::bors::handlers::unapprove_pr;
 use crate::bors::handlers::workflow::{AutoBuildCancelReason, maybe_cancel_auto_build};
-use crate::bors::merge_queue::MergeQueueSender;
-use crate::bors::mergeability_queue::MergeabilityQueueSender;
+use crate::bors::mergeability_queue::{
+    MergeabilityQueueSender, set_pr_mergeability_based_on_user_action,
+};
 use crate::bors::process::QueueSenders;
 use crate::bors::{AUTO_BRANCH_NAME, BorsContext};
 use crate::bors::{Comment, PullRequestStatus, RepositoryState};
-use crate::database::{MergeableState, PullRequestModel, UpsertPullRequestParams};
+use crate::database::{PullRequestModel, UpsertPullRequestParams};
 use crate::github::{CommitSha, PullRequestNumber};
 use crate::utils::text::pluralize;
 use std::sync::Arc;
@@ -30,7 +31,7 @@ pub(super) async fn handle_pull_request_edited(
         .upsert_pull_request(repo_state.repository(), pr.clone().into())
         .await?;
 
-    mergeability_queue.enqueue_pr(&pr_model, None);
+    set_pr_mergeability_based_on_user_action(&db, pr, &pr_model, mergeability_queue).await?;
 
     // If the base branch has changed, unapprove the PR
     let Some(_) = payload.from_base_sha else {
@@ -57,7 +58,7 @@ pub(super) async fn handle_push_to_pull_request(
         .upsert_pull_request(repo_state.repository(), pr.clone().into())
         .await?;
 
-    mergeability_queue.enqueue_pr(&pr_model, None);
+    set_pr_mergeability_based_on_user_action(&db, pr, &pr_model, mergeability_queue).await?;
 
     let auto_build_cancel_message = maybe_cancel_auto_build(
         &repo_state.client,
@@ -110,7 +111,7 @@ pub(super) async fn handle_pull_request_opened(
         .iter()
         .map(|user| user.username.clone())
         .collect();
-    let pr = db
+    let pr_model = db
         .upsert_pull_request(
             repo_state.repository(),
             UpsertPullRequestParams {
@@ -126,10 +127,9 @@ pub(super) async fn handle_pull_request_opened(
         )
         .await?;
 
-    process_pr_description_commands(&payload, repo_state.clone(), db, ctx, senders.merge_queue())
-        .await?;
+    process_pr_description_commands(&payload, repo_state.clone(), db, ctx, senders).await?;
 
-    senders.mergeability_queue().enqueue_pr(&pr, None);
+    senders.mergeability_queue().enqueue_pr(&pr_model, None);
 
     Ok(())
 }
@@ -167,11 +167,11 @@ pub(super) async fn handle_pull_request_reopened(
     payload: PullRequestReopened,
 ) -> anyhow::Result<()> {
     let pr = &payload.pull_request;
-    let pr = db
+    let pr_model = db
         .upsert_pull_request(repo_state.repository(), pr.clone().into())
         .await?;
 
-    mergeability_queue.enqueue_pr(&pr, None);
+    set_pr_mergeability_based_on_user_action(&db, pr, &pr_model, mergeability_queue).await?;
 
     Ok(())
 }
@@ -247,11 +247,7 @@ pub(super) async fn handle_push_to_branch(
     payload: PushToBranch,
 ) -> anyhow::Result<()> {
     let affected_prs = db
-        .update_mergeable_states_by_base_branch(
-            repo_state.repository(),
-            &payload.branch,
-            MergeableState::Unknown,
-        )
+        .set_stale_mergeability_status_by_base_branch(repo_state.repository(), &payload.branch)
         .await?;
 
     if !affected_prs.is_empty() {
@@ -305,10 +301,10 @@ async fn process_pr_description_commands(
     repo: Arc<RepositoryState>,
     database: Arc<PgDbClient>,
     ctx: Arc<BorsContext>,
-    merge_queue_tx: &MergeQueueSender,
+    senders: &QueueSenders,
 ) -> anyhow::Result<()> {
     let pr_description_comment = create_pr_description_comment(payload);
-    handle_comment(repo, database, ctx, pr_description_comment, merge_queue_tx).await
+    handle_comment(repo, database, ctx, pr_description_comment, senders).await
 }
 
 fn create_pr_description_comment(payload: &PullRequestOpened) -> PullRequestComment {
@@ -472,6 +468,84 @@ mod tests {
     }
 
     #[sqlx::test]
+    async fn push_to_pr_do_not_send_mergeability_notification(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            let pr2 = ctx.open_pr((), |_| {}).await?;
+            ctx.push_to_branch(default_branch_name(), Commit::new("sha", "foo"))
+                .await?;
+
+            // At this point, PR2 should be in the mergeability queue
+            // Now, change it to become unmergeable
+            ctx.modify_pr_in_gh(pr2.id(), |pr| {
+                pr.mergeable_state = OctocrabMergeableState::Dirty;
+            });
+
+            // And push to it. This should NOT result in unmergeability notification!
+            ctx.push_to_pr(pr2.id()).await?;
+            ctx.drain_mergeability_queue().await?;
+
+            // No comment should be posted
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn edit_pr_while_in_mergeability_queue(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            let pr2 = ctx.open_pr((), |_| {}).await?;
+            ctx.approve(pr2.id()).await?;
+
+            // Enqueue the PR
+            ctx.push_to_branch(default_branch_name(), Commit::new("sha", "foo"))
+                .await?;
+
+            // Edit PR in a way that changes its mergeability to dirty
+            ctx.edit_pr(pr2.id(), |pr| {
+                pr.mergeable_state = OctocrabMergeableState::Dirty;
+            })
+            .await?;
+
+            // Even though the unmergeability change happened in response to user action (PR edit),
+            // since the PR was already queued, we want to ensure that a comment will be sent, and
+            // the PR will get unapproved.
+            ctx.run_mergeability_check().await?;
+            ctx.expect_comments(pr2.id(), 1).await;
+            ctx.pr(pr2.id()).await.expect_unapproved();
+
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn edit_pr_while_not_in_mergeability_queue(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            let pr2 = ctx.open_pr((), |_| {}).await?;
+            ctx.approve(pr2.id()).await?;
+
+            // Edit PR in a way that changes its mergeability to dirty
+            ctx.edit_pr(pr2.id(), |pr| {
+                pr.mergeable_state = OctocrabMergeableState::Dirty;
+            })
+            .await?;
+
+            // Here the unmergeability change happened in response to user action (PR edit) while
+            // the PR was NOT enqueued. In that case we currently do not unapprove the PR nor send
+            // the notification, but we do update the mergeability status.
+            ctx.pr(pr2.id())
+                .await
+                .expect_mergeable_state(MergeableState::HasConflicts);
+            ctx.pr(pr2.id())
+                .await
+                .expect_approved_by(&User::default_pr_author().name);
+
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
     async fn store_base_branch_on_pr_opened(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             let pr = ctx.open_pr((), |_| {}).await?;
@@ -505,8 +579,10 @@ mod tests {
                 pr.mergeable_state = OctocrabMergeableState::Dirty;
             })
             .await?;
-            ctx.wait_for_pr((), |pr| pr.mergeable_state == MergeableState::HasConflicts)
-                .await?;
+            ctx.wait_for_pr((), |pr| {
+                pr.mergeable_status() == MergeableState::HasConflicts
+            })
+            .await?;
             Ok(())
         })
         .await;
@@ -613,7 +689,7 @@ mod tests {
                 pr.mergeable_state = OctocrabMergeableState::Unknown;
             })
             .await?;
-            ctx.wait_for_pr((), |pr| pr.mergeable_state == MergeableState::Unknown)
+            ctx.wait_for_pr((), |pr| pr.mergeable_status() == MergeableState::Unknown)
                 .await?;
             ctx.modify_pr_in_gh((), |pr| pr.mergeable_state = OctocrabMergeableState::Dirty);
             ctx.run_mergeability_check().await?;
@@ -833,7 +909,7 @@ conflict = ["+conflict"]
                 })
                 .await?;
             ctx.wait_for_pr(pr.number, |pr| {
-                pr.mergeable_state == MergeableState::HasConflicts
+                pr.mergeable_status() == MergeableState::HasConflicts
             })
             .await?;
             Ok(())
@@ -848,7 +924,7 @@ conflict = ["+conflict"]
                 pr.mergeable_state = OctocrabMergeableState::Unknown;
             });
             ctx.reopen_pr(()).await?;
-            ctx.wait_for_pr((), |pr| pr.mergeable_state == MergeableState::Unknown)
+            ctx.wait_for_pr((), |pr| pr.mergeable_status() == MergeableState::Unknown)
                 .await?;
             ctx.modify_pr_in_gh((), |pr| {
                 pr.mergeable_state = OctocrabMergeableState::Dirty;
@@ -866,7 +942,7 @@ conflict = ["+conflict"]
     async fn enqueue_prs_on_push_to_pr(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.push_to_pr(()).await?;
-            ctx.wait_for_pr((), |pr| pr.mergeable_state == MergeableState::Unknown)
+            ctx.wait_for_pr((), |pr| pr.mergeable_status() == MergeableState::Unknown)
                 .await?;
             ctx.modify_pr_in_gh((), |pr| pr.mergeable_state = OctocrabMergeableState::Dirty);
             ctx.run_mergeability_check().await?;

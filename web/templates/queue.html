@@ -244,14 +244,14 @@
                     {%- endmatch -%}
                     <span class="elapsed-time-display"></span>
                 </td>
-                <td class="marker {%~ match pr.mergeable_state -%}
+                <td class="marker {%~ match pr.mergeable_status() -%}
                     {%- when Mergeable -%}
                     positive
                     {%- when HasConflicts -%}
                     negative
                     {%- when Unknown -%}
                     {%- endmatch -%}">
-                    {%- match pr.mergeable_state -%}
+                    {%- match pr.mergeable_status() -%}
                     {%- when Mergeable -%}
                     yes
                     {%- when HasConflicts -%}

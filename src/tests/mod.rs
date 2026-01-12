@@ -1247,6 +1247,16 @@ impl PullRequestProxy {
         self.gh_pr.clone()
     }
 
+    /// Useful for debugging the GitHub and DB PR state.
+    #[allow(unused)]
+    pub fn dump(&self) -> &Self {
+        eprintln!(
+            "GitHub state:\n{:?}\n\nDB state:\n{:?}\n",
+            self.gh_pr, self.db_pr
+        );
+        self
+    }
+
     #[track_caller]
     pub fn expect_status(&self, status: PullRequestStatus) -> &Self {
         assert_eq!(self.require_db_pr().pr_status, status);
@@ -1279,7 +1289,7 @@ impl PullRequestProxy {
 
     #[track_caller]
     pub fn expect_mergeable_state(&self, state: MergeableState) -> &Self {
-        assert_eq!(self.require_db_pr().mergeable_state, state);
+        assert_eq!(self.require_db_pr().mergeable_status(), state);
         self
     }
 

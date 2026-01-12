@@ -55,6 +55,7 @@ pub(crate) async fn get_pull_request(
         pr.head_branch,
         pr.base_branch,
         pr.mergeable_state as "mergeable_state: MergeableState",
+        pr.mergeable_state_is_stale,
         pr.created_at as "created_at: DateTime<Utc>",
         try_build AS "try_build: BuildModel",
         auto_build AS "auto_build: BuildModel"
@@ -95,7 +96,6 @@ pub(crate) async fn set_pr_status(
     .await
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(crate) async fn upsert_pull_request(
     executor: impl PgExecutor<'_>,
     repo: &GithubRepoName,
@@ -112,6 +112,8 @@ pub(crate) async fn upsert_pull_request(
         pr_status,
     } = params;
 
+    let mergeable_state_is_stale = *mergeable_state == MergeableState::Unknown;
+
     measure_db_query("upsert_pull_request", || async {
         let record = sqlx::query_as!(
             PullRequestModel,
@@ -126,9 +128,10 @@ pub(crate) async fn upsert_pull_request(
                     head_branch,
                     base_branch,
                     mergeable_state,
+                    mergeable_state_is_stale,
                     status
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
                 ON CONFLICT (repository, number)
                 DO UPDATE SET
                     title = $3,
@@ -136,8 +139,17 @@ pub(crate) async fn upsert_pull_request(
                     assignees = $5,
                     head_branch = $6,
                     base_branch = $7,
-                    mergeable_state = $8,
-                    status = $9
+                    -- Note that we do NOT update mergeable_state here, it is updated explicitly elsewhere,
+                    -- to properly handle unmergeability notifications.
+                    mergeable_state_is_stale =
+                          -- Only set the stale flag here, but do not clear it!
+                          -- This is important for the mergeability queue to work properly, so that we can
+                          -- detect whether something is stale or not.
+                          CASE
+                            WHEN $9 = true THEN true
+                            ELSE pull_request.mergeable_state_is_stale
+                          END,
+                    status = $10
                 RETURNING *
             )
             SELECT
@@ -158,6 +170,7 @@ pub(crate) async fn upsert_pull_request(
                 pr.head_branch,
                 pr.base_branch,
                 pr.mergeable_state as "mergeable_state: MergeableState",
+                pr.mergeable_state_is_stale,
                 pr.created_at as "created_at: DateTime<Utc>",
                 try_build AS "try_build: BuildModel",
                 auto_build AS "auto_build: BuildModel"
@@ -173,6 +186,7 @@ pub(crate) async fn upsert_pull_request(
             head_branch,
             base_branch,
             mergeable_state as _,
+            mergeable_state_is_stale,
             pr_status as _,
         )
         .fetch_one(executor)
@@ -208,6 +222,7 @@ pub(crate) async fn get_nonclosed_pull_requests(
                 pr.head_branch,
                 pr.base_branch,
                 pr.mergeable_state as "mergeable_state: MergeableState",
+                pr.mergeable_state_is_stale,
                 pr.created_at as "created_at: DateTime<Utc>",
                 try_build AS "try_build: BuildModel",
                 auto_build AS "auto_build: BuildModel"
@@ -234,22 +249,35 @@ pub(crate) async fn set_pr_mergeability_state(
     repo: &GithubRepoName,
     pr_number: PullRequestNumber,
     mergeability_state: MergeableState,
-) -> anyhow::Result<()> {
-    measure_db_query("update_pr_mergeability_state", || async {
-        sqlx::query!(
-            "UPDATE pull_request SET mergeable_state = $3 WHERE repository = $1 AND number = $2",
+) -> anyhow::Result<MergeableState> {
+    measure_db_query("set_pr_mergeability_state", || async {
+        // The self-join is performed to be able to read the original values of the row
+        // *before* the update has been performed.
+        // See https://stackoverflow.com/a/7927957/1107768
+        let row = sqlx::query!(
+            r#"
+    UPDATE pull_request AS pr1
+    SET
+        mergeable_state = $3,
+        mergeable_state_is_stale = false
+    FROM pull_request AS pr2
+    WHERE pr1.id = pr2.id
+      AND pr1.repository = $1
+      AND pr1.number = $2
+        RETURNING pr2.mergeable_state as "mergeable_state: MergeableState"
+"#,
             repo as &GithubRepoName,
             pr_number.0 as i32,
             mergeability_state as _,
         )
-        .execute(executor)
+        .fetch_one(executor)
         .await?;
-        Ok(())
+        Ok(row.mergeable_state)
     })
     .await
 }
 
-pub(crate) async fn get_prs_with_unknown_mergeability_or_approved(
+pub(crate) async fn get_prs_with_stale_mergeability_or_approved(
     executor: impl PgExecutor<'_>,
     repo: &GithubRepoName,
 ) -> anyhow::Result<Vec<PullRequestModel>> {
@@ -275,6 +303,7 @@ pub(crate) async fn get_prs_with_unknown_mergeability_or_approved(
                 pr.head_branch,
                 pr.base_branch,
                 pr.mergeable_state as "mergeable_state: MergeableState",
+                pr.mergeable_state_is_stale,
                 pr.created_at as "created_at: DateTime<Utc>",
                 try_build AS "try_build: BuildModel",
                 auto_build AS "auto_build: BuildModel"
@@ -282,7 +311,7 @@ pub(crate) async fn get_prs_with_unknown_mergeability_or_approved(
             LEFT JOIN build AS try_build ON pr.try_build_id = try_build.id
             LEFT JOIN build AS auto_build ON pr.auto_build_id = auto_build.id
             WHERE pr.repository = $1
-              AND (pr.mergeable_state = 'unknown' OR pr.approved_by IS NOT NULL)
+              AND (pr.mergeable_state = 'unknown' OR pr.mergeable_state_is_stale = true OR pr.approved_by IS NOT NULL)
               AND pr.status IN ('open', 'draft')
             "#,
             repo as &GithubRepoName
@@ -295,28 +324,22 @@ pub(crate) async fn get_prs_with_unknown_mergeability_or_approved(
     .await
 }
 
-pub(crate) async fn update_mergeable_states_by_base_branch(
+pub(crate) async fn set_stale_mergeability_status_by_base_branch(
     executor: impl PgExecutor<'_>,
     repo: &GithubRepoName,
     base_branch: &str,
-    mergeability_state: MergeableState,
 ) -> anyhow::Result<Vec<PullRequestModel>> {
-    measure_db_query("update_mergeable_states_by_base_branch", || async {
+    measure_db_query("set_stale_mergeability_status_by_base_branch", || async {
         let result = sqlx::query_as!(
             PullRequestModel,
-            // The self-join is performed to be able to read the original values of the row
-            // *before* the update has been performed.
-            // See https://stackoverflow.com/a/7927957/1107768
             r#"
             WITH pr AS (
-                UPDATE pull_request AS pr1
-                SET mergeable_state = $1
-                FROM pull_request AS pr2
-                WHERE pr1.id = pr2.id
-                    AND pr1.repository = $2
-                    AND pr1.base_branch = $3
-                    AND pr1.status IN ('open', 'draft')
-                RETURNING pr2.*
+                UPDATE pull_request
+                SET mergeable_state_is_stale = true
+                WHERE pull_request.repository = $1
+                    AND pull_request.base_branch = $2
+                    AND pull_request.status IN ('open', 'draft')
+                RETURNING pull_request.*
             )
             SELECT
                 pr.id,
@@ -336,6 +359,7 @@ pub(crate) async fn update_mergeable_states_by_base_branch(
                 pr.head_branch,
                 pr.base_branch,
                 pr.mergeable_state as "mergeable_state: MergeableState",
+                pr.mergeable_state_is_stale,
                 pr.created_at as "created_at: DateTime<Utc>",
                 try_build AS "try_build: BuildModel",
                 auto_build AS "auto_build: BuildModel"
@@ -343,7 +367,6 @@ pub(crate) async fn update_mergeable_states_by_base_branch(
             LEFT JOIN build AS try_build ON pr.try_build_id = try_build.id
             LEFT JOIN build AS auto_build ON pr.auto_build_id = auto_build.id
             "#,
-            mergeability_state as _,
             repo as &GithubRepoName,
             base_branch,
         )
@@ -467,6 +490,7 @@ SELECT
     pr.head_branch,
     pr.base_branch,
     pr.mergeable_state as "mergeable_state: MergeableState",
+    pr.mergeable_state_is_stale,
     pr.rollup as "rollup: RollupMode",
     pr.created_at as "created_at: DateTime<Utc>",
     try_build AS "try_build: BuildModel",
@@ -1063,4 +1087,51 @@ pub(crate) async fn clear_auto_build(
         Ok(())
     })
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::bors::PullRequestStatus;
+    use crate::database::operations::{
+        set_stale_mergeability_status_by_base_branch, upsert_pull_request,
+    };
+    use crate::database::{MergeableState, UpsertPullRequestParams};
+    use crate::github::{GithubRepoName, PullRequestNumber};
+    use sqlx::PgPool;
+
+    #[sqlx::test]
+    async fn upsert_pr_do_not_clear_mergeable_stale_flag(pool: PgPool) {
+        let make_pr = |mergeable_state| UpsertPullRequestParams {
+            pr_number: PullRequestNumber(1),
+            title: "".to_string(),
+            author: "".to_string(),
+            assignees: vec![],
+            head_branch: "".to_string(),
+            base_branch: "base".to_string(),
+            mergeable_state,
+            pr_status: PullRequestStatus::Open,
+        };
+
+        let repo = GithubRepoName::new("foo", "bar");
+        // Create the PR, which should set the state
+        let pr = upsert_pull_request(&pool, &repo, &make_pr(MergeableState::Mergeable))
+            .await
+            .unwrap();
+        assert_eq!(pr.mergeable_state, MergeableState::Mergeable);
+        assert!(!pr.mergeable_state_is_stale);
+
+        // Now set the staleness flag
+        set_stale_mergeability_status_by_base_branch(&pool, &repo, "base")
+            .await
+            .unwrap();
+
+        // Now set the mergeability status again - this should not clear the staleness flag!
+        let pr = upsert_pull_request(&pool, &repo, &make_pr(MergeableState::HasConflicts))
+            .await
+            .unwrap();
+        // The status is not changed here!
+        assert_eq!(pr.mergeable_state, MergeableState::Mergeable);
+        // Nor the staleness flag
+        assert!(pr.mergeable_state_is_stale);
+    }
 }

@@ -11,11 +11,10 @@ use super::{MergeType, bors_commit_author, create_merge_commit_message};
 use crate::bors::build::load_workflow_runs;
 use crate::bors::comment::{
     CommentTag, auto_build_push_failed_comment, auto_build_started_comment,
-    auto_build_succeeded_comment, merge_conflict_comment,
-    unapproved_because_of_sha_mismatch_comment,
+    auto_build_succeeded_comment, unapproved_because_of_sha_mismatch_comment,
 };
 use crate::bors::handlers::unapprove_pr;
-use crate::bors::mergeability_queue::MergeabilityQueueSender;
+use crate::bors::mergeability_queue::{MergeabilityQueueSender, update_pr_with_known_mergeability};
 use crate::bors::{AUTO_BRANCH_NAME, PullRequestStatus, RepositoryState};
 use crate::database::{
     ApprovalInfo, BuildModel, BuildStatus, MergeableState, PullRequestModel, QueueStatus,
@@ -268,7 +267,7 @@ async fn handle_start_auto_build(
     mergeability_sender: &MergeabilityQueueSender,
 ) -> anyhow::Result<AutoBuildStartOutcome> {
     let pr_num = pr.number;
-    if let MergeableState::HasConflicts = pr.mergeable_state {
+    if let MergeableState::HasConflicts = pr.mergeable_status() {
         tracing::warn!("Attempting to start auto build for unmergeable PR {pr_num}");
     }
 
@@ -278,21 +277,19 @@ async fn handle_start_auto_build(
     };
 
     match error {
-        StartAutoBuildError::MergeConflict(gh_pr) => {
+        StartAutoBuildError::MergeConflict(mut gh_pr) => {
             tracing::debug!("Failed to start auto build for PR {pr_num} due to merge conflict");
 
-            ctx.db
-                .set_pr_mergeable_state(repo.repository(), pr.number, MergeableState::HasConflicts)
-                .await?;
-
-            // Post a merge attempt merge conflict message, so that there is at least
-            // some indication of what has happened.
-            repo.client
-                .post_comment(pr.number, merge_conflict_comment(&gh_pr.head.name))
-                .await?;
-            // Enqueue mergeability check to post the usual merge conflict message and unapprove the
-            // PR.
-            mergeability_sender.enqueue_pr(pr, None);
+            // Regardless of what the GH state said, we now know that the PR is not mergeable
+            gh_pr.mergeable_state = octocrab::models::pulls::MergeableState::Dirty;
+            update_pr_with_known_mergeability(
+                repo,
+                &ctx.db,
+                &gh_pr,
+                pr,
+                mergeability_sender.get_conflict_source(pr),
+            )
+            .await?;
             Ok(AutoBuildStartOutcome::ContinueToNextPr)
         }
         StartAutoBuildError::SanityCheckFailed {
@@ -301,6 +298,7 @@ async fn handle_start_auto_build(
         } => {
             tracing::info!("Sanity check failed for PR {pr_num}: its status was {status}");
             // The DB PR status was wrong, let's update it.
+            // We don't even send a comment, since the PR is either closed or already merged.
             ctx.db
                 .set_pr_status(&pr.repository, pr.number, status)
                 .await?;
@@ -308,7 +306,7 @@ async fn handle_start_auto_build(
         }
         StartAutoBuildError::SanityCheckFailed {
             error: SanityCheckError::NotMergeable { mergeable_state },
-            pr: _,
+            pr: gh_pr,
         } => {
             tracing::info!(
                 "Sanity check failed for PR {pr_num}: it was not mergeable (mergeable state: {mergeable_state:?})"
@@ -319,17 +317,45 @@ async fn handle_start_auto_build(
                 MergeableState::Mergeable => {
                     unreachable!("Mergeable status received as the result of a failed sanity check")
                 }
-                // If it has conflicts, we still want the mergeability queue to post the conflict
-                // message, to avoid racing with it and posting the comment multiple times.
-                // But if GitHub claims that there are conflicts, we should continue to the next
-                // pull request in the queue.
-                MergeableState::HasConflicts => AutoBuildStartOutcome::ContinueToNextPr,
+                // If the PR has conflicts on GitHub, we have several choices:
+                // 1. Put the PR into the mergeability queue. This will post the unmergeable
+                //   notification at a later time, but it could have higher quality message, since
+                //   it might know the conflict source, and it will also notify the PR that it has
+                //   been unapproved in a single comment.
+                // 2. Immediately post the unmergeable notification here. This ensures that we
+                //   unapprove and send the notification at the same time, but we might lose the
+                //   conflict source.
+                // 3. Unapprove immediately to remove the PR from the merge queue, but still enqueue
+                //   the PR into the mergeability queue. In that case, the unapproval will happen
+                //   without a comment, and (hopefully) soon after the PR should receive the
+                //   unmergeable notification.
+                // To try to combine the benefits of 1. and 2., we use a combined approach.
+                // We unapprove the PR immediately, to remove it from the merge queue, and also
+                // immediately send the unmergeability notification. However, we also try to lookup
+                // a potential existing conflict source from the mergeability queue, to avoid losing
+                // the detailed context.
+                MergeableState::HasConflicts => {
+                    update_pr_with_known_mergeability(
+                        repo,
+                        &ctx.db,
+                        &gh_pr,
+                        pr,
+                        mergeability_sender.get_conflict_source(pr),
+                    )
+                    .await?;
+                    // We continue with the rest of the queue, since we know that this
+                    // PR was unapproved above.
+                    AutoBuildStartOutcome::ContinueToNextPr
+                }
                 // If it's unknown, we want to wait until the mergeability queue reloads the status,
                 // so we pause the merge queue.
-                MergeableState::Unknown => AutoBuildStartOutcome::PauseQueue,
+                // Note that if a PR is already queued with a known conflict source, this will
+                // **NOT** overwrite the conflict source with `None`.
+                MergeableState::Unknown => {
+                    mergeability_sender.enqueue_pr(pr, None);
+                    AutoBuildStartOutcome::PauseQueue
+                }
             };
-            // In both cases, we want to enqueue the pull request for mergeability check
-            mergeability_sender.enqueue_pr(pr, None);
 
             Ok(outcome)
         }
@@ -1033,35 +1059,11 @@ merge_queue_enabled = false
             ctx.run_merge_queue_now().await;
             insta::assert_snapshot!(
                 ctx.get_next_comment_text(()).await?,
-                @r#"
-            :lock: Merge conflict
+                @"
+            :umbrella: The latest upstream changes made this pull request unmergeable. Please [resolve the merge conflicts](https://rustc-dev-guide.rust-lang.org/git.html#rebasing-and-conflicts).
 
-            A merge attempt failed due to a merge conflict. Please rebase on top of the latest base
-            branch, and let the reviewer approve again.
-
-            <details><summary>How do I rebase?</summary>
-
-            Assuming `self` is your fork and `upstream` is this repository,
-             you can resolve the conflict following these steps:
-
-            1. `git checkout pr-1` *(switch to your branch)*
-            2. `git fetch upstream HEAD` *(retrieve the latest base branch)*
-            3. `git rebase upstream/HEAD -p` *(rebase on top of it)*
-            4. Follow the on-screen instruction to resolve conflicts (check `git status` if you got lost).
-            5. `git push self pr-1 --force-with-lease` *(update this PR)*
-
-            You may also read
-             [*Git Rebasing to Resolve Conflicts* by Drew Blessing](http://blessing.io/git/git-rebase/open-source/2015/08/23/git-rebasing-to-resolve-conflicts.html)
-             for a short tutorial.
-
-            Please avoid the ["**Resolve conflicts**" button](https://help.github.com/articles/resolving-a-merge-conflict-on-github/) on GitHub.
-             It uses `git merge` instead of `git rebase` which makes the PR commit history more difficult to read.
-
-            Sometimes step 4 will complete without asking for resolution. This is usually due to difference between how `Cargo.lock` conflict is
-            handled during merge and rebase. This is normal, and you should still perform step 5 to update this PR.
-
-            </details>
-            "#
+            This pull request was unapproved.
+            "
             );
             ctx
                 .pr(())
@@ -1081,9 +1083,52 @@ merge_queue_enabled = false
                 pr.mergeable_state = OctocrabMergeableState::Dirty;
             });
             ctx.run_merge_queue_now().await;
-            ctx.pr(pr.id()).await.expect_no_auto_build();
-            ctx.run_mergeability_check().await?;
-            ctx.expect_comments(pr.id(), 1).await;
+            ctx.pr(pr.id())
+                .await
+                .expect_no_auto_build()
+                .expect_unapproved();
+            insta::assert_snapshot!(ctx.get_next_comment_text(pr.id()).await?, @"
+            :umbrella: The latest upstream changes made this pull request unmergeable. Please [resolve the merge conflicts](https://rustc-dev-guide.rust-lang.org/git.html#rebasing-and-conflicts).
+
+            This pull request was unapproved.
+            ");
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn auto_build_mergeable_state_sanity_check_fails_conflict_source(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            let pr2 = ctx.open_pr((), |_| {}).await?;
+            ctx.approve(pr2.id()).await?;
+            ctx.start_and_finish_auto_build(pr2.id()).await?;
+            let commit = ctx.auto_branch().get_commit().clone();
+
+            let pr3 = ctx.open_pr((), |_| {}).await?;
+            ctx.approve(pr3.id()).await?;
+
+            ctx.drain_mergeability_queue().await?;
+
+            ctx.modify_pr_in_gh(pr3.id(), |pr| {
+                pr.mergeable_state = OctocrabMergeableState::Dirty;
+            });
+            // Set conflict source and enqueue pr3
+            ctx.push_to_branch(default_branch_name(), commit).await?;
+
+            ctx.run_merge_queue_now().await;
+            ctx.pr(pr3.id())
+                .await
+                .expect_no_auto_build()
+                .expect_unapproved();
+
+            // Ensure that the conflict source was taken from the mergeability queue
+            insta::assert_snapshot!(ctx.get_next_comment_text(pr3.id()).await?, @"
+            :umbrella: The latest upstream changes (presumably #2) made this pull request unmergeable. Please [resolve the merge conflicts](https://rustc-dev-guide.rust-lang.org/git.html#rebasing-and-conflicts).
+
+            This pull request was unapproved.
+            ");
+
             Ok(())
         })
         .await;
@@ -1096,7 +1141,10 @@ merge_queue_enabled = false
             ctx.approve(pr.id()).await?;
             ctx.modify_pr_in_gh(pr.id(), |pr| pr.close());
             ctx.run_merge_queue_now().await;
-            ctx.pr(pr.id()).await.expect_no_auto_build();
+            ctx.pr(pr.id())
+                .await
+                .expect_no_auto_build()
+                .expect_status(PullRequestStatus::Closed);
             Ok(())
         })
         .await;
@@ -1585,7 +1633,7 @@ also include this pls"
 
             ctx.modify_pr_in_gh((), |pr| pr.mergeable_state = OctocrabMergeableState::Clean);
             ctx.refresh_mergeability_queue().await;
-            ctx.wait_for_pr((), |pr| pr.mergeable_state == MergeableState::Mergeable)
+            ctx.wait_for_pr((), |pr| pr.mergeable_status() == MergeableState::Mergeable)
                 .await?;
 
             ctx.start_and_finish_auto_build(()).await?;
@@ -1597,7 +1645,7 @@ also include this pls"
     }
 
     #[sqlx::test]
-    async fn jump_over_conflicted_pr(pool: sqlx::PgPool) {
+    async fn unapprove_conflicted_pr(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             let pr2 = ctx.open_pr((), |_| {}).await?;
             ctx.post_comment(Comment::new(pr2.id(), "@bors r+ p=1"))
@@ -1605,20 +1653,14 @@ also include this pls"
             ctx.expect_comments(pr2.id(), 1).await;
             ctx.approve(()).await?;
 
-            ctx.edit_pr(pr2.id(), |pr| {
-                pr.mergeable_state = OctocrabMergeableState::Dirty
-            })
-            .await?;
-
-            // Jump over PR2
-            ctx.start_and_finish_auto_build(()).await?;
-
-            // Reset the conflict state to clean, without creating a webhook
-            // The merge queue should try to merge the PR, even if it is marked as dirty in the DB
             ctx.modify_pr_in_gh(pr2.id(), |pr| {
-                pr.mergeable_state = OctocrabMergeableState::Clean;
+                pr.mergeable_state = OctocrabMergeableState::Dirty;
             });
-            ctx.start_and_finish_auto_build(pr2.id()).await?;
+
+            // Skip PR2 and unapprove it
+            ctx.start_and_finish_auto_build(()).await?;
+            ctx.expect_comments(pr2.id(), 1).await;
+            ctx.pr(pr2.id()).await.expect_unapproved();
 
             Ok(())
         })

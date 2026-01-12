@@ -39,7 +39,7 @@ fn get_queue_status_priority(status: &QueueStatus) -> u32 {
 }
 
 fn get_mergeable_priority(pr: &PullRequestModel) -> u32 {
-    match pr.mergeable_state {
+    match pr.mergeable_status() {
         MergeableState::Mergeable | MergeableState::Unknown => 0,
         MergeableState::HasConflicts => 1,
     }
