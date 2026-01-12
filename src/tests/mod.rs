@@ -1,7 +1,8 @@
 use crate::bors::{
-    CommandPrefix, PullRequestStatus, RollupMode, WAIT_FOR_BUILD_QUEUE, WAIT_FOR_MERGE_QUEUE,
-    WAIT_FOR_MERGE_QUEUE_MERGE_ATTEMPT, WAIT_FOR_MERGEABILITY_STATUS_REFRESH, WAIT_FOR_PR_OPEN,
-    WAIT_FOR_PR_STATUS_REFRESH, WAIT_FOR_WORKFLOW_COMPLETED, WAIT_FOR_WORKFLOW_STARTED,
+    CommandPrefix, PullRequestStatus, RollupMode, WAIT_FOR_BUILD_QUEUE, WAIT_FOR_COMMENTS_HANDLED,
+    WAIT_FOR_MERGE_QUEUE, WAIT_FOR_MERGE_QUEUE_MERGE_ATTEMPT, WAIT_FOR_MERGEABILITY_STATUS_REFRESH,
+    WAIT_FOR_PR_OPEN, WAIT_FOR_PR_STATUS_REFRESH, WAIT_FOR_WORKFLOW_COMPLETED,
+    WAIT_FOR_WORKFLOW_STARTED,
 };
 use crate::database::{
     BuildModel, BuildStatus, DelegatedPermission, MergeableState, OctocrabMergeableState,
@@ -411,19 +412,27 @@ impl BorsTester {
     pub async fn post_comment<C: Into<Comment>>(&mut self, comment: C) -> anyhow::Result<Comment> {
         let comment = comment.into();
 
-        // Allocate comment IDs
-        let comment = {
-            let gh = self.github.lock();
-            let repo = gh.get_repo(&comment.pr_ident().repo);
-            let mut repo = repo.lock();
-            let pr = repo.get_pr_mut(comment.pr_ident().number);
-            let (id, node_id) = pr.next_comment_ids();
-            let comment = comment.with_ids(id, node_id);
-            pr.add_comment_to_history(comment.clone());
-            comment
-        };
+        let comment = wait_for_marker(
+            async move || {
+                // Allocate comment IDs
+                let comment = {
+                    let gh = self.github.lock();
+                    let repo = gh.get_repo(&comment.pr_ident().repo);
+                    let mut repo = repo.lock();
+                    let pr = repo.get_pr_mut(comment.pr_ident().number);
+                    let (id, node_id) = pr.next_comment_ids();
+                    let comment = comment.with_ids(id, node_id);
+                    pr.add_comment_to_history(comment.clone());
+                    comment
+                };
 
-        self.webhook_comment(comment.clone()).await?;
+                self.webhook_comment(comment.clone()).await?;
+                Ok(comment)
+            },
+            &WAIT_FOR_COMMENTS_HANDLED,
+        )
+        .await?;
+
         Ok(comment)
     }
 
@@ -1310,7 +1319,7 @@ impl PullRequestProxy {
     pub fn expect_added_labels(&self, labels: &[&str]) -> &Self {
         let added_labels = self
             .gh_pr
-            .labels_added_by_bors
+            .labels_added_by_bors()
             .iter()
             .map(|s| s.as_str())
             .collect::<Vec<_>>();
@@ -1318,11 +1327,20 @@ impl PullRequestProxy {
         self
     }
 
+    /// Assert that the GitHub PR currently has this set of labels.
+    #[track_caller]
+    pub fn expect_labels(&self, labels: &[&str]) {
+        assert_eq!(
+            self.gh_pr.labels,
+            labels.iter().map(|l| l.to_owned()).collect::<Vec<_>>()
+        );
+    }
+
     #[track_caller]
     pub fn expect_removed_labels(&self, labels: &[&str]) -> &Self {
         let removed_labels = self
             .gh_pr
-            .labels_removed_by_bors
+            .labels_removed_by_bors()
             .iter()
             .map(|s| s.as_str())
             .collect::<Vec<_>>();
@@ -1338,9 +1356,9 @@ impl PullRequestProxy {
 
 /// Start an async operation and wait until a specific [`TestSyncMarker`]
 /// is marked.
-async fn wait_for_marker<Func>(func: Func, marker: &TestSyncMarker) -> anyhow::Result<()>
+async fn wait_for_marker<Func, R>(func: Func, marker: &TestSyncMarker) -> anyhow::Result<R>
 where
-    Func: AsyncFnOnce() -> anyhow::Result<()>,
+    Func: AsyncFnOnce() -> anyhow::Result<R>,
 {
     // Since the `TestSyncMarker` contains a thread-local variable, it could contain some previously
     // marked notifications from previously executed tests that ran on the same thread.

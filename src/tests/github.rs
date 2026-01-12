@@ -626,8 +626,6 @@ impl From<PullRequest> for PrIdentifier {
 pub struct PullRequest {
     pub number: PullRequestNumber,
     pub repo: GithubRepoName,
-    pub labels_added_by_bors: Vec<String>,
-    pub labels_removed_by_bors: Vec<String>,
     pub comment_counter: u64,
     pub head_sha: String,
     pub author: User,
@@ -640,6 +638,8 @@ pub struct PullRequest {
     pub description: String,
     pub title: String,
     pub labels: Vec<String>,
+    pub(super) labels_added_by_bors: Vec<String>,
+    pub(super) labels_removed_by_bors: Vec<String>,
     pub comment_queue_tx: Sender<CommentMsg>,
     pub comment_queue_rx: Arc<tokio::sync::Mutex<Receiver<CommentMsg>>>,
     pub comment_history: Vec<Comment>,
@@ -653,8 +653,6 @@ impl PullRequest {
         Self {
             number: PullRequestNumber(number),
             repo,
-            labels_added_by_bors: Vec::new(),
-            labels_removed_by_bors: Vec::new(),
             comment_counter: 0,
             head_sha: format!("pr-{number}-sha"),
             author,
@@ -667,6 +665,8 @@ impl PullRequest {
             description: format!("Description of PR {number}"),
             title: format!("Title of PR {number}"),
             labels: Vec::new(),
+            labels_added_by_bors: Vec::new(),
+            labels_removed_by_bors: Vec::new(),
             comment_queue_tx,
             comment_queue_rx: Arc::new(tokio::sync::Mutex::new(comment_queue_rx)),
             comment_history: Vec::new(),
@@ -717,6 +717,28 @@ impl PullRequest {
 
     pub fn add_comment_to_history(&mut self, comment: Comment) {
         self.comment_history.push(comment);
+    }
+
+    pub fn labels_added_by_bors(&self) -> &[String] {
+        &self.labels_added_by_bors
+    }
+
+    pub fn labels_removed_by_bors(&self) -> &[String] {
+        &self.labels_removed_by_bors
+    }
+
+    pub fn add_labels(&mut self, labels: Vec<String>) {
+        self.labels_added_by_bors.extend(labels.clone());
+        for label in labels {
+            if !self.labels.contains(&label) {
+                self.labels.push(label);
+            }
+        }
+    }
+
+    pub fn remove_label(&mut self, label: &str) {
+        self.labels_removed_by_bors.push(label.to_owned());
+        self.labels.retain(|l| l != label);
     }
 }
 

@@ -137,6 +137,9 @@ pub static WAIT_FOR_PR_OPEN: TestSyncMarker = TestSyncMarker::new();
 #[cfg(test)]
 pub static WAIT_FOR_MERGE_QUEUE: TestSyncMarker = TestSyncMarker::new();
 
+#[cfg(test)]
+pub static WAIT_FOR_COMMENTS_HANDLED: TestSyncMarker = TestSyncMarker::new();
+
 /// The merge queue has attempted to merge a PR.
 #[cfg(test)]
 pub static WAIT_FOR_MERGE_QUEUE_MERGE_ATTEMPT: TestSyncMarker = TestSyncMarker::new();
