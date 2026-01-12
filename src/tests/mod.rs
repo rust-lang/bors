@@ -1,8 +1,7 @@
 use crate::bors::{
-    CommandPrefix, PullRequestStatus, RollupMode, WAIT_FOR_BUILD_QUEUE, WAIT_FOR_COMMENTS_HANDLED,
-    WAIT_FOR_MERGE_QUEUE, WAIT_FOR_MERGE_QUEUE_MERGE_ATTEMPT, WAIT_FOR_MERGEABILITY_STATUS_REFRESH,
-    WAIT_FOR_PR_OPEN, WAIT_FOR_PR_STATUS_REFRESH, WAIT_FOR_WORKFLOW_COMPLETED,
-    WAIT_FOR_WORKFLOW_STARTED,
+    CommandPrefix, PullRequestStatus, RollupMode, WAIT_FOR_BUILD_QUEUE, WAIT_FOR_MERGE_QUEUE,
+    WAIT_FOR_MERGE_QUEUE_MERGE_ATTEMPT, WAIT_FOR_MERGEABILITY_STATUS_REFRESH,
+    WAIT_FOR_PR_STATUS_REFRESH, WAIT_FOR_WEBHOOK_COMPLETED,
 };
 use crate::database::{
     BuildModel, BuildStatus, DelegatedPermission, MergeableState, OctocrabMergeableState,
@@ -36,6 +35,7 @@ mod mock;
 mod utils;
 
 // Public re-exports for use in tests
+use crate::bors::mergeability_queue::{MergeabilityQueueReceiver, check_mergeability};
 use crate::bors::process::QueueSenders;
 use crate::github::api::client::HideCommentReason;
 use crate::server::{ServerState, create_app};
@@ -68,6 +68,8 @@ pub use utils::webhook::{TEST_WEBHOOK_SECRET, create_webhook_request};
 const TEST_TIMEOUT: Duration = Duration::from_secs(15);
 /// How long should we wait until a custom condition in a test is hit.
 const TEST_CONDITION_TIMEOUT: Duration = Duration::from_secs(10);
+/// How long should we wait until a mergeability item is dequeued.
+const TEST_MERGEABILITY_TIMEOUT: Duration = Duration::from_secs(3);
 /// How often should we check whether a custom condition in a test is hit.
 const TEST_CONDITION_CHECK: Duration = Duration::from_millis(100);
 /// How long should we wait for a sync marker to be hit.
@@ -186,6 +188,8 @@ pub struct BorsTester {
     // Sender for bors global events
     global_tx: Sender<BorsGlobalEvent>,
     senders: QueueSenders,
+    mergeability_queue_rx: MergeabilityQueueReceiver,
+    ctx: Arc<BorsContext>,
 }
 
 impl BorsTester {
@@ -221,6 +225,7 @@ impl BorsTester {
             global_tx,
             senders,
             bors_process,
+            mergeability_queue_rx,
         } = create_bors_process(
             ctx.clone(),
             mock.github_client(),
@@ -236,7 +241,7 @@ impl BorsTester {
             global_tx.clone(),
             WebhookSecret::new(TEST_WEBHOOK_SECRET.to_string()),
             Some(oauth_client),
-            ctx,
+            ctx.clone(),
         );
         let app = create_app(state);
         let bors = tokio::spawn(bors_process);
@@ -248,6 +253,8 @@ impl BorsTester {
                 db,
                 senders,
                 global_tx,
+                mergeability_queue_rx,
+                ctx,
             },
             bors,
         )
@@ -412,27 +419,19 @@ impl BorsTester {
     pub async fn post_comment<C: Into<Comment>>(&mut self, comment: C) -> anyhow::Result<Comment> {
         let comment = comment.into();
 
-        let comment = wait_for_marker(
-            async move || {
-                // Allocate comment IDs
-                let comment = {
-                    let gh = self.github.lock();
-                    let repo = gh.get_repo(&comment.pr_ident().repo);
-                    let mut repo = repo.lock();
-                    let pr = repo.get_pr_mut(comment.pr_ident().number);
-                    let (id, node_id) = pr.next_comment_ids();
-                    let comment = comment.with_ids(id, node_id);
-                    pr.add_comment_to_history(comment.clone());
-                    comment
-                };
+        // Allocate comment IDs
+        let comment = {
+            let gh = self.github.lock();
+            let repo = gh.get_repo(&comment.pr_ident().repo);
+            let mut repo = repo.lock();
+            let pr = repo.get_pr_mut(comment.pr_ident().number);
+            let (id, node_id) = pr.next_comment_ids();
+            let comment = comment.with_ids(id, node_id);
+            pr.add_comment_to_history(comment.clone());
+            comment
+        };
 
-                self.webhook_comment(comment.clone()).await?;
-                Ok(comment)
-            },
-            &WAIT_FOR_COMMENTS_HANDLED,
-        )
-        .await?;
-
+        self.webhook_comment(comment.clone()).await?;
         Ok(comment)
     }
 
@@ -441,6 +440,44 @@ impl BorsTester {
         self.post_comment(Comment::new(id.clone(), "@bors r+"))
             .await?;
         self.expect_comments(id, 1).await;
+        Ok(())
+    }
+
+    /// Pops a single mergeability item from the mergeability queue and handles.
+    pub async fn run_mergeability_check(&self) -> anyhow::Result<()> {
+        if !try_run_mergeability_check(self.ctx.clone(), &self.mergeability_queue_rx).await? {
+            return Err(anyhow::anyhow!(
+                "There was nothing in the mergeability queue"
+            ));
+        }
+        Ok(())
+    }
+
+    /// Debugging function to dump the current contents of the mergeability queue.
+    #[allow(unused)]
+    pub fn dump_mergeability_queue(&self) {
+        eprintln!("Mergeability queue contents:");
+        let prs = self.senders.mergeability_queue().get_queue_prs();
+        for pr in prs {
+            eprintln!("{pr:?}");
+        }
+    }
+
+    /// Handle items from the mergeability queue until it becomes empty.
+    pub async fn drain_mergeability_queue(&self) -> anyhow::Result<()> {
+        while self.senders.mergeability_queue().queue_size() > 0 {
+            self.run_mergeability_check().await?;
+        }
+        Ok(())
+    }
+
+    /// Pop `count` items from the mergeability queue.
+    pub async fn run_mergeability_checks(&self, count: u32) -> anyhow::Result<()> {
+        for index in 0..count {
+            self.run_mergeability_check()
+                .await
+                .with_context(|| anyhow::anyhow!("Index {index}"))?;
+        }
         Ok(())
     }
 
@@ -460,7 +497,8 @@ impl BorsTester {
         .unwrap();
     }
 
-    pub async fn update_mergeability_status(&self) {
+    /// Enqueue PRs with stale/unknown mergeability into the mergeability queue.
+    pub async fn refresh_mergeability_queue(&self) {
         // Wait until the refresh is fully handled
         wait_for_marker(
             async || {
@@ -566,13 +604,7 @@ impl BorsTester {
             ))
         };
 
-        let marker = match &event.event {
-            WorkflowEventKind::Started => &WAIT_FOR_WORKFLOW_STARTED,
-            WorkflowEventKind::Completed { .. } => &WAIT_FOR_WORKFLOW_COMPLETED,
-        };
-
-        let fut = self.send_webhook("workflow_run", payload);
-        wait_for_marker(async || fut.await, marker).await
+        self.send_webhook("workflow_run", payload).await
     }
 
     /// Start a workflow and wait until the workflow has been handled by bors.
@@ -613,11 +645,7 @@ impl BorsTester {
             (payload, pr)
         };
 
-        wait_for_marker(
-            async || self.send_webhook("pull_request", payload).await,
-            &WAIT_FOR_PR_OPEN,
-        )
-        .await?;
+        self.send_webhook("pull_request", payload).await?;
         Ok(pr)
     }
 
@@ -1047,25 +1075,34 @@ impl BorsTester {
     }
 
     async fn send_webhook<S: Serialize>(&mut self, event: &str, content: S) -> anyhow::Result<()> {
-        let serialized = serde_json::to_string(&content)?;
-        let webhook = create_webhook_request(event, &serialized);
-        let response = self
-            .app
-            .call(webhook)
-            .await
-            .context("Cannot send webhook request")?;
-        let status = response.status();
-        if !status.is_success() {
-            return Err(anyhow::anyhow!(
-                "Wrong status code {status} when sending {event}"
-            ));
-        }
-        let body_text = String::from_utf8(
-            axum::body::to_bytes(response.into_body(), 10 * 1024 * 1024)
-                .await?
-                .to_vec(),
-        )?;
-        tracing::debug!("Received webhook with status {status} and response body `{body_text}`");
+        wait_for_marker(
+            async || {
+                let serialized = serde_json::to_string(&content)?;
+                let webhook = create_webhook_request(event, &serialized);
+                let response = self
+                    .app
+                    .call(webhook)
+                    .await
+                    .context("Cannot send webhook request")?;
+                let status = response.status();
+                if !status.is_success() {
+                    return Err(anyhow::anyhow!(
+                        "Wrong status code {status} when sending {event}"
+                    ));
+                }
+                let body_text = String::from_utf8(
+                    axum::body::to_bytes(response.into_body(), 10 * 1024 * 1024)
+                        .await?
+                        .to_vec(),
+                )?;
+                tracing::debug!(
+                    "Received webhook with status {status} and response body `{body_text}`"
+                );
+                Ok(())
+            },
+            &WAIT_FOR_WEBHOOK_COMPLETED,
+        )
+        .await?;
         Ok(())
     }
 
@@ -1080,11 +1117,18 @@ impl BorsTester {
     }
 
     async fn finish(self, bors: JoinHandle<()>) -> anyhow::Result<GitHub> {
+        // Tell the mergeability queue that it should shutdown once it has nothing else to do
+        self.senders.mergeability_queue().shutdown();
+
         // Make sure that the event channel senders are closed
+        // This also ensures that nothing will generate further mergeability checks
         drop(self.app);
         drop(self.global_tx);
-        self.senders.mergeability_queue().shutdown();
         drop(self.senders);
+
+        // Drain the mergeability queue
+        while try_run_mergeability_check(self.ctx.clone(), &self.mergeability_queue_rx).await? {}
+
         // Wait until all events are handled in the bors service
         match tokio::time::timeout(Duration::from_secs(5), bors).await {
             Ok(Ok(_)) => {}
@@ -1269,7 +1313,7 @@ impl PullRequestProxy {
     #[track_caller]
     pub fn expect_approved_by(&self, approved_by: &str) -> &Self {
         assert_eq!(self.require_db_pr().approver(), Some(approved_by));
-        self.expect_added_labels(&["approved"])
+        self
     }
 
     #[track_caller]
@@ -1373,4 +1417,25 @@ where
             .map_err(|_| anyhow::anyhow!("Timed out waiting for a test marker to be marked"))?;
     }
     res
+}
+
+/// Tries to pop a single mergeability item from the mergeability queue and handle it.
+/// Returns true if there was some entry handled.
+async fn try_run_mergeability_check(
+    ctx: Arc<BorsContext>,
+    mergeability_queue_rx: &MergeabilityQueueReceiver,
+) -> anyhow::Result<bool> {
+    let fut = tokio::time::timeout(TEST_MERGEABILITY_TIMEOUT, mergeability_queue_rx.dequeue());
+    match fut.await {
+        Ok(Some((pr, sender))) => {
+            check_mergeability(ctx, sender, pr).await?;
+            Ok(true)
+        }
+        Ok(None) => Ok(false),
+        Err(_) => {
+            panic!(
+                "Timed out while waiting for a mergeability item to be popped off the mergeability queue"
+            );
+        }
+    }
 }

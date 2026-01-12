@@ -365,7 +365,7 @@ mod tests {
     #[sqlx::test]
     async fn min_ci_time_mark_too_short_workflow_as_failed(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
-            .github(GitHub::default().with_default_config(
+            .github(GitHub::default().append_to_default_config(
                 r#"
 min_ci_time = 10
 "#,
@@ -393,7 +393,7 @@ min_ci_time = 10
     #[sqlx::test]
     async fn min_ci_time_ignore_failed_workflow(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
-            .github(GitHub::default().with_default_config(
+            .github(GitHub::default().append_to_default_config(
                 r#"
 min_ci_time = 10
 "#,
@@ -418,7 +418,7 @@ min_ci_time = 10
     #[sqlx::test]
     async fn min_ci_time_ignore_long_enough_workflow(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
-            .github(GitHub::default().with_default_config(
+            .github(GitHub::default().append_to_default_config(
                 r#"
 min_ci_time = 20
 "#,

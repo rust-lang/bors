@@ -192,7 +192,7 @@ mod tests {
     use crate::bors::handlers::trybuild::TRY_BUILD_CHECK_RUN_NAME;
     use crate::bors::{PullRequestStatus, with_mocked_time};
     use crate::database::{MergeableState, OctocrabMergeableState, WorkflowStatus};
-    use crate::tests::{BorsBuilder, BorsTester, GitHub, run_test};
+    use crate::tests::{BorsTester, GitHub, run_test};
     use crate::tests::{User, default_repo_name};
     use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
     use std::time::Duration;
@@ -215,35 +215,23 @@ mod tests {
         .await;
     }
 
-    fn gh_state_with_long_timeout() -> GitHub {
-        GitHub::default().with_default_config(
-            r#"
-timeout = 3600
-"#,
-        )
-    }
-
     #[sqlx::test]
     async fn refresh_do_nothing_before_timeout(pool: sqlx::PgPool) {
-        BorsBuilder::new(pool)
-            .github(gh_state_with_long_timeout())
-            .run_test(async |ctx: &mut BorsTester| {
-                ctx.post_comment("@bors try").await?;
-                ctx.expect_comments((), 1).await;
-                with_mocked_time(Duration::from_secs(10), async {
-                    ctx.refresh_pending_builds().await;
-                })
-                .await;
-                Ok(())
+        run_test(pool, async |ctx: &mut BorsTester| {
+            ctx.post_comment("@bors try").await?;
+            ctx.expect_comments((), 1).await;
+            with_mocked_time(Duration::from_secs(10), async {
+                ctx.refresh_pending_builds().await;
             })
             .await;
+            Ok(())
+        })
+        .await;
     }
 
     #[sqlx::test]
     async fn refresh_cancel_build_after_timeout(pool: sqlx::PgPool) {
-        BorsBuilder::new(pool)
-            .github(gh_state_with_long_timeout())
-            .run_test(async |ctx: &mut BorsTester| {
+        run_test(pool, async |ctx: &mut BorsTester| {
                 ctx.post_comment("@bors try").await?;
                 ctx.expect_comments((), 1).await;
                 with_mocked_time(Duration::from_secs(4000), async {
@@ -276,11 +264,8 @@ timeout = 3600
 
     #[sqlx::test]
     async fn refresh_cancel_build_apply_timeout(pool: sqlx::PgPool) {
-        let gh = GitHub::default().with_default_config(
+        let gh = GitHub::default().append_to_default_config(
             r#"
-timeout = 3600
-merge_queue_enabled = true
-
 [labels]
 auto_build_failed = ["+failed"]
 "#,
@@ -303,66 +288,66 @@ auto_build_failed = ["+failed"]
 
     #[sqlx::test]
     async fn refresh_cancel_build_updates_check_run(pool: sqlx::PgPool) {
-        BorsBuilder::new(pool)
-            .github(gh_state_with_long_timeout())
-            .run_test(async |ctx: &mut BorsTester| {
-                ctx.post_comment("@bors try").await?;
-                ctx.expect_comments((), 1).await;
+        run_test(pool, async |ctx: &mut BorsTester| {
+            ctx.post_comment("@bors try").await?;
+            ctx.expect_comments((), 1).await;
 
-                with_mocked_time(Duration::from_secs(4000), async {
-                    ctx.refresh_pending_builds().await;
-                })
-                .await;
-                ctx.expect_comments((), 1).await;
-
-                ctx.expect_check_run(
-                    &ctx.pr(()).await.get_gh_pr().head_sha,
-                    TRY_BUILD_CHECK_RUN_NAME,
-                    "Bors try build",
-                    CheckRunStatus::Completed,
-                    Some(CheckRunConclusion::TimedOut),
-                );
-
-                Ok(())
+            with_mocked_time(Duration::from_secs(4000), async {
+                ctx.refresh_pending_builds().await;
             })
             .await;
+            ctx.expect_comments((), 1).await;
+
+            ctx.expect_check_run(
+                &ctx.pr(()).await.get_gh_pr().head_sha,
+                TRY_BUILD_CHECK_RUN_NAME,
+                "Bors try build",
+                CheckRunStatus::Completed,
+                Some(CheckRunConclusion::TimedOut),
+            );
+
+            Ok(())
+        })
+        .await;
     }
 
     #[sqlx::test]
     async fn refresh_cancel_workflow_after_timeout(pool: sqlx::PgPool) {
-        BorsBuilder::new(pool)
-            .github(gh_state_with_long_timeout())
-            .run_test(async |ctx: &mut BorsTester| {
-                ctx.post_comment("@bors try").await?;
-                ctx.expect_comments((), 1).await;
+        run_test(pool, async |ctx: &mut BorsTester| {
+            ctx.post_comment("@bors try").await?;
+            ctx.expect_comments((), 1).await;
 
-                let run_id = ctx.try_workflow();
-                ctx.workflow_start(run_id).await?;
+            let run_id = ctx.try_workflow();
+            ctx.workflow_start(run_id).await?;
 
-                with_mocked_time(Duration::from_secs(4000), async {
-                    ctx.refresh_pending_builds().await;
-                })
-                .await;
-                ctx.expect_comments((), 1).await;
-                ctx.expect_cancelled_workflows((), &[run_id]);
-                Ok(())
+            with_mocked_time(Duration::from_secs(4000), async {
+                ctx.refresh_pending_builds().await;
             })
             .await;
+            ctx.expect_comments((), 1).await;
+            ctx.expect_cancelled_workflows((), &[run_id]);
+            Ok(())
+        })
+        .await;
     }
 
     #[sqlx::test]
     async fn refresh_enqueues_unknown_mergeable_prs(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.edit_pr((), |pr| {
-                pr.mergeable_state = OctocrabMergeableState::Unknown
+                pr.mergeable_state = OctocrabMergeableState::Unknown;
             })
             .await?;
-            ctx.wait_for_pr((), |pr| pr.mergeable_state == MergeableState::Unknown)
-                .await?;
+            ctx.run_mergeability_check().await?;
+            ctx.pr(())
+                .await
+                .expect_mergeable_state(MergeableState::Unknown);
             ctx.modify_pr((), |pr| pr.mergeable_state = OctocrabMergeableState::Dirty);
-            ctx.update_mergeability_status().await;
-            ctx.wait_for_pr((), |pr| pr.mergeable_state == MergeableState::HasConflicts)
-                .await?;
+            ctx.refresh_mergeability_queue().await;
+            ctx.run_mergeability_check().await?;
+            ctx.pr(())
+                .await
+                .expect_mergeable_state(MergeableState::HasConflicts);
             Ok(())
         })
         .await;
@@ -450,6 +435,10 @@ auto_build_failed = ["+failed"]
                 .expect_title("Foobar")
                 .expect_assignees(&[&User::try_user().name])
                 .expect_base_branch("stable");
+
+            ctx.run_mergeability_check().await?;
+            // Mergeability notification
+            ctx.expect_comments(pr.id(), 1).await;
             Ok(())
         })
         .await;
@@ -458,7 +447,7 @@ auto_build_failed = ["+failed"]
     #[sqlx::test]
     async fn refresh_complete_before_timeout(pool: sqlx::PgPool) {
         run_test(
-            (pool, gh_state_with_long_timeout()),
+            pool,
             async |ctx: &mut BorsTester| {
                 ctx.post_comment("@bors try").await?;
                 ctx.expect_comments((), 1).await;

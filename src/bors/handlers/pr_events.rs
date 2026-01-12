@@ -30,12 +30,12 @@ pub(super) async fn handle_pull_request_edited(
         .upsert_pull_request(repo_state.repository(), pr.clone().into())
         .await?;
 
+    mergeability_queue.enqueue_pr(&pr_model, None);
+
     // If the base branch has changed, unapprove the PR
     let Some(_) = payload.from_base_sha else {
         return Ok(());
     };
-
-    mergeability_queue.enqueue_pr(&pr_model, None);
 
     if !pr_model.is_approved() {
         return Ok(());
@@ -616,8 +616,10 @@ mod tests {
             ctx.wait_for_pr((), |pr| pr.mergeable_state == MergeableState::Unknown)
                 .await?;
             ctx.modify_pr((), |pr| pr.mergeable_state = OctocrabMergeableState::Dirty);
-            ctx.wait_for_pr((), |pr| pr.mergeable_state == MergeableState::HasConflicts)
-                .await?;
+            ctx.run_mergeability_check().await?;
+            ctx.pr(())
+                .await
+                .expect_mergeable_state(MergeableState::HasConflicts);
             Ok(())
         })
         .await;
@@ -631,15 +633,17 @@ mod tests {
                     pr.mergeable_state = OctocrabMergeableState::Unknown;
                 })
                 .await?;
+
+            ctx.drain_mergeability_queue().await?;
             ctx.push_to_branch(default_branch_name(), Commit::new("sha", "push"))
                 .await?;
             ctx.modify_pr(pr.id(), |pr| {
                 pr.mergeable_state = OctocrabMergeableState::Dirty;
             });
-            ctx.wait_for_pr(pr.id(), |pr| {
-                pr.mergeable_state == MergeableState::HasConflicts
-            })
-            .await?;
+            ctx.run_mergeability_check().await?;
+            ctx.pr(pr.id())
+                .await
+                .expect_mergeable_state(MergeableState::HasConflicts);
             Ok(())
         })
         .await;
@@ -647,7 +651,12 @@ mod tests {
 
     #[sqlx::test]
     async fn conflict_message_disabled_in_config(pool: sqlx::PgPool) {
-        run_test(pool, async |ctx: &mut BorsTester| {
+        let gh = GitHub::default().with_default_config(
+            r#"
+report_merge_conflicts = false
+"#,
+        );
+        run_test((pool, gh), async |ctx: &mut BorsTester| {
             let pr = ctx
                 .open_pr(default_repo_name(), |pr| {
                     pr.mergeable_state = OctocrabMergeableState::Clean;
@@ -666,13 +675,7 @@ mod tests {
 
     #[sqlx::test]
     async fn conflict_message_unknown_sha(pool: sqlx::PgPool) {
-        BorsBuilder::new(pool)
-            .github(GitHub::default().with_default_config(
-                r#"
-merge_queue_enabled = true
-report_merge_conflicts = true
-"#,
-            )).run_test(async |ctx: &mut BorsTester| {
+        run_test(pool, async |ctx: &mut BorsTester| {
             let pr = ctx
                 .open_pr(default_repo_name(), |pr| {
                     pr.mergeable_state = OctocrabMergeableState::Clean;
@@ -682,7 +685,12 @@ report_merge_conflicts = true
                 .modify_pr(pr.id(), |pr| {
                     pr.mergeable_state = OctocrabMergeableState::Dirty;
                 });
+
+            // Drain the queue
+            ctx.run_mergeability_check().await?;
+
             ctx.push_to_branch(default_branch_name(), Commit::new("sha", "push")).await?;
+            ctx.run_mergeability_check().await?;
             assert_snapshot!(ctx.get_next_comment_text(pr).await?, @":umbrella: The latest upstream changes made this pull request unmergeable. Please [resolve the merge conflicts](https://rustc-dev-guide.rust-lang.org/git.html#rebasing-and-conflicts).");
 
             Ok(())
@@ -692,24 +700,19 @@ report_merge_conflicts = true
 
     #[sqlx::test]
     async fn conflict_message_unknown_sha_approved(pool: sqlx::PgPool) {
-        BorsBuilder::new(pool)
-            .github(GitHub::default().with_default_config(
-                r#"
-merge_queue_enabled = true
-report_merge_conflicts = true
-"#,
-            )).run_test(async |ctx: &mut BorsTester| {
+        run_test(pool, async |ctx: &mut BorsTester| {
             let pr = ctx
-                .open_pr(default_repo_name(), |pr| {
-                    pr.mergeable_state = OctocrabMergeableState::Clean;
-                })
+                .open_pr(default_repo_name(), |_| {})
                 .await?;
             ctx.approve(pr.id()).await?;
             ctx
                 .modify_pr(pr.id(), |pr| {
                     pr.mergeable_state = OctocrabMergeableState::Dirty;
                 });
+
+            ctx.drain_mergeability_queue().await?;
             ctx.push_to_branch(default_branch_name(), Commit::new("sha", "push")).await?;
+            ctx.run_mergeability_check().await?;
             assert_snapshot!(ctx.get_next_comment_text(pr.id()).await?, @"
             :umbrella: The latest upstream changes made this pull request unmergeable. Please [resolve the merge conflicts](https://rustc-dev-guide.rust-lang.org/git.html#rebasing-and-conflicts).
 
@@ -724,13 +727,7 @@ report_merge_conflicts = true
 
     #[sqlx::test]
     async fn conflict_message_known_sha(pool: sqlx::PgPool) {
-        BorsBuilder::new(pool)
-            .github(GitHub::default().with_default_config(
-                r#"
-merge_queue_enabled = true
-report_merge_conflicts = true
-"#,
-            )).run_test(async |ctx: &mut BorsTester| {
+        run_test(pool, async |ctx: &mut BorsTester| {
             let pr2 = ctx
                 .open_pr((), |_| {})
                 .await?;
@@ -743,6 +740,10 @@ report_merge_conflicts = true
             ctx.start_and_finish_auto_build(pr3.id()).await?;
             let commit = ctx.auto_branch().get_commit().clone();
 
+            // Make sure that everything from the queue gets drained, so that we can input a new
+            // item with a conflict source below
+            ctx.run_mergeability_checks(2).await?;
+
             ctx
                 .modify_pr(pr2.id(), |pr| {
                     pr.mergeable_state = OctocrabMergeableState::Dirty;
@@ -751,7 +752,43 @@ report_merge_conflicts = true
             // Repush the same commit again to generate a push webhook
             // Ideally, the tests should do that automatically...
             ctx.push_to_branch(default_branch_name(), commit).await?;
+            ctx.run_mergeability_check().await?;
             assert_snapshot!(ctx.get_next_comment_text(pr2.id()).await?, @":umbrella: The latest upstream changes (presumably #3) made this pull request unmergeable. Please [resolve the merge conflicts](https://rustc-dev-guide.rust-lang.org/git.html#rebasing-and-conflicts).");
+
+            Ok(())
+        })
+            .await;
+    }
+
+    #[sqlx::test]
+    async fn conflict_message_known_sha_race_condition(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            let pr2 = ctx
+                .open_pr((), |_| {})
+                .await?;
+            ctx.approve(pr2.id()).await?;
+            ctx.start_and_finish_auto_build(pr2.id()).await?;
+            let commit = ctx.auto_branch().get_commit().clone();
+
+            // Drain the queue
+            ctx.drain_mergeability_queue().await?;
+
+            // Open a new PR
+            let pr3 = ctx
+                .open_pr((), |_| {})
+                .await?;
+            ctx.pr(pr3.id()).await.expect_mergeable_state(MergeableState::Mergeable);
+            ctx
+                .modify_pr(pr3.id(), |pr| {
+                    pr.mergeable_state = OctocrabMergeableState::Dirty;
+                });
+
+            // Now PR 3 is in the mergeability queue. We do not drain it, so after the push,
+            // the conflict source will not get updated. So we will lose the conflict source
+            // information.
+            ctx.push_to_branch(default_branch_name(), commit).await?;
+            ctx.run_mergeability_check().await?;
+            assert_snapshot!(ctx.get_next_comment_text(pr3.id()).await?, @":umbrella: The latest upstream changes made this pull request unmergeable. Please [resolve the merge conflicts](https://rustc-dev-guide.rust-lang.org/git.html#rebasing-and-conflicts).");
 
             Ok(())
         })
@@ -761,11 +798,8 @@ report_merge_conflicts = true
     #[sqlx::test]
     async fn conflict_label(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
-            .github(GitHub::default().with_default_config(
+            .github(GitHub::default().append_to_default_config(
                 r#"
-merge_queue_enabled = true
-report_merge_conflicts = true
-
 [labels]
 conflict = ["+conflict"]
 "#,
@@ -781,6 +815,7 @@ conflict = ["+conflict"]
                 });
                 ctx.push_to_branch(default_branch_name(), Commit::new("sha", "push"))
                     .await?;
+                ctx.run_mergeability_check().await?;
                 ctx.expect_comments(pr.id(), 1).await;
                 ctx.pr(pr.id()).await.expect_added_labels(&["conflict"]);
 
@@ -818,8 +853,10 @@ conflict = ["+conflict"]
             ctx.modify_pr((), |pr| {
                 pr.mergeable_state = OctocrabMergeableState::Dirty;
             });
-            ctx.wait_for_pr((), |pr| pr.mergeable_state == MergeableState::HasConflicts)
-                .await?;
+            ctx.run_mergeability_check().await?;
+            ctx.pr(())
+                .await
+                .expect_mergeable_state(MergeableState::HasConflicts);
             Ok(())
         })
         .await;
@@ -832,8 +869,10 @@ conflict = ["+conflict"]
             ctx.wait_for_pr((), |pr| pr.mergeable_state == MergeableState::Unknown)
                 .await?;
             ctx.modify_pr((), |pr| pr.mergeable_state = OctocrabMergeableState::Dirty);
-            ctx.wait_for_pr((), |pr| pr.mergeable_state == MergeableState::HasConflicts)
-                .await?;
+            ctx.run_mergeability_check().await?;
+            ctx.pr(())
+                .await
+                .expect_mergeable_state(MergeableState::HasConflicts);
             Ok(())
         })
         .await;
