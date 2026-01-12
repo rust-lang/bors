@@ -1049,6 +1049,7 @@ merge_queue_enabled = false
             });
             ctx.run_merge_queue_now().await;
             ctx.pr(pr.id()).await.expect_no_auto_build();
+            ctx.run_mergeability_check().await?;
             ctx.expect_comments(pr.id(), 1).await;
             Ok(())
         })
@@ -1547,7 +1548,7 @@ also include this pls"
             ctx.run_merge_queue_now().await;
 
             ctx.modify_pr((), |pr| pr.mergeable_state = OctocrabMergeableState::Clean);
-            ctx.update_mergeability_status().await;
+            ctx.refresh_mergeability_queue().await;
             ctx.wait_for_pr((), |pr| pr.mergeable_state == MergeableState::Mergeable)
                 .await?;
 

@@ -3,8 +3,7 @@ use crate::bors::build_queue::{
 };
 use crate::bors::merge_queue::{MergeQueueSender, start_merge_queue};
 use crate::bors::mergeability_queue::{
-    MergeabilityQueueReceiver, MergeabilityQueueSender, check_mergeability,
-    create_mergeability_queue,
+    MergeabilityQueueReceiver, MergeabilityQueueSender, create_mergeability_queue,
 };
 use crate::bors::{handle_bors_global_event, handle_bors_repository_event};
 use crate::{BorsContext, BorsGlobalEvent, BorsRepositoryEvent, TeamApiClient};
@@ -20,6 +19,10 @@ pub struct BorsProcess {
     pub global_tx: mpsc::Sender<BorsGlobalEvent>,
     pub senders: QueueSenders,
     pub bors_process: Pin<Box<dyn Future<Output = ()> + Send>>,
+    // In tests, we want to run the mergeability queue manually, rather than it running in the
+    // background, to have the ability to simulate various race conditions.
+    #[cfg(test)]
+    pub mergeability_queue_rx: MergeabilityQueueReceiver,
 }
 
 /// Creates a future with a Bors process that continuously receives webhook events and reacts to
@@ -59,10 +62,11 @@ pub fn create_bors_process(
             let _ = tokio::join!(
                 consume_repository_events(ctx.clone(), repository_rx, senders2.clone()),
                 consume_global_events(ctx.clone(), global_rx, senders2, gh_client, team_api),
-                consume_mergeability_queue_events(ctx.clone(), mergeability_queue_rx),
                 consume_build_queue_events(ctx.clone(), build_queue_rx, merge_queue_tx),
                 merge_queue_fut
             );
+            // Note that we do not run the mergeability queue automatically in tests, to have more
+            // control over it. Instead, we add it to the bors context below.
         }
         // In real execution, the bot runs forever. If there is something that finishes
         // the futures early, it's essentially a bug.
@@ -94,6 +98,8 @@ pub fn create_bors_process(
         global_tx,
         senders,
         bors_process: Box::pin(service),
+        #[cfg(test)]
+        mergeability_queue_rx,
     }
 }
 
@@ -157,6 +163,7 @@ async fn consume_global_events(
     }
 }
 
+#[cfg(not(test))]
 async fn consume_mergeability_queue_events(
     ctx: Arc<BorsContext>,
     mergeability_queue_rx: MergeabilityQueueReceiver,
@@ -171,7 +178,7 @@ async fn consume_mergeability_queue_events(
             "Mergeability check",
             item = ?mq_item
         );
-        if let Err(error) = check_mergeability(ctx, mq_tx, mq_item)
+        if let Err(error) = crate::bors::mergeability_queue::check_mergeability(ctx, mq_tx, mq_item)
             .instrument(span.clone())
             .await
         {

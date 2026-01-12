@@ -139,7 +139,39 @@ pub fn create_mergeability_queue() -> (MergeabilityQueueSender, MergeabilityQueu
 }
 
 impl MergeabilityQueueSender {
+    /// Return the size of the mergeability queue.
+    #[cfg(test)]
+    pub fn queue_size(&self) -> usize {
+        self.inner
+            .queues
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(_, q)| q.len())
+            .sum::<usize>()
+    }
+
+    /// Return the PRs currently in the mergeability queue.
+    #[cfg(test)]
+    pub fn get_queue_prs(&self) -> Vec<PullRequestToCheck> {
+        self.inner
+            .queues
+            .lock()
+            .unwrap()
+            .iter()
+            .flat_map(|(_, q)| {
+                let mut queue = q.clone();
+                let mut items = vec![];
+                while let Some(item) = queue.pop() {
+                    items.push(item.0.entry);
+                }
+                items
+            })
+            .collect()
+    }
+
     /// Shutdown the mergeability queue.
+    #[cfg(test)]
     pub fn shutdown(&self) {
         // Store shutdown flag
         self.inner
@@ -305,11 +337,12 @@ impl MergeabilityQueueReceiver {
         let now = Instant::now();
         let mut queues = self.inner.queues.lock().unwrap();
 
-        // Shutdown requested, report end
+        // Shutdown requested, report end if we have no more items to process
         if self
             .inner
             .shutdown_requested
             .load(std::sync::atomic::Ordering::SeqCst)
+            && queues.iter().all(|(_, q)| q.is_empty())
         {
             return Ok(None);
         }

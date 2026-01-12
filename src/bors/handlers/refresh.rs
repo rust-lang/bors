@@ -335,15 +335,19 @@ auto_build_failed = ["+failed"]
     async fn refresh_enqueues_unknown_mergeable_prs(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.edit_pr((), |pr| {
-                pr.mergeable_state = OctocrabMergeableState::Unknown
+                pr.mergeable_state = OctocrabMergeableState::Unknown;
             })
             .await?;
-            ctx.wait_for_pr((), |pr| pr.mergeable_state == MergeableState::Unknown)
-                .await?;
+            ctx.run_mergeability_check().await?;
+            ctx.pr(())
+                .await
+                .expect_mergeable_state(MergeableState::Unknown);
             ctx.modify_pr((), |pr| pr.mergeable_state = OctocrabMergeableState::Dirty);
-            ctx.update_mergeability_status().await;
-            ctx.wait_for_pr((), |pr| pr.mergeable_state == MergeableState::HasConflicts)
-                .await?;
+            ctx.refresh_mergeability_queue().await;
+            ctx.run_mergeability_check().await?;
+            ctx.pr(())
+                .await
+                .expect_mergeable_state(MergeableState::HasConflicts);
             Ok(())
         })
         .await;
@@ -431,6 +435,9 @@ auto_build_failed = ["+failed"]
                 .expect_title("Foobar")
                 .expect_assignees(&[&User::try_user().name])
                 .expect_base_branch("stable");
+
+            ctx.run_mergeability_check().await?;
+            // Mergeability notification
             ctx.expect_comments(pr.id(), 1).await;
             Ok(())
         })

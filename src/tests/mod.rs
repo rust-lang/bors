@@ -35,6 +35,7 @@ mod mock;
 mod utils;
 
 // Public re-exports for use in tests
+use crate::bors::mergeability_queue::{MergeabilityQueueReceiver, check_mergeability};
 use crate::bors::process::QueueSenders;
 use crate::github::api::client::HideCommentReason;
 use crate::server::{ServerState, create_app};
@@ -67,6 +68,8 @@ pub use utils::webhook::{TEST_WEBHOOK_SECRET, create_webhook_request};
 const TEST_TIMEOUT: Duration = Duration::from_secs(15);
 /// How long should we wait until a custom condition in a test is hit.
 const TEST_CONDITION_TIMEOUT: Duration = Duration::from_secs(10);
+/// How long should we wait until a mergeability item is dequeued.
+const TEST_MERGEABILITY_TIMEOUT: Duration = Duration::from_secs(3);
 /// How often should we check whether a custom condition in a test is hit.
 const TEST_CONDITION_CHECK: Duration = Duration::from_millis(100);
 /// How long should we wait for a sync marker to be hit.
@@ -185,6 +188,8 @@ pub struct BorsTester {
     // Sender for bors global events
     global_tx: Sender<BorsGlobalEvent>,
     senders: QueueSenders,
+    mergeability_queue_rx: MergeabilityQueueReceiver,
+    ctx: Arc<BorsContext>,
 }
 
 impl BorsTester {
@@ -220,6 +225,7 @@ impl BorsTester {
             global_tx,
             senders,
             bors_process,
+            mergeability_queue_rx,
         } = create_bors_process(
             ctx.clone(),
             mock.github_client(),
@@ -235,7 +241,7 @@ impl BorsTester {
             global_tx.clone(),
             WebhookSecret::new(TEST_WEBHOOK_SECRET.to_string()),
             Some(oauth_client),
-            ctx,
+            ctx.clone(),
         );
         let app = create_app(state);
         let bors = tokio::spawn(bors_process);
@@ -247,6 +253,8 @@ impl BorsTester {
                 db,
                 senders,
                 global_tx,
+                mergeability_queue_rx,
+                ctx,
             },
             bors,
         )
@@ -435,6 +443,44 @@ impl BorsTester {
         Ok(())
     }
 
+    /// Pops a single mergeability item from the mergeability queue and handles.
+    pub async fn run_mergeability_check(&self) -> anyhow::Result<()> {
+        if !try_run_mergeability_check(self.ctx.clone(), &self.mergeability_queue_rx).await? {
+            return Err(anyhow::anyhow!(
+                "There was nothing in the mergeability queue"
+            ));
+        }
+        Ok(())
+    }
+
+    /// Debugging function to dump the current contents of the mergeability queue.
+    #[allow(unused)]
+    pub fn dump_mergeability_queue(&self) {
+        eprintln!("Mergeability queue contents:");
+        let prs = self.senders.mergeability_queue().get_queue_prs();
+        for pr in prs {
+            eprintln!("{pr:?}");
+        }
+    }
+
+    /// Handle items from the mergeability queue until it becomes empty.
+    pub async fn drain_mergeability_queue(&self) -> anyhow::Result<()> {
+        while self.senders.mergeability_queue().queue_size() > 0 {
+            self.run_mergeability_check().await?;
+        }
+        Ok(())
+    }
+
+    /// Pop `count` items from the mergeability queue.
+    pub async fn run_mergeability_checks(&self, count: u32) -> anyhow::Result<()> {
+        for index in 0..count {
+            self.run_mergeability_check()
+                .await
+                .with_context(|| anyhow::anyhow!("Index {index}"))?;
+        }
+        Ok(())
+    }
+
     pub async fn refresh_pending_builds(&self) {
         // Wait until the refresh is fully handled
         wait_for_marker(
@@ -451,7 +497,8 @@ impl BorsTester {
         .unwrap();
     }
 
-    pub async fn update_mergeability_status(&self) {
+    /// Enqueue PRs with stale/unknown mergeability into the mergeability queue.
+    pub async fn refresh_mergeability_queue(&self) {
         // Wait until the refresh is fully handled
         wait_for_marker(
             async || {
@@ -1070,11 +1117,18 @@ impl BorsTester {
     }
 
     async fn finish(self, bors: JoinHandle<()>) -> anyhow::Result<GitHub> {
+        // Tell the mergeability queue that it should shutdown once it has nothing else to do
+        self.senders.mergeability_queue().shutdown();
+
         // Make sure that the event channel senders are closed
+        // This also ensures that nothing will generate further mergeability checks
         drop(self.app);
         drop(self.global_tx);
-        self.senders.mergeability_queue().shutdown();
         drop(self.senders);
+
+        // Drain the mergeability queue
+        while try_run_mergeability_check(self.ctx.clone(), &self.mergeability_queue_rx).await? {}
+
         // Wait until all events are handled in the bors service
         match tokio::time::timeout(Duration::from_secs(5), bors).await {
             Ok(Ok(_)) => {}
@@ -1363,4 +1417,25 @@ where
             .map_err(|_| anyhow::anyhow!("Timed out waiting for a test marker to be marked"))?;
     }
     res
+}
+
+/// Tries to pop a single mergeability item from the mergeability queue and handle it.
+/// Returns true if there was some entry handled.
+async fn try_run_mergeability_check(
+    ctx: Arc<BorsContext>,
+    mergeability_queue_rx: &MergeabilityQueueReceiver,
+) -> anyhow::Result<bool> {
+    let fut = tokio::time::timeout(TEST_MERGEABILITY_TIMEOUT, mergeability_queue_rx.dequeue());
+    match fut.await {
+        Ok(Some((pr, sender))) => {
+            check_mergeability(ctx, sender, pr).await?;
+            Ok(true)
+        }
+        Ok(None) => Ok(false),
+        Err(_) => {
+            panic!(
+                "Timed out while waiting for a mergeability item to be popped off the mergeability queue"
+            );
+        }
+    }
 }
