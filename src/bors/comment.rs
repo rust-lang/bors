@@ -231,9 +231,8 @@ pub fn merge_conflict_comment(branch: &str) -> Comment {
     let message = format!(
         r#":lock: Merge conflict
 
-This pull request and the base branch diverged in a way that cannot
- be automatically merged. Please rebase on top of the latest base
- branch, and let the reviewer approve again.
+A merge attempt failed due to a merge conflict. Please rebase on top of the latest base
+branch, and let the reviewer approve again.
 
 <details><summary>How do I rebase?</summary>
 
@@ -260,6 +259,18 @@ handled during merge and rebase. This is normal, and you should still perform st
 "#
     );
     Comment::new(message)
+}
+
+pub fn unapproved_because_of_sha_mismatch_comment(
+    expected_sha: &CommitSha,
+    actual_sha: &CommitSha,
+) -> Comment {
+    Comment::new(format!(
+        r#"The pull request was unapproved, because its SHA did not match the approved SHA during a merge attempt.
+Approved commit SHA: {expected_sha}
+Actual head SHA: {actual_sha}
+"#
+    ))
 }
 
 pub fn approved_comment(

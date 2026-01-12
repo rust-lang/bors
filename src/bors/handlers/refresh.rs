@@ -5,9 +5,7 @@ use std::collections::BTreeMap;
 
 use crate::bors::RepositoryState;
 use crate::bors::mergeability_queue::MergeabilityQueueSender;
-use crate::database::PullRequestModel;
-use crate::github::PullRequest;
-use crate::{PgDbClient, TeamApiClient};
+use crate::{PgDbClient, TeamApiClient, database};
 
 /// Reload the team DB bors permissions for the given repository.
 pub async fn reload_repository_permissions(
@@ -28,18 +26,18 @@ pub async fn reload_repository_permissions(
 }
 
 /// Reloads the mergeability status from GitHub for PRs that have an unknown
-/// mergeability status in the DB.
+/// mergeability status in the DB or that are approved.
 pub async fn reload_mergeability_status(
     repo: Arc<RepositoryState>,
     db: &PgDbClient,
     mergeability_queue: MergeabilityQueueSender,
 ) -> anyhow::Result<()> {
     let prs = db
-        .get_prs_with_unknown_mergeability_state(repo.repository())
+        .get_prs_with_unknown_mergeability_or_approved(repo.repository())
         .await?;
 
     tracing::info!(
-        "Refreshing {} PR(s) with unknown mergeable state",
+        "Refreshing {} PR(s) that have unknown mergeability or that are approved",
         prs.len()
     );
 
@@ -84,7 +82,7 @@ pub async fn sync_pull_requests_state(
     for (pr_num, gh_pr) in &nonclosed_gh_prs_num {
         let db_pr = nonclosed_db_prs_num.get(pr_num);
         match db_pr {
-            Some(db_pr) if needs_update_in_db(db_pr, gh_pr) => {
+            Some(db_pr) if database::pr_needs_update_in_db(db_pr, gh_pr) => {
                 // Nonclosed PR that needs to be updated in the DB
                 tracing::debug!(
                     "PR {pr_num} has changed on GitHub, updating in DB (from {gh_pr:?} to {db_pr:?})",
@@ -123,68 +121,6 @@ pub async fn sync_pull_requests_state(
     }
 
     Ok(())
-}
-
-/// Returns true if the DB and GitHub representation of a PR do not match, and we need to update
-/// the PR in the DB. This is an optimization to avoid writing e.g. ~1000 PRs to the DB everytime
-/// we do a refresh.
-fn needs_update_in_db(db_pr: &PullRequestModel, gh_pr: &PullRequest) -> bool {
-    let PullRequestModel {
-        id: _,
-        repository: _,
-        number: _,
-        title: db_title,
-        author: _,
-        assignees: db_assignees,
-        pr_status: db_status,
-        head_branch: db_head_branch,
-        base_branch: db_base_branch,
-        mergeable_state: _,
-        approval_status: _,
-        delegated_permission: _,
-        priority: _,
-        rollup: _,
-        try_build: _,
-        auto_build: _,
-        created_at: _,
-    } = db_pr;
-    let PullRequest {
-        number: _,
-        head_label: _,
-        head,
-        base,
-        title,
-        // It seems that when we query PRs in bulk from GitHub, the mergeability status is
-        // unknown.. so we do not check it here.
-        mergeable_state: _,
-        message: _,
-        author: _,
-        assignees,
-        status,
-        labels: _,
-        html_url: _,
-    } = gh_pr;
-    if status != db_status {
-        return true;
-    }
-    if title != db_title {
-        return true;
-    }
-    if assignees
-        .iter()
-        .map(|a| a.username.clone())
-        .collect::<Vec<_>>()
-        != *db_assignees
-    {
-        return true;
-    }
-    if head.name != *db_head_branch {
-        return true;
-    }
-    if base.name != *db_base_branch {
-        return true;
-    }
-    false
 }
 
 #[cfg(test)]
@@ -342,12 +278,30 @@ auto_build_failed = ["+failed"]
             ctx.pr(())
                 .await
                 .expect_mergeable_state(MergeableState::Unknown);
-            ctx.modify_pr((), |pr| pr.mergeable_state = OctocrabMergeableState::Dirty);
+            ctx.modify_pr_in_gh((), |pr| pr.mergeable_state = OctocrabMergeableState::Dirty);
             ctx.refresh_mergeability_queue().await;
             ctx.run_mergeability_check().await?;
             ctx.pr(())
                 .await
                 .expect_mergeable_state(MergeableState::HasConflicts);
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn refresh_enqueues_approved_prs(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            ctx.approve(()).await?;
+            ctx.modify_pr_in_gh((), |pr| {
+                pr.mergeable_state = OctocrabMergeableState::Dirty;
+            });
+            ctx.refresh_mergeability_queue().await;
+            ctx.run_mergeability_check().await?;
+            ctx.pr(())
+                .await
+                .expect_mergeable_state(MergeableState::HasConflicts);
+            ctx.expect_comments((), 1).await;
             Ok(())
         })
         .await;
@@ -370,7 +324,7 @@ auto_build_failed = ["+failed"]
             let pr = ctx.open_pr((), |_| {}).await?;
             ctx.wait_for_pr(pr.number, |_| true).await?;
 
-            ctx.modify_pr(pr.id(), |pr| {
+            ctx.modify_pr_in_gh(pr.id(), |pr| {
                 pr.close();
             });
             ctx.refresh_prs().await;
@@ -386,7 +340,7 @@ auto_build_failed = ["+failed"]
     async fn refresh_pr_with_status_draft(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             let pr = ctx.open_pr((), |_| {}).await?;
-            ctx.modify_pr(pr.id(), |pr| pr.convert_to_draft());
+            ctx.modify_pr_in_gh(pr.id(), |pr| pr.convert_to_draft());
 
             ctx.refresh_prs().await;
             ctx.pr(pr.id())
@@ -401,7 +355,7 @@ auto_build_failed = ["+failed"]
     async fn refresh_pr_with_status_closed_draft(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             let pr = ctx.open_pr((), |_| {}).await?;
-            ctx.modify_pr(pr.id(), |pr| {
+            ctx.modify_pr_in_gh(pr.id(), |pr| {
                 // Both mark as closed as draft
                 pr.close();
                 pr.convert_to_draft();
@@ -421,7 +375,7 @@ auto_build_failed = ["+failed"]
         run_test(pool, async |ctx: &mut BorsTester| {
             let pr = ctx.open_pr((), |_| {}).await?;
             let branch = ctx.create_branch("stable");
-            ctx.modify_pr(pr.id(), |pr| {
+            ctx.modify_pr_in_gh(pr.id(), |pr| {
                 pr.title = "Foobar".to_string();
                 pr.assignees = vec![User::try_user()];
                 pr.base_branch = branch;
@@ -429,13 +383,15 @@ auto_build_failed = ["+failed"]
             });
 
             ctx.refresh_prs().await;
+            // Refreshing PRs does not update mergeability!
             ctx.pr(pr.id())
                 .await
-                .expect_mergeable_state(MergeableState::HasConflicts)
+                .expect_mergeable_state(MergeableState::Mergeable)
                 .expect_title("Foobar")
                 .expect_assignees(&[&User::try_user().name])
                 .expect_base_branch("stable");
 
+            // Although it should add the PR to the mergeability queue
             ctx.run_mergeability_check().await?;
             // Mergeability notification
             ctx.expect_comments(pr.id(), 1).await;

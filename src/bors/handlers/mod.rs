@@ -18,7 +18,7 @@ use crate::bors::handlers::review::{
 use crate::bors::handlers::trybuild::{command_try_build, command_try_cancel};
 use crate::bors::handlers::workflow::{handle_workflow_completed, handle_workflow_started};
 use crate::bors::labels::handle_label_trigger;
-use crate::bors::merge_queue::MergeQueueSender;
+use crate::bors::mergeability_queue::set_pr_mergeability_based_on_user_action;
 use crate::bors::process::QueueSenders;
 use crate::bors::{
     AUTO_BRANCH_NAME, BorsContext, CommandPrefix, Comment, RepositoryState, TRY_BRANCH_NAME,
@@ -83,10 +83,9 @@ pub async fn handle_bors_repository_event(
                 author = comment.author.username
             );
             let pr_number = comment.pr_number;
-            if let Err(error) =
-                handle_comment(Arc::clone(&repo), db, ctx, comment, senders.merge_queue())
-                    .instrument(span.clone())
-                    .await
+            if let Err(error) = handle_comment(Arc::clone(&repo), db, ctx, comment, &senders)
+                .instrument(span.clone())
+                .await
             {
                 repo.client
                     .post_comment(
@@ -332,7 +331,7 @@ async fn handle_comment(
     database: Arc<PgDbClient>,
     ctx: Arc<BorsContext>,
     comment: PullRequestComment,
-    merge_queue_tx: &MergeQueueSender,
+    senders: &QueueSenders,
 ) -> anyhow::Result<()> {
     use std::fmt::Write;
 
@@ -353,14 +352,29 @@ async fn handle_comment(
         .await
         .with_context(|| format!("Cannot get information about PR {pr_number}"))?;
 
-    for command in commands {
+    let mut pr_db = database
+        .upsert_pull_request(repo.repository(), pr_github.clone().into())
+        .await
+        .with_context(|| format!("Cannot upsert PR {pr_number} into the database"))?;
+    set_pr_mergeability_based_on_user_action(
+        &database,
+        &pr_github,
+        &pr_db,
+        senders.mergeability_queue(),
+    )
+    .await?;
+
+    for (index, command) in commands.into_iter().enumerate() {
         match command {
             Ok(command) => {
                 // Reload the PR state from DB, because a previous command might have changed it.
-                let pr_db = database
-                    .upsert_pull_request(repo.repository(), pr_github.clone().into())
-                    .await
-                    .with_context(|| format!("Cannot upsert PR {pr_number} into the database"))?;
+                if index > 0
+                    && let Some(pr) = database
+                        .get_pull_request(repo.repository(), pr_number)
+                        .await?
+                {
+                    pr_db = pr;
+                }
 
                 let pr = PullRequestData {
                     github: &pr_github,
@@ -385,16 +399,22 @@ async fn handle_comment(
                             &approver,
                             priority,
                             rollup,
-                            merge_queue_tx,
+                            senders.merge_queue(),
                         )
                         .instrument(span)
                         .await
                     }
                     BorsCommand::OpenTree => {
                         let span = tracing::info_span!("TreeOpen");
-                        command_open_tree(repo, database, pr, &comment.author, merge_queue_tx)
-                            .instrument(span)
-                            .await
+                        command_open_tree(
+                            repo,
+                            database,
+                            pr,
+                            &comment.author,
+                            senders.merge_queue(),
+                        )
+                        .instrument(span)
+                        .await
                     }
                     BorsCommand::TreeClosed(priority) => {
                         let span = tracing::info_span!("TreeClosed");
@@ -405,7 +425,7 @@ async fn handle_comment(
                             &comment.author,
                             priority,
                             &comment.html_url,
-                            merge_queue_tx,
+                            senders.merge_queue(),
                         )
                         .instrument(span)
                         .await
@@ -485,7 +505,7 @@ async fn handle_comment(
                     }
                     BorsCommand::Retry => {
                         let span = tracing::info_span!("Retry");
-                        command_retry(repo, database, pr, &comment.author, merge_queue_tx)
+                        command_retry(repo, database, pr, &comment.author, senders.merge_queue())
                             .instrument(span)
                             .await
                     }
@@ -497,7 +517,7 @@ async fn handle_comment(
                             pr,
                             &comment.author,
                             ctx.parser.prefix(),
-                            merge_queue_tx,
+                            senders.merge_queue(),
                         )
                         .instrument(span)
                         .await

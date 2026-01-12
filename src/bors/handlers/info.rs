@@ -32,7 +32,7 @@ pub(super) async fn command_info(
     writeln!(
         message,
         "- Mergeable: {}",
-        match pr.db.mergeable_state {
+        match pr.db.mergeable_status() {
             MergeableState::Mergeable => "yes",
             MergeableState::HasConflicts => "no",
             MergeableState::Unknown => "unknown",

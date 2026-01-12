@@ -397,7 +397,10 @@ pub struct PullRequestModel {
     /// The target branch this PR will be merged into.
     pub base_branch: String,
     /// GitHub's determination of PR mergeability.
-    pub mergeable_state: MergeableState,
+    /// To read the actual status, use `self.mergeable_status()` instead.
+    mergeable_state: MergeableState,
+    /// Is `self.mergeable_state` (possibly) stale?
+    mergeable_state_is_stale: bool,
     /// Approval status including approver and approved commit SHA.
     pub approval_status: ApprovalStatus,
     /// Temporary permissions granted to the PR author by a reviewer (try or review).
@@ -429,6 +432,16 @@ impl PullRequestModel {
         match &self.approval_status {
             ApprovalStatus::Approved(info) => Some(info.sha.as_str()),
             ApprovalStatus::NotApproved => None,
+        }
+    }
+
+    /// Get the latest known mergeable status.
+    /// If it is possibly stale, it will be returned as `MergeableState::Unknown`.
+    pub fn mergeable_status(&self) -> MergeableState {
+        if self.mergeable_state_is_stale {
+            MergeableState::Unknown
+        } else {
+            self.mergeable_state.clone()
         }
     }
 
@@ -652,4 +665,67 @@ impl sqlx::Decode<'_, sqlx::Postgres> for CommentTag {
             tag => Err(format!("Unknown comment tag: {tag}").into()),
         }
     }
+}
+
+/// Returns true if the DB and GitHub representation of a PR do not match, and we need to update
+/// the PR in the DB. This is an optimization to avoid writing e.g. ~1000 PRs to the DB everytime
+/// we do a refresh.
+pub fn pr_needs_update_in_db(db_pr: &PullRequestModel, gh_pr: &PullRequest) -> bool {
+    let PullRequestModel {
+        id: _,
+        repository: _,
+        number: _,
+        title: db_title,
+        author: _,
+        assignees: db_assignees,
+        pr_status: db_status,
+        head_branch: db_head_branch,
+        base_branch: db_base_branch,
+        mergeable_state: _,
+        mergeable_state_is_stale: _,
+        approval_status: _,
+        delegated_permission: _,
+        priority: _,
+        rollup: _,
+        try_build: _,
+        auto_build: _,
+        created_at: _,
+    } = db_pr;
+    let PullRequest {
+        number: _,
+        head_label: _,
+        head,
+        base,
+        title,
+        // It seems that when we query PRs in bulk from GitHub, the mergeability status is
+        // unknown.. so we do not check it here.
+        mergeable_state: _,
+        message: _,
+        author: _,
+        assignees,
+        status,
+        labels: _,
+        html_url: _,
+    } = gh_pr;
+    if status != db_status {
+        return true;
+    }
+    if title != db_title {
+        return true;
+    }
+    if assignees
+        .iter()
+        .map(|a| a.username.clone())
+        .collect::<Vec<_>>()
+        != *db_assignees
+    {
+        return true;
+    }
+    if head.name != *db_head_branch {
+        return true;
+    }
+    if base.name != *db_base_branch {
+        return true;
+    }
+    false
 }

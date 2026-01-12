@@ -18,19 +18,19 @@ use tracing::log::LevelFilter;
 use tracing_subscriber::filter::EnvFilter;
 
 /// How often should the bot refresh repository configurations from GitHub.
-const CONFIG_REFRESH_INTERVAL: Duration = Duration::from_secs(60 * 10);
+const CONFIG_REFRESH_INTERVAL: Duration = Duration::from_secs(60 * 15);
 
 /// How often should the bot refresh repository permissions from the team DB.
-const PERMISSIONS_REFRESH_INTERVAL: Duration = Duration::from_secs(60 * 10);
+const PERMISSIONS_REFRESH_INTERVAL: Duration = Duration::from_secs(60 * 15);
 
 /// How often should the bot attempt to time out CI builds that ran for too long.
 const PENDING_BUILDS_REFRESH_INTERVAL: Duration = Duration::from_secs(60 * 10);
 
 /// How often should the bot reload the mergeability status of PRs?
-const MERGEABILITY_STATUS_INTERVAL: Duration = Duration::from_secs(60 * 10);
+const MERGEABILITY_STATUS_INTERVAL: Duration = Duration::from_secs(60 * 30);
 
 /// How often should the bot synchronize PR state.
-const PR_STATE_PERIODIC_REFRESH: Duration = Duration::from_secs(60 * 10);
+const PR_STATE_PERIODIC_REFRESH: Duration = Duration::from_secs(60 * 15);
 
 /// How often should the bot try to process the merge queue.
 /// It won't actually be executed more often than `MERGE_QUEUE_MAX_INTERVAL`, unless

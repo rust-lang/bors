@@ -1,6 +1,6 @@
 use crate::bors::event::BorsEvent;
 use crate::bors::{CommandPrefix, RepositoryState, format_help};
-use crate::database::{ApprovalStatus, PullRequestModel, QueueStatus};
+use crate::database::{ApprovalStatus, QueueStatus};
 use crate::github::{GithubRepoName, rollup};
 use crate::templates::{
     HelpTemplate, HtmlTemplate, NotFoundTemplate, PullRequestStats, QueueTemplate, RepositoryView,
@@ -210,46 +210,25 @@ async fn api_merge_queue(
     let prs = sort_queue_prs(prs);
     let prs = prs
         .into_iter()
-        .map(|pr| {
-            let PullRequestModel {
-                id: _,
-                repository: _,
-                number,
-                title,
-                author,
-                assignees: _,
-                pr_status,
-                head_branch,
-                base_branch,
-                mergeable_state: _,
-                approval_status,
-                delegated_permission: _,
-                priority,
-                rollup: _,
-                try_build,
-                auto_build,
-                created_at: _,
-            } = pr;
-            PullRequest {
-                number: number.0,
-                title,
-                author,
-                status: match pr_status {
-                    bors::PullRequestStatus::Closed => PullRequestStatus::Closed,
-                    bors::PullRequestStatus::Draft => PullRequestStatus::Draft,
-                    bors::PullRequestStatus::Merged => PullRequestStatus::Merged,
-                    bors::PullRequestStatus::Open => PullRequestStatus::Open,
-                },
-                head_branch,
-                base_branch,
-                priority: priority.map(|p| p as u64),
-                approver: match approval_status {
-                    ApprovalStatus::NotApproved => None,
-                    ApprovalStatus::Approved(info) => Some(info.approver),
-                },
-                try_build: try_build.map(|b| convert_status(b.status)),
-                auto_build: auto_build.map(|b| convert_status(b.status)),
-            }
+        .map(|pr| PullRequest {
+            number: pr.number.0,
+            title: pr.title,
+            author: pr.author,
+            status: match pr.pr_status {
+                bors::PullRequestStatus::Closed => PullRequestStatus::Closed,
+                bors::PullRequestStatus::Draft => PullRequestStatus::Draft,
+                bors::PullRequestStatus::Merged => PullRequestStatus::Merged,
+                bors::PullRequestStatus::Open => PullRequestStatus::Open,
+            },
+            head_branch: pr.head_branch,
+            base_branch: pr.base_branch,
+            priority: pr.priority.map(|p| p as u64),
+            approver: match pr.approval_status {
+                ApprovalStatus::NotApproved => None,
+                ApprovalStatus::Approved(info) => Some(info.approver),
+            },
+            try_build: pr.try_build.map(|b| convert_status(b.status)),
+            auto_build: pr.auto_build.map(|b| convert_status(b.status)),
         })
         .collect::<Vec<_>>();
     Ok(Json(prs).into_response())

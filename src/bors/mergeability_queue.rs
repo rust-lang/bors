@@ -1,13 +1,162 @@
-//! The mergeability queue serves for background fetching of pull requests from the GitHub API,
-//! to determine their mergeability status.
+//! # Mergeability checking
+//! Having up-to-date information about mergeability is tricky. We want to balance several needs:
+//! - Avoid ignoring a PR that seems to be unmergeable, but in reality could be merged.
+//! - Recover from missed webhooks and bors being offline, so that we do not remember a PR in a
+//!   certain mergeability state that is stale, without ever updating it again.
+//! - Avoid race conditions that could send multiple "PR is unmergeable" comments per one switch
+//!   from mergeable to unmergeable.
+//! - Report PRs becoming unmergeable as quickly as possible, ideally with the precise PR that
+//!   caused the merge conflict.
+//! - Do not report PRs becoming unmergeable in case a user action on the PR has happened in-between
+//!   the event that caused the unmergeability and the unmergeability notification being posted.
+//! - Do all of the above without making too many unnecessary GitHub API calls.
 //!
-//! The mergeability status cannot be determined directly from GitHub, because it is computed by a
-//! background job (see https://docs.github.com/en/rest/guides/using-the-rest-api-to-interact-with-your-git-database).
+//! ## Desired properties
+//! There are some desires properties and general rules that we want to uphold. Those are documented
+//! below.
 //!
-//! You can add a PR to the mergeability queue. The queue will then immediately contact the GH API
-//! (by GETing the PR from GitHub), which should start the background job. After that, the PR will
-//! be checked in increasing intervals (after 5s, then after 10s, then after 15s, etc.), until we
-//! either get a known mergeability status from GH or until we run out of retries.
+//! ### Avoiding stale mergeability status
+//! We want to ensure that if the mergeability of a PR becomes stale (which happens after a
+//! commit being pushed to the PR or its base branch), we will eventually resolve its mergeability
+//! from GH in the future. This should happen even if bors stops executing, misses some webhooks
+//! or if GitHub has transient issues and it cannot return accurate mergeability even after N
+//! attempts. Even if all else fails, the status should be updated at least if you send any bors
+//! comment on the pull request. We explicitly do not want to force users to have to do something
+//! like `@bors sync` or similar.
+//!
+//! ### Unapproving
+//! We want to ensure that when we learn about a PR that **becomes** unmergeable, we will
+//! unapprove it. Even though it could become mergeable again in the future even without a push to
+//! that PR, that is quite rare, and unapproving the PR outright is a safer solution.
+//!
+//! ### Unmergeable PR notification
+//! In some cases, when a PR becomes unmergeable, we want to notify its author by sending a comment
+//! to the PR. We want to avoid notifying the same PR multiple times if it didn't become mergeable
+//! since the last notification, and ideally we would like to also specify the PR which caused the
+//! merge conflict (the "conflict source").
+//!
+//! We do not want to send these comments in response to user actions (e.g. a PR being pushed to),
+//! but we still want to update the mergeability status in that case, if we know it from GitHub.
+//!
+//! ## Design
+//! With all the important properties described, let's talk about how mergeability checking works
+//! in bors.
+//!
+//! ### Mergeability queue
+//! To reload the mergeability of PRs, we use a mergeability queue, which is implemented in this
+//! module. Sadly, the mergeability status cannot be determined directly from GitHub, because it is
+//! computed by a background job (see https://docs.github.com/en/rest/guides/using-the-rest-api-to-interact-with-your-git-database).
+//! Instead, we have to poll GitHub repeatedly, which is what the queue does.
+//!
+//! When you add a PR to the mergeability queue, it will then immediately contact the GH API
+//! (by GETing the PR from GitHub), which should start the GitHub background job. After that, the
+//! PR will be checked in increasing intervals (after 5s, then after 10s, then after 15s, etc.),
+//! until we either get a known mergeability status from GH or until we run out of retries.
+//!
+//! A PR can be added to the queue multiple times. If it was previously in the queue, nothing will
+//! happen (even if you add it there e.g. with a different conflict source).
+//!
+//! ### Learning about mergeability changes
+//! There are three main sources of events that can make bors realize that mergeability might
+//! have changed:
+//! A) When a commit is pushed to the base branch of a PR, we know that its mergeability status
+//!    becomes stale. At this point, we also know the most recently merged PR, and we can provide
+//!    precise information about it in the unmergeability notifications. When this happens, we
+//!    put all non-closed PRs into the mergeability queue.
+//! B) When the merge queue tries to merge a PR, it can receive an actual merge conflict when
+//!    performing a merge or it can learn from the GitHub API that the PR is currently unmergeable.
+//! C) When we receive a PR-related webhook (PR edited, assignees changed, commit pushed to a PR,
+//!    comment sent to a PR) based on user action, the webhook contains information about the
+//!    current mergeability status of the PR. In this case we try to update the mergeability status
+//!    in the DB, but we do not send the notification, because it could lead to unnecessary spam
+//!    (as the user is already doing something with the PR!).
+//!
+//! There is a particular set of notable race conditions that we document:
+//! - **A1 followed by A2 before A1 ends**. In this case, the conflict source could be imprecise,
+//!   because the mergeability queue might not correctly select the source between A1 and A2.
+//!   This could probably be fixed by having a separate DB table that could remember multiple
+//!   conflict sources per PR, but that seems overkill.
+//!   So we explicitly do not care about this race condition. Two base branch pushes on
+//!   rust-lang/rust happen very infrequently (usually not more often than once every 3 hours),
+//!   while we expect the full mergeability check to finish within 5-10 minutes. Thus this should
+//!   not occur ~ever.
+//! - **A followed by a bors redeploy**. In this case, the conflict source could be forgotten, and
+//!   we can only display a generic unmergeability message. It could be solved by the same approach
+//!   as hinted above, but same as above, we do not care about this. If it happens, the notification
+//!   will just not contain the conflict source.
+//! - **A followed by C before A ends**. Assume that a commit is pushed to `main`, which triggers
+//!   enqueuing of PR #1 into the mergeability queue. It can take several minutes before A finishes.
+//!   If during that time PR #1 receives a webhook (it gets edited or receives a bors comment),
+//!   we can do two things:
+//!   1. Immediately send the conflict notification, if needed.
+//!   2. Just update the mergeability status in the DB, but do not post the notification.
+//!
+//!   We do 2., with the assumption that if the user does something with the PR, they are already
+//!   observing it, and they do not need to receive an additional notification. In particular,
+//!   if we get a push to a base branch followed by A, and then a push to the PR, which causes a
+//!   conflict, which happens before A finishes, then we do not want to spam the user with a
+//!   notification.
+//! - **A followed by B before A ends**. If the merge queue attempts to start an auto build for a
+//!   pull request that is still being checked in the mergeability queue, the mergeability check
+//!   could race. If the GitHub mergeability status is unknown, the merge queue will wait until the
+//!   mergeability check finishes. If the mergeability status is known (and unmergeable), the merge
+//!   queue will immediately unapprove the PR to remove it from the merge queue, and it will send
+//!   the notification at the same time. If the PR was already enqueued in the mergeability check
+//!   with a conflict source at the same time, it will take the conflict source from the
+//!   mergeability queue, to avoid losing the conflict source.
+//! - **B running before A**. Similar to the previous race condition. In this case, we will post the
+//!   lower quality conflict notification, without the conflict source, as it has not been
+//!   determined yet. We could fix this by enqueuing all PRs targeting the given base branch
+//!   immediately after a PR being merged (as we expect bors to do all merges on the repository).
+//!   However, it seems a bit dangerous, because if we start asking GitHub for mergeability
+//!   "too soon", it could return stale data (in theory, this is untested!). If we only start
+//!   checking after we receive the "base branch pushed" webhook, it seems to work fine so far.
+//!
+//! Some additional comments based on the above:
+//! - We do not persist the conflict source in the DB, so it is best-effort. If bors is redeployed,
+//!   any conflict sources in the mergeability queue are lost.
+//! - We persist the "staleness" of mergeability, so that we can reload it in the future even after
+//!   bors redeploys.
+//! - If we cannot reload the mergeability for some reason, we will still update it after a PR
+//!   webhook comes in, to have a way of staying up to date.
+//!
+//! All of that leads to the above design:
+//! The mergeability state of a PR is stored in the DB in the following two columns:
+//! - The `mergeable_state` column contains the last mergeability status known from GitHub
+//!   (`mergeable`/`has_conflicts`/`unknown`).
+//!   - The `unknown` variant is set for newly opened PRs, PRs receiving a push, etc.
+//! - The `mergeable_state_is_stale` column is a boolean that specifies that `mergeable_state`
+//!   might be out of date, and we should attempt to reload the mergeability status for the PR
+//!   from GitHub.
+//!   - In a previous design, we used to only remember `mergeable_state`. However, this meant that
+//!     to mark a PR as being stale, we had to overwrite its last known mergeability status. This
+//!     was causing race conditions when creating unmergeability comments, because we didn't store
+//!     the previously known status in the DB, but only in memory. By storing the status in the DB
+//!     separately from the staleness information, we can atomically read the previous mergeability
+//!     state and replace it with a new one, and then send a notification only if the old state was
+//!     `mergeable`.
+//!
+//! We say that a PR has *stale mergeability* if its `mergeable_state` column is `unknown` OR its
+//! `mergeable_state_is_stale` column is `true`.
+//!
+//! ### Updating mergeability status
+//! When we update the mergeable state in the merge/mergeability queue, we atomically swap the new
+//! state with the old in the DB, and clear the stale flag. Then, if the new state is unmergeable,
+//! and the old was mergeable, we send the notification. This ensures that we do not send the
+//! notification twice without the state switching to the mergeable state in the meantime.
+//!
+//! When we update the mergeable state in response to user actions (PR pushed to, PR comment, etc.),
+//! we update `mergeable_state` directly, to avoid posting a notification.
+//!
+//! ### Reloading mergeability
+//! When bors starts, and periodically every N minutes, it will try to reload the mergeability of
+//! PRs that have stale mergeability, and just to be sure also of all approved PRs, as the
+//! mergeability status is important for merge queue sorting.
+//!
+//! ### Unapproving
+//! Whenever we can, we mark PRs that become unmergeable as unapproved. However, we might not always
+//! observe all switches to the unmergeable status. So the merge queue also has to assume the rare
+//! possibility of an approved PR that is unmergeable.
 
 use super::{BorsContext, PullRequestStatus, RepositoryState};
 use crate::PgDbClient;
@@ -23,6 +172,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::sync::Notify;
 use tokio::time::timeout;
+use tracing::Instrument;
 
 /// Base delay before two mergeability check attempts.
 #[cfg(not(test))]
@@ -58,8 +208,6 @@ pub struct PullRequestToCheck {
     /// Notably, even if a higher priority item has an expiration set, and a lower priority item
     /// doesn't, the higher priority item will be handled first, if it's expiration has elapsed.
     priority: MergeabilityCheckPriority,
-    /// Was the pull request mergeable *before* being put into the mergeability queue?
-    was_previously_mergeable: bool,
     /// Merged pull request that *might* have caused a merge conflict for this PR.
     conflict_source: Option<PullRequestNumber>,
 }
@@ -184,6 +332,9 @@ impl MergeabilityQueueSender {
     /// Enqueues the given PR for a mergeability check.
     /// It will be repeatedly fetched in the background from the GH API, until we can figure out
     /// its mergeability status.
+    ///
+    /// If the PR is already in the queue, it will stay there.
+    /// Notably, its conflict source will *not* get overridden by `None` if it was set before.
     pub fn enqueue_pr(&self, model: &PullRequestModel, conflict_source: Option<PullRequestNumber>) {
         // Prioritize approved PRs, so that they are checked first.
         // Those are the most important to check, because after a merge of some other PR, they
@@ -193,13 +344,22 @@ impl MergeabilityQueueSender {
             &model.repository,
             model.number,
             MergeabilityCheckPriority(priority),
-            match model.mergeable_state {
-                MergeableState::Mergeable => true,
-                MergeableState::HasConflicts => false,
-                MergeableState::Unknown => false,
-            },
             conflict_source,
         );
+    }
+
+    /// Try to return an existing conflict source for the given PR.
+    pub fn get_conflict_source(&self, model: &PullRequestModel) -> Option<PullRequestNumber> {
+        let pr_data = PullRequestData {
+            repo: model.repository.clone(),
+            pr_number: model.number,
+        };
+        let queues = self.inner.queues.lock().unwrap();
+        queues
+            .iter()
+            .flat_map(|(_, queue)| queue.iter())
+            .find(|entry| entry.0.entry.pull_request == pr_data)
+            .and_then(|entry| entry.0.entry.conflict_source)
     }
 
     pub fn enqueue(
@@ -207,7 +367,6 @@ impl MergeabilityQueueSender {
         repo: &GithubRepoName,
         number: PullRequestNumber,
         priority: MergeabilityCheckPriority,
-        was_previously_mergeable: bool,
         conflict_source: Option<PullRequestNumber>,
     ) {
         self.insert_pr_item(
@@ -218,7 +377,6 @@ impl MergeabilityQueueSender {
                 },
                 attempt: 1,
                 priority,
-                was_previously_mergeable,
                 conflict_source,
             },
             None,
@@ -230,7 +388,6 @@ impl MergeabilityQueueSender {
             pull_request,
             attempt,
             priority,
-            was_previously_mergeable,
             conflict_source,
         } = pr_item;
 
@@ -247,7 +404,6 @@ impl MergeabilityQueueSender {
                 pull_request,
                 attempt: next_attempt,
                 priority,
-                was_previously_mergeable,
                 conflict_source,
             },
             expiration,
@@ -406,7 +562,6 @@ pub async fn check_mergeability(
         ref attempt,
         priority: _,
         conflict_source,
-        was_previously_mergeable,
     } = mq_item;
 
     if *attempt >= MAX_RETRIES {
@@ -439,59 +594,134 @@ pub async fn check_mergeability(
         }
 
         return Ok(());
-    } else {
-        tracing::info!("Received mergeability status {new_mergeable_state:?}");
-    }
-
-    let new_mergeable_state: MergeableState = new_mergeable_state.into();
-    // We know the mergeability status, so update it in the DB
-    ctx.db
-        .set_pr_mergeable_state(
-            repo_state.repository(),
-            fetched_pr.number,
-            new_mergeable_state.clone(),
+    } else if let Some(db_pr) = ctx
+        .db
+        .get_pull_request(repo_state.repository(), fetched_pr.number)
+        .await?
+    {
+        update_pr_with_known_mergeability(
+            &repo_state,
+            &ctx.db,
+            &fetched_pr,
+            &db_pr,
+            conflict_source,
         )
         .await?;
-
-    if new_mergeable_state == MergeableState::HasConflicts && was_previously_mergeable {
-        handle_pr_conflict(&repo_state, &ctx.db, &fetched_pr, conflict_source).await?;
+    } else {
+        tracing::warn!("Cannot find DB pull request for {fetched_pr:?}");
     }
 
     Ok(())
 }
 
-async fn handle_pr_conflict(
-    repo_state: &RepositoryState,
+/// This method should be called once we learn about the mergeability status of a PR from GitHub
+/// (or through other means).
+///
+/// If needed, it will update the mergeability status in the DB and unapprove the PR and send a
+/// PR comment if the PR became unmergeable.
+///
+/// Should ONLY be called when the mergeability status from GitHub is known.
+#[tracing::instrument(skip_all)]
+pub async fn update_pr_with_known_mergeability(
+    repo: &RepositoryState,
     db: &PgDbClient,
-    pr: &PullRequest,
+    gh_pr: &PullRequest,
+    db_pr: &PullRequestModel,
     conflict_source: Option<PullRequestNumber>,
 ) -> anyhow::Result<()> {
-    tracing::info!("Pull request {pr:?} was likely unmergeable (source: {conflict_source:?})");
+    let new_mergeable_state = MergeableState::from(gh_pr.mergeable_state.clone());
+    assert_ne!(new_mergeable_state, MergeableState::Unknown);
 
-    if !repo_state.config.load().report_merge_conflicts {
-        tracing::info!("Reporting merge conflicts is disabled, not doing anything further");
-        return Ok(());
-    }
+    tracing::debug!(
+        "Updating mergeability of {}#{} (DB: {:?}, GH: {new_mergeable_state:?})",
+        repo.repository(),
+        gh_pr.number,
+        db_pr.mergeable_status(),
+    );
 
-    let Some(pr_db) = db
-        .get_pull_request(repo_state.repository(), pr.number)
-        .await?
-    else {
-        return Err(anyhow::anyhow!("Pull request {pr:?} was not found"));
-    };
-
-    // Unapprove PR
-    let unapproved = if pr_db.is_approved() {
-        unapprove_pr(repo_state, db, &pr_db, pr).await?;
+    // Unapprove PR if needed
+    let unapproved = if let MergeableState::HasConflicts = new_mergeable_state
+        && db_pr.is_approved()
+    {
+        unapprove_pr(repo, db, db_pr, gh_pr).await?;
         true
     } else {
         false
     };
-    handle_label_trigger(repo_state, pr, LabelTrigger::Conflict).await?;
-    repo_state
-        .client
-        .post_comment(pr_db.number, conflict_comment(conflict_source, unapproved))
+
+    // We update what is in the DB.
+    // Note that we do this even if the DB state already matched what comes from GitHub, to
+    // possibly clear the "mergeable_is_stale" flag.
+    let previous_mergeable_state = db
+        .set_pr_mergeable_state(repo.repository(), db_pr.number, new_mergeable_state.clone())
         .await?;
+
+    if !repo.config.load().report_merge_conflicts {
+        tracing::debug!("Reporting merge conflicts is disabled, not doing anything further");
+        return Ok(());
+    }
+    tracing::debug!(
+        "Previous mergeability status: {previous_mergeable_state:?}, new status: {new_mergeable_state:?}"
+    );
+
+    if new_mergeable_state == MergeableState::HasConflicts
+        && previous_mergeable_state == MergeableState::Mergeable
+    {
+        handle_label_trigger(repo, gh_pr, LabelTrigger::Conflict).await?;
+        repo.client
+            .post_comment(db_pr.number, conflict_comment(conflict_source, unapproved))
+            .await?;
+    }
+
+    Ok(())
+}
+
+/// This function should be called when we receive a webhook event **based on user action**, which
+/// contains the latest GitHub PR information.
+/// Since the webhook reacts to user action, we should not enqueue the PR
+pub async fn set_pr_mergeability_based_on_user_action(
+    db: &PgDbClient,
+    gh_pr: &PullRequest,
+    db_pr: &PullRequestModel,
+    sender: &MergeabilityQueueSender,
+) -> anyhow::Result<()> {
+    let mergeable_state = MergeableState::from(gh_pr.mergeable_state.clone());
+
+    let span = tracing::debug_span!(
+        "mergeability_user_action",
+        "{}#{}",
+        db_pr.repository,
+        db_pr.number
+    );
+
+    // If the status is unknown or it is different than what is in the DB, we enqueue the PR
+    if mergeable_state == MergeableState::Unknown {
+        // Eagerly update the last known state in the DB. This will essentially avoid posting the
+        // conflict notification, because the last state will be unknown.
+        db.set_pr_mergeable_state(&db_pr.repository, db_pr.number, mergeable_state)
+            .instrument(span)
+            .await?;
+        sender.enqueue_pr(db_pr, None);
+    } else if mergeable_state != db_pr.mergeable_status() {
+        span.in_scope(|| {
+            tracing::debug!(
+            "Encountered mergeability status staleness in response to user action. New state: {mergeable_state:?}, old state: {:?}, approved: {}",
+                db_pr.mergeable_status(),
+                db_pr.is_approved()
+            );
+        });
+
+        // If the status is unknown, we assume that the PR will be refreshed soon by some other
+        // means, and we do not do anything here
+        if db_pr.mergeable_status() != MergeableState::Unknown {
+            // If it is not unknown, we assume that for some reason this PR has not been updated
+            // properly in the DB. We will thus force update the state here, without sending a
+            // notification, and without unapproving the PR.
+            db.set_pr_mergeable_state(&db_pr.repository, db_pr.number, mergeable_state)
+                .instrument(span)
+                .await?;
+        }
+    }
     Ok(())
 }
 
@@ -615,7 +845,7 @@ mod tests {
         }
 
         fn enqueue(&self, tx: &MergeabilityQueueSender) {
-            tx.enqueue(&self.repo, self.number, self.priority, false, None);
+            tx.enqueue(&self.repo, self.number, self.priority, None);
         }
 
         fn enqueue_retry(&self, tx: &MergeabilityQueueSender, attempt: u32) {
@@ -626,7 +856,6 @@ mod tests {
                 },
                 attempt,
                 priority: self.priority,
-                was_previously_mergeable: false,
                 conflict_source: None,
             });
         }
