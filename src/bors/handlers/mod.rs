@@ -65,40 +65,54 @@ pub async fn handle_bors_repository_event(
 
     match event {
         BorsRepositoryEvent::Comment(comment) => {
-            // We want to ignore comments made by this bot
-            if repo.client.is_comment_internal(&comment).await? {
-                tracing::trace!("Ignoring comment {comment:?} because it was authored by this bot");
-                return Ok(());
-            }
+            let handle = async move {
+                // We want to ignore comments made by this bot
+                if repo.client.is_comment_internal(&comment).await? {
+                    tracing::trace!(
+                        "Ignoring comment {comment:?} because it was authored by this bot"
+                    );
+                    return Ok(());
+                }
 
-            // Also ignore comments made by homu
-            if comment.author.username == "bors" {
-                tracing::trace!("Ignoring comment {comment:?} because it was authored by homu");
-                return Ok(());
-            }
+                // Also ignore comments made by homu
+                if comment.author.username == "bors" {
+                    tracing::trace!("Ignoring comment {comment:?} because it was authored by homu");
+                    return Ok(());
+                }
 
-            let span = tracing::info_span!(
-                "Comment",
-                pr = format!("{}#{}", comment.repository, comment.pr_number),
-                author = comment.author.username
-            );
-            let pr_number = comment.pr_number;
-            if let Err(error) =
-                handle_comment(Arc::clone(&repo), db, ctx, comment, senders.merge_queue())
-                    .instrument(span.clone())
-                    .await
-            {
-                repo.client
-                    .post_comment(
-                        pr_number,
-                        Comment::new(
-                            ":x: Encountered an error while executing command".to_string(),
-                        ),
-                    )
-                    .await
-                    .context("Cannot send comment reacting to an error")?;
-                return Err(error.context("Cannot perform command"));
-            }
+                let span = tracing::info_span!(
+                    "Comment",
+                    pr = format!("{}#{}", comment.repository, comment.pr_number),
+                    author = comment.author.username
+                );
+                let pr_number = comment.pr_number;
+                if let Err(error) =
+                    handle_comment(Arc::clone(&repo), db, ctx, comment, senders.merge_queue())
+                        .instrument(span.clone())
+                        .await
+                {
+                    repo.client
+                        .post_comment(
+                            pr_number,
+                            Comment::new(
+                                ":x: Encountered an error while executing command".to_string(),
+                            ),
+                        )
+                        .await
+                        .context("Cannot send comment reacting to an error")?;
+
+                    Err(error.context("Cannot perform command"))
+                } else {
+                    Ok(())
+                }
+            };
+
+            let res = handle.await;
+
+            #[cfg(test)]
+            super::WAIT_FOR_COMMENTS_HANDLED.mark();
+
+            res?;
         }
         BorsRepositoryEvent::WorkflowStarted(payload) => {
             let span = tracing::info_span!(
