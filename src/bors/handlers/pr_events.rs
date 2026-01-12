@@ -779,7 +779,7 @@ report_merge_conflicts = false
                 .await?;
             ctx.pr(pr3.id()).await.expect_mergeable_state(MergeableState::Mergeable);
             ctx
-                .modify_pr(pr3.id(), |pr| {
+                .modify_pr_in_gh(pr3.id(), |pr| {
                     pr.mergeable_state = OctocrabMergeableState::Dirty;
                 });
 

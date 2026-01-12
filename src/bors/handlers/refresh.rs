@@ -357,12 +357,15 @@ auto_build_failed = ["+failed"]
     async fn refresh_enqueues_approved_prs(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.approve(()).await?;
-            ctx.modify_pr((), |pr| {
+            ctx.modify_pr_in_gh((), |pr| {
                 pr.mergeable_state = OctocrabMergeableState::Dirty;
             });
-            ctx.update_mergeability_status().await;
-            ctx.wait_for_pr((), |pr| pr.mergeable_state == MergeableState::HasConflicts)
-                .await?;
+            ctx.refresh_mergeability_queue().await;
+            ctx.run_mergeability_check().await?;
+            ctx.pr(())
+                .await
+                .expect_mergeable_state(MergeableState::HasConflicts);
+            ctx.expect_comments((), 1).await;
             Ok(())
         })
         .await;
