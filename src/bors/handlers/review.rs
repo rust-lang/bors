@@ -428,6 +428,22 @@ mod tests {
     }
 
     #[sqlx::test]
+    async fn approve_add_label(pool: sqlx::PgPool) {
+        let gh = GitHub::default().append_to_default_config(
+            r#"
+[labels]
+approved = ["+approved"]
+"#,
+        );
+        run_test((pool, gh), async |ctx: &mut BorsTester| {
+            ctx.approve(()).await?;
+            ctx.pr(()).await.expect_added_labels(&["approved"]);
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
     async fn approve_on_behalf(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             let approve_user = "user1";
@@ -519,7 +535,7 @@ mod tests {
 
     #[sqlx::test]
     async fn approve_do_not_unnecessarily_modify_labels(pool: sqlx::PgPool) {
-        let gh = GitHub::default().with_default_config(
+        let gh = GitHub::default().append_to_default_config(
             r#"
 [labels]
 approved = ["+foo", "+baz", "-bar", "-foo2"]
@@ -548,7 +564,7 @@ approved = ["+foo", "+baz", "-bar", "-foo2"]
 
     #[sqlx::test]
     async fn label_respect_unless(pool: sqlx::PgPool) {
-        let gh = GitHub::default().with_default_config(
+        let gh = GitHub::default().append_to_default_config(
             r#"
 [labels]
 approved = { modifications = ["+foo", "+baz"], unless = ["label1", "label2"] }
@@ -1326,7 +1342,7 @@ approved = { modifications = ["+foo", "+baz"], unless = ["label1", "label2"] }
     #[sqlx::test]
     async fn approve_pr_with_blocked_label(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
-            .github(GitHub::default().with_default_config(
+            .github(GitHub::default().append_to_default_config(
                 r#"
 labels_blocking_approval = ["proposed-final-comment-period"]
 "#,
@@ -1351,7 +1367,7 @@ labels_blocking_approval = ["proposed-final-comment-period"]
     #[sqlx::test]
     async fn approve_pr_with_blocked_labels(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
-            .github(GitHub::default().with_default_config(
+            .github(GitHub::default().append_to_default_config(
                 r#"
 labels_blocking_approval = ["proposed-final-comment-period", "final-comment-period"]
 "#,

@@ -885,7 +885,7 @@ try-job: Bar
 
     #[sqlx::test]
     async fn try_build_failed_modify_labels(pool: sqlx::PgPool) {
-        let gh = GitHub::default().with_default_config(
+        let gh = GitHub::default().append_to_default_config(
             r#"
 [labels]
 try_failed = ["+foo", "+bar", "-baz"]

@@ -647,7 +647,12 @@ mod tests {
 
     #[sqlx::test]
     async fn conflict_message_disabled_in_config(pool: sqlx::PgPool) {
-        run_test(pool, async |ctx: &mut BorsTester| {
+        let gh = GitHub::default().with_default_config(
+            r#"
+report_merge_conflicts = false
+"#,
+        );
+        run_test((pool, gh), async |ctx: &mut BorsTester| {
             let pr = ctx
                 .open_pr(default_repo_name(), |pr| {
                     pr.mergeable_state = OctocrabMergeableState::Clean;
@@ -666,13 +671,7 @@ mod tests {
 
     #[sqlx::test]
     async fn conflict_message_unknown_sha(pool: sqlx::PgPool) {
-        BorsBuilder::new(pool)
-            .github(GitHub::default().with_default_config(
-                r#"
-merge_queue_enabled = true
-report_merge_conflicts = true
-"#,
-            )).run_test(async |ctx: &mut BorsTester| {
+        run_test(pool, async |ctx: &mut BorsTester| {
             let pr = ctx
                 .open_pr(default_repo_name(), |pr| {
                     pr.mergeable_state = OctocrabMergeableState::Clean;
@@ -692,13 +691,7 @@ report_merge_conflicts = true
 
     #[sqlx::test]
     async fn conflict_message_unknown_sha_approved(pool: sqlx::PgPool) {
-        BorsBuilder::new(pool)
-            .github(GitHub::default().with_default_config(
-                r#"
-merge_queue_enabled = true
-report_merge_conflicts = true
-"#,
-            )).run_test(async |ctx: &mut BorsTester| {
+        run_test(pool, async |ctx: &mut BorsTester| {
             let pr = ctx
                 .open_pr(default_repo_name(), |pr| {
                     pr.mergeable_state = OctocrabMergeableState::Clean;
@@ -724,13 +717,7 @@ report_merge_conflicts = true
 
     #[sqlx::test]
     async fn conflict_message_known_sha(pool: sqlx::PgPool) {
-        BorsBuilder::new(pool)
-            .github(GitHub::default().with_default_config(
-                r#"
-merge_queue_enabled = true
-report_merge_conflicts = true
-"#,
-            )).run_test(async |ctx: &mut BorsTester| {
+        run_test(pool, async |ctx: &mut BorsTester| {
             let pr2 = ctx
                 .open_pr((), |_| {})
                 .await?;
@@ -761,11 +748,8 @@ report_merge_conflicts = true
     #[sqlx::test]
     async fn conflict_label(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
-            .github(GitHub::default().with_default_config(
+            .github(GitHub::default().append_to_default_config(
                 r#"
-merge_queue_enabled = true
-report_merge_conflicts = true
-
 [labels]
 conflict = ["+conflict"]
 "#,

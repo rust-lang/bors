@@ -44,6 +44,14 @@ impl GitHub {
         self
     }
 
+    pub fn append_to_default_config(self, config: &str) -> Self {
+        self.default_repo()
+            .lock()
+            .config
+            .push_str(&format!("\n{config}"));
+        self
+    }
+
     pub fn add_user(&mut self, user: User) {
         assert!(
             !self
@@ -264,10 +272,7 @@ impl Default for GitHub {
         let config = r#"
 timeout = 3600
 merge_queue_enabled = true
-
-# Set labels on PR approvals
-[labels]
-approved = ["+approved"]
+report_merge_conflicts = true
 "#
         .to_string();
 

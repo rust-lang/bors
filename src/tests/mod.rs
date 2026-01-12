@@ -1269,7 +1269,7 @@ impl PullRequestProxy {
     #[track_caller]
     pub fn expect_approved_by(&self, approved_by: &str) -> &Self {
         assert_eq!(self.require_db_pr().approver(), Some(approved_by));
-        self.expect_added_labels(&["approved"])
+        self
     }
 
     #[track_caller]

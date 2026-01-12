@@ -1049,6 +1049,7 @@ merge_queue_enabled = false
             });
             ctx.run_merge_queue_now().await;
             ctx.pr(pr.id()).await.expect_no_auto_build();
+            ctx.expect_comments(pr.id(), 1).await;
             Ok(())
         })
         .await;
@@ -1102,10 +1103,8 @@ merge_queue_enabled = false
 
     #[sqlx::test]
     async fn auto_build_success_labels(pool: sqlx::PgPool) {
-        let github = GitHub::default().with_default_config(
+        let github = GitHub::default().append_to_default_config(
             r#"
-merge_queue_enabled = true
-
 [labels]
 auto_build_succeeded = ["+foo", "+bar", "-baz"]
   "#,
@@ -1134,10 +1133,8 @@ auto_build_succeeded = ["+foo", "+bar", "-baz"]
 
     #[sqlx::test]
     async fn auto_build_failed_labels(pool: sqlx::PgPool) {
-        let github = GitHub::default().with_default_config(
+        let github = GitHub::default().append_to_default_config(
             r#"
-merge_queue_enabled = true
-
 [labels]
 auto_build_failed = ["+foo", "+bar", "-baz"]
       "#,
