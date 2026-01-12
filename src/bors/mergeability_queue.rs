@@ -146,8 +146,8 @@ impl MergeabilityQueueSender {
             .queues
             .lock()
             .unwrap()
-            .iter()
-            .map(|(_, q)| q.len())
+            .values()
+            .map(|q| q.len())
             .sum::<usize>()
     }
 
