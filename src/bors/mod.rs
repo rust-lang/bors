@@ -125,20 +125,12 @@ pub static WAIT_FOR_MERGEABILITY_STATUS_REFRESH: TestSyncMarker = TestSyncMarker
 #[cfg(test)]
 pub static WAIT_FOR_PR_STATUS_REFRESH: TestSyncMarker = TestSyncMarker::new();
 
+/// Wait until a PR webhook has been handled.
 #[cfg(test)]
-pub static WAIT_FOR_WORKFLOW_STARTED: TestSyncMarker = TestSyncMarker::new();
-
-#[cfg(test)]
-pub static WAIT_FOR_WORKFLOW_COMPLETED: TestSyncMarker = TestSyncMarker::new();
-
-#[cfg(test)]
-pub static WAIT_FOR_PR_OPEN: TestSyncMarker = TestSyncMarker::new();
+pub static WAIT_FOR_WEBHOOK_COMPLETED: TestSyncMarker = TestSyncMarker::new();
 
 #[cfg(test)]
 pub static WAIT_FOR_MERGE_QUEUE: TestSyncMarker = TestSyncMarker::new();
-
-#[cfg(test)]
-pub static WAIT_FOR_COMMENTS_HANDLED: TestSyncMarker = TestSyncMarker::new();
 
 /// The merge queue has attempted to merge a PR.
 #[cfg(test)]

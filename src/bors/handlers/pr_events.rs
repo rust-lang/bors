@@ -30,12 +30,12 @@ pub(super) async fn handle_pull_request_edited(
         .upsert_pull_request(repo_state.repository(), pr.clone().into())
         .await?;
 
+    mergeability_queue.enqueue_pr(&pr_model, None);
+
     // If the base branch has changed, unapprove the PR
     let Some(_) = payload.from_base_sha else {
         return Ok(());
     };
-
-    mergeability_queue.enqueue_pr(&pr_model, None);
 
     if !pr_model.is_approved() {
         return Ok(());

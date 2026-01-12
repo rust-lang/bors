@@ -132,6 +132,9 @@ async fn consume_repository_events(
         {
             handle_root_error(span, error);
         }
+
+        #[cfg(test)]
+        super::WAIT_FOR_WEBHOOK_COMPLETED.mark();
     }
 }
 

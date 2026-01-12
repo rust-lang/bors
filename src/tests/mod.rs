@@ -1,8 +1,7 @@
 use crate::bors::{
-    CommandPrefix, PullRequestStatus, RollupMode, WAIT_FOR_BUILD_QUEUE, WAIT_FOR_COMMENTS_HANDLED,
-    WAIT_FOR_MERGE_QUEUE, WAIT_FOR_MERGE_QUEUE_MERGE_ATTEMPT, WAIT_FOR_MERGEABILITY_STATUS_REFRESH,
-    WAIT_FOR_PR_OPEN, WAIT_FOR_PR_STATUS_REFRESH, WAIT_FOR_WORKFLOW_COMPLETED,
-    WAIT_FOR_WORKFLOW_STARTED,
+    CommandPrefix, PullRequestStatus, RollupMode, WAIT_FOR_BUILD_QUEUE, WAIT_FOR_MERGE_QUEUE,
+    WAIT_FOR_MERGE_QUEUE_MERGE_ATTEMPT, WAIT_FOR_MERGEABILITY_STATUS_REFRESH,
+    WAIT_FOR_PR_STATUS_REFRESH, WAIT_FOR_WEBHOOK_COMPLETED,
 };
 use crate::database::{
     BuildModel, BuildStatus, DelegatedPermission, MergeableState, OctocrabMergeableState,
@@ -412,27 +411,19 @@ impl BorsTester {
     pub async fn post_comment<C: Into<Comment>>(&mut self, comment: C) -> anyhow::Result<Comment> {
         let comment = comment.into();
 
-        let comment = wait_for_marker(
-            async move || {
-                // Allocate comment IDs
-                let comment = {
-                    let gh = self.github.lock();
-                    let repo = gh.get_repo(&comment.pr_ident().repo);
-                    let mut repo = repo.lock();
-                    let pr = repo.get_pr_mut(comment.pr_ident().number);
-                    let (id, node_id) = pr.next_comment_ids();
-                    let comment = comment.with_ids(id, node_id);
-                    pr.add_comment_to_history(comment.clone());
-                    comment
-                };
+        // Allocate comment IDs
+        let comment = {
+            let gh = self.github.lock();
+            let repo = gh.get_repo(&comment.pr_ident().repo);
+            let mut repo = repo.lock();
+            let pr = repo.get_pr_mut(comment.pr_ident().number);
+            let (id, node_id) = pr.next_comment_ids();
+            let comment = comment.with_ids(id, node_id);
+            pr.add_comment_to_history(comment.clone());
+            comment
+        };
 
-                self.webhook_comment(comment.clone()).await?;
-                Ok(comment)
-            },
-            &WAIT_FOR_COMMENTS_HANDLED,
-        )
-        .await?;
-
+        self.webhook_comment(comment.clone()).await?;
         Ok(comment)
     }
 
@@ -566,13 +557,7 @@ impl BorsTester {
             ))
         };
 
-        let marker = match &event.event {
-            WorkflowEventKind::Started => &WAIT_FOR_WORKFLOW_STARTED,
-            WorkflowEventKind::Completed { .. } => &WAIT_FOR_WORKFLOW_COMPLETED,
-        };
-
-        let fut = self.send_webhook("workflow_run", payload);
-        wait_for_marker(async || fut.await, marker).await
+        self.send_webhook("workflow_run", payload).await
     }
 
     /// Start a workflow and wait until the workflow has been handled by bors.
@@ -613,11 +598,7 @@ impl BorsTester {
             (payload, pr)
         };
 
-        wait_for_marker(
-            async || self.send_webhook("pull_request", payload).await,
-            &WAIT_FOR_PR_OPEN,
-        )
-        .await?;
+        self.send_webhook("pull_request", payload).await?;
         Ok(pr)
     }
 
@@ -1047,25 +1028,34 @@ impl BorsTester {
     }
 
     async fn send_webhook<S: Serialize>(&mut self, event: &str, content: S) -> anyhow::Result<()> {
-        let serialized = serde_json::to_string(&content)?;
-        let webhook = create_webhook_request(event, &serialized);
-        let response = self
-            .app
-            .call(webhook)
-            .await
-            .context("Cannot send webhook request")?;
-        let status = response.status();
-        if !status.is_success() {
-            return Err(anyhow::anyhow!(
-                "Wrong status code {status} when sending {event}"
-            ));
-        }
-        let body_text = String::from_utf8(
-            axum::body::to_bytes(response.into_body(), 10 * 1024 * 1024)
-                .await?
-                .to_vec(),
-        )?;
-        tracing::debug!("Received webhook with status {status} and response body `{body_text}`");
+        wait_for_marker(
+            async || {
+                let serialized = serde_json::to_string(&content)?;
+                let webhook = create_webhook_request(event, &serialized);
+                let response = self
+                    .app
+                    .call(webhook)
+                    .await
+                    .context("Cannot send webhook request")?;
+                let status = response.status();
+                if !status.is_success() {
+                    return Err(anyhow::anyhow!(
+                        "Wrong status code {status} when sending {event}"
+                    ));
+                }
+                let body_text = String::from_utf8(
+                    axum::body::to_bytes(response.into_body(), 10 * 1024 * 1024)
+                        .await?
+                        .to_vec(),
+                )?;
+                tracing::debug!(
+                    "Received webhook with status {status} and response body `{body_text}`"
+                );
+                Ok(())
+            },
+            &WAIT_FOR_WEBHOOK_COMPLETED,
+        )
+        .await?;
         Ok(())
     }
 
