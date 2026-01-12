@@ -1319,7 +1319,7 @@ impl PullRequestProxy {
     pub fn expect_added_labels(&self, labels: &[&str]) -> &Self {
         let added_labels = self
             .gh_pr
-            .labels_added_by_bors
+            .labels_added_by_bors()
             .iter()
             .map(|s| s.as_str())
             .collect::<Vec<_>>();
@@ -1327,11 +1327,20 @@ impl PullRequestProxy {
         self
     }
 
+    /// Assert that the GitHub PR currently has this set of labels.
+    #[track_caller]
+    pub fn expect_labels(&self, labels: &[&str]) {
+        assert_eq!(
+            self.gh_pr.labels,
+            labels.iter().map(|l| l.to_owned()).collect::<Vec<_>>()
+        );
+    }
+
     #[track_caller]
     pub fn expect_removed_labels(&self, labels: &[&str]) -> &Self {
         let removed_labels = self
             .gh_pr
-            .labels_removed_by_bors
+            .labels_removed_by_bors()
             .iter()
             .map(|s| s.as_str())
             .collect::<Vec<_>>();

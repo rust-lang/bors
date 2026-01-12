@@ -5,10 +5,11 @@ use crate::PgDbClient;
 use crate::bors::comment::no_auto_build_in_progress_comment;
 use crate::bors::handlers::workflow::{AutoBuildCancelReason, maybe_cancel_auto_build};
 use crate::bors::handlers::{PullRequestData, deny_request, has_permission};
+use crate::bors::labels::handle_label_trigger;
 use crate::bors::merge_queue::{MergeQueueSender, get_pr_at_front_of_merge_queue};
 use crate::bors::{CommandPrefix, Comment, RepositoryState};
 use crate::database::{BuildStatus, QueueStatus};
-use crate::github::{GithubUser, PullRequestNumber};
+use crate::github::{GithubUser, LabelTrigger, PullRequestNumber};
 use crate::permissions::PermissionType;
 
 pub(super) async fn command_retry(
@@ -28,6 +29,9 @@ pub(super) async fn command_retry(
     if matches!(pr_model.queue_status(), QueueStatus::Failed(_, _)) {
         db.clear_auto_build(pr_model).await?;
         merge_queue_tx.notify().await?;
+
+        // Retrying is essentially like a reapproval
+        handle_label_trigger(&repo_state, pr.github, LabelTrigger::Approved).await?;
     } else {
         notify_of_invalid_retry_state(&repo_state, pr.number()).await?;
     }
@@ -107,7 +111,7 @@ async fn notify_of_invalid_retry_state(
 
 #[cfg(test)]
 mod tests {
-    use crate::tests::{BorsTester, Comment, User, run_test};
+    use crate::tests::{BorsTester, Comment, GitHub, User, run_test};
 
     #[sqlx::test]
     async fn retry_command_insufficient_privileges(pool: sqlx::PgPool) {
@@ -126,7 +130,7 @@ mod tests {
     #[sqlx::test]
     async fn retry_invalid_state_error(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
-            ctx.post_comment(Comment::from("@bors retry")).await?;
+            ctx.post_comment("@bors retry").await?;
             insta::assert_snapshot!(
                 ctx.get_next_comment_text(()).await?,
                 @":exclamation: You can only retry pull requests that are approved and have a previously failed auto build"
@@ -143,13 +147,37 @@ mod tests {
             ctx.start_auto_build(()).await?;
             ctx.workflow_full_failure(ctx.auto_workflow()).await?;
             ctx.expect_comments((), 1).await;
-            ctx.post_comment(Comment::from("@bors retry")).await?;
+            ctx.post_comment("@bors retry").await?;
             ctx.wait_for_pr((), |pr| pr.auto_build.is_none()).await?;
             ctx.run_merge_queue_now().await;
             insta::assert_snapshot!(
                 ctx.get_next_comment_text(()).await?,
                 @":hourglass: Testing commit pr-1-sha with merge merge-1-pr-1-d7d45f1f-reauthored-to-bors..."
             );
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn retry_apply_label(pool: sqlx::PgPool) {
+        let gh = GitHub::default().with_default_config(
+            r#"
+merge_queue_enabled = true
+
+[labels]
+approved = ["+foo"]
+auto_build_failed = ["-foo"]
+"#,
+        );
+        run_test((pool, gh), async |ctx: &mut BorsTester| {
+            ctx.approve(()).await?;
+            ctx.start_auto_build(()).await?;
+            ctx.workflow_full_failure(ctx.auto_workflow()).await?;
+            ctx.expect_comments((), 1).await;
+
+            ctx.post_comment("@bors retry").await?;
+            ctx.pr(()).await.expect_labels(&["foo"]);
             Ok(())
         })
         .await;

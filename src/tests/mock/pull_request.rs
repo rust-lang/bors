@@ -208,11 +208,11 @@ async fn mock_pr_labels(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
             let Some(pr) = repo.pulls_mut().get_mut(&pr_number) else {
                 return ResponseTemplate::new(404);
             };
-            pr.labels_added_by_bors.extend(data.labels.clone());
+            pr.add_labels(data.labels.clone());
 
-            let labels: Vec<GitHubLabel> = data
+            let labels: Vec<GitHubLabel> = pr
                 .labels
-                .into_iter()
+                .iter()
                 .map(|label| GitHubLabel {
                     id: 1.into(),
                     node_id: "".to_string(),
@@ -241,7 +241,7 @@ async fn mock_pr_labels(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
             let Some(pr) = repo.pulls_mut().get_mut(&pr_number) else {
                 return ResponseTemplate::new(404);
             };
-            pr.labels_removed_by_bors.push(label_name.to_string());
+            pr.remove_label(label_name);
 
             ResponseTemplate::new(200).set_body_json::<&[GitHubLabel]>(&[])
         },
