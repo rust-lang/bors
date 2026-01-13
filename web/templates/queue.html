@@ -149,6 +149,9 @@
             word-break: break-word;
         }
     }
+    .title {
+        min-width: 300px;
+    }
     .limited-width {
         max-width: 250px;
     }
@@ -199,7 +202,7 @@
                 <th>#</th>
                 <th style="padding-left: 16px;">Status</th>
                 <th>Mergeable</th>
-                <th>Title</th>
+                <th class="title">Title</th>
                 <th>Author</th>
                 <th>Assignees</th>
                 <th>Approved by</th>
@@ -258,7 +261,7 @@
                     {%- when Unknown -%}
                     {%- endmatch -%}
                 </td>
-                <td class="wrapped">{{ pr.title }}</td>
+                <td class="wrapped title">{{ pr.title }}</td>
                 <td>{{ pr.author }}</td>
                 <td class="wrapped limited-width">{{ pr.assignees|join(", ") }}</td>
                 <td>
