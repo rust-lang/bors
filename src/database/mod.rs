@@ -391,7 +391,7 @@ pub struct PullRequestModel {
     /// List of GitHub usernames assigned to this PR.
     pub assignees: Vec<String>,
     /// The GitHub PR state: open, closed, draft, or merged.
-    pub pr_status: PullRequestStatus,
+    pub status: PullRequestStatus,
     /// The source branch of the PR.
     pub head_branch: String,
     /// The target branch this PR will be merged into.
@@ -596,7 +596,7 @@ pub struct UpsertPullRequestParams {
     pub head_branch: String,
     pub base_branch: String,
     pub mergeable_state: MergeableState,
-    pub pr_status: PullRequestStatus,
+    pub status: PullRequestStatus,
 }
 
 impl From<PullRequest> for UpsertPullRequestParams {
@@ -609,7 +609,7 @@ impl From<PullRequest> for UpsertPullRequestParams {
             head_branch: pr.head.name,
             base_branch: pr.base.name,
             mergeable_state: pr.mergeable_state.into(),
-            pr_status: pr.status,
+            status: pr.status,
         }
     }
 }
@@ -680,7 +680,7 @@ pub fn pr_needs_update_in_db(db_pr: &PullRequestModel, gh_pr: &PullRequest) -> b
         title: db_title,
         author: _,
         assignees: db_assignees,
-        pr_status: db_status,
+        status: db_status,
         head_branch: db_head_branch,
         base_branch: db_base_branch,
         mergeable_state: _,

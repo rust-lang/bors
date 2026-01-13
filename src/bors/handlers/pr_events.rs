@@ -126,7 +126,7 @@ pub(super) async fn handle_pull_request_opened(
                 head_branch: payload.pull_request.head.name.clone(),
                 base_branch: payload.pull_request.base.name.clone(),
                 mergeable_state: payload.pull_request.mergeable_state.clone().into(),
-                pr_status,
+                status: pr_status,
             },
         )
         .await?;
@@ -584,7 +584,7 @@ mod tests {
         run_test(pool, async |ctx: &mut BorsTester| {
             let pr = ctx.open_pr((), |_| {}).await?;
             ctx.wait_for_pr(pr.number, |pr| {
-                pr.base_branch == *default_branch_name() && pr.pr_status == PullRequestStatus::Open
+                pr.base_branch == *default_branch_name() && pr.status == PullRequestStatus::Open
             })
             .await?;
             Ok(())
@@ -626,13 +626,13 @@ mod tests {
     async fn open_close_and_reopen_pr(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             let pr = ctx.open_pr((), |_| {}).await?;
-            ctx.wait_for_pr(pr.number, |pr| pr.pr_status == PullRequestStatus::Open)
+            ctx.wait_for_pr(pr.number, |pr| pr.status == PullRequestStatus::Open)
                 .await?;
             ctx.set_pr_status_closed(pr.number).await?;
-            ctx.wait_for_pr(pr.number, |pr| pr.pr_status == PullRequestStatus::Closed)
+            ctx.wait_for_pr(pr.number, |pr| pr.status == PullRequestStatus::Closed)
                 .await?;
             ctx.reopen_pr(pr.number).await?;
-            ctx.wait_for_pr(pr.number, |pr| pr.pr_status == PullRequestStatus::Open)
+            ctx.wait_for_pr(pr.number, |pr| pr.status == PullRequestStatus::Open)
                 .await?;
             Ok(())
         })
@@ -647,10 +647,10 @@ mod tests {
                     pr.convert_to_draft();
                 })
                 .await?;
-            ctx.wait_for_pr(pr.number, |pr| pr.pr_status == PullRequestStatus::Draft)
+            ctx.wait_for_pr(pr.number, |pr| pr.status == PullRequestStatus::Draft)
                 .await?;
             ctx.set_pr_status_ready_for_review(pr.number).await?;
-            ctx.wait_for_pr(pr.number, |pr| pr.pr_status == PullRequestStatus::Open)
+            ctx.wait_for_pr(pr.number, |pr| pr.status == PullRequestStatus::Open)
                 .await?;
             Ok(())
         })
@@ -661,10 +661,10 @@ mod tests {
     async fn open_pr_and_convert_to_draft(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             let pr = ctx.open_pr((), |_| {}).await?;
-            ctx.wait_for_pr(pr.number, |pr| pr.pr_status == PullRequestStatus::Open)
+            ctx.wait_for_pr(pr.number, |pr| pr.status == PullRequestStatus::Open)
                 .await?;
             ctx.set_pr_status_draft(pr.number).await?;
-            ctx.wait_for_pr(pr.number, |pr| pr.pr_status == PullRequestStatus::Draft)
+            ctx.wait_for_pr(pr.number, |pr| pr.status == PullRequestStatus::Draft)
                 .await?;
             Ok(())
         })
@@ -704,10 +704,10 @@ mod tests {
     async fn open_and_merge_pr(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             let pr = ctx.open_pr((), |_| {}).await?;
-            ctx.wait_for_pr(pr.number, |pr| pr.pr_status == PullRequestStatus::Open)
+            ctx.wait_for_pr(pr.number, |pr| pr.status == PullRequestStatus::Open)
                 .await?;
             ctx.set_pr_status_merged(pr.number).await?;
-            ctx.wait_for_pr(pr.number, |pr| pr.pr_status == PullRequestStatus::Merged)
+            ctx.wait_for_pr(pr.number, |pr| pr.status == PullRequestStatus::Merged)
                 .await?;
             Ok(())
         })

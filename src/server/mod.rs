@@ -214,7 +214,7 @@ async fn api_merge_queue(
             number: pr.number.0,
             title: pr.title,
             author: pr.author,
-            status: match pr.pr_status {
+            status: match pr.status {
                 bors::PullRequestStatus::Closed => PullRequestStatus::Closed,
                 bors::PullRequestStatus::Draft => PullRequestStatus::Draft,
                 bors::PullRequestStatus::Merged => PullRequestStatus::Merged,
