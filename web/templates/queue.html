@@ -182,15 +182,16 @@
     {{ stats.failed_count }} failed
   </p>
 
-  <div style="margin-bottom: 1rem;">
-    <label for="groupBy">Group by: </label>
-    <select id="groupBy">
+  <!-- DOM template that will be cloned into the DataTables top layout -->
+  <div id="groupBy-template" style="display: none;">
+    <label>Group by:
+    <select class="groupBy">
       <option value="">None</option>
       <option value="status">Status</option>
       <option value="mergeable">Mergeable</option>
       <option value="author">Author</option>
       <option value="priority">Priority</option>
-    </select>
+    </select></label>
   </div>
 
   <div class="table-wrapper">
@@ -324,7 +325,14 @@
         let config = {
             layout: {
                 topEnd: null,
-                topStart: "search",
+                topStart: [
+                  "search",
+                  {
+                    div: {
+                      className: "groupBy-target"
+                    }
+                  }
+                ],
                 bottomStart: "info",
                 bottomEnd: "paging"
             },
@@ -382,6 +390,11 @@
               }).select();
               $("#table").show();
               $("#loading").hide();
+
+              // (Re-)initialize the group by select input and put it next to the search input
+              const groupBy = $("#groupBy-template").clone();
+              groupBy.appendTo(".groupBy-target");
+              groupBy.show();
             }
         };
 
@@ -450,17 +463,40 @@
         return () => tbody.removeEventListener("click", handler);
     }
 
-    let table = initializeTable(null);
-    let detachRowClick = bindRowClick(table);
+    let table = null;
+    let detachRowClick = null;
+    let selectCheckbox = null;
 
-    // Handle group by dropdown changes
-    document.getElementById("groupBy").addEventListener("change", function() {
+    function handleSelectChange() {
         let groupByColumnName = this.value === "" ? null : this.value;
-        table.destroy();
-        detachRowClick();
+        initialize(groupByColumnName);
+    }
+
+    function initialize(groupByColumnName) {
+        if (table !== null) {
+          table.destroy();
+        }
+        if (detachRowClick !== null) {
+          detachRowClick();
+        }
+
+        if (selectCheckbox !== null) {
+          selectCheckbox.removeEventListener("change", handleSelectChange);
+        }
+
         table = initializeTable(groupByColumnName);
         detachRowClick = bindRowClick(table);
-    });
+
+        // This dance is required because we want to put the select input into the DataTables
+        // layout, which causes it to be removed from the DOM everytime we (re-)initiaize the table.
+        selectCheckbox = document.querySelector(".groupBy-target .groupBy");
+        selectCheckbox.addEventListener("change", handleSelectChange);
+        if (groupByColumnName !== null) {
+          selectCheckbox.value = groupByColumnName;
+        }
+    }
+
+    initialize(null);
 
     const createRollupButton = document.getElementById("showRollupSelection")
     const modal = document.getElementById("rollupModal");
