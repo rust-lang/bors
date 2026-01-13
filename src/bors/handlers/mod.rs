@@ -505,9 +505,16 @@ async fn handle_comment(
                     }
                     BorsCommand::Retry => {
                         let span = tracing::info_span!("Retry");
-                        command_retry(repo, database, pr, &comment.author, senders.merge_queue())
-                            .instrument(span)
-                            .await
+                        command_retry(
+                            repo,
+                            database,
+                            pr,
+                            &comment.author,
+                            senders.merge_queue(),
+                            ctx.parser.prefix(),
+                        )
+                        .instrument(span)
+                        .await
                     }
                     BorsCommand::Cancel => {
                         let span = tracing::info_span!("Cancel");

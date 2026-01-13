@@ -18,6 +18,7 @@ pub(super) async fn command_retry(
     pr: PullRequestData<'_>,
     author: &GithubUser,
     merge_queue_tx: &MergeQueueSender,
+    bot_prefix: &CommandPrefix,
 ) -> anyhow::Result<()> {
     if !has_permission(&repo_state, author, pr, PermissionType::Review).await? {
         deny_request(&repo_state, pr.number(), author, PermissionType::Review).await?;
@@ -25,7 +26,6 @@ pub(super) async fn command_retry(
     }
 
     let pr_model = pr.db;
-
     if matches!(pr_model.queue_status(), QueueStatus::Failed(_, _)) {
         db.clear_auto_build(pr_model).await?;
         merge_queue_tx.notify().await?;
@@ -33,7 +33,13 @@ pub(super) async fn command_retry(
         // Retrying is essentially like a reapproval
         handle_label_trigger(&repo_state, pr.github, LabelTrigger::Approved).await?;
     } else {
-        notify_of_invalid_retry_state(&repo_state, pr.number()).await?;
+        let pending_auto_build = pr_model
+            .auto_build
+            .as_ref()
+            .map(|b| b.status == BuildStatus::Pending)
+            .unwrap_or(false);
+        notify_of_invalid_retry_state(&repo_state, pr.number(), pending_auto_build, bot_prefix)
+            .await?;
     }
 
     Ok(())
@@ -99,12 +105,16 @@ pub(super) async fn command_cancel(
 async fn notify_of_invalid_retry_state(
     repo: &RepositoryState,
     pr_number: PullRequestNumber,
+    running_auto_build: bool,
+    bot_prefix: &CommandPrefix,
 ) -> anyhow::Result<()> {
+    let mut msg = ":exclamation: You can only retry pull requests that are approved and have a previously failed auto build.".to_string();
+    if running_auto_build {
+        writeln!(msg, "\n\n*Hint*: There is currently a pending auto build on this PR. To cancel it, run `{bot_prefix} cancel`.").unwrap();
+    }
+
     repo.client
-        .post_comment(
-            pr_number,
-            Comment::new(":exclamation: You can only retry pull requests that are approved and have a previously failed auto build".to_string())
-        )
+        .post_comment(pr_number, Comment::new(msg))
         .await?;
     Ok(())
 }
@@ -133,11 +143,31 @@ mod tests {
             ctx.post_comment("@bors retry").await?;
             insta::assert_snapshot!(
                 ctx.get_next_comment_text(()).await?,
-                @":exclamation: You can only retry pull requests that are approved and have a previously failed auto build"
+                @":exclamation: You can only retry pull requests that are approved and have a previously failed auto build."
             );
             Ok(())
         })
         .await;
+    }
+
+    #[sqlx::test]
+    async fn retry_invalid_state_error_pending_build_hint(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            ctx.approve(()).await?;
+            ctx.start_auto_build(()).await?;
+
+            ctx.post_comment("@bors retry").await?;
+            insta::assert_snapshot!(
+                ctx.get_next_comment_text(()).await?,
+                @"
+            :exclamation: You can only retry pull requests that are approved and have a previously failed auto build.
+
+            *Hint*: There is currently a pending auto build on this PR. To cancel it, run `@bors cancel`.
+            "
+            );
+            Ok(())
+        })
+            .await;
     }
 
     #[sqlx::test]
