@@ -3,9 +3,7 @@ use std::sync::Arc;
 use super::has_permission;
 use super::{PullRequestData, deny_request};
 use crate::PgDbClient;
-use crate::bors::build::{
-    CancelBuildConclusion, CancelBuildError, cancel_build, hide_build_started_comments,
-};
+use crate::bors::build::{CancelBuildConclusion, CancelBuildError, cancel_build};
 use crate::bors::command::{CommandPrefix, Parent};
 use crate::bors::comment::try_build_cancelled_comment;
 use crate::bors::comment::try_build_cancelled_with_failed_workflow_cancel_comment;
@@ -15,6 +13,7 @@ use crate::bors::comment::{
 };
 use crate::bors::{
     MergeType, RepositoryState, TRY_BRANCH_NAME, bors_commit_author, create_merge_commit_message,
+    hide_tagged_comments,
 };
 use crate::database::{BuildModel, BuildStatus, PullRequestModel};
 use crate::github::api::client::{CheckRunOutput, GithubRepositoryClient};
@@ -77,7 +76,7 @@ pub(super) async fn command_try_build(
         let res = cancel_previous_try_build(repo, &db, build).await?;
         // Also try to hide previous "Try build started" comments that weren't hidden yet
         if let Err(error) =
-            hide_build_started_comments(repo, &db, pr.db, CommentTag::TryBuildStarted).await
+            hide_tagged_comments(repo, &db, pr.db, CommentTag::TryBuildStarted).await
         {
             tracing::error!("Failed to hide previous try build started comment(s): {error:?}");
         }

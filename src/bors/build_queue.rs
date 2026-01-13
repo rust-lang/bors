@@ -10,8 +10,7 @@
 //! other background sync processes. We want to finish builds as fast as possible.
 
 use crate::bors::build::{
-    CancelBuildConclusion, CancelBuildError, cancel_build, get_failed_jobs,
-    hide_build_started_comments, load_workflow_runs,
+    CancelBuildConclusion, CancelBuildError, cancel_build, get_failed_jobs, load_workflow_runs,
 };
 use crate::bors::comment::{
     CommentTag, build_failed_comment, build_timed_out_comment, try_build_succeeded_comment,
@@ -19,7 +18,9 @@ use crate::bors::comment::{
 use crate::bors::event::WorkflowRunCompleted;
 use crate::bors::labels::handle_label_trigger;
 use crate::bors::merge_queue::MergeQueueSender;
-use crate::bors::{BuildKind, FailedWorkflowRun, RepositoryState, elapsed_time_since};
+use crate::bors::{
+    BuildKind, FailedWorkflowRun, RepositoryState, elapsed_time_since, hide_tagged_comments,
+};
 use crate::database::{BuildModel, BuildStatus, PullRequestModel, WorkflowStatus};
 use crate::github::{CommitSha, GithubRepoName, LabelTrigger};
 use crate::{BorsContext, PgDbClient};
@@ -373,7 +374,7 @@ async fn maybe_complete_build(
         BuildKind::Try => CommentTag::TryBuildStarted,
         BuildKind::Auto => CommentTag::AutoBuildStarted,
     };
-    hide_build_started_comments(repo, db, pr, tag).await?;
+    hide_tagged_comments(repo, db, pr, tag).await?;
 
     if let Some(comment) = comment_opt {
         repo.client.post_comment(pr_num, comment).await?;
