@@ -316,7 +316,7 @@ pub fn approve_wip_title(keyword: &str) -> Comment {
     Comment::new(format!(
         r":clipboard: Looks like this PR is still in progress, ignoring approval.
 
-Hint: Remove **{keyword}** from this PR's title when it is ready for review.
+*Hint*: Remove **{keyword}** from this PR's title when it is ready for review.
 "
     ))
 }

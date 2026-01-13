@@ -1331,7 +1331,7 @@ approved = { modifications = ["+foo", "+baz"], unless = ["label1", "label2"] }
             insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
             :clipboard: Looks like this PR is still in progress, ignoring approval.
 
-            Hint: Remove **[do not merge]** from this PR's title when it is ready for review.
+            *Hint*: Remove **[do not merge]** from this PR's title when it is ready for review.
             ");
             ctx.pr(()).await.expect_unapproved();
             Ok(())
