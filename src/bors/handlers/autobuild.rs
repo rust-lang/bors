@@ -21,7 +21,14 @@ pub(super) async fn command_retry(
     bot_prefix: &CommandPrefix,
 ) -> anyhow::Result<()> {
     if !has_permission(&repo_state, author, pr, PermissionType::Review).await? {
-        deny_request(&repo_state, pr.number(), author, PermissionType::Review).await?;
+        deny_request(
+            &repo_state,
+            &db,
+            pr.number(),
+            author,
+            PermissionType::Review,
+        )
+        .await?;
         return Ok(());
     }
 
@@ -38,8 +45,14 @@ pub(super) async fn command_retry(
             .as_ref()
             .map(|b| b.status == BuildStatus::Pending)
             .unwrap_or(false);
-        notify_of_invalid_retry_state(&repo_state, pr.number(), pending_auto_build, bot_prefix)
-            .await?;
+        notify_of_invalid_retry_state(
+            &db,
+            &repo_state,
+            pr.number(),
+            pending_auto_build,
+            bot_prefix,
+        )
+        .await?;
     }
 
     Ok(())
@@ -54,7 +67,14 @@ pub(super) async fn command_cancel(
     merge_queue_tx: &MergeQueueSender,
 ) -> anyhow::Result<()> {
     if !has_permission(&repo_state, author, pr, PermissionType::Review).await? {
-        deny_request(&repo_state, pr.number(), author, PermissionType::Review).await?;
+        deny_request(
+            &repo_state,
+            &db,
+            pr.number(),
+            author,
+            PermissionType::Review,
+        )
+        .await?;
         return Ok(());
     }
 
@@ -98,11 +118,15 @@ pub(super) async fn command_cancel(
             no_auto_build_in_progress_comment(bot_prefix, has_pending_try_build)
         }
     };
-    repo_state.client.post_comment(pr.number(), comment).await?;
+    repo_state
+        .client
+        .post_comment(pr.number(), comment, &db)
+        .await?;
     Ok(())
 }
 
 async fn notify_of_invalid_retry_state(
+    db: &PgDbClient,
     repo: &RepositoryState,
     pr_number: PullRequestNumber,
     running_auto_build: bool,
@@ -114,7 +138,7 @@ async fn notify_of_invalid_retry_state(
     }
 
     repo.client
-        .post_comment(pr_number, Comment::new(msg))
+        .post_comment(pr_number, Comment::new(msg), db)
         .await?;
     Ok(())
 }

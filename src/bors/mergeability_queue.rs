@@ -160,7 +160,7 @@
 
 use super::{BorsContext, PullRequestStatus, RepositoryState};
 use crate::PgDbClient;
-use crate::bors::comment::{CommentTag, merge_conflict_comment};
+use crate::bors::comment::merge_conflict_comment;
 use crate::bors::handlers::unapprove_pr;
 use crate::bors::labels::handle_label_trigger;
 use crate::database::{MergeableState, OctocrabMergeableState, PullRequestModel};
@@ -668,20 +668,13 @@ pub async fn update_pr_with_known_mergeability(
         && previous_mergeable_state == MergeableState::Mergeable
     {
         handle_label_trigger(repo, gh_pr, LabelTrigger::Conflict).await?;
-        let comment = repo
-            .client
+        repo.client
             .post_comment(
                 db_pr.number,
                 merge_conflict_comment(conflict_source, unapproved),
+                db,
             )
             .await?;
-        db.record_tagged_bot_comment(
-            repo.repository(),
-            gh_pr.number,
-            CommentTag::MergeConflict,
-            &comment.node_id,
-        )
-        .await?;
     }
 
     Ok(())

@@ -44,7 +44,7 @@ pub(super) async fn handle_pull_request_edited(
     }
 
     unapprove_pr(&repo_state, &db, &pr_model, pr).await?;
-    notify_of_edited_pr(&repo_state, pr_number, &payload.pull_request.base.name).await
+    notify_of_edited_pr(&repo_state, &db, pr_number, &payload.pull_request.base.name).await
 }
 
 pub(super) async fn handle_push_to_pull_request(
@@ -86,6 +86,7 @@ pub(super) async fn handle_push_to_pull_request(
     if !had_failed_build {
         notify_of_pushed_pr(
             &repo_state,
+            &db,
             pr_number,
             pr.head.sha.clone(),
             auto_build_cancel_message,
@@ -325,6 +326,7 @@ fn create_pr_description_comment(payload: &PullRequestOpened) -> PullRequestComm
 
 async fn notify_of_edited_pr(
     repo: &RepositoryState,
+    db: &PgDbClient,
     pr_number: PullRequestNumber,
     base_name: &str,
 ) -> anyhow::Result<()> {
@@ -335,6 +337,7 @@ async fn notify_of_edited_pr(
                 r#":warning: The base branch changed to `{base_name}`, and the
 PR will need to be re-approved."#,
             )),
+            db,
         )
         .await?;
     Ok(())
@@ -342,6 +345,7 @@ PR will need to be re-approved."#,
 
 async fn notify_of_pushed_pr(
     repo: &RepositoryState,
+    db: &PgDbClient,
     pr_number: PullRequestNumber,
     head_sha: CommitSha,
     cancel_message: Option<String>,
@@ -355,7 +359,7 @@ async fn notify_of_pushed_pr(
     }
 
     repo.client
-        .post_comment(pr_number, Comment::new(comment))
+        .post_comment(pr_number, Comment::new(comment), db)
         .await?;
     Ok(())
 }

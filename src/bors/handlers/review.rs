@@ -37,14 +37,21 @@ pub(super) async fn command_approve(
 ) -> anyhow::Result<()> {
     tracing::info!("Approving PR {}", pr.number());
     if !has_permission(&repo_state, author, pr, PermissionType::Review).await? {
-        deny_request(&repo_state, pr.number(), author, PermissionType::Review).await?;
+        deny_request(
+            &repo_state,
+            &db,
+            pr.number(),
+            author,
+            PermissionType::Review,
+        )
+        .await?;
         return Ok(());
     };
 
     if let Some(error_comment) = check_pr_approval_validity(pr, &repo_state).await? {
         repo_state
             .client
-            .post_comment(pr.number(), error_comment)
+            .post_comment(pr.number(), error_comment, &db)
             .await?;
         return Ok(());
     }
@@ -63,7 +70,7 @@ pub(super) async fn command_approve(
     let priority = priority.or(pr.db.priority.map(|p| p as u32));
 
     merge_queue_tx.notify().await?;
-    notify_of_approval(ctx, &repo_state, pr, priority, approver.as_str()).await?;
+    notify_of_approval(ctx, &db, &repo_state, pr, priority, approver.as_str()).await?;
     handle_label_trigger(&repo_state, pr.github, LabelTrigger::Approved).await
 }
 
@@ -122,7 +129,7 @@ pub(super) async fn command_unapprove(
 
     tracing::info!("Unapproving PR {}", pr_num);
     if !has_permission(&repo_state, author, pr, PermissionType::Review).await? {
-        deny_request(&repo_state, pr_num, author, PermissionType::Review).await?;
+        deny_request(&repo_state, &db, pr_num, author, PermissionType::Review).await?;
         return Ok(());
     };
 
@@ -132,7 +139,7 @@ pub(super) async fn command_unapprove(
     ) {
         repo_state
             .client
-            .post_comment(pr_num, unapprove_non_open_pr_comment())
+            .post_comment(pr_num, unapprove_non_open_pr_comment(), &db)
             .await?;
         return Ok(());
     }
@@ -145,7 +152,7 @@ pub(super) async fn command_unapprove(
     )
     .await?;
     unapprove_pr(&repo_state, &db, pr.db, pr.github).await?;
-    notify_of_unapproval(&repo_state, pr, auto_build_cancel_message).await?;
+    notify_of_unapproval(&repo_state, &db, pr, auto_build_cancel_message).await?;
 
     Ok(())
 }
@@ -160,7 +167,14 @@ pub(super) async fn command_set_priority(
     priority: u32,
 ) -> anyhow::Result<()> {
     if !has_permission(&repo_state, author, pr, PermissionType::Review).await? {
-        deny_request(&repo_state, pr.number(), author, PermissionType::Review).await?;
+        deny_request(
+            &repo_state,
+            &db,
+            pr.number(),
+            author,
+            PermissionType::Review,
+        )
+        .await?;
         return Ok(());
     };
     db.set_priority(pr.db, priority).await
@@ -181,13 +195,21 @@ pub(super) async fn command_delegate(
         delegated_permission
     );
     if !sufficient_delegate_permission(repo_state.clone(), author) {
-        deny_request(&repo_state, pr.number(), author, PermissionType::Review).await?;
+        deny_request(
+            &repo_state,
+            &db,
+            pr.number(),
+            author,
+            PermissionType::Review,
+        )
+        .await?;
         return Ok(());
     }
 
     db.delegate(pr.db, delegated_permission).await?;
     notify_of_delegation(
         &repo_state,
+        &db,
         pr.number(),
         &pr.github.author.username,
         &author.username,
@@ -206,7 +228,14 @@ pub(super) async fn command_undelegate(
 ) -> anyhow::Result<()> {
     tracing::info!("Undelegating PR {} approval", pr.number());
     if !has_permission(&repo_state, author, pr, PermissionType::Review).await? {
-        deny_request(&repo_state, pr.number(), author, PermissionType::Review).await?;
+        deny_request(
+            &repo_state,
+            &db,
+            pr.number(),
+            author,
+            PermissionType::Review,
+        )
+        .await?;
         return Ok(());
     }
     db.undelegate(pr.db).await
@@ -224,7 +253,7 @@ pub(super) async fn command_set_rollup(
     // Require only try for rollup commands, because rust-timer uses them, and we don't want to
     // grant it approve permissions.
     if !has_permission(&repo_state, author, pr, PermissionType::Try).await? {
-        deny_request(&repo_state, pr.number(), author, PermissionType::Try).await?;
+        deny_request(&repo_state, &db, pr.number(), author, PermissionType::Try).await?;
         return Ok(());
     }
     db.set_rollup(pr.db, rollup).await
@@ -240,7 +269,14 @@ pub(super) async fn command_close_tree(
     merge_queue_tx: &MergeQueueSender,
 ) -> anyhow::Result<()> {
     if !sufficient_approve_permission(repo_state.clone(), author) {
-        deny_request(&repo_state, pr.number(), author, PermissionType::Review).await?;
+        deny_request(
+            &repo_state,
+            &db,
+            pr.number(),
+            author,
+            PermissionType::Review,
+        )
+        .await?;
         return Ok(());
     };
     db.upsert_repository(
@@ -253,7 +289,7 @@ pub(super) async fn command_close_tree(
     .await?;
 
     merge_queue_tx.notify().await?;
-    notify_of_tree_closed(&repo_state, pr.number(), priority).await
+    notify_of_tree_closed(&repo_state, &db, pr.number(), priority).await
 }
 
 pub(super) async fn command_open_tree(
@@ -264,7 +300,14 @@ pub(super) async fn command_open_tree(
     merge_queue_tx: &MergeQueueSender,
 ) -> anyhow::Result<()> {
     if !sufficient_delegate_permission(repo_state.clone(), author) {
-        deny_request(&repo_state, pr.number(), author, PermissionType::Review).await?;
+        deny_request(
+            &repo_state,
+            &db,
+            pr.number(),
+            author,
+            PermissionType::Review,
+        )
+        .await?;
         return Ok(());
     }
 
@@ -272,7 +315,7 @@ pub(super) async fn command_open_tree(
         .await?;
 
     merge_queue_tx.notify().await?;
-    notify_of_tree_open(&repo_state, pr.number()).await
+    notify_of_tree_open(&repo_state, &db, pr.number()).await
 }
 
 fn sufficient_approve_permission(repo: Arc<RepositoryState>, author: &GithubUser) -> bool {
@@ -289,6 +332,7 @@ fn sufficient_delegate_permission(repo: Arc<RepositoryState>, author: &GithubUse
 
 async fn notify_of_tree_closed(
     repo: &RepositoryState,
+    db: &PgDbClient,
     pr_number: PullRequestNumber,
     priority: u32,
 ) -> anyhow::Result<()> {
@@ -298,6 +342,7 @@ async fn notify_of_tree_closed(
             Comment::new(format!(
                 "Tree closed for PRs with priority less than {priority}."
             )),
+            db,
         )
         .await?;
     Ok(())
@@ -305,12 +350,14 @@ async fn notify_of_tree_closed(
 
 async fn notify_of_tree_open(
     repo: &RepositoryState,
+    db: &PgDbClient,
     pr_number: PullRequestNumber,
 ) -> anyhow::Result<()> {
     repo.client
         .post_comment(
             pr_number,
             Comment::new("Tree is now open for merging.".to_string()),
+            db,
         )
         .await?;
     Ok(())
@@ -318,6 +365,7 @@ async fn notify_of_tree_open(
 
 async fn notify_of_unapproval(
     repo: &RepositoryState,
+    db: &PgDbClient,
     pr: PullRequestData<'_>,
     cancel_message: Option<String>,
 ) -> anyhow::Result<()> {
@@ -328,13 +376,14 @@ async fn notify_of_unapproval(
     }
 
     repo.client
-        .post_comment(pr.number(), Comment::new(comment))
+        .post_comment(pr.number(), Comment::new(comment), db)
         .await?;
     Ok(())
 }
 
 async fn notify_of_approval(
     ctx: Arc<BorsContext>,
+    db: &PgDbClient,
     repo: &RepositoryState,
     pr: PullRequestData<'_>,
     priority: Option<u32>,
@@ -368,6 +417,7 @@ async fn notify_of_approval(
                 approver,
                 tree_state,
             ),
+            db,
         )
         .await?;
     Ok(())
@@ -375,6 +425,7 @@ async fn notify_of_approval(
 
 async fn notify_of_delegation(
     repo: &RepositoryState,
+    db: &PgDbClient,
     pr_number: PullRequestNumber,
     delegatee: &str,
     delegator: &str,
@@ -386,7 +437,7 @@ async fn notify_of_delegation(
         DelegatedPermission::Review => delegate_comment(delegatee, delegator, bot_prefix),
     };
 
-    repo.client.post_comment(pr_number, comment).await?;
+    repo.client.post_comment(pr_number, comment, db).await?;
     Ok(())
 }
 

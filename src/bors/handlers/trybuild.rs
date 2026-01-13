@@ -50,14 +50,14 @@ pub(super) async fn command_try_build(
 ) -> anyhow::Result<()> {
     let repo = repo.as_ref();
     if !has_permission(repo, author, pr, PermissionType::Try).await? {
-        deny_request(repo, pr.number(), author, PermissionType::Try).await?;
+        deny_request(repo, &db, pr.number(), author, PermissionType::Try).await?;
         return Ok(());
     }
 
     if Some(Parent::Last) == parent && pr.db.try_build.is_none() {
         tracing::warn!("try build was requested with parent=last but no previous build was found");
         repo.client
-            .post_comment(pr.number(), cant_find_last_parent_comment())
+            .post_comment(pr.number(), cant_find_last_parent_comment(), &db)
             .await?;
         return Ok(());
     };
@@ -142,8 +142,7 @@ pub(super) async fn command_try_build(
                 }
             }
 
-            let comment = repo
-                .client
+            repo.client
                 .post_comment(
                     pr.number(),
                     try_build_started_comment(
@@ -152,31 +151,18 @@ pub(super) async fn command_try_build(
                         bot_prefix,
                         cancelled_workflow_urls,
                     ),
+                    &db,
                 )
                 .await?;
-            db.record_tagged_bot_comment(
-                repo.repository(),
-                pr.number(),
-                CommentTag::TryBuildStarted,
-                &comment.node_id,
-            )
-            .await?;
         }
         MergeResult::Conflict => {
-            let comment = repo
-                .client
+            repo.client
                 .post_comment(
                     pr.number(),
                     merge_attempt_merge_conflict_comment(&pr.github.head.name),
+                    &db,
                 )
                 .await?;
-            db.record_tagged_bot_comment(
-                repo.repository(),
-                pr.number(),
-                CommentTag::MergeConflict,
-                &comment.node_id,
-            )
-            .await?;
         }
     }
     Ok(())
@@ -249,7 +235,7 @@ pub(super) async fn command_try_cancel(
 ) -> anyhow::Result<()> {
     let repo = repo.as_ref();
     if !has_permission(repo, author, pr, PermissionType::Try).await? {
-        deny_request(repo, pr.number(), author, PermissionType::Try).await?;
+        deny_request(repo, &db, pr.number(), author, PermissionType::Try).await?;
         return Ok(());
     }
 
@@ -257,7 +243,7 @@ pub(super) async fn command_try_cancel(
     let Some(build) = get_pending_try_build(pr.db) else {
         tracing::info!("No try build found when trying to cancel a try build");
         repo.client
-            .post_comment(pr_number, no_try_build_in_progress_comment())
+            .post_comment(pr_number, no_try_build_in_progress_comment(), &db)
             .await?;
         return Ok(());
     };
@@ -277,6 +263,7 @@ pub(super) async fn command_try_cancel(
                 .post_comment(
                     pr_number,
                     try_build_cancelled_comment(workflows.into_iter().map(|w| w.url)),
+                    &db,
                 )
                 .await?
         }
@@ -292,6 +279,7 @@ pub(super) async fn command_try_cancel(
                 .post_comment(
                     pr_number,
                     try_build_cancelled_with_failed_workflow_cancel_comment(),
+                    &db,
                 )
                 .await?
         }

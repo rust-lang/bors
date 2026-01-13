@@ -10,8 +10,8 @@ use tracing::Instrument;
 use super::{MergeType, bors_commit_author, create_merge_commit_message};
 use crate::bors::build::load_workflow_runs;
 use crate::bors::comment::{
-    CommentTag, auto_build_push_failed_comment, auto_build_started_comment,
-    auto_build_succeeded_comment, unapproved_because_of_sha_mismatch_comment,
+    auto_build_push_failed_comment, auto_build_started_comment, auto_build_succeeded_comment,
+    unapproved_because_of_sha_mismatch_comment,
 };
 use crate::bors::handlers::unapprove_pr;
 use crate::bors::mergeability_queue::{MergeabilityQueueSender, update_pr_with_known_mergeability};
@@ -235,14 +235,18 @@ async fn handle_successful_build(
             ctx.db
                 .update_build_status(auto_build, BuildStatus::Failure)
                 .await?;
-            repo.client.post_comment(pr_num, error_comment).await?;
+            repo.client
+                .post_comment(pr_num, error_comment, &ctx.db)
+                .await?;
         }
     } else {
         tracing::info!("Auto build succeeded and merged for PR {pr_num}");
         ctx.db
             .set_pr_status(&pr.repository, pr.number, PullRequestStatus::Merged)
             .await?;
-        repo.client.post_comment(pr.number, comment).await?;
+        repo.client
+            .post_comment(pr.number, comment, &ctx.db)
+            .await?;
     }
 
     Ok(())
@@ -377,6 +381,7 @@ async fn handle_start_auto_build(
                         &CommitSha(pr.approved_sha().unwrap_or("<missing>").to_owned()),
                         &gh_pr.head.sha,
                     ),
+                    &ctx.db,
                 )
                 .await?;
             Ok(AutoBuildStartOutcome::ContinueToNextPr)
@@ -563,24 +568,8 @@ async fn start_auto_build(
 
     // 5. Post status comment
     let comment = auto_build_started_comment(&head_sha, &merged_commit);
-    match client.post_comment(pr.number, comment).await {
-        Ok(comment) => {
-            if let Err(error) = ctx
-                .db
-                .record_tagged_bot_comment(
-                    repo.repository(),
-                    pr.number,
-                    CommentTag::AutoBuildStarted,
-                    &comment.node_id,
-                )
-                .await
-            {
-                tracing::error!("Cannot tag auto build started comment: {error:?}",);
-            }
-        }
-        Err(error) => {
-            tracing::error!("Failed to post auto build started comment: {error:?}",);
-        }
+    if let Err(error) = client.post_comment(pr.number, comment, &ctx.db).await {
+        tracing::error!("Failed to post auto build started comment: {error:?}");
     };
 
     Ok(())

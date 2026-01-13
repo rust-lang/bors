@@ -188,7 +188,7 @@ async fn maybe_timeout_build(
 
         if let Err(error) = repo
             .client
-            .post_comment(pr.number, build_timed_out_comment(timeout))
+            .post_comment(pr.number, build_timed_out_comment(timeout), db)
             .await
         {
             tracing::error!("Could not send comment to PR {}: {error:?}", pr.number);
@@ -377,7 +377,7 @@ async fn maybe_complete_build(
     hide_tagged_comments(repo, db, pr, tag).await?;
 
     if let Some(comment) = comment_opt {
-        repo.client.post_comment(pr_num, comment).await?;
+        repo.client.post_comment(pr_num, comment, db).await?;
     }
 
     Ok(true)
