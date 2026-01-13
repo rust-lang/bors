@@ -97,7 +97,7 @@ You can use the following commands:
 - `delegate=<try|review>`: Delegate permissions for running try builds or approving to the PR author
     - `try` allows the PR author to start try builds.
     - `review` allows the PR author to both start try builds and approve the PR.
-- `delegate+`: Delegate approval permissions to the PR author
+- `delegate` | `delegate+`: Delegate approval permissions to the PR author
     - Shortcut for `delegate=review`
 - `delegate-`: Remove any previously granted permission delegation
 - `try [parent=<parent>] [job|jobs=<jobs>]`: Start a try build.
