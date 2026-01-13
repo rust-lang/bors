@@ -201,7 +201,6 @@
                 <th>Mergeable</th>
                 <th>Title</th>
                 <th>Author</th>
-                <th>Head branch</th>
                 <th>Assignees</th>
                 <th>Approved by</th>
                 <th>Priority</th>
@@ -261,7 +260,6 @@
                 </td>
                 <td class="wrapped">{{ pr.title }}</td>
                 <td>{{ pr.author }}</td>
-                <td class="wrapped limited-width">{{ pr.head_branch }}</td>
                 <td class="wrapped limited-width">{{ pr.assignees|join(", ") }}</td>
                 <td>
                     {%- if let Some(approver) = pr.approver() -%}
@@ -335,7 +333,6 @@
                 { name: "mergeable" },
                 { name: "title", width: "40%" },
                 { name: "author" },
-                { name: "head-branch" },
                 { name: "assignees" },
                 { name: "approved_by" },
                 { name: "priority" },
