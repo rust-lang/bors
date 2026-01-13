@@ -83,7 +83,6 @@ impl FromStr for GithubRepoName {
 pub struct GithubUser {
     pub id: UserId,
     pub username: String,
-    pub email: Option<String>,
     pub html_url: Url,
 }
 
@@ -92,7 +91,6 @@ impl From<octocrab::models::Author> for GithubUser {
         Self {
             id: value.id,
             username: value.login,
-            email: value.email,
             html_url: value.html_url,
         }
     }
@@ -148,7 +146,6 @@ pub struct PullRequest {
     // <author>:<branch>
     pub head_label: String,
     pub head: Branch,
-    pub head_repository: Option<GithubRepoName>,
     pub base: Branch,
     pub title: String,
     pub mergeable_state: MergeableState,
@@ -158,7 +155,6 @@ pub struct PullRequest {
     pub status: PullRequestStatus,
     pub labels: Vec<String>,
     pub html_url: Option<Url>,
-    pub commit_count: u64,
 }
 
 impl From<octocrab::models::pulls::PullRequest> for PullRequest {
@@ -170,11 +166,6 @@ impl From<octocrab::models::pulls::PullRequest> for PullRequest {
                 name: pr.head.ref_field,
                 sha: pr.head.sha.into(),
             },
-            head_repository: pr.head.repo.and_then(|repo| {
-                let author = repo.owner?;
-                let name = author.name?;
-                Some(GithubRepoName::new(&name, &repo.name))
-            }),
             base: Branch {
                 name: pr.base.ref_field,
                 sha: pr.base.sha.into(),
@@ -207,7 +198,6 @@ impl From<octocrab::models::pulls::PullRequest> for PullRequest {
                 .map(|l| l.name)
                 .collect(),
             html_url: pr.html_url,
-            commit_count: pr.commits.unwrap_or(0),
         }
     }
 }
