@@ -63,9 +63,8 @@ pub(super) async fn command_approve(
     let priority = priority.or(pr.db.priority.map(|p| p as u32));
 
     merge_queue_tx.notify().await?;
-    handle_label_trigger(&repo_state, pr.github, LabelTrigger::Approved).await?;
-
-    notify_of_approval(ctx, &repo_state, pr, priority, approver.as_str()).await
+    notify_of_approval(ctx, &repo_state, pr, priority, approver.as_str()).await?;
+    handle_label_trigger(&repo_state, pr.github, LabelTrigger::Approved).await
 }
 
 /// Keywords that will prevent an approval if they appear in the PR's title.
