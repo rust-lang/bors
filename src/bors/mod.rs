@@ -376,10 +376,17 @@ async fn hide_tagged_comments(
         .get_tagged_bot_comments(repo.repository(), pr.number, tag)
         .await?;
     for comment in outdated {
-        repo.client
-            .hide_comment(&comment.node_id, HideCommentReason::Outdated)
-            .await?;
-        db.delete_tagged_bot_comment(&comment).await?;
+        let hide_comment = repo
+            .client
+            .hide_comment(&comment.node_id, HideCommentReason::Outdated);
+        let delete_comment_from_db = db.delete_tagged_bot_comment(&comment);
+
+        // Send the requests concurrently, as they are independent of one another.
+        // If we fail to hide the comment, delete it from the DB anyway, it is best-effort after
+        // all.
+        let (res1, res2) = tokio::join!(hide_comment, delete_comment_from_db);
+        res1?;
+        res2?;
     }
     Ok(())
 }
