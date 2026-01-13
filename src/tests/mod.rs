@@ -1259,7 +1259,7 @@ impl PullRequestProxy {
 
     #[track_caller]
     pub fn expect_status(&self, status: PullRequestStatus) -> &Self {
-        assert_eq!(self.require_db_pr().pr_status, status);
+        assert_eq!(self.require_db_pr().status, status);
         self
     }
 

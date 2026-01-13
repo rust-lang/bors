@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\nSELECT\n    pr.id,\n    pr.repository as \"repository: GithubRepoName\",\n    pr.number as \"number!: i64\",\n    pr.title,\n    pr.author,\n    pr.assignees as \"assignees: Assignees\",\n    (\n        pr.approved_by,\n        pr.approved_sha\n    ) AS \"approval_status!: ApprovalStatus\",\n    pr.status as \"pr_status: PullRequestStatus\",\n    pr.delegated_permission as \"delegated_permission: DelegatedPermission\",\n    pr.priority,\n    pr.head_branch,\n    pr.base_branch,\n    pr.mergeable_state as \"mergeable_state: MergeableState\",\n    pr.mergeable_state_is_stale,\n    pr.rollup as \"rollup: RollupMode\",\n    pr.created_at as \"created_at: DateTime<Utc>\",\n    try_build AS \"try_build: BuildModel\",\n    auto_build AS \"auto_build: BuildModel\"\nFROM pull_request as pr\nLEFT JOIN build AS try_build ON pr.try_build_id = try_build.id\nLEFT JOIN build AS auto_build ON pr.auto_build_id = auto_build.id\nWHERE try_build.id = $1 OR auto_build.id = $1\n",
+  "query": "\n            WITH upserted_pr AS (\n                INSERT INTO pull_request (\n                    repository,\n                    number,\n                    title,\n                    author,\n                    assignees,\n                    head_branch,\n                    base_branch,\n                    mergeable_state,\n                    mergeable_state_is_stale,\n                    status\n                )\n                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)\n                ON CONFLICT (repository, number)\n                DO UPDATE SET\n                    title = $3,\n                    author = $4,\n                    assignees = $5,\n                    head_branch = $6,\n                    base_branch = $7,\n                    -- Note that we do NOT update mergeable_state here, it is updated explicitly elsewhere,\n                    -- to properly handle unmergeability notifications.\n                    mergeable_state_is_stale =\n                          -- Only set the stale flag here, but do not clear it!\n                          -- This is important for the mergeability queue to work properly, so that we can\n                          -- detect whether something is stale or not.\n                          CASE\n                            WHEN $9 = true THEN true\n                            ELSE pull_request.mergeable_state_is_stale\n                          END,\n                    status = $10\n                RETURNING *\n            )\n            SELECT\n                pr.id,\n                pr.repository as \"repository: GithubRepoName\",\n                pr.number as \"number!: i64\",\n                pr.title,\n                pr.author,\n                pr.assignees as \"assignees: Assignees\",\n                (\n                    pr.approved_by,\n                    pr.approved_sha\n                ) AS \"approval_status!: ApprovalStatus\",\n                pr.status as \"status: PullRequestStatus\",\n                pr.priority,\n                pr.rollup as \"rollup: RollupMode\",\n                pr.delegated_permission as \"delegated_permission: DelegatedPermission\",\n                pr.head_branch,\n                pr.base_branch,\n                pr.mergeable_state as \"mergeable_state: MergeableState\",\n                pr.mergeable_state_is_stale,\n                pr.created_at as \"created_at: DateTime<Utc>\",\n                try_build AS \"try_build: BuildModel\",\n                auto_build AS \"auto_build: BuildModel\"\n            FROM upserted_pr as pr\n            LEFT JOIN build AS try_build ON pr.try_build_id = try_build.id\n            LEFT JOIN build AS auto_build ON pr.auto_build_id = auto_build.id\n            ",
   "describe": {
     "columns": [
       {
@@ -40,43 +40,43 @@
       },
       {
         "ordinal": 7,
-        "name": "pr_status: PullRequestStatus",
+        "name": "status: PullRequestStatus",
         "type_info": "Text"
       },
       {
         "ordinal": 8,
-        "name": "delegated_permission: DelegatedPermission",
-        "type_info": "Text"
-      },
-      {
-        "ordinal": 9,
         "name": "priority",
         "type_info": "Int4"
       },
       {
+        "ordinal": 9,
+        "name": "rollup: RollupMode",
+        "type_info": "Text"
+      },
+      {
         "ordinal": 10,
-        "name": "head_branch",
+        "name": "delegated_permission: DelegatedPermission",
         "type_info": "Text"
       },
       {
         "ordinal": 11,
-        "name": "base_branch",
+        "name": "head_branch",
         "type_info": "Text"
       },
       {
         "ordinal": 12,
-        "name": "mergeable_state: MergeableState",
+        "name": "base_branch",
         "type_info": "Text"
       },
       {
         "ordinal": 13,
-        "name": "mergeable_state_is_stale",
-        "type_info": "Bool"
+        "name": "mergeable_state: MergeableState",
+        "type_info": "Text"
       },
       {
         "ordinal": 14,
-        "name": "rollup: RollupMode",
-        "type_info": "Text"
+        "name": "mergeable_state_is_stale",
+        "type_info": "Bool"
       },
       {
         "ordinal": 15,
@@ -184,7 +184,16 @@
     ],
     "parameters": {
       "Left": [
-        "Int4"
+        "Text",
+        "Int8",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Bool",
+        "Text"
       ]
     },
     "nullable": [
@@ -198,15 +207,15 @@
       false,
       true,
       true,
+      true,
+      false,
       false,
       false,
       false,
       false,
       true,
-      false,
-      null,
-      null
+      true
     ]
   },
-  "hash": "7e42188637f7ccae17e8546bc145af39dea0a66bcb974f3d749d730b62889148"
+  "hash": "27babf080874701c1035b6827734227fbcf7a0940a76df84d6871c698e400c4c"
 }

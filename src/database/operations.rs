@@ -48,7 +48,7 @@ pub(crate) async fn get_pull_request(
             pr.approved_by,
             pr.approved_sha
         ) AS "approval_status!: ApprovalStatus",
-        pr.status as "pr_status: PullRequestStatus",
+        pr.status as "status: PullRequestStatus",
         pr.priority,
         pr.rollup as "rollup: RollupMode",
         pr.delegated_permission as "delegated_permission: DelegatedPermission",
@@ -109,7 +109,7 @@ pub(crate) async fn upsert_pull_request(
         head_branch,
         base_branch,
         mergeable_state,
-        pr_status,
+        status,
     } = params;
 
     let mergeable_state_is_stale = *mergeable_state == MergeableState::Unknown;
@@ -163,7 +163,7 @@ pub(crate) async fn upsert_pull_request(
                     pr.approved_by,
                     pr.approved_sha
                 ) AS "approval_status!: ApprovalStatus",
-                pr.status as "pr_status: PullRequestStatus",
+                pr.status as "status: PullRequestStatus",
                 pr.priority,
                 pr.rollup as "rollup: RollupMode",
                 pr.delegated_permission as "delegated_permission: DelegatedPermission",
@@ -187,7 +187,7 @@ pub(crate) async fn upsert_pull_request(
             base_branch,
             mergeable_state as _,
             mergeable_state_is_stale,
-            pr_status as _,
+            status as _,
         )
         .fetch_one(executor)
         .await?;
@@ -215,7 +215,7 @@ pub(crate) async fn get_nonclosed_pull_requests(
                     pr.approved_by,
                     pr.approved_sha
                 ) AS "approval_status!: ApprovalStatus",
-                pr.status as "pr_status: PullRequestStatus",
+                pr.status as "status: PullRequestStatus",
                 pr.priority,
                 pr.rollup as "rollup: RollupMode",
                 pr.delegated_permission as "delegated_permission: DelegatedPermission",
@@ -296,7 +296,7 @@ pub(crate) async fn get_prs_with_stale_mergeability_or_approved(
                     pr.approved_by,
                     pr.approved_sha
                 ) AS "approval_status!: ApprovalStatus",
-                pr.status as "pr_status: PullRequestStatus",
+                pr.status as "status: PullRequestStatus",
                 pr.priority,
                 pr.rollup as "rollup: RollupMode",
                 pr.delegated_permission as "delegated_permission: DelegatedPermission",
@@ -352,7 +352,7 @@ pub(crate) async fn set_stale_mergeability_status_by_base_branch(
                     pr.approved_by,
                     pr.approved_sha
                 ) AS "approval_status!: ApprovalStatus",
-                pr.status as "pr_status: PullRequestStatus",
+                pr.status as "status: PullRequestStatus",
                 pr.priority,
                 pr.rollup as "rollup: RollupMode",
                 pr.delegated_permission as "delegated_permission: DelegatedPermission",
@@ -484,7 +484,7 @@ SELECT
         pr.approved_by,
         pr.approved_sha
     ) AS "approval_status!: ApprovalStatus",
-    pr.status as "pr_status: PullRequestStatus",
+    pr.status as "status: PullRequestStatus",
     pr.delegated_permission as "delegated_permission: DelegatedPermission",
     pr.priority,
     pr.head_branch,
@@ -1109,7 +1109,7 @@ mod tests {
             head_branch: "".to_string(),
             base_branch: "base".to_string(),
             mergeable_state,
-            pr_status: PullRequestStatus::Open,
+            status: PullRequestStatus::Open,
         };
 
         let repo = GithubRepoName::new("foo", "bar");
