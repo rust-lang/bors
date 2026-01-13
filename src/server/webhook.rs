@@ -520,6 +520,7 @@ mod tests {
                                     4539057,
                                 ),
                                 username: "Kobzol",
+                                email: None,
                                 html_url: Url {
                                     scheme: "https",
                                     cannot_be_a_base: false,
@@ -572,6 +573,7 @@ mod tests {
                                         "bedf96270622ff19b4711dd7df3f19f4be1cba93",
                                     ),
                                 },
+                                head_repository: None,
                                 base: Branch {
                                     name: "testest",
                                     sha: CommitSha(
@@ -586,6 +588,7 @@ mod tests {
                                         78085736,
                                     ),
                                     username: "vohoanglong0107",
+                                    email: None,
                                     html_url: Url {
                                         scheme: "https",
                                         cannot_be_a_base: false,
@@ -626,6 +629,7 @@ mod tests {
                                         fragment: None,
                                     },
                                 ),
+                                commit_count: 2,
                             },
                             from_base_sha: Some(
                                 CommitSha(
@@ -663,6 +667,7 @@ mod tests {
                                         "bedf96270622ff19b4711dd7df3f19f4be1cba93",
                                     ),
                                 },
+                                head_repository: None,
                                 base: Branch {
                                     name: "main",
                                     sha: CommitSha(
@@ -677,6 +682,7 @@ mod tests {
                                         78085736,
                                     ),
                                     username: "vohoanglong0107",
+                                    email: None,
                                     html_url: Url {
                                         scheme: "https",
                                         cannot_be_a_base: false,
@@ -717,6 +723,7 @@ mod tests {
                                         fragment: None,
                                     },
                                 ),
+                                commit_count: 2,
                             },
                         },
                     ),
@@ -743,6 +750,7 @@ mod tests {
                                     4539057,
                                 ),
                                 username: "Kobzol",
+                                email: None,
                                 html_url: Url {
                                     scheme: "https",
                                     cannot_be_a_base: false,
@@ -795,6 +803,7 @@ mod tests {
                                         "5f935077074fb7e225332e672399306591db30dd",
                                     ),
                                 },
+                                head_repository: None,
                                 base: Branch {
                                     name: "main",
                                     sha: CommitSha(
@@ -809,6 +818,7 @@ mod tests {
                                         66968718,
                                     ),
                                     username: "Sakib25800",
+                                    email: None,
                                     html_url: Url {
                                         scheme: "https",
                                         cannot_be_a_base: false,
@@ -845,6 +855,7 @@ mod tests {
                                         fragment: None,
                                     },
                                 ),
+                                commit_count: 2,
                             },
                             draft: false,
                         },
@@ -878,6 +889,7 @@ mod tests {
                                         "cf36029b6811f9e73e0c2dd2d8e41e3168c0a21a",
                                     ),
                                 },
+                                head_repository: None,
                                 base: Branch {
                                     name: "main",
                                     sha: CommitSha(
@@ -892,6 +904,7 @@ mod tests {
                                         72911296,
                                     ),
                                     username: "geetanshjuneja",
+                                    email: None,
                                     html_url: Url {
                                         scheme: "https",
                                         cannot_be_a_base: false,
@@ -930,6 +943,7 @@ mod tests {
                                         fragment: None,
                                     },
                                 ),
+                                commit_count: 1,
                             },
                         },
                     ),
@@ -962,6 +976,7 @@ mod tests {
                                         "4964158cdea899629716b4f0c0e2f5ab72e3cb4a",
                                     ),
                                 },
+                                head_repository: None,
                                 base: Branch {
                                     name: "main",
                                     sha: CommitSha(
@@ -976,6 +991,7 @@ mod tests {
                                         72911296,
                                     ),
                                     username: "geetanshjuneja",
+                                    email: None,
                                     html_url: Url {
                                         scheme: "https",
                                         cannot_be_a_base: false,
@@ -1012,6 +1028,7 @@ mod tests {
                                         fragment: None,
                                     },
                                 ),
+                                commit_count: 1,
                             },
                         },
                     ),
@@ -1044,6 +1061,7 @@ mod tests {
                                         "cf36029b6811f9e73e0c2dd2d8e41e3168c0a21a",
                                     ),
                                 },
+                                head_repository: None,
                                 base: Branch {
                                     name: "main",
                                     sha: CommitSha(
@@ -1058,6 +1076,7 @@ mod tests {
                                         72911296,
                                     ),
                                     username: "geetanshjuneja",
+                                    email: None,
                                     html_url: Url {
                                         scheme: "https",
                                         cannot_be_a_base: false,
@@ -1096,6 +1115,7 @@ mod tests {
                                         fragment: None,
                                     },
                                 ),
+                                commit_count: 1,
                             },
                         },
                     ),
@@ -1128,6 +1148,7 @@ mod tests {
                                         "4964158cdea899629716b4f0c0e2f5ab72e3cb4a",
                                     ),
                                 },
+                                head_repository: None,
                                 base: Branch {
                                     name: "main",
                                     sha: CommitSha(
@@ -1142,6 +1163,7 @@ mod tests {
                                         72911296,
                                     ),
                                     username: "geetanshjuneja",
+                                    email: None,
                                     html_url: Url {
                                         scheme: "https",
                                         cannot_be_a_base: false,
@@ -1178,6 +1200,7 @@ mod tests {
                                         fragment: None,
                                     },
                                 ),
+                                commit_count: 1,
                             },
                             draft: true,
                         },
@@ -1211,6 +1234,7 @@ mod tests {
                                         "4964158cdea899629716b4f0c0e2f5ab72e3cb4a",
                                     ),
                                 },
+                                head_repository: None,
                                 base: Branch {
                                     name: "main",
                                     sha: CommitSha(
@@ -1225,6 +1249,7 @@ mod tests {
                                         72911296,
                                     ),
                                     username: "geetanshjuneja",
+                                    email: None,
                                     html_url: Url {
                                         scheme: "https",
                                         cannot_be_a_base: false,
@@ -1261,6 +1286,7 @@ mod tests {
                                         fragment: None,
                                     },
                                 ),
+                                commit_count: 1,
                             },
                         },
                     ),
@@ -1293,6 +1319,7 @@ mod tests {
                                         "4964158cdea899629716b4f0c0e2f5ab72e3cb4a",
                                     ),
                                 },
+                                head_repository: None,
                                 base: Branch {
                                     name: "main",
                                     sha: CommitSha(
@@ -1307,6 +1334,7 @@ mod tests {
                                         72911296,
                                     ),
                                     username: "geetanshjuneja",
+                                    email: None,
                                     html_url: Url {
                                         scheme: "https",
                                         cannot_be_a_base: false,
@@ -1343,6 +1371,7 @@ mod tests {
                                         fragment: None,
                                     },
                                 ),
+                                commit_count: 1,
                             },
                         },
                     ),
@@ -1369,6 +1398,7 @@ mod tests {
                                     4539057,
                                 ),
                                 username: "Kobzol",
+                                email: None,
                                 html_url: Url {
                                     scheme: "https",
                                     cannot_be_a_base: false,
@@ -1421,6 +1451,7 @@ mod tests {
                                         "3824fd9a567e3c27dff0cd51427e7562a0eda8da",
                                     ),
                                 },
+                                head_repository: None,
                                 base: Branch {
                                     name: "main",
                                     sha: CommitSha(
@@ -1435,6 +1466,7 @@ mod tests {
                                         66968718,
                                     ),
                                     username: "Sakib25800",
+                                    email: None,
                                     html_url: Url {
                                         scheme: "https",
                                         cannot_be_a_base: false,
@@ -1457,6 +1489,7 @@ mod tests {
                                             66968718,
                                         ),
                                         username: "Sakib25800",
+                                        email: None,
                                         html_url: Url {
                                             scheme: "https",
                                             cannot_be_a_base: false,
@@ -1493,6 +1526,7 @@ mod tests {
                                         fragment: None,
                                     },
                                 ),
+                                commit_count: 2,
                             },
                         },
                     ),
@@ -1525,6 +1559,7 @@ mod tests {
                                         "3824fd9a567e3c27dff0cd51427e7562a0eda8da",
                                     ),
                                 },
+                                head_repository: None,
                                 base: Branch {
                                     name: "main",
                                     sha: CommitSha(
@@ -1539,6 +1574,7 @@ mod tests {
                                         66968718,
                                     ),
                                     username: "Sakib25800",
+                                    email: None,
                                     html_url: Url {
                                         scheme: "https",
                                         cannot_be_a_base: false,
@@ -1575,6 +1611,7 @@ mod tests {
                                         fragment: None,
                                     },
                                 ),
+                                commit_count: 2,
                             },
                         },
                     ),

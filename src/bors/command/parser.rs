@@ -138,6 +138,7 @@ const DEFAULT_PARSERS: &[ParserFn] = &[
     parser_retry,
     parser_tree_ops,
     parser_cancel,
+    parser_squash,
 ];
 
 fn parse_command(input: &str, parsers: &[ParserFn]) -> ParseResult {
@@ -438,6 +439,14 @@ fn parser_tree_ops(command: &CommandPart<'_>, _parts: &[CommandPart<'_>]) -> Par
 fn parser_cancel(command: &CommandPart<'_>, _parts: &[CommandPart<'_>]) -> ParseResult {
     match command {
         CommandPart::Bare("cancel" | "yield") => Some(Ok(BorsCommand::Cancel)),
+        _ => None,
+    }
+}
+
+/// Parses `@bors squash` command.
+fn parser_squash(command: &CommandPart<'_>, _parts: &[CommandPart<'_>]) -> ParseResult {
+    match command {
+        CommandPart::Bare("squash") => Some(Ok(BorsCommand::Squash)),
         _ => None,
     }
 }
@@ -1352,6 +1361,13 @@ for the crater",
         let cmds = parse_commands("@bors yield");
         assert_eq!(cmds.len(), 1);
         assert_eq!(cmds[0], Ok(BorsCommand::Cancel));
+    }
+
+    #[test]
+    fn parse_squash() {
+        let cmds = parse_commands("@bors squash");
+        assert_eq!(cmds.len(), 1);
+        assert_eq!(cmds[0], Ok(BorsCommand::Squash));
     }
 
     #[test]
