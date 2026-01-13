@@ -27,6 +27,7 @@ pub enum CommentMetadata {
 pub enum CommentTag {
     TryBuildStarted,
     AutoBuildStarted,
+    MergeConflict,
 }
 
 impl Comment {
@@ -227,7 +228,7 @@ pub fn append_workflow_links_to_comment(comment_content: &mut String, workflow_u
     }
 }
 
-pub fn merge_conflict_comment(branch: &str) -> Comment {
+pub fn merge_attempt_merge_conflict_comment(branch: &str) -> Comment {
     let message = format!(
         r#":lock: Merge conflict
 
@@ -416,7 +417,7 @@ pub fn auto_build_push_failed_comment(error: &str) -> Comment {
     ))
 }
 
-pub fn conflict_comment(source: Option<PullRequestNumber>, was_unapproved: bool) -> Comment {
+pub fn merge_conflict_comment(source: Option<PullRequestNumber>, was_unapproved: bool) -> Comment {
     Comment::new(format!(
         r#":umbrella: The latest upstream changes{} made this pull request unmergeable. Please [resolve the merge conflicts](https://rustc-dev-guide.rust-lang.org/git.html#rebasing-and-conflicts).{}"#,
         source

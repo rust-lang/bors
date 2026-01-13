@@ -9,7 +9,7 @@ use crate::bors::comment::try_build_cancelled_comment;
 use crate::bors::comment::try_build_cancelled_with_failed_workflow_cancel_comment;
 use crate::bors::comment::{CommentTag, no_try_build_in_progress_comment};
 use crate::bors::comment::{
-    cant_find_last_parent_comment, merge_conflict_comment, try_build_started_comment,
+    cant_find_last_parent_comment, merge_attempt_merge_conflict_comment, try_build_started_comment,
 };
 use crate::bors::{
     MergeType, RepositoryState, TRY_BRANCH_NAME, bors_commit_author, create_merge_commit_message,
@@ -163,9 +163,20 @@ pub(super) async fn command_try_build(
             .await?;
         }
         MergeResult::Conflict => {
-            repo.client
-                .post_comment(pr.number(), merge_conflict_comment(&pr.github.head.name))
+            let comment = repo
+                .client
+                .post_comment(
+                    pr.number(),
+                    merge_attempt_merge_conflict_comment(&pr.github.head.name),
+                )
                 .await?;
+            db.record_tagged_bot_comment(
+                repo.repository(),
+                pr.number(),
+                CommentTag::MergeConflict,
+                &comment.node_id,
+            )
+            .await?;
         }
     }
     Ok(())
