@@ -1,15 +1,3 @@
-use sqlx::PgPool;
-
-use crate::bors::comment::CommentTag;
-use crate::bors::{BuildKind, PullRequestStatus, RollupMode};
-use crate::database::operations::update_pr_auto_build_id;
-use crate::database::{
-    BuildModel, BuildStatus, CommentModel, PullRequestModel, RepoModel, TreeState, WorkflowModel,
-    WorkflowStatus, WorkflowType,
-};
-use crate::github::PullRequestNumber;
-use crate::github::{CommitSha, GithubRepoName};
-
 use super::operations::{
     approve_pull_request, clear_auto_build, create_build, create_workflow, delegate_pull_request,
     delete_tagged_bot_comment, find_build, find_pr_by_build, get_nonclosed_pull_requests,
@@ -22,16 +10,68 @@ use super::operations::{
     upsert_pull_request, upsert_repository,
 };
 use super::{ApprovalInfo, DelegatedPermission, MergeableState, RunId, UpsertPullRequestParams};
+use crate::bors::comment::CommentTag;
+use crate::bors::{BuildKind, PullRequestStatus, RollupMode};
+use crate::database::operations::update_pr_auto_build_id;
+use crate::database::{
+    BuildModel, BuildStatus, CommentModel, PullRequestModel, RepoModel, TreeState, WorkflowModel,
+    WorkflowStatus, WorkflowType,
+};
+use crate::github::PullRequestNumber;
+use crate::github::{CommitSha, GithubRepoName};
+use anyhow::Context;
+use itertools::Either;
+use sqlx::PgPool;
+use sqlx::postgres::PgAdvisoryLock;
+use tracing::log;
 
 /// Provides access to a database using sqlx operations.
 #[derive(Clone)]
 pub struct PgDbClient {
-    pool: PgPool,
+    pub(super) pool: PgPool,
 }
 
 impl PgDbClient {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
+    }
+
+    /// Tries to perform the given asynchronous operation if there is no other concurrent operation
+    /// operation on the same `lock_name` at the same time.
+    ///
+    /// **If it is not possible to take the lock, then `func` will NOT be called at all!**
+    pub async fn ensure_not_concurrent<Func, R>(
+        &self,
+        lock_name: &str,
+        func: Func,
+    ) -> anyhow::Result<ExclusiveOperationOutcome<R>>
+    where
+        Func: AsyncFnOnce(ExclusiveLockProof) -> R,
+    {
+        let lock = PgAdvisoryLock::new(lock_name);
+
+        // Try to acquire the lock
+        let _guard = match lock
+            .try_acquire(self.pool.acquire().await?)
+            .await
+            .with_context(|| anyhow::anyhow!("Cannot acquire advisory lock {lock_name}"))?
+        {
+            Either::Left(guard) => guard,
+            Either::Right(_conn) => {
+                // Something is doing the same operation concurrently. Immediately return.
+                return Ok(ExclusiveOperationOutcome::Skipped);
+            }
+        };
+        // Create lock proof
+        let proof = ExclusiveLockProof { _proof: () };
+        // Run the "atomic" operation
+        let res = func(proof).await;
+        // Try to unlock the lock explicitly, to avoid waiting for the next DB operation on this
+        // connection.
+        if let Err(error) = _guard.release_now().await {
+            log::error!("Cannot unlock advisory lock {lock_name}: {error:?}");
+        }
+        Ok(ExclusiveOperationOutcome::Performed(res))
     }
 
     pub async fn approve(
@@ -336,4 +376,19 @@ impl PgDbClient {
     pub async fn delete_tagged_bot_comment(&self, comment: &CommentModel) -> anyhow::Result<()> {
         delete_tagged_bot_comment(&self.pool, comment.id).await
     }
+}
+
+pub enum ExclusiveOperationOutcome<R> {
+    /// The operation was performed.
+    Performed(R),
+    /// There was concurrent interference, the operation was not performed.
+    Skipped,
+}
+
+/// Proof that a Postgres session advisory lock is held.
+/// This should be used when perform GitHub API operations related to merges that have to
+/// be atomic and shouldn't be performed by multiple concurrently running bors instances (this can
+/// happen during redeploys).
+pub struct ExclusiveLockProof {
+    _proof: (),
 }

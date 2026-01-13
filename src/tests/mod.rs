@@ -35,6 +35,7 @@ mod mock;
 mod utils;
 
 // Public re-exports for use in tests
+use crate::bors::merge_queue::merge_queue_tick;
 use crate::bors::mergeability_queue::{MergeabilityQueueReceiver, check_mergeability};
 use crate::bors::process::QueueSenders;
 use crate::github::api::client::HideCommentReason;
@@ -541,6 +542,21 @@ impl BorsTester {
         wait_for_marker(
             async || {
                 self.senders.merge_queue().perform_tick().await.unwrap();
+                Ok(())
+            },
+            &WAIT_FOR_MERGE_QUEUE,
+        )
+        .await
+        .unwrap();
+    }
+
+    /// Run the merge queue tick directly, without going through the command queue.
+    pub async fn run_merge_queue_directly(&self) {
+        wait_for_marker(
+            async || {
+                merge_queue_tick(self.ctx.clone(), self.senders.mergeability_queue())
+                    .await
+                    .unwrap();
                 Ok(())
             },
             &WAIT_FOR_MERGE_QUEUE,

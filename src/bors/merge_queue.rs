@@ -17,7 +17,8 @@ use crate::bors::handlers::unapprove_pr;
 use crate::bors::mergeability_queue::{MergeabilityQueueSender, update_pr_with_known_mergeability};
 use crate::bors::{AUTO_BRANCH_NAME, PullRequestStatus, RepositoryState};
 use crate::database::{
-    ApprovalInfo, BuildModel, BuildStatus, MergeableState, PullRequestModel, QueueStatus,
+    ApprovalInfo, BuildModel, BuildStatus, ExclusiveLockProof, ExclusiveOperationOutcome,
+    MergeableState, PullRequestModel, QueueStatus,
 };
 use crate::github::api::client::CheckRunOutput;
 use crate::github::api::operations::{BranchUpdateError, ForcePush};
@@ -93,10 +94,36 @@ pub async fn merge_queue_tick(
 
     for repo in repos {
         let repo_name = repo.repository().to_string();
-        if let Err(error) = process_repository(&repo, &ctx, mergeability_sender).await {
-            tracing::error!("Error running merge queue for {repo_name}: {error:?}");
+        // We need to hold the lock over the whole merge queue operation, otherwise we would
+        // protect only the merge operations, but two concurrent bors instances could still start
+        // an auto build after one another (if the second instance didn't see the updated PR state
+        // from the DB).
+        let res = ctx
+            .db
+            .ensure_not_concurrent(
+                &format!("{}-auto-build", repo.repository()),
+                async |proof| {
+                    if let Err(error) =
+                        process_repository(&repo, &ctx, mergeability_sender, proof).await
+                    {
+                        tracing::error!("Error running merge queue for {repo_name}: {error:?}");
+                    }
+                },
+            )
+            .await
+            .context("Merge lock failure")?;
+        match res {
+            ExclusiveOperationOutcome::Performed(_) => {}
+            ExclusiveOperationOutcome::Skipped => {
+                tracing::warn!(
+                    "Merge queue tick was not performed due to other concurrent bors instance"
+                );
+            }
         }
     }
+
+    #[cfg(test)]
+    crate::bors::WAIT_FOR_MERGE_QUEUE.mark();
 
     Ok(())
 }
@@ -105,6 +132,7 @@ async fn process_repository(
     repo: &RepositoryState,
     ctx: &BorsContext,
     mergeability_sender: &MergeabilityQueueSender,
+    proof: ExclusiveLockProof,
 ) -> anyhow::Result<()> {
     if !repo.config.load().merge_queue_enabled {
         return Ok(());
@@ -161,8 +189,15 @@ async fn process_repository(
                 tracing::info!(
                     "Attempting to start auto build for {pr_num}. Current queue: {prs:?}"
                 );
-                match handle_start_auto_build(repo, ctx, pr, approval_info, mergeability_sender)
-                    .await?
+                match handle_start_auto_build(
+                    repo,
+                    ctx,
+                    pr,
+                    approval_info,
+                    mergeability_sender,
+                    &proof,
+                )
+                .await?
                 {
                     AutoBuildStartOutcome::BuildStarted | AutoBuildStartOutcome::PauseQueue => {
                         break;
@@ -262,20 +297,21 @@ enum AutoBuildStartOutcome {
 }
 
 /// Handle starting a new auto build for an approved PR.
-#[tracing::instrument(skip(repo, ctx, pr, mergeability_sender))]
+#[tracing::instrument(skip(repo, ctx, pr, mergeability_sender, proof))]
 async fn handle_start_auto_build(
     repo: &RepositoryState,
     ctx: &BorsContext,
     pr: &PullRequestModel,
     approval_info: &ApprovalInfo,
     mergeability_sender: &MergeabilityQueueSender,
+    proof: &ExclusiveLockProof,
 ) -> anyhow::Result<AutoBuildStartOutcome> {
     let pr_num = pr.number;
     if let MergeableState::HasConflicts = pr.mergeable_status() {
         tracing::warn!("Attempting to start auto build for unmergeable PR {pr_num}");
     }
 
-    let Err(error) = start_auto_build(repo, ctx, pr, approval_info).await else {
+    let Err(error) = start_auto_build(repo, ctx, pr, approval_info, proof).await else {
         tracing::info!("Started auto build for PR {pr_num}");
         return Ok(AutoBuildStartOutcome::BuildStarted);
     };
@@ -458,6 +494,7 @@ async fn start_auto_build(
     ctx: &BorsContext,
     pr: &PullRequestModel,
     approval_info: &ApprovalInfo,
+    proof: &ExclusiveLockProof,
 ) -> anyhow::Result<(), StartAutoBuildError> {
     let client = &repo.client;
 
@@ -494,6 +531,7 @@ async fn start_auto_build(
         &head_sha,
         &base_sha,
         "merge commit",
+        proof,
     )
     .await
     {
@@ -641,7 +679,6 @@ pub fn start_merge_queue(
                         &mergeability_sender,
                     )
                     .await;
-                    crate::bors::WAIT_FOR_MERGE_QUEUE.mark();
                 }
                 MergeQueueEvent::MaybePerformTick => {
                     // Note: this is not executed at all in tests
@@ -857,6 +894,28 @@ merge_queue_enabled = false
             email: "bors@rust-lang.org",
         }
         "#);
+    }
+
+    /// Make sure that when running bors concurrently, we will not start an auto build for a PR
+    /// more than once.
+    #[sqlx::test]
+    async fn auto_build_concurrent_bors_instances(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            ctx.approve(()).await?;
+            let concurrent_futs = (0..10)
+                .map(|_| ctx.run_merge_queue_directly())
+                .collect::<Vec<_>>();
+            futures::future::join_all(concurrent_futs).await;
+
+            assert_eq!(ctx.auto_branch().get_commit_history().len(), 1);
+            ctx.pr(())
+                .await
+                .expect_auto_build(|build| build.status == BuildStatus::Pending);
+            ctx.expect_comments((), 1).await;
+
+            Ok(())
+        })
+        .await;
     }
 
     #[sqlx::test]
