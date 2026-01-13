@@ -14,7 +14,7 @@ pub enum CommandParseError {
     MissingCommand,
     UnknownCommand(String),
     MissingArgValue { arg: String },
-    UnknownArg(String),
+    UnknownArg { arg: String, did_you_mean: String },
     DuplicateArg(String),
     ValidationError(String),
 }
@@ -270,7 +270,10 @@ fn parser_try(command: &CommandPart<'_>, parts: &[CommandPart<'_>]) -> ParseResu
     for part in parts {
         match part {
             CommandPart::Bare(key) => {
-                return Some(Err(CommandParseError::UnknownArg(key.to_string())));
+                return Some(Err(CommandParseError::UnknownArg {
+                    arg: key.to_string(),
+                    did_you_mean: "jobs=<jobs>|parent=<parent>".to_string(),
+                }));
             }
             CommandPart::KeyValue { key, value } => match (*key, *value) {
                 ("parent", "last") => parent = Some(Parent::Last),
@@ -299,7 +302,10 @@ fn parser_try(command: &CommandPart<'_>, parts: &[CommandPart<'_>]) -> ParseResu
                     jobs = raw_jobs;
                 }
                 _ => {
-                    return Some(Err(CommandParseError::UnknownArg(key.to_string())));
+                    return Some(Err(CommandParseError::UnknownArg {
+                        arg: key.to_string(),
+                        did_you_mean: "jobs=<jobs>|parent=<parent>".to_string(),
+                    }));
                 }
             },
         }
@@ -318,10 +324,23 @@ fn parser_try_cancel(command: &CommandPart<'_>, parts: &[CommandPart<'_>]) -> Pa
 }
 
 /// Parses `@bors delegate=<try|review>` or `@bors delegate+`.
-fn parser_delegate(command: &CommandPart<'_>, _parts: &[CommandPart<'_>]) -> ParseResult {
+fn parser_delegate(command: &CommandPart<'_>, parts: &[CommandPart<'_>]) -> ParseResult {
     match command {
-        CommandPart::Bare("delegate+" | "delegate") => {
+        CommandPart::Bare("delegate+") => {
             Some(Ok(BorsCommand::SetDelegate(DelegatedPermission::Review)))
+        }
+        CommandPart::Bare("delegate") => {
+            if !parts.is_empty() {
+                Some(Err(CommandParseError::UnknownArg {
+                    arg: match parts[0] {
+                        CommandPart::Bare(arg) => arg.to_owned(),
+                        CommandPart::KeyValue { key, .. } => key.to_owned(),
+                    },
+                    did_you_mean: "delegate=<try|review>".to_string(),
+                }))
+            } else {
+                Some(Ok(BorsCommand::SetDelegate(DelegatedPermission::Review)))
+            }
         }
         CommandPart::KeyValue {
             key: "delegate",
@@ -1163,15 +1182,31 @@ for the crater",
     #[test]
     fn parse_try_unknown_arg() {
         let cmds = parse_commands("@bors try a");
-        assert_eq!(cmds.len(), 1);
-        assert_eq!(cmds[0], Err(CommandParseError::UnknownArg("a".to_string())));
+        insta::assert_debug_snapshot!(cmds, @r#"
+        [
+            Err(
+                UnknownArg {
+                    arg: "a",
+                    did_you_mean: "jobs=<jobs>|parent=<parent>",
+                },
+            ),
+        ]
+        "#);
     }
 
     #[test]
     fn parse_try_unknown_kv_arg() {
         let cmds = parse_commands("@bors try a=b");
-        assert_eq!(cmds.len(), 1);
-        assert_eq!(cmds[0], Err(CommandParseError::UnknownArg("a".to_string())));
+        insta::assert_debug_snapshot!(cmds, @r#"
+        [
+            Err(
+                UnknownArg {
+                    arg: "a",
+                    did_you_mean: "jobs=<jobs>|parent=<parent>",
+                },
+            ),
+        ]
+        "#);
     }
 
     #[test]
@@ -1245,6 +1280,21 @@ for the crater",
             cmds[0],
             Ok(BorsCommand::SetDelegate(DelegatedPermission::Review))
         ));
+    }
+
+    #[test]
+    fn parse_delegate_unknown_arg() {
+        let cmds = parse_commands("@bors delegate try");
+        insta::assert_debug_snapshot!(cmds, @r#"
+        [
+            Err(
+                UnknownArg {
+                    arg: "try",
+                    did_you_mean: "delegate=<try|review>",
+                },
+            ),
+        ]
+        "#);
     }
 
     #[test]

@@ -549,8 +549,11 @@ async fn handle_comment(
                     CommandParseError::MissingArgValue { arg } => {
                         format!(r#"Unknown value for argument "{arg}"."#)
                     }
-                    CommandParseError::UnknownArg(arg) => {
-                        format!(r#"Unknown argument "{arg}"."#)
+                    CommandParseError::UnknownArg { arg, did_you_mean } => {
+                        format!(
+                            r#"Unknown argument "{arg}". Did you mean to use `{} {did_you_mean}`?"#,
+                            ctx.parser.prefix()
+                        )
                     }
                     CommandParseError::DuplicateArg(arg) => {
                         format!(r#"Argument "{arg}" found multiple times."#)
