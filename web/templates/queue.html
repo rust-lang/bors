@@ -321,6 +321,9 @@
     const getDataStatusFromCell = (cell) => cell?.dataset?.status || "";
     const interactiveSelector = "a, button, input, label, select, textarea";
 
+    // Have we already pre-selected rows based on the URL parameter?
+    let rowsPreselected = false;
+
     function initializeTable(groupByColumnName) {
         let config = {
             layout: {
@@ -384,10 +387,13 @@
                 }
             },
             initComplete: function() {
-              // Pre-select nodes based on query parameter
-              this.api().rows((idx, data, node) => {
-                return node.dataset.preselected === "true";
-              }).select();
+              // Pre-select nodes based on query parameter (just once)
+              if (!rowsPreselected) {
+                rowsPreselected = true;
+                this.api().rows((idx, data, node) => {
+                  return node.dataset.preselected === "true";
+                }).select();
+              }
               $("#table").show();
               $("#loading").hide();
 
