@@ -1,6 +1,6 @@
 use crate::database::ExclusiveLockProof;
 use crate::github::api::client::{CheckRunOutput, CommitAuthor, GithubRepositoryClient};
-use crate::github::{CommitSha, GithubRepoName, TreeSha};
+use crate::github::{CommitSha, TreeSha};
 use http::StatusCode;
 use octocrab::models::CheckRunId;
 use octocrab::models::checks::CheckRun;
@@ -8,14 +8,9 @@ use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
 use octocrab::params::repos::Reference;
 use thiserror::Error;
 
-/// How should we perform a push to a branch/git reference.
 #[derive(Copy, Clone, PartialEq, Eq)]
 pub enum ForcePush {
-    /// Force push. If the branch doesn't exist, create it.
     Yes,
-    /// Force push, but only if the branch does exist. If it doesn't exist, exit with an error.
-    YesIfBranchExists,
-    /// Only try to push to the branch, without creating a branch and without force pushing.
     No,
 }
 
@@ -53,7 +48,6 @@ pub struct Commit {
     pub sha: CommitSha,
     pub parents: Vec<CommitSha>,
     pub tree: TreeSha,
-    pub author: Option<CommitAuthor>,
 }
 
 /// Creates a merge commit on the given repository.
@@ -106,13 +100,7 @@ pub async fn merge_branches(
                 .into_iter()
                 .map(|parent| CommitSha(parent.sha))
                 .collect();
-            // TODO
-            Commit {
-                sha,
-                tree,
-                parents,
-                author: None,
-            }
+            Commit { sha, tree, parents }
         }
     }
 
@@ -184,19 +172,18 @@ pub async fn merge_branches(
 /// Forcefully updates the branch to the given commit `sha`.
 /// If the branch does not exist yet, it instead attempts to create it.
 pub async fn set_branch_to_commit(
-    client: &GithubRepositoryClient,
-    repo: &GithubRepoName,
+    repo: &GithubRepositoryClient,
     branch_name: String,
     sha: &CommitSha,
     force: ForcePush,
 ) -> Result<(), BranchUpdateError> {
     // Fast-path: assume that the branch exists
-    match update_branch(client, repo, branch_name.clone(), sha, force).await {
+    match update_branch(repo, branch_name.clone(), sha, force).await {
         Ok(_) => Ok(()),
         // Branch does not exist yet or there was some other error.
         // Try to create it instead if we are force pushing.
         Err(BranchUpdateError::ValidationFailed(_)) if force == ForcePush::Yes => {
-            match create_branch(client, repo, branch_name.clone(), sha).await {
+            match create_branch(repo, branch_name.clone(), sha).await {
                 Ok(_) => Ok(()),
                 Err(error) => Err(BranchUpdateError::Custom(error)),
             }
@@ -206,14 +193,12 @@ pub async fn set_branch_to_commit(
 }
 
 pub async fn create_branch(
-    client: &GithubRepositoryClient,
-    repo: &GithubRepoName,
+    repo: &GithubRepositoryClient,
     name: String,
     sha: &CommitSha,
 ) -> Result<(), String> {
-    client
-        .client()
-        .repos(repo.owner(), repo.name())
+    repo.client()
+        .repos(repo.repository().owner(), repo.repository().name())
         .create_ref(&Reference::Branch(name), sha.as_ref())
         .await
         .map_err(|error| format!("Cannot create branch: {error}"))?;
@@ -236,14 +221,14 @@ pub enum BranchUpdateError {
 
 /// Force update the branch with the given `branch_name` to the given `sha`.
 async fn update_branch(
-    client: &GithubRepositoryClient,
-    repo: &GithubRepoName,
+    repo: &GithubRepositoryClient,
     branch_name: String,
     sha: &CommitSha,
     force: ForcePush,
 ) -> Result<(), BranchUpdateError> {
     let url = format!(
-        "/repos/{repo}/git/refs/{}",
+        "/repos/{}/git/refs/{}",
+        repo.repository(),
         Reference::Branch(branch_name.clone()).ref_url()
     );
 
@@ -255,17 +240,13 @@ async fn update_branch(
         force: bool,
     }
 
-    let force = match force {
-        ForcePush::Yes | ForcePush::YesIfBranchExists => true,
-        ForcePush::No => false,
-    };
-    let res = client
+    let res = repo
         .client()
         ._patch(
             url.as_str(),
             Some(&Request {
                 sha: sha.as_ref(),
-                force,
+                force: matches!(force, ForcePush::Yes),
             }),
         )
         .await?;
@@ -274,7 +255,7 @@ async fn update_branch(
     tracing::trace!(
         "Updating branch response: status={}, text={:?}",
         status,
-        client.client().body_to_string(res).await
+        repo.client().body_to_string(res).await
     );
 
     match status {
