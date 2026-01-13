@@ -1,3 +1,4 @@
+use crate::PgDbClient;
 use crate::bors::RepositoryState;
 use crate::bors::{Comment, format_help};
 use crate::github::PullRequestNumber;
@@ -5,12 +6,13 @@ use std::sync::Arc;
 
 pub(super) async fn command_help(
     repo: Arc<RepositoryState>,
+    db: &PgDbClient,
     pr_number: PullRequestNumber,
 ) -> anyhow::Result<()> {
     let help = format_help();
 
     repo.client
-        .post_comment(pr_number, Comment::new(help.to_string()))
+        .post_comment(pr_number, Comment::new(help.to_string()), db)
         .await?;
     Ok(())
 }

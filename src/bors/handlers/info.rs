@@ -81,7 +81,7 @@ pub(super) async fn command_info(
     }
 
     repo.client
-        .post_comment(pr.number(), Comment::new(message))
+        .post_comment(pr.number(), Comment::new(message), &db)
         .await?;
 
     Ok(())

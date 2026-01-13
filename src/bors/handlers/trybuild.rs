@@ -3,18 +3,17 @@ use std::sync::Arc;
 use super::has_permission;
 use super::{PullRequestData, deny_request};
 use crate::PgDbClient;
-use crate::bors::build::{
-    CancelBuildConclusion, CancelBuildError, cancel_build, hide_build_started_comments,
-};
+use crate::bors::build::{CancelBuildConclusion, CancelBuildError, cancel_build};
 use crate::bors::command::{CommandPrefix, Parent};
 use crate::bors::comment::try_build_cancelled_comment;
 use crate::bors::comment::try_build_cancelled_with_failed_workflow_cancel_comment;
 use crate::bors::comment::{CommentTag, no_try_build_in_progress_comment};
 use crate::bors::comment::{
-    cant_find_last_parent_comment, merge_conflict_comment, try_build_started_comment,
+    cant_find_last_parent_comment, merge_attempt_merge_conflict_comment, try_build_started_comment,
 };
 use crate::bors::{
     MergeType, RepositoryState, TRY_BRANCH_NAME, bors_commit_author, create_merge_commit_message,
+    hide_tagged_comments,
 };
 use crate::database::{BuildModel, BuildStatus, PullRequestModel};
 use crate::github::api::client::{CheckRunOutput, GithubRepositoryClient};
@@ -51,14 +50,14 @@ pub(super) async fn command_try_build(
 ) -> anyhow::Result<()> {
     let repo = repo.as_ref();
     if !has_permission(repo, author, pr, PermissionType::Try).await? {
-        deny_request(repo, pr.number(), author, PermissionType::Try).await?;
+        deny_request(repo, &db, pr.number(), author, PermissionType::Try).await?;
         return Ok(());
     }
 
     if Some(Parent::Last) == parent && pr.db.try_build.is_none() {
         tracing::warn!("try build was requested with parent=last but no previous build was found");
         repo.client
-            .post_comment(pr.number(), cant_find_last_parent_comment())
+            .post_comment(pr.number(), cant_find_last_parent_comment(), &db)
             .await?;
         return Ok(());
     };
@@ -77,7 +76,7 @@ pub(super) async fn command_try_build(
         let res = cancel_previous_try_build(repo, &db, build).await?;
         // Also try to hide previous "Try build started" comments that weren't hidden yet
         if let Err(error) =
-            hide_build_started_comments(repo, &db, pr.db, CommentTag::TryBuildStarted).await
+            hide_tagged_comments(repo, &db, pr.db, CommentTag::TryBuildStarted).await
         {
             tracing::error!("Failed to hide previous try build started comment(s): {error:?}");
         }
@@ -143,8 +142,7 @@ pub(super) async fn command_try_build(
                 }
             }
 
-            let comment = repo
-                .client
+            repo.client
                 .post_comment(
                     pr.number(),
                     try_build_started_comment(
@@ -153,19 +151,17 @@ pub(super) async fn command_try_build(
                         bot_prefix,
                         cancelled_workflow_urls,
                     ),
+                    &db,
                 )
                 .await?;
-            db.record_tagged_bot_comment(
-                repo.repository(),
-                pr.number(),
-                CommentTag::TryBuildStarted,
-                &comment.node_id,
-            )
-            .await?;
         }
         MergeResult::Conflict => {
             repo.client
-                .post_comment(pr.number(), merge_conflict_comment(&pr.github.head.name))
+                .post_comment(
+                    pr.number(),
+                    merge_attempt_merge_conflict_comment(&pr.github.head.name),
+                    &db,
+                )
                 .await?;
         }
     }
@@ -239,7 +235,7 @@ pub(super) async fn command_try_cancel(
 ) -> anyhow::Result<()> {
     let repo = repo.as_ref();
     if !has_permission(repo, author, pr, PermissionType::Try).await? {
-        deny_request(repo, pr.number(), author, PermissionType::Try).await?;
+        deny_request(repo, &db, pr.number(), author, PermissionType::Try).await?;
         return Ok(());
     }
 
@@ -247,7 +243,7 @@ pub(super) async fn command_try_cancel(
     let Some(build) = get_pending_try_build(pr.db) else {
         tracing::info!("No try build found when trying to cancel a try build");
         repo.client
-            .post_comment(pr_number, no_try_build_in_progress_comment())
+            .post_comment(pr_number, no_try_build_in_progress_comment(), &db)
             .await?;
         return Ok(());
     };
@@ -267,6 +263,7 @@ pub(super) async fn command_try_cancel(
                 .post_comment(
                     pr_number,
                     try_build_cancelled_comment(workflows.into_iter().map(|w| w.url)),
+                    &db,
                 )
                 .await?
         }
@@ -282,6 +279,7 @@ pub(super) async fn command_try_cancel(
                 .post_comment(
                     pr_number,
                     try_build_cancelled_with_failed_workflow_cancel_comment(),
+                    &db,
                 )
                 .await?
         }

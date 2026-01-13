@@ -1,6 +1,6 @@
 use crate::config::RepositoryConfig;
 use crate::github::GithubRepoName;
-use crate::github::api::client::{CommitAuthor, GithubRepositoryClient};
+use crate::github::api::client::{CommitAuthor, GithubRepositoryClient, HideCommentReason};
 use crate::permissions::UserPermissions;
 #[cfg(test)]
 use crate::tests::TestSyncMarker;
@@ -34,8 +34,10 @@ pub mod merge_queue;
 pub mod mergeability_queue;
 pub mod process;
 
+use crate::PgDbClient;
 use crate::bors::command::BorsCommand;
-use crate::database::WorkflowStatus;
+use crate::bors::comment::CommentTag;
+use crate::database::{PullRequestModel, WorkflowStatus};
 pub use command::CommandPrefix;
 
 /// Branch where CI checks run for auto builds.
@@ -361,4 +363,30 @@ pub fn create_merge_commit_message(pr: handlers::PullRequestData, merge_type: Me
         MergeType::Auto => {}
     }
     message
+}
+
+/// Hide all previous comments on the given PR with the given tag.
+async fn hide_tagged_comments(
+    repo: &RepositoryState,
+    db: &PgDbClient,
+    pr: &PullRequestModel,
+    tag: CommentTag,
+) -> anyhow::Result<()> {
+    let outdated = db
+        .get_tagged_bot_comments(repo.repository(), pr.number, tag)
+        .await?;
+    for comment in outdated {
+        let hide_comment = repo
+            .client
+            .hide_comment(&comment.node_id, HideCommentReason::Outdated);
+        let delete_comment_from_db = db.delete_tagged_bot_comment(&comment);
+
+        // Send the requests concurrently, as they are independent of one another.
+        // If we fail to hide the comment, delete it from the DB anyway, it is best-effort after
+        // all.
+        let (res1, res2) = tokio::join!(hide_comment, delete_comment_from_db);
+        res1?;
+        res2?;
+    }
+    Ok(())
 }

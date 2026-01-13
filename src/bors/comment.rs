@@ -13,6 +13,7 @@ use std::time::Duration;
 pub struct Comment {
     text: String,
     metadata: Option<CommentMetadata>,
+    tag: Option<CommentTag>,
 }
 
 #[derive(Serialize)]
@@ -27,6 +28,7 @@ pub enum CommentMetadata {
 pub enum CommentTag {
     TryBuildStarted,
     AutoBuildStarted,
+    MergeConflict,
 }
 
 impl Comment {
@@ -34,7 +36,17 @@ impl Comment {
         Self {
             text,
             metadata: None,
+            tag: None,
         }
+    }
+
+    pub fn with_tag(mut self, tag: CommentTag) -> Self {
+        self.tag = Some(tag);
+        self
+    }
+
+    pub fn tag(&self) -> Option<CommentTag> {
+        self.tag
     }
 
     pub fn render(&self) -> String {
@@ -78,6 +90,7 @@ pub fn try_build_succeeded_comment(
         metadata: Some(CommentMetadata::TryBuildCompleted {
             merge_sha: commit_sha.to_string(),
         }),
+        tag: None,
     }
 }
 
@@ -209,7 +222,7 @@ pub fn try_build_started_comment(
     )
     .unwrap();
 
-    Comment::new(msg)
+    Comment::new(msg).with_tag(CommentTag::TryBuildStarted)
 }
 
 pub fn append_workflow_links_to_comment(comment_content: &mut String, workflow_urls: Vec<String>) {
@@ -227,7 +240,7 @@ pub fn append_workflow_links_to_comment(comment_content: &mut String, workflow_u
     }
 }
 
-pub fn merge_conflict_comment(branch: &str) -> Comment {
+pub fn merge_attempt_merge_conflict_comment(branch: &str) -> Comment {
     let message = format!(
         r#":lock: Merge conflict
 
@@ -258,7 +271,7 @@ handled during merge and rebase. This is normal, and you should still perform st
 </details>
 "#
     );
-    Comment::new(message)
+    Comment::new(message).with_tag(CommentTag::MergeConflict)
 }
 
 pub fn unapproved_because_of_sha_mismatch_comment(
@@ -382,6 +395,7 @@ pub fn auto_build_started_comment(head_sha: &CommitSha, merge_sha: &CommitSha) -
     Comment::new(format!(
         ":hourglass: Testing commit {head_sha} with merge {merge_sha}..."
     ))
+    .with_tag(CommentTag::AutoBuildStarted)
 }
 
 pub fn auto_build_succeeded_comment(
@@ -407,6 +421,7 @@ Pushing {merge_sha} to `{base_ref}`..."#
             base_ref: base_ref.to_owned(),
             merge_sha: merge_sha.0.clone(),
         }),
+        tag: None,
     }
 }
 
@@ -416,7 +431,7 @@ pub fn auto_build_push_failed_comment(error: &str) -> Comment {
     ))
 }
 
-pub fn conflict_comment(source: Option<PullRequestNumber>, was_unapproved: bool) -> Comment {
+pub fn merge_conflict_comment(source: Option<PullRequestNumber>, was_unapproved: bool) -> Comment {
     Comment::new(format!(
         r#":umbrella: The latest upstream changes{} made this pull request unmergeable. Please [resolve the merge conflicts](https://rustc-dev-guide.rust-lang.org/git.html#rebasing-and-conflicts).{}"#,
         source
@@ -427,7 +442,7 @@ pub fn conflict_comment(source: Option<PullRequestNumber>, was_unapproved: bool)
         } else {
             ""
         }
-    ))
+    )).with_tag(CommentTag::MergeConflict)
 }
 
 // :-)

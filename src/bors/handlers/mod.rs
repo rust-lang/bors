@@ -83,9 +83,10 @@ pub async fn handle_bors_repository_event(
                 author = comment.author.username
             );
             let pr_number = comment.pr_number;
-            if let Err(error) = handle_comment(Arc::clone(&repo), db, ctx, comment, &senders)
-                .instrument(span.clone())
-                .await
+            if let Err(error) =
+                handle_comment(Arc::clone(&repo), db.clone(), ctx, comment, &senders)
+                    .instrument(span.clone())
+                    .await
             {
                 repo.client
                     .post_comment(
@@ -93,6 +94,7 @@ pub async fn handle_bors_repository_event(
                         Comment::new(
                             ":x: Encountered an error while executing command".to_string(),
                         ),
+                        &db,
                     )
                     .await
                     .context("Cannot send comment reacting to an error")?;
@@ -463,11 +465,15 @@ async fn handle_comment(
                     }
                     BorsCommand::Help => {
                         let span = tracing::info_span!("Help");
-                        command_help(repo, pr.number()).instrument(span).await
+                        command_help(repo, &ctx.db, pr.number())
+                            .instrument(span)
+                            .await
                     }
                     BorsCommand::Ping => {
                         let span = tracing::info_span!("Ping");
-                        command_ping(repo, pr.number()).instrument(span).await
+                        command_ping(repo, &ctx.db, pr.number())
+                            .instrument(span)
+                            .await
                     }
                     BorsCommand::Try { parent, jobs } => {
                         let span = tracing::info_span!("Try");
@@ -560,7 +566,7 @@ async fn handle_comment(
                 )?;
                 tracing::warn!("{}", message);
                 repo.client
-                    .post_comment(pr_github.number, Comment::new(message))
+                    .post_comment(pr_github.number, Comment::new(message), &database)
                     .await
                     .context("Could not reply to PR comment")?;
             }
@@ -601,6 +607,7 @@ async fn reload_repos(
 /// Deny permission for a request.
 async fn deny_request(
     repo: &RepositoryState,
+    db: &PgDbClient,
     pr_number: PullRequestNumber,
     author: &GithubUser,
     permission_type: PermissionType,
@@ -616,6 +623,7 @@ async fn deny_request(
                 "@{}: :key: Insufficient privileges: not in {} users",
                 author.username, permission_type
             )),
+            db,
         )
         .await?;
     Ok(())

@@ -1,9 +1,8 @@
 use crate::PgDbClient;
-use crate::bors::comment::CommentTag;
 use crate::bors::{RepositoryState, WorkflowRun};
-use crate::database::{BuildModel, BuildStatus, PullRequestModel, WorkflowModel};
+use crate::database::{BuildModel, BuildStatus, WorkflowModel};
 use crate::github::CommitSha;
-use crate::github::api::client::{GithubRepositoryClient, HideCommentReason};
+use crate::github::api::client::GithubRepositoryClient;
 use octocrab::models::CheckRunId;
 use octocrab::models::workflows::{Conclusion, Job, Status};
 use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
@@ -107,25 +106,6 @@ pub async fn get_failed_jobs(
             }
         })
         .collect())
-}
-
-/// Hide all previous "Try/auto build started" comments on the given PR.
-pub async fn hide_build_started_comments(
-    repo: &RepositoryState,
-    db: &PgDbClient,
-    pr: &PullRequestModel,
-    tag: CommentTag,
-) -> anyhow::Result<()> {
-    let outdated = db
-        .get_tagged_bot_comments(repo.repository(), pr.number, tag)
-        .await?;
-    for comment in outdated {
-        repo.client
-            .hide_comment(&comment.node_id, HideCommentReason::Outdated)
-            .await?;
-        db.delete_tagged_bot_comment(&comment).await?;
-    }
-    Ok(())
 }
 
 /// Load workflows for the given build both from the DB and GitHub, and consolidate their state.

@@ -8,6 +8,7 @@ use std::fmt::Debug;
 use std::time::Duration;
 use tracing::log;
 
+use crate::PgDbClient;
 use crate::bors::event::PullRequestComment;
 use crate::bors::{Comment, WorkflowRun};
 use crate::config::{CONFIG_FILE_PATH, RepositoryConfig, deserialize_config};
@@ -192,8 +193,9 @@ impl GithubRepositoryClient {
         &self,
         pr: PullRequestNumber,
         comment: Comment,
+        db: &PgDbClient,
     ) -> anyhow::Result<octocrab::models::issues::Comment> {
-        let comment = perform_retryable("post_comment", RetryMethod::default(), || async {
+        let gh_comment = perform_retryable("post_comment", RetryMethod::default(), || async {
             self.client
                 .issues(&self.repository().owner, &self.repository().name)
                 .create_comment(pr.0, comment.render())
@@ -201,7 +203,13 @@ impl GithubRepositoryClient {
                 .with_context(|| format!("Cannot post comment to {}", self.format_pr(pr)))
         })
         .await?;
-        Ok(comment)
+
+        if let Some(tag) = comment.tag() {
+            db.record_tagged_bot_comment(self.repository(), pr, tag, &gh_comment.node_id)
+                .await?;
+        }
+
+        Ok(gh_comment)
     }
 
     /// Set the given branch to a commit with the given `sha`.

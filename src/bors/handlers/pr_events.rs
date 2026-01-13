@@ -5,6 +5,7 @@ use crate::bors::event::{
     PullRequestReadyForReview, PullRequestReopened, PullRequestUnassigned, PushToBranch,
 };
 
+use crate::bors::comment::CommentTag;
 use crate::bors::handlers::handle_comment;
 use crate::bors::handlers::unapprove_pr;
 use crate::bors::handlers::workflow::{AutoBuildCancelReason, maybe_cancel_auto_build};
@@ -12,7 +13,7 @@ use crate::bors::mergeability_queue::{
     MergeabilityQueueSender, set_pr_mergeability_based_on_user_action,
 };
 use crate::bors::process::QueueSenders;
-use crate::bors::{AUTO_BRANCH_NAME, BorsContext};
+use crate::bors::{AUTO_BRANCH_NAME, BorsContext, hide_tagged_comments};
 use crate::bors::{Comment, PullRequestStatus, RepositoryState};
 use crate::database::{PullRequestModel, UpsertPullRequestParams};
 use crate::github::{CommitSha, PullRequestNumber};
@@ -43,7 +44,7 @@ pub(super) async fn handle_pull_request_edited(
     }
 
     unapprove_pr(&repo_state, &db, &pr_model, pr).await?;
-    notify_of_edited_pr(&repo_state, pr_number, &payload.pull_request.base.name).await
+    notify_of_edited_pr(&repo_state, &db, pr_number, &payload.pull_request.base.name).await
 }
 
 pub(super) async fn handle_push_to_pull_request(
@@ -68,6 +69,8 @@ pub(super) async fn handle_push_to_pull_request(
     )
     .await?;
 
+    hide_tagged_comments(&repo_state, &db, &pr_model, CommentTag::MergeConflict).await?;
+
     if !pr_model.is_approved() {
         return Ok(());
     }
@@ -83,6 +86,7 @@ pub(super) async fn handle_push_to_pull_request(
     if !had_failed_build {
         notify_of_pushed_pr(
             &repo_state,
+            &db,
             pr_number,
             pr.head.sha.clone(),
             auto_build_cancel_message,
@@ -322,6 +326,7 @@ fn create_pr_description_comment(payload: &PullRequestOpened) -> PullRequestComm
 
 async fn notify_of_edited_pr(
     repo: &RepositoryState,
+    db: &PgDbClient,
     pr_number: PullRequestNumber,
     base_name: &str,
 ) -> anyhow::Result<()> {
@@ -332,6 +337,7 @@ async fn notify_of_edited_pr(
                 r#":warning: The base branch changed to `{base_name}`, and the
 PR will need to be re-approved."#,
             )),
+            db,
         )
         .await?;
     Ok(())
@@ -339,6 +345,7 @@ PR will need to be re-approved."#,
 
 async fn notify_of_pushed_pr(
     repo: &RepositoryState,
+    db: &PgDbClient,
     pr_number: PullRequestNumber,
     head_sha: CommitSha,
     cancel_message: Option<String>,
@@ -352,7 +359,7 @@ async fn notify_of_pushed_pr(
     }
 
     repo.client
-        .post_comment(pr_number, Comment::new(comment))
+        .post_comment(pr_number, Comment::new(comment), db)
         .await?;
     Ok(())
 }
@@ -364,6 +371,7 @@ mod tests {
 
     use crate::bors::PullRequestStatus;
     use crate::bors::merge_queue::AUTO_BUILD_CHECK_RUN_NAME;
+    use crate::github::api::client::HideCommentReason;
     use crate::tests::{BorsBuilder, BorsTester, GitHub};
     use crate::tests::{Commit, default_repo_name};
     use crate::{
@@ -485,6 +493,32 @@ mod tests {
             ctx.drain_mergeability_queue().await?;
 
             // No comment should be posted
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn push_to_pr_hide_previous_mergeability_notification(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            let pr2 = ctx.open_pr((), |_| {}).await?;
+            ctx.push_to_branch(default_branch_name(), Commit::new("sha", "foo"))
+                .await?;
+
+            // At this point, PR2 should be in the mergeability queue
+            // Now, change it to become unmergeable
+            ctx.modify_pr_in_gh(pr2.id(), |pr| {
+                pr.mergeable_state = OctocrabMergeableState::Dirty;
+            });
+            ctx.run_mergeability_check().await?;
+            // Merge conflict comment
+            let comment = ctx.get_next_comment(pr2.id()).await?;
+
+            // The comment should be hidden after this push
+            ctx.push_to_pr(pr2.id()).await?;
+
+            ctx.expect_hidden_comment(&comment, HideCommentReason::Outdated);
+
             Ok(())
         })
         .await;

@@ -652,6 +652,7 @@ impl sqlx::Encode<'_, sqlx::Postgres> for CommentTag {
         let tag = match self {
             CommentTag::TryBuildStarted => "TryBuildStarted",
             CommentTag::AutoBuildStarted => "AutoBuildStarted",
+            CommentTag::MergeConflict => "MergeConflict",
         };
         <&str as sqlx::Encode<sqlx::Postgres>>::encode(tag, buf)
     }
@@ -662,6 +663,7 @@ impl sqlx::Decode<'_, sqlx::Postgres> for CommentTag {
         match <&str as sqlx::Decode<sqlx::Postgres>>::decode(value)? {
             "TryBuildStarted" => Ok(CommentTag::TryBuildStarted),
             "AutoBuildStarted" => Ok(CommentTag::AutoBuildStarted),
+            "MergeConflict" => Ok(CommentTag::MergeConflict),
             tag => Err(format!("Unknown comment tag: {tag}").into()),
         }
     }
