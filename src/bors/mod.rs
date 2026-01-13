@@ -78,6 +78,7 @@ pub fn format_help() -> &'static str {
         BorsCommand::TreeClosed(_) => {}
         BorsCommand::Retry => {}
         BorsCommand::Cancel => {}
+        BorsCommand::Squash => {}
     }
 
     r#"
@@ -106,6 +107,7 @@ You can use the following commands:
 - `try cancel`: Cancel a running try build on the current PR.
 - `retry`: Clear a failed auto build status from an approved PR. This will cause the merge queue to eventually attempt to merge the PR again.
 - `cancel` | `yield`: Cancel a running auto build on the current PR.
+- `squash`: Squash the commits of a PR into a single commit.
 - `info`: Get information about the current PR
 
 ## Repository management

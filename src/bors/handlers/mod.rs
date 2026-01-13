@@ -15,6 +15,7 @@ use crate::bors::handlers::refresh::{
 use crate::bors::handlers::review::{
     command_approve, command_close_tree, command_open_tree, command_unapprove,
 };
+use crate::bors::handlers::squash::command_squash;
 use crate::bors::handlers::trybuild::{command_try_build, command_try_cancel};
 use crate::bors::handlers::workflow::{handle_workflow_completed, handle_workflow_started};
 use crate::bors::labels::handle_label_trigger;
@@ -46,6 +47,7 @@ mod ping;
 mod pr_events;
 mod refresh;
 mod review;
+mod squash;
 mod trybuild;
 mod workflow;
 
@@ -534,6 +536,12 @@ async fn handle_comment(
                         )
                         .instrument(span)
                         .await
+                    }
+                    BorsCommand::Squash => {
+                        let span = tracing::info_span!("Squash");
+                        command_squash(repo, database, pr, &comment.author, ctx.parser.prefix())
+                            .instrument(span)
+                            .await
                     }
                 };
                 if result.is_err() {
