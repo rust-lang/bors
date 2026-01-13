@@ -320,7 +320,7 @@ fn parser_try_cancel(command: &CommandPart<'_>, parts: &[CommandPart<'_>]) -> Pa
 /// Parses `@bors delegate=<try|review>` or `@bors delegate+`.
 fn parser_delegate(command: &CommandPart<'_>, _parts: &[CommandPart<'_>]) -> ParseResult {
     match command {
-        CommandPart::Bare("delegate+") => {
+        CommandPart::Bare("delegate+" | "delegate") => {
             Some(Ok(BorsCommand::SetDelegate(DelegatedPermission::Review)))
         }
         CommandPart::KeyValue {
@@ -1228,8 +1228,18 @@ for the crater",
     }
 
     #[test]
-    fn parse_delegate_author() {
+    fn parse_delegate_plus_author() {
         let cmds = parse_commands("@bors delegate+");
+        assert_eq!(cmds.len(), 1);
+        assert!(matches!(
+            cmds[0],
+            Ok(BorsCommand::SetDelegate(DelegatedPermission::Review))
+        ));
+    }
+
+    #[test]
+    fn parse_delegate_author() {
+        let cmds = parse_commands("@bors delegate");
         assert_eq!(cmds.len(), 1);
         assert!(matches!(
             cmds[0],
