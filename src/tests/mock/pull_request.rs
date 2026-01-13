@@ -143,7 +143,12 @@ async fn mock_pr_list(repo_clone: Arc<Mutex<Repo>>, mock_server: &MockServer) {
                                 true
                             }
                         })
-                        .map(|pr| GitHubPullRequest::from(pr.clone()))
+                        .map(|pr| {
+                            let mut pr = GitHubPullRequest::from(pr.clone());
+                            // GitHub always returns unknown mergeable state from this endpoint
+                            pr.mergeable_state = OctocrabMergeableState::Unknown;
+                            pr
+                        })
                         .collect::<Vec<_>>(),
                 )
             }
