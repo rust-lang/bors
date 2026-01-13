@@ -58,7 +58,7 @@ pub(super) async fn command_approve(
 
     let approver = match approver {
         Approver::Myself => author.username.clone(),
-        Approver::Specified(approver) => approver.clone(),
+        Approver::Specified(approver) => normalize_approvers(approver),
     };
     let approval_info = ApprovalInfo {
         approver: approver.clone(),
@@ -72,6 +72,16 @@ pub(super) async fn command_approve(
     merge_queue_tx.notify().await?;
     notify_of_approval(ctx, &db, &repo_state, pr, priority, approver.as_str()).await?;
     handle_label_trigger(&repo_state, pr.github, LabelTrigger::Approved).await
+}
+
+/// Normalize approvers (given after @bors r=) by removing leading @, possibly from multiple
+/// usernames split by a comma.
+fn normalize_approvers(approvers: &str) -> String {
+    approvers
+        .split(',')
+        .map(|approver| approver.trim_start_matches('@'))
+        .collect::<Vec<&str>>()
+        .join(",")
 }
 
 /// Keywords that will prevent an approval if they appear in the PR's title.
@@ -509,6 +519,44 @@ approved = ["+approved"]
             );
 
             ctx.pr(()).await.expect_approved_by(approve_user);
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn approve_normalize_approver(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            ctx.post_comment("@bors r=@foo").await?;
+            insta::assert_snapshot!(
+                ctx.get_next_comment_text(()).await?,
+                @"
+            :pushpin: Commit pr-1-sha has been approved by `foo`
+
+            It is now in the [queue](https://bors-test.com/queue/borstest) for this repository.
+            "
+            );
+
+            ctx.pr(()).await.expect_approved_by("foo");
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn approve_normalize_approver_multiple(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            ctx.post_comment("@bors r=@foo,bar,@baz").await?;
+            insta::assert_snapshot!(
+                ctx.get_next_comment_text(()).await?,
+                @"
+            :pushpin: Commit pr-1-sha has been approved by `foo,bar,baz`
+
+            It is now in the [queue](https://bors-test.com/queue/borstest) for this repository.
+            "
+            );
+
+            ctx.pr(()).await.expect_approved_by("foo,bar,baz");
             Ok(())
         })
         .await;
