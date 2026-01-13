@@ -11,7 +11,7 @@ use crate::{
     github::{GithubRepoName, PullRequest, PullRequestNumber},
 };
 use chrono::{DateTime, Utc};
-pub use client::PgDbClient;
+pub use client::{ExclusiveLockProof, ExclusiveOperationOutcome, PgDbClient};
 pub use octocrab::models::pulls::MergeableState as OctocrabMergeableState;
 use sqlx::error::BoxDynError;
 use sqlx::{Database, Postgres};

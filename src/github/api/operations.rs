@@ -1,12 +1,12 @@
+use crate::database::ExclusiveLockProof;
+use crate::github::api::client::{CheckRunOutput, CommitAuthor, GithubRepositoryClient};
+use crate::github::{CommitSha, TreeSha};
 use http::StatusCode;
 use octocrab::models::CheckRunId;
 use octocrab::models::checks::CheckRun;
 use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
 use octocrab::params::repos::Reference;
 use thiserror::Error;
-
-use crate::github::api::client::{CheckRunOutput, CommitAuthor, GithubRepositoryClient};
-use crate::github::{CommitSha, TreeSha};
 
 #[derive(Copy, Clone, PartialEq, Eq)]
 pub enum ForcePush {
@@ -412,6 +412,7 @@ pub async fn attempt_merge(
     head_sha: &CommitSha,
     base_sha: &CommitSha,
     merge_message: &str,
+    _merge_lock_is_held: &ExclusiveLockProof,
 ) -> anyhow::Result<MergeResult> {
     tracing::debug!(
         "Attempting to merge {head_sha} into base SHA {base_sha} using branch {branch_name}"
