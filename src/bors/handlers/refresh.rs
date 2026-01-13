@@ -58,6 +58,7 @@ pub async fn reload_repository_config(repo: Arc<RepositoryState>) -> anyhow::Res
 pub async fn sync_pull_requests_state(
     repo: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
+    mergeability_queue_tx: &MergeabilityQueueSender,
 ) -> anyhow::Result<()> {
     tracing::debug!("Refreshing PR state from GitHub");
 
@@ -87,17 +88,26 @@ pub async fn sync_pull_requests_state(
                 tracing::debug!(
                     "PR {pr_num} has changed on GitHub, updating in DB (from {gh_pr:?} to {db_pr:?})",
                 );
-                db.upsert_pull_request(repo_name, gh_pr.clone().into())
+                let pr = db
+                    .upsert_pull_request(repo_name, gh_pr.clone().into())
                     .await?;
+                // The above will always mark the PR as having stale mergeability, because the
+                // mergeable state will be "unknown" when coming from the list PRs GitHub endpoint.
+                // So we enqueue the PR here.
+                mergeability_queue_tx.enqueue_pr(&pr, None);
             }
             Some(_) => {
                 // Nothing to be done here, the common case
             }
             None => {
                 // Nonclosed PRs in GitHub that are either not in the DB or marked as closed
-                tracing::debug!("PR {} not found in open PRs in DB, upserting it", pr_num);
-                db.upsert_pull_request(repo_name, gh_pr.clone().into())
+                tracing::debug!("PR {pr_num} not found in open PRs in DB, upserting it");
+                // Insert it into the DB
+                let pr = db
+                    .upsert_pull_request(repo_name, gh_pr.clone().into())
                     .await?;
+                // And also check its mergeability
+                mergeability_queue_tx.enqueue_pr(&pr, None);
             }
         }
     }
@@ -310,9 +320,17 @@ auto_build_failed = ["+failed"]
     #[sqlx::test]
     async fn refresh_new_pr(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
-            let number = ctx.repo().lock().add_pr(User::default_pr_author()).number;
+            let pr_id = ctx.repo().lock().add_pr(User::default_pr_author()).id();
             ctx.refresh_prs().await;
-            ctx.pr(number).await.expect_status(PullRequestStatus::Open);
+            ctx.pr(pr_id.clone())
+                .await
+                .expect_status(PullRequestStatus::Open)
+                .expect_mergeable_state(MergeableState::Unknown);
+            ctx.drain_mergeability_queue().await?;
+            ctx.pr(pr_id)
+                .await
+                .expect_mergeable_state(MergeableState::Mergeable);
+
             Ok(())
         })
         .await;
@@ -383,16 +401,16 @@ auto_build_failed = ["+failed"]
             });
 
             ctx.refresh_prs().await;
-            // Refreshing PRs does not update mergeability!
             ctx.pr(pr.id())
                 .await
-                .expect_mergeable_state(MergeableState::Mergeable)
+                // Currently enqueued
+                .expect_mergeable_state(MergeableState::Unknown)
                 .expect_title("Foobar")
                 .expect_assignees(&[&User::try_user().name])
                 .expect_base_branch("stable");
 
-            // Although it should add the PR to the mergeability queue
-            ctx.run_mergeability_check().await?;
+            // It should add the PR to the mergeability queue
+            ctx.drain_mergeability_queue().await?;
             // Mergeability notification
             ctx.expect_comments(pr.id(), 1).await;
             Ok(())

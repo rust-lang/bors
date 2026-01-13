@@ -287,7 +287,8 @@ pub async fn handle_bors_global_event(
             let span = tracing::info_span!("Refresh PR status");
             for_each_repo(&ctx, |repo| {
                 let subspan = tracing::info_span!("Repo", "{}", repo.repository());
-                sync_pull_requests_state(repo, Arc::clone(&db)).instrument(subspan)
+                sync_pull_requests_state(repo, Arc::clone(&db), senders.mergeability_queue())
+                    .instrument(subspan)
             })
             .instrument(span)
             .await?;
