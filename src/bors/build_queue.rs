@@ -97,16 +97,8 @@ pub async fn handle_build_queue_event(
                         // First try to complete builds, and only then timeout then
                         // Because if the bot was offline for some time, we want to first attempt to
                         // actually finish the build, otherwise it might get instantly timeouted.
-                        if !maybe_complete_build(
-                            &repo,
-                            db,
-                            &build,
-                            &pr,
-                            &merge_queue_tx,
-                            None,
-                            None,
-                        )
-                        .await?
+                        if !maybe_complete_build(&repo, db, &build, &pr, &merge_queue_tx, None)
+                            .await?
                         {
                             maybe_timeout_build(&repo, db, &build, &pr, timeout).await?;
                         }
@@ -161,7 +153,6 @@ pub async fn handle_build_queue_event(
                 &pr,
                 &merge_queue_tx,
                 Some(CompletionTrigger { error_context }),
-                event.running_time,
             )
             .await?;
         }
@@ -233,7 +224,6 @@ async fn maybe_complete_build(
     pr: &PullRequestModel,
     merge_queue_tx: &MergeQueueSender,
     completion_trigger: Option<CompletionTrigger>,
-    running_time: Option<chrono::Duration>,
 ) -> anyhow::Result<bool> {
     assert_eq!(
         build.status,
@@ -314,11 +304,22 @@ async fn maybe_complete_build(
         }),
     };
 
+    let compute_duration = || {
+        // Compute the time when the earliest workflow started, and when the latest workflow ended
+        let start = workflow_runs.iter().map(|run| run.created_at).min()?;
+        let end = workflow_runs
+            .iter()
+            .filter_map(|run| run.duration.map(|d| run.created_at + d))
+            .max()?;
+
+        // The build duration is the difference between those two
+        (end - start).to_std().ok()
+    };
     db.update_build(
         build.id,
         UpdateBuildParams::default()
             .status(status)
-            .duration(running_time),
+            .duration(compute_duration()),
     )
     .await?;
     if let Some(trigger) = trigger {

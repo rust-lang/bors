@@ -374,11 +374,23 @@ impl GithubRepositoryClient {
             let mut stream = std::pin::pin!(response.into_stream(&self.client));
             while let Some(run) = stream.try_next().await? {
                 let status = get_status(&run);
+                let duration = match status {
+                    WorkflowStatus::Pending => None,
+                    WorkflowStatus::Success |
+                    WorkflowStatus::Failure => {
+                        let start = run.created_at;
+                        let end = run.updated_at;
+                        (end - start).to_std().ok()
+                    }
+                };
+
                 let run = WorkflowRun {
                     id: run.id,
                     name: run.name,
                     url: run.html_url.to_string(),
                     status,
+                    created_at: run.created_at,
+                    duration
                 };
                 runs.push(run);
             }

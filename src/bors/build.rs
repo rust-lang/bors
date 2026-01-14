@@ -156,6 +156,12 @@ pub async fn load_workflow_runs(
                 name: db_run.name,
                 url: db_run.url,
                 status: db_run.status,
+                // This is not really the time the workflow started running, but rather when we
+                // inserted it into the DB. But that hopefully should not matter, as the duration is
+                // `None` and this should never occur anyway :)
+                created_at: db_run.created_at,
+                // We currently do not store workflow duration in the DB
+                duration: None,
             });
         }
     }

@@ -10,11 +10,12 @@ use crate::{
     bors::{PullRequestStatus, RollupMode},
     github::{GithubRepoName, PullRequest, PullRequestNumber},
 };
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Utc};
 pub use client::{ExclusiveLockProof, ExclusiveOperationOutcome, PgDbClient};
 pub use octocrab::models::pulls::MergeableState as OctocrabMergeableState;
 use sqlx::error::BoxDynError;
 use sqlx::{Database, Postgres, postgres::types::PgInterval};
+use std::time::Duration;
 
 mod client;
 pub(crate) mod operations;
@@ -405,10 +406,12 @@ impl sqlx::Encode<'_, sqlx::Postgres> for PgDuration {
 impl sqlx::Decode<'_, sqlx::Postgres> for PgDuration {
     fn decode(value: sqlx::postgres::PgValueRef<'_>) -> Result<Self, BoxDynError> {
         let interval = PgInterval::decode(value)?;
-        let days_us = interval.days as i64 * 86_400_000_000;
-        let total_us = interval.microseconds + days_us;
+        assert!(interval.days >= 0);
+        assert!(interval.microseconds >= 0);
+        let days_us = interval.days as u64 * 86_400_000_000;
+        let total_us = interval.microseconds as u64 + days_us;
 
-        Ok(PgDuration(Duration::microseconds(total_us)))
+        Ok(PgDuration(Duration::from_micros(total_us)))
     }
 }
 

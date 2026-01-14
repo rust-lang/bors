@@ -185,6 +185,8 @@ pub struct WorkflowRun {
     pub name: String,
     pub url: String,
     pub status: WorkflowStatus,
+    pub created_at: DateTime<Utc>,
+    pub duration: Option<Duration>,
 }
 
 pub struct FailedWorkflowRun {
