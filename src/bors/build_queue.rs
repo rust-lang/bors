@@ -21,7 +21,9 @@ use crate::bors::merge_queue::MergeQueueSender;
 use crate::bors::{
     BuildKind, FailedWorkflowRun, RepositoryState, elapsed_time_since, hide_tagged_comments,
 };
-use crate::database::{BuildModel, BuildStatus, PullRequestModel, WorkflowStatus};
+use crate::database::{
+    BuildModel, BuildStatus, PullRequestModel, UpdateBuildParams, WorkflowStatus,
+};
 use crate::github::{CommitSha, GithubRepoName, LabelTrigger};
 use crate::{BorsContext, PgDbClient};
 use anyhow::Context;
@@ -121,8 +123,11 @@ pub async fn handle_build_queue_event(
                         tracing::warn!(
                             "Detected orphaned pending without a PR, marking it as timeouted: {build:?}"
                         );
-                        db.update_build_column(&build, BuildStatus::Timeouted, None)
-                            .await?;
+                        db.update_build(
+                            build.id,
+                            UpdateBuildParams::default().status(BuildStatus::Timeouted),
+                        )
+                        .await?;
                     }
                     anyhow::Ok(())
                 };
@@ -309,7 +314,13 @@ async fn maybe_complete_build(
         }),
     };
 
-    db.update_build_column(build, status, running_time).await?;
+    db.update_build(
+        build.id,
+        UpdateBuildParams::default()
+            .status(status)
+            .duration(running_time),
+    )
+    .await?;
     if let Some(trigger) = trigger {
         let pr = repo.client.get_pull_request(pr_num).await?;
         handle_label_trigger(repo, &pr, trigger).await?;

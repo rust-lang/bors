@@ -1,8 +1,7 @@
+use chrono::DateTime;
 use chrono::Utc;
-use chrono::{DateTime, Duration};
 use sqlx::postgres::PgExecutor;
 
-use super::ApprovalInfo;
 use super::ApprovalStatus;
 use super::Assignees;
 use super::BuildModel;
@@ -15,6 +14,7 @@ use super::TreeState;
 use super::UpsertPullRequestParams;
 use super::WorkflowStatus;
 use super::WorkflowType;
+use super::{ApprovalInfo, PrimaryKey, UpdateBuildParams};
 use crate::bors::PullRequestStatus;
 use crate::bors::RollupMode;
 use crate::bors::comment::CommentTag;
@@ -646,23 +646,29 @@ WHERE repository = $1
     .await
 }
 
-pub(crate) async fn update_build_column(
+pub(crate) async fn update_build(
     executor: impl PgExecutor<'_>,
-    build_id: i32,
-    status: BuildStatus,
-    duration: Option<Duration>,
+    build_id: PrimaryKey,
+    params: UpdateBuildParams,
 ) -> anyhow::Result<()> {
-    measure_db_query("update_build_column", || async {
+    let UpdateBuildParams {
+        status,
+        duration,
+        check_run_id,
+    } = params;
+    measure_db_query("update_build", || async {
         sqlx::query!(
             r#"
 UPDATE build
 SET
-    status   = $1,
-    duration = COALESCE($2, duration)
-WHERE id = $3
+    status   = COALESCE($1, status),
+    duration = COALESCE($2, duration),
+    check_run_id = COALESCE($3, check_run_id)
+WHERE id = $4
 "#,
-            status as BuildStatus,
+            status as Option<BuildStatus>,
             duration as Option<_>,
+            check_run_id as Option<i64>,
             build_id
         )
         .execute(executor)
@@ -991,24 +997,6 @@ pub(crate) async fn upsert_repository(
         .execute(executor)
         .await?;
 
-        Ok(())
-    })
-    .await
-}
-
-pub(crate) async fn update_build_check_run_id(
-    executor: impl PgExecutor<'_>,
-    build_id: i32,
-    check_run_id: i64,
-) -> anyhow::Result<()> {
-    measure_db_query("update_build_check_run_id", || async {
-        sqlx::query!(
-            "UPDATE build SET check_run_id = $1 WHERE id = $2",
-            check_run_id,
-            build_id
-        )
-        .execute(executor)
-        .await?;
         Ok(())
     })
     .await

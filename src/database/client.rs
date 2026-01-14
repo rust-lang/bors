@@ -6,21 +6,23 @@ use super::operations::{
     get_workflows_for_build, insert_repo_if_not_exists, record_tagged_bot_comment,
     set_pr_assignees, set_pr_mergeability_state, set_pr_priority, set_pr_rollup, set_pr_status,
     set_stale_mergeability_status_by_base_branch, unapprove_pull_request, undelegate_pull_request,
-    update_build_check_run_id, update_build_column, update_pr_try_build_id, update_workflow_status,
-    upsert_pull_request, upsert_repository,
+    update_build, update_pr_try_build_id, update_workflow_status, upsert_pull_request,
+    upsert_repository,
 };
-use super::{ApprovalInfo, DelegatedPermission, MergeableState, RunId, UpsertPullRequestParams};
+use super::{
+    ApprovalInfo, DelegatedPermission, MergeableState, PrimaryKey, RunId, UpdateBuildParams,
+    UpsertPullRequestParams,
+};
 use crate::bors::comment::CommentTag;
 use crate::bors::{BuildKind, PullRequestStatus, RollupMode};
 use crate::database::operations::update_pr_auto_build_id;
 use crate::database::{
-    BuildModel, BuildStatus, CommentModel, PullRequestModel, RepoModel, TreeState, WorkflowModel,
+    BuildModel, CommentModel, PullRequestModel, RepoModel, TreeState, WorkflowModel,
     WorkflowStatus, WorkflowType,
 };
 use crate::github::PullRequestNumber;
 use crate::github::{CommitSha, GithubRepoName};
 use anyhow::Context;
-use chrono::Duration;
 use itertools::Either;
 use sqlx::PgPool;
 use sqlx::postgres::PgAdvisoryLock;
@@ -257,21 +259,12 @@ impl PgDbClient {
         get_pending_builds(&self.pool, repo).await
     }
 
-    pub async fn update_build_column(
+    pub async fn update_build(
         &self,
-        build: &BuildModel,
-        status: BuildStatus,
-        duration: Option<Duration>,
+        build_id: PrimaryKey,
+        params: UpdateBuildParams,
     ) -> anyhow::Result<()> {
-        update_build_column(&self.pool, build.id, status, duration).await
-    }
-
-    pub async fn update_build_check_run_id(
-        &self,
-        build_id: i32,
-        check_run_id: i64,
-    ) -> anyhow::Result<()> {
-        update_build_check_run_id(&self.pool, build_id, check_run_id).await
+        update_build(&self.pool, build_id, params).await
     }
 
     pub async fn create_workflow(

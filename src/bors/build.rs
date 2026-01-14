@@ -1,6 +1,6 @@
 use crate::PgDbClient;
 use crate::bors::{RepositoryState, WorkflowRun};
-use crate::database::{BuildModel, BuildStatus, WorkflowModel};
+use crate::database::{BuildModel, BuildStatus, UpdateBuildParams, WorkflowModel};
 use crate::github::CommitSha;
 use crate::github::api::client::GithubRepositoryClient;
 use octocrab::models::CheckRunId;
@@ -50,7 +50,7 @@ pub async fn cancel_build(
         CancelBuildConclusion::Timeout => BuildStatus::Timeouted,
         CancelBuildConclusion::Cancel => BuildStatus::Cancelled,
     };
-    db.update_build_column(build, status, None)
+    db.update_build(build.id, UpdateBuildParams::default().status(status))
         .await
         .map_err(CancelBuildError::FailedToMarkBuildAsCancelled)?;
 

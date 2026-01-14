@@ -650,6 +650,34 @@ impl From<PullRequest> for UpsertPullRequestParams {
     }
 }
 
+/// Updates the build table with the given fields.
+/// If `None`, the given column will not be updated.
+/// In other words, none of those columns can be set to `None` after being set at least once.
+#[derive(Debug, Default)]
+pub struct UpdateBuildParams {
+    status: Option<BuildStatus>,
+    duration: Option<Duration>,
+    check_run_id: Option<i64>,
+}
+
+impl UpdateBuildParams {
+    pub fn status(self, status: BuildStatus) -> Self {
+        Self {
+            status: Some(status),
+            ..self
+        }
+    }
+    pub fn check_run_id(self, check_run_id: i64) -> Self {
+        Self {
+            check_run_id: Some(check_run_id),
+            ..self
+        }
+    }
+    pub fn duration(self, duration: Option<Duration>) -> Self {
+        Self { duration, ..self }
+    }
+}
+
 /// Represents a repository configuration.
 pub struct RepoModel {
     pub id: PrimaryKey,
