@@ -1608,12 +1608,13 @@ labels_blocking_approval = ["proposed-final-comment-period", "final-comment-peri
             ctx.wait_for_pr((), |pr| pr.mergeable_status() == MergeableState::Mergeable)
                 .await?;
             let pr_number = ctx.pr(()).await.get_gh_pr().number;
-            ctx.db().set_pr_mergeable_state(
-                &default_repo_name(),
-                pr_number,
-                MergeableState::HasConflicts,
-            )
-            .await?;
+            ctx.db()
+                .set_pr_mergeable_state(
+                    &default_repo_name(),
+                    pr_number,
+                    MergeableState::HasConflicts,
+                )
+                .await?;
             ctx.modify_pr_in_gh((), |pr| {
                 pr.mergeable_state = OctocrabMergeableState::Clean;
             });
@@ -1644,12 +1645,13 @@ labels_blocking_approval = ["proposed-final-comment-period", "final-comment-peri
             ctx.wait_for_pr((), |pr| pr.mergeable_status() == MergeableState::Mergeable)
                 .await?;
             let pr_number = ctx.pr(()).await.get_gh_pr().number;
-            ctx.db().set_pr_mergeable_state(
-                &default_repo_name(),
-                pr_number,
-                MergeableState::HasConflicts,
-            )
-            .await?;
+            ctx.db()
+                .set_pr_mergeable_state(
+                    &default_repo_name(),
+                    pr_number,
+                    MergeableState::HasConflicts,
+                )
+                .await?;
             ctx.modify_pr_in_gh((), |pr| {
                 pr.mergeable_state = OctocrabMergeableState::Clean;
             });
