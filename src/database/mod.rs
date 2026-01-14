@@ -10,11 +10,11 @@ use crate::{
     bors::{PullRequestStatus, RollupMode},
     github::{GithubRepoName, PullRequest, PullRequestNumber},
 };
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 pub use client::{ExclusiveLockProof, ExclusiveOperationOutcome, PgDbClient};
 pub use octocrab::models::pulls::MergeableState as OctocrabMergeableState;
 use sqlx::error::BoxDynError;
-use sqlx::{Database, Postgres};
+use sqlx::{Database, Postgres, postgres::types::PgInterval};
 
 mod client;
 pub(crate) mod operations;
@@ -325,6 +325,15 @@ impl Display for BuildStatus {
     }
 }
 
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub struct PgDuration(pub Duration);
+
+impl PgDuration {
+    pub fn inner(&self) -> Duration {
+        self.0
+    }
+}
+
 /// Represents a single (merged) commit.
 #[derive(Debug, PartialEq, sqlx::Type)]
 #[sqlx(type_name = "build")]
@@ -345,6 +354,8 @@ pub struct BuildModel {
     pub check_run_id: Option<i64>,
     /// What kind of build this is (`try` or `auto`).
     pub kind: BuildKind,
+    /// Build time to finish CI workflow.
+    pub duration: Option<PgDuration>,
 }
 
 impl sqlx::Type<sqlx::Postgres> for BuildKind {
@@ -373,6 +384,31 @@ impl sqlx::Decode<'_, sqlx::Postgres> for BuildKind {
             "auto" => Ok(Self::Auto),
             kind => Err(format!("Unknown build kind: {kind}").into()),
         }
+    }
+}
+
+impl sqlx::Type<sqlx::Postgres> for PgDuration {
+    fn type_info() -> sqlx::postgres::PgTypeInfo {
+        <PgInterval as sqlx::Type<sqlx::Postgres>>::type_info()
+    }
+}
+
+impl sqlx::Encode<'_, sqlx::Postgres> for PgDuration {
+    fn encode_by_ref(
+        &self,
+        buf: &mut sqlx::postgres::PgArgumentBuffer,
+    ) -> Result<sqlx::encode::IsNull, BoxDynError> {
+        self.0.encode_by_ref(buf)
+    }
+}
+
+impl sqlx::Decode<'_, sqlx::Postgres> for PgDuration {
+    fn decode(value: sqlx::postgres::PgValueRef<'_>) -> Result<Self, BoxDynError> {
+        let interval = PgInterval::decode(value)?;
+        let days_us = interval.days as i64 * 86_400_000_000;
+        let total_us = interval.microseconds + days_us;
+
+        Ok(PgDuration(Duration::microseconds(total_us)))
     }
 }
 

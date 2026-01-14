@@ -268,7 +268,7 @@ async fn handle_successful_build(
 
         if let Some(error_comment) = error_comment {
             ctx.db
-                .update_build_status(auto_build, BuildStatus::Failure)
+                .update_build_column(auto_build, BuildStatus::Failure, None)
                 .await?;
             repo.client
                 .post_comment(pr_num, error_comment, &ctx.db)

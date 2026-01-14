@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\nSELECT\n    id,\n    repository as \"repository: GithubRepoName\",\n    branch,\n    kind as \"kind: BuildKind\",\n    commit_sha,\n    status as \"status: BuildStatus\",\n    parent,\n    created_at as \"created_at: DateTime<Utc>\",\n    check_run_id\nFROM build\nWHERE repository = $1\n    AND status = $2\n",
+  "query": "\nSELECT\n    id,\n    repository as \"repository: GithubRepoName\",\n    branch,\n    kind as \"kind: BuildKind\",\n    commit_sha,\n    status as \"status: BuildStatus\",\n    parent,\n    created_at as \"created_at: DateTime<Utc>\",\n    check_run_id,\n    duration as \"duration: PgDuration\"\nFROM build\nWHERE repository = $1\n    AND status = $2\n",
   "describe": {
     "columns": [
       {
@@ -47,6 +47,11 @@
         "ordinal": 8,
         "name": "check_run_id",
         "type_info": "Int8"
+      },
+      {
+        "ordinal": 9,
+        "name": "duration: PgDuration",
+        "type_info": "Interval"
       }
     ],
     "parameters": {
@@ -64,8 +69,9 @@
       false,
       false,
       false,
+      true,
       true
     ]
   },
-  "hash": "c34bcda0288120bab553f7ca8bf0f84c02a320d4663394ed4f4ca04d73faf718"
+  "hash": "b2763d7e6f9e8bede01a3623db1f64fe0bdc27a305a089d9a3d29fafb140dfa9"
 }

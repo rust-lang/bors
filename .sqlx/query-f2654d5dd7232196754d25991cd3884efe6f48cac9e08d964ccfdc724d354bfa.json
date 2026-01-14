@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\nUPDATE build\nSET\n    status   = $1,\n    duration = COALESCE($2, duration)\nWHERE id = $3\n",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Interval",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f2654d5dd7232196754d25991cd3884efe6f48cac9e08d964ccfdc724d354bfa"
+}

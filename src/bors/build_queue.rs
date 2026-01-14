@@ -95,8 +95,16 @@ pub async fn handle_build_queue_event(
                         // First try to complete builds, and only then timeout then
                         // Because if the bot was offline for some time, we want to first attempt to
                         // actually finish the build, otherwise it might get instantly timeouted.
-                        if !maybe_complete_build(&repo, db, &build, &pr, &merge_queue_tx, None)
-                            .await?
+                        if !maybe_complete_build(
+                            &repo,
+                            db,
+                            &build,
+                            &pr,
+                            &merge_queue_tx,
+                            None,
+                            None,
+                        )
+                        .await?
                         {
                             maybe_timeout_build(&repo, db, &build, &pr, timeout).await?;
                         }
@@ -113,7 +121,7 @@ pub async fn handle_build_queue_event(
                         tracing::warn!(
                             "Detected orphaned pending without a PR, marking it as timeouted: {build:?}"
                         );
-                        db.update_build_status(&build, BuildStatus::Timeouted)
+                        db.update_build_column(&build, BuildStatus::Timeouted, None)
                             .await?;
                     }
                     anyhow::Ok(())
@@ -148,6 +156,7 @@ pub async fn handle_build_queue_event(
                 &pr,
                 &merge_queue_tx,
                 Some(CompletionTrigger { error_context }),
+                event.running_time,
             )
             .await?;
         }
@@ -219,6 +228,7 @@ async fn maybe_complete_build(
     pr: &PullRequestModel,
     merge_queue_tx: &MergeQueueSender,
     completion_trigger: Option<CompletionTrigger>,
+    running_time: Option<chrono::Duration>,
 ) -> anyhow::Result<bool> {
     assert_eq!(
         build.status,
@@ -299,7 +309,7 @@ async fn maybe_complete_build(
         }),
     };
 
-    db.update_build_status(build, status).await?;
+    db.update_build_column(build, status, running_time).await?;
     if let Some(trigger) = trigger {
         let pr = repo.client.get_pull_request(pr_num).await?;
         handle_label_trigger(repo, &pr, trigger).await?;

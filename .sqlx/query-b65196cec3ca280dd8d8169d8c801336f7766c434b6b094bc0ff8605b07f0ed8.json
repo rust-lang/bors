@@ -126,6 +126,10 @@
                 [
                   "kind",
                   "Text"
+                ],
+                [
+                  "duration",
+                  "Interval"
                 ]
               ]
             }
@@ -175,6 +179,10 @@
                 [
                   "kind",
                   "Text"
+                ],
+                [
+                  "duration",
+                  "Interval"
                 ]
               ]
             }
