@@ -463,7 +463,7 @@ mod tests {
 
     use crate::bors::TRY_BRANCH_NAME;
     use crate::bors::merge_queue::AUTO_BUILD_CHECK_RUN_NAME;
-    use crate::database::{DelegatedPermission, MergeableState, OctocrabMergeableState, TreeState};
+    use crate::database::{DelegatedPermission, OctocrabMergeableState, TreeState};
     use crate::tests::BorsTester;
     use crate::tests::default_repo_name;
     use crate::{
