@@ -4,8 +4,9 @@ use crate::bors::RepositoryState;
 use crate::bors::command::RollupMode;
 use crate::bors::command::{Approver, CommandPrefix};
 use crate::bors::comment::{
-    approve_blocking_labels_present, approve_non_open_pr_comment, approve_wip_title,
-    approved_comment, delegate_comment, delegate_try_builds_comment, unapprove_non_open_pr_comment,
+    approve_blocking_labels_present, approve_merge_conflict_comment, approve_non_open_pr_comment,
+    approve_wip_title, approved_comment, delegate_comment, delegate_try_builds_comment,
+    unapprove_non_open_pr_comment,
 };
 use crate::bors::handlers::workflow::{AutoBuildCancelReason, maybe_cancel_auto_build};
 use crate::bors::handlers::{PullRequestData, deny_request};
@@ -15,7 +16,7 @@ use crate::bors::merge_queue::MergeQueueSender;
 use crate::bors::{Comment, PullRequestStatus};
 use crate::database::ApprovalInfo;
 use crate::database::DelegatedPermission;
-use crate::database::TreeState;
+use crate::database::{MergeableState, TreeState};
 use crate::github::LabelTrigger;
 use crate::github::{GithubUser, PullRequestNumber};
 use crate::permissions::PermissionType;
@@ -122,6 +123,11 @@ async fn check_pr_approval_validity(
         .collect();
     if !blocking_labels.is_empty() {
         return Ok(Some(approve_blocking_labels_present(&blocking_labels)));
+    }
+
+    let mergeable_state = MergeableState::from(pr.github.mergeable_state.clone());
+    if mergeable_state == MergeableState::HasConflicts {
+        return Ok(Some(approve_merge_conflict_comment()));
     }
 
     Ok(None)
@@ -457,7 +463,7 @@ mod tests {
 
     use crate::bors::TRY_BRANCH_NAME;
     use crate::bors::merge_queue::AUTO_BUILD_CHECK_RUN_NAME;
-    use crate::database::{DelegatedPermission, TreeState};
+    use crate::database::{DelegatedPermission, OctocrabMergeableState, TreeState};
     use crate::tests::BorsTester;
     use crate::tests::default_repo_name;
     use crate::{
@@ -1559,6 +1565,20 @@ labels_blocking_approval = ["proposed-final-comment-period", "final-comment-peri
                 CheckRunStatus::Completed,
                 Some(CheckRunConclusion::Cancelled),
             );
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn approve_pr_with_merge_conflict_dirty(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            ctx.modify_pr_in_gh((), |pr| {
+                pr.mergeable_state = OctocrabMergeableState::Dirty;
+            });
+            ctx.post_comment("@bors r+").await?;
+            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @":clipboard: This PR cannot be approved because it has merge conflicts. Please resolve the conflicts and try again.");
+            ctx.pr(()).await.expect_unapproved();
             Ok(())
         })
         .await;
