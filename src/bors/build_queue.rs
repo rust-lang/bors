@@ -21,7 +21,9 @@ use crate::bors::merge_queue::MergeQueueSender;
 use crate::bors::{
     BuildKind, FailedWorkflowRun, RepositoryState, elapsed_time_since, hide_tagged_comments,
 };
-use crate::database::{BuildModel, BuildStatus, PullRequestModel, WorkflowStatus};
+use crate::database::{
+    BuildModel, BuildStatus, PullRequestModel, UpdateBuildParams, WorkflowStatus,
+};
 use crate::github::{CommitSha, GithubRepoName, LabelTrigger};
 use crate::{BorsContext, PgDbClient};
 use anyhow::Context;
@@ -95,16 +97,8 @@ pub async fn handle_build_queue_event(
                         // First try to complete builds, and only then timeout then
                         // Because if the bot was offline for some time, we want to first attempt to
                         // actually finish the build, otherwise it might get instantly timeouted.
-                        if !maybe_complete_build(
-                            &repo,
-                            db,
-                            &build,
-                            &pr,
-                            &merge_queue_tx,
-                            None,
-                            None,
-                        )
-                        .await?
+                        if !maybe_complete_build(&repo, db, &build, &pr, &merge_queue_tx, None)
+                            .await?
                         {
                             maybe_timeout_build(&repo, db, &build, &pr, timeout).await?;
                         }
@@ -121,8 +115,11 @@ pub async fn handle_build_queue_event(
                         tracing::warn!(
                             "Detected orphaned pending without a PR, marking it as timeouted: {build:?}"
                         );
-                        db.update_build_column(&build, BuildStatus::Timeouted, None)
-                            .await?;
+                        db.update_build(
+                            build.id,
+                            UpdateBuildParams::default().status(BuildStatus::Timeouted),
+                        )
+                        .await?;
                     }
                     anyhow::Ok(())
                 };
@@ -156,7 +153,6 @@ pub async fn handle_build_queue_event(
                 &pr,
                 &merge_queue_tx,
                 Some(CompletionTrigger { error_context }),
-                event.running_time,
             )
             .await?;
         }
@@ -228,7 +224,6 @@ async fn maybe_complete_build(
     pr: &PullRequestModel,
     merge_queue_tx: &MergeQueueSender,
     completion_trigger: Option<CompletionTrigger>,
-    running_time: Option<chrono::Duration>,
 ) -> anyhow::Result<bool> {
     assert_eq!(
         build.status,
@@ -309,7 +304,24 @@ async fn maybe_complete_build(
         }),
     };
 
-    db.update_build_column(build, status, running_time).await?;
+    let compute_duration = || {
+        // Compute the time when the earliest workflow started, and when the latest workflow ended
+        let start = workflow_runs.iter().map(|run| run.created_at).min()?;
+        let end = workflow_runs
+            .iter()
+            .filter_map(|run| run.duration.map(|d| run.created_at + d))
+            .max()?;
+
+        // The build duration is the difference between those two
+        (end - start).to_std().ok()
+    };
+    db.update_build(
+        build.id,
+        UpdateBuildParams::default()
+            .status(status)
+            .duration(compute_duration()),
+    )
+    .await?;
     if let Some(trigger) = trigger {
         let pr = repo.client.get_pull_request(pr_num).await?;
         handle_label_trigger(repo, &pr, trigger).await?;

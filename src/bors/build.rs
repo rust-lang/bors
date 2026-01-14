@@ -1,6 +1,6 @@
 use crate::PgDbClient;
 use crate::bors::{RepositoryState, WorkflowRun};
-use crate::database::{BuildModel, BuildStatus, WorkflowModel};
+use crate::database::{BuildModel, BuildStatus, UpdateBuildParams, WorkflowModel};
 use crate::github::CommitSha;
 use crate::github::api::client::GithubRepositoryClient;
 use octocrab::models::CheckRunId;
@@ -50,7 +50,7 @@ pub async fn cancel_build(
         CancelBuildConclusion::Timeout => BuildStatus::Timeouted,
         CancelBuildConclusion::Cancel => BuildStatus::Cancelled,
     };
-    db.update_build_column(build, status, None)
+    db.update_build(build.id, UpdateBuildParams::default().status(status))
         .await
         .map_err(CancelBuildError::FailedToMarkBuildAsCancelled)?;
 
@@ -156,6 +156,12 @@ pub async fn load_workflow_runs(
                 name: db_run.name,
                 url: db_run.url,
                 status: db_run.status,
+                // This is not really the time the workflow started running, but rather when we
+                // inserted it into the DB. But that hopefully should not matter, as the duration is
+                // `None` and this should never occur anyway :)
+                created_at: db_run.created_at,
+                // We currently do not store workflow duration in the DB
+                duration: None,
             });
         }
     }

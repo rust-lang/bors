@@ -18,7 +18,7 @@ use crate::bors::mergeability_queue::{MergeabilityQueueSender, update_pr_with_kn
 use crate::bors::{AUTO_BRANCH_NAME, PullRequestStatus, RepositoryState};
 use crate::database::{
     ApprovalInfo, BuildModel, BuildStatus, ExclusiveLockProof, ExclusiveOperationOutcome,
-    MergeableState, PullRequestModel, QueueStatus,
+    MergeableState, PullRequestModel, QueueStatus, UpdateBuildParams,
 };
 use crate::github::api::client::CheckRunOutput;
 use crate::github::api::operations::{BranchUpdateError, ForcePush};
@@ -268,7 +268,10 @@ async fn handle_successful_build(
 
         if let Some(error_comment) = error_comment {
             ctx.db
-                .update_build_column(auto_build, BuildStatus::Failure, None)
+                .update_build(
+                    auto_build.id,
+                    UpdateBuildParams::default().status(BuildStatus::Failure),
+                )
                 .await?;
             repo.client
                 .post_comment(pr_num, error_comment, &ctx.db)
@@ -593,7 +596,10 @@ async fn start_auto_build(
 
             if let Err(error) = ctx
                 .db
-                .update_build_check_run_id(build_id, id.into_inner() as i64)
+                .update_build(
+                    build_id,
+                    UpdateBuildParams::default().check_run_id(id.into_inner() as i64),
+                )
                 .await
             {
                 tracing::error!("Failed to update database with build check run id {id}: {error:?}",)

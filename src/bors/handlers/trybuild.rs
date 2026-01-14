@@ -15,7 +15,9 @@ use crate::bors::{
     MergeType, RepositoryState, TRY_BRANCH_NAME, bors_commit_author, create_merge_commit_message,
     hide_tagged_comments,
 };
-use crate::database::{BuildModel, BuildStatus, ExclusiveOperationOutcome, PullRequestModel};
+use crate::database::{
+    BuildModel, BuildStatus, ExclusiveOperationOutcome, PullRequestModel, UpdateBuildParams,
+};
 use crate::github::api::client::{CheckRunOutput, GithubRepositoryClient};
 use crate::github::api::operations::ForcePush;
 use crate::github::{CommitSha, GithubUser, PullRequestNumber};
@@ -139,9 +141,10 @@ pub(super) async fn command_try_build(
                         .await
                     {
                         Ok(check_run) => {
-                            db.update_build_check_run_id(
+                            db.update_build(
                                 build_id,
-                                check_run.id.into_inner() as i64,
+                                UpdateBuildParams::default()
+                                    .check_run_id(check_run.id.into_inner() as i64),
                             )
                             .await?;
                         }

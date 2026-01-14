@@ -10,11 +10,12 @@ use crate::{
     bors::{PullRequestStatus, RollupMode},
     github::{GithubRepoName, PullRequest, PullRequestNumber},
 };
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Utc};
 pub use client::{ExclusiveLockProof, ExclusiveOperationOutcome, PgDbClient};
 pub use octocrab::models::pulls::MergeableState as OctocrabMergeableState;
 use sqlx::error::BoxDynError;
 use sqlx::{Database, Postgres, postgres::types::PgInterval};
+use std::time::Duration;
 
 mod client;
 pub(crate) mod operations;
@@ -334,6 +335,38 @@ impl PgDuration {
     }
 }
 
+impl sqlx::Type<sqlx::Postgres> for PgDuration {
+    fn type_info() -> sqlx::postgres::PgTypeInfo {
+        <PgInterval as sqlx::Type<sqlx::Postgres>>::type_info()
+    }
+}
+
+impl sqlx::Encode<'_, sqlx::Postgres> for PgDuration {
+    fn encode_by_ref(
+        &self,
+        buf: &mut sqlx::postgres::PgArgumentBuffer,
+    ) -> Result<sqlx::encode::IsNull, BoxDynError> {
+        let secs = self.0.as_secs();
+        // The Postgres INTERVAL type does not support nanosecond precision
+        // Let's round the duration down to microseconds, we don't need higher precision anyway
+        let nanos = self.0.subsec_nanos();
+        let nanos = nanos.saturating_sub(nanos % 1000);
+        Duration::new(secs, nanos).encode_by_ref(buf)
+    }
+}
+
+impl sqlx::Decode<'_, sqlx::Postgres> for PgDuration {
+    fn decode(value: sqlx::postgres::PgValueRef<'_>) -> Result<Self, BoxDynError> {
+        let interval = PgInterval::decode(value)?;
+        assert!(interval.days >= 0);
+        assert!(interval.microseconds >= 0);
+        let days_us = interval.days as u64 * 86_400_000_000;
+        let total_us = interval.microseconds as u64 + days_us;
+
+        Ok(PgDuration(Duration::from_micros(total_us)))
+    }
+}
+
 /// Represents a single (merged) commit.
 #[derive(Debug, PartialEq, sqlx::Type)]
 #[sqlx(type_name = "build")]
@@ -384,31 +417,6 @@ impl sqlx::Decode<'_, sqlx::Postgres> for BuildKind {
             "auto" => Ok(Self::Auto),
             kind => Err(format!("Unknown build kind: {kind}").into()),
         }
-    }
-}
-
-impl sqlx::Type<sqlx::Postgres> for PgDuration {
-    fn type_info() -> sqlx::postgres::PgTypeInfo {
-        <PgInterval as sqlx::Type<sqlx::Postgres>>::type_info()
-    }
-}
-
-impl sqlx::Encode<'_, sqlx::Postgres> for PgDuration {
-    fn encode_by_ref(
-        &self,
-        buf: &mut sqlx::postgres::PgArgumentBuffer,
-    ) -> Result<sqlx::encode::IsNull, BoxDynError> {
-        self.0.encode_by_ref(buf)
-    }
-}
-
-impl sqlx::Decode<'_, sqlx::Postgres> for PgDuration {
-    fn decode(value: sqlx::postgres::PgValueRef<'_>) -> Result<Self, BoxDynError> {
-        let interval = PgInterval::decode(value)?;
-        let days_us = interval.days as i64 * 86_400_000_000;
-        let total_us = interval.microseconds + days_us;
-
-        Ok(PgDuration(Duration::microseconds(total_us)))
     }
 }
 
@@ -647,6 +655,34 @@ impl From<PullRequest> for UpsertPullRequestParams {
             mergeable_state: pr.mergeable_state.into(),
             status: pr.status,
         }
+    }
+}
+
+/// Updates the build table with the given fields.
+/// If `None`, the given column will not be updated.
+/// In other words, none of those columns can be set to `None` after being set at least once.
+#[derive(Debug, Default)]
+pub struct UpdateBuildParams {
+    status: Option<BuildStatus>,
+    duration: Option<Duration>,
+    check_run_id: Option<i64>,
+}
+
+impl UpdateBuildParams {
+    pub fn status(self, status: BuildStatus) -> Self {
+        Self {
+            status: Some(status),
+            ..self
+        }
+    }
+    pub fn check_run_id(self, check_run_id: i64) -> Self {
+        Self {
+            check_run_id: Some(check_run_id),
+            ..self
+        }
+    }
+    pub fn duration(self, duration: Option<Duration>) -> Self {
+        Self { duration, ..self }
     }
 }
 

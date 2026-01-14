@@ -3,7 +3,7 @@ use crate::tests::Repo;
 use crate::tests::github::{WorkflowEventKind, WorkflowRun};
 use crate::tests::mock::repository::GitHubRepository;
 use chrono::{DateTime, Utc};
-use octocrab::models::workflows::{Conclusion, Status};
+use octocrab::models::workflows::Conclusion;
 use octocrab::models::{CheckSuiteId, RunId, WorkflowId};
 use serde::Serialize;
 use url::Url;
@@ -41,7 +41,7 @@ pub struct GitHubWorkflowRun {
     head_sha: String,
     run_number: i64,
     event: String,
-    status: Status,
+    status: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     conclusion: Option<Conclusion>,
     created_at: DateTime<Utc>,
@@ -76,10 +76,10 @@ impl GitHubWorkflowRun {
         let created_at = completed_at - run.duration();
 
         let status = match run.status() {
-            WorkflowStatus::Pending => Status::Pending,
-            WorkflowStatus::Success => Status::Completed,
-            WorkflowStatus::Failure => Status::Failed,
-        };
+            WorkflowStatus::Pending => "pending",
+            WorkflowStatus::Success | WorkflowStatus::Failure => "completed",
+        }
+        .to_string();
         let conclusion = match run.status() {
             WorkflowStatus::Pending => None,
             WorkflowStatus::Success => Some(Conclusion::Success),
