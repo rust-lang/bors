@@ -656,6 +656,7 @@ pub(crate) async fn update_build(
         duration,
         check_run_id,
     } = params;
+    let duration = duration.map(PgDuration);
     measure_db_query("update_build", || async {
         sqlx::query!(
             r#"

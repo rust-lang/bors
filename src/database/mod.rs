@@ -335,6 +335,38 @@ impl PgDuration {
     }
 }
 
+impl sqlx::Type<sqlx::Postgres> for PgDuration {
+    fn type_info() -> sqlx::postgres::PgTypeInfo {
+        <PgInterval as sqlx::Type<sqlx::Postgres>>::type_info()
+    }
+}
+
+impl sqlx::Encode<'_, sqlx::Postgres> for PgDuration {
+    fn encode_by_ref(
+        &self,
+        buf: &mut sqlx::postgres::PgArgumentBuffer,
+    ) -> Result<sqlx::encode::IsNull, BoxDynError> {
+        let secs = self.0.as_secs();
+        // The Postgres INTERVAL type does not support nanosecond precision
+        // Let's round the duration down to microseconds, we don't need higher precision anyway
+        let nanos = self.0.subsec_nanos();
+        let nanos = nanos.saturating_sub(nanos % 1000);
+        Duration::new(secs, nanos).encode_by_ref(buf)
+    }
+}
+
+impl sqlx::Decode<'_, sqlx::Postgres> for PgDuration {
+    fn decode(value: sqlx::postgres::PgValueRef<'_>) -> Result<Self, BoxDynError> {
+        let interval = PgInterval::decode(value)?;
+        assert!(interval.days >= 0);
+        assert!(interval.microseconds >= 0);
+        let days_us = interval.days as u64 * 86_400_000_000;
+        let total_us = interval.microseconds as u64 + days_us;
+
+        Ok(PgDuration(Duration::from_micros(total_us)))
+    }
+}
+
 /// Represents a single (merged) commit.
 #[derive(Debug, PartialEq, sqlx::Type)]
 #[sqlx(type_name = "build")]
@@ -385,33 +417,6 @@ impl sqlx::Decode<'_, sqlx::Postgres> for BuildKind {
             "auto" => Ok(Self::Auto),
             kind => Err(format!("Unknown build kind: {kind}").into()),
         }
-    }
-}
-
-impl sqlx::Type<sqlx::Postgres> for PgDuration {
-    fn type_info() -> sqlx::postgres::PgTypeInfo {
-        <PgInterval as sqlx::Type<sqlx::Postgres>>::type_info()
-    }
-}
-
-impl sqlx::Encode<'_, sqlx::Postgres> for PgDuration {
-    fn encode_by_ref(
-        &self,
-        buf: &mut sqlx::postgres::PgArgumentBuffer,
-    ) -> Result<sqlx::encode::IsNull, BoxDynError> {
-        self.0.encode_by_ref(buf)
-    }
-}
-
-impl sqlx::Decode<'_, sqlx::Postgres> for PgDuration {
-    fn decode(value: sqlx::postgres::PgValueRef<'_>) -> Result<Self, BoxDynError> {
-        let interval = PgInterval::decode(value)?;
-        assert!(interval.days >= 0);
-        assert!(interval.microseconds >= 0);
-        let days_us = interval.days as u64 * 86_400_000_000;
-        let total_us = interval.microseconds as u64 + days_us;
-
-        Ok(PgDuration(Duration::from_micros(total_us)))
     }
 }
 
