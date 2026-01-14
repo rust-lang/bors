@@ -367,14 +367,6 @@ async fn handle_comment(
     )
     .await?;
 
-    // Reload PR from DB after mergeability update, to ensure we have the latest state
-    if let Some(pr) = database
-        .get_pull_request(repo.repository(), pr_number)
-        .await?
-    {
-        pr_db = pr;
-    }
-
     for (index, command) in commands.into_iter().enumerate() {
         match command {
             Ok(command) => {

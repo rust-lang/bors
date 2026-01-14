@@ -700,16 +700,11 @@ pub async fn set_pr_mergeability_based_on_user_action(
 
     // If the status is unknown or it is different than what is in the DB, we enqueue the PR
     if mergeable_state == MergeableState::Unknown {
-        // Only update to Unknown if the DB doesn't already have a known conflict state.
-        // We should not overwrite HasConflicts with Unknown, as that would lose important
-        // information about merge conflicts that should block approval.
-        if db_pr.mergeable_status() != MergeableState::HasConflicts {
-            // Eagerly update the last known state in the DB. This will essentially avoid posting the
-            // conflict notification, because the last state will be unknown.
-            db.set_pr_mergeable_state(&db_pr.repository, db_pr.number, mergeable_state)
-                .instrument(span)
-                .await?;
-        }
+        // Eagerly update the last known state in the DB. This will essentially avoid posting the
+        // conflict notification, because the last state will be unknown.
+        db.set_pr_mergeable_state(&db_pr.repository, db_pr.number, mergeable_state)
+            .instrument(span)
+            .await?;
         sender.enqueue_pr(db_pr, None);
     } else if mergeable_state != db_pr.mergeable_status() {
         span.in_scope(|| {
@@ -722,14 +717,10 @@ pub async fn set_pr_mergeability_based_on_user_action(
 
         // If the status is unknown, we assume that the PR will be refreshed soon by some other
         // means, and we do not do anything here
-        // Also, do not overwrite HasConflicts with any other state, as that would lose critical
-        // merge conflict information needed to block PR approval.
-        if db_pr.mergeable_status() != MergeableState::Unknown
-            && db_pr.mergeable_status() != MergeableState::HasConflicts
-        {
-            // If it is not unknown and not HasConflicts, we assume that for some reason this PR
-            // has not been updated properly in the DB. We will thus force update the state here,
-            // without sending a notification, and without unapproving the PR.
+        if db_pr.mergeable_status() != MergeableState::Unknown {
+            // If it is not unknown, we assume that for some reason this PR has not been updated
+            // properly in the DB. We will thus force update the state here, without sending a
+            // notification, and without unapproving the PR.
             db.set_pr_mergeable_state(&db_pr.repository, db_pr.number, mergeable_state)
                 .instrument(span)
                 .await?;

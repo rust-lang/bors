@@ -130,10 +130,6 @@ async fn check_pr_approval_validity(
         return Ok(Some(approve_merge_conflict_comment()));
     }
 
-    if pr.db.mergeable_status() == MergeableState::HasConflicts {
-        return Ok(Some(approve_merge_conflict_comment()));
-    }
-
     Ok(None)
 }
 
@@ -1624,9 +1620,15 @@ labels_blocking_approval = ["proposed-final-comment-period", "final-comment-peri
             ctx.post_comment("@bors r+").await?;
             insta::assert_snapshot!(
                 ctx.get_next_comment_text(()).await?,
-                @":clipboard: This PR cannot be approved because it has merge conflicts. Please resolve the conflicts and try again."
+                @"
+            :pushpin: Commit pr-1-sha has been approved by `default-user`
+
+            It is now in the [queue](https://bors-test.com/queue/borstest) for this repository.
+            "
             );
-            ctx.pr(()).await.expect_unapproved();
+            ctx.pr(())
+                .await
+                .expect_approved_by(&User::default_pr_author().name);
             Ok(())
         })
         .await;
@@ -1654,9 +1656,15 @@ labels_blocking_approval = ["proposed-final-comment-period", "final-comment-peri
             ctx.post_comment("@bors r+").await?;
             insta::assert_snapshot!(
                 ctx.get_next_comment_text(()).await?,
-                @":clipboard: This PR cannot be approved because it has merge conflicts. Please resolve the conflicts and try again."
+                @"
+            :pushpin: Commit pr-1-sha has been approved by `default-user`
+
+            It is now in the [queue](https://bors-test.com/queue/borstest) for this repository.
+            "
             );
-            ctx.pr(()).await.expect_unapproved();
+            ctx.pr(())
+                .await
+                .expect_approved_by(&User::default_pr_author().name);
             Ok(())
         })
         .await;
