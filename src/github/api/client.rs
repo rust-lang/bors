@@ -356,6 +356,7 @@ impl GithubRepositoryClient {
                     .unwrap_or(response.items.len()),
             );
 
+            // https://docs.github.com/en/webhooks/webhook-events-and-payloads#workflow_run
             fn get_status(run: &Run) -> WorkflowStatus {
                 match run.status.as_str() {
                     "completed" => match run.conclusion.as_deref() {
@@ -366,7 +367,6 @@ impl GithubRepositoryClient {
                             WorkflowStatus::Failure
                         }
                     },
-                    "failure" | "startup_failure" => WorkflowStatus::Failure,
                     _ => WorkflowStatus::Pending
                 }
             }
