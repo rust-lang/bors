@@ -221,9 +221,10 @@ fn auto_build_cancelled_msg(
 mod tests {
     use std::time::Duration;
 
-    use crate::database::WorkflowStatus;
     use crate::database::operations::get_all_workflows;
-    use crate::tests::{BorsBuilder, BorsTester, GitHub};
+    use crate::database::{PgDuration, WorkflowStatus};
+    use crate::github::CommitSha;
+    use crate::tests::{BorsBuilder, BorsTester, GitHub, default_repo_name};
     use crate::tests::{WorkflowEvent, run_test};
 
     #[sqlx::test]
@@ -441,5 +442,59 @@ min_ci_time = 20
                 Ok(())
             })
             .await;
+    }
+
+    #[sqlx::test]
+    async fn build_success_duration(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            ctx.post_comment("@bors try").await?;
+            ctx.expect_comments((), 1).await;
+
+            let w1 = ctx.try_workflow();
+            ctx.modify_workflow(w1, |w| w.set_duration(Duration::from_secs(100)));
+            ctx.workflow_full_success(w1).await?;
+            ctx.expect_comments((), 1).await;
+
+            let build = ctx
+                .db()
+                .find_build(
+                    &default_repo_name(),
+                    ctx.try_branch().name(),
+                    CommitSha(ctx.try_branch().sha()),
+                )
+                .await?
+                .expect("Build not found");
+            assert_eq!(build.duration, Some(PgDuration(Duration::from_secs(100))));
+
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn build_failed_duration(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            ctx.post_comment("@bors try").await?;
+            ctx.expect_comments((), 1).await;
+
+            let w1 = ctx.try_workflow();
+            ctx.modify_workflow(w1, |w| w.set_duration(Duration::from_secs(100)));
+            ctx.workflow_full_failure(w1).await?;
+            ctx.expect_comments((), 1).await;
+
+            let build = ctx
+                .db()
+                .find_build(
+                    &default_repo_name(),
+                    ctx.try_branch().name(),
+                    CommitSha(ctx.try_branch().sha()),
+                )
+                .await?
+                .expect("Build not found");
+            assert_eq!(build.duration, Some(PgDuration(Duration::from_secs(100))));
+
+            Ok(())
+        })
+        .await;
     }
 }
