@@ -175,12 +175,13 @@
     {% endif %}
   </h1>
 
-  <button id="showRollupSelection" style="margin-bottom: 1rem">Create rollup</button>
-
-  <p>
-    {{ stats.total_count }} total, {{ stats.in_queue_count }} in queue,
-    {{ stats.failed_count }} failed
-  </p>
+  <div style="margin-bottom: 1rem; display: flex; align-items: center;">
+    <button id="showRollupSelection">Create rollup</button>
+    <p style="margin-left: 10px; margin-bottom: 0;">
+      {{ stats.total_count }} total, {{ stats.in_queue_count }} in queue,
+      {{ stats.failed_count }} failed
+    </p>
+  </div>
 
   <!-- DOM template that will be cloned into the DataTables top layout -->
   <div id="groupBy-template" style="display: none;">
