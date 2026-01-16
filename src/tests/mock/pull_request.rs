@@ -13,6 +13,7 @@ use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::collections::HashMap;
+use std::ops::Deref;
 use std::sync::Arc;
 use url::Url;
 use wiremock::{
@@ -25,14 +26,14 @@ pub async fn mock_pull_requests(
     github: Arc<Mutex<GitHub>>,
     mock_server: &MockServer,
 ) {
-    mock_pr_list(repo.clone(), mock_server).await;
-    mock_pr(repo.clone(), mock_server).await;
+    mock_pr_list(repo.clone(), github.clone(), mock_server).await;
+    mock_pr(repo.clone(), github.clone(), mock_server).await;
     mock_pr_create(repo.clone(), github, mock_server).await;
     mock_pr_comments(repo.clone(), mock_server).await;
     mock_pr_labels(repo, mock_server).await;
 }
 
-async fn mock_pr(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
+async fn mock_pr(repo: Arc<Mutex<Repo>>, github: Arc<Mutex<GitHub>>, mock_server: &MockServer) {
     let repo_name = repo.lock().full_name();
     dynamic_mock_req(
         move |_req: &Request, [pr_number]: [&str; 1]| {
@@ -41,7 +42,8 @@ async fn mock_pr(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
             if pull_request_error {
                 ResponseTemplate::new(500)
             } else if let Some(pr) = repo.lock().pulls().get(&pr_number) {
-                ResponseTemplate::new(200).set_body_json(GitHubPullRequest::from(pr.clone()))
+                ResponseTemplate::new(200)
+                    .set_body_json(GitHubPullRequest::new(&github.lock(), pr.clone()))
             } else {
                 ResponseTemplate::new(404)
             }
@@ -84,6 +86,7 @@ async fn mock_pr_create(
                 .get(&GithubRepoName::new(fork_owner, repo.full_name().name()))
                 .expect("Fork not found")
                 .clone();
+            assert!(fork.lock().fork);
             let commit = fork
                 .lock()
                 .get_branch_by_name(branch)
@@ -105,7 +108,8 @@ async fn mock_pr_create(
             pr.description = data.body;
             pr.reset_to_single_commit(commit);
             pr.base_branch = base_branch;
-            ResponseTemplate::new(200).set_body_json(GitHubPullRequest::from(pr.clone()))
+            ResponseTemplate::new(200)
+                .set_body_json(GitHubPullRequest::new(&github.lock(), pr.clone()))
         },
         "POST",
         format!("^/repos/{repo_name}/pulls$"),
@@ -114,7 +118,11 @@ async fn mock_pr_create(
     .await;
 }
 
-async fn mock_pr_list(repo_clone: Arc<Mutex<Repo>>, mock_server: &MockServer) {
+async fn mock_pr_list(
+    repo_clone: Arc<Mutex<Repo>>,
+    github: Arc<Mutex<GitHub>>,
+    mock_server: &MockServer,
+) {
     let repo_name = repo_clone.lock().full_name();
     Mock::given(method("GET"))
         .and(path(format!("/repos/{repo_name}/pulls")))
@@ -144,7 +152,7 @@ async fn mock_pr_list(repo_clone: Arc<Mutex<Repo>>, mock_server: &MockServer) {
                             }
                         })
                         .map(|pr| {
-                            let mut pr = GitHubPullRequest::from(pr.clone());
+                            let mut pr = GitHubPullRequest::new(&github.lock(), pr.clone());
                             // GitHub always returns unknown mergeable state from this endpoint
                             pr.mergeable_state = OctocrabMergeableState::Unknown;
                             pr
@@ -283,12 +291,13 @@ pub struct GitHubPullRequest {
     html_url: String,
 }
 
-impl From<PullRequest> for GitHubPullRequest {
-    fn from(pr: PullRequest) -> Self {
+impl GitHubPullRequest {
+    pub fn new(github: &GitHub, pr: PullRequest) -> Self {
         let head_sha = pr.head_sha();
         let PullRequest {
             number,
             repo,
+            head_repository,
             labels_added_by_bors: _,
             labels_removed_by_bors: _,
             comment_counter: _,
@@ -307,6 +316,11 @@ impl From<PullRequest> for GitHubPullRequest {
             comment_queue_rx: _,
             comment_history: _,
         } = pr;
+
+        if let Some(head_repository) = &head_repository {
+            assert_ne!(head_repository, &repo);
+        }
+
         GitHubPullRequest {
             user: author.clone().into(),
             url: "https://test.com".to_string(),
@@ -321,6 +335,8 @@ impl From<PullRequest> for GitHubPullRequest {
                 label: format!("pr-{number}"),
                 ref_field: format!("pr-{number}"),
                 sha: head_sha,
+                repo: head_repository
+                    .map(|repo| GitHubRepository::from(github.get_repo(repo).lock().deref())),
             }),
             base: Box::new(GitHubBase {
                 ref_field: base_branch.name().to_string(),
@@ -360,6 +376,7 @@ struct GitHubHead {
     #[serde(rename = "ref")]
     ref_field: String,
     sha: String,
+    repo: Option<GitHubRepository>,
 }
 
 #[derive(Serialize)]
@@ -380,13 +397,14 @@ pub struct GitHubPullRequestEventPayload {
 impl GitHubPullRequestEventPayload {
     pub fn new(
         repo: &Repo,
+        github: &GitHub,
         pull_request: PullRequest,
         action: &str,
         changes: Option<PullRequestChangeEvent>,
     ) -> Self {
         GitHubPullRequestEventPayload {
             action: action.to_string(),
-            pull_request: pull_request.clone().into(),
+            pull_request: GitHubPullRequest::new(github, pull_request),
             changes: changes.map(Into::into),
             repository: GitHubRepository::from(repo),
         }

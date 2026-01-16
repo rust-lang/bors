@@ -636,6 +636,8 @@ pub struct PullRequest {
     pub description: String,
     pub title: String,
     pub labels: Vec<String>,
+    /// Set to `Some` to specify that this is a PR from a forked repository.
+    pub head_repository: Option<GithubRepoName>,
     pub(super) labels_added_by_bors: Vec<String>,
     pub(super) labels_removed_by_bors: Vec<String>,
     pub(super) comment_queue_tx: Sender<CommentMsg>,
@@ -668,6 +670,7 @@ impl PullRequest {
             labels: Vec::new(),
             labels_added_by_bors: Vec::new(),
             labels_removed_by_bors: Vec::new(),
+            head_repository: None,
             comment_queue_tx,
             comment_queue_rx: Arc::new(tokio::sync::Mutex::new(comment_queue_rx)),
             comment_history: Vec::new(),

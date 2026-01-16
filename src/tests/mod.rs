@@ -657,7 +657,8 @@ impl BorsTester {
             modify_pr(pr);
             let pr = pr.clone();
 
-            let payload = GitHubPullRequestEventPayload::new(&repo, pr.clone(), "opened", None);
+            let payload =
+                GitHubPullRequestEventPayload::new(&repo, &gh, pr.clone(), "opened", None);
             (payload, pr)
         };
 
@@ -686,7 +687,13 @@ impl BorsTester {
 
         let payload = {
             let gh = self.github.lock();
-            GitHubPullRequestEventPayload::new(&gh.get_repo(&pr.repo).lock(), pr, "reopened", None)
+            GitHubPullRequestEventPayload::new(
+                &gh.get_repo(&pr.repo).lock(),
+                &gh,
+                pr,
+                "reopened",
+                None,
+            )
         };
 
         self.send_webhook("pull_request", payload).await?;
@@ -701,7 +708,13 @@ impl BorsTester {
 
         let payload = {
             let gh = self.github.lock();
-            GitHubPullRequestEventPayload::new(&gh.get_repo(&pr.repo).lock(), pr, "closed", None)
+            GitHubPullRequestEventPayload::new(
+                &gh.get_repo(&pr.repo).lock(),
+                &gh,
+                pr,
+                "closed",
+                None,
+            )
         };
         self.send_webhook("pull_request", payload).await?;
         Ok(())
@@ -717,6 +730,7 @@ impl BorsTester {
             let gh = self.github.lock();
             GitHubPullRequestEventPayload::new(
                 &gh.get_repo(&pr.repo).lock(),
+                &gh,
                 pr,
                 "converted_to_draft",
                 None,
@@ -736,6 +750,7 @@ impl BorsTester {
             let gh = self.github.lock();
             GitHubPullRequestEventPayload::new(
                 &gh.get_repo(&pr.repo).lock(),
+                &gh,
                 pr,
                 "ready_for_review",
                 None,
@@ -753,7 +768,13 @@ impl BorsTester {
 
         let payload = {
             let gh = self.github.lock();
-            GitHubPullRequestEventPayload::new(&gh.get_repo(&pr.repo).lock(), pr, "closed", None)
+            GitHubPullRequestEventPayload::new(
+                &gh.get_repo(&pr.repo).lock(),
+                &gh,
+                pr,
+                "closed",
+                None,
+            )
         };
         self.send_webhook("pull_request", payload).await?;
         Ok(())
@@ -809,7 +830,7 @@ impl BorsTester {
             pr.add_commit(commit);
             pr.mergeable_state = OctocrabMergeableState::Unknown;
             let pr = pr.clone();
-            GitHubPullRequestEventPayload::new(&repo, pr, "synchronize", None)
+            GitHubPullRequestEventPayload::new(&repo, &gh, pr, "synchronize", None)
         };
 
         self.send_webhook("pull_request", payload).await
@@ -823,7 +844,13 @@ impl BorsTester {
         let pr = self.modify_pr_in_gh(id, |pr| pr.assignees.push(assignee.clone()));
         let payload = {
             let gh = self.github.lock();
-            GitHubPullRequestEventPayload::new(&gh.get_repo(&pr.repo).lock(), pr, "assigned", None)
+            GitHubPullRequestEventPayload::new(
+                &gh.get_repo(&pr.repo).lock(),
+                &gh,
+                pr,
+                "assigned",
+                None,
+            )
         };
         self.send_webhook("pull_request", payload).await
     }
@@ -838,6 +865,7 @@ impl BorsTester {
             let gh = self.github.lock();
             GitHubPullRequestEventPayload::new(
                 &gh.get_repo(&pr.repo).lock(),
+                &gh,
                 pr,
                 "unassigned",
                 None,
@@ -1084,6 +1112,7 @@ impl BorsTester {
             let gh = self.github.lock();
             GitHubPullRequestEventPayload::new(
                 &gh.get_repo(&pr.repo).lock(),
+                &gh,
                 pr,
                 "edited",
                 Some(changes.unwrap_or_default()),
