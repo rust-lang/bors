@@ -347,14 +347,10 @@ async fn mock_create_commit(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
             struct Request {
                 message: String,
                 tree: String,
-                parents: Vec<String>,
                 author: Author,
             }
 
             let data: Request = request.body_json().unwrap();
-
-            // Check that we re-author a merge commit
-            assert_eq!(data.parents.len(), 2);
 
             let original_sha = data.tree.strip_suffix("-tree").expect("not a tree SHA");
             let commit_sha = format!("{original_sha}-reauthored-to-{}", data.author.name);

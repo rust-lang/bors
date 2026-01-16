@@ -5,11 +5,9 @@ use crate::database::BuildStatus;
 use crate::github::api::client::CommitAuthor;
 use crate::github::{CommitSha, GithubRepoName, GithubUser};
 use anyhow::Context;
-use git2::{Cred, FetchOptions, PushOptions, RemoteCallbacks, Repository};
-use secrecy::{ExposeSecret, SecretString};
+use secrecy::SecretString;
 use std::fmt::Write;
 use std::sync::Arc;
-use tracing::{Instrument, debug_span};
 
 pub(super) async fn command_squash(
     repo_state: Arc<RepositoryState>,
@@ -28,6 +26,11 @@ pub(super) async fn command_squash(
 
     if author.id != pr.github.author.id {
         send_comment(":key: Only the PR author can squash its commits.".to_string()).await?;
+        return Ok(());
+    }
+
+    if !pr.github.editable_by_maintainers {
+        send_comment(":key: The `Allow edits by maintainers` option is not enabled on this PR. It is required for squashing to work.".to_string()).await?;
         return Ok(());
     }
 
@@ -116,20 +119,38 @@ pub(super) async fn command_squash(
     // Push the squashed commit to the fork.
     // We need to use local git operations for this, because GitHub doesn't currently provide an
     // API that would allow us to transfer a commit between two repositories without opening a PR.
-    let token = repo_state.client.client().installation_token().await?;
-    let source_repo = repo_state.repository().clone();
-    let commit_sha = commit.clone();
-    let fork = fork_repository.clone();
-    let fork_branch_name = pr.github.head.name.clone();
-    let span = debug_span!(
-        "push commit to fork",
-        "{source_repo}:{commit_sha} -> {fork}:{fork_branch_name}"
-    );
-    let fut = tokio::task::spawn_blocking(move || {
-        push_to_fork(&source_repo, &fork, &commit_sha, &fork_branch_name, token)
-    })
-    .instrument(span);
-    match fut.await? {
+    #[cfg(not(test))]
+    let result = {
+        use tracing::Instrument;
+
+        let token = repo_state.client.client().installation_token().await?;
+        let source_repo = repo_state.repository().clone();
+        let commit_sha = commit.clone();
+        let fork = fork_repository.clone();
+        let fork_branch_name = pr.github.head.name.clone();
+        let span = tracing::debug_span!(
+            "push commit to fork",
+            "{source_repo}:{commit_sha} -> {fork}:{fork_branch_name}"
+        );
+        tokio::task::spawn_blocking(move || {
+            push_to_fork(&source_repo, &fork, &commit_sha, &fork_branch_name, token)
+        })
+        .instrument(span)
+        .await?
+    };
+
+    // TODO: implement git mock for tests? :)
+    #[cfg(test)]
+    let result = repo_state
+        .client
+        .set_branch_to_sha(
+            &pr.github.head.name,
+            &commit,
+            crate::github::api::operations::ForcePush::Yes,
+        )
+        .await;
+
+    match result {
         Ok(_) => {}
         Err(error) => {
             send_comment(format!(
@@ -157,6 +178,7 @@ pub(super) async fn command_squash(
     send_comment(msg).await
 }
 
+#[allow(unused)]
 fn push_to_fork(
     source_repo: &GithubRepoName,
     fork_repo: &GithubRepoName,
@@ -164,6 +186,9 @@ fn push_to_fork(
     branch_name: &str,
     token: SecretString,
 ) -> anyhow::Result<()> {
+    use git2::{Cred, FetchOptions, PushOptions, RemoteCallbacks, Repository};
+    use secrecy::ExposeSecret;
+
     let source_repo_url = format!("https://github.com/{source_repo}.git");
     let target_repo_url = format!("https://github.com/{fork_repo}.git");
     let target_branch = format!("refs/heads/{branch_name}");
@@ -213,4 +238,150 @@ fn push_to_fork(
         .push(&[&refspec], Some(&mut push_options))
         .with_context(|| anyhow::anyhow!("Cannot push commit {commit_sha} to {fork_repo}"))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::github::GithubRepoName;
+    use crate::tests::{
+        BorsTester, Comment, Commit, GitHub, Repo, User, default_repo_name, run_test,
+    };
+
+    #[sqlx::test]
+    async fn squash_non_author(pool: sqlx::PgPool) {
+        run_test((pool, squash_state()), async |ctx: &mut BorsTester| {
+            ctx.post_comment(Comment::new((), "@bors squash").with_author(User::reviewer()))
+                .await?;
+            insta::assert_snapshot!(
+                ctx.get_next_comment_text(()).await?,
+                @":key: Only the PR author can squash its commits."
+            );
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn squash_maintainers_can_edit_disabled(pool: sqlx::PgPool) {
+        run_test((pool, squash_state()), async |ctx: &mut BorsTester| {
+            ctx.modify_pr_in_gh((), |pr| pr.maintainers_can_modify = false);
+            ctx.post_comment("@bors squash").await?;
+            insta::assert_snapshot!(
+                ctx.get_next_comment_text(()).await?,
+                @":key: The `Allow edits by maintainers` option is not enabled on this PR. It is required for squashing to work."
+            );
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn squash_non_fork_pr(pool: sqlx::PgPool) {
+        run_test((pool, squash_state()), async |ctx: &mut BorsTester| {
+            ctx.modify_pr_in_gh((), |pr| pr.head_repository = None);
+            ctx.post_comment(Comment::new((), "@bors squash")).await?;
+            insta::assert_snapshot!(
+                ctx.get_next_comment_text(()).await?,
+                @":fork_and_knife: The squash command can only be used on PRs from a fork."
+            );
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn squash_tested_pr(pool: sqlx::PgPool) {
+        run_test((pool, squash_state()), async |ctx: &mut BorsTester| {
+            ctx.approve(()).await?;
+            ctx.start_auto_build(()).await?;
+            ctx.post_comment("@bors squash").await?;
+            insta::assert_snapshot!(
+                ctx.get_next_comment_text(()).await?,
+                @":exclamation: Cannot squash a PR that is currently being tested. Unapprove the PR first using `@bors r-`."
+            );
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn squash_too_many_commits(pool: sqlx::PgPool) {
+        run_test((pool, squash_state()), async |ctx: &mut BorsTester| {
+            ctx.modify_pr_in_gh((), |pr| {
+                let commits = (0..250).map(|num| Commit::new(&format!("sha-{num}"), &num.to_string())).collect();
+                pr.add_commits(commits);
+            });
+            ctx.post_comment("@bors squash").await?;
+            insta::assert_snapshot!(
+                ctx.get_next_comment_text(()).await?,
+                @":exclamation: The PR has too many commits (251). At most 250 commits can be squashed."
+            );
+            Ok(())
+        })
+            .await;
+    }
+
+    #[sqlx::test]
+    async fn squash_single_commit(pool: sqlx::PgPool) {
+        run_test((pool, squash_state()), async |ctx: &mut BorsTester| {
+            ctx.post_comment("@bors squash").await?;
+            insta::assert_snapshot!(
+                ctx.get_next_comment_text(()).await?,
+                @":exclamation: The PR has only one commit."
+            );
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn squash_two_commits(pool: sqlx::PgPool) {
+        let gh = run_test((pool, squash_state()), async |ctx: &mut BorsTester| {
+            ctx.modify_pr_in_gh((), |pr| {
+                pr.title = "Foobar".to_string();
+                pr.reset_to_single_commit(Commit::from_sha("sha1"));
+                pr.add_commits(vec![Commit::from_sha("sha2")]);
+            });
+            ctx.post_comment("@bors squash").await?;
+            insta::assert_snapshot!(
+                ctx.get_next_comment_text(()).await?,
+                @":hammer: 2 commits were squashed into sha2-reauthored-to-git-user."
+            );
+            let branch = ctx.pr(()).await.get_gh_pr().head_branch_copy();
+            assert_eq!(branch.get_commits().len(), 1);
+            insta::assert_debug_snapshot!(branch.get_commit(), @r#"
+            Commit {
+                sha: "sha2-reauthored-to-git-user",
+                message: "Foobar",
+                author: GitUser {
+                    name: "git-user",
+                    email: "git-user@git.com",
+                },
+            }
+            "#);
+
+            Ok(())
+        })
+        .await;
+        insta::assert_snapshot!(gh.get_sha_history((), "pr/1"), @"
+        pr-1-sha
+        sha1
+        sha2
+        sha2-reauthored-to-git-user
+        ");
+    }
+
+    fn squash_state() -> GitHub {
+        let gh = GitHub::default();
+        let pr_author = User::default_pr_author();
+
+        // Create fork
+        let fork_repo = GithubRepoName::new(&pr_author.name, default_repo_name().name());
+        let mut repo = Repo::new(pr_author.clone(), fork_repo.name());
+        repo.fork = true;
+
+        // Set the default PR to be from the fork
+        gh.default_repo().lock().get_pr_mut(1).head_repository = Some(repo.full_name());
+        gh.with_repo(repo)
+    }
 }

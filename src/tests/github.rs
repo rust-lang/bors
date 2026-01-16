@@ -462,7 +462,16 @@ impl Repo {
     }
 
     pub fn get_branch_by_name(&mut self, name: &str) -> Option<&mut Branch> {
-        self.branches.iter_mut().find(|b| b.name == name)
+        if let Some(branch) = self.branches.iter_mut().find(|b| b.name == name) {
+            Some(branch)
+        } else {
+            for (_, pr) in &mut self.pull_requests {
+                if pr.head_branch.name == name {
+                    return Some(&mut pr.head_branch);
+                }
+            }
+            None
+        }
     }
 
     pub fn push_commit(&mut self, branch_name: &str, commit: Commit, force: bool) {
@@ -643,6 +652,7 @@ pub struct PullRequest {
     pub(super) comment_queue_tx: Sender<CommentMsg>,
     pub(super) comment_queue_rx: Arc<tokio::sync::Mutex<Receiver<CommentMsg>>>,
     pub(super) comment_history: Vec<Comment>,
+    pub maintainers_can_modify: bool,
 }
 
 impl PullRequest {
@@ -655,7 +665,11 @@ impl PullRequest {
             Commit::new(
                 &format!("pr-{number}-sha"),
                 &format!("initial PR#{number} commit"),
-            ),
+            )
+            .with_author(GitUser {
+                name: author.name.clone(),
+                email: format!("{}@email.com", author.name),
+            }),
         );
         Self {
             number: PullRequestNumber(number),
@@ -678,6 +692,7 @@ impl PullRequest {
             comment_queue_tx,
             comment_queue_rx: Arc::new(tokio::sync::Mutex::new(comment_queue_rx)),
             comment_history: Vec::new(),
+            maintainers_can_modify: true,
         }
     }
 
@@ -693,6 +708,10 @@ impl PullRequest {
         self.head_branch.sha()
     }
 
+    pub fn head_branch_copy(&self) -> Branch {
+        self.head_branch.clone()
+    }
+
     pub fn id(&self) -> PrIdentifier {
         PrIdentifier {
             repo: self.repo.clone(),
@@ -701,12 +720,16 @@ impl PullRequest {
     }
 
     pub fn reset_to_single_commit(&mut self, commit: Commit) {
-        self.head_branch.commits = vec![commit];
+        self.head_branch.push_commit(commit, true);
     }
 
-    pub fn add_commit(&mut self, commit: Commit) {
-        assert!(!self.head_branch.commits.iter().any(|c| c.sha == commit.sha));
-        self.head_branch.commits.push(commit);
+    pub fn add_commits(&mut self, commits: Vec<Commit>) {
+        for commit in &commits {
+            assert!(!self.head_branch.commits.iter().any(|c| c.sha == commit.sha));
+        }
+        for commit in commits {
+            self.head_branch.push_commit(commit, false);
+        }
     }
 
     /// Return a numeric ID and a node ID for the next comment to be created.
@@ -796,6 +819,9 @@ impl Branch {
     }
     pub fn get_commit(&self) -> &Commit {
         self.commits.last().unwrap()
+    }
+    pub fn get_commits(&self) -> &[Commit] {
+        &self.commits
     }
     pub fn sha(&self) -> String {
         self.get_commit().sha().to_owned()

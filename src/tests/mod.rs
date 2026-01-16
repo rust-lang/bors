@@ -41,8 +41,7 @@ use crate::bors::process::QueueSenders;
 use crate::github::api::client::HideCommentReason;
 use crate::server::{ServerState, create_app};
 use crate::tests::github::{
-    PrIdentifier, RepoIdentifier, TestWorkflowStatus, WorkflowEventKind, WorkflowRun,
-    default_oauth_config,
+    RepoIdentifier, TestWorkflowStatus, WorkflowEventKind, WorkflowRun, default_oauth_config,
 };
 use crate::tests::mock::{
     GitHubIssueCommentEventPayload, GitHubPullRequestEventPayload, GitHubPushEventPayload,
@@ -53,6 +52,7 @@ pub use github::Comment;
 pub use github::Commit;
 pub use github::GitHub;
 pub use github::Permissions;
+pub use github::PrIdentifier;
 pub use github::PullRequest;
 pub use github::Repo;
 pub use github::User;
@@ -827,7 +827,7 @@ impl BorsTester {
                 .pulls_mut()
                 .get_mut(&id.number)
                 .expect("PR must be initialized before pushing to it");
-            pr.add_commit(commit);
+            pr.add_commits(vec![commit]);
             pr.mergeable_state = OctocrabMergeableState::Unknown;
             let pr = pr.clone();
             GitHubPullRequestEventPayload::new(&repo, &gh, pr, "synchronize", None)

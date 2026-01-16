@@ -30,7 +30,8 @@ pub async fn mock_pull_requests(
     mock_pr(repo.clone(), github.clone(), mock_server).await;
     mock_pr_create(repo.clone(), github, mock_server).await;
     mock_pr_comments(repo.clone(), mock_server).await;
-    mock_pr_labels(repo, mock_server).await;
+    mock_pr_labels(repo.clone(), mock_server).await;
+    mock_pr_commits(repo, mock_server).await;
 }
 
 async fn mock_pr(repo: Arc<Mutex<Repo>>, github: Arc<Mutex<GitHub>>, mock_server: &MockServer) {
@@ -265,6 +266,119 @@ async fn mock_pr_labels(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
     .await;
 }
 
+// https://docs.github.com/en/rest/pulls/pulls?apiVersion=2022-11-28#list-commits-on-a-pull-request
+async fn mock_pr_commits(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
+    let repo_name = repo.lock().full_name();
+    let repo2 = repo.clone();
+    // Add label(s)
+    dynamic_mock_req(
+        move |_req: &Request, [pr_number]: [&str; 1]| {
+            let pr_number: u64 = pr_number.parse().unwrap();
+
+            let repo = repo.lock();
+            let Some(pr) = repo.pulls().get(&pr_number) else {
+                return ResponseTemplate::new(404);
+            };
+
+            #[derive(serde::Serialize)]
+            struct TreeResponse {
+                sha: String,
+                url: String,
+            }
+
+            #[derive(serde::Serialize)]
+            struct Parent {
+                sha: String,
+            }
+
+            #[derive(serde::Serialize)]
+            struct Author {
+                name: String,
+                email: String,
+            }
+
+            #[derive(serde::Serialize)]
+            struct CommitResponse {
+                url: String,
+                tree: TreeResponse,
+                author: Author,
+                committer: Option<Author>,
+                message: String,
+                comment_count: u64,
+            }
+
+            #[derive(serde::Serialize)]
+            struct PullRequestCommit {
+                url: String,
+                node_id: String,
+                html_url: String,
+                comments_url: String,
+                sha: String,
+                parents: Vec<Parent>,
+                commit: CommitResponse,
+                author: Option<String>,
+                committer: Option<String>,
+            }
+
+            let url = || "https://github.com/todo".to_string();
+            let response = pr
+                .head_branch
+                .get_commits()
+                .iter()
+                .map(|commit| PullRequestCommit {
+                    url: url(),
+                    node_id: String::new(),
+                    html_url: url(),
+                    comments_url: url(),
+                    sha: commit.sha().to_owned(),
+                    parents: vec![],
+                    commit: CommitResponse {
+                        url: url(),
+                        tree: TreeResponse {
+                            sha: format!("{}-tree", commit.sha()),
+                            url: url(),
+                        },
+                        author: Author {
+                            name: commit.author().name.clone(),
+                            email: commit.author().email.clone(),
+                        },
+                        committer: None,
+                        message: commit.message().to_string(),
+                        comment_count: 0,
+                    },
+                    author: None,
+                    committer: None,
+                })
+                .collect::<Vec<PullRequestCommit>>();
+
+            ResponseTemplate::new(200).set_body_json(response)
+        },
+        "GET",
+        format!("^/repos/{repo_name}/pulls/([0-9]+)/commits"),
+    )
+    .mount(mock_server)
+    .await;
+
+    // Remove label(s)
+    dynamic_mock_req(
+        move |_req: &Request, [pr_number, label_name]: [&str; 2]| {
+            let pr_number: u64 = pr_number.parse().unwrap();
+
+            let mut repo = repo2.lock();
+            let Some(pr) = repo.pulls_mut().get_mut(&pr_number) else {
+                return ResponseTemplate::new(404);
+            };
+            pr.remove_label(label_name);
+
+            ResponseTemplate::new(200).set_body_json::<&[GitHubLabel]>(&[])
+        },
+        "DELETE",
+        format!("/repos/{repo_name}/issues/([0-9]+)/labels/(.*)"),
+    )
+    .mount(mock_server)
+    .await;
+}
+
 #[derive(Serialize)]
 pub struct GitHubPullRequest {
     url: String,
@@ -289,6 +403,8 @@ pub struct GitHubPullRequest {
     assignees: Vec<GitHubUser>,
     labels: Vec<GitHubLabel>,
     html_url: String,
+    maintainer_can_modify: bool,
+    commits: Option<u64>,
 }
 
 impl GitHubPullRequest {
@@ -311,6 +427,7 @@ impl GitHubPullRequest {
             description,
             title,
             labels,
+            maintainers_can_modify,
             comment_queue_tx: _,
             comment_queue_rx: _,
             comment_history: _,
@@ -355,6 +472,8 @@ impl GitHubPullRequest {
                     default: false,
                 })
                 .collect(),
+            maintainer_can_modify: maintainers_can_modify,
+            commits: Some(head_branch.get_commits().len() as u64),
         }
     }
 }

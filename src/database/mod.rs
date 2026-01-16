@@ -782,6 +782,7 @@ pub fn pr_needs_update_in_db(db_pr: &PullRequestModel, gh_pr: &PullRequest) -> b
         labels: _,
         html_url: _,
         commit_count: _,
+        editable_by_maintainers: _,
     } = gh_pr;
     if status != db_status {
         return true;
