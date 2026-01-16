@@ -392,7 +392,7 @@ impl BorsTester {
             let gh = self.github.lock();
             let repo = gh.get_repo(default_repo_name());
             let mut repo = repo.lock();
-            repo.push_commit(branch, commit.clone());
+            repo.push_commit(branch, commit.clone(), false);
             GitHubPushEventPayload::new(&repo, branch, commit.sha())
         };
         self.send_webhook("push", payload).await

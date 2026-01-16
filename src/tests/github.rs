@@ -465,11 +465,11 @@ impl Repo {
         self.branches.iter_mut().find(|b| b.name == name)
     }
 
-    pub fn push_commit(&mut self, branch_name: &str, commit: Commit) {
+    pub fn push_commit(&mut self, branch_name: &str, commit: Commit, force: bool) {
         self.create_commit(commit.clone());
         self.get_branch_by_name(branch_name)
             .expect("Pushing to a non-existing branch")
-            .push_commit(commit);
+            .push_commit(commit, force);
     }
 
     pub fn create_commit(&mut self, commit: Commit) {
@@ -775,6 +775,7 @@ impl PullRequest {
 pub struct Branch {
     name: String,
     commits: Vec<Commit>,
+    commit_history: Vec<Commit>,
     pub merge_counter: u64,
     pub merge_conflict: bool,
 }
@@ -783,7 +784,8 @@ impl Branch {
     pub fn new(name: &str, commit: Commit) -> Self {
         Self {
             name: name.to_string(),
-            commits: vec![commit],
+            commits: vec![commit.clone()],
+            commit_history: vec![commit],
             merge_counter: 0,
             merge_conflict: false,
         }
@@ -799,12 +801,17 @@ impl Branch {
         self.get_commit().sha().to_owned()
     }
 
-    fn push_commit(&mut self, commit: Commit) {
-        self.commits.push(commit);
+    fn push_commit(&mut self, commit: Commit, force: bool) {
+        self.commit_history.push(commit.clone());
+        if force {
+            self.commits = vec![commit];
+        } else {
+            self.commits.push(commit);
+        }
     }
 
     pub fn get_commit_history(&self) -> Vec<Commit> {
-        self.commits.clone()
+        self.commit_history.clone()
     }
 }
 

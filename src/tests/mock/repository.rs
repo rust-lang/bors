@@ -189,6 +189,7 @@ async fn mock_update_branch(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
             #[derive(serde::Deserialize)]
             struct SetRefRequest {
                 sha: String,
+                force: bool,
             }
 
             let data: SetRefRequest = req.body_json().unwrap();
@@ -213,7 +214,7 @@ async fn mock_update_branch(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
             if repo.get_branch_by_name(branch_name).is_some() {
                 // Update branch
                 let commit = repo.get_commit_by_sha(&sha);
-                repo.push_commit(branch_name, commit);
+                repo.push_commit(branch_name, commit, data.force);
             } else {
                 // GitHub uses this error code in this endpoint when the branch does not exist
                 return ResponseTemplate::new(422);
@@ -286,7 +287,7 @@ async fn mock_merge_branch(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
 
             let base_sha = base_branch.sha();
             let branch_name = base_branch.name().to_owned();
-            repo.push_commit(&branch_name, commit);
+            repo.push_commit(&branch_name, commit, false);
 
             #[derive(serde::Serialize)]
             struct TreeResponse {
