@@ -15,8 +15,6 @@ jobs:
     env:
       # Matches docker-compose.yaml
       DATABASE_URL: postgres://bors:bors@localhost:5432/bors
-      CARGO_PROFILE_DEV_OPT_LEVEL: 1
-      CARGO_PROFILE_DEV_BUILD_OVERRIDE_OPT_LEVEL: 1
     steps:
       - name: Checkout sources
         uses: actions/checkout@v6

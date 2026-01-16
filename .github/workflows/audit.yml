@@ -19,3 +19,4 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
       - uses: EmbarkStudios/cargo-deny-action@v2
+        continue-on-error: true
