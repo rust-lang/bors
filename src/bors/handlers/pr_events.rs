@@ -435,11 +435,11 @@ mod tests {
     async fn unapprove_on_push(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.approve(()).await?;
-            ctx.push_to_pr(()).await?;
+            ctx.push_to_pr((), Commit::from_sha("foo")).await?;
 
             insta::assert_snapshot!(
                 ctx.get_next_comment_text(()).await?,
-                @":warning: A new commit `pr-1-commit-1` was pushed to the branch, the PR will need to be re-approved."
+                @":warning: A new commit `foo` was pushed to the branch, the PR will need to be re-approved."
             );
             ctx.pr(()).await.expect_unapproved();
             Ok(())
@@ -450,7 +450,7 @@ mod tests {
     #[sqlx::test]
     async fn push_to_pr_do_nothing_when_not_approved(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
-            ctx.push_to_pr(()).await?;
+            ctx.push_to_pr((), Commit::from_sha("foo")).await?;
 
             // No comment should be posted
             Ok(())
@@ -465,7 +465,7 @@ mod tests {
             ctx.start_auto_build(()).await?;
             ctx.workflow_full_failure(ctx.auto_workflow()).await?;
             ctx.expect_comments((), 1).await;
-            ctx.push_to_pr(()).await?;
+            ctx.push_to_pr((), Commit::from_sha("foo")).await?;
 
             // No comment should be posted, but the PR should still be unapproved
             ctx.wait_for_pr((), |pr| !pr.is_approved() && pr.auto_build.is_none())
@@ -489,7 +489,7 @@ mod tests {
             });
 
             // And push to it. This should NOT result in unmergeability notification!
-            ctx.push_to_pr(pr2.id()).await?;
+            ctx.push_to_pr(pr2.id(), Commit::from_sha("foo")).await?;
             ctx.drain_mergeability_queue().await?;
 
             // No comment should be posted
@@ -515,7 +515,7 @@ mod tests {
             let comment = ctx.get_next_comment(pr2.id()).await?;
 
             // The comment should be hidden after this push
-            ctx.push_to_pr(pr2.id()).await?;
+            ctx.push_to_pr(pr2.id(), Commit::from_sha("foo")).await?;
 
             ctx.expect_hidden_comment(&comment, HideCommentReason::Outdated);
 
@@ -583,7 +583,7 @@ mod tests {
     async fn store_base_branch_on_pr_opened(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             let pr = ctx.open_pr((), |_| {}).await?;
-            ctx.wait_for_pr(pr.number, |pr| {
+            ctx.wait_for_pr(pr.id(), |pr| {
                 pr.base_branch == *default_branch_name() && pr.status == PullRequestStatus::Open
             })
             .await?;
@@ -626,13 +626,13 @@ mod tests {
     async fn open_close_and_reopen_pr(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             let pr = ctx.open_pr((), |_| {}).await?;
-            ctx.wait_for_pr(pr.number, |pr| pr.status == PullRequestStatus::Open)
+            ctx.wait_for_pr(pr.id(), |pr| pr.status == PullRequestStatus::Open)
                 .await?;
-            ctx.set_pr_status_closed(pr.number).await?;
-            ctx.wait_for_pr(pr.number, |pr| pr.status == PullRequestStatus::Closed)
+            ctx.set_pr_status_closed(pr.id()).await?;
+            ctx.wait_for_pr(pr.id(), |pr| pr.status == PullRequestStatus::Closed)
                 .await?;
-            ctx.reopen_pr(pr.number).await?;
-            ctx.wait_for_pr(pr.number, |pr| pr.status == PullRequestStatus::Open)
+            ctx.reopen_pr(pr.id()).await?;
+            ctx.wait_for_pr(pr.id(), |pr| pr.status == PullRequestStatus::Open)
                 .await?;
             Ok(())
         })
@@ -647,10 +647,10 @@ mod tests {
                     pr.convert_to_draft();
                 })
                 .await?;
-            ctx.wait_for_pr(pr.number, |pr| pr.status == PullRequestStatus::Draft)
+            ctx.wait_for_pr(pr.id(), |pr| pr.status == PullRequestStatus::Draft)
                 .await?;
-            ctx.set_pr_status_ready_for_review(pr.number).await?;
-            ctx.wait_for_pr(pr.number, |pr| pr.status == PullRequestStatus::Open)
+            ctx.set_pr_status_ready_for_review(pr.id()).await?;
+            ctx.wait_for_pr(pr.id(), |pr| pr.status == PullRequestStatus::Open)
                 .await?;
             Ok(())
         })
@@ -661,10 +661,10 @@ mod tests {
     async fn open_pr_and_convert_to_draft(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             let pr = ctx.open_pr((), |_| {}).await?;
-            ctx.wait_for_pr(pr.number, |pr| pr.status == PullRequestStatus::Open)
+            ctx.wait_for_pr(pr.id(), |pr| pr.status == PullRequestStatus::Open)
                 .await?;
-            ctx.set_pr_status_draft(pr.number).await?;
-            ctx.wait_for_pr(pr.number, |pr| pr.status == PullRequestStatus::Draft)
+            ctx.set_pr_status_draft(pr.id()).await?;
+            ctx.wait_for_pr(pr.id(), |pr| pr.status == PullRequestStatus::Draft)
                 .await?;
             Ok(())
         })
@@ -675,10 +675,10 @@ mod tests {
     async fn assign_pr_updates_assignees(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             let pr = ctx.open_pr((), |_| {}).await?;
-            ctx.wait_for_pr(pr.number, |pr| pr.assignees.is_empty())
+            ctx.wait_for_pr(pr.id(), |pr| pr.assignees.is_empty())
                 .await?;
-            ctx.assign_pr(pr.number, User::reviewer()).await?;
-            ctx.wait_for_pr(pr.number, |pr| pr.assignees == vec![User::reviewer().name])
+            ctx.assign_pr(pr.id(), User::reviewer()).await?;
+            ctx.wait_for_pr(pr.id(), |pr| pr.assignees == vec![User::reviewer().name])
                 .await?;
             Ok(())
         })
@@ -689,11 +689,11 @@ mod tests {
     async fn unassign_pr_updates_assignees(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             let pr = ctx.open_pr((), |_| {}).await?;
-            ctx.assign_pr(pr.number, User::reviewer()).await?;
-            ctx.wait_for_pr(pr.number, |pr| pr.assignees == vec![User::reviewer().name])
+            ctx.assign_pr(pr.id(), User::reviewer()).await?;
+            ctx.wait_for_pr(pr.id(), |pr| pr.assignees == vec![User::reviewer().name])
                 .await?;
-            ctx.unassign_pr(pr.number, User::reviewer()).await?;
-            ctx.wait_for_pr(pr.number, |pr| pr.assignees.is_empty())
+            ctx.unassign_pr(pr.id(), User::reviewer()).await?;
+            ctx.wait_for_pr(pr.id(), |pr| pr.assignees.is_empty())
                 .await?;
             Ok(())
         })
@@ -704,10 +704,10 @@ mod tests {
     async fn open_and_merge_pr(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             let pr = ctx.open_pr((), |_| {}).await?;
-            ctx.wait_for_pr(pr.number, |pr| pr.status == PullRequestStatus::Open)
+            ctx.wait_for_pr(pr.id(), |pr| pr.status == PullRequestStatus::Open)
                 .await?;
-            ctx.set_pr_status_merged(pr.number).await?;
-            ctx.wait_for_pr(pr.number, |pr| pr.status == PullRequestStatus::Merged)
+            ctx.set_pr_status_merged(pr.id()).await?;
+            ctx.wait_for_pr(pr.id(), |pr| pr.status == PullRequestStatus::Merged)
                 .await?;
             Ok(())
         })
@@ -942,7 +942,7 @@ conflict = ["+conflict"]
                     pr.mergeable_state = OctocrabMergeableState::Dirty
                 })
                 .await?;
-            ctx.wait_for_pr(pr.number, |pr| {
+            ctx.wait_for_pr(pr.id(), |pr| {
                 pr.mergeable_status() == MergeableState::HasConflicts
             })
             .await?;
@@ -975,7 +975,7 @@ conflict = ["+conflict"]
     #[sqlx::test]
     async fn enqueue_prs_on_push_to_pr(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
-            ctx.push_to_pr(()).await?;
+            ctx.push_to_pr((), Commit::from_sha("foo")).await?;
             ctx.wait_for_pr((), |pr| pr.mergeable_status() == MergeableState::Unknown)
                 .await?;
             ctx.modify_pr_in_gh((), |pr| pr.mergeable_state = OctocrabMergeableState::Dirty);
@@ -999,9 +999,9 @@ conflict = ["+conflict"]
             ctx
                 .workflow_start(run_id)
                 .await?;
-            ctx.push_to_pr(()).await?;
+            ctx.push_to_pr((), Commit::from_sha("foo")).await?;
             insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
-            :warning: A new commit `pr-1-commit-1` was pushed to the branch, the PR will need to be re-approved.
+            :warning: A new commit `foo` was pushed to the branch, the PR will need to be re-approved.
 
             Auto build cancelled due to push. Cancelled workflows:
 
@@ -1025,9 +1025,9 @@ conflict = ["+conflict"]
             ctx.pr(()).await.expect_auto_build(|_| true);
 
             ctx.workflow_start(ctx.auto_workflow()).await?;
-            ctx.push_to_pr(()).await?;
+            ctx.push_to_pr((), Commit::from_sha("foo")).await?;
             insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
-            :warning: A new commit `pr-1-commit-1` was pushed to the branch, the PR will need to be re-approved.
+            :warning: A new commit `foo` was pushed to the branch, the PR will need to be re-approved.
 
             Auto build cancelled due to push. It was not possible to cancel some workflows.
             ");
@@ -1043,11 +1043,11 @@ conflict = ["+conflict"]
             ctx.start_auto_build(()).await?;
             ctx.workflow_start(ctx.auto_workflow()).await?;
 
-            let prev_commit = &ctx.pr(()).await.get_gh_pr().head_sha;
-            ctx.push_to_pr(()).await?;
+            let prev_commit_sha = &ctx.pr(()).await.get_gh_pr().head_sha();
+            ctx.push_to_pr((), Commit::from_sha("foo")).await?;
             ctx.expect_comments((), 1).await;
             ctx.expect_check_run(
-                prev_commit,
+                prev_commit_sha,
                 AUTO_BUILD_CHECK_RUN_NAME,
                 AUTO_BUILD_CHECK_RUN_NAME,
                 CheckRunStatus::Completed,
@@ -1066,7 +1066,7 @@ conflict = ["+conflict"]
                     pr.description = "@bors p=2".to_string();
                 })
                 .await?;
-            ctx.wait_for_pr(pr.number, |pr| pr.priority == Some(2))
+            ctx.wait_for_pr(pr.id(), |pr| pr.priority == Some(2))
                 .await?;
             Ok(())
         })

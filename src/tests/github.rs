@@ -380,7 +380,6 @@ pub struct Repo {
     pub pull_request_error: bool,
     /// Push error failure/success behaviour.
     pub push_behaviour: BranchPushBehaviour,
-    pub pr_push_counter: u64,
     pub fork: bool,
     pub merge_behavior: MergeBehavior,
 }
@@ -399,7 +398,6 @@ impl Repo {
             workflow_cancel_error: false,
             workflow_runs: vec![],
             pull_request_error: false,
-            pr_push_counter: 0,
             check_runs: vec![],
             push_behaviour: BranchPushBehaviour::default(),
             fork: false,
@@ -514,11 +512,6 @@ impl Repo {
             .unwrap()
     }
 
-    pub fn get_next_pr_push_counter(&mut self) -> u64 {
-        self.pr_push_counter += 1;
-        self.pr_push_counter
-    }
-
     pub fn find_workflow(&self, id: RunId) -> Option<WorkflowRun> {
         self.workflow_runs.iter().find(|w| w.run_id == id).cloned()
     }
@@ -629,11 +622,11 @@ impl From<PullRequest> for PrIdentifier {
 
 #[derive(Clone, Debug)]
 pub struct PullRequest {
-    pub number: PullRequestNumber,
-    pub repo: GithubRepoName,
-    pub comment_counter: u64,
-    pub head_sha: String,
-    pub author: User,
+    pub(super) number: PullRequestNumber,
+    pub(super) repo: GithubRepoName,
+    pub(super) comment_counter: u64,
+    pub(super) commits: Vec<Commit>,
+    pub(super) author: User,
     pub base_branch: Branch,
     pub mergeable_state: MergeableState,
     pub(super) status: PullRequestStatus,
@@ -645,9 +638,9 @@ pub struct PullRequest {
     pub labels: Vec<String>,
     pub(super) labels_added_by_bors: Vec<String>,
     pub(super) labels_removed_by_bors: Vec<String>,
-    pub comment_queue_tx: Sender<CommentMsg>,
-    pub comment_queue_rx: Arc<tokio::sync::Mutex<Receiver<CommentMsg>>>,
-    pub comment_history: Vec<Comment>,
+    pub(super) comment_queue_tx: Sender<CommentMsg>,
+    pub(super) comment_queue_rx: Arc<tokio::sync::Mutex<Receiver<CommentMsg>>>,
+    pub(super) comment_history: Vec<Comment>,
 }
 
 impl PullRequest {
@@ -659,7 +652,10 @@ impl PullRequest {
             number: PullRequestNumber(number),
             repo,
             comment_counter: 0,
-            head_sha: format!("pr-{number}-sha"),
+            commits: vec![Commit::new(
+                &format!("pr-{number}-sha"),
+                &format!("initial PR#{number} commit"),
+            )],
             author,
             base_branch: Branch::default(),
             mergeable_state: MergeableState::Clean,
@@ -678,11 +674,32 @@ impl PullRequest {
         }
     }
 
+    pub fn number(&self) -> PullRequestNumber {
+        self.number
+    }
+
+    pub fn repo(&self) -> &GithubRepoName {
+        &self.repo
+    }
+
+    pub fn head_sha(&self) -> String {
+        self.commits.last().expect("No commits on a PR").sha.clone()
+    }
+
     pub fn id(&self) -> PrIdentifier {
         PrIdentifier {
             repo: self.repo.clone(),
             number: self.number.0,
         }
+    }
+
+    pub fn reset_to_single_commit(&mut self, commit: Commit) {
+        self.commits = vec![commit];
+    }
+
+    pub fn add_commit(&mut self, commit: Commit) {
+        assert!(!self.commits.iter().any(|c| c.sha == commit.sha));
+        self.commits.push(commit);
     }
 
     /// Return a numeric ID and a node ID for the next comment to be created.
@@ -816,6 +833,10 @@ pub struct Commit {
 }
 
 impl Commit {
+    pub fn from_sha(sha: &str) -> Self {
+        Self::new(sha, &format!("Commit {sha}"))
+    }
+
     pub fn new(sha: &str, message: &str) -> Self {
         Self {
             sha: sha.to_owned(),

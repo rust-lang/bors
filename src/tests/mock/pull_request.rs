@@ -103,7 +103,7 @@ async fn mock_pr_create(
             let pr = repo.add_pr(pr_author);
             pr.title = data.title;
             pr.description = data.body;
-            pr.head_sha = commit.sha().to_owned();
+            pr.reset_to_single_commit(commit);
             pr.base_branch = base_branch;
             ResponseTemplate::new(200).set_body_json(GitHubPullRequest::from(pr.clone()))
         },
@@ -285,13 +285,14 @@ pub struct GitHubPullRequest {
 
 impl From<PullRequest> for GitHubPullRequest {
     fn from(pr: PullRequest) -> Self {
+        let head_sha = pr.head_sha();
         let PullRequest {
             number,
             repo,
             labels_added_by_bors: _,
             labels_removed_by_bors: _,
             comment_counter: _,
-            head_sha,
+            commits: _,
             author,
             base_branch,
             mergeable_state,

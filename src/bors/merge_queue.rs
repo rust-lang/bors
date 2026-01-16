@@ -715,7 +715,7 @@ mod tests {
 
     use crate::bors::with_mocked_time;
     use crate::github::api::client::HideCommentReason;
-    use crate::tests::{BorsBuilder, GitHub, run_test};
+    use crate::tests::{BorsBuilder, Commit, GitHub, run_test};
     use crate::tests::{default_branch_name, default_repo_name};
     use crate::{
         bors::{
@@ -755,7 +755,7 @@ merge_queue_enabled = false
             ctx.approve(()).await?;
             ctx.start_auto_build(()).await?;
             ctx.expect_check_run(
-                &ctx.pr(()).await.get_gh_pr().head_sha,
+                &ctx.pr(()).await.get_gh_pr().head_sha(),
                 AUTO_BUILD_CHECK_RUN_NAME,
                 AUTO_BUILD_CHECK_RUN_NAME,
                 CheckRunStatus::InProgress,
@@ -1208,7 +1208,9 @@ merge_queue_enabled = false
     async fn auto_build_sha_mismatch_sanity_check_fails(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.approve(()).await?;
-            ctx.modify_pr_in_gh((), |pr| pr.head_sha = format!("{}-modified", pr.head_sha));
+            ctx.modify_pr_in_gh((), |pr| {
+                pr.reset_to_single_commit(Commit::new(&format!("{}-modified", pr.head_sha()), "force push"));
+            });
             ctx.run_merge_queue_now().await;
             insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
             The pull request was unapproved, because its SHA did not match the approved SHA during a merge attempt.
@@ -1228,7 +1230,7 @@ merge_queue_enabled = false
             ctx.approve(()).await?;
             ctx.start_and_finish_auto_build(()).await?;
             ctx.expect_check_run(
-                &ctx.pr(()).await.get_gh_pr().head_sha,
+                &ctx.pr(()).await.get_gh_pr().head_sha(),
                 AUTO_BUILD_CHECK_RUN_NAME,
                 AUTO_BUILD_CHECK_RUN_NAME,
                 CheckRunStatus::Completed,
@@ -1310,7 +1312,7 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
             ctx.workflow_full_failure(ctx.auto_workflow()).await?;
             ctx.expect_comments((), 1).await;
             ctx.expect_check_run(
-                &ctx.pr(()).await.get_gh_pr().head_sha,
+                &ctx.pr(()).await.get_gh_pr().head_sha(),
                 AUTO_BUILD_CHECK_RUN_NAME,
                 AUTO_BUILD_CHECK_RUN_NAME,
                 CheckRunStatus::Completed,
@@ -1479,7 +1481,7 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
             // Change its head SHA, but don't tell bors about it
             ctx
                 .modify_pr_in_gh(pr2.id(), |pr| {
-                    pr.head_sha = format!("{}-modified", pr.head_sha);
+                    pr.reset_to_single_commit(Commit::new(&format!("{}-modified", pr.head_sha()), "force push"));
                 });
 
             // Run the merge queue. It should recover and start merging PR3

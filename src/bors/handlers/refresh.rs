@@ -245,7 +245,7 @@ auto_build_failed = ["+failed"]
             ctx.expect_comments((), 1).await;
 
             ctx.expect_check_run(
-                &ctx.pr(()).await.get_gh_pr().head_sha,
+                &ctx.pr(()).await.get_gh_pr().head_sha(),
                 TRY_BUILD_CHECK_RUN_NAME,
                 "Bors try build",
                 CheckRunStatus::Completed,
@@ -340,13 +340,13 @@ auto_build_failed = ["+failed"]
     async fn refresh_pr_with_status_closed(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             let pr = ctx.open_pr((), |_| {}).await?;
-            ctx.wait_for_pr(pr.number, |_| true).await?;
+            ctx.wait_for_pr(pr.id(), |_| true).await?;
 
             ctx.modify_pr_in_gh(pr.id(), |pr| {
                 pr.close();
             });
             ctx.refresh_prs().await;
-            ctx.pr(pr.number)
+            ctx.pr(pr.id())
                 .await
                 .expect_status(PullRequestStatus::Closed);
             Ok(())
