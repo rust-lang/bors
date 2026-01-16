@@ -625,9 +625,9 @@ pub struct PullRequest {
     pub(super) number: PullRequestNumber,
     pub(super) repo: GithubRepoName,
     pub(super) comment_counter: u64,
-    pub(super) commits: Vec<Commit>,
     pub(super) author: User,
     pub base_branch: Branch,
+    pub(super) head_branch: Branch,
     pub mergeable_state: MergeableState,
     pub(super) status: PullRequestStatus,
     pub(super) merged_at: Option<DateTime<Utc>>,
@@ -650,14 +650,18 @@ impl PullRequest {
         // The size of the buffer is load-bearing, if we receive too many comments, the test harness
         // could deadlock.
         let (comment_queue_tx, comment_queue_rx) = tokio::sync::mpsc::channel(100);
+        let head_branch = Branch::new(
+            &format!("pr/{number}"),
+            Commit::new(
+                &format!("pr-{number}-sha"),
+                &format!("initial PR#{number} commit"),
+            ),
+        );
         Self {
             number: PullRequestNumber(number),
             repo,
             comment_counter: 0,
-            commits: vec![Commit::new(
-                &format!("pr-{number}-sha"),
-                &format!("initial PR#{number} commit"),
-            )],
+            head_branch,
             author,
             base_branch: Branch::default(),
             mergeable_state: MergeableState::Clean,
@@ -686,7 +690,7 @@ impl PullRequest {
     }
 
     pub fn head_sha(&self) -> String {
-        self.commits.last().expect("No commits on a PR").sha.clone()
+        self.head_branch.sha()
     }
 
     pub fn id(&self) -> PrIdentifier {
@@ -697,12 +701,12 @@ impl PullRequest {
     }
 
     pub fn reset_to_single_commit(&mut self, commit: Commit) {
-        self.commits = vec![commit];
+        self.head_branch.commits = vec![commit];
     }
 
     pub fn add_commit(&mut self, commit: Commit) {
-        assert!(!self.commits.iter().any(|c| c.sha == commit.sha));
-        self.commits.push(commit);
+        assert!(!self.head_branch.commits.iter().any(|c| c.sha == commit.sha));
+        self.head_branch.commits.push(commit);
     }
 
     /// Return a numeric ID and a node ID for the next comment to be created.

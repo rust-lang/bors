@@ -456,7 +456,7 @@ It fixes so many issues, sir."
             ctx.expect_comments((), 1).await;
 
             insta::assert_snapshot!(ctx.try_branch().get_commit().message(), @"
-            Auto merge of #1 - pr-1, r=<try>
+            Auto merge of #1 - default-user:pr/1, r=<try>
 
             Title of PR 1
             ");
@@ -485,7 +485,7 @@ try-job: Bar
             ctx.expect_comments((), 1).await;
 
             insta::assert_snapshot!(ctx.try_branch().get_commit().message(), @"
-            Auto merge of #1 - pr-1, r=<try>
+            Auto merge of #1 - default-user:pr/1, r=<try>
 
             Title of PR 1
 
@@ -514,7 +514,7 @@ try-job: Bar
             ctx.expect_comments((), 1).await;
 
             insta::assert_snapshot!(ctx.try_branch().get_commit().message(), @"
-            Auto merge of #1 - pr-1, r=<try>
+            Auto merge of #1 - default-user:pr/1, r=<try>
 
             Title of PR 1
 
@@ -660,11 +660,11 @@ try-job: Bar
             Assuming `self` is your fork and `upstream` is this repository,
              you can resolve the conflict following these steps:
 
-            1. `git checkout pr-1` *(switch to your branch)*
+            1. `git checkout pr/1` *(switch to your branch)*
             2. `git fetch upstream HEAD` *(retrieve the latest base branch)*
             3. `git rebase upstream/HEAD -p` *(rebase on top of it)*
             4. Follow the on-screen instruction to resolve conflicts (check `git status` if you got lost).
-            5. `git push self pr-1 --force-with-lease` *(update this PR)*
+            5. `git push self pr/1 --force-with-lease` *(update this PR)*
 
             You may also read
              [*Git Rebasing to Resolve Conflicts* by Drew Blessing](http://blessing.io/git/git-rebase/open-source/2015/08/23/git-rebasing-to-resolve-conflicts.html)

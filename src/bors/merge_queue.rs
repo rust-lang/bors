@@ -1568,7 +1568,7 @@ also include this pls"
             ctx.start_and_finish_auto_build(()).await?;
 
             insta::assert_snapshot!(ctx.auto_branch().get_commit().message(), @"
-            Auto merge of #1 - pr-1, r=default-user
+            Auto merge of #1 - default-user:pr/1, r=default-user
 
             Title of PR 1
 

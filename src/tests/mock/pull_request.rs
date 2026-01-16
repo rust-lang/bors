@@ -293,15 +293,14 @@ pub struct GitHubPullRequest {
 
 impl GitHubPullRequest {
     pub fn new(github: &GitHub, pr: PullRequest) -> Self {
-        let head_sha = pr.head_sha();
         let PullRequest {
             number,
             repo,
+            head_branch,
             head_repository,
             labels_added_by_bors: _,
             labels_removed_by_bors: _,
             comment_counter: _,
-            commits: _,
             author,
             base_branch,
             mergeable_state,
@@ -332,9 +331,9 @@ impl GitHubPullRequest {
             draft: status == PullRequestStatus::Draft,
             number: number.0,
             head: Box::new(GitHubHead {
-                label: format!("pr-{number}"),
-                ref_field: format!("pr-{number}"),
-                sha: head_sha,
+                label: format!("{}:{}", author.name, head_branch.name()),
+                ref_field: head_branch.name().to_owned(),
+                sha: head_branch.sha(),
                 repo: head_repository
                     .map(|repo| GitHubRepository::from(github.get_repo(repo).lock().deref())),
             }),
