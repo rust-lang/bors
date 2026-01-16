@@ -465,7 +465,7 @@ impl Repo {
         if let Some(branch) = self.branches.iter_mut().find(|b| b.name == name) {
             Some(branch)
         } else {
-            for (_, pr) in &mut self.pull_requests {
+            for pr in self.pull_requests.values_mut() {
                 if pr.head_branch.name == name {
                     return Some(&mut pr.head_branch);
                 }
