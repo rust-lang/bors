@@ -791,20 +791,22 @@ impl BorsTester {
         self.pull_request_edited(pr, changes).await
     }
 
-    pub async fn push_to_pr<Id: Into<PrIdentifier>>(&mut self, id: Id) -> anyhow::Result<()> {
+    pub async fn push_to_pr<Id: Into<PrIdentifier>>(
+        &mut self,
+        id: Id,
+        commit: Commit,
+    ) -> anyhow::Result<()> {
         let id = id.into();
         let payload = {
             let gh = self.github.lock();
             let repo = gh.get_repo(&id.repo);
             let mut repo = repo.lock();
 
-            let counter = repo.get_next_pr_push_counter();
-
             let pr = repo
                 .pulls_mut()
                 .get_mut(&id.number)
                 .expect("PR must be initialized before pushing to it");
-            pr.head_sha = format!("pr-{}-commit-{counter}", id.number);
+            pr.add_commit(commit);
             pr.mergeable_state = OctocrabMergeableState::Unknown;
             let pr = pr.clone();
             GitHubPullRequestEventPayload::new(&repo, pr, "synchronize", None)

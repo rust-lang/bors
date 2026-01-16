@@ -1209,7 +1209,7 @@ merge_queue_enabled = false
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.approve(()).await?;
             ctx.modify_pr_in_gh((), |pr| {
-                pr.force_push(Commit::new(&format!("{}-modified", pr.head_sha()), "force push"));
+                pr.reset_to_single_commit(Commit::new(&format!("{}-modified", pr.head_sha()), "force push"));
             });
             ctx.run_merge_queue_now().await;
             insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
@@ -1481,7 +1481,7 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
             // Change its head SHA, but don't tell bors about it
             ctx
                 .modify_pr_in_gh(pr2.id(), |pr| {
-                    pr.force_push(Commit::new(&format!("{}-modified", pr.head_sha()), "force push"));
+                    pr.reset_to_single_commit(Commit::new(&format!("{}-modified", pr.head_sha()), "force push"));
                 });
 
             // Run the merge queue. It should recover and start merging PR3

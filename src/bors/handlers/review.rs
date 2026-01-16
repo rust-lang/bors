@@ -464,8 +464,8 @@ mod tests {
     use crate::bors::TRY_BRANCH_NAME;
     use crate::bors::merge_queue::AUTO_BUILD_CHECK_RUN_NAME;
     use crate::database::{DelegatedPermission, OctocrabMergeableState, TreeState};
-    use crate::tests::BorsTester;
     use crate::tests::default_repo_name;
+    use crate::tests::{BorsTester, Commit};
     use crate::{
         bors::{RollupMode, handlers::trybuild::TRY_MERGE_BRANCH_NAME},
         tests::{BorsBuilder, Comment, GitHub, Permissions, User, run_test},
@@ -1295,7 +1295,7 @@ approved = { modifications = ["+foo", "+baz"], unless = ["label1", "label2"] }
 
             ctx.pr(()).await.expect_approved_sha(&pr.head_sha());
 
-            ctx.push_to_pr(()).await?;
+            ctx.push_to_pr((), Commit::from_sha("foo")).await?;
             let pr2 = ctx.pr(()).await.get_gh_pr();
             assert_ne!(pr.head_sha(), pr2.head_sha());
 

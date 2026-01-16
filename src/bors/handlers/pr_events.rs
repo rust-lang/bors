@@ -435,11 +435,11 @@ mod tests {
     async fn unapprove_on_push(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.approve(()).await?;
-            ctx.push_to_pr(()).await?;
+            ctx.push_to_pr((), Commit::from_sha("foo")).await?;
 
             insta::assert_snapshot!(
                 ctx.get_next_comment_text(()).await?,
-                @":warning: A new commit `pr-1-commit-1` was pushed to the branch, the PR will need to be re-approved."
+                @":warning: A new commit `foo` was pushed to the branch, the PR will need to be re-approved."
             );
             ctx.pr(()).await.expect_unapproved();
             Ok(())
@@ -450,7 +450,7 @@ mod tests {
     #[sqlx::test]
     async fn push_to_pr_do_nothing_when_not_approved(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
-            ctx.push_to_pr(()).await?;
+            ctx.push_to_pr((), Commit::from_sha("foo")).await?;
 
             // No comment should be posted
             Ok(())
@@ -465,7 +465,7 @@ mod tests {
             ctx.start_auto_build(()).await?;
             ctx.workflow_full_failure(ctx.auto_workflow()).await?;
             ctx.expect_comments((), 1).await;
-            ctx.push_to_pr(()).await?;
+            ctx.push_to_pr((), Commit::from_sha("foo")).await?;
 
             // No comment should be posted, but the PR should still be unapproved
             ctx.wait_for_pr((), |pr| !pr.is_approved() && pr.auto_build.is_none())
@@ -489,7 +489,7 @@ mod tests {
             });
 
             // And push to it. This should NOT result in unmergeability notification!
-            ctx.push_to_pr(pr2.id()).await?;
+            ctx.push_to_pr(pr2.id(), Commit::from_sha("foo")).await?;
             ctx.drain_mergeability_queue().await?;
 
             // No comment should be posted
@@ -515,7 +515,7 @@ mod tests {
             let comment = ctx.get_next_comment(pr2.id()).await?;
 
             // The comment should be hidden after this push
-            ctx.push_to_pr(pr2.id()).await?;
+            ctx.push_to_pr(pr2.id(), Commit::from_sha("foo")).await?;
 
             ctx.expect_hidden_comment(&comment, HideCommentReason::Outdated);
 
@@ -975,7 +975,7 @@ conflict = ["+conflict"]
     #[sqlx::test]
     async fn enqueue_prs_on_push_to_pr(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
-            ctx.push_to_pr(()).await?;
+            ctx.push_to_pr((), Commit::from_sha("foo")).await?;
             ctx.wait_for_pr((), |pr| pr.mergeable_status() == MergeableState::Unknown)
                 .await?;
             ctx.modify_pr_in_gh((), |pr| pr.mergeable_state = OctocrabMergeableState::Dirty);
@@ -999,9 +999,9 @@ conflict = ["+conflict"]
             ctx
                 .workflow_start(run_id)
                 .await?;
-            ctx.push_to_pr(()).await?;
+            ctx.push_to_pr((), Commit::from_sha("foo")).await?;
             insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
-            :warning: A new commit `pr-1-commit-1` was pushed to the branch, the PR will need to be re-approved.
+            :warning: A new commit `foo` was pushed to the branch, the PR will need to be re-approved.
 
             Auto build cancelled due to push. Cancelled workflows:
 
@@ -1025,9 +1025,9 @@ conflict = ["+conflict"]
             ctx.pr(()).await.expect_auto_build(|_| true);
 
             ctx.workflow_start(ctx.auto_workflow()).await?;
-            ctx.push_to_pr(()).await?;
+            ctx.push_to_pr((), Commit::from_sha("foo")).await?;
             insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
-            :warning: A new commit `pr-1-commit-1` was pushed to the branch, the PR will need to be re-approved.
+            :warning: A new commit `foo` was pushed to the branch, the PR will need to be re-approved.
 
             Auto build cancelled due to push. It was not possible to cancel some workflows.
             ");
@@ -1044,7 +1044,7 @@ conflict = ["+conflict"]
             ctx.workflow_start(ctx.auto_workflow()).await?;
 
             let prev_commit_sha = &ctx.pr(()).await.get_gh_pr().head_sha();
-            ctx.push_to_pr(()).await?;
+            ctx.push_to_pr((), Commit::from_sha("foo")).await?;
             ctx.expect_comments((), 1).await;
             ctx.expect_check_run(
                 prev_commit_sha,

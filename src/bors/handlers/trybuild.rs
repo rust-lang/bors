@@ -1022,7 +1022,7 @@ try_failed = ["+foo", "+bar", "-baz"]
             ctx.expect_comments((), 1).await;
 
             let prev_sha = ctx.pr(()).await.get_gh_pr().head_sha();
-            ctx.push_to_pr(()).await?;
+            ctx.push_to_pr((), Commit::from_sha("foo")).await?;
             ctx.post_comment("@bors try").await?;
             ctx.expect_comments((), 1).await;
 
