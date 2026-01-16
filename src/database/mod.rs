@@ -769,6 +769,7 @@ pub fn pr_needs_update_in_db(db_pr: &PullRequestModel, gh_pr: &PullRequest) -> b
         number: _,
         head_label: _,
         head,
+        head_repository: _,
         base,
         title,
         // It seems that when we query PRs in bulk from GitHub, the mergeability status is
@@ -780,6 +781,7 @@ pub fn pr_needs_update_in_db(db_pr: &PullRequestModel, gh_pr: &PullRequest) -> b
         status,
         labels: _,
         html_url: _,
+        commit_count: _,
     } = gh_pr;
     if status != db_status {
         return true;

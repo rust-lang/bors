@@ -134,4 +134,6 @@ pub enum BorsCommand {
     Retry,
     /// Cancel an auto build currently running on a given PR (without removing it from the queue).
     Cancel,
+    /// Squash all commits of a pull request into a single commit.
+    Squash,
 }

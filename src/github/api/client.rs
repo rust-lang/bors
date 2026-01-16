@@ -187,6 +187,50 @@ impl GithubRepositoryClient {
         Ok(prs)
     }
 
+    pub async fn get_pull_request_commits(
+        &self,
+        number: PullRequestNumber,
+    ) -> anyhow::Result<Vec<Commit>> {
+        let commits = perform_retryable(
+            "get_pull_request_commits",
+            RetryMethod::default(),
+            || async {
+                let response = self
+                    .client
+                    .pulls(self.repository().owner(), self.repository().name())
+                    .pr_commits(number.0)
+                    .per_page(100)
+                    .send()
+                    .await
+                    .map_err(|error| {
+                        anyhow::anyhow!(
+                            "Could not get PR {}#{number} commits: {error:?}",
+                            self.repository()
+                        )
+                    })?;
+
+                let mut commits = Vec::new();
+                let mut stream = std::pin::pin!(response.into_stream(&self.client));
+                while let Some(gh_commit) = stream.try_next().await? {
+                    let commit = Commit {
+                        sha: CommitSha(gh_commit.sha),
+                        parents: gh_commit
+                            .parents
+                            .into_iter()
+                            .filter_map(|p| p.sha.map(CommitSha))
+                            .collect(),
+                        tree: TreeSha(gh_commit.commit.tree.sha),
+                        author: CommitAuthor::from_gh(gh_commit.commit.author),
+                    };
+                    commits.push(commit);
+                }
+                anyhow::Ok(commits)
+            },
+        )
+        .await?;
+        Ok(commits)
+    }
+
     /// Post a comment to the pull request with the given number.
     /// The comment will be posted as the Github App user of the bot.
     pub async fn post_comment(
@@ -741,10 +785,25 @@ pub struct CheckRunOutput {
     pub summary: String,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommitAuthor {
     pub name: String,
     pub email: String,
+}
+
+impl CommitAuthor {
+    pub fn from_gh(gh_author: Option<octocrab::models::repos::CommitAuthor>) -> Option<Self> {
+        if let Some(author) = gh_author
+            && let Some(email) = author.email
+        {
+            Some(Self {
+                name: author.name,
+                email,
+            })
+        } else {
+            None
+        }
+    }
 }
 
 #[cfg(test)]
