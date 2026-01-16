@@ -13,6 +13,7 @@ use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::collections::HashMap;
+use std::ops::Deref;
 use std::sync::Arc;
 use url::Url;
 use wiremock::{
@@ -25,14 +26,15 @@ pub async fn mock_pull_requests(
     github: Arc<Mutex<GitHub>>,
     mock_server: &MockServer,
 ) {
-    mock_pr_list(repo.clone(), mock_server).await;
-    mock_pr(repo.clone(), mock_server).await;
+    mock_pr_list(repo.clone(), github.clone(), mock_server).await;
+    mock_pr(repo.clone(), github.clone(), mock_server).await;
     mock_pr_create(repo.clone(), github, mock_server).await;
     mock_pr_comments(repo.clone(), mock_server).await;
-    mock_pr_labels(repo, mock_server).await;
+    mock_pr_labels(repo.clone(), mock_server).await;
+    mock_pr_commits(repo, mock_server).await;
 }
 
-async fn mock_pr(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
+async fn mock_pr(repo: Arc<Mutex<Repo>>, github: Arc<Mutex<GitHub>>, mock_server: &MockServer) {
     let repo_name = repo.lock().full_name();
     dynamic_mock_req(
         move |_req: &Request, [pr_number]: [&str; 1]| {
@@ -41,7 +43,8 @@ async fn mock_pr(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
             if pull_request_error {
                 ResponseTemplate::new(500)
             } else if let Some(pr) = repo.lock().pulls().get(&pr_number) {
-                ResponseTemplate::new(200).set_body_json(GitHubPullRequest::from(pr.clone()))
+                ResponseTemplate::new(200)
+                    .set_body_json(GitHubPullRequest::new(&github.lock(), pr.clone()))
             } else {
                 ResponseTemplate::new(404)
             }
@@ -84,6 +87,7 @@ async fn mock_pr_create(
                 .get(&GithubRepoName::new(fork_owner, repo.full_name().name()))
                 .expect("Fork not found")
                 .clone();
+            assert!(fork.lock().fork);
             let commit = fork
                 .lock()
                 .get_branch_by_name(branch)
@@ -105,7 +109,8 @@ async fn mock_pr_create(
             pr.description = data.body;
             pr.reset_to_single_commit(commit);
             pr.base_branch = base_branch;
-            ResponseTemplate::new(200).set_body_json(GitHubPullRequest::from(pr.clone()))
+            ResponseTemplate::new(200)
+                .set_body_json(GitHubPullRequest::new(&github.lock(), pr.clone()))
         },
         "POST",
         format!("^/repos/{repo_name}/pulls$"),
@@ -114,7 +119,11 @@ async fn mock_pr_create(
     .await;
 }
 
-async fn mock_pr_list(repo_clone: Arc<Mutex<Repo>>, mock_server: &MockServer) {
+async fn mock_pr_list(
+    repo_clone: Arc<Mutex<Repo>>,
+    github: Arc<Mutex<GitHub>>,
+    mock_server: &MockServer,
+) {
     let repo_name = repo_clone.lock().full_name();
     Mock::given(method("GET"))
         .and(path(format!("/repos/{repo_name}/pulls")))
@@ -144,7 +153,7 @@ async fn mock_pr_list(repo_clone: Arc<Mutex<Repo>>, mock_server: &MockServer) {
                             }
                         })
                         .map(|pr| {
-                            let mut pr = GitHubPullRequest::from(pr.clone());
+                            let mut pr = GitHubPullRequest::new(&github.lock(), pr.clone());
                             // GitHub always returns unknown mergeable state from this endpoint
                             pr.mergeable_state = OctocrabMergeableState::Unknown;
                             pr
@@ -257,6 +266,119 @@ async fn mock_pr_labels(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
     .await;
 }
 
+// https://docs.github.com/en/rest/pulls/pulls?apiVersion=2022-11-28#list-commits-on-a-pull-request
+async fn mock_pr_commits(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
+    let repo_name = repo.lock().full_name();
+    let repo2 = repo.clone();
+    // Add label(s)
+    dynamic_mock_req(
+        move |_req: &Request, [pr_number]: [&str; 1]| {
+            let pr_number: u64 = pr_number.parse().unwrap();
+
+            let repo = repo.lock();
+            let Some(pr) = repo.pulls().get(&pr_number) else {
+                return ResponseTemplate::new(404);
+            };
+
+            #[derive(serde::Serialize)]
+            struct TreeResponse {
+                sha: String,
+                url: String,
+            }
+
+            #[derive(serde::Serialize)]
+            struct Parent {
+                sha: String,
+            }
+
+            #[derive(serde::Serialize)]
+            struct Author {
+                name: String,
+                email: String,
+            }
+
+            #[derive(serde::Serialize)]
+            struct CommitResponse {
+                url: String,
+                tree: TreeResponse,
+                author: Author,
+                committer: Option<Author>,
+                message: String,
+                comment_count: u64,
+            }
+
+            #[derive(serde::Serialize)]
+            struct PullRequestCommit {
+                url: String,
+                node_id: String,
+                html_url: String,
+                comments_url: String,
+                sha: String,
+                parents: Vec<Parent>,
+                commit: CommitResponse,
+                author: Option<String>,
+                committer: Option<String>,
+            }
+
+            let url = || "https://github.com/todo".to_string();
+            let response = pr
+                .head_branch
+                .get_commits()
+                .iter()
+                .map(|commit| PullRequestCommit {
+                    url: url(),
+                    node_id: String::new(),
+                    html_url: url(),
+                    comments_url: url(),
+                    sha: commit.sha().to_owned(),
+                    parents: vec![],
+                    commit: CommitResponse {
+                        url: url(),
+                        tree: TreeResponse {
+                            sha: format!("{}-tree", commit.sha()),
+                            url: url(),
+                        },
+                        author: Author {
+                            name: commit.author().name.clone(),
+                            email: commit.author().email.clone(),
+                        },
+                        committer: None,
+                        message: commit.message().to_string(),
+                        comment_count: 0,
+                    },
+                    author: None,
+                    committer: None,
+                })
+                .collect::<Vec<PullRequestCommit>>();
+
+            ResponseTemplate::new(200).set_body_json(response)
+        },
+        "GET",
+        format!("^/repos/{repo_name}/pulls/([0-9]+)/commits"),
+    )
+    .mount(mock_server)
+    .await;
+
+    // Remove label(s)
+    dynamic_mock_req(
+        move |_req: &Request, [pr_number, label_name]: [&str; 2]| {
+            let pr_number: u64 = pr_number.parse().unwrap();
+
+            let mut repo = repo2.lock();
+            let Some(pr) = repo.pulls_mut().get_mut(&pr_number) else {
+                return ResponseTemplate::new(404);
+            };
+            pr.remove_label(label_name);
+
+            ResponseTemplate::new(200).set_body_json::<&[GitHubLabel]>(&[])
+        },
+        "DELETE",
+        format!("/repos/{repo_name}/issues/([0-9]+)/labels/(.*)"),
+    )
+    .mount(mock_server)
+    .await;
+}
+
 #[derive(Serialize)]
 pub struct GitHubPullRequest {
     url: String,
@@ -281,18 +403,20 @@ pub struct GitHubPullRequest {
     assignees: Vec<GitHubUser>,
     labels: Vec<GitHubLabel>,
     html_url: String,
+    maintainer_can_modify: bool,
+    commits: Option<u64>,
 }
 
-impl From<PullRequest> for GitHubPullRequest {
-    fn from(pr: PullRequest) -> Self {
-        let head_sha = pr.head_sha();
+impl GitHubPullRequest {
+    pub fn new(github: &GitHub, pr: PullRequest) -> Self {
         let PullRequest {
             number,
             repo,
+            head_branch,
+            head_repository,
             labels_added_by_bors: _,
             labels_removed_by_bors: _,
             comment_counter: _,
-            commits: _,
             author,
             base_branch,
             mergeable_state,
@@ -303,10 +427,16 @@ impl From<PullRequest> for GitHubPullRequest {
             description,
             title,
             labels,
+            maintainers_can_modify,
             comment_queue_tx: _,
             comment_queue_rx: _,
             comment_history: _,
         } = pr;
+
+        if let Some(head_repository) = &head_repository {
+            assert_ne!(head_repository, &repo);
+        }
+
         GitHubPullRequest {
             user: author.clone().into(),
             url: "https://test.com".to_string(),
@@ -318,9 +448,11 @@ impl From<PullRequest> for GitHubPullRequest {
             draft: status == PullRequestStatus::Draft,
             number: number.0,
             head: Box::new(GitHubHead {
-                label: format!("pr-{number}"),
-                ref_field: format!("pr-{number}"),
-                sha: head_sha,
+                label: format!("{}:{}", author.name, head_branch.name()),
+                ref_field: head_branch.name().to_owned(),
+                sha: head_branch.sha(),
+                repo: head_repository
+                    .map(|repo| GitHubRepository::from(github.get_repo(repo).lock().deref())),
             }),
             base: Box::new(GitHubBase {
                 ref_field: base_branch.name().to_string(),
@@ -340,6 +472,8 @@ impl From<PullRequest> for GitHubPullRequest {
                     default: false,
                 })
                 .collect(),
+            maintainer_can_modify: maintainers_can_modify,
+            commits: Some(head_branch.get_commits().len() as u64),
         }
     }
 }
@@ -360,6 +494,7 @@ struct GitHubHead {
     #[serde(rename = "ref")]
     ref_field: String,
     sha: String,
+    repo: Option<GitHubRepository>,
 }
 
 #[derive(Serialize)]
@@ -380,13 +515,14 @@ pub struct GitHubPullRequestEventPayload {
 impl GitHubPullRequestEventPayload {
     pub fn new(
         repo: &Repo,
+        github: &GitHub,
         pull_request: PullRequest,
         action: &str,
         changes: Option<PullRequestChangeEvent>,
     ) -> Self {
         GitHubPullRequestEventPayload {
             action: action.to_string(),
-            pull_request: pull_request.clone().into(),
+            pull_request: GitHubPullRequest::new(github, pull_request),
             changes: changes.map(Into::into),
             repository: GitHubRepository::from(repo),
         }

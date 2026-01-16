@@ -65,6 +65,10 @@ rand = { version = "0.9", features = ["alloc"] }
 pulldown-cmark = "0.13"
 regex = "1"
 
+# Optional
+git2 = { version = "0.20", optional = true }
+tempfile = { version = "3", optional = true }
+
 [dev-dependencies]
 insta = "1.26"
 wiremock = "0.6"
@@ -82,3 +86,7 @@ debug = 1
 
 [profile.dev.package.sqlx-macros]
 opt-level = 3
+
+[features]
+default = ["local-git-ops"]
+local-git-ops = ["dep:git2", "dep:tempfile"]

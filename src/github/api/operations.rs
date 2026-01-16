@@ -8,9 +8,12 @@ use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
 use octocrab::params::repos::Reference;
 use thiserror::Error;
 
+/// How should we perform a push to a branch/git reference.
 #[derive(Copy, Clone, PartialEq, Eq)]
 pub enum ForcePush {
+    /// Force push. If the branch doesn't exist, create it.
     Yes,
+    /// Only try to push to the branch, without creating a branch and without force pushing.
     No,
 }
 
@@ -48,6 +51,7 @@ pub struct Commit {
     pub sha: CommitSha,
     pub parents: Vec<CommitSha>,
     pub tree: TreeSha,
+    pub author: Option<CommitAuthor>,
 }
 
 /// Creates a merge commit on the given repository.
@@ -100,7 +104,13 @@ pub async fn merge_branches(
                 .into_iter()
                 .map(|parent| CommitSha(parent.sha))
                 .collect();
-            Commit { sha, tree, parents }
+            // TODO
+            Commit {
+                sha,
+                tree,
+                parents,
+                author: None,
+            }
         }
     }
 
@@ -240,13 +250,17 @@ async fn update_branch(
         force: bool,
     }
 
+    let force = match force {
+        ForcePush::Yes => true,
+        ForcePush::No => false,
+    };
     let res = repo
         .client()
         ._patch(
             url.as_str(),
             Some(&Request {
                 sha: sha.as_ref(),
-                force: matches!(force, ForcePush::Yes),
+                force,
             }),
         )
         .await?;
@@ -287,15 +301,18 @@ pub enum CommitCreateError {
 /// Create a new commit with the given tree SHA and author.
 /// https://docs.github.com/en/rest/git/commits?apiVersion=2022-11-28#create-a-commit
 pub(super) async fn create_commit(
-    repo: &GithubRepositoryClient,
+    client: &GithubRepositoryClient,
     tree: &TreeSha,
     parents: &[CommitSha],
     message: &str,
     author: &CommitAuthor,
 ) -> Result<CommitSha, CommitCreateError> {
-    let url = format!("/repos/{}/git/commits", repo.repository(),);
+    let repo = client.repository();
+    let url = format!("/repos/{repo}/git/commits");
 
-    tracing::debug!("Creating commit with tree {tree}, message {message} and author {author:?}");
+    tracing::debug!(
+        "Creating commit in `{repo}` with tree `{tree}`, message `{message}` and author {author:?}"
+    );
 
     #[derive(serde::Serialize)]
     struct Author<'a> {
@@ -312,7 +329,7 @@ pub(super) async fn create_commit(
     }
 
     let parents = parents.iter().map(|sha| sha.as_ref()).collect::<Vec<_>>();
-    let res = repo
+    let res = client
         .client()
         ._post(
             url.as_str(),
@@ -329,7 +346,11 @@ pub(super) async fn create_commit(
         .await?;
 
     let status = res.status();
-    let text = repo.client().body_to_string(res).await.unwrap_or_default();
+    let text = client
+        .client()
+        .body_to_string(res)
+        .await
+        .unwrap_or_default();
     tracing::trace!("Creating commit response: status={status}, text={text}");
 
     #[derive(serde::Deserialize)]

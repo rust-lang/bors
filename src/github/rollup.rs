@@ -778,7 +778,7 @@ also include this pls"
         // Find the rollup merge commit
         let rollup_merge_commit = rollup_branch.get_commit_history().last().unwrap().clone();
         insta::assert_snapshot!(rollup_merge_commit.message(), @"
-        Rollup merge of #2 - pr-2, r=default-user
+        Rollup merge of #2 - pr/2, r=default-user
 
         Title of PR 2
 

@@ -413,7 +413,7 @@ mod tests {
                 .await?
                 .assert_ok()
                 .into_body();
-            insta::assert_snapshot!(response, @r#"[{"number":1,"title":"Title of PR 1","author":"default-user","status":"open","head_branch":"pr-1","base_branch":"main","priority":null,"approver":"default-user","try_build":null,"auto_build":null}]"#);
+            insta::assert_snapshot!(response, @r#"[{"number":1,"title":"Title of PR 1","author":"default-user","status":"open","head_branch":"pr/1","base_branch":"main","priority":null,"approver":"default-user","try_build":null,"auto_build":null}]"#);
             Ok(())
         })
         .await;

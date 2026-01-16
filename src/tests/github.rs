@@ -462,14 +462,23 @@ impl Repo {
     }
 
     pub fn get_branch_by_name(&mut self, name: &str) -> Option<&mut Branch> {
-        self.branches.iter_mut().find(|b| b.name == name)
+        if let Some(branch) = self.branches.iter_mut().find(|b| b.name == name) {
+            Some(branch)
+        } else {
+            for pr in self.pull_requests.values_mut() {
+                if pr.head_branch.name == name {
+                    return Some(&mut pr.head_branch);
+                }
+            }
+            None
+        }
     }
 
-    pub fn push_commit(&mut self, branch_name: &str, commit: Commit) {
+    pub fn push_commit(&mut self, branch_name: &str, commit: Commit, force: bool) {
         self.create_commit(commit.clone());
         self.get_branch_by_name(branch_name)
             .expect("Pushing to a non-existing branch")
-            .push_commit(commit);
+            .push_commit(commit, force);
     }
 
     pub fn create_commit(&mut self, commit: Commit) {
@@ -625,9 +634,9 @@ pub struct PullRequest {
     pub(super) number: PullRequestNumber,
     pub(super) repo: GithubRepoName,
     pub(super) comment_counter: u64,
-    pub(super) commits: Vec<Commit>,
     pub(super) author: User,
     pub base_branch: Branch,
+    pub(super) head_branch: Branch,
     pub mergeable_state: MergeableState,
     pub(super) status: PullRequestStatus,
     pub(super) merged_at: Option<DateTime<Utc>>,
@@ -636,11 +645,14 @@ pub struct PullRequest {
     pub description: String,
     pub title: String,
     pub labels: Vec<String>,
+    /// Set to `Some` to specify that this is a PR from a forked repository.
+    pub head_repository: Option<GithubRepoName>,
     pub(super) labels_added_by_bors: Vec<String>,
     pub(super) labels_removed_by_bors: Vec<String>,
     pub(super) comment_queue_tx: Sender<CommentMsg>,
     pub(super) comment_queue_rx: Arc<tokio::sync::Mutex<Receiver<CommentMsg>>>,
     pub(super) comment_history: Vec<Comment>,
+    pub maintainers_can_modify: bool,
 }
 
 impl PullRequest {
@@ -648,14 +660,22 @@ impl PullRequest {
         // The size of the buffer is load-bearing, if we receive too many comments, the test harness
         // could deadlock.
         let (comment_queue_tx, comment_queue_rx) = tokio::sync::mpsc::channel(100);
+        let head_branch = Branch::new(
+            &format!("pr/{number}"),
+            Commit::new(
+                &format!("pr-{number}-sha"),
+                &format!("initial PR#{number} commit"),
+            )
+            .with_author(GitUser {
+                name: author.name.clone(),
+                email: format!("{}@email.com", author.name),
+            }),
+        );
         Self {
             number: PullRequestNumber(number),
             repo,
             comment_counter: 0,
-            commits: vec![Commit::new(
-                &format!("pr-{number}-sha"),
-                &format!("initial PR#{number} commit"),
-            )],
+            head_branch,
             author,
             base_branch: Branch::default(),
             mergeable_state: MergeableState::Clean,
@@ -668,9 +688,11 @@ impl PullRequest {
             labels: Vec::new(),
             labels_added_by_bors: Vec::new(),
             labels_removed_by_bors: Vec::new(),
+            head_repository: None,
             comment_queue_tx,
             comment_queue_rx: Arc::new(tokio::sync::Mutex::new(comment_queue_rx)),
             comment_history: Vec::new(),
+            maintainers_can_modify: true,
         }
     }
 
@@ -683,7 +705,11 @@ impl PullRequest {
     }
 
     pub fn head_sha(&self) -> String {
-        self.commits.last().expect("No commits on a PR").sha.clone()
+        self.head_branch.sha()
+    }
+
+    pub fn head_branch_copy(&self) -> Branch {
+        self.head_branch.clone()
     }
 
     pub fn id(&self) -> PrIdentifier {
@@ -694,12 +720,16 @@ impl PullRequest {
     }
 
     pub fn reset_to_single_commit(&mut self, commit: Commit) {
-        self.commits = vec![commit];
+        self.head_branch.push_commit(commit, true);
     }
 
-    pub fn add_commit(&mut self, commit: Commit) {
-        assert!(!self.commits.iter().any(|c| c.sha == commit.sha));
-        self.commits.push(commit);
+    pub fn add_commits(&mut self, commits: Vec<Commit>) {
+        for commit in &commits {
+            assert!(!self.head_branch.commits.iter().any(|c| c.sha == commit.sha));
+        }
+        for commit in commits {
+            self.head_branch.push_commit(commit, false);
+        }
     }
 
     /// Return a numeric ID and a node ID for the next comment to be created.
@@ -768,6 +798,7 @@ impl PullRequest {
 pub struct Branch {
     name: String,
     commits: Vec<Commit>,
+    commit_history: Vec<Commit>,
     pub merge_counter: u64,
     pub merge_conflict: bool,
 }
@@ -776,7 +807,8 @@ impl Branch {
     pub fn new(name: &str, commit: Commit) -> Self {
         Self {
             name: name.to_string(),
-            commits: vec![commit],
+            commits: vec![commit.clone()],
+            commit_history: vec![commit],
             merge_counter: 0,
             merge_conflict: false,
         }
@@ -788,16 +820,24 @@ impl Branch {
     pub fn get_commit(&self) -> &Commit {
         self.commits.last().unwrap()
     }
+    pub fn get_commits(&self) -> &[Commit] {
+        &self.commits
+    }
     pub fn sha(&self) -> String {
         self.get_commit().sha().to_owned()
     }
 
-    fn push_commit(&mut self, commit: Commit) {
-        self.commits.push(commit);
+    fn push_commit(&mut self, commit: Commit, force: bool) {
+        self.commit_history.push(commit.clone());
+        if force {
+            self.commits = vec![commit];
+        } else {
+            self.commits.push(commit);
+        }
     }
 
     pub fn get_commit_history(&self) -> Vec<Commit> {
-        self.commits.clone()
+        self.commit_history.clone()
     }
 }
 
