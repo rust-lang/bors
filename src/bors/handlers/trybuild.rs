@@ -937,7 +937,7 @@ try_failed = ["+foo", "+bar", "-baz"]
             ctx.expect_comments((), 1).await;
 
             ctx.expect_check_run(
-                &ctx.pr(()).await.get_gh_pr().head_sha,
+                &ctx.pr(()).await.get_gh_pr().head_sha(),
                 TRY_BUILD_CHECK_RUN_NAME,
                 "Bors try build",
                 CheckRunStatus::InProgress,
@@ -959,7 +959,7 @@ try_failed = ["+foo", "+bar", "-baz"]
             ctx.expect_comments((), 1).await;
 
             ctx.expect_check_run(
-                &ctx.pr(()).await.get_gh_pr().head_sha,
+                &ctx.pr(()).await.get_gh_pr().head_sha(),
                 TRY_BUILD_CHECK_RUN_NAME,
                 "Bors try build",
                 CheckRunStatus::Completed,
@@ -981,7 +981,7 @@ try_failed = ["+foo", "+bar", "-baz"]
             ctx.expect_comments((), 1).await;
 
             ctx.expect_check_run(
-                &ctx.pr(()).await.get_gh_pr().head_sha,
+                &ctx.pr(()).await.get_gh_pr().head_sha(),
                 TRY_BUILD_CHECK_RUN_NAME,
                 "Bors try build",
                 CheckRunStatus::Completed,
@@ -1003,7 +1003,7 @@ try_failed = ["+foo", "+bar", "-baz"]
             ctx.expect_comments((), 1).await;
 
             ctx.expect_check_run(
-                &ctx.pr(()).await.get_gh_pr().head_sha,
+                &ctx.pr(()).await.get_gh_pr().head_sha(),
                 TRY_BUILD_CHECK_RUN_NAME,
                 "Bors try build",
                 CheckRunStatus::Completed,
@@ -1021,7 +1021,7 @@ try_failed = ["+foo", "+bar", "-baz"]
             ctx.post_comment("@bors try").await?;
             ctx.expect_comments((), 1).await;
 
-            let prev_sha = ctx.pr(()).await.get_gh_pr().head_sha;
+            let prev_sha = ctx.pr(()).await.get_gh_pr().head_sha();
             ctx.push_to_pr(()).await?;
             ctx.post_comment("@bors try").await?;
             ctx.expect_comments((), 1).await;
@@ -1034,7 +1034,7 @@ try_failed = ["+foo", "+bar", "-baz"]
                 Some(CheckRunConclusion::Cancelled),
             );
             ctx.expect_check_run(
-                &ctx.pr(()).await.get_gh_pr().head_sha,
+                &ctx.pr(()).await.get_gh_pr().head_sha(),
                 TRY_BUILD_CHECK_RUN_NAME,
                 "Bors try build",
                 CheckRunStatus::InProgress,

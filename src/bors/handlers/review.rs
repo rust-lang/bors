@@ -1280,7 +1280,7 @@ approved = { modifications = ["+foo", "+baz"], unless = ["label1", "label2"] }
             let pr = ctx.pr(()).await.get_gh_pr();
             ctx.approve(()).await?;
 
-            ctx.pr(()).await.expect_approved_sha(&pr.head_sha);
+            ctx.pr(()).await.expect_approved_sha(&pr.head_sha());
 
             Ok(())
         })
@@ -1293,17 +1293,17 @@ approved = { modifications = ["+foo", "+baz"], unless = ["label1", "label2"] }
             let pr = ctx.pr(()).await.get_gh_pr();
             ctx.approve(()).await?;
 
-            ctx.pr(()).await.expect_approved_sha(&pr.head_sha);
+            ctx.pr(()).await.expect_approved_sha(&pr.head_sha());
 
             ctx.push_to_pr(()).await?;
             let pr2 = ctx.pr(()).await.get_gh_pr();
-            assert_ne!(pr.head_sha, pr2.head_sha);
+            assert_ne!(pr.head_sha(), pr2.head_sha());
 
             ctx.expect_comments((), 1).await;
 
             ctx.approve(()).await?;
 
-            ctx.pr(()).await.expect_approved_sha(&pr2.head_sha);
+            ctx.pr(()).await.expect_approved_sha(&pr2.head_sha());
 
             Ok(())
         })
@@ -1559,7 +1559,7 @@ labels_blocking_approval = ["proposed-final-comment-period", "final-comment-peri
             ctx.post_comment("@bors r-").await?;
             ctx.expect_comments((), 1).await;
             ctx.expect_check_run(
-                &ctx.pr(()).await.get_gh_pr().head_sha,
+                &ctx.pr(()).await.get_gh_pr().head_sha(),
                 AUTO_BUILD_CHECK_RUN_NAME,
                 AUTO_BUILD_CHECK_RUN_NAME,
                 CheckRunStatus::Completed,

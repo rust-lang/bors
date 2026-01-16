@@ -629,11 +629,11 @@ impl From<PullRequest> for PrIdentifier {
 
 #[derive(Clone, Debug)]
 pub struct PullRequest {
-    pub number: PullRequestNumber,
-    pub repo: GithubRepoName,
-    pub comment_counter: u64,
-    pub head_sha: String,
-    pub author: User,
+    pub(super) number: PullRequestNumber,
+    pub(super) repo: GithubRepoName,
+    pub(super) comment_counter: u64,
+    pub(super) head_sha: String,
+    pub(super) author: User,
     pub base_branch: Branch,
     pub mergeable_state: MergeableState,
     pub(super) status: PullRequestStatus,
@@ -645,9 +645,9 @@ pub struct PullRequest {
     pub labels: Vec<String>,
     pub(super) labels_added_by_bors: Vec<String>,
     pub(super) labels_removed_by_bors: Vec<String>,
-    pub comment_queue_tx: Sender<CommentMsg>,
-    pub comment_queue_rx: Arc<tokio::sync::Mutex<Receiver<CommentMsg>>>,
-    pub comment_history: Vec<Comment>,
+    pub(super) comment_queue_tx: Sender<CommentMsg>,
+    pub(super) comment_queue_rx: Arc<tokio::sync::Mutex<Receiver<CommentMsg>>>,
+    pub(super) comment_history: Vec<Comment>,
 }
 
 impl PullRequest {
@@ -678,11 +678,27 @@ impl PullRequest {
         }
     }
 
+    pub fn number(&self) -> PullRequestNumber {
+        self.number
+    }
+
+    pub fn repo(&self) -> &GithubRepoName {
+        &self.repo
+    }
+
+    pub fn head_sha(&self) -> String {
+        self.head_sha.clone()
+    }
+
     pub fn id(&self) -> PrIdentifier {
         PrIdentifier {
             repo: self.repo.clone(),
             number: self.number.0,
         }
+    }
+
+    pub fn force_push(&mut self, commit: Commit) {
+        self.head_sha = commit.sha;
     }
 
     /// Return a numeric ID and a node ID for the next comment to be created.

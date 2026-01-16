@@ -583,7 +583,7 @@ mod tests {
     async fn store_base_branch_on_pr_opened(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             let pr = ctx.open_pr((), |_| {}).await?;
-            ctx.wait_for_pr(pr.number, |pr| {
+            ctx.wait_for_pr(pr.id(), |pr| {
                 pr.base_branch == *default_branch_name() && pr.status == PullRequestStatus::Open
             })
             .await?;
@@ -626,13 +626,13 @@ mod tests {
     async fn open_close_and_reopen_pr(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             let pr = ctx.open_pr((), |_| {}).await?;
-            ctx.wait_for_pr(pr.number, |pr| pr.status == PullRequestStatus::Open)
+            ctx.wait_for_pr(pr.id(), |pr| pr.status == PullRequestStatus::Open)
                 .await?;
-            ctx.set_pr_status_closed(pr.number).await?;
-            ctx.wait_for_pr(pr.number, |pr| pr.status == PullRequestStatus::Closed)
+            ctx.set_pr_status_closed(pr.id()).await?;
+            ctx.wait_for_pr(pr.id(), |pr| pr.status == PullRequestStatus::Closed)
                 .await?;
-            ctx.reopen_pr(pr.number).await?;
-            ctx.wait_for_pr(pr.number, |pr| pr.status == PullRequestStatus::Open)
+            ctx.reopen_pr(pr.id()).await?;
+            ctx.wait_for_pr(pr.id(), |pr| pr.status == PullRequestStatus::Open)
                 .await?;
             Ok(())
         })
@@ -647,10 +647,10 @@ mod tests {
                     pr.convert_to_draft();
                 })
                 .await?;
-            ctx.wait_for_pr(pr.number, |pr| pr.status == PullRequestStatus::Draft)
+            ctx.wait_for_pr(pr.id(), |pr| pr.status == PullRequestStatus::Draft)
                 .await?;
-            ctx.set_pr_status_ready_for_review(pr.number).await?;
-            ctx.wait_for_pr(pr.number, |pr| pr.status == PullRequestStatus::Open)
+            ctx.set_pr_status_ready_for_review(pr.id()).await?;
+            ctx.wait_for_pr(pr.id(), |pr| pr.status == PullRequestStatus::Open)
                 .await?;
             Ok(())
         })
@@ -661,10 +661,10 @@ mod tests {
     async fn open_pr_and_convert_to_draft(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             let pr = ctx.open_pr((), |_| {}).await?;
-            ctx.wait_for_pr(pr.number, |pr| pr.status == PullRequestStatus::Open)
+            ctx.wait_for_pr(pr.id(), |pr| pr.status == PullRequestStatus::Open)
                 .await?;
-            ctx.set_pr_status_draft(pr.number).await?;
-            ctx.wait_for_pr(pr.number, |pr| pr.status == PullRequestStatus::Draft)
+            ctx.set_pr_status_draft(pr.id()).await?;
+            ctx.wait_for_pr(pr.id(), |pr| pr.status == PullRequestStatus::Draft)
                 .await?;
             Ok(())
         })
@@ -675,10 +675,10 @@ mod tests {
     async fn assign_pr_updates_assignees(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             let pr = ctx.open_pr((), |_| {}).await?;
-            ctx.wait_for_pr(pr.number, |pr| pr.assignees.is_empty())
+            ctx.wait_for_pr(pr.id(), |pr| pr.assignees.is_empty())
                 .await?;
-            ctx.assign_pr(pr.number, User::reviewer()).await?;
-            ctx.wait_for_pr(pr.number, |pr| pr.assignees == vec![User::reviewer().name])
+            ctx.assign_pr(pr.id(), User::reviewer()).await?;
+            ctx.wait_for_pr(pr.id(), |pr| pr.assignees == vec![User::reviewer().name])
                 .await?;
             Ok(())
         })
@@ -689,11 +689,11 @@ mod tests {
     async fn unassign_pr_updates_assignees(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             let pr = ctx.open_pr((), |_| {}).await?;
-            ctx.assign_pr(pr.number, User::reviewer()).await?;
-            ctx.wait_for_pr(pr.number, |pr| pr.assignees == vec![User::reviewer().name])
+            ctx.assign_pr(pr.id(), User::reviewer()).await?;
+            ctx.wait_for_pr(pr.id(), |pr| pr.assignees == vec![User::reviewer().name])
                 .await?;
-            ctx.unassign_pr(pr.number, User::reviewer()).await?;
-            ctx.wait_for_pr(pr.number, |pr| pr.assignees.is_empty())
+            ctx.unassign_pr(pr.id(), User::reviewer()).await?;
+            ctx.wait_for_pr(pr.id(), |pr| pr.assignees.is_empty())
                 .await?;
             Ok(())
         })
@@ -704,10 +704,10 @@ mod tests {
     async fn open_and_merge_pr(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             let pr = ctx.open_pr((), |_| {}).await?;
-            ctx.wait_for_pr(pr.number, |pr| pr.status == PullRequestStatus::Open)
+            ctx.wait_for_pr(pr.id(), |pr| pr.status == PullRequestStatus::Open)
                 .await?;
-            ctx.set_pr_status_merged(pr.number).await?;
-            ctx.wait_for_pr(pr.number, |pr| pr.status == PullRequestStatus::Merged)
+            ctx.set_pr_status_merged(pr.id()).await?;
+            ctx.wait_for_pr(pr.id(), |pr| pr.status == PullRequestStatus::Merged)
                 .await?;
             Ok(())
         })
@@ -942,7 +942,7 @@ conflict = ["+conflict"]
                     pr.mergeable_state = OctocrabMergeableState::Dirty
                 })
                 .await?;
-            ctx.wait_for_pr(pr.number, |pr| {
+            ctx.wait_for_pr(pr.id(), |pr| {
                 pr.mergeable_status() == MergeableState::HasConflicts
             })
             .await?;
@@ -1043,11 +1043,11 @@ conflict = ["+conflict"]
             ctx.start_auto_build(()).await?;
             ctx.workflow_start(ctx.auto_workflow()).await?;
 
-            let prev_commit = &ctx.pr(()).await.get_gh_pr().head_sha;
+            let prev_commit_sha = &ctx.pr(()).await.get_gh_pr().head_sha();
             ctx.push_to_pr(()).await?;
             ctx.expect_comments((), 1).await;
             ctx.expect_check_run(
-                prev_commit,
+                prev_commit_sha,
                 AUTO_BUILD_CHECK_RUN_NAME,
                 AUTO_BUILD_CHECK_RUN_NAME,
                 CheckRunStatus::Completed,
@@ -1066,7 +1066,7 @@ conflict = ["+conflict"]
                     pr.description = "@bors p=2".to_string();
                 })
                 .await?;
-            ctx.wait_for_pr(pr.number, |pr| pr.priority == Some(2))
+            ctx.wait_for_pr(pr.id(), |pr| pr.priority == Some(2))
                 .await?;
             Ok(())
         })

@@ -426,7 +426,7 @@ mod tests {
                 .assert_status(StatusCode::BAD_REQUEST)
                 .assert_body(&format!(
                     "Fork rolluper/{} not found, create it before opening the rollup",
-                    pr1.repo.name()
+                    pr1.repo().name()
                 ));
             Ok(())
         })
@@ -444,7 +444,7 @@ mod tests {
                 .assert_status(StatusCode::BAD_REQUEST)
                 .assert_body(&format!(
                     "Pull request #{} cannot be included in a rollup",
-                    pr1.number
+                    pr1.number()
                 ));
             Ok(())
         })
@@ -798,7 +798,7 @@ also include this pls"
         ctx: &mut BorsTester,
         prs: &[&PullRequest],
     ) -> anyhow::Result<ApiResponse> {
-        let prs = prs.iter().map(|pr| pr.number).collect::<Vec<_>>();
+        let prs = prs.iter().map(|pr| pr.number()).collect::<Vec<_>>();
         ctx.api_request(rollup_request(
             &rollup_user().name,
             default_repo_name(),
