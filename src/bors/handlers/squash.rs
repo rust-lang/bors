@@ -4,6 +4,7 @@ use crate::bors::{CommandPrefix, Comment, RepositoryState, bors_commit_author};
 use crate::database::BuildStatus;
 use crate::github::api::client::CommitAuthor;
 use crate::github::{CommitSha, GithubRepoName, GithubUser};
+use crate::permissions::PermissionType;
 use anyhow::Context;
 use secrecy::SecretString;
 use std::fmt::Write;
@@ -23,9 +24,15 @@ pub(super) async fn command_squash(
             .await?;
         anyhow::Ok(())
     };
+    let is_reviewer = repo_state
+        .permissions
+        .load()
+        .has_permission(author.id, PermissionType::Review);
+    let is_author = author.id == pr.github.author.id;
 
-    if author.id != pr.github.author.id {
-        send_comment(":key: Only the PR author can squash its commits.".to_string()).await?;
+    if !is_author && !is_reviewer {
+        send_comment(":key: Only the PR author or reviewers can squash commits.".to_string())
+            .await?;
         return Ok(());
     }
 
@@ -248,13 +255,13 @@ mod tests {
     };
 
     #[sqlx::test]
-    async fn squash_non_author(pool: sqlx::PgPool) {
+    async fn squash_non_author_non_reviewer(pool: sqlx::PgPool) {
         run_test((pool, squash_state()), async |ctx: &mut BorsTester| {
-            ctx.post_comment(Comment::new((), "@bors squash").with_author(User::reviewer()))
+            ctx.post_comment(Comment::new((), "@bors squash").with_author(User::try_user()))
                 .await?;
             insta::assert_snapshot!(
                 ctx.get_next_comment_text(()).await?,
-                @":key: Only the PR author can squash its commits."
+                @":key: Only the PR author or reviewers can squash commits."
             );
             Ok(())
         })
@@ -369,6 +376,22 @@ mod tests {
         sha2
         sha2-reauthored-to-git-user
         ");
+    }
+
+    #[sqlx::test]
+    async fn squash_reviewer(pool: sqlx::PgPool) {
+        run_test((pool, squash_state()), async |ctx: &mut BorsTester| {
+            ctx.modify_pr_in_gh((), |pr| pr.add_commits(vec![Commit::from_sha("foo")]));
+            ctx.post_comment(Comment::new((), "@bors squash").with_author(User::reviewer()))
+                .await?;
+            insta::assert_snapshot!(
+                ctx.get_next_comment_text(()).await?,
+                @":hammer: 2 commits were squashed into foo-reauthored-to-git-user."
+            );
+
+            Ok(())
+        })
+        .await;
     }
 
     fn squash_state() -> GitHub {
