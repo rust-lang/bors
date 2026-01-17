@@ -48,7 +48,7 @@ pub(super) async fn command_squash(
             send_comment(fork_error()).await?;
             return Ok(());
         }
-        Some(repo) if repo == *repo_state.repository() => {
+        Some(repo) if !validate_fork(&pr.github.author, repo_state.repository(), &repo) => {
             send_comment(fork_error()).await?;
             return Ok(());
         }
@@ -183,6 +183,27 @@ pub(super) async fn command_squash(
         writeln!(msg, "\n\nThe pull request was unapproved.").unwrap();
     }
     send_comment(msg).await
+}
+
+/// Validate if the given fork is safe for pushing.
+fn validate_fork(
+    pr_author: &GithubUser,
+    source_repo: &GithubRepoName,
+    fork: &GithubRepoName,
+) -> bool {
+    let owner = source_repo.owner().to_lowercase();
+    let fork_owner = fork.owner().to_lowercase();
+
+    // PR cannot be from the same organisation.
+    // This also excludes the "fork" being the source repository.
+    if owner == fork_owner {
+        return false;
+    }
+    // The fork has to be owned by the PR author
+    if fork_owner != pr_author.username.to_lowercase() {
+        return false;
+    }
+    true
 }
 
 #[allow(unused)]
