@@ -4,6 +4,7 @@ use crate::bors::{CommandPrefix, Comment, RepositoryState, bors_commit_author};
 use crate::database::BuildStatus;
 use crate::github::api::client::CommitAuthor;
 use crate::github::{CommitSha, GithubRepoName, GithubUser};
+use crate::permissions::PermissionType;
 use anyhow::Context;
 use secrecy::SecretString;
 use std::fmt::Write;
@@ -23,9 +24,26 @@ pub(super) async fn command_squash(
             .await?;
         anyhow::Ok(())
     };
+    #[cfg(not(test))]
+    {
+        if author.username.to_lowercase() != "kobzol" {
+            send_comment(
+                ":key: Squashing is currently experimental and cannot be used yet.".to_string(),
+            )
+            .await?;
+            return Ok(());
+        }
+    }
 
-    if author.id != pr.github.author.id {
-        send_comment(":key: Only the PR author can squash its commits.".to_string()).await?;
+    let is_reviewer = repo_state
+        .permissions
+        .load()
+        .has_permission(author.id, PermissionType::Review);
+    let is_author = author.id == pr.github.author.id;
+
+    if !is_author && !is_reviewer {
+        send_comment(":key: Only the PR author or reviewers can squash commits.".to_string())
+            .await?;
         return Ok(());
     }
 
@@ -41,7 +59,7 @@ pub(super) async fn command_squash(
             send_comment(fork_error()).await?;
             return Ok(());
         }
-        Some(repo) if repo == *repo_state.repository() => {
+        Some(repo) if !validate_fork(&pr.github.author, repo_state.repository(), &repo) => {
             send_comment(fork_error()).await?;
             return Ok(());
         }
@@ -132,8 +150,18 @@ pub(super) async fn command_squash(
             "push commit to fork",
             "{source_repo}:{commit_sha} -> {fork}:{fork_branch_name}"
         );
+        let pr_number = pr.number();
         tokio::task::spawn_blocking(move || {
-            push_to_fork(&source_repo, &fork, &commit_sha, &fork_branch_name, token)
+            use std::time::Instant;
+
+            let start = Instant::now();
+            let res = push_to_fork(&source_repo, &fork, &commit_sha, &fork_branch_name, token);
+            tracing::debug!(
+                "Squashing {}#{pr_number} took {:.3}s",
+                source_repo,
+                start.elapsed().as_secs_f64()
+            );
+            res
         })
         .instrument(span)
         .await?
@@ -178,6 +206,27 @@ pub(super) async fn command_squash(
     send_comment(msg).await
 }
 
+/// Validate if the given fork is safe for pushing.
+fn validate_fork(
+    pr_author: &GithubUser,
+    source_repo: &GithubRepoName,
+    fork: &GithubRepoName,
+) -> bool {
+    let owner = source_repo.owner().to_lowercase();
+    let fork_owner = fork.owner().to_lowercase();
+
+    // PR cannot be from the same organisation.
+    // This also excludes the "fork" being the source repository.
+    if owner == fork_owner {
+        return false;
+    }
+    // The fork has to be owned by the PR author
+    if fork_owner != pr_author.username.to_lowercase() {
+        return false;
+    }
+    true
+}
+
 #[allow(unused)]
 fn push_to_fork(
     source_repo: &GithubRepoName,
@@ -209,6 +258,8 @@ fn push_to_fork(
 
     let mut source_remote = repo.remote_anonymous(&source_repo_url)?;
     let mut fetch_options = FetchOptions::new();
+    // Only fetch the single commit
+    fetch_options.depth(1);
     fetch_options.remote_callbacks(callbacks());
 
     tracing::debug!("Fetching commit");
@@ -248,13 +299,13 @@ mod tests {
     };
 
     #[sqlx::test]
-    async fn squash_non_author(pool: sqlx::PgPool) {
+    async fn squash_non_author_non_reviewer(pool: sqlx::PgPool) {
         run_test((pool, squash_state()), async |ctx: &mut BorsTester| {
-            ctx.post_comment(Comment::new((), "@bors squash").with_author(User::reviewer()))
+            ctx.post_comment(Comment::new((), "@bors squash").with_author(User::try_user()))
                 .await?;
             insta::assert_snapshot!(
                 ctx.get_next_comment_text(()).await?,
-                @":key: Only the PR author can squash its commits."
+                @":key: Only the PR author or reviewers can squash commits."
             );
             Ok(())
         })
@@ -369,6 +420,22 @@ mod tests {
         sha2
         sha2-reauthored-to-git-user
         ");
+    }
+
+    #[sqlx::test]
+    async fn squash_reviewer(pool: sqlx::PgPool) {
+        run_test((pool, squash_state()), async |ctx: &mut BorsTester| {
+            ctx.modify_pr_in_gh((), |pr| pr.add_commits(vec![Commit::from_sha("foo")]));
+            ctx.post_comment(Comment::new((), "@bors squash").with_author(User::reviewer()))
+                .await?;
+            insta::assert_snapshot!(
+                ctx.get_next_comment_text(()).await?,
+                @":hammer: 2 commits were squashed into foo-reauthored-to-git-user."
+            );
+
+            Ok(())
+        })
+        .await;
     }
 
     fn squash_state() -> GitHub {
