@@ -139,8 +139,18 @@ pub(super) async fn command_squash(
             "push commit to fork",
             "{source_repo}:{commit_sha} -> {fork}:{fork_branch_name}"
         );
+        let pr_number = pr.number();
         tokio::task::spawn_blocking(move || {
-            push_to_fork(&source_repo, &fork, &commit_sha, &fork_branch_name, token)
+            use std::time::Instant;
+
+            let start = Instant::now();
+            let res = push_to_fork(&source_repo, &fork, &commit_sha, &fork_branch_name, token);
+            tracing::debug!(
+                "Squashing {}#{pr_number} took {:.3}s",
+                source_repo,
+                start.elapsed().as_secs_f64()
+            );
+            res
         })
         .instrument(span)
         .await?
@@ -237,6 +247,8 @@ fn push_to_fork(
 
     let mut source_remote = repo.remote_anonymous(&source_repo_url)?;
     let mut fetch_options = FetchOptions::new();
+    // Only fetch the single commit
+    fetch_options.depth(1);
     fetch_options.remote_callbacks(callbacks());
 
     tracing::debug!("Fetching commit");
