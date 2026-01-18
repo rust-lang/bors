@@ -12,7 +12,8 @@ mod utils;
 
 pub use self::bors::process::{BorsProcess, create_bors_process};
 pub use bors::{
-    BorsContext, CommandParser, RepositoryStore, event::BorsGlobalEvent, event::BorsRepositoryEvent,
+    BorsContext, CommandParser, Git, RepositoryStore, event::BorsGlobalEvent,
+    event::BorsRepositoryEvent,
 };
 pub use database::{PgDbClient, TreeState};
 pub use github::{

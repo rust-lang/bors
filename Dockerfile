@@ -33,7 +33,8 @@ FROM ubuntu:24.04 AS runtime
 WORKDIR /
 
 # curl is needed for healthcheck
-RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl
+# git is needed for local git operations
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl git
 
 COPY --from=build /app/target/release/bors .
 
