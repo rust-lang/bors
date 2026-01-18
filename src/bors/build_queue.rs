@@ -64,7 +64,7 @@ impl BuildQueueSender {
     }
 }
 
-pub fn create_buid_queue() -> (BuildQueueSender, BuildQueueReceiver) {
+pub fn create_build_queue() -> (BuildQueueSender, BuildQueueReceiver) {
     let (tx, rx) = tokio::sync::mpsc::channel(1024);
     (BuildQueueSender { inner: tx }, rx)
 }

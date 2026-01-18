@@ -1,5 +1,5 @@
 use crate::bors::build_queue::{
-    BuildQueueReceiver, BuildQueueSender, create_buid_queue, handle_build_queue_event,
+    BuildQueueReceiver, BuildQueueSender, create_build_queue, handle_build_queue_event,
 };
 #[cfg(not(test))]
 use crate::bors::gitops_queue::handle_gitops_entry;
@@ -51,7 +51,7 @@ pub fn create_bors_process(
         mergeability_queue_tx.clone(),
     );
 
-    let (build_queue_tx, build_queue_rx) = create_buid_queue();
+    let (build_queue_tx, build_queue_rx) = create_build_queue();
 
     let senders = QueueSenders {
         merge_queue: merge_queue_tx.clone(),
