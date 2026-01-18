@@ -244,6 +244,7 @@ async fn handle_successful_build(
         &approval_info.approver,
         &commit_sha,
         &pr.base_branch,
+        auto_build.duration.map(|d| d.inner()),
     );
 
     if let Err(error) = repo
@@ -793,6 +794,7 @@ merge_queue_enabled = false
                 @r#"
             :sunny: Test successful - [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1)
             Approved by: `default-user`
+            Duration: `1h`
             Pushing merge-0-pr-1-d7d45f1f-reauthored-to-bors to `main`...
             <!-- homu: {"type":"BuildCompleted","base_ref":"main","merge_sha":"merge-0-pr-1-d7d45f1f-reauthored-to-bors"} -->
             "#
@@ -800,6 +802,84 @@ merge_queue_enabled = false
             Ok(())
         })
         .await;
+    }
+
+    #[sqlx::test]
+    async fn auto_build_success_comment_duration_hours_minutes(pool: sqlx::PgPool) {
+        // Test with hours and minutes (4800 seconds = 1h 20m)
+        run_test(pool, async |ctx: &mut BorsTester| {
+              ctx.approve(()).await?;
+              ctx.start_auto_build(()).await?;
+              let w1 = ctx.auto_workflow();
+              ctx.modify_workflow(w1, |w| w.set_duration(Duration::from_secs(4800)));
+              ctx.workflow_full_success(w1).await?;
+              ctx.run_merge_queue_until_merge_attempt().await;
+
+              insta::assert_snapshot!(
+                  ctx.get_next_comment_text(()).await?,
+                  @r#"
+              :sunny: Test successful - [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1)
+              Approved by: `default-user`
+              Duration: `1h 20m`
+              Pushing merge-0-pr-1-d7d45f1f-reauthored-to-bors to `main`...
+              <!-- homu: {"type":"BuildCompleted","base_ref":"main","merge_sha":"merge-0-pr-1-d7d45f1f-reauthored-to-bors"} -->
+              "#
+              );
+              Ok(())
+          })
+          .await;
+    }
+
+    #[sqlx::test]
+    async fn auto_build_success_comment_duration_all_units(pool: sqlx::PgPool) {
+        // Test with hours, minutes and seconds (12345 seconds = 3h 25m 45s)
+        run_test(pool, async |ctx: &mut BorsTester| {
+              ctx.approve(()).await?;
+              ctx.start_auto_build(()).await?;
+              let w1 = ctx.auto_workflow();
+              ctx.modify_workflow(w1, |w| w.set_duration(Duration::from_secs(12345)));
+              ctx.workflow_full_success(w1).await?;
+              ctx.run_merge_queue_until_merge_attempt().await;
+
+              insta::assert_snapshot!(
+                  ctx.get_next_comment_text(()).await?,
+                  @r#"
+              :sunny: Test successful - [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1)
+              Approved by: `default-user`
+              Duration: `3h 25m 45s`
+              Pushing merge-0-pr-1-d7d45f1f-reauthored-to-bors to `main`...
+              <!-- homu: {"type":"BuildCompleted","base_ref":"main","merge_sha":"merge-0-pr-1-d7d45f1f-reauthored-to-bors"} -->
+              "#
+              );
+              Ok(())
+          })
+          .await;
+    }
+
+    #[sqlx::test]
+    async fn auto_build_success_comment_duration_seconds_only(pool: sqlx::PgPool) {
+        // Test with just seconds (45 seconds)
+        run_test(pool, async |ctx: &mut BorsTester| {
+              ctx.approve(()).await?;
+              ctx.start_auto_build(()).await?;
+              let w1 = ctx.auto_workflow();
+              ctx.modify_workflow(w1, |w| w.set_duration(Duration::from_secs(45)));
+              ctx.workflow_full_success(w1).await?;
+              ctx.run_merge_queue_until_merge_attempt().await;
+
+              insta::assert_snapshot!(
+                  ctx.get_next_comment_text(()).await?,
+                  @r#"
+              :sunny: Test successful - [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1)
+              Approved by: `default-user`
+              Duration: `45s`
+              Pushing merge-0-pr-1-d7d45f1f-reauthored-to-bors to `main`...
+              <!-- homu: {"type":"BuildCompleted","base_ref":"main","merge_sha":"merge-0-pr-1-d7d45f1f-reauthored-to-bors"} -->
+              "#
+              );
+              Ok(())
+          })
+          .await;
     }
 
     #[sqlx::test]

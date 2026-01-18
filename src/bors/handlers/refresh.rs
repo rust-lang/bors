@@ -475,6 +475,7 @@ auto_build_failed = ["+failed"]
             insta::assert_snapshot!(comment, @r#"
             :sunny: Test successful - [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1)
             Approved by: `default-user`
+            Duration: `1h`
             Pushing merge-0-pr-1-d7d45f1f-reauthored-to-bors to `main`...
             <!-- homu: {"type":"BuildCompleted","base_ref":"main","merge_sha":"merge-0-pr-1-d7d45f1f-reauthored-to-bors"} -->
             "#);
@@ -506,6 +507,7 @@ auto_build_failed = ["+failed"]
             insta::assert_snapshot!(comment, @r#"
             :sunny: Test successful - [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1)
             Approved by: `default-user`
+            Duration: `1h`
             Pushing merge-0-pr-1-d7d45f1f-reauthored-to-bors to `main`...
             <!-- homu: {"type":"BuildCompleted","base_ref":"main","merge_sha":"merge-0-pr-1-d7d45f1f-reauthored-to-bors"} -->
             "#);
