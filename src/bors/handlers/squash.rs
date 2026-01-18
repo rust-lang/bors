@@ -1,21 +1,23 @@
 use crate::PgDbClient;
+use crate::bors::gitops_queue::{GitOpsCommand, GitOpsQueueSender, PushCallback, PushCommand};
 use crate::bors::handlers::{PullRequestData, unapprove_pr};
 use crate::bors::{CommandPrefix, Comment, RepositoryState, bors_commit_author};
 use crate::database::BuildStatus;
 use crate::github::api::client::CommitAuthor;
-use crate::github::{CommitSha, GithubRepoName, GithubUser};
+use crate::github::{GithubRepoName, GithubUser};
 use crate::permissions::PermissionType;
-use anyhow::Context;
-use secrecy::SecretString;
 use std::fmt::Write;
 use std::sync::Arc;
 
+/// Entry point for the squash command.
+/// This function validates the command and enqueues the actual work to the gitops queue.
 pub(super) async fn command_squash(
     repo_state: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
     pr: PullRequestData<'_>,
     author: &GithubUser,
     bot_prefix: &CommandPrefix,
+    gitops_queue: &GitOpsQueueSender,
 ) -> anyhow::Result<()> {
     let send_comment = async |text: String| {
         repo_state
@@ -24,6 +26,7 @@ pub(super) async fn command_squash(
             .await?;
         anyhow::Ok(())
     };
+
     #[cfg(not(test))]
     {
         if author.username.to_lowercase() != "kobzol" {
@@ -54,16 +57,14 @@ pub(super) async fn command_squash(
 
     let fork_error =
         || ":fork_and_knife: The squash command can only be used on PRs from a fork.".to_string();
-    let fork_repository = match pr.github.head_repository.clone() {
-        None => {
-            send_comment(fork_error()).await?;
-            return Ok(());
-        }
-        Some(repo) if !validate_fork(&pr.github.author, repo_state.repository(), &repo) => {
-            send_comment(fork_error()).await?;
-            return Ok(());
-        }
-        Some(repo) => repo,
+    let Some(fork_repository) = pr
+        .github
+        .head_repository
+        .clone()
+        .take_if(|repo| validate_fork(&pr.github.author, repo_state.repository(), repo))
+    else {
+        send_comment(fork_error()).await?;
+        return Ok(());
     };
 
     let pr_model = pr.db;
@@ -88,6 +89,7 @@ pub(super) async fn command_squash(
         .await?;
         return Ok(());
     }
+
     let commits = repo_state
         .client
         .get_pull_request_commits(pr.number())
@@ -100,7 +102,7 @@ pub(super) async fn command_squash(
     // Extract the first and last commits
     let first_commit = &commits[0];
     let last_commit = commits.last().unwrap();
-    let author = last_commit.author.clone().unwrap_or_else(|| CommitAuthor {
+    let commit_author = last_commit.author.clone().unwrap_or_else(|| CommitAuthor {
         name: pr.github.author.username.clone(),
         email: pr
             .github
@@ -120,7 +122,7 @@ pub(super) async fn command_squash(
             &last_commit.tree,
             &first_commit.parents,
             commit_msg,
-            &author,
+            &commit_author,
         )
         .await
     {
@@ -134,76 +136,108 @@ pub(super) async fn command_squash(
         }
     };
 
-    // Push the squashed commit to the fork.
+    let target_branch = pr.github.head.name.clone();
+    let pr_number = pr.number();
+
+    let fork_repository2 = fork_repository.clone();
+    let target_branch2 = target_branch.clone();
+    let repo_state2 = repo_state.clone();
+    let db2 = db.clone();
+    let commit2 = commit.clone();
+    let pr_github = pr.github.clone();
+
+    // We have to help inference here by annotating the variable
+    let on_finish: PushCallback = Box::new(move |push_result: anyhow::Result<()>| {
+        let repo_state = repo_state2;
+        let db = db2;
+        let fork_repository = fork_repository2;
+        let target_branch = target_branch2;
+        let commit = commit2;
+
+        Box::pin(async move {
+            // TODO: implement git mock for tests? :)
+            #[cfg(test)]
+            let push_result = {
+                if let Err(error) = push_result {
+                    return Err(error);
+                };
+                repo_state
+                    .client
+                    .set_branch_to_sha(
+                        &target_branch,
+                        &commit,
+                        crate::github::api::operations::ForcePush::Yes,
+                    )
+                    .await
+            };
+
+            if let Err(error) = push_result {
+                tracing::error!("Push failed: {error:?}",);
+                repo_state.client.post_comment(pr_number, Comment::new(format!(
+                        ":exclamation: Failed to push the squashed commit to `{fork_repository}:{target_branch}`: {error}"
+                    )), &db)
+                        .await?;
+                return Ok(());
+            }
+
+            // Reload the PR from DB, to update approval status
+            let Some(pr_model) = db
+                .get_pull_request(repo_state.repository(), pr_number)
+                .await?
+            else {
+                return Ok(());
+            };
+            let unapproved = if pr_model.is_approved() {
+                unapprove_pr(&repo_state, &db, &pr_model, &pr_github).await?;
+                true
+            } else {
+                false
+            };
+
+            let mut msg = format!(
+                ":hammer: {} commits were squashed into {commit}.",
+                pr_github.commit_count,
+            );
+            if unapproved {
+                writeln!(msg, "\n\nThe pull request was unapproved.").unwrap();
+            }
+            repo_state
+                .client
+                .post_comment(pr_number, Comment::new(msg), &db)
+                .await?;
+            Ok(())
+        })
+    });
+
+    // Request a token that will last at least a few minutes, as there might be some preceding
+    // operations in the queue.
+    let token = repo_state
+        .client
+        .client()
+        .installation_token_with_buffer(chrono::Duration::minutes(5))
+        .await?;
+
+    // Enqueue pushing the squashed commit to the fork.
     // We need to use local git operations for this, because GitHub doesn't currently provide an
     // API that would allow us to transfer a commit between two repositories without opening a PR.
-    #[cfg(not(test))]
-    let result = {
-        use tracing::Instrument;
+    let command = GitOpsCommand::Push(PushCommand {
+        source_repo: repo_state.repository().clone(),
+        target_repo: fork_repository,
+        target_branch,
+        commit,
+        token,
+        on_finish,
+    });
 
-        let token = repo_state.client.client().installation_token().await?;
-        let source_repo = repo_state.repository().clone();
-        let commit_sha = commit.clone();
-        let fork = fork_repository.clone();
-        let fork_branch_name = pr.github.head.name.clone();
-        let span = tracing::debug_span!(
-            "push commit to fork",
-            "{source_repo}:{commit_sha} -> {fork}:{fork_branch_name}"
-        );
-        let pr_number = pr.number();
-        tokio::task::spawn_blocking(move || {
-            use std::time::Instant;
-
-            let start = Instant::now();
-            let res = push_to_fork(&source_repo, &fork, &commit_sha, &fork_branch_name, token);
-            tracing::debug!(
-                "Squashing {}#{pr_number} took {:.3}s",
-                source_repo,
-                start.elapsed().as_secs_f64()
-            );
-            res
-        })
-        .instrument(span)
-        .await?
-    };
-
-    // TODO: implement git mock for tests? :)
-    #[cfg(test)]
-    let result = repo_state
-        .client
-        .set_branch_to_sha(
-            &pr.github.head.name,
-            &commit,
-            crate::github::api::operations::ForcePush::Yes,
+    if !gitops_queue.try_send(command)? {
+        send_comment(
+            ":hourglass: There are too many git operations in progress at the moment. Please try again a few minutes later."
+                .to_string(),
         )
-        .await;
-
-    match result {
-        Ok(_) => {}
-        Err(error) => {
-            send_comment(format!(
-                ":exclamation: Failed to push the squashed commit to `{fork_repository}`: {error:?}"
-            ))
-            .await?;
-            return Ok(());
-        }
+        .await?;
+        return Ok(());
     }
-
-    let unapproved = if pr_model.is_approved() {
-        unapprove_pr(&repo_state, &db, pr_model, pr.github).await?;
-        true
-    } else {
-        false
-    };
-
-    let mut msg = format!(
-        ":hammer: {} commits were squashed into {commit}.",
-        pr.github.commit_count,
-    );
-    if unapproved {
-        writeln!(msg, "\n\nThe pull request was unapproved.").unwrap();
-    }
-    send_comment(msg).await
+    Ok(())
 }
 
 /// Validate if the given fork is safe for pushing.
@@ -225,70 +259,6 @@ fn validate_fork(
         return false;
     }
     true
-}
-
-#[allow(unused)]
-fn push_to_fork(
-    source_repo: &GithubRepoName,
-    fork_repo: &GithubRepoName,
-    commit_sha: &CommitSha,
-    branch_name: &str,
-    token: SecretString,
-) -> anyhow::Result<()> {
-    use git2::{Cred, FetchOptions, PushOptions, RemoteCallbacks, Repository};
-    use secrecy::ExposeSecret;
-
-    let source_repo_url = format!("https://github.com/{source_repo}.git");
-    let target_repo_url = format!("https://github.com/{fork_repo}.git");
-    let target_branch = format!("refs/heads/{branch_name}");
-
-    // Create a temporary directory for the local repository
-    let temp_dir = tempfile::tempdir()?;
-    let repo_path = temp_dir.path();
-    let repo = Repository::init_bare(repo_path)?;
-
-    let callbacks = || {
-        let token = token.clone();
-        let mut callbacks = RemoteCallbacks::new();
-        callbacks.credentials(move |_url, _username_from_url, _allowed_types| {
-            Cred::userpass_plaintext("bors", token.expose_secret())
-        });
-        callbacks
-    };
-
-    let mut source_remote = repo.remote_anonymous(&source_repo_url)?;
-    let mut fetch_options = FetchOptions::new();
-    // Only fetch the single commit
-    fetch_options.depth(1);
-    fetch_options.remote_callbacks(callbacks());
-
-    tracing::debug!("Fetching commit");
-    // Fetch the commit from the source repo
-    source_remote
-        .fetch(&[commit_sha.as_ref()], Some(&mut fetch_options), None)
-        .with_context(|| anyhow::anyhow!("Cannot fethc commit {commit_sha} from {source_repo}"))?;
-
-    let oid = git2::Oid::from_str(commit_sha.as_ref())?;
-    if let Err(error) = repo.find_commit(oid) {
-        return Err(anyhow::anyhow!(
-            "Cannot find commit {commit_sha} from {source_repo}: {error:?}"
-        ));
-    }
-
-    // Create the refspec: push the commit to the target branch
-    // The `+` sign says that it is a force push
-    let refspec = format!("+{commit_sha}:{target_branch}");
-
-    tracing::debug!("Pushing commit");
-    // And push it to the fork repo
-    let mut target_remote = repo.remote_anonymous(&target_repo_url)?;
-    let mut push_options = PushOptions::new();
-    push_options.remote_callbacks(callbacks());
-
-    target_remote
-        .push(&[&refspec], Some(&mut push_options))
-        .with_context(|| anyhow::anyhow!("Cannot push commit {commit_sha} to {fork_repo}"))?;
-    Ok(())
 }
 
 #[cfg(test)]
@@ -394,6 +364,7 @@ mod tests {
                 pr.add_commits(vec![Commit::from_sha("sha2")]);
             });
             ctx.post_comment("@bors squash").await?;
+            ctx.run_gitops_operation().await?;
             insta::assert_snapshot!(
                 ctx.get_next_comment_text(()).await?,
                 @":hammer: 2 commits were squashed into sha2-reauthored-to-git-user."
@@ -428,9 +399,32 @@ mod tests {
             ctx.modify_pr_in_gh((), |pr| pr.add_commits(vec![Commit::from_sha("foo")]));
             ctx.post_comment(Comment::new((), "@bors squash").with_author(User::reviewer()))
                 .await?;
+            ctx.run_gitops_operation().await?;
             insta::assert_snapshot!(
                 ctx.get_next_comment_text(()).await?,
                 @":hammer: 2 commits were squashed into foo-reauthored-to-git-user."
+            );
+
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn squash_queue_full(pool: sqlx::PgPool) {
+        run_test((pool, squash_state()), async |ctx: &mut BorsTester| {
+            ctx.modify_pr_in_gh((), |pr| pr.add_commits(vec![Commit::from_sha("foo")]));
+
+            // Fill the queue (capacity is 3)
+            for _ in 0..3 {
+                ctx.post_comment("@bors squash").await?;
+            }
+
+            // The fourth request should fail because the queue is full
+            ctx.post_comment("@bors squash").await?;
+            insta::assert_snapshot!(
+                ctx.get_next_comment_text(()).await?,
+                @":hourglass: There are too many git operations in progress at the moment. Please try again a few minutes later."
             );
 
             Ok(())

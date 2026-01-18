@@ -28,6 +28,7 @@ mod command;
 pub mod comment;
 mod context;
 pub mod event;
+pub mod gitops_queue;
 mod handlers;
 mod labels;
 pub mod merge_queue;

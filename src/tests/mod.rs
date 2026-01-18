@@ -35,6 +35,7 @@ mod mock;
 mod utils;
 
 // Public re-exports for use in tests
+use crate::bors::gitops_queue::{GitOpsQueueReceiver, handle_gitops_command};
 use crate::bors::merge_queue::merge_queue_tick;
 use crate::bors::mergeability_queue::{MergeabilityQueueReceiver, check_mergeability};
 use crate::bors::process::QueueSenders;
@@ -190,6 +191,7 @@ pub struct BorsTester {
     global_tx: Sender<BorsGlobalEvent>,
     senders: QueueSenders,
     mergeability_queue_rx: MergeabilityQueueReceiver,
+    gitops_queue_rx: GitOpsQueueReceiver,
     ctx: Arc<BorsContext>,
 }
 
@@ -227,6 +229,7 @@ impl BorsTester {
             senders,
             bors_process,
             mergeability_queue_rx,
+            gitops_queue_rx,
         } = create_bors_process(
             ctx.clone(),
             mock.github_client(),
@@ -255,6 +258,7 @@ impl BorsTester {
                 senders,
                 global_tx,
                 mergeability_queue_rx,
+                gitops_queue_rx,
                 ctx,
             },
             bors,
@@ -480,6 +484,14 @@ impl BorsTester {
                 .with_context(|| anyhow::anyhow!("Index {index}"))?;
         }
         Ok(())
+    }
+
+    /// Execute a single gitops operation from the queue.
+    pub async fn run_gitops_operation(&mut self) -> anyhow::Result<()> {
+        match self.gitops_queue_rx.recv().await {
+            Some(command) => handle_gitops_command(command).await,
+            None => Err(anyhow::anyhow!("Gitops queue is empty or closed")),
+        }
     }
 
     pub async fn refresh_pending_builds(&self) {
