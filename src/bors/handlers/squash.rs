@@ -169,9 +169,7 @@ pub(super) async fn command_squash(
             // TODO: implement git mock for tests? :)
             #[cfg(test)]
             let push_result = {
-                if let Err(error) = push_result {
-                    return Err(error);
-                };
+                push_result?;
                 repo_state
                     .client
                     .set_branch_to_sha(
