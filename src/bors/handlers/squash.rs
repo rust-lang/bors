@@ -489,6 +489,23 @@ mod tests {
         .await;
     }
 
+    #[sqlx::test]
+    async fn squash_unapprove(pool: sqlx::PgPool) {
+        run_test((pool, squash_state()), async |ctx: &mut BorsTester| {
+            ctx.modify_pr_in_gh((), |pr| {
+                pr.add_commits(vec![Commit::from_sha("sha2")]);
+            });
+            ctx.approve(()).await?;
+            ctx.post_comment("@bors squash").await?;
+            ctx.run_gitop_queue().await?;
+            ctx.expect_comments((), 1).await;
+            ctx.pr(()).await.expect_unapproved();
+
+            Ok(())
+        })
+        .await;
+    }
+
     fn squash_state() -> GitHub {
         let gh = GitHub::default();
         let pr_author = User::default_pr_author();
