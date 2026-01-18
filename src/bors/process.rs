@@ -1,6 +1,9 @@
 use crate::bors::build_queue::{
-    BuildQueueReceiver, BuildQueueSender, create_buid_queue, handle_build_queue_event,
+    BuildQueueReceiver, BuildQueueSender, create_build_queue, handle_build_queue_event,
 };
+#[cfg(not(test))]
+use crate::bors::gitops_queue::handle_gitops_entry;
+use crate::bors::gitops_queue::{GitOpsQueueReceiver, GitOpsQueueSender, create_gitops_queue};
 use crate::bors::merge_queue::{MergeQueueSender, start_merge_queue};
 use crate::bors::mergeability_queue::{
     MergeabilityQueueReceiver, MergeabilityQueueSender, create_mergeability_queue,
@@ -23,6 +26,10 @@ pub struct BorsProcess {
     // background, to have the ability to simulate various race conditions.
     #[cfg(test)]
     pub mergeability_queue_rx: MergeabilityQueueReceiver,
+    // In tests, we want to run gitops operations manually, to have explicit control over when
+    // expensive git operations are executed.
+    #[cfg(test)]
+    pub gitops_queue_rx: GitOpsQueueReceiver,
 }
 
 /// Creates a future with a Bors process that continuously receives webhook events and reacts to
@@ -36,6 +43,7 @@ pub fn create_bors_process(
     let (repository_tx, repository_rx) = mpsc::channel::<BorsRepositoryEvent>(1024);
     let (global_tx, global_rx) = mpsc::channel::<BorsGlobalEvent>(1024);
     let (mergeability_queue_tx, mergeability_queue_rx) = create_mergeability_queue();
+    let (gitops_queue_tx, gitops_queue_rx) = create_gitops_queue();
 
     let (merge_queue_tx, merge_queue_fut) = start_merge_queue(
         ctx.clone(),
@@ -43,12 +51,13 @@ pub fn create_bors_process(
         mergeability_queue_tx.clone(),
     );
 
-    let (build_queue_tx, build_queue_rx) = create_buid_queue();
+    let (build_queue_tx, build_queue_rx) = create_build_queue();
 
     let senders = QueueSenders {
         merge_queue: merge_queue_tx.clone(),
         mergeability_queue: mergeability_queue_tx,
         build_queue: build_queue_tx,
+        gitops_queue: gitops_queue_tx,
     };
     let senders2 = senders.clone();
 
@@ -65,8 +74,9 @@ pub fn create_bors_process(
                 consume_build_queue_events(ctx.clone(), build_queue_rx, merge_queue_tx),
                 merge_queue_fut
             );
-            // Note that we do not run the mergeability queue automatically in tests, to have more
-            // control over it. Instead, we add it to the bors context below.
+            // Note that we do not run the mergeability queue or gitops queue automatically in
+            // tests, to have more control over them. Instead, we add them to the bors context
+            // below.
         }
         // In real execution, the bot runs forever. If there is something that finishes
         // the futures early, it's essentially a bug.
@@ -86,6 +96,9 @@ pub fn create_bors_process(
                 _ = consume_build_queue_events(ctx.clone(), build_queue_rx, merge_queue_tx) => {
                     tracing::error!("Build queue handling process has ended")
                 }
+                _ = consume_gitops_queue_events(gitops_queue_rx) => {
+                    tracing::error!("Gitops queue handling process has ended")
+                }
                 _ = merge_queue_fut => {
                     tracing::error!("Merge queue handling process has ended");
                 }
@@ -100,6 +113,8 @@ pub fn create_bors_process(
         bors_process: Box::pin(service),
         #[cfg(test)]
         mergeability_queue_rx,
+        #[cfg(test)]
+        gitops_queue_rx,
     }
 }
 
@@ -108,6 +123,7 @@ pub struct QueueSenders {
     mergeability_queue: MergeabilityQueueSender,
     merge_queue: MergeQueueSender,
     build_queue: BuildQueueSender,
+    gitops_queue: GitOpsQueueSender,
 }
 
 impl QueueSenders {
@@ -119,6 +135,9 @@ impl QueueSenders {
     }
     pub fn build_queue(&self) -> &BuildQueueSender {
         &self.build_queue
+    }
+    pub fn gitops_queue(&self) -> &GitOpsQueueSender {
+        &self.gitops_queue
     }
 }
 
@@ -205,6 +224,19 @@ async fn consume_build_queue_events(
 
         #[cfg(test)]
         crate::bors::WAIT_FOR_BUILD_QUEUE.mark();
+    }
+}
+
+#[cfg(not(test))]
+async fn consume_gitops_queue_events(mut gitops_queue_rx: GitOpsQueueReceiver) {
+    while let Some(entry) = gitops_queue_rx.recv().await {
+        let span = tracing::debug_span!("Gitops queue command", "{entry:?}");
+        if let Err(error) = handle_gitops_entry(&gitops_queue_rx, entry)
+            .instrument(span.clone())
+            .await
+        {
+            handle_root_error(span, error);
+        }
     }
 }
 

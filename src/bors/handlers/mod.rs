@@ -549,6 +549,7 @@ async fn handle_comment(
                                 pr,
                                 &comment.author,
                                 ctx.parser.prefix(),
+                                senders.gitops_queue(),
                             )
                             .instrument(span)
                             .await
