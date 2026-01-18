@@ -2,7 +2,7 @@ use crate::bors::build_queue::{
     BuildQueueReceiver, BuildQueueSender, create_buid_queue, handle_build_queue_event,
 };
 #[cfg(not(test))]
-use crate::bors::gitops_queue::handle_gitops_command;
+use crate::bors::gitops_queue::handle_gitops_entry;
 use crate::bors::gitops_queue::{GitOpsQueueReceiver, GitOpsQueueSender, create_gitops_queue};
 use crate::bors::merge_queue::{MergeQueueSender, start_merge_queue};
 use crate::bors::mergeability_queue::{
@@ -229,9 +229,9 @@ async fn consume_build_queue_events(
 
 #[cfg(not(test))]
 async fn consume_gitops_queue_events(mut gitops_queue_rx: GitOpsQueueReceiver) {
-    while let Some(command) = gitops_queue_rx.recv().await {
-        let span = tracing::debug_span!("Gitops queue event", "{command:?}");
-        if let Err(error) = handle_gitops_command(command)
+    while let Some(entry) = gitops_queue_rx.recv().await {
+        let span = tracing::debug_span!("Gitops queue command", "{entry:?}");
+        if let Err(error) = handle_gitops_entry(&gitops_queue_rx, entry)
             .instrument(span.clone())
             .await
         {

@@ -1,5 +1,7 @@
 use crate::PgDbClient;
-use crate::bors::gitops_queue::{GitOpsCommand, GitOpsQueueSender, PushCallback, PushCommand};
+use crate::bors::gitops_queue::{
+    GitOpsCommand, GitOpsQueueSender, PullRequestId, PushCallback, PushCommand,
+};
 use crate::bors::handlers::{PullRequestData, unapprove_pr};
 use crate::bors::{CommandPrefix, Comment, RepositoryState, bors_commit_author};
 use crate::database::BuildStatus;
@@ -87,6 +89,15 @@ pub(super) async fn command_squash(
             pr.github.commit_count
         ))
         .await?;
+        return Ok(());
+    }
+
+    let pr_id = PullRequestId {
+        repo: repo_state.repository().clone(),
+        pr: pr.number(),
+    };
+    if gitops_queue.is_pending(&pr_id) {
+        send_comment(":hourglass: This PR already has a pending git operation in progress, please wait until it is completed.".to_string()).await?;
         return Ok(());
     }
 
@@ -229,7 +240,7 @@ pub(super) async fn command_squash(
         on_finish,
     });
 
-    if !gitops_queue.try_send(command)? {
+    if !gitops_queue.try_send(pr_id, command)? {
         send_comment(
             ":hourglass: There are too many git operations in progress at the moment. Please try again a few minutes later."
                 .to_string(),
@@ -265,7 +276,7 @@ fn validate_fork(
 mod tests {
     use crate::github::GithubRepoName;
     use crate::tests::{
-        BorsTester, Comment, Commit, GitHub, Repo, User, default_repo_name, run_test,
+        BorsTester, Comment, Commit, GitHub, PullRequest, Repo, User, default_repo_name, run_test,
     };
 
     #[sqlx::test]
@@ -364,7 +375,7 @@ mod tests {
                 pr.add_commits(vec![Commit::from_sha("sha2")]);
             });
             ctx.post_comment("@bors squash").await?;
-            ctx.run_gitops_operation().await?;
+            ctx.run_gitop_queue().await?;
             insta::assert_snapshot!(
                 ctx.get_next_comment_text(()).await?,
                 @":hammer: 2 commits were squashed into sha2-reauthored-to-git-user."
@@ -399,7 +410,7 @@ mod tests {
             ctx.modify_pr_in_gh((), |pr| pr.add_commits(vec![Commit::from_sha("foo")]));
             ctx.post_comment(Comment::new((), "@bors squash").with_author(User::reviewer()))
                 .await?;
-            ctx.run_gitops_operation().await?;
+            ctx.run_gitop_queue().await?;
             insta::assert_snapshot!(
                 ctx.get_next_comment_text(()).await?,
                 @":hammer: 2 commits were squashed into foo-reauthored-to-git-user."
@@ -411,19 +422,67 @@ mod tests {
     }
 
     #[sqlx::test]
-    async fn squash_queue_full(pool: sqlx::PgPool) {
+    async fn squash_pending_git_op_same_pr(pool: sqlx::PgPool) {
         run_test((pool, squash_state()), async |ctx: &mut BorsTester| {
             ctx.modify_pr_in_gh((), |pr| pr.add_commits(vec![Commit::from_sha("foo")]));
 
-            // Fill the queue (capacity is 3)
-            for _ in 0..3 {
-                ctx.post_comment("@bors squash").await?;
-            }
-
-            // The fourth request should fail because the queue is full
             ctx.post_comment("@bors squash").await?;
+            ctx.post_comment("@bors squash").await?;
+
             insta::assert_snapshot!(
                 ctx.get_next_comment_text(()).await?,
+                @":hourglass: This PR already has a pending git operation in progress, please wait until it is completed."
+            );
+
+            Ok(())
+        })
+            .await;
+    }
+
+    #[sqlx::test]
+    async fn squash_twice(pool: sqlx::PgPool) {
+        let gh = run_test((pool, squash_state()), async |ctx: &mut BorsTester| {
+            ctx.modify_pr_in_gh((), |pr| pr.add_commits(vec![Commit::from_sha("foo")]));
+
+            ctx.post_comment("@bors squash").await?;
+            ctx.run_gitop_queue().await?;
+            ctx.expect_comments((), 1).await;
+            let branch = ctx.pr(()).await.get_gh_pr().head_branch_copy();
+            assert_eq!(branch.get_commits().len(), 1);
+
+            ctx.modify_pr_in_gh((), |pr| pr.add_commits(vec![Commit::from_sha("bar")]));
+            ctx.post_comment("@bors squash").await?;
+            ctx.run_gitop_queue().await?;
+            ctx.expect_comments((), 1).await;
+            let branch = ctx.pr(()).await.get_gh_pr().head_branch_copy();
+            assert_eq!(branch.get_commits().len(), 1);
+
+            Ok(())
+        })
+        .await;
+        insta::assert_snapshot!(gh.get_sha_history((), "pr/1"), @"
+        pr-1-sha
+        foo
+        foo-reauthored-to-git-user
+        bar
+        bar-reauthored-to-git-user
+        ");
+    }
+
+    #[sqlx::test]
+    async fn squash_queue_full(pool: sqlx::PgPool) {
+        run_test((pool, squash_state()), async |ctx: &mut BorsTester| {
+            let pr2 = open_fork_pr(ctx).await?;
+            let pr3 = open_fork_pr(ctx).await?;
+            let pr4 = open_fork_pr(ctx).await?;
+            ctx.modify_pr_in_gh((), |pr| pr.add_commits(vec![Commit::from_sha("pr1 commit")]));
+
+            ctx.post_comment("@bors squash").await?;
+            ctx.post_comment(Comment::new(pr2.id(), "@bors squash")).await?;
+            ctx.post_comment(Comment::new(pr3.id(), "@bors squash")).await?;
+            ctx.post_comment(Comment::new(pr4.id(), "@bors squash")).await?;
+            insta::assert_snapshot!(
+                ctx.get_next_comment_text(pr4.id()).await?,
                 @":hourglass: There are too many git operations in progress at the moment. Please try again a few minutes later."
             );
 
@@ -437,12 +496,24 @@ mod tests {
         let pr_author = User::default_pr_author();
 
         // Create fork
-        let fork_repo = GithubRepoName::new(&pr_author.name, default_repo_name().name());
+        let fork_repo = fork_repo();
         let mut repo = Repo::new(pr_author.clone(), fork_repo.name());
         repo.fork = true;
 
         // Set the default PR to be from the fork
         gh.default_repo().lock().get_pr_mut(1).head_repository = Some(repo.full_name());
         gh.with_repo(repo)
+    }
+
+    fn fork_repo() -> GithubRepoName {
+        GithubRepoName::new(&User::default_pr_author().name, default_repo_name().name())
+    }
+
+    async fn open_fork_pr(ctx: &mut BorsTester) -> anyhow::Result<PullRequest> {
+        ctx.open_pr((), |pr| {
+            pr.add_commits(vec![Commit::from_sha("foo")]);
+            pr.head_repository = Some(fork_repo());
+        })
+        .await
     }
 }
