@@ -244,6 +244,7 @@ async fn handle_successful_build(
         &approval_info.approver,
         &commit_sha,
         &pr.base_branch,
+        auto_build.duration.map(|d| d.inner()),
     );
 
     if let Err(error) = repo
@@ -791,7 +792,7 @@ merge_queue_enabled = false
             insta::assert_snapshot!(
                 ctx.get_next_comment_text(()).await?,
                 @r#"
-            :sunny: Test successful - [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1)
+            :sunny: Test successful after 1 hour - [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1)
             Approved by: `default-user`
             Pushing merge-0-pr-1-d7d45f1f-reauthored-to-bors to `main`...
             <!-- homu: {"type":"BuildCompleted","base_ref":"main","merge_sha":"merge-0-pr-1-d7d45f1f-reauthored-to-bors"} -->

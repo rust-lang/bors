@@ -409,6 +409,7 @@ pub fn auto_build_succeeded_comment(
     approved_by: &str,
     merge_sha: &CommitSha,
     base_ref: &str,
+    duration: Option<Duration>,
 ) -> Comment {
     workflows.sort_by(|a, b| a.name.cmp(&b.name));
     let urls = workflows
@@ -417,9 +418,19 @@ pub fn auto_build_succeeded_comment(
         .collect::<Vec<_>>()
         .join(", ");
 
+    let success_message = if let Some(dur) = duration {
+        format!(
+            ":sunny: Test successful after {} - {}",
+            format_duration(dur),
+            urls
+        )
+    } else {
+        format!(":sunny: Test successful - {urls}")
+    };
+
     Comment {
         text: format!(
-            r#":sunny: Test successful - {urls}
+            r#"{success_message}
 Approved by: `{approved_by}`
 Pushing {merge_sha} to `{base_ref}`..."#
         ),
@@ -428,6 +439,31 @@ Pushing {merge_sha} to `{base_ref}`..."#
             merge_sha: merge_sha.0.clone(),
         }),
         tag: None,
+    }
+}
+
+fn format_duration(duration: Duration) -> String {
+    let total_secs = duration.as_secs();
+    let hours = total_secs / 3600;
+    let minutes = (total_secs % 3600) / 60;
+    let seconds = total_secs % 60;
+
+    if hours > 0 {
+        if minutes > 0 {
+            format!(
+                "{} {} {} {}",
+                hours,
+                pluralize("hour", hours as usize),
+                minutes,
+                pluralize("minute", minutes as usize)
+            )
+        } else {
+            format!("{} {}", hours, pluralize("hour", hours as usize))
+        }
+    } else if minutes > 0 {
+        format!("{} {}", minutes, pluralize("minute", minutes as usize))
+    } else {
+        format!("{} {}", seconds, pluralize("second", seconds as usize))
     }
 }
 
