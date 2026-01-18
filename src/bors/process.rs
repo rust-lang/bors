@@ -43,7 +43,7 @@ pub fn create_bors_process(
     let (repository_tx, repository_rx) = mpsc::channel::<BorsRepositoryEvent>(1024);
     let (global_tx, global_rx) = mpsc::channel::<BorsGlobalEvent>(1024);
     let (mergeability_queue_tx, mergeability_queue_rx) = create_mergeability_queue();
-    let (gitops_queue_tx, gitops_queue_rx) = create_gitops_queue();
+    let (gitops_queue_tx, gitops_queue_rx) = create_gitops_queue(ctx.get_git());
 
     let (merge_queue_tx, merge_queue_fut) = start_merge_queue(
         ctx.clone(),

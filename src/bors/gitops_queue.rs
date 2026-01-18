@@ -2,8 +2,8 @@
 //! It is used for operations that cannot be performed using the GitHub API and have to be done
 //! using local git operations (currently through libgit2).
 
+use crate::bors::gitops::Git;
 use crate::github::{CommitSha, GithubRepoName, PullRequestNumber};
-use anyhow::Context;
 use secrecy::SecretString;
 use std::collections::HashSet;
 use std::fmt::{Debug, Formatter};
@@ -34,6 +34,7 @@ pub struct GitOpsQueueEntry {
 }
 
 struct GitOpsSharedState {
+    git: Option<Git>,
     /// Pull requests on which a local git operation is currently queued or in-progress.
     pending_prs: HashSet<PullRequestId>,
 }
@@ -125,10 +126,11 @@ impl Debug for PushCommand {
     }
 }
 
-pub fn create_gitops_queue() -> (GitOpsQueueSender, GitOpsQueueReceiver) {
+pub fn create_gitops_queue(git: Option<Git>) -> (GitOpsQueueSender, GitOpsQueueReceiver) {
     let (tx, rx) = mpsc::channel(GITOPS_QUEUE_CAPACITY);
     let state = Arc::new(RwLock::new(GitOpsSharedState {
         pending_prs: Default::default(),
+        git,
     }));
     (
         GitOpsQueueSender {
@@ -154,33 +156,42 @@ pub async fn handle_gitops_entry(
                 target_repo,
                 target_branch,
                 commit,
-                token,
+                token: _token,
                 on_finish,
             }) => {
                 let span = tracing::debug_span!(
                     "push commit to repository",
                     "{source_repo}:{commit} -> {target_repo}:{target_branch}"
                 );
-                let res = {
-                    let fut = tokio::task::spawn_blocking(move || {
+
+                let git = rx.state.read().unwrap().git.clone();
+                let res = if let Some(_git) = git {
+                    let fut = async move {
                         use std::time::Instant;
 
                         let start = Instant::now();
-                        let res = execute_push(
-                            &source_repo,
-                            &target_repo,
-                            &commit,
-                            &target_branch,
-                            token,
-                        );
-                        tracing::trace!("Push took {}", start.elapsed().as_secs_f64());
+                        #[cfg(test)]
+                        let res = anyhow::Ok(());
+                        #[cfg(not(test))]
+                        let res = _git
+                            .transfer_commit_between_repositories(
+                                &source_repo,
+                                &target_repo,
+                                &commit,
+                                &target_branch,
+                                _token,
+                            )
+                            .await;
+                        tracing::trace!("Push took {:.3}s", start.elapsed().as_secs_f64());
                         res
-                    })
+                    }
                     .instrument(span.clone());
                     match tokio::time::timeout(GITOP_TIMEOUT, fut).await {
-                        Ok(res) => res.map_err(|e| anyhow::anyhow!("{e}"))?,
+                        Ok(res) => res,
                         Err(_) => Err(anyhow::anyhow!("Push timeouted")),
                     }
+                } else {
+                    Err(anyhow::anyhow!("Local git is not available"))
                 };
 
                 if let Err(error) = on_finish(res).instrument(span.clone()).await {
@@ -199,71 +210,4 @@ pub async fn handle_gitops_entry(
     let res = handle.await;
     rx.state.write().unwrap().pending_prs.remove(&pr);
     res
-}
-
-#[cfg_attr(test, allow(unreachable_code, unused))]
-fn execute_push(
-    source_repo: &GithubRepoName,
-    target_repo: &GithubRepoName,
-    commit: &CommitSha,
-    target_branch: &str,
-    token: SecretString,
-) -> anyhow::Result<()> {
-    #[cfg(test)]
-    return Ok(());
-
-    use git2::{Cred, FetchOptions, PushOptions, RemoteCallbacks, Repository};
-    use secrecy::ExposeSecret;
-
-    let source_repo_url = format!("https://github.com/{source_repo}.git");
-    let target_repo_url = format!("https://github.com/{target_repo}.git");
-    let target_branch = format!("refs/heads/{target_branch}");
-
-    // Create a temporary directory for the local repository
-    let temp_dir = tempfile::tempdir()?;
-    let repo_path = temp_dir.path();
-    let repo = Repository::init_bare(repo_path)?;
-
-    let callbacks = || {
-        let token = token.clone();
-        let mut callbacks = RemoteCallbacks::new();
-        callbacks.credentials(move |_url, _username_from_url, _allowed_types| {
-            Cred::userpass_plaintext("bors", token.expose_secret())
-        });
-        callbacks
-    };
-
-    let mut source_remote = repo.remote_anonymous(&source_repo_url)?;
-    let mut fetch_options = FetchOptions::new();
-    // Only fetch the single commit
-    fetch_options.depth(1);
-    fetch_options.remote_callbacks(callbacks());
-
-    tracing::debug!("Fetching commit");
-    // Fetch the commit from the source repo
-    source_remote
-        .fetch(&[commit.as_ref()], Some(&mut fetch_options), None)
-        .with_context(|| anyhow::anyhow!("Cannot fetch commit {commit} from {source_repo}"))?;
-
-    let oid = git2::Oid::from_str(commit.as_ref())?;
-    if let Err(error) = repo.find_commit(oid) {
-        return Err(anyhow::anyhow!(
-            "Cannot find commit {commit} from {source_repo}: {error:?}"
-        ));
-    }
-
-    // Create the refspec: push the commit to the target branch
-    // The `+` sign says that it is a force push
-    let refspec = format!("+{commit}:{target_branch}");
-
-    tracing::debug!("Pushing commit");
-    // And push it to the fork repo
-    let mut target_remote = repo.remote_anonymous(&target_repo_url)?;
-    let mut push_options = PushOptions::new();
-    push_options.remote_callbacks(callbacks());
-
-    target_remote
-        .push(&[&refspec], Some(&mut push_options))
-        .with_context(|| anyhow::anyhow!("Cannot push commit {commit} to {target_repo}"))?;
-    Ok(())
 }

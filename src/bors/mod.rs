@@ -28,6 +28,7 @@ mod command;
 pub mod comment;
 mod context;
 pub mod event;
+mod gitops;
 pub mod gitops_queue;
 mod handlers;
 mod labels;
@@ -40,6 +41,7 @@ use crate::bors::command::BorsCommand;
 use crate::bors::comment::CommentTag;
 use crate::database::{PullRequestModel, WorkflowStatus};
 pub use command::CommandPrefix;
+pub use gitops::Git;
 
 /// Branch where CI checks run for auto builds.
 /// This branch should run CI checks.

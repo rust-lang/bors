@@ -1754,6 +1754,7 @@ mod tests {
                 CommandParser::new(default_cmd_prefix()),
                 db,
                 Arc::new(RepositoryStore::default()),
+                None,
                 "",
             )),
         )));

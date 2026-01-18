@@ -6,8 +6,8 @@ use std::time::Duration;
 use anyhow::Context;
 use bors::server::{ServerState, create_app};
 use bors::{
-    BorsContext, BorsGlobalEvent, BorsProcess, CommandParser, OAuthClient, OAuthConfig, PgDbClient,
-    RepositoryStore, TeamApiClient, TreeState, WebhookSecret, create_bors_process,
+    BorsContext, BorsGlobalEvent, BorsProcess, CommandParser, Git, OAuthClient, OAuthConfig,
+    PgDbClient, RepositoryStore, TeamApiClient, TreeState, WebhookSecret, create_bors_process,
     create_github_client, load_repositories,
 };
 use clap::Parser;
@@ -160,11 +160,22 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
         repos.insert(repo);
     }
 
+    let git = match Git::try_init() {
+        Ok(git) => Some(git),
+        Err(error) => {
+            tracing::warn!(
+                "git was not found, local git operations will not be available ({error})"
+            );
+            None
+        }
+    };
+
     let db = Arc::new(db);
     let ctx = Arc::new(BorsContext::new(
         CommandParser::new(opts.cmd_prefix.clone().into()),
         db.clone(),
         repos.clone(),
+        git,
         &opts.web_url,
     ));
     let BorsProcess {

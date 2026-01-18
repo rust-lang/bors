@@ -9,7 +9,7 @@ use crate::database::{
 };
 use crate::github::PullRequestNumber;
 use crate::{
-    BorsContext, BorsGlobalEvent, BorsProcess, CommandParser, PgDbClient, RepositoryStore,
+    BorsContext, BorsGlobalEvent, BorsProcess, CommandParser, Git, PgDbClient, RepositoryStore,
     TreeState, WebhookSecret, create_bors_process, load_repositories,
 };
 use anyhow::Context;
@@ -24,6 +24,7 @@ use sqlx::PgPool;
 use std::collections::BTreeMap;
 use std::fmt::Write;
 use std::future::Future;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc::Sender;
@@ -220,6 +221,9 @@ impl BorsTester {
             CommandParser::new("@bors".to_string().into()),
             db.clone(),
             repos.clone(),
+            // Create a fake git repo, as we want to enable testing handlers that use
+            // local git ops, but we do not currently mock git in tests.
+            Some(Git::from_path(PathBuf::from("/tmp/git"))),
             "https://bors-test.com",
         ));
 

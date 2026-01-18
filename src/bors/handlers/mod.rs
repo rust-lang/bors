@@ -49,7 +49,6 @@ mod review;
 mod trybuild;
 mod workflow;
 
-#[cfg(feature = "local-git-ops")]
 mod squash;
 
 /// This function executes a single bors repository event
@@ -541,8 +540,7 @@ async fn handle_comment(
                     }
                     BorsCommand::Squash => {
                         let span = tracing::info_span!("Squash");
-                        #[cfg(feature = "local-git-ops")]
-                        {
+                        if ctx.local_git_available() {
                             squash::command_squash(
                                 repo,
                                 database,
@@ -553,9 +551,7 @@ async fn handle_comment(
                             )
                             .instrument(span)
                             .await
-                        }
-                        #[cfg(not(feature = "local-git-ops"))]
-                        {
+                        } else {
                             repo.client
                                 .post_comment(
                                     pr_number,
