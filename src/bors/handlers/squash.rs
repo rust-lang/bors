@@ -509,7 +509,11 @@ mod tests {
             ctx.approve(()).await?;
             ctx.post_comment("@bors squash").await?;
             ctx.run_gitop_queue().await?;
-            ctx.expect_comments((), 1).await;
+            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
+            :hammer: 2 commits were squashed into sha2-reauthored-to-git-user.
+
+            The pull request was unapproved.
+            ");
             ctx.pr(()).await.expect_unapproved();
 
             Ok(())
