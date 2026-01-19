@@ -90,17 +90,21 @@ impl Git {
             token.expose_secret()
         );
 
-        tracing::debug!("Pushing commit");
+        tracing::debug!(
+            "Pushing commit to https://bors:<token>@github.com/{target_repo}.git, refspec `{refspec}`"
+        );
 
         // And then push the commit
         run_command(
             tokio::process::Command::new(&self.git)
                 .kill_on_drop(true)
                 .current_dir(&clone_path)
+                .env("GIT_TRACE", "1")
                 // Do not store the token on disk
-                .arg("-c")
-                .arg("credential.helper=")
+                // .arg("-c")
+                // .arg("credential.helper=")
                 .arg("push")
+                .arg("-v")
                 .arg(&target_repo_url)
                 .arg(refspec),
         )
