@@ -5,7 +5,7 @@ use crate::bors::gitops_queue::{
 use crate::bors::handlers::{PullRequestData, unapprove_pr};
 use crate::bors::{CommandPrefix, Comment, RepositoryState, bors_commit_author};
 use crate::database::BuildStatus;
-use crate::github::api::client::CommitAuthor;
+use crate::github::api::CommitAuthor;
 use crate::github::{GithubRepoName, GithubUser};
 use crate::permissions::PermissionType;
 use std::fmt::Write;
@@ -483,6 +483,23 @@ mod tests {
                 ctx.get_next_comment_text(pr4.id()).await?,
                 @":hourglass: There are too many git operations in progress at the moment. Please try again a few minutes later."
             );
+
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn squash_unapprove(pool: sqlx::PgPool) {
+        run_test((pool, squash_state()), async |ctx: &mut BorsTester| {
+            ctx.modify_pr_in_gh((), |pr| {
+                pr.add_commits(vec![Commit::from_sha("sha2")]);
+            });
+            ctx.approve(()).await?;
+            ctx.post_comment("@bors squash").await?;
+            ctx.run_gitop_queue().await?;
+            ctx.expect_comments((), 1).await;
+            ctx.pr(()).await.expect_unapproved();
 
             Ok(())
         })

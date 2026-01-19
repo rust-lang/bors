@@ -68,6 +68,7 @@ impl Git {
         tracing::debug!("Cloning commit");
         run_command(
             tokio::process::Command::new(&self.git)
+                .kill_on_drop(true)
                 .current_dir(root_path)
                 .arg("clone")
                 .arg("--depth=1")
@@ -94,6 +95,7 @@ impl Git {
         // And then push the commit
         run_command(
             tokio::process::Command::new(&self.git)
+                .kill_on_drop(true)
                 .current_dir(&clone_path)
                 // Do not store the token on disk
                 .arg("-c")

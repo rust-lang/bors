@@ -13,6 +13,7 @@ use crate::bors::event::PullRequestComment;
 use crate::bors::{Comment, WorkflowRun};
 use crate::config::{CONFIG_FILE_PATH, RepositoryConfig, deserialize_config};
 use crate::database::WorkflowStatus;
+use crate::github::api::CommitAuthor;
 use crate::github::api::operations::{
     BranchUpdateError, Commit, CommitCreateError, ForcePush, MergeError, create_branch,
     create_check_run, create_commit, merge_branches, set_branch_to_commit, update_check_run,
@@ -783,27 +784,6 @@ pub enum HideCommentReason {
 pub struct CheckRunOutput {
     pub title: String,
     pub summary: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CommitAuthor {
-    pub name: String,
-    pub email: String,
-}
-
-impl CommitAuthor {
-    pub fn from_gh(gh_author: Option<octocrab::models::repos::CommitAuthor>) -> Option<Self> {
-        if let Some(author) = gh_author
-            && let Some(email) = author.email
-        {
-            Some(Self {
-                name: author.name,
-                email,
-            })
-        } else {
-            None
-        }
-    }
 }
 
 #[cfg(test)]
