@@ -17,6 +17,7 @@ pub enum CommandParseError {
     UnknownArg { arg: String, did_you_mean: String },
     DuplicateArg(String),
     ValidationError(String),
+    UnclosedQuote,
 }
 
 /// Part of a command, either a bare string like `try` or a key value like `parent=<sha>`.
@@ -165,15 +166,75 @@ fn parse_command(input: &str, parsers: &[ParserFn]) -> ParseResult {
 fn parse_parts(input: &str) -> Result<Vec<CommandPart<'_>>, CommandParseError> {
     let mut parts = vec![];
     let mut seen_keys = HashSet::new();
+    let bytes = input.as_bytes();
+    let len = bytes.len();
+    let mut i = 0;
 
-    for item in input.split_whitespace() {
-        // Stop parsing, as this is a command for another bot, such as `@rust-timer queue`.
-        if item.starts_with('@') {
+    while i < len {
+        // Skip whitespace
+        while i < len && bytes[i].is_ascii_whitespace() {
+            i += 1;
+        }
+        if i >= len {
             break;
         }
 
-        match item.split_once('=') {
-            Some((key, value)) => {
+        // Stop parsing, as this is a command for another bot, such as `@rust-timer queue`.
+        if bytes[i] == b'@' {
+            break;
+        }
+
+        let start = i;
+        let mut eq_pos = None;
+        let mut in_quotes = false;
+        let mut quote_start = None;
+        let mut quote_end = None;
+
+        // Parse a `bare` part or a `key=value` part
+        while i < len {
+            let b = bytes[i];
+
+            if in_quotes {
+                if b == b'"' {
+                    quote_end = Some(i);
+                    i += 1;
+                    break; // End of quoted value means end of this part
+                }
+                i += 1;
+            } else {
+                if b.is_ascii_whitespace() {
+                    break;
+                }
+                if b == b'=' && eq_pos.is_none() {
+                    eq_pos = Some(i);
+                    i += 1;
+                    // Check if value starts with quote
+                    if i < len && bytes[i] == b'"' {
+                        in_quotes = true;
+                        quote_start = Some(i);
+                        i += 1;
+                    }
+                    continue;
+                }
+                i += 1;
+            }
+        }
+
+        if in_quotes && quote_end.is_none() {
+            return Err(CommandParseError::UnclosedQuote);
+        }
+
+        let end = i;
+
+        match eq_pos {
+            Some(eq_idx) => {
+                let key = &input[start..eq_idx];
+                let value = if let (Some(qs), Some(qe)) = (quote_start, quote_end) {
+                    &input[qs + 1..qe] // Strip quotes
+                } else {
+                    &input[eq_idx + 1..end]
+                };
+
                 if value.is_empty() {
                     return Err(CommandParseError::MissingArgValue {
                         arg: key.to_string(),
@@ -185,7 +246,9 @@ fn parse_parts(input: &str) -> Result<Vec<CommandPart<'_>>, CommandParseError> {
                 seen_keys.insert(key);
                 parts.push(CommandPart::KeyValue { key, value });
             }
-            None => parts.push(CommandPart::Bare(item)),
+            None => {
+                parts.push(CommandPart::Bare(&input[start..end]));
+            }
         }
     }
     Ok(parts)
@@ -1472,6 +1535,110 @@ I am markdown HTML comment
     fn ignore_markdown_link() {
         let cmds = parse_commands("Ignore [me](@bors-try).");
         assert_eq!(cmds.len(), 0);
+    }
+
+    #[test]
+    fn parse_unicode() {
+        let cmds = parse_commands(r#"@bors r=čaujaksemáš"#);
+        assert_eq!(cmds.len(), 1);
+        insta::assert_debug_snapshot!(cmds[0], @r#"
+        Ok(
+            Approve {
+                approver: Specified(
+                    "čaujaksemáš",
+                ),
+                priority: None,
+                rollup: None,
+            },
+        )
+        "#);
+    }
+
+    #[test]
+    fn parse_quoted_value_without_spaces() {
+        let cmds = parse_commands(r#"@bors try jobs="ci""#);
+        assert_eq!(cmds.len(), 1);
+        assert_eq!(
+            cmds[0],
+            Ok(BorsCommand::Try {
+                parent: None,
+                jobs: vec!["ci".to_string()]
+            })
+        );
+    }
+
+    #[test]
+    fn parse_quoted_value_with_spaces() {
+        let cmds = parse_commands(r#"@bors try jobs="foo bar baz""#);
+        assert_eq!(cmds.len(), 1);
+        insta::assert_debug_snapshot!(cmds[0], @r#"
+        Ok(
+            Try {
+                parent: None,
+                jobs: [
+                    "foo bar baz",
+                ],
+            },
+        )
+        "#);
+    }
+
+    #[test]
+    fn parse_unclosed_quote() {
+        let cmds = parse_commands(r#"@bors try jobs="ci"#);
+        assert_eq!(cmds.len(), 1);
+        assert_eq!(cmds[0], Err(CommandParseError::UnclosedQuote));
+    }
+
+    #[test]
+    fn parse_empty_quoted_value() {
+        let cmds = parse_commands(r#"@bors try jobs="""#);
+        assert_eq!(cmds.len(), 1);
+        assert_eq!(
+            cmds[0],
+            Err(CommandParseError::MissingArgValue {
+                arg: "jobs".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn parse_quoted_and_unquoted_args() {
+        let cmds = parse_commands(r#"@bors try parent=last jobs="ci, lint""#);
+        assert_eq!(cmds.len(), 1);
+        assert_eq!(
+            cmds[0],
+            Ok(BorsCommand::Try {
+                parent: Some(Parent::Last),
+                jobs: vec!["ci".to_string(), " lint".to_string()]
+            })
+        );
+    }
+
+    #[test]
+    fn parse_quoted_value_followed_by_more_args() {
+        let cmds = parse_commands(r#"@bors try jobs="ci, lint" parent=last"#);
+        assert_eq!(cmds.len(), 1);
+        assert_eq!(
+            cmds[0],
+            Ok(BorsCommand::Try {
+                parent: Some(Parent::Last),
+                jobs: vec!["ci".to_string(), " lint".to_string()]
+            })
+        );
+    }
+
+    #[test]
+    fn parse_at_inside_quoted_value() {
+        let cmds = parse_commands(r#"@bors try jobs="test@windows""#);
+        assert_eq!(cmds.len(), 1);
+        assert_eq!(
+            cmds[0],
+            Ok(BorsCommand::Try {
+                parent: None,
+                jobs: vec!["test@windows".to_string()]
+            })
+        );
     }
 
     fn parse_commands(text: &str) -> Vec<Result<BorsCommand, CommandParseError>> {

@@ -592,6 +592,7 @@ async fn handle_comment(
                     CommandParseError::ValidationError(error) => {
                         format!("Invalid command: {error}.")
                     }
+                    CommandParseError::UnclosedQuote => "Unclosed quote in argument.".to_string(),
                 };
                 writeln!(
                     message,
