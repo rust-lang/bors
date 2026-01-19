@@ -59,23 +59,33 @@ impl Git {
         // Create a temporary directory for the local repository
         let temp_dir = tempfile::tempdir()?;
         let root_path = temp_dir.path();
-        let clone_path = root_path.join("cloned-repo");
 
         let source_repo_url = format!("https://github.com/{source_repo}.git");
 
-        // Then do a partial clone of a single commit, without a checkout, and without and blob or
-        // trees
-        tracing::debug!("Cloning commit");
         run_command(
             tokio::process::Command::new(&self.git)
                 .kill_on_drop(true)
                 .current_dir(root_path)
-                .arg("clone")
+                .arg("init")
+                .arg("--bare"),
+        )
+        .await
+        .context("Cannot perform git init")?;
+
+        // It **should** be much faster to do a partial clone than a fetch with depth=1.
+        // However, on the production server, the partial clone of rust-lang/rust seems to choke :(
+        // So we use the fetch as an alternative.
+        tracing::debug!("Fetching commit");
+        run_command(
+            tokio::process::Command::new(&self.git)
+                .kill_on_drop(true)
+                .current_dir(root_path)
+                .arg("fetch")
                 .arg("--depth=1")
-                .arg("--no-checkout")
-                .arg("--filter=tree:0")
+                // Note: using --filter=tree:0 makes the fetch much faster, but the resulting push
+                // becomes MUCH slower :(
                 .arg(source_repo_url)
-                .arg(&clone_path),
+                .arg(commit.as_ref()),
         )
         .await
         .context("Cannot perform git clone")?;
@@ -98,13 +108,11 @@ impl Git {
         run_command(
             tokio::process::Command::new(&self.git)
                 .kill_on_drop(true)
-                .current_dir(&clone_path)
-                .env("GIT_TRACE", "1")
+                .current_dir(root_path)
                 // Do not store the token on disk
-                // .arg("-c")
-                // .arg("credential.helper=")
+                .arg("-c")
+                .arg("credential.helper=")
                 .arg("push")
-                .arg("-v")
                 .arg(&target_repo_url)
                 .arg(refspec),
         )
