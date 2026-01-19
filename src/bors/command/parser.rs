@@ -27,6 +27,15 @@ enum CommandPart<'a> {
     KeyValue { key: &'a str, value: &'a str },
 }
 
+impl<'a> CommandPart<'a> {
+    fn as_key(&self) -> &'a str {
+        match self {
+            CommandPart::Bare(item) => item,
+            CommandPart::KeyValue { key, value: _ } => key,
+        }
+    }
+}
+
 pub struct CommandParser {
     prefix: CommandPrefix,
     parsers: Vec<ParserFn>,
@@ -526,9 +535,27 @@ fn parser_cancel(command: &CommandPart<'_>, _parts: &[CommandPart<'_>]) -> Parse
 }
 
 /// Parses `@bors squash` command.
-fn parser_squash(command: &CommandPart<'_>, _parts: &[CommandPart<'_>]) -> ParseResult {
+/// Supports specifying a commit message via `@bors squash [msg|message]="message"`.
+fn parser_squash(command: &CommandPart<'_>, parts: &[CommandPart<'_>]) -> ParseResult {
     match command {
-        CommandPart::Bare("squash") => Some(Ok(BorsCommand::Squash)),
+        CommandPart::Bare("squash") => match parts {
+            &[] => Some(Ok(BorsCommand::Squash {
+                commit_message: None,
+            })),
+            &[
+                CommandPart::KeyValue {
+                    key: "msg" | "message",
+                    value,
+                },
+                ..,
+            ] => Some(Ok(BorsCommand::Squash {
+                commit_message: Some(value.to_owned()),
+            })),
+            [part, ..] => Some(Err(CommandParseError::UnknownArg {
+                arg: part.as_key().to_owned(),
+                did_you_mean: "squash [msg|message=\"<commit-msg>\"]".to_string(),
+            })),
+        },
         _ => None,
     }
 }
@@ -1490,7 +1517,91 @@ for the crater",
     fn parse_squash() {
         let cmds = parse_commands("@bors squash");
         assert_eq!(cmds.len(), 1);
-        assert_eq!(cmds[0], Ok(BorsCommand::Squash));
+        assert_eq!(
+            cmds[0],
+            Ok(BorsCommand::Squash {
+                commit_message: None
+            })
+        );
+    }
+
+    #[test]
+    fn parse_squash_msg() {
+        let cmds = parse_commands("@bors squash msg=foo");
+        insta::assert_debug_snapshot!(cmds, @r#"
+        [
+            Ok(
+                Squash {
+                    commit_message: Some(
+                        "foo",
+                    ),
+                },
+            ),
+        ]
+        "#);
+    }
+
+    #[test]
+    fn parse_squash_message() {
+        let cmds = parse_commands("@bors squash message=foo");
+        insta::assert_debug_snapshot!(cmds, @r#"
+        [
+            Ok(
+                Squash {
+                    commit_message: Some(
+                        "foo",
+                    ),
+                },
+            ),
+        ]
+        "#);
+    }
+
+    #[test]
+    fn parse_squash_message_quoted() {
+        let cmds = parse_commands(r#"@bors squash message="foo bar baz""#);
+        insta::assert_debug_snapshot!(cmds, @r#"
+        [
+            Ok(
+                Squash {
+                    commit_message: Some(
+                        "foo bar baz",
+                    ),
+                },
+            ),
+        ]
+        "#);
+    }
+
+    #[test]
+    fn parse_squash_unknown_arg() {
+        let cmds = parse_commands("@bors squash commit=foo");
+        insta::assert_debug_snapshot!(cmds, @r#"
+        [
+            Err(
+                UnknownArg {
+                    arg: "commit",
+                    did_you_mean: "squash [msg|message=\"<commit-msg>\"]",
+                },
+            ),
+        ]
+        "#);
+    }
+
+    #[test]
+    fn parse_squash_extra_args() {
+        let cmds = parse_commands("@bors squash message=foo baz");
+        insta::assert_debug_snapshot!(cmds, @r#"
+        [
+            Ok(
+                Squash {
+                    commit_message: Some(
+                        "foo",
+                    ),
+                },
+            ),
+        ]
+        "#);
     }
 
     #[test]

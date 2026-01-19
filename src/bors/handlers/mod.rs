@@ -538,7 +538,7 @@ async fn handle_comment(
                         .instrument(span)
                         .await
                     }
-                    BorsCommand::Squash => {
+                    BorsCommand::Squash { commit_message } => {
                         let span = tracing::info_span!("Squash");
                         if ctx.local_git_available() {
                             squash::command_squash(
@@ -546,6 +546,7 @@ async fn handle_comment(
                                 database,
                                 pr,
                                 &comment.author,
+                                commit_message,
                                 ctx.parser.prefix(),
                                 senders.gitops_queue(),
                             )

@@ -82,7 +82,7 @@ pub fn format_help() -> &'static str {
         BorsCommand::TreeClosed(_) => {}
         BorsCommand::Retry => {}
         BorsCommand::Cancel => {}
-        BorsCommand::Squash => {}
+        BorsCommand::Squash { .. } => {}
     }
 
     r#"
@@ -111,7 +111,8 @@ You can use the following commands:
 - `try cancel`: Cancel a running try build on the current PR.
 - `retry`: Clear a failed auto build status from an approved PR. This will cause the merge queue to eventually attempt to merge the PR again.
 - `cancel` | `yield`: Cancel a running auto build on the current PR.
-- `squash`: Squash the commits of a PR into a single commit.
+- `squash [msg|message=<commit-message>]`: Squash the commits of a PR into a single commit.
+    - Optionally, you can specify a `<commit-message>` for the created commit. If not specified, the commit messages of all squashed commits will be combined.
 - `info`: Get information about the current PR
 
 ## Repository management

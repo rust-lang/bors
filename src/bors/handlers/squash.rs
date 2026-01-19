@@ -19,6 +19,7 @@ pub(super) async fn command_squash(
     db: Arc<PgDbClient>,
     pr: PullRequestData<'_>,
     author: &GithubUser,
+    commit_message: Option<String>,
     bot_prefix: &CommandPrefix,
     gitops_queue: &GitOpsQueueSender,
 ) -> anyhow::Result<()> {
@@ -510,6 +511,24 @@ mod tests {
             ctx.run_gitop_queue().await?;
             ctx.expect_comments((), 1).await;
             ctx.pr(()).await.expect_unapproved();
+
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn squash_custom_message(pool: sqlx::PgPool) {
+        run_test((pool, squash_state()), async |ctx: &mut BorsTester| {
+            ctx.modify_pr_in_gh((), |pr| {
+                pr.add_commits(vec![Commit::from_sha("sha2")]);
+            });
+            ctx.approve(()).await?;
+            ctx.post_comment("@bors squash msg=\"This is a squashed commit\"")
+                .await?;
+            ctx.run_gitop_queue().await?;
+            ctx.expect_comments((), 1).await;
+            insta::assert_snapshot!(ctx.pr(()).await.get_gh_pr().head_branch_copy().get_commit().message(), @"This is a squashed commit");
 
             Ok(())
         })
