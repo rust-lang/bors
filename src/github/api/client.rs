@@ -222,6 +222,7 @@ impl GithubRepositoryClient {
                             .collect(),
                         tree: TreeSha(gh_commit.commit.tree.sha),
                         author: CommitAuthor::from_gh(gh_commit.commit.author),
+                        message: gh_commit.commit.message,
                     };
                     commits.push(commit);
                 }

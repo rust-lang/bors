@@ -52,6 +52,7 @@ pub struct Commit {
     pub parents: Vec<CommitSha>,
     pub tree: TreeSha,
     pub author: Option<CommitAuthor>,
+    pub message: String,
 }
 
 /// Creates a merge commit on the given repository.
@@ -152,6 +153,7 @@ pub struct ParentResponse {
 pub struct CommitInnerResponse {
     tree: TreeResponse,
     author: Option<octocrab::models::repos::CommitAuthor>,
+    message: String,
 }
 
 #[derive(serde::Deserialize)]
@@ -175,6 +177,7 @@ impl From<CommitResponse> for Commit {
             tree,
             parents,
             author: CommitAuthor::from_gh(response.commit.author),
+            message: response.commit.message,
         }
     }
 }

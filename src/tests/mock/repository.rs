@@ -297,6 +297,7 @@ async fn mock_merge_branch(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
             #[derive(serde::Serialize)]
             struct CommitResponse {
                 tree: TreeResponse,
+                message: String,
             }
 
             #[derive(serde::Serialize)]
@@ -316,6 +317,7 @@ async fn mock_merge_branch(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
                 sha: merge_sha,
                 commit: CommitResponse {
                     tree: TreeResponse { sha: tree_sha },
+                    message: data.commit_message,
                 },
                 parents: vec![
                     ParentResponse { sha: base_sha },
