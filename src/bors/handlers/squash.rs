@@ -31,17 +31,6 @@ pub(super) async fn command_squash(
         anyhow::Ok(())
     };
 
-    #[cfg(not(test))]
-    {
-        if author.username.to_lowercase() != "kobzol" {
-            send_comment(
-                ":key: Squashing is currently experimental and cannot be used yet.".to_string(),
-            )
-            .await?;
-            return Ok(());
-        }
-    }
-
     let is_reviewer = repo_state
         .permissions
         .load()
