@@ -111,15 +111,11 @@ impl Git {
 }
 
 async fn run_command(cmd: &mut tokio::process::Command) -> anyhow::Result<()> {
-    let output = cmd.output().await?;
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    tracing::trace!("Command stdout: {stdout}\nstderr: {stderr}");
-    if !output.status.success() {
-        Err(anyhow::anyhow!(
-            "Command ended with status {}\nStdout:\n{stdout}\n\nStderr:\n{stderr}",
-            output.status,
-        ))
+    // Use status instead of output, so that we stream the output directly into logs.
+    // If we buffered it, then we would not print anything in case of a timeout.
+    let status = cmd.status().await?;
+    if !status.success() {
+        Err(anyhow::anyhow!("Command ended with status {status}"))
     } else {
         Ok(())
     }
