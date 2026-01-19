@@ -409,6 +409,7 @@ pub fn auto_build_succeeded_comment(
     approved_by: &str,
     merge_sha: &CommitSha,
     base_ref: &str,
+    duration: Option<Duration>,
 ) -> Comment {
     workflows.sort_by(|a, b| a.name.cmp(&b.name));
     let urls = workflows
@@ -417,10 +418,17 @@ pub fn auto_build_succeeded_comment(
         .collect::<Vec<_>>()
         .join(", ");
 
+    let duration = if let Some(dur) = duration {
+        format_duration(dur)
+    } else {
+        "Unknown duration".to_string()
+    };
+
     Comment {
         text: format!(
             r#":sunny: Test successful - {urls}
 Approved by: `{approved_by}`
+Duration: `{duration}`
 Pushing {merge_sha} to `{base_ref}`..."#
         ),
         metadata: Some(CommentMetadata::BuildCompleted {
@@ -429,6 +437,27 @@ Pushing {merge_sha} to `{base_ref}`..."#
         }),
         tag: None,
     }
+}
+
+fn format_duration(duration: Duration) -> String {
+    let total_secs = duration.as_secs();
+    let hours = total_secs / 3600;
+    let minutes = (total_secs % 3600) / 60;
+    let seconds = total_secs % 60;
+
+    let mut res = String::new();
+
+    if hours > 0 {
+        res.push_str(&format!("{hours}h "));
+    }
+    if minutes > 0 {
+        res.push_str(&format!("{minutes}m "));
+    }
+    if seconds > 0 {
+        res.push_str(&format!("{seconds}s"));
+    }
+
+    res.trim().to_string()
 }
 
 pub fn auto_build_push_failed_comment(error: &str) -> Comment {
