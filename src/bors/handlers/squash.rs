@@ -6,6 +6,7 @@ use crate::bors::handlers::{PullRequestData, unapprove_pr};
 use crate::bors::{CommandPrefix, Comment, RepositoryState, bors_commit_author};
 use crate::database::BuildStatus;
 use crate::github::api::CommitAuthor;
+use crate::github::api::operations::Commit;
 use crate::github::{GithubRepoName, GithubUser};
 use crate::permissions::PermissionType;
 use std::fmt::Write;
@@ -18,6 +19,7 @@ pub(super) async fn command_squash(
     db: Arc<PgDbClient>,
     pr: PullRequestData<'_>,
     author: &GithubUser,
+    commit_message: Option<String>,
     bot_prefix: &CommandPrefix,
     gitops_queue: &GitOpsQueueSender,
 ) -> anyhow::Result<()> {
@@ -126,13 +128,14 @@ pub(super) async fn command_squash(
     // Create the squashed commit on the source repository.
     // We take the parents of the first commit, and the tree of the last commit, to create the
     // squashed commit.
-    let commit_msg = &pr.github.title;
+    let commit_msg =
+        commit_message.unwrap_or_else(|| generate_squashed_commit_msg(&pr.github.title, &commits));
     let commit = match repo_state
         .client
         .create_commit(
             &last_commit.tree,
             &first_commit.parents,
-            commit_msg,
+            &commit_msg,
             &commit_author,
         )
         .await
@@ -247,6 +250,14 @@ pub(super) async fn command_squash(
         return Ok(());
     }
     Ok(())
+}
+
+fn generate_squashed_commit_msg(pr_title: &str, commits: &[Commit]) -> String {
+    let mut msg = format!("{pr_title}\n\n");
+    for commit in commits {
+        writeln!(msg, "* {}", commit.message).unwrap();
+    }
+    msg
 }
 
 /// Validate if the given fork is safe for pushing.
@@ -383,7 +394,7 @@ mod tests {
             insta::assert_debug_snapshot!(branch.get_commit(), @r#"
             Commit {
                 sha: "sha2-reauthored-to-git-user",
-                message: "Foobar",
+                message: "Foobar\n\n* Commit sha1\n* Commit sha2\n",
                 author: GitUser {
                     name: "git-user",
                     email: "git-user@git.com",
@@ -498,8 +509,30 @@ mod tests {
             ctx.approve(()).await?;
             ctx.post_comment("@bors squash").await?;
             ctx.run_gitop_queue().await?;
-            ctx.expect_comments((), 1).await;
+            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
+            :hammer: 2 commits were squashed into sha2-reauthored-to-git-user.
+
+            The pull request was unapproved.
+            ");
             ctx.pr(()).await.expect_unapproved();
+
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn squash_custom_message(pool: sqlx::PgPool) {
+        run_test((pool, squash_state()), async |ctx: &mut BorsTester| {
+            ctx.modify_pr_in_gh((), |pr| {
+                pr.add_commits(vec![Commit::from_sha("sha2")]);
+            });
+            ctx.approve(()).await?;
+            ctx.post_comment("@bors squash msg=\"This is a squashed commit\"")
+                .await?;
+            ctx.run_gitop_queue().await?;
+            ctx.expect_comments((), 1).await;
+            insta::assert_snapshot!(ctx.pr(()).await.get_gh_pr().head_branch_copy().get_commit().message(), @"This is a squashed commit");
 
             Ok(())
         })
