@@ -1,6 +1,6 @@
 use crate::config::RepositoryConfig;
 use crate::github::GithubRepoName;
-use crate::github::api::client::{CommitAuthor, GithubRepositoryClient, HideCommentReason};
+use crate::github::api::client::{GithubRepositoryClient, HideCommentReason};
 use crate::permissions::UserPermissions;
 #[cfg(test)]
 use crate::tests::TestSyncMarker;
@@ -40,6 +40,7 @@ use crate::PgDbClient;
 use crate::bors::command::BorsCommand;
 use crate::bors::comment::CommentTag;
 use crate::database::{PullRequestModel, WorkflowStatus};
+use crate::github::api::operations::CommitAuthor;
 pub use command::CommandPrefix;
 pub use gitops::Git;
 

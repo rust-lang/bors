@@ -1,5 +1,5 @@
 use crate::database::ExclusiveLockProof;
-use crate::github::api::client::{CheckRunOutput, CommitAuthor, GithubRepositoryClient};
+use crate::github::api::client::{CheckRunOutput, GithubRepositoryClient};
 use crate::github::{CommitSha, TreeSha};
 use http::StatusCode;
 use octocrab::models::CheckRunId;
@@ -73,47 +73,6 @@ pub async fn merge_branches(
     };
     let response = client._post(merge_url, Some(&request)).await;
 
-    #[derive(serde::Deserialize)]
-    struct TreeResponse {
-        sha: String,
-    }
-
-    #[derive(serde::Deserialize)]
-    struct ParentResponse {
-        sha: String,
-    }
-
-    #[derive(serde::Deserialize)]
-    struct CommitResponse {
-        tree: TreeResponse,
-    }
-
-    #[derive(serde::Deserialize)]
-    struct MergeCommitResponse {
-        sha: String,
-        commit: CommitResponse,
-        parents: Vec<ParentResponse>,
-    }
-
-    impl From<MergeCommitResponse> for Commit {
-        fn from(response: MergeCommitResponse) -> Self {
-            let sha: CommitSha = response.sha.into();
-            let tree: TreeSha = response.commit.tree.sha.into();
-            let parents = response
-                .parents
-                .into_iter()
-                .map(|parent| CommitSha(parent.sha))
-                .collect();
-            // TODO
-            Commit {
-                sha,
-                tree,
-                parents,
-                author: None,
-            }
-        }
-    }
-
     match response {
         Ok(response) => {
             let status = response.status();
@@ -126,7 +85,7 @@ pub async fn merge_branches(
 
             match status {
                 StatusCode::CREATED => {
-                    let response: MergeCommitResponse =
+                    let response: CommitResponse =
                         serde_json::from_str(&text).map_err(|error| MergeError::Unknown {
                             status,
                             text: format!("{error:?}"),
@@ -175,6 +134,68 @@ pub async fn merge_branches(
                 repo.repository()
             );
             Err(MergeError::NetworkError(error))
+        }
+    }
+}
+
+#[derive(serde::Deserialize)]
+pub struct TreeResponse {
+    sha: String,
+}
+
+#[derive(serde::Deserialize)]
+pub struct ParentResponse {
+    sha: String,
+}
+
+#[derive(serde::Deserialize)]
+pub struct CommitInnerResponse {
+    tree: TreeResponse,
+    author: Option<octocrab::models::repos::CommitAuthor>,
+}
+
+#[derive(serde::Deserialize)]
+pub struct CommitResponse {
+    sha: String,
+    commit: CommitInnerResponse,
+    parents: Vec<ParentResponse>,
+}
+
+impl From<CommitResponse> for Commit {
+    fn from(response: CommitResponse) -> Self {
+        let sha: CommitSha = response.sha.into();
+        let tree: TreeSha = response.commit.tree.sha.into();
+        let parents = response
+            .parents
+            .into_iter()
+            .map(|parent| CommitSha(parent.sha))
+            .collect();
+        Commit {
+            sha,
+            tree,
+            parents,
+            author: CommitAuthor::from_gh(response.commit.author),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommitAuthor {
+    pub name: String,
+    pub email: String,
+}
+
+impl CommitAuthor {
+    pub fn from_gh(gh_author: Option<octocrab::models::repos::CommitAuthor>) -> Option<Self> {
+        if let Some(author) = gh_author
+            && let Some(email) = author.email
+        {
+            Some(Self {
+                name: author.name,
+                email,
+            })
+        } else {
+            None
         }
     }
 }

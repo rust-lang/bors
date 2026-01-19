@@ -5,7 +5,7 @@ use crate::bors::gitops_queue::{
 use crate::bors::handlers::{PullRequestData, unapprove_pr};
 use crate::bors::{CommandPrefix, Comment, RepositoryState, bors_commit_author};
 use crate::database::BuildStatus;
-use crate::github::api::client::CommitAuthor;
+use crate::github::api::CommitAuthor;
 use crate::github::{GithubRepoName, GithubUser};
 use crate::permissions::PermissionType;
 use std::fmt::Write;
