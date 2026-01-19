@@ -55,12 +55,26 @@ impl BuildQueueSender {
         event: WorkflowRunCompleted,
         error_context: Option<String>,
     ) -> Result<(), mpsc::error::SendError<BuildQueueEvent>> {
+        // If we're in a test, we want to wait until the workflow completed event is actually
+        // handled, to avoid possible race conditions.
+        #[cfg(test)]
+        crate::bors::WAIT_FOR_WORKFLOW_COMPLETED_HANDLED
+            .drain()
+            .await;
+
         self.inner
             .send(BuildQueueEvent::OnWorkflowCompleted {
                 event,
                 error_context,
             })
-            .await
+            .await?;
+
+        #[cfg(test)]
+        crate::bors::WAIT_FOR_WORKFLOW_COMPLETED_HANDLED
+            .sync()
+            .await;
+
+        Ok(())
     }
 }
 
@@ -132,29 +146,39 @@ pub async fn handle_build_queue_event(
             event,
             error_context,
         } => {
-            let build = db
-                .find_build(&event.repository, &event.branch, event.commit_sha.clone())
+            let handle = async {
+                let build = db
+                    .find_build(&event.repository, &event.branch, event.commit_sha.clone())
+                    .await?;
+                let Some(build) = build else {
+                    return Ok(());
+                };
+                if build.status != BuildStatus::Pending {
+                    tracing::warn!("Received workflow completed for an already completed build");
+                    return Ok(());
+                }
+                let Some(pr) = db.find_pr_by_build(&build).await? else {
+                    return Ok(());
+                };
+                let repo = ctx.get_repo(&event.repository)?;
+                maybe_complete_build(
+                    &repo,
+                    db,
+                    &build,
+                    &pr,
+                    &merge_queue_tx,
+                    Some(CompletionTrigger { error_context }),
+                )
                 .await?;
-            let Some(build) = build else {
-                return Ok(());
+                Ok(())
             };
-            if build.status != BuildStatus::Pending {
-                tracing::warn!("Received workflow completed for an already completed build");
-                return Ok(());
-            }
-            let Some(pr) = db.find_pr_by_build(&build).await? else {
-                return Ok(());
-            };
-            let repo = ctx.get_repo(&event.repository)?;
-            maybe_complete_build(
-                &repo,
-                db,
-                &build,
-                &pr,
-                &merge_queue_tx,
-                Some(CompletionTrigger { error_context }),
-            )
-            .await?;
+
+            let res = handle.await;
+
+            #[cfg(test)]
+            crate::bors::WAIT_FOR_WORKFLOW_COMPLETED_HANDLED.mark();
+
+            return res;
         }
     }
 

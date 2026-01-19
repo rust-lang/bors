@@ -145,6 +145,10 @@ pub static WAIT_FOR_MERGE_QUEUE: TestSyncMarker = TestSyncMarker::new();
 #[cfg(test)]
 pub static WAIT_FOR_MERGE_QUEUE_MERGE_ATTEMPT: TestSyncMarker = TestSyncMarker::new();
 
+/// The build queue has handled a workflow completed event.
+#[cfg(test)]
+pub static WAIT_FOR_WORKFLOW_COMPLETED_HANDLED: TestSyncMarker = TestSyncMarker::new();
+
 #[cfg(not(test))]
 fn now() -> DateTime<Utc> {
     Utc::now()
