@@ -1,6 +1,6 @@
 use super::{GithubRepoName, PullRequest, PullRequestNumber};
 use crate::PgDbClient;
-use crate::bors::{make_text_ignored_by_bors, normalize_merge_message};
+use crate::bors::{RollupMode, make_text_ignored_by_bors, normalize_merge_message};
 use crate::github::api::client::GithubRepositoryClient;
 use crate::github::api::operations::MergeError;
 use crate::github::oauth::{OAuthClient, UserGitHubClient};
@@ -393,6 +393,9 @@ async fn create_rollup(
         .await
         .context("Cannot store the created rollup into the DB")?;
 
+    // Mark it as rollup=never
+    db.set_rollup(&rollup_db, RollupMode::Never).await?;
+
     // And register its rollup member PRs
     db.register_rollup_members(&rollup_db, &successes)
         .await
@@ -408,6 +411,7 @@ async fn create_rollup(
 
 #[cfg(test)]
 mod tests {
+    use crate::bors::RollupMode;
     use crate::github::rollup::OAuthRollupState;
     use crate::github::{GithubRepoName, PullRequestNumber};
     use crate::permissions::PermissionType;
@@ -864,6 +868,21 @@ also include this pls"
 
         also include this pls
         ");
+    }
+
+    #[sqlx::test]
+    async fn rollup_marked_as_rollup_never(pool: sqlx::PgPool) {
+        run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
+            let pr2 = ctx.open_pr(default_repo_name(), |_| {}).await?;
+            ctx.approve(pr2.id()).await?;
+
+            make_rollup(ctx, &[&pr2])
+                .await?
+                .assert_status(StatusCode::SEE_OTHER);
+            ctx.pr(3).await.expect_rollup(Some(RollupMode::Never));
+            Ok(())
+        })
+        .await;
     }
 
     async fn make_rollup(
