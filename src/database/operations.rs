@@ -745,7 +745,7 @@ pub(crate) async fn set_pr_priority(
     .await
 }
 
-pub(crate) async fn set_pr_rollup(
+pub(crate) async fn set_pr_rollup_mode(
     executor: impl PgExecutor<'_>,
     pr_id: i32,
     rollup: RollupMode,
@@ -1141,6 +1141,26 @@ pub(crate) async fn get_nonclosed_rollups(
         }
 
         Ok(rollups_map)
+    })
+    .await
+}
+
+pub(crate) async fn is_rollup(
+    executor: impl PgExecutor<'_>,
+    id: PrimaryKey,
+) -> anyhow::Result<bool> {
+    measure_db_query("is_rollup", || async {
+        let row = sqlx::query!(
+            r#"
+        SELECT rollup
+        FROM rollup_member rm
+        WHERE rollup = $1
+            "#,
+            id
+        )
+        .fetch_optional(executor)
+        .await?;
+        Ok(row.is_some())
     })
     .await
 }
