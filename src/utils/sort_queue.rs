@@ -34,7 +34,7 @@ fn get_queue_status_priority(status: &QueueStatus) -> u32 {
         QueueStatus::Pending(_, _) => 1,
         QueueStatus::Approved(_) => 2,
         QueueStatus::Failed(_, _) => 3,
-        QueueStatus::NotApproved => 4,
+        QueueStatus::NotApproved | QueueStatus::NotOpen => 4,
     }
 }
 

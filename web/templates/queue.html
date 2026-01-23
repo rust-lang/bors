@@ -258,7 +258,7 @@
                         {%- endif -%}
                       {%- when QueueStatus::Failed(_, _) -%}
                         failed
-                      {%- when QueueStatus::NotApproved -%}
+                      {%- when QueueStatus::NotApproved | QueueStatus::NotOpen -%}
                     {%- endmatch -%}
                     <span class="elapsed-time-display"></span>
                 </td>

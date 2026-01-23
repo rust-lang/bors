@@ -919,6 +919,24 @@ also include this pls"
             .await;
     }
 
+    #[sqlx::test]
+    async fn rollup_draft_pr(pool: sqlx::PgPool) {
+        run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
+            let pr2 = ctx.open_pr(default_repo_name(), |_| {}).await?;
+            ctx.approve(pr2.id()).await?;
+            let pr3 = ctx.open_pr(default_repo_name(), |_| {}).await?;
+            ctx.approve(pr3.id()).await?;
+            ctx.set_pr_status_draft(pr3.id()).await?;
+
+            make_rollup(ctx, &[&pr2, &pr3])
+                .await?
+                .assert_status(StatusCode::BAD_REQUEST)
+                .assert_body("Pull request #3 cannot be included in a rollup");
+            Ok(())
+        })
+        .await;
+    }
+
     async fn make_rollup(
         ctx: &mut BorsTester,
         prs: &[&PullRequest],
