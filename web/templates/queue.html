@@ -288,6 +288,9 @@
                     {%- endif -%}
                 </td>
                 <td>{{ pr.priority.unwrap_or(0) }}</td>
+                {%~ if rollups_info.rollups.get(pr.number).is_some() -%}
+                  <td>Rollup PR</td>
+                {%- else -%}
                 <td class="marker {%~ if let Some(rollup) = pr.rollup -%}
                       {%- match rollup -%}
                         {%- when Always -%}
@@ -312,6 +315,7 @@
                       {%- endmatch -%}
                     {%- endif -%}
                 </td>
+                {%- endif -%}
             </tr>
             {% endfor -%}
         </tbody>
