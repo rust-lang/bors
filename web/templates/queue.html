@@ -93,16 +93,17 @@
     td.status[data-status="approved"]:before {
         background-color: #85DB7B;
     }
-    table.dataTable > tbody > tr.rollup-hover > td {
+    table.dataTable > tbody > tr.rollup-hover:not(.selected) > td {
         background-color: #C2D2FF;
     }
     table.dataTable > tbody > tr.rollup-hover:nth-child(2n+1) > td {
         /* Override the striped overlay from DataTables to properly highlight the whole row when hovering a rollup PR */
-        box-shadow: none
+        box-shadow: none;
     }
-    table.dataTable.stripe > tbody > tr.rollup-hover > td:first-child {
-        box-shadow: inset 6px 0 0 #1d4ed8; /* left bar inside the cell */
+    table.dataTable > tbody > tr[data-rollup-pr-members] {
+        cursor: pointer;
     }
+
     .marker {
         white-space: nowrap;
     }
@@ -228,6 +229,7 @@
             <tr data-pr-number="{{ pr.number.0 }}"
                 {% if let Some(rollup_members) = rollups_info.rollups.get(pr.number) %}
                 data-rollup-pr-members='{{ rollup_members.iter().join(",")  }}'
+                title="Select PRs of this rollup"
                 {% endif %}
                 data-rollupable="{{ pr.is_rollupable() }}"
                 data-preselected="{{ selected_rollup_prs.contains(pr.number.0 as u32) }}"
@@ -286,6 +288,9 @@
                     {%- endif -%}
                 </td>
                 <td>{{ pr.priority.unwrap_or(0) }}</td>
+                {%~ if rollups_info.rollups.get(pr.number).is_some() -%}
+                  <td>Rollup PR</td>
+                {%- else -%}
                 <td class="marker {%~ if let Some(rollup) = pr.rollup -%}
                       {%- match rollup -%}
                         {%- when Always -%}
@@ -310,6 +315,7 @@
                       {%- endmatch -%}
                     {%- endif -%}
                 </td>
+                {%- endif -%}
             </tr>
             {% endfor -%}
         </tbody>
@@ -446,48 +452,65 @@
         return new DataTable("#table", config);
     }
 
-    function bindRowClick(tableInstance) {
-        const tbody = document.querySelector("#table tbody");
-        if (!tbody) {
-            return () => {};
-        }
-
-        const handler = (event) => {
-            // Ignore clicks on checkbox - let checkbox handle it
-            if (event.target.closest("td.select-checkbox")) {
-                return;
-            }
-
-            // Ignore clicks on interactive elements
-            if (event.target.closest(interactiveSelector)) {
-                return;
-            }
-
-            const rowElement = event.target.closest("tr");
-            if (!rowElement) {
-                return;
-            }
-
-            const rowApi = tableInstance.row(rowElement);
-            if (!rowApi.any()) {
-                return;
-            }
-
-            if (rowApi.selected()) {
-                rowApi.deselect();
-            } else {
-                rowApi.select();
-            }
-        };
-
-        tbody.addEventListener("click", handler);
-        return () => tbody.removeEventListener("click", handler);
+    function toggleSelect(rowApi) {
+      if (rowApi.selected()) {
+        rowApi.deselect();
+      } else {
+        rowApi.select();
+      }
     }
 
     let table = null;
     let detachRowClick = null;
     let detachRowHover = null;
     let selectCheckbox = null;
+
+    // Select PR or rollup members on click
+    function bindRowClick(tableInstance) {
+      const tbody = document.querySelector("#table tbody");
+      if (!tbody) {
+        return () => {};
+      }
+
+      const handler = (event) => {
+        // Ignore clicks on checkbox - let checkbox handle it
+        if (event.target.closest("td.select-checkbox")) {
+          return;
+        }
+
+        // Ignore clicks on interactive elements
+        if (event.target.closest(interactiveSelector)) {
+          return;
+        }
+
+        const rowElement = event.target.closest("tr");
+        if (!rowElement) {
+          return;
+        }
+
+        let rollupPrMembers = rowElement.dataset.rollupPrMembers;
+        if (!rollupPrMembers) {
+          // Not a rollup - select the row
+          const rowApi = tableInstance.row(rowElement);
+          if (rowApi.any()) {
+            toggleSelect(rowApi);
+          }
+        } else {
+          // Rollup - special click handling, select its members
+          rollupPrMembers = rollupPrMembers.split(",");
+          for (const rollupPrMember of rollupPrMembers) {
+            const rollupRow = tbody.querySelector(`tr[data-pr-number="${rollupPrMember}"]`);
+            const rowApi = tableInstance.row(rollupRow);
+            if (rowApi.any()) {
+              rowApi.select();
+            }
+          }
+        }
+      };
+
+      tbody.addEventListener("click", handler);
+      return () => tbody.removeEventListener("click", handler);
+    }
 
     // Highlight rollup members when hovering over the rollup row
     function bindRollupHover() {
