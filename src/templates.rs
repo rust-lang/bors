@@ -115,6 +115,11 @@ impl QueueTemplate {
             }
             write!(output, "{minutes}m").unwrap();
         }
+
+        if output.is_empty() {
+            output.push_str("<1m");
+        }
+
         output
     }
 }
