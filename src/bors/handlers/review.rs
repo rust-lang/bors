@@ -33,7 +33,7 @@ pub(super) async fn command_approve(
     author: &GithubUser,
     approver: &Approver,
     priority: Option<u32>,
-    rollup: Option<RollupMode>,
+    rollup_mode: Option<RollupMode>,
     merge_queue_tx: &MergeQueueSender,
 ) -> anyhow::Result<()> {
     tracing::info!("Approving PR {}", pr.number());
@@ -57,6 +57,17 @@ pub(super) async fn command_approve(
         return Ok(());
     }
 
+    if let Some(rollup_mode) = rollup_mode {
+        let is_rollup = db.is_rollup(pr.db).await?;
+        if is_rollup && rollup_mode != RollupMode::Never {
+            repo_state
+                .client
+                .post_comment(pr.number(), rollup_pr_invalid_rollup_mode_comment(), &db)
+                .await?;
+            return Ok(());
+        }
+    }
+
     let approver = match approver {
         Approver::Myself => author.username.clone(),
         Approver::Specified(approver) => normalize_approvers(approver),
@@ -66,7 +77,8 @@ pub(super) async fn command_approve(
         sha: pr.github.head.sha.to_string(),
     };
 
-    db.approve(pr.db, approval_info, priority, rollup).await?;
+    db.approve(pr.db, approval_info, priority, rollup_mode)
+        .await?;
 
     let priority = priority.or(pr.db.priority.map(|p| p as u32));
 
@@ -264,7 +276,7 @@ pub(super) async fn command_set_rollup(
     db: Arc<PgDbClient>,
     pr: PullRequestData<'_>,
     author: &GithubUser,
-    rollup: RollupMode,
+    rollup_mode: RollupMode,
 ) -> anyhow::Result<()> {
     // Require only try for rollup commands, because rust-timer uses them, and we don't want to
     // grant it approve permissions.
@@ -272,7 +284,16 @@ pub(super) async fn command_set_rollup(
         deny_request(&repo_state, &db, pr.number(), author, PermissionType::Try).await?;
         return Ok(());
     }
-    db.set_rollup(pr.db, rollup).await
+    let is_rollup = db.is_rollup(pr.db).await?;
+    if is_rollup && rollup_mode != RollupMode::Never {
+        repo_state
+            .client
+            .post_comment(pr.number(), rollup_pr_invalid_rollup_mode_comment(), &db)
+            .await?;
+        return Ok(());
+    }
+
+    db.set_rollup_mode(pr.db, rollup_mode).await
 }
 
 pub(super) async fn command_close_tree(
@@ -455,6 +476,10 @@ async fn notify_of_delegation(
 
     repo.client.post_comment(pr_number, comment, db).await?;
     Ok(())
+}
+
+fn rollup_pr_invalid_rollup_mode_comment() -> Comment {
+    Comment::new(":exclamation: Rollup PRs can only be marked as rollup=never.".to_string())
 }
 
 #[cfg(test)]

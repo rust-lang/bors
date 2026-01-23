@@ -394,7 +394,7 @@ async fn create_rollup(
         .context("Cannot store the created rollup into the DB")?;
 
     // Mark it as rollup=never
-    db.set_rollup(&rollup_db, RollupMode::Never).await?;
+    db.set_rollup_mode(&rollup_db, RollupMode::Never).await?;
 
     // And register its rollup member PRs
     db.register_rollup_members(&rollup_db, &successes)
@@ -883,6 +883,40 @@ also include this pls"
             Ok(())
         })
         .await;
+    }
+
+    #[sqlx::test]
+    async fn rollup_mark_as_rollup_always(pool: sqlx::PgPool) {
+        run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
+            let pr2 = ctx.open_pr(default_repo_name(), |_| {}).await?;
+            ctx.approve(pr2.id()).await?;
+
+            make_rollup(ctx, &[&pr2])
+                .await?
+                .assert_status(StatusCode::SEE_OTHER);
+            ctx.post_comment(Comment::new(3, "@bors rollup=always"))
+                .await?;
+            insta::assert_snapshot!(ctx.get_next_comment_text(3).await?, @":exclamation: Rollup PRs can only be marked as rollup=never.");
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn rollup_mark_as_rollup_always_in_approve(pool: sqlx::PgPool) {
+        run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
+            let pr2 = ctx.open_pr(default_repo_name(), |_| {}).await?;
+            ctx.approve(pr2.id()).await?;
+
+            make_rollup(ctx, &[&pr2])
+                .await?
+                .assert_status(StatusCode::SEE_OTHER);
+            ctx.post_comment(Comment::new(3, "@bors r+ rollup=always"))
+                .await?;
+            insta::assert_snapshot!(ctx.get_next_comment_text(3).await?, @":exclamation: Rollup PRs can only be marked as rollup=never.");
+            Ok(())
+        })
+            .await;
     }
 
     async fn make_rollup(
