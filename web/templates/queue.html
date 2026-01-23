@@ -93,6 +93,16 @@
     td.status[data-status="approved"]:before {
         background-color: #85DB7B;
     }
+    table.dataTable > tbody > tr.rollup-hover > td {
+        background-color: #C2D2FF;
+    }
+    table.dataTable > tbody > tr.rollup-hover:nth-child(2n+1) > td {
+        /* Override the striped overlay from DataTables to properly highlight the whole row when hovering a rollup PR */
+        box-shadow: none
+    }
+    table.dataTable.stripe > tbody > tr.rollup-hover > td:first-child {
+        box-shadow: inset 6px 0 0 #1d4ed8; /* left bar inside the cell */
+    }
     .marker {
         white-space: nowrap;
     }
@@ -215,7 +225,11 @@
 
         <tbody>
             {%- for pr in prs %}
-            <tr data-rollupable="{{ pr.is_rollupable() }}"
+            <tr data-pr-number="{{ pr.number.0 }}"
+                {% if let Some(rollup_members) = rollups_info.rollups.get(pr.number) %}
+                data-rollup-pr-members='{{ rollup_members.iter().join(",")  }}'
+                {% endif %}
+                data-rollupable="{{ pr.is_rollupable() }}"
                 data-preselected="{{ selected_rollup_prs.contains(pr.number.0 as u32) }}"
                 {% if let Some(priority) = tree_state.priority() &&
                       pr.priority.unwrap_or(0) < *priority as i32 &&
@@ -472,7 +486,42 @@
 
     let table = null;
     let detachRowClick = null;
+    let detachRowHover = null;
     let selectCheckbox = null;
+
+    // Highlight rollup members when hovering over the rollup row
+    function bindRollupHover() {
+        const tbody = document.querySelector("#table tbody");
+        if (!tbody) {
+            return () => {};
+        }
+        const clear = () => {
+            tbody.querySelectorAll(".rollup-hover").forEach(el => el.classList.remove("rollup-hover"));
+        };
+        const handler = (event) => {
+            // Reset highlight
+            clear();
+            const rowElement = event.target.closest("tr");
+            if (!rowElement) {
+                return;
+            }
+            let rollupPrMembers = rowElement.dataset.rollupPrMembers;
+            if (!rollupPrMembers) {
+                return;
+            }
+            rollupPrMembers = rollupPrMembers.split(",");
+            for (const rollupPrMember of rollupPrMembers) {
+                tbody.querySelector(`tr[data-pr-number="${rollupPrMember}"]`).classList.add("rollup-hover");
+            }
+        }
+        tbody.addEventListener("mouseover", handler);
+        tbody.addEventListener("mouseleave", clear);
+
+        return () => {
+            tbody.removeEventListener("mouseover", handler);
+            tbody.removeEventListener("mouseleave", clear);
+        };
+    }
 
     function handleSelectChange() {
         let groupByColumnName = this.value === "" ? null : this.value;
@@ -490,9 +539,13 @@
         if (selectCheckbox !== null) {
           selectCheckbox.removeEventListener("change", handleSelectChange);
         }
+        if (detachRowHover !== null) {
+          detachRowHover();
+        }
 
         table = initializeTable(groupByColumnName);
         detachRowClick = bindRowClick(table);
+        detachRowHover = bindRollupHover();
 
         // This dance is required because we want to put the select input into the DataTables
         // layout, which causes it to be removed from the DOM everytime we (re-)initiaize the table.

@@ -4,6 +4,7 @@ use crate::database::{ApprovalStatus, QueueStatus};
 use crate::github::{GithubRepoName, rollup};
 use crate::templates::{
     HelpTemplate, HtmlTemplate, NotFoundTemplate, PullRequestStats, QueueTemplate, RepositoryView,
+    RollupsInfo,
 };
 use crate::utils::sort_queue::sort_queue_prs;
 use crate::{
@@ -356,6 +357,8 @@ pub async fn queue_handler(
         (in_queue + in_queue_inc, failed + failed_inc)
     });
 
+    let rollups = db.get_nonclosed_rollups(&repo.name).await?;
+
     Ok(HtmlTemplate(QueueTemplate {
         oauth_client_id: oauth
             .as_ref()
@@ -372,6 +375,7 @@ pub async fn queue_handler(
         prs,
         pending_workflow,
         selected_rollup_prs: params.pull_requests.map(|prs| prs.0).unwrap_or_default(),
+        rollups_info: RollupsInfo::from(rollups),
     })
     .into_response())
 }

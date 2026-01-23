@@ -1,6 +1,7 @@
 use chrono::DateTime;
 use chrono::Utc;
 use sqlx::postgres::PgExecutor;
+use std::collections::{HashMap, HashSet};
 
 use super::ApprovalStatus;
 use super::Assignees;
@@ -1087,6 +1088,59 @@ pub(crate) async fn clear_auto_build(
         .execute(executor)
         .await?;
         Ok(())
+    })
+    .await
+}
+
+pub(crate) async fn register_rollup_pr_member(
+    executor: impl PgExecutor<'_>,
+    rollup: &PullRequestModel,
+    member: &PullRequestModel,
+) -> anyhow::Result<()> {
+    measure_db_query("register_rollup_pr_member", || async {
+        sqlx::query!(
+            r#"
+        INSERT INTO rollup_member (rollup, member)
+        VALUES ($1, $2)
+        "#,
+            rollup.id,
+            member.id
+        )
+        .execute(executor)
+        .await?;
+        Ok(())
+    })
+    .await
+}
+
+pub(crate) async fn get_nonclosed_rollups(
+    executor: impl PgExecutor<'_>,
+    repo: &GithubRepoName,
+) -> anyhow::Result<HashMap<PullRequestNumber, HashSet<PullRequestNumber>>> {
+    measure_db_query("get_nonclosed_rollups", || async {
+        let mut stream = sqlx::query!(
+            r#"
+        SELECT rollup.number AS rollup_num, member.number AS member_num
+        FROM rollup_member rm
+            JOIN pull_request rollup ON rollup.id = rm.rollup
+            JOIN pull_request member ON member.id = rm.member
+        WHERE rollup.status IN ('open', 'draft') AND
+              rollup.repository = $1
+            "#,
+            repo as &GithubRepoName
+        )
+        .fetch(executor);
+
+        let mut rollups_map: HashMap<PullRequestNumber, HashSet<PullRequestNumber>> =
+            HashMap::new();
+        while let Some(row) = stream.try_next().await? {
+            let rollup_pr = PullRequestNumber(row.rollup_num as u64);
+            let member_pr = PullRequestNumber(row.member_num as u64);
+
+            rollups_map.entry(rollup_pr).or_default().insert(member_pr);
+        }
+
+        Ok(rollups_map)
     })
     .await
 }

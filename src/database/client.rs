@@ -13,9 +13,13 @@ use super::{
     ApprovalInfo, DelegatedPermission, MergeableState, PrimaryKey, RunId, UpdateBuildParams,
     UpsertPullRequestParams,
 };
+use std::collections::{HashMap, HashSet};
+
 use crate::bors::comment::CommentTag;
 use crate::bors::{BuildKind, PullRequestStatus, RollupMode};
-use crate::database::operations::update_pr_auto_build_id;
+use crate::database::operations::{
+    get_nonclosed_rollups, register_rollup_pr_member, update_pr_auto_build_id,
+};
 use crate::database::{
     BuildModel, CommentModel, PullRequestModel, RepoModel, TreeState, WorkflowModel,
     WorkflowStatus, WorkflowType,
@@ -370,6 +374,32 @@ impl PgDbClient {
 
     pub async fn delete_tagged_bot_comment(&self, comment: &CommentModel) -> anyhow::Result<()> {
         delete_tagged_bot_comment(&self.pool, comment.id).await
+    }
+
+    /// Register the members of a rollup.
+    /// All records are inserted in a single transaction.
+    pub async fn register_rollup_members(
+        &self,
+        rollup: &PullRequestModel,
+        members: &[PullRequestModel],
+    ) -> anyhow::Result<()> {
+        let mut tx = self.pool.begin().await?;
+        for member in members {
+            assert_ne!(rollup.id, member.id);
+            assert_eq!(rollup.repository, member.repository);
+            register_rollup_pr_member(&mut *tx, rollup, member).await?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+
+    /// Returns a map of rollup PR numbers to the set of member PR numbers that are part of that rollup.
+    /// Only returns non-closed rollup PRs.
+    pub async fn get_nonclosed_rollups(
+        &self,
+        repo: &GithubRepoName,
+    ) -> anyhow::Result<HashMap<PullRequestNumber, HashSet<PullRequestNumber>>> {
+        get_nonclosed_rollups(&self.pool, repo).await
     }
 }
 

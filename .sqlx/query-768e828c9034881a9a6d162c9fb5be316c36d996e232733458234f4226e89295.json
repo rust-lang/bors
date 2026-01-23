@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT rollup.number AS rollup_num, member.number AS member_num\n        FROM rollup_member rm\n            JOIN pull_request rollup ON rollup.id = rm.rollup\n            JOIN pull_request member ON member.id = rm.member\n        WHERE rollup.status IN ('open', 'draft') AND\n              rollup.repository = $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "rollup_num",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "member_num",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "768e828c9034881a9a6d162c9fb5be316c36d996e232733458234f4226e89295"
+}
