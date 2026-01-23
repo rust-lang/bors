@@ -183,7 +183,6 @@ async fn create_rollup(
         repo_owner,
         mut pr_nums,
     } = rollup_state;
-
     // Repository where we will create the PR
     let base_repo = GithubRepoName::new(&repo_owner, &repo_name);
 
@@ -388,6 +387,17 @@ async fn create_rollup(
         .await
         .context("Cannot create PR")?;
 
+    // Store the rollup PR into the DB
+    let rollup_db = db
+        .upsert_pull_request(&base_repo, pr.clone().into())
+        .await
+        .context("Cannot store the created rollup into the DB")?;
+
+    // And register its rollup member PRs
+    db.register_rollup_members(&rollup_db, &successes)
+        .await
+        .context("Cannot register rollup members")?;
+
     // Set the rollup label
     gh_client
         .add_labels(pr.number, &["rollup".to_string()])
@@ -406,6 +416,7 @@ mod tests {
         User, default_repo_name, run_test,
     };
     use http::StatusCode;
+    use std::collections::{HashMap, HashSet};
 
     #[sqlx::test]
     async fn rollup_missing_fork(pool: sqlx::PgPool) {
@@ -528,6 +539,17 @@ mod tests {
             make_rollup(ctx, &[&pr2, &pr3, &pr4, &pr5])
                 .await?
                 .assert_status(StatusCode::SEE_OTHER);
+            assert_eq!(
+                ctx.db().get_nonclosed_rollups(&default_repo_name()).await?,
+                HashMap::from([(
+                    PullRequestNumber(6),
+                    HashSet::from_iter(vec![
+                        PullRequestNumber(2),
+                        PullRequestNumber(3),
+                        PullRequestNumber(5)
+                    ])
+                )])
+            );
             Ok(())
         })
         .await;
@@ -650,7 +672,57 @@ mod tests {
             insta::assert_snapshot!(pr_url, @"https://github.com/rust-lang/borstest/pull/4");
 
             ctx.pr(4).await.expect_added_labels(&["rollup"]);
+            assert_eq!(
+                ctx.db().get_nonclosed_rollups(pr2.repo()).await?,
+                HashMap::from([(
+                    PullRequestNumber(4),
+                    HashSet::from_iter(vec![PullRequestNumber(3), PullRequestNumber(2)])
+                )])
+            );
 
+            Ok(())
+        })
+        .await;
+        let repo = gh.get_repo(());
+        insta::assert_snapshot!(repo.lock().get_pr(4).description, @"
+        Successful merges:
+
+         - rust-lang/borstest#2 (Title of PR 2)
+         - rust-lang/borstest#3 (Title of PR 3)
+
+        r? @ghost
+
+        <!-- homu-ignore:start -->
+        [Create a similar rollup](https://bors-test.com/queue/borstest?prs=2,3)
+        <!-- homu-ignore:end -->
+        ");
+    }
+
+    /// Ensure that a PR can be associated to multiple rollups.
+    /// This can happen when opening a new rollup similar to an existing one, before closing the old one.
+    #[sqlx::test]
+    async fn multiple_rollups_same_pr(pool: sqlx::PgPool) {
+        let gh = run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
+            let pr2 = ctx.open_pr((), |_| {}).await?;
+            let pr3 = ctx.open_pr((), |_| {}).await?;
+            ctx.approve(pr2.id()).await?;
+            ctx.approve(pr3.id()).await?;
+
+            make_rollup(ctx, &[&pr2, &pr3]).await?;
+            make_rollup(ctx, &[&pr3]).await?;
+            assert_eq!(
+                ctx.db().get_nonclosed_rollups(pr2.repo()).await?,
+                HashMap::from([
+                    (
+                        PullRequestNumber(4),
+                        HashSet::from_iter(vec![PullRequestNumber(2), PullRequestNumber(3)])
+                    ),
+                    (
+                        PullRequestNumber(5),
+                        HashSet::from_iter(vec![PullRequestNumber(3)])
+                    )
+                ])
+            );
             Ok(())
         })
         .await;
