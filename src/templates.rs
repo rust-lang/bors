@@ -87,7 +87,7 @@ pub struct QueueTemplate {
     // Active workflow for an active pending auto build
     pub pending_workflow: Option<WorkflowModel>,
     // Guesstimated duration to merge all current approved/pending PRs in the queue
-    pub expected_remaining_duration: Duration,
+    pub expected_remaining_duration: Option<Duration>,
 }
 
 impl QueueTemplate {

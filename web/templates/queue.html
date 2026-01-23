@@ -192,11 +192,11 @@
       {{ stats.total_count }} total, {{ stats.in_queue_count }} in queue,
       {{ stats.failed_count }} failed
     </p>
-    {%- if !expected_remaining_duration.is_zero() -%}
+    {%- if let Some(expected) = expected_remaining_duration -%}
       <div style="margin: 0 5px;">|</div>
       <p style="margin-bottom: 0;"
-         title="Expected duration to merge all current PRs in the queue, assuming that there are no build failures.">
-        Estimated time to merge queue: {{ format_duration(*expected_remaining_duration) }}
+         title="Estimated duration to merge all current PRs in the queue, assuming that there are no build failures.">
+        Estimated time to flush queue: {{ format_duration(**expected) }}
       </p>
     {%- endif -%}
   </div>

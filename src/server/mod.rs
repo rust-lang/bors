@@ -357,21 +357,24 @@ pub async fn queue_handler(
         None => None,
     };
 
-    let average_auto_duration = {
+    let average_build_duration = {
         let total_duration = last_ten_builds
             .iter()
             .filter_map(|build| build.duration)
             .map(|d| d.0)
             .sum::<Duration>();
+        let count = last_ten_builds.len() as u32;
         let total_duration = if total_duration.is_zero() {
-            // Default guess of 3 hours
-            Duration::from_secs(3600 * 3)
+            // Default guess of 3 hours per build
+            Duration::from_secs(3600 * 3) * count
         } else {
             total_duration
         };
-        let count = last_ten_builds.len() as u32;
-        let count = if count > 0 { count } else { 1 };
-        total_duration / count
+        if count > 1 {
+            total_duration / count
+        } else {
+            total_duration
+        }
     };
 
     let mut in_queue_count = 0;
@@ -394,18 +397,18 @@ pub async fn queue_handler(
         match &status {
             QueueStatus::Pending(_, _) => {
                 // Try to guess already elapsed time of the pending workflow
-                let subtract_duration = if let Some(workflow) = &pending_workflow {
+                let elapsed = if let Some(workflow) = &pending_workflow {
                     (Utc::now() - workflow.created_at)
                         .to_std()
                         .unwrap_or_default()
                 } else {
                     Duration::ZERO
                 };
-                in_queue.insert(pr.number, average_auto_duration - subtract_duration);
+                in_queue.insert(pr.number, average_build_duration.saturating_sub(elapsed));
             }
             // For an approved PR, assume that it will take the average auto build duration
             QueueStatus::Approved(_) => {
-                in_queue.insert(pr.number, average_auto_duration);
+                in_queue.insert(pr.number, average_build_duration);
             }
             QueueStatus::Failed(_, _)
             | QueueStatus::ReadyForMerge(_, _)
@@ -414,7 +417,7 @@ pub async fn queue_handler(
         }
     }
 
-    let mut expected_remaining_duration = Duration::ZERO;
+    let mut expected_remaining_duration: Option<Duration> = None;
 
     // Rollup members whose rollup is in the queue, and thus its duration will be counted
     let rollup_members: HashSet<PullRequestNumber> = rollups
@@ -429,7 +432,8 @@ pub async fn queue_handler(
         if rollup_members.contains(&pr) {
             continue;
         }
-        expected_remaining_duration += remaining_duration;
+        expected_remaining_duration =
+            Some(expected_remaining_duration.unwrap_or_default() + remaining_duration);
     }
 
     Ok(HtmlTemplate(QueueTemplate {
