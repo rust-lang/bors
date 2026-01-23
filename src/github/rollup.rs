@@ -6,6 +6,7 @@ use crate::github::api::operations::MergeError;
 use crate::github::oauth::{OAuthClient, UserGitHubClient};
 use crate::permissions::PermissionType;
 use crate::server::ServerStateRef;
+use crate::utils::sort_queue::sort_queue_prs;
 use anyhow::Context;
 use axum::extract::{Query, State};
 use axum::http::StatusCode;
@@ -13,7 +14,7 @@ use axum::response::{IntoResponse, Redirect, Response};
 use futures::StreamExt;
 use itertools::Itertools;
 use rand::{Rng, distr::Alphanumeric};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 use std::sync::Arc;
 use tracing::Instrument;
@@ -228,14 +229,30 @@ async fn create_rollup(
         }
     }
 
-    // Sort PRs by priority and then PR number
-    // We want to try to merge PRs with higher priority first, so that in case of conflicts they
+    let queue_prs = db.get_nonclosed_pull_requests(&base_repo).await?;
+    let queue_prs = sort_queue_prs(queue_prs);
+    let pr_to_queue_order: HashMap<PullRequestNumber, usize> = queue_prs
+        .into_iter()
+        .enumerate()
+        .map(|(index, pr)| (pr.number, index))
+        .collect();
+
+    // Sort PRs by queue order
+    // We want to try to merge PRs with higher queue order first, so that in case of conflicts they
     // get in, rather than being left out.
     rollup_prs.sort_by(|a, b| {
-        a.priority
-            .cmp(&b.priority)
-            .reverse()
-            .then(a.number.cmp(&b.number))
+        let queue_a = pr_to_queue_order.get(&a.number);
+        let queue_b = pr_to_queue_order.get(&b.number);
+        let ordering = if let (Some(a), Some(b)) = (queue_a, queue_b) {
+            // "Smaller" position in the queue goes first (#1 < #2)
+            a.cmp(b)
+        } else {
+            // Otherwise, higher priority goes first
+            a.priority.cmp(&b.priority).reverse()
+        };
+
+        // If everything is the same, just compare by PR number
+        ordering.then(a.number.cmp(&b.number))
     });
 
     // Fetch the first PR from GitHub to determine the target base branch
