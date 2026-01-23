@@ -9,6 +9,8 @@ use axum::response::{Html, IntoResponse, Response};
 use http::StatusCode;
 use itertools::Itertools;
 use std::collections::{HashMap, HashSet};
+use std::fmt::Write;
+use std::time::Duration;
 
 /// Build status to display on the queue page.
 pub fn status_text(pr: &PullRequestModel) -> String {
@@ -84,6 +86,37 @@ pub struct QueueTemplate {
     pub selected_rollup_prs: Vec<u32>,
     // Active workflow for an active pending auto build
     pub pending_workflow: Option<WorkflowModel>,
+    // Guesstimated duration to merge all current approved/pending PRs in the queue
+    pub expected_remaining_duration: Duration,
+}
+
+impl QueueTemplate {
+    fn format_duration(&self, duration: Duration) -> String {
+        let total_seconds = duration.as_secs();
+        let days = total_seconds / 86400;
+        let hours = (total_seconds % 86400) / 3600;
+        let minutes = (total_seconds % 3600) / 60;
+
+        let mut output = String::new();
+        if days > 0 {
+            write!(output, "{days}d").unwrap();
+        }
+
+        if hours > 0 {
+            if !output.is_empty() {
+                output.push(' ');
+            }
+            write!(output, "{hours}h").unwrap();
+        }
+
+        if days == 0 && minutes > 0 {
+            if !output.is_empty() {
+                output.push(' ');
+            }
+            write!(output, "{minutes}m").unwrap();
+        }
+        output
+    }
 }
 
 #[derive(Template)]

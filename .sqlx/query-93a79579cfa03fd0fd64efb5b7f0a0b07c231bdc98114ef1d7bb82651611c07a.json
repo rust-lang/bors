@@ -1,0 +1,77 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            id,\n            repository as \"repository: GithubRepoName\",\n            branch,\n            kind as \"kind: BuildKind\",\n            commit_sha,\n            status as \"status: BuildStatus\",\n            parent,\n            created_at as \"created_at: DateTime<Utc>\",\n            check_run_id,\n            duration as \"duration: PgDuration\"\n        FROM build\n        WHERE repository = $1 AND\n            kind = 'auto' AND\n            status = 'success'\n        ORDER BY created_at DESC\n        LIMIT $2\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "repository: GithubRepoName",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "branch",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "kind: BuildKind",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "commit_sha",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "status: BuildStatus",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "parent",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "created_at: DateTime<Utc>",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "check_run_id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 9,
+        "name": "duration: PgDuration",
+        "type_info": "Interval"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "93a79579cfa03fd0fd64efb5b7f0a0b07c231bdc98114ef1d7bb82651611c07a"
+}

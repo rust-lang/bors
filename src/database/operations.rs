@@ -1165,6 +1165,43 @@ pub(crate) async fn is_rollup(
     .await
 }
 
+pub(crate) async fn get_last_n_successful_auto_builds(
+    executor: impl PgExecutor<'_>,
+    repo: &GithubRepoName,
+    n: u32,
+) -> anyhow::Result<Vec<BuildModel>> {
+    measure_db_query("get_last_n_successful_auto_builds", || async {
+        let builds = sqlx::query_as!(
+            BuildModel,
+            r#"
+        SELECT
+            id,
+            repository as "repository: GithubRepoName",
+            branch,
+            kind as "kind: BuildKind",
+            commit_sha,
+            status as "status: BuildStatus",
+            parent,
+            created_at as "created_at: DateTime<Utc>",
+            check_run_id,
+            duration as "duration: PgDuration"
+        FROM build
+        WHERE repository = $1 AND
+            kind = 'auto' AND
+            status = 'success'
+        ORDER BY created_at DESC
+        LIMIT $2
+            "#,
+            repo as &GithubRepoName,
+            n as i32
+        )
+        .fetch_all(executor)
+        .await?;
+        Ok(builds)
+    })
+    .await
+}
+
 #[cfg(test)]
 mod tests {
     use crate::bors::PullRequestStatus;

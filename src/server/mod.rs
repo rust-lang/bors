@@ -1,7 +1,7 @@
 use crate::bors::event::BorsEvent;
 use crate::bors::{CommandPrefix, RepositoryState, format_help};
 use crate::database::{ApprovalStatus, QueueStatus};
-use crate::github::{GithubRepoName, rollup};
+use crate::github::{GithubRepoName, PullRequestNumber, rollup};
 use crate::templates::{
     HelpTemplate, HtmlTemplate, NotFoundTemplate, PullRequestStats, QueueTemplate, RepositoryView,
     RollupsInfo,
@@ -16,12 +16,14 @@ use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use axum_embed::ServeEmbed;
+use chrono::Utc;
 use http::{Request, StatusCode};
 use pulldown_cmark::Parser;
 use rust_embed::Embed;
 use serde::de::Error;
 use serde::{Deserialize, Deserializer};
 use std::any::Any;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -332,7 +334,17 @@ pub async fn queue_handler(
         }
     };
 
-    let prs = db.get_nonclosed_pull_requests(&repo.name).await?;
+    // Perform the queries concurrently to save a bit of time
+    let (prs, rollups, last_ten_builds) = futures::future::join3(
+        db.get_nonclosed_pull_requests(&repo.name),
+        db.get_nonclosed_rollups(&repo.name),
+        db.get_last_n_successful_auto_builds(&repo.name, 10),
+    )
+    .await;
+    let prs = prs?;
+    let rollups = rollups?;
+    let last_ten_builds = last_ten_builds?;
+
     let prs = sort_queue_prs(prs);
 
     // Note: this assumed that there is ever at most a single pending build
@@ -345,19 +357,80 @@ pub async fn queue_handler(
         None => None,
     };
 
-    let (in_queue_count, failed_count) = prs.iter().fold((0, 0), |(in_queue, failed), pr| {
-        let (in_queue_inc, failed_inc) = match pr.queue_status() {
+    let average_auto_duration = {
+        let total_duration = last_ten_builds
+            .iter()
+            .filter_map(|build| build.duration)
+            .map(|d| d.0)
+            .sum::<Duration>();
+        let total_duration = if total_duration.is_zero() {
+            // Default guess of 3 hours
+            Duration::from_secs(3600 * 3)
+        } else {
+            total_duration
+        };
+        let count = last_ten_builds.len() as u32;
+        let count = if count > 0 { count } else { 1 };
+        total_duration / count
+    };
+
+    let mut in_queue_count = 0;
+    let mut failed_count = 0;
+
+    // PR number -> expected remaining duration
+    let mut in_queue: HashMap<PullRequestNumber, Duration> = HashMap::new();
+    for pr in &prs {
+        let status = pr.queue_status();
+        let (in_queue_inc, failed_inc) = match &status {
             QueueStatus::Approved(..) => (1, 0),
             QueueStatus::ReadyForMerge(..) => (1, 0),
             QueueStatus::Pending(..) => (1, 0),
             QueueStatus::Failed(..) => (0, 1),
             QueueStatus::NotApproved | QueueStatus::NotOpen => (0, 0),
         };
+        in_queue_count += in_queue_inc;
+        failed_count += failed_inc;
 
-        (in_queue + in_queue_inc, failed + failed_inc)
-    });
+        match &status {
+            QueueStatus::Pending(_, _) => {
+                // Try to guess already elapsed time of the pending workflow
+                let subtract_duration = if let Some(workflow) = &pending_workflow {
+                    (Utc::now() - workflow.created_at)
+                        .to_std()
+                        .unwrap_or_default()
+                } else {
+                    Duration::ZERO
+                };
+                in_queue.insert(pr.number, average_auto_duration - subtract_duration);
+            }
+            // For an approved PR, assume that it will take the average auto build duration
+            QueueStatus::Approved(_) => {
+                in_queue.insert(pr.number, average_auto_duration);
+            }
+            QueueStatus::Failed(_, _)
+            | QueueStatus::ReadyForMerge(_, _)
+            | QueueStatus::NotOpen
+            | QueueStatus::NotApproved => {}
+        }
+    }
 
-    let rollups = db.get_nonclosed_rollups(&repo.name).await?;
+    let mut expected_remaining_duration = Duration::ZERO;
+
+    // Rollup members whose rollup is in the queue, and thus its duration will be counted
+    let rollup_members: HashSet<PullRequestNumber> = rollups
+        .iter()
+        .filter(|(rollup, _)| in_queue.contains_key(*rollup))
+        .flat_map(|(_, member)| member)
+        .copied()
+        .collect();
+
+    for (pr, remaining_duration) in in_queue {
+        // For a rollup member, we will count its rollup instead
+        if rollup_members.contains(&pr) {
+            continue;
+        }
+        expected_remaining_duration += remaining_duration;
+    }
 
     Ok(HtmlTemplate(QueueTemplate {
         oauth_client_id: oauth
@@ -376,6 +449,7 @@ pub async fn queue_handler(
         pending_workflow,
         selected_rollup_prs: params.pull_requests.map(|prs| prs.0).unwrap_or_default(),
         rollups_info: RollupsInfo::from(rollups),
+        expected_remaining_duration,
     })
     .into_response())
 }
