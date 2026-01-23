@@ -194,6 +194,9 @@ pub enum QueueStatus<'a> {
     Approved(&'a ApprovalInfo),
     /// Approved with passing CI.
     ReadyForMerge(&'a ApprovalInfo, &'a BuildModel),
+    /// Status is draft/merged/closed.
+    NotOpen,
+    /// Not approved.
     NotApproved,
 }
 
@@ -491,6 +494,13 @@ impl PullRequestModel {
 
     /// Get the merge queue status of this pull request.
     pub fn queue_status(&self) -> QueueStatus<'_> {
+        match &self.status {
+            PullRequestStatus::Closed | PullRequestStatus::Merged | PullRequestStatus::Draft => {
+                return QueueStatus::NotOpen;
+            }
+            PullRequestStatus::Open => {}
+        }
+
         match &self.approval_status {
             ApprovalStatus::NotApproved => QueueStatus::NotApproved,
             ApprovalStatus::Approved(approval_info) => match &self.auto_build {
@@ -518,7 +528,8 @@ impl PullRequestModel {
             QueueStatus::Approved(_) | QueueStatus::Pending(_, _) => true,
             QueueStatus::Failed(_, _)
             | QueueStatus::ReadyForMerge(_, _)
-            | QueueStatus::NotApproved => false,
+            | QueueStatus::NotApproved
+            | QueueStatus::NotOpen => false,
         }
     }
 }
