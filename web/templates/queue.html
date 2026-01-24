@@ -134,6 +134,13 @@
         background: #F0DE57;
         border-color: #8C7E14;
     }
+    .special1 {
+        color: #4B0066;
+    }
+    .special1:before {
+        background: #C266FF;
+        border-color: #3A004D;
+    }
 
     #rollupModal {
         display: none;
@@ -296,7 +303,7 @@
                 </td>
                 <td>{{ pr.priority.unwrap_or(0) }}</td>
                 {%~ if rollups_info.rollups.get(pr.number).is_some() -%}
-                  <td>Rollup PR</td>
+                  <td class="marker special1">rollup</td>
                 {%- else -%}
                 <td class="marker {%~ if let Some(rollup) = pr.rollup -%}
                       {%- match rollup -%}
