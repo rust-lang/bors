@@ -377,17 +377,13 @@ async fn create_rollup(
             ));
         }
     }
-    body.push_str("\nr? @ghost");
 
-    let similar_rollup_link = format!(
-        "[Create a similar rollup]({web_url}/queue/{repo_name}?prs={})",
-        pr_nums.iter().copied().map(|s| s.to_string()).join(",")
+    let ignored_body = format!(
+        "r? @ghost\n\n\
+        [Create a similar rollup]({web_url}/queue/{repo_name}?prs={pr_nums})",
+        pr_nums = pr_nums.iter().copied().map(|s| s.to_string()).join(",")
     );
-    writeln!(
-        body,
-        "\n\n{}\n",
-        make_text_ignored_by_bors(&similar_rollup_link)
-    )?;
+    writeln!(body, "\n{}\n", make_text_ignored_by_bors(&ignored_body))?;
 
     let title = format!("Rollup of {} pull requests", successes.len());
 
@@ -586,9 +582,9 @@ mod tests {
 
          - rust-lang/borstest#4 (Title of PR 4)
 
+        <!-- homu-ignore:start -->
         r? @ghost
 
-        <!-- homu-ignore:start -->
         [Create a similar rollup](https://bors-test.com/queue/borstest?prs=2,3,4,5)
         <!-- homu-ignore:end -->
         ");
@@ -626,9 +622,9 @@ mod tests {
 
          - rust-lang/borstest#3 (Title of PR 3)
 
+        <!-- homu-ignore:start -->
         r? @ghost
 
-        <!-- homu-ignore:start -->
         [Create a similar rollup](https://bors-test.com/queue/borstest?prs=2,3,4)
         <!-- homu-ignore:end -->
         ");
@@ -670,9 +666,9 @@ mod tests {
          - rust-lang/borstest#2 (Title of PR 2)
          - rust-lang/borstest#3 (Title of PR 3)
 
+        <!-- homu-ignore:start -->
         r? @ghost
 
-        <!-- homu-ignore:start -->
         [Create a similar rollup](https://bors-test.com/queue/borstest?prs=2,3)
         <!-- homu-ignore:end -->
         ");
@@ -711,9 +707,9 @@ mod tests {
          - rust-lang/borstest#2 (Title of PR 2)
          - rust-lang/borstest#3 (Title of PR 3)
 
+        <!-- homu-ignore:start -->
         r? @ghost
 
-        <!-- homu-ignore:start -->
         [Create a similar rollup](https://bors-test.com/queue/borstest?prs=2,3)
         <!-- homu-ignore:end -->
         ");
@@ -754,9 +750,9 @@ mod tests {
          - rust-lang/borstest#2 (Title of PR 2)
          - rust-lang/borstest#3 (Title of PR 3)
 
+        <!-- homu-ignore:start -->
         r? @ghost
 
-        <!-- homu-ignore:start -->
         [Create a similar rollup](https://bors-test.com/queue/borstest?prs=2,3)
         <!-- homu-ignore:end -->
         ");
@@ -794,9 +790,9 @@ mod tests {
          - rust-lang/borstest#2 (Title of PR 2)
          - rust-lang/borstest#5 (Title of PR 5)
 
+        <!-- homu-ignore:start -->
         r? @ghost
 
-        <!-- homu-ignore:start -->
         [Create a similar rollup](https://bors-test.com/queue/borstest?prs=2,3,4,5)
         <!-- homu-ignore:end -->
         ");
@@ -823,9 +819,9 @@ mod tests {
          - rust-lang/borstest#2 (Title of PR 2)
          - rust-lang/borstest#3 (Title of PR 3)
 
+        <!-- homu-ignore:start -->
         r? @ghost
 
-        <!-- homu-ignore:start -->
         [Create a similar rollup](https://bors-test.com/queue/borstest?prs=3,2)
         <!-- homu-ignore:end -->
         ");
