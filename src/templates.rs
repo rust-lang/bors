@@ -129,17 +129,28 @@ impl QueueTemplate {
     fn pending_build_elapsed(&self, build: &BuildModel) -> Duration {
         (Utc::now() - build.created_at).to_std().unwrap_or_default()
     }
+
+    fn get_pending_auto_build<'a>(&self, pr: &'a PullRequestModel) -> Option<&'a BuildModel> {
+        if let Some(auto_build) = &pr.auto_build
+            && auto_build.status == BuildStatus::Pending
+        {
+            return Some(auto_build);
+        }
+        None
+    }
+
+    /// Calculate the % progress of a build based on average build duration.
+    /// Capped at 100%.
+    fn calculate_progress_pct(&self, build: &BuildModel, average_duration: Duration) -> u32 {
+        if average_duration.is_zero() {
+            return 0;
+        }
+        let elapsed = self.pending_build_elapsed(build);
+        let percent = ((elapsed.as_secs_f64() / average_duration.as_secs_f64()) * 100.0) as u32;
+        percent.min(100)
+    }
 }
 
 #[derive(Template)]
 #[template(path = "not_found.html")]
 pub struct NotFoundTemplate {}
-
-pub fn get_pending_auto_build(pr: &PullRequestModel) -> Option<&BuildModel> {
-    if let Some(auto_build) = &pr.auto_build
-        && auto_build.status == BuildStatus::Pending
-    {
-        return Some(auto_build);
-    }
-    None
-}

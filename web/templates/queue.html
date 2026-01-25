@@ -180,8 +180,35 @@
     .select-info {
         margin-left: 10px;
     }
-    .pending-progress {
-        max-width: 100px;
+
+    /* Progress bar background for pending builds */
+    .progress-bar-bg {
+        position: absolute;
+        left: 6px; /* Start after the status indicator bar */
+        top: 0;
+        bottom: 0;
+        width: 0;
+        max-width: calc(100% - 6px);
+        background-color: #F0DE5750;
+        z-index: 0;
+        pointer-events: none;
+        box-sizing: border-box;
+    }
+    /* Fixed vertical line at the right edge to show where progress ends */
+    td.status.has-progress::after {
+        content: "";
+        position: absolute;
+        right: 0;
+        top: 0;
+        bottom: 0;
+        width: 2px;
+        background-color: black;
+        z-index: 0;
+        pointer-events: none;
+    }
+    td.status > *:not(.progress-bar-bg) {
+        position: relative;
+        z-index: 1;
     }
 </style>
 {% endblock %}
@@ -248,7 +275,7 @@ Average duration of recent auto builds: {{ format_duration(*average_build_durati
 
         <tbody>
             {%- for pr in prs %}
-            {% let pending_build = crate::templates::get_pending_auto_build(pr) %}
+            {% let pending_build = get_pending_auto_build(pr) %}
             <tr data-pr-number="{{ pr.number.0 }}"
                 {% if let Some(rollup_members) = rollups_info.rollups.get(pr.number) %}
                 data-rollup-pr-members='{{ rollup_members.iter().join(",")  }}'
@@ -265,10 +292,20 @@ Average duration of recent auto builds: {{ format_duration(*average_build_durati
                 <td data-pr-number="{{ pr.number.0 }}">
                     <a href="{{ repo_url }}/pull/{{ pr.number }}">{{ pr.number.0 }}</a>
                 </td>
-                <td class="status" data-status="{{ crate::templates::status_text(pr) }}"
+                <td class="status{% if pending_build.is_some() %} has-progress{% endif %}" data-status="{{ crate::templates::status_text(pr) }}"
                     {%- if let Some(build) = pending_build -%}
                     data-created-at="{{ build.created_at.timestamp_millis() }}"
                     {%- endif -%}>
+                    {%- if let Some(build) = pending_build -%}
+                    {%- let progress_percent = calculate_progress_pct(build, *average_build_duration) -%}
+                    <div class="progress-bar-bg"
+                         role="progressbar"
+                         aria-valuenow="{{ progress_percent }}"
+                         aria-valuemin="0"
+                         aria-valuemax="100"
+                         aria-label="Build progress"
+                         style="width: calc({{ progress_percent }}% - 6px)"></div>
+                    {%- endif -%}
                     {%- match pr.queue_status() -%}
                       {%- when QueueStatus::Approved(_) -%}
                         approved
@@ -283,14 +320,6 @@ Average duration of recent auto builds: {{ format_duration(*average_build_durati
                         {%- endif -%}
                         <span class="elapsed-time-display"></span>
                         </div>
-                        {%- if let Some(build) = pending_build -%}
-                        <div>
-                          <progress
-                                  class="pending-progress"
-                                  max="{{ average_build_duration.as_secs() }}"
-                                  value="{{ pending_build_elapsed(build).as_secs() }}"></progress>
-                        </div>
-                        {%- endif -%}
                       {%- when QueueStatus::Failed(_, _) -%}
                         failed
                       {%- when QueueStatus::NotApproved | QueueStatus::NotOpen -%}
@@ -702,6 +731,8 @@ Average duration of recent auto builds: {{ format_duration(*average_build_durati
         return '';
     }
 
+    const AVERAGE_BUILD_DURATION_MS = {{ average_build_duration.as_millis() }};
+
     function updateElapsedTimes() {
         const now = Date.now();
         document.querySelectorAll('[data-created-at]').forEach(td => {
@@ -712,13 +743,16 @@ Average duration of recent auto builds: {{ format_duration(*average_build_durati
                 const display = td.querySelector('.elapsed-time-display');
                 display.textContent = formattedTime;
 
-                const progress = td.querySelector('.pending-progress');
-                if (progress !== null) {
-                  progress.value = Math.round(elapsedMs / 1000);
+                // Update progress bar width and ARIA attribute
+                const progressBar = td.querySelector('.progress-bar-bg');
+                if (progressBar && AVERAGE_BUILD_DURATION_MS > 0) {
+                    const percent = Math.min(100, (elapsedMs / AVERAGE_BUILD_DURATION_MS) * 100);
+                    progressBar.style.width = `calc(${percent}% - 6px)`;
+                    progressBar.setAttribute('aria-valuenow', Math.round(percent));
                 }
 
                 const startedAt = new Date(createdAtMs);
-                const expectedEndAt = new Date(createdAtMs + {{ average_build_duration.as_millis() }});
+                const expectedEndAt = new Date(createdAtMs + AVERAGE_BUILD_DURATION_MS);
                 td.title = `Started at: ${startedAt.toLocaleString()}
 Expected end: ${expectedEndAt.toLocaleString()}`;
             }
