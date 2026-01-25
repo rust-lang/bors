@@ -72,6 +72,9 @@
     table.dataTable td.status {
         padding-left: 10px;
     }
+    table.dataTable td.status > * {
+        inline-size: min-content;
+    }
     td.status:before {
         content: " ";
         position: absolute;
@@ -177,6 +180,9 @@
     .select-info {
         margin-left: 10px;
     }
+    .pending-progress {
+        max-width: 100px;
+    }
 </style>
 {% endblock %}
 
@@ -269,16 +275,26 @@ Average duration of recent auto builds: {{ format_duration(*average_build_durati
                       {%- when QueueStatus::ReadyForMerge(_, _) -%}
                         ready for merge
                       {%- when QueueStatus::Pending(_, _) -%}
+                        <div>
                         {%- if let Some(workflow) = pending_workflow -%}
-                        <a href="{{ workflow.url }}">pending</a>
+                          <a href="{{ workflow.url }}">pending</a>
                         {%- else -%}
                           pending
+                        {%- endif -%}
+                        <span class="elapsed-time-display"></span>
+                        </div>
+                        {%- if let Some(build) = pending_build -%}
+                        <div>
+                          <progress
+                                  class="pending-progress"
+                                  max="{{ average_build_duration.as_secs() }}"
+                                  value="{{ pending_build_elapsed(build).as_secs() }}"></progress>
+                        </div>
                         {%- endif -%}
                       {%- when QueueStatus::Failed(_, _) -%}
                         failed
                       {%- when QueueStatus::NotApproved | QueueStatus::NotOpen -%}
                     {%- endmatch -%}
-                    <span class="elapsed-time-display"></span>
                 </td>
                 <td class="marker {%~ match pr.mergeable_status() -%}
                     {%- when Mergeable -%}
@@ -693,8 +709,13 @@ Average duration of recent auto builds: {{ format_duration(*average_build_durati
             if (createdAtMs > 0) {
                 const elapsedMs = now - createdAtMs;
                 const formattedTime = formatElapsedTime(elapsedMs);
-                let display = td.querySelector('.elapsed-time-display');
+                const display = td.querySelector('.elapsed-time-display');
                 display.textContent = formattedTime;
+
+                const progress = td.querySelector('.pending-progress');
+                if (progress !== null) {
+                  progress.value = Math.round(elapsedMs / 1000);
+                }
 
                 const startedAt = new Date(createdAtMs);
                 const expectedEndAt = new Date(createdAtMs + {{ average_build_duration.as_millis() }});

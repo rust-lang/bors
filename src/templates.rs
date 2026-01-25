@@ -6,6 +6,7 @@ use crate::database::{
 use crate::github::PullRequestNumber;
 use askama::Template;
 use axum::response::{Html, IntoResponse, Response};
+use chrono::Utc;
 use http::StatusCode;
 use itertools::Itertools;
 use std::collections::{HashMap, HashSet};
@@ -123,6 +124,10 @@ impl QueueTemplate {
         }
 
         output
+    }
+
+    fn pending_build_elapsed(&self, build: &BuildModel) -> Duration {
+        (Utc::now() - build.created_at).to_std().unwrap_or_default()
     }
 }
 
