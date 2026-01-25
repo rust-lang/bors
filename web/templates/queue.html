@@ -202,7 +202,9 @@
     {%- if let Some(expected) = expected_remaining_duration -%}
       <div style="margin: 0 5px;">|</div>
       <p style="margin-bottom: 0;"
-         title="Estimated duration to merge all current PRs in the queue, assuming that there are no build failures.">
+         title="Estimated duration to merge all current PRs in the queue, assuming that there are no build failures.
+
+Average duration of recent auto builds: {{ format_duration(*average_build_duration) }}">
         Estimated time to flush queue: {{ format_duration(**expected) }}
       </p>
     {%- endif -%}
