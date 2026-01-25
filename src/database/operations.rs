@@ -1152,9 +1152,10 @@ pub(crate) async fn is_rollup(
     measure_db_query("is_rollup", || async {
         let row = sqlx::query!(
             r#"
-        SELECT rollup
+        SELECT 1 AS _output
         FROM rollup_member rm
         WHERE rollup = $1
+        LIMIT 1
             "#,
             id
         )
