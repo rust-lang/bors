@@ -242,6 +242,7 @@ Average duration of recent auto builds: {{ format_duration(*average_build_durati
 
         <tbody>
             {%- for pr in prs %}
+            {% let pending_build = crate::templates::get_pending_auto_build(pr) %}
             <tr data-pr-number="{{ pr.number.0 }}"
                 {% if let Some(rollup_members) = rollups_info.rollups.get(pr.number) %}
                 data-rollup-pr-members='{{ rollup_members.iter().join(",")  }}'
@@ -251,14 +252,13 @@ Average duration of recent auto builds: {{ format_duration(*average_build_durati
                 data-preselected="{{ selected_rollup_prs.contains(pr.number.0 as u32) }}"
                 {% if let Some(priority) = tree_state.priority() &&
                       pr.priority.unwrap_or(0) < *priority as i32 &&
-                      crate::templates::get_pending_auto_build(pr).is_none() %}
+                      pending_build.is_none() %}
                 class="treeclosed"
                 {% endif %}>
                 <td class="select-checkbox"></td>
                 <td data-pr-number="{{ pr.number.0 }}">
                     <a href="{{ repo_url }}/pull/{{ pr.number }}">{{ pr.number.0 }}</a>
                 </td>
-                {% let pending_build = crate::templates::get_pending_auto_build(pr) %}
                 <td class="status" data-status="{{ crate::templates::status_text(pr) }}"
                     {%- if let Some(build) = pending_build -%}
                     data-created-at="{{ build.created_at.timestamp_millis() }}"
@@ -697,7 +697,9 @@ Average duration of recent auto builds: {{ format_duration(*average_build_durati
                 display.textContent = formattedTime;
 
                 const startedAt = new Date(createdAtMs);
-                td.title = `Started at ${startedAt.toLocaleString()}`;
+                const expectedEndAt = new Date(createdAtMs + {{ average_build_duration.as_millis() }});
+                td.title = `Started at: ${startedAt.toLocaleString()}
+Expected end: ${expectedEndAt.toLocaleString()}`;
             }
         });
     }
