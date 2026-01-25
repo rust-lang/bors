@@ -364,13 +364,10 @@ pub async fn queue_handler(
             .map(|d| d.0)
             .sum::<Duration>();
         let count = last_ten_builds.len() as u32;
-        let total_duration = if total_duration.is_zero() {
+        if total_duration.is_zero() {
             // Default guess of 3 hours per build
-            Duration::from_secs(3600 * 3) * count
-        } else {
-            total_duration
-        };
-        if count > 1 {
+            Duration::from_secs(3600 * 3)
+        } else if count > 1 {
             total_duration / count
         } else {
             total_duration
@@ -454,6 +451,7 @@ pub async fn queue_handler(
         selected_rollup_prs: params.pull_requests.map(|prs| prs.0).unwrap_or_default(),
         rollups_info: RollupsInfo::from(rollups),
         expected_remaining_duration,
+        average_build_duration,
     })
     .into_response())
 }
