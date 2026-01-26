@@ -68,10 +68,15 @@ pub(super) async fn command_approve(
         }
     }
 
-    let approver = match approver {
-        Approver::Myself => author.username.clone(),
-        Approver::Specified(approver) => normalize_approvers(approver),
+    let (approver, unknown_reviewers) = match approver {
+        Approver::Myself => (author.username.clone(), None),
+        Approver::Specified(approver) => {
+            let normalized = normalize_approvers(approver);
+            let unknown = check_unknown_reviewers(&repo_state, &normalized).await;
+            (normalized, unknown)
+        }
     };
+
     let approval_info = ApprovalInfo {
         approver: approver.clone(),
         sha: pr.github.head.sha.to_string(),
@@ -83,7 +88,16 @@ pub(super) async fn command_approve(
     let priority = priority.or(pr.db.priority.map(|p| p as u32));
 
     merge_queue_tx.notify().await?;
-    notify_of_approval(ctx, &db, &repo_state, pr, priority, approver.as_str()).await?;
+    notify_of_approval(
+        ctx,
+        &db,
+        &repo_state,
+        pr,
+        priority,
+        approver.as_str(),
+        unknown_reviewers,
+    )
+    .await?;
     handle_label_trigger(&repo_state, pr.github, LabelTrigger::Approved).await
 }
 
@@ -95,6 +109,40 @@ fn normalize_approvers(approvers: &str) -> String {
         .map(|approver| approver.trim_start_matches('@'))
         .collect::<Vec<&str>>()
         .join(",")
+}
+
+/// Check if the specified reviewers exist as GitHub users or teams.
+/// Returns comma-separated string of unknown reviewer names, or None if all exist.
+async fn check_unknown_reviewers(repo_state: &RepositoryState, reviewers: &str) -> Option<String> {
+    let mut unknown_reviewers = Vec::new();
+
+    for reviewer in reviewers.split(',') {
+        let user_exists = repo_state
+            .client
+            .client()
+            .users(reviewer)
+            .profile()
+            .await
+            .is_ok();
+        if !user_exists {
+            let team_exists = repo_state
+                .client
+                .client()
+                .teams(repo_state.repository().owner())
+                .get(reviewer)
+                .await
+                .is_ok();
+            if !team_exists {
+                unknown_reviewers.push(reviewer);
+            }
+        }
+    }
+
+    if unknown_reviewers.is_empty() {
+        None
+    } else {
+        Some(unknown_reviewers.join(","))
+    }
 }
 
 /// Keywords that will prevent an approval if they appear in the PR's title.
@@ -424,6 +472,7 @@ async fn notify_of_approval(
     pr: PullRequestData<'_>,
     priority: Option<u32>,
     approver: &str,
+    unknown_reviewers: Option<String>,
 ) -> anyhow::Result<()> {
     let mut tree_state = ctx
         .db
@@ -451,6 +500,7 @@ async fn notify_of_approval(
                 repo.repository(),
                 &pr.github.head.sha,
                 approver,
+                unknown_reviewers,
                 tree_state,
             ),
             db,
@@ -587,6 +637,28 @@ approved = ["+approved"]
             );
 
             ctx.pr(()).await.expect_approved_by("foo,bar,baz");
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn approve_with_unknown_reviewer(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            // Approve with a user that doesn't exist
+            ctx.post_comment("@bors r=nonexistent-user").await?;
+            insta::assert_snapshot!(
+                ctx.get_next_comment_text(()).await?,
+                @r###"
+            :pushpin: Commit pr-1-sha has been approved by `nonexistent-user`
+
+            It is now in the [queue](https://bors-test.com/queue/borstest) for this repository.
+
+            :warning: The following reviewer(s) could not be found: `nonexistent-user`
+            "###
+            );
+
+            ctx.pr(()).await.expect_approved_by("nonexistent-user");
             Ok(())
         })
         .await;
