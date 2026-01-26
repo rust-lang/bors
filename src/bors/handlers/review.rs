@@ -180,7 +180,11 @@ pub(super) async fn command_unapprove(
     )
     .await?;
     unapprove_pr(&repo_state, &db, pr.db, pr.github).await?;
-    notify_of_unapproval(&repo_state, &db, pr, auto_build_cancel_message).await?;
+
+    // Only send unapproval comment when a build was canceled, to avoid needless spam
+    if let Some(cancel_msg) = auto_build_cancel_message {
+        notify_of_unapproval(&repo_state, &db, pr, cancel_msg).await?;
+    }
 
     Ok(())
 }
@@ -403,13 +407,12 @@ async fn notify_of_unapproval(
     repo: &RepositoryState,
     db: &PgDbClient,
     pr: PullRequestData<'_>,
-    cancel_message: Option<String>,
+    cancel_message: String,
 ) -> anyhow::Result<()> {
-    let mut comment = format!("Commit {} has been unapproved.", pr.github.head.sha);
-
-    if let Some(message) = cancel_message {
-        comment.push_str(&format!("\n\n{message}"));
-    }
+    let comment = format!(
+        "Commit {} has been unapproved.\n\n{cancel_message}",
+        pr.github.head.sha
+    );
 
     repo.client
         .post_comment(pr.number(), Comment::new(comment), db)
@@ -733,11 +736,6 @@ approved = { modifications = ["+foo", "+baz"], unless = ["label1", "label2"] }
                 .await
                 .expect_approved_by(&User::default_pr_author().name);
             ctx.post_comment("@bors r-").await?;
-            insta::assert_snapshot!(
-                ctx.get_next_comment_text(()).await?,
-                @"Commit pr-1-sha has been unapproved."
-            );
-
             ctx.pr(()).await.expect_unapproved();
             Ok(())
         })
@@ -1078,8 +1076,6 @@ approved = { modifications = ["+foo", "+baz"], unless = ["label1", "label2"] }
                     .expect_approved_by(&User::default_pr_author().name);
 
                 ctx.post_comment(review_comment("@bors r-")).await?;
-                ctx.expect_comments((), 1).await;
-
                 ctx.pr(()).await.expect_unapproved();
 
                 Ok(())
