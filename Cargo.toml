@@ -66,6 +66,7 @@ tempfile = "3"
 which = "8"
 
 # Text processing
+comrak = { version = "0.50.0", default-features = false }
 pulldown-cmark = "0.13"
 regex = "1"
 

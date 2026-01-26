@@ -316,7 +316,7 @@ pub fn make_text_ignored_by_bors(text: &str) -> String {
     format!("{IGNORE_BLOCK_START}\n{text}\n{IGNORE_BLOCK_END}")
 }
 
-/// Remove homu-ignore blocks from the merge message
+/// Remove homu-ignore blocks from the merge message, then rewrap the text.
 pub fn normalize_merge_message(message: &str) -> String {
     static IGNORE_REGEX: LazyLock<Regex> = LazyLock::new(|| {
         RegexBuilder::new(r"<!--\s*homu-ignore:start\s*-->.*?<!--\s*homu-ignore:end\s*-->")
@@ -326,7 +326,22 @@ pub fn normalize_merge_message(message: &str) -> String {
             .build()
             .unwrap()
     });
-    IGNORE_REGEX.replace_all(message, "").to_string()
+    let cleaned = IGNORE_REGEX.replace_all(message, "");
+    format_commit_message(&cleaned)
+}
+
+/// Rewrap PR bodies to standard commit message width.
+pub fn format_commit_message(message: &str) -> String {
+    let mut opts = comrak::Options::default();
+    opts.render.width = 72;
+    opts.render.list_style = comrak::options::ListStyleType::Star;
+
+    let mut out = String::new();
+    let arena = comrak::Arena::new();
+    let node = comrak::parse_document(&arena, message, &opts);
+    comrak::format_commonmark(&node, &opts, &mut out).unwrap();
+
+    out
 }
 
 pub fn create_merge_commit_message(pr: handlers::PullRequestData, merge_type: MergeType) -> String {
