@@ -518,6 +518,7 @@ mod tests {
     use crate::bors::TRY_BRANCH_NAME;
     use crate::bors::merge_queue::AUTO_BUILD_CHECK_RUN_NAME;
     use crate::database::{DelegatedPermission, OctocrabMergeableState, TreeState};
+    use crate::permissions::PermissionType;
     use crate::tests::default_repo_name;
     use crate::tests::{BorsTester, Commit};
     use crate::{
@@ -565,8 +566,16 @@ approved = ["+approved"]
 
     #[sqlx::test]
     async fn approve_on_behalf(pool: sqlx::PgPool) {
-        run_test(pool, async |ctx: &mut BorsTester| {
-            let approve_user = "user1";
+        let approve_user_id = 200;
+        let approve_user = "user1";
+        let mut gh = GitHub::default();
+        gh.add_user(User::new(approve_user_id, approve_user));
+        gh.default_repo().lock().permissions.users.insert(
+            User::new(approve_user_id, approve_user),
+            vec![PermissionType::Review],
+        );
+
+        run_test((pool, gh), async |ctx: &mut BorsTester| {
             ctx.post_comment(format!(r#"@bors r={approve_user}"#).as_str())
                 .await?;
             insta::assert_snapshot!(
@@ -586,7 +595,15 @@ approved = ["+approved"]
 
     #[sqlx::test]
     async fn approve_normalize_approver(pool: sqlx::PgPool) {
-        run_test(pool, async |ctx: &mut BorsTester| {
+        let mut gh = GitHub::default();
+        gh.add_user(User::new(201, "foo"));
+        gh.default_repo()
+            .lock()
+            .permissions
+            .users
+            .insert(User::new(201, "foo"), vec![PermissionType::Review]);
+
+        run_test((pool, gh), async |ctx: &mut BorsTester| {
             ctx.post_comment("@bors r=@foo").await?;
             insta::assert_snapshot!(
                 ctx.get_next_comment_text(()).await?,
@@ -605,7 +622,17 @@ approved = ["+approved"]
 
     #[sqlx::test]
     async fn approve_normalize_approver_multiple(pool: sqlx::PgPool) {
-        run_test(pool, async |ctx: &mut BorsTester| {
+        let mut gh = GitHub::default();
+        for (id, name) in [(202, "foo"), (203, "bar"), (204, "baz")] {
+            gh.add_user(User::new(id, name));
+            gh.default_repo()
+                .lock()
+                .permissions
+                .users
+                .insert(User::new(id, name), vec![PermissionType::Review]);
+        }
+
+        run_test((pool, gh), async |ctx: &mut BorsTester| {
             ctx.post_comment("@bors r=@foo,bar,@baz").await?;
             insta::assert_snapshot!(
                 ctx.get_next_comment_text(()).await?,
