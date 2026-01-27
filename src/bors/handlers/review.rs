@@ -68,10 +68,15 @@ pub(super) async fn command_approve(
         }
     }
 
-    let approver = match approver {
-        Approver::Myself => author.username.clone(),
-        Approver::Specified(approver) => normalize_approvers(approver),
+    let (approver, unknown_reviewers) = match approver {
+        Approver::Myself => (author.username.clone(), Vec::new()),
+        Approver::Specified(approver) => {
+            let normalized = normalize_approvers(approver);
+            let unknown = check_unknown_reviewers(&repo_state, &normalized).await;
+            (normalized.join(","), unknown)
+        }
     };
+
     let approval_info = ApprovalInfo {
         approver: approver.clone(),
         sha: pr.github.head.sha.to_string(),
@@ -83,18 +88,41 @@ pub(super) async fn command_approve(
     let priority = priority.or(pr.db.priority.map(|p| p as u32));
 
     merge_queue_tx.notify().await?;
-    notify_of_approval(ctx, &db, &repo_state, pr, priority, approver.as_str()).await?;
+    notify_of_approval(
+        ctx,
+        &db,
+        &repo_state,
+        pr,
+        priority,
+        approver.as_str(),
+        unknown_reviewers,
+    )
+    .await?;
     handle_label_trigger(&repo_state, pr.github, LabelTrigger::Approved).await
 }
 
 /// Normalize approvers (given after @bors r=) by removing leading @, possibly from multiple
 /// usernames split by a comma.
-fn normalize_approvers(approvers: &str) -> String {
+fn normalize_approvers(approvers: &str) -> Vec<String> {
     approvers
         .split(',')
-        .map(|approver| approver.trim_start_matches('@'))
-        .collect::<Vec<&str>>()
-        .join(",")
+        .map(|approver| approver.trim_start_matches('@').to_string())
+        .collect::<Vec<String>>()
+}
+
+/// Check if the specified reviewers exist as GitHub users or teams.
+/// Returns comma-separated string of unknown reviewer names, or None if all exist.
+async fn check_unknown_reviewers(
+    repo_state: &RepositoryState,
+    reviewers: &[String],
+) -> Vec<String> {
+    let permission = repo_state.permissions.load();
+
+    reviewers
+        .iter()
+        .filter(|reviewer| !permission.has_reviewer(reviewer))
+        .cloned()
+        .collect()
 }
 
 /// Keywords that will prevent an approval if they appear in the PR's title.
@@ -427,6 +455,7 @@ async fn notify_of_approval(
     pr: PullRequestData<'_>,
     priority: Option<u32>,
     approver: &str,
+    unknown_reviewers: Vec<String>,
 ) -> anyhow::Result<()> {
     let mut tree_state = ctx
         .db
@@ -454,6 +483,7 @@ async fn notify_of_approval(
                 repo.repository(),
                 &pr.github.head.sha,
                 approver,
+                unknown_reviewers,
                 tree_state,
             ),
             db,
@@ -491,6 +521,7 @@ mod tests {
     use crate::bors::TRY_BRANCH_NAME;
     use crate::bors::merge_queue::AUTO_BUILD_CHECK_RUN_NAME;
     use crate::database::{DelegatedPermission, OctocrabMergeableState, TreeState};
+    use crate::permissions::PermissionType;
     use crate::tests::default_repo_name;
     use crate::tests::{BorsTester, Commit};
     use crate::{
@@ -538,8 +569,16 @@ approved = ["+approved"]
 
     #[sqlx::test]
     async fn approve_on_behalf(pool: sqlx::PgPool) {
-        run_test(pool, async |ctx: &mut BorsTester| {
-            let approve_user = "user1";
+        let approve_user_id = 200;
+        let approve_user = "user1";
+        let mut gh = GitHub::default();
+        gh.add_user(User::new(approve_user_id, approve_user));
+        gh.default_repo().lock().permissions.users.insert(
+            User::new(approve_user_id, approve_user),
+            vec![PermissionType::Review],
+        );
+
+        run_test((pool, gh), async |ctx: &mut BorsTester| {
             ctx.post_comment(format!(r#"@bors r={approve_user}"#).as_str())
                 .await?;
             insta::assert_snapshot!(
@@ -559,7 +598,15 @@ approved = ["+approved"]
 
     #[sqlx::test]
     async fn approve_normalize_approver(pool: sqlx::PgPool) {
-        run_test(pool, async |ctx: &mut BorsTester| {
+        let mut gh = GitHub::default();
+        gh.add_user(User::new(201, "foo"));
+        gh.default_repo()
+            .lock()
+            .permissions
+            .users
+            .insert(User::new(201, "foo"), vec![PermissionType::Review]);
+
+        run_test((pool, gh), async |ctx: &mut BorsTester| {
             ctx.post_comment("@bors r=@foo").await?;
             insta::assert_snapshot!(
                 ctx.get_next_comment_text(()).await?,
@@ -578,7 +625,17 @@ approved = ["+approved"]
 
     #[sqlx::test]
     async fn approve_normalize_approver_multiple(pool: sqlx::PgPool) {
-        run_test(pool, async |ctx: &mut BorsTester| {
+        let mut gh = GitHub::default();
+        for (id, name) in [(202, "foo"), (203, "bar"), (204, "baz")] {
+            gh.add_user(User::new(id, name));
+            gh.default_repo()
+                .lock()
+                .permissions
+                .users
+                .insert(User::new(id, name), vec![PermissionType::Review]);
+        }
+
+        run_test((pool, gh), async |ctx: &mut BorsTester| {
             ctx.post_comment("@bors r=@foo,bar,@baz").await?;
             insta::assert_snapshot!(
                 ctx.get_next_comment_text(()).await?,
@@ -590,6 +647,28 @@ approved = ["+approved"]
             );
 
             ctx.pr(()).await.expect_approved_by("foo,bar,baz");
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn approve_with_unknown_reviewer(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            // Approve with a user that doesn't exist
+            ctx.post_comment("@bors r=nonexistent-user").await?;
+            insta::assert_snapshot!(
+                ctx.get_next_comment_text(()).await?,
+                @r###"
+            :pushpin: Commit pr-1-sha has been approved by `nonexistent-user`
+
+            It is now in the [queue](https://bors-test.com/queue/borstest) for this repository.
+
+            :warning: The following reviewer(s) could not be found: `nonexistent-user`
+            "###
+            );
+
+            ctx.pr(()).await.expect_approved_by("nonexistent-user");
             Ok(())
         })
         .await;

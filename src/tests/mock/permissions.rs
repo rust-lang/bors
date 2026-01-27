@@ -23,7 +23,8 @@ impl TeamApiMockServer {
             users.sort_by_key(|p| p.0.github_id);
             users.retain(|p| p.1.contains(&kind));
             let permissions = json!({
-                "github_ids": users.into_iter().map(|(user, _)| user.github_id).collect::<Vec<_>>()
+                "github_ids": users.iter().map(|(user, _)| user.github_id).collect::<Vec<_>>(),
+                "github_users": users.iter().map(|(user, _)| user.name.clone()).collect::<Vec<_>>()
             });
 
             Mock::given(method("GET"))

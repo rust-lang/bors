@@ -24,13 +24,19 @@ impl fmt::Display for PermissionType {
 
 pub struct UserPermissions {
     review_users: HashSet<UserId>,
+    review_usernames: HashSet<String>,
     try_users: HashSet<UserId>,
 }
 
 impl UserPermissions {
-    pub fn new(review_users: HashSet<UserId>, try_users: HashSet<UserId>) -> Self {
+    pub fn new(
+        review_users: HashSet<UserId>,
+        review_usernames: HashSet<String>,
+        try_users: HashSet<UserId>,
+    ) -> Self {
         Self {
             review_users,
+            review_usernames,
             try_users,
         }
     }
@@ -41,11 +47,16 @@ impl UserPermissions {
             PermissionType::Try => self.try_users.contains(&user_id),
         }
     }
+
+    pub fn has_reviewer(&self, username: &str) -> bool {
+        self.review_usernames.contains(username)
+    }
 }
 
 #[derive(Deserialize, Serialize)]
 pub(crate) struct UserPermissionsResponse {
     github_ids: HashSet<UserId>,
+    github_users: HashSet<String>,
 }
 
 enum TeamSource {
@@ -74,18 +85,19 @@ impl TeamApiClient {
     ) -> anyhow::Result<UserPermissions> {
         tracing::info!("Reloading permissions for repository {repo}");
 
-        let review_users: HashSet<UserId> = self
+        let (review_users, review_usernames) = self
             .load_users(repo.name(), PermissionType::Review)
             .await
             .map_err(|error| anyhow::anyhow!("Cannot load review users: {error:?}"))?;
 
-        let try_users = self
-            .load_users(repo.name(), PermissionType::Try)
-            .await
-            .map_err(|error| anyhow::anyhow!("Cannot load try users: {error:?}"))?;
+        let (try_users, _try_usernames) =
+            self.load_users(repo.name(), PermissionType::Try)
+                .await
+                .map_err(|error| anyhow::anyhow!("Cannot load try users: {error:?}"))?;
 
         Ok(UserPermissions {
             review_users,
+            review_usernames,
             try_users,
         })
     }
@@ -96,7 +108,7 @@ impl TeamApiClient {
         &self,
         repository_name: &str,
         permission: PermissionType,
-    ) -> anyhow::Result<HashSet<UserId>> {
+    ) -> anyhow::Result<(HashSet<UserId>, HashSet<String>)> {
         let permission = match permission {
             PermissionType::Review => "review",
             PermissionType::Try => "try",
@@ -116,7 +128,7 @@ impl TeamApiClient {
                     .map_err(|error| {
                         anyhow::anyhow!("Cannot deserialize users from team API: {error:?}")
                     })?;
-                Ok(users.github_ids)
+                Ok((users.github_ids, users.github_users))
             }
             TeamSource::Directory(base_path) => {
                 let path = format!("{base_path}/bors.{permission}.json");
@@ -127,7 +139,7 @@ impl TeamApiClient {
                     serde_json::from_str(&data).map_err(|error| {
                         anyhow::anyhow!("Cannot deserialize users from a file '{path}': {error:?}")
                     })?;
-                Ok(users.github_ids)
+                Ok((users.github_ids, users.github_users))
             }
         }
     }
