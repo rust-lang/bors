@@ -291,7 +291,7 @@ pub fn approved_comment(
     repo: &GithubRepoName,
     commit_sha: &CommitSha,
     reviewer: &str,
-    unknown_reviewers: Option<String>,
+    unknown_reviewers: Vec<String>,
     tree_state: TreeState,
 ) -> Comment {
     let approve_emoji = if is_holiday_season() {
@@ -306,10 +306,11 @@ It is now in the [queue]({web_url}/queue/{}) for this repository.
 ",
         repo.name()
     );
-    if let Some(unknown) = unknown_reviewers {
+    if !unknown_reviewers.is_empty() {
         writeln!(
             comment,
-            "\n:warning: The following reviewer(s) could not be found: `{unknown}`"
+            "\n:warning: The following reviewer(s) could not be found: `{}`",
+            unknown_reviewers.join(", ")
         )
         .unwrap();
     }

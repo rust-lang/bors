@@ -69,11 +69,11 @@ pub(super) async fn command_approve(
     }
 
     let (approver, unknown_reviewers) = match approver {
-        Approver::Myself => (author.username.clone(), None),
+        Approver::Myself => (author.username.clone(), Vec::new()),
         Approver::Specified(approver) => {
             let normalized = normalize_approvers(approver);
             let unknown = check_unknown_reviewers(&repo_state, &normalized).await;
-            (normalized, unknown)
+            (normalized.join(","), unknown)
         }
     };
 
@@ -103,20 +103,22 @@ pub(super) async fn command_approve(
 
 /// Normalize approvers (given after @bors r=) by removing leading @, possibly from multiple
 /// usernames split by a comma.
-fn normalize_approvers(approvers: &str) -> String {
+fn normalize_approvers(approvers: &str) -> Vec<String> {
     approvers
         .split(',')
-        .map(|approver| approver.trim_start_matches('@'))
-        .collect::<Vec<&str>>()
-        .join(",")
+        .map(|approver| approver.trim_start_matches('@').to_string())
+        .collect::<Vec<String>>()
 }
 
 /// Check if the specified reviewers exist as GitHub users or teams.
 /// Returns comma-separated string of unknown reviewer names, or None if all exist.
-async fn check_unknown_reviewers(repo_state: &RepositoryState, reviewers: &str) -> Option<String> {
+async fn check_unknown_reviewers(
+    repo_state: &RepositoryState,
+    reviewers: &Vec<String>,
+) -> Vec<String> {
     let mut unknown_reviewers = Vec::new();
 
-    for reviewer in reviewers.split(',') {
+    for reviewer in reviewers {
         let user_exists = repo_state
             .client
             .client()
@@ -133,16 +135,11 @@ async fn check_unknown_reviewers(repo_state: &RepositoryState, reviewers: &str) 
                 .await
                 .is_ok();
             if !team_exists {
-                unknown_reviewers.push(reviewer);
+                unknown_reviewers.push(reviewer.clone());
             }
         }
     }
-
-    if unknown_reviewers.is_empty() {
-        None
-    } else {
-        Some(unknown_reviewers.join(","))
-    }
+    unknown_reviewers
 }
 
 /// Keywords that will prevent an approval if they appear in the PR's title.
@@ -472,7 +469,7 @@ async fn notify_of_approval(
     pr: PullRequestData<'_>,
     priority: Option<u32>,
     approver: &str,
-    unknown_reviewers: Option<String>,
+    unknown_reviewers: Vec<String>,
 ) -> anyhow::Result<()> {
     let mut tree_state = ctx
         .db
