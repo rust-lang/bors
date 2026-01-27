@@ -114,32 +114,15 @@ fn normalize_approvers(approvers: &str) -> Vec<String> {
 /// Returns comma-separated string of unknown reviewer names, or None if all exist.
 async fn check_unknown_reviewers(
     repo_state: &RepositoryState,
-    reviewers: &Vec<String>,
+    reviewers: &[String],
 ) -> Vec<String> {
-    let mut unknown_reviewers = Vec::new();
+    let permission = repo_state.permissions.load();
 
-    for reviewer in reviewers {
-        let user_exists = repo_state
-            .client
-            .client()
-            .users(reviewer)
-            .profile()
-            .await
-            .is_ok();
-        if !user_exists {
-            let team_exists = repo_state
-                .client
-                .client()
-                .teams(repo_state.repository().owner())
-                .get(reviewer)
-                .await
-                .is_ok();
-            if !team_exists {
-                unknown_reviewers.push(reviewer.clone());
-            }
-        }
-    }
-    unknown_reviewers
+    reviewers
+        .iter()
+        .filter(|reviewer| !permission.has_reviewer(reviewer))
+        .cloned()
+        .collect()
 }
 
 /// Keywords that will prevent an approval if they appear in the PR's title.
