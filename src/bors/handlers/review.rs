@@ -117,11 +117,11 @@ async fn check_unknown_reviewers(
     repo_state: &RepositoryState,
     reviewers: &[String],
 ) -> Vec<String> {
-    let permission = repo_state.permissions.load();
+    let directory = repo_state.permissions.load();
 
     reviewers
         .iter()
-        .filter(|reviewer| !permission.has_reviewer(reviewer))
+        .filter(|reviewer| !directory.user_exists(reviewer) && !directory.team_exists(reviewer))
         .cloned()
         .collect()
 }

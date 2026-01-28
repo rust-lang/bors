@@ -67,6 +67,10 @@ impl GitHub {
         self.users.get(name)
     }
 
+    pub fn users(&self) -> Vec<User> {
+        self.users.values().cloned().collect()
+    }
+
     pub fn default_repo(&self) -> Arc<Mutex<Repo>> {
         self.get_repo(default_repo_name())
     }
