@@ -36,7 +36,10 @@ impl UserPermissions {
     ) -> Self {
         Self {
             review_users,
-            review_usernames,
+            review_usernames: review_usernames
+                .into_iter()
+                .map(|username| username.to_lowercase())
+                .collect(),
             try_users,
         }
     }
@@ -48,8 +51,10 @@ impl UserPermissions {
         }
     }
 
+    /// Checks if the given username is a valid reviewer.
+    /// The usernames are checked in a case-insensitive manner.
     pub fn has_reviewer(&self, username: &str) -> bool {
-        self.review_usernames.contains(username)
+        self.review_usernames.contains(&username.to_lowercase())
     }
 }
 
