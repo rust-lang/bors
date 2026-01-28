@@ -783,6 +783,23 @@ approved = ["+approved"]
     }
 
     #[sqlx::test]
+    async fn approve_with_known_reviewer_different_case(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            ctx.post_comment("@bors r=DEFAULT-USER").await?;
+            insta::assert_snapshot!(
+                ctx.get_next_comment_text(()).await?,
+                @"
+            :pushpin: Commit pr-1-sha has been approved by `DEFAULT-USER`
+
+            It is now in the [queue](https://bors-test.com/queue/borstest) for this repository.
+            "
+            );
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
     async fn insufficient_permission_approve(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.post_comment(Comment::from("@bors try").with_author(User::unprivileged()))
