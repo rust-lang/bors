@@ -761,10 +761,10 @@ mod tests {
     #[sqlx::test]
     async fn rollup_order_by_priority(pool: sqlx::PgPool) {
         let gh = run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
-            let pr2 = ctx.open_pr(default_repo_name(), |_| {}).await?;
-            let pr3 = ctx.open_pr(default_repo_name(), |_| {}).await?;
-            let pr4 = ctx.open_pr(default_repo_name(), |_| {}).await?;
-            let pr5 = ctx.open_pr(default_repo_name(), |_| {}).await?;
+            let pr2 = ctx.open_pr((), |_| {}).await?;
+            let pr3 = ctx.open_pr((), |_| {}).await?;
+            let pr4 = ctx.open_pr((), |_| {}).await?;
+            let pr5 = ctx.open_pr((), |_| {}).await?;
             ctx.approve(pr2.id()).await?;
             ctx.approve(pr3.id()).await?;
             ctx.post_comment(Comment::new(pr3.id(), "@bors p=5"))
@@ -801,8 +801,8 @@ mod tests {
     #[sqlx::test]
     async fn rollup_duplicates(pool: sqlx::PgPool) {
         let gh = run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
-            let pr2 = ctx.open_pr(default_repo_name(), |_| {}).await?;
-            let pr3 = ctx.open_pr(default_repo_name(), |_| {}).await?;
+            let pr2 = ctx.open_pr((), |_| {}).await?;
+            let pr3 = ctx.open_pr((), |_| {}).await?;
             ctx.approve(pr2.id()).await?;
             ctx.approve(pr3.id()).await?;
 
@@ -831,7 +831,7 @@ mod tests {
     async fn rollup_remove_homu_ignore_block(pool: sqlx::PgPool) {
         let gh = run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
             let pr2 = ctx
-                .open_pr(default_repo_name(), |pr| {
+                .open_pr((), |pr| {
                     pr.description = r"This is a very good PR.
 
 <!-- homu-ignore:start -->
@@ -886,7 +886,7 @@ also include this pls"
     #[sqlx::test]
     async fn rollup_marked_as_rollup_never(pool: sqlx::PgPool) {
         run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
-            let pr2 = ctx.open_pr(default_repo_name(), |_| {}).await?;
+            let pr2 = ctx.open_pr((), |_| {}).await?;
             ctx.approve(pr2.id()).await?;
 
             make_rollup(ctx, &[&pr2])
@@ -901,7 +901,7 @@ also include this pls"
     #[sqlx::test]
     async fn rollup_mark_as_rollup_always(pool: sqlx::PgPool) {
         run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
-            let pr2 = ctx.open_pr(default_repo_name(), |_| {}).await?;
+            let pr2 = ctx.open_pr((), |_| {}).await?;
             ctx.approve(pr2.id()).await?;
 
             make_rollup(ctx, &[&pr2])
@@ -918,7 +918,7 @@ also include this pls"
     #[sqlx::test]
     async fn rollup_mark_as_rollup_always_in_approve(pool: sqlx::PgPool) {
         run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
-            let pr2 = ctx.open_pr(default_repo_name(), |_| {}).await?;
+            let pr2 = ctx.open_pr((), |_| {}).await?;
             ctx.approve(pr2.id()).await?;
 
             make_rollup(ctx, &[&pr2])
@@ -935,9 +935,9 @@ also include this pls"
     #[sqlx::test]
     async fn rollup_draft_pr(pool: sqlx::PgPool) {
         run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
-            let pr2 = ctx.open_pr(default_repo_name(), |_| {}).await?;
+            let pr2 = ctx.open_pr((), |_| {}).await?;
             ctx.approve(pr2.id()).await?;
-            let pr3 = ctx.open_pr(default_repo_name(), |_| {}).await?;
+            let pr3 = ctx.open_pr((), |_| {}).await?;
             ctx.approve(pr3.id()).await?;
             ctx.set_pr_status_draft(pr3.id()).await?;
 
@@ -945,6 +945,119 @@ also include this pls"
                 .await?
                 .assert_status(StatusCode::BAD_REQUEST)
                 .assert_body("Pull request #3 cannot be included in a rollup");
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn rollup_unapprove_member(pool: sqlx::PgPool) {
+        run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
+            let pr2 = ctx.open_pr((), |_| {}).await?;
+            ctx.approve(pr2.id()).await?;
+            let pr3 = ctx.open_pr((), |_| {}).await?;
+            ctx.approve(pr3.id()).await?;
+
+            make_rollup(ctx, &[&pr2, &pr3])
+                .await?
+                .assert_status(StatusCode::SEE_OTHER);
+            ctx.approve(4).await?;
+            ctx.post_comment(Comment::new(pr3.id(), "@bors r-")).await?;
+            insta::assert_snapshot!(ctx.get_next_comment_text(pr3.id()).await?, @"
+            Commit pr-3-sha has been unapproved.
+
+            This PR was contained in a rollup (#4), which was also unapproved.
+            ");
+            insta::assert_snapshot!(ctx.get_next_comment_text(4).await?, @"
+            PR #3, which is a member of this rollup, was [unapproved](https://github.com/rust-lang/borstest/pull/3#issuecomment-3).
+            This rollup was thus also unapproved.
+            ");
+
+            ctx.pr(4).await.expect_unapproved();
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn rollup_unapprove_member_contained_in_multiple_rollups(pool: sqlx::PgPool) {
+        run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
+            let pr2 = ctx.open_pr((), |_| {}).await?;
+            ctx.approve(pr2.id()).await?;
+            let pr3 = ctx.open_pr((), |_| {}).await?;
+            ctx.approve(pr3.id()).await?;
+            make_rollup(ctx, &[&pr2, &pr3])
+                .await?
+                .assert_status(StatusCode::SEE_OTHER);
+            make_rollup(ctx, &[&pr2, &pr3])
+                .await?
+                .assert_status(StatusCode::SEE_OTHER);
+
+            ctx.approve(4).await?;
+            ctx.approve(5).await?;
+            ctx.post_comment(Comment::new(pr3.id(), "@bors r-")).await?;
+
+            insta::assert_snapshot!(ctx.get_next_comment_text(pr3.id()).await?, @"
+            Commit pr-3-sha has been unapproved.
+
+            This PR was contained in the following rollups: #4, #5. They were also unapproved.
+            ");
+            insta::assert_snapshot!(ctx.get_next_comment_text(4).await?, @"
+            PR #3, which is a member of this rollup, was [unapproved](https://github.com/rust-lang/borstest/pull/3#issuecomment-3).
+            This rollup was thus also unapproved.
+            ");
+            insta::assert_snapshot!(ctx.get_next_comment_text(5).await?, @"
+            PR #3, which is a member of this rollup, was [unapproved](https://github.com/rust-lang/borstest/pull/3#issuecomment-3).
+            This rollup was thus also unapproved.
+            ");
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn rollup_unapprove_member_rollup_not_approved(pool: sqlx::PgPool) {
+        run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
+            let pr2 = ctx.open_pr((), |_| {}).await?;
+            ctx.approve(pr2.id()).await?;
+            let pr3 = ctx.open_pr((), |_| {}).await?;
+            ctx.approve(pr3.id()).await?;
+
+            make_rollup(ctx, &[&pr2, &pr3])
+                .await?
+                .assert_status(StatusCode::SEE_OTHER);
+            ctx.post_comment(Comment::new(pr3.id(), "@bors r-")).await?;
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn rollup_unapprove_member_cancel_auto_build(pool: sqlx::PgPool) {
+        run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
+            let pr2 = ctx.open_pr((), |_| {}).await?;
+            ctx.approve(pr2.id()).await?;
+            let pr3 = ctx.open_pr((), |_| {}).await?;
+            ctx.approve(pr3.id()).await?;
+
+            make_rollup(ctx, &[&pr2, &pr3])
+                .await?
+                .assert_status(StatusCode::SEE_OTHER);
+            ctx.post_comment(Comment::new(4, "@bors r+ p=100")).await?;
+            ctx.expect_comments(4, 1).await;
+            ctx.start_auto_build(4).await?;
+
+            ctx.post_comment(Comment::new(pr3.id(), "@bors r-")).await?;
+            ctx.expect_comments(pr3.id(), 1).await;
+            insta::assert_snapshot!(ctx.get_next_comment_text(4).await?, @"
+            PR #3, which is a member of this rollup, was [unapproved](https://github.com/rust-lang/borstest/pull/3#issuecomment-3).
+            This rollup was thus also unapproved.
+
+            Auto build cancelled due to unapproval. Cancelled workflows:
+            ");
+
+            ctx.pr(4).await.expect_unapproved();
+
             Ok(())
         })
         .await;

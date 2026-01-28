@@ -1427,7 +1427,11 @@ impl PullRequestProxy {
     #[track_caller]
     pub fn expect_auto_build_cancelled(&self) {
         assert_eq!(
-            self.require_db_pr().auto_build.as_ref().unwrap().status,
+            self.require_db_pr()
+                .auto_build
+                .as_ref()
+                .expect("auto build not found")
+                .status,
             BuildStatus::Cancelled
         );
     }

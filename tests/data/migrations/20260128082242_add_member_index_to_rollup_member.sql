@@ -1,0 +1,2 @@
+-- Empty to satisfy migration tests
+-- Just adding an index.

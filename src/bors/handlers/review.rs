@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use crate::bors::RepositoryState;
 use crate::bors::command::RollupMode;
 use crate::bors::command::{Approver, CommandPrefix};
@@ -17,10 +15,13 @@ use crate::bors::{Comment, PullRequestStatus};
 use crate::database::ApprovalInfo;
 use crate::database::DelegatedPermission;
 use crate::database::{MergeableState, TreeState};
-use crate::github::LabelTrigger;
 use crate::github::{GithubUser, PullRequestNumber};
+use crate::github::{LabelTrigger, PullRequest};
 use crate::permissions::PermissionType;
 use crate::{BorsContext, PgDbClient};
+use itertools::Itertools;
+use std::sync::Arc;
+use tracing::{Instrument, debug_span};
 
 /// Approve a pull request.
 /// A pull request can only be approved by a user of sufficient authority.
@@ -180,6 +181,7 @@ pub(super) async fn command_unapprove(
     db: Arc<PgDbClient>,
     pr: PullRequestData<'_>,
     author: &GithubUser,
+    comment_url: &str,
 ) -> anyhow::Result<()> {
     let pr_num = pr.number();
 
@@ -209,12 +211,135 @@ pub(super) async fn command_unapprove(
     .await?;
     unapprove_pr(&repo_state, &db, pr.db, pr.github).await?;
 
-    // Only send unapproval comment when a build was canceled, to avoid needless spam
-    if let Some(cancel_msg) = auto_build_cancel_message {
-        notify_of_unapproval(&repo_state, &db, pr, cancel_msg).await?;
+    // Rollups that contain this PR
+    let rollups = db.find_rollups_for_member_pr(pr.db).await?;
+
+    // Rollups which we will include in the unapproval comment on this PR
+    let rollups_to_notify = rollups
+        .iter()
+        .filter(|rollup| rollup.status == PullRequestStatus::Open && rollup.is_approved())
+        .map(|rollup| rollup.number)
+        .collect::<Vec<_>>();
+
+    // Rollups that we actually unapprove. Note that we will unapprove even closed/draft rollups,
+    // though that should not be needed in practice.
+    let unapprove_rollup_futs = rollups
+        .into_iter()
+        .filter(|rollup| rollup.is_approved())
+        // Just a sanity check to avoid doing too much work here
+        .take(10)
+        .map(|rollup_db| {
+            let span = debug_span!("Unapproving rollup", rollup = rollup_db.number.0);
+            let repo_state = repo_state.clone();
+            let db = db.clone();
+            async move {
+                let rollup_pr = repo_state.client.get_pull_request(rollup_db.number).await?;
+
+                let auto_build_cancel_message = maybe_cancel_auto_build(
+                    &repo_state.client,
+                    &db,
+                    &rollup_db,
+                    AutoBuildCancelReason::Unapproval,
+                )
+                .await?;
+                unapprove_pr(&repo_state, &db, &rollup_db, &rollup_pr).await?;
+
+                if let Some(comment) = unapproval_comment(
+                    &rollup_pr,
+                    UnapprovalCause::MemberPrUnapproved {
+                        member: pr_num,
+                        comment_url: comment_url.to_owned(),
+                    },
+                    auto_build_cancel_message,
+                ) {
+                    repo_state
+                        .client
+                        .post_comment(rollup_db.number, comment, &db)
+                        .await?;
+                }
+                anyhow::Ok(())
+            }
+            .instrument(span)
+        });
+
+    for res in futures::future::join_all(unapprove_rollup_futs).await {
+        if let Err(error) = res {
+            tracing::error!("It was not possible to unapprove rollup: {error:?}");
+        }
+    }
+
+    if let Some(comment) = unapproval_comment(
+        pr.github,
+        UnapprovalCause::DirectUnapproval {
+            unapproved_rollups: rollups_to_notify,
+        },
+        auto_build_cancel_message,
+    ) {
+        repo_state
+            .client
+            .post_comment(pr.number(), comment, &db)
+            .await?;
     }
 
     Ok(())
+}
+
+enum UnapprovalCause {
+    /// The PR was directly unapproved with `@bors r-`.
+    DirectUnapproval {
+        /// The following rollups have been unapproved because they contain this PR.
+        unapproved_rollups: Vec<PullRequestNumber>,
+    },
+    /// A member of a rollup was unapproved.
+    MemberPrUnapproved {
+        member: PullRequestNumber,
+        comment_url: String,
+    },
+}
+
+fn unapproval_comment(
+    pr: &PullRequest,
+    cause: UnapprovalCause,
+    build_cancelled_msg: Option<String>,
+) -> Option<Comment> {
+    use std::fmt::Write;
+
+    let mut comment = match cause {
+        UnapprovalCause::DirectUnapproval {
+            mut unapproved_rollups,
+        } => {
+            // Only send unapproval comment when a build was canceled, to avoid needless spam
+            if unapproved_rollups.is_empty() && build_cancelled_msg.is_none() {
+                return None;
+            }
+            let mut msg = format!("Commit {} has been unapproved.", pr.head.sha);
+            if !unapproved_rollups.is_empty() {
+                if let [rollup] = unapproved_rollups.as_slice() {
+                    write!(msg, "\n\nThis PR was contained in a rollup (#{rollup}), which was also unapproved.").unwrap();
+                } else {
+                    unapproved_rollups.sort();
+                    write!(msg, "\n\nThis PR was contained in the following rollups: {}. They were also unapproved.",
+                           unapproved_rollups.into_iter().map(|num| format!("#{num}")).join(", ")
+                    ).unwrap();
+                }
+            }
+            msg
+        }
+        UnapprovalCause::MemberPrUnapproved {
+            member,
+            comment_url,
+        } => {
+            format!(
+                r#"PR #{member}, which is a member of this rollup, was [unapproved]({comment_url}).
+This rollup was thus also unapproved."#
+            )
+        }
+    };
+
+    if let Some(cancel_msg) = build_cancelled_msg {
+        write!(comment, "\n\n{cancel_msg}").unwrap();
+    }
+    Some(Comment::new(comment))
 }
 
 /// Set the priority of a pull request.
@@ -427,23 +552,6 @@ async fn notify_of_tree_open(
             Comment::new("Tree is now open for merging.".to_string()),
             db,
         )
-        .await?;
-    Ok(())
-}
-
-async fn notify_of_unapproval(
-    repo: &RepositoryState,
-    db: &PgDbClient,
-    pr: PullRequestData<'_>,
-    cancel_message: String,
-) -> anyhow::Result<()> {
-    let comment = format!(
-        "Commit {} has been unapproved.\n\n{cancel_message}",
-        pr.github.head.sha
-    );
-
-    repo.client
-        .post_comment(pr.number(), Comment::new(comment), db)
         .await?;
     Ok(())
 }
