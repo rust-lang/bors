@@ -595,7 +595,10 @@ Average duration of recent auto builds: {{ format_duration(*average_build_durati
             }
             rollupPrMembers = rollupPrMembers.split(",");
             for (const rollupPrMember of rollupPrMembers) {
-                tbody.querySelector(`tr[data-pr-number="${rollupPrMember}"]`).classList.add("rollup-hover");
+                const element = tbody.querySelector(`tr[data-pr-number="${rollupPrMember}"]`);
+                if (element !== null) {
+                  element.classList.add("rollup-hover");
+                }
             }
         }
         tbody.addEventListener("mouseover", handler);
