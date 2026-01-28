@@ -1,13 +1,14 @@
 use super::operations::{
     approve_pull_request, clear_auto_build, create_build, create_workflow, delegate_pull_request,
-    delete_tagged_bot_comment, find_build, find_pr_by_build, get_last_n_successful_auto_builds,
-    get_nonclosed_pull_requests, get_pending_builds, get_prs_with_stale_mergeability_or_approved,
-    get_pull_request, get_repository, get_repository_by_name, get_tagged_bot_comments,
-    get_workflow_urls_for_build, get_workflows_for_build, insert_repo_if_not_exists, is_rollup,
-    record_tagged_bot_comment, set_pr_assignees, set_pr_mergeability_state, set_pr_priority,
-    set_pr_rollup_mode, set_pr_status, set_stale_mergeability_status_by_base_branch,
-    unapprove_pull_request, undelegate_pull_request, update_build, update_pr_try_build_id,
-    update_workflow_status, upsert_pull_request, upsert_repository,
+    delete_tagged_bot_comment, find_build, find_pr_by_build, find_rollups_for_member_pr,
+    get_last_n_successful_auto_builds, get_nonclosed_pull_requests, get_pending_builds,
+    get_prs_with_stale_mergeability_or_approved, get_pull_request, get_repository,
+    get_repository_by_name, get_tagged_bot_comments, get_workflow_urls_for_build,
+    get_workflows_for_build, insert_repo_if_not_exists, is_rollup, record_tagged_bot_comment,
+    set_pr_assignees, set_pr_mergeability_state, set_pr_priority, set_pr_rollup_mode,
+    set_pr_status, set_stale_mergeability_status_by_base_branch, unapprove_pull_request,
+    undelegate_pull_request, update_build, update_pr_try_build_id, update_workflow_status,
+    upsert_pull_request, upsert_repository,
 };
 use super::{
     ApprovalInfo, DelegatedPermission, MergeableState, PrimaryKey, RunId, UpdateBuildParams,
@@ -405,6 +406,14 @@ impl PgDbClient {
     /// Returns true if the given PR is a rollup.
     pub async fn is_rollup(&self, pr: &PullRequestModel) -> anyhow::Result<bool> {
         is_rollup(&self.pool, pr.id).await
+    }
+
+    /// Return all rollups that contain `pr` as a member.
+    pub async fn find_rollups_for_member_pr(
+        &self,
+        pr: &PullRequestModel,
+    ) -> anyhow::Result<Vec<PullRequestModel>> {
+        find_rollups_for_member_pr(&self.pool, pr.id).await
     }
 
     /// Return the last N auto builds that have succeeded on the given repository.

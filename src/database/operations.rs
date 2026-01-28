@@ -1166,6 +1166,54 @@ pub(crate) async fn is_rollup(
     .await
 }
 
+pub(crate) async fn find_rollups_for_member_pr(
+    executor: impl PgExecutor<'_>,
+    rollup_id: PrimaryKey,
+) -> anyhow::Result<Vec<PullRequestModel>> {
+    measure_db_query("find_rollups_for_member_pr", || async {
+        let prs = sqlx::query_as!(
+            PullRequestModel,
+            r#"
+    SELECT
+        pr.id,
+        pr.repository as "repository: GithubRepoName",
+        pr.number as "number!: i64",
+        pr.title,
+        pr.author,
+        pr.assignees as "assignees: Assignees",
+        (
+            pr.approved_by,
+            pr.approved_sha
+        ) AS "approval_status!: ApprovalStatus",
+        pr.status as "status: PullRequestStatus",
+        pr.priority,
+        pr.rollup as "rollup: RollupMode",
+        pr.delegated_permission as "delegated_permission: DelegatedPermission",
+        pr.head_branch,
+        pr.base_branch,
+        pr.mergeable_state as "mergeable_state: MergeableState",
+        pr.mergeable_state_is_stale,
+        pr.created_at as "created_at: DateTime<Utc>",
+        try_build AS "try_build: BuildModel",
+        auto_build AS "auto_build: BuildModel"
+    FROM pull_request as pr
+    LEFT JOIN build AS try_build ON pr.try_build_id = try_build.id
+    LEFT JOIN build AS auto_build ON pr.auto_build_id = auto_build.id
+    WHERE pr.id IN (
+        SELECT rollup
+        FROM rollup_member
+        WHERE member = $1
+    )
+    "#,
+            rollup_id
+        )
+        .fetch_all(executor)
+        .await?;
+        Ok(prs)
+    })
+    .await
+}
+
 pub(crate) async fn get_last_n_successful_auto_builds(
     executor: impl PgExecutor<'_>,
     repo: &GithubRepoName,

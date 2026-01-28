@@ -437,7 +437,7 @@ async fn handle_comment(
                     }
                     BorsCommand::Unapprove => {
                         let span = tracing::info_span!("Unapprove");
-                        command_unapprove(repo, database, pr, &comment.author)
+                        command_unapprove(repo, database, pr, &comment.author, &comment.html_url)
                             .instrument(span)
                             .await
                     }
