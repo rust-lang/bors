@@ -16,6 +16,8 @@ jobs:
       id-token: write
       contents: read
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
       - name: Deploy to ECS
         uses: ./.github/actions/deploy-ecs
         with:

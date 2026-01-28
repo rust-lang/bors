@@ -14,7 +14,9 @@ jobs:
       id-token: write
       contents: read
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
       - name: Deploy to ECS
         uses: ./.github/actions/deploy-ecs
         with:
-          aws-role-arn: "351621253146"
+          aws-iam: "351621253146"
