@@ -14,36 +14,7 @@ jobs:
       id-token: write
       contents: read
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v6
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v5
+      - name: Deploy to ECS
+        uses: ./.github/actions/deploy-ecs
         with:
-          role-to-assume: arn:aws:iam::351621253146:role/gha-access
-          aws-region: us-east-2
-
-      - name: Login to Amazon ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v2
-
-      - uses: docker/setup-buildx-action@v3
-      - name: Build and tag the Docker image
-        env:
-          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          REPOSITORY: bors
-          IMAGE_TAG: latest
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          tags: ${{ env.REGISTRY }}/${{ env.REPOSITORY }}:${{ env.IMAGE_TAG }}
-          push: true
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          build-args: GIT_VERSION=${{ github.sha }}
-
-      - name: Kick ECS to deploy new version
-        run: |
-          aws ecs update-service --service bors --cluster bors --force-new-deployment
-          # Poll every 15 seconds until a successful state has been reached. Fail after 40 failed checks.
-          aws ecs wait services-stable --services bors --cluster bors
+          aws-role-arn: "351621253146"
