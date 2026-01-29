@@ -387,6 +387,7 @@ dependencies = [
  "regex",
  "reqwest",
  "rust-embed",
+ "rust_team_data",
  "secrecy",
  "serde",
  "serde_json",
@@ -1501,6 +1502,8 @@ checksum = "0ad4bb2b565bca0645f4d68c5c9af97fba094e9791da685bf83cb5f3ce74acf2"
 dependencies = [
  "equivalent",
  "hashbrown 0.16.1",
+ "serde",
+ "serde_core",
 ]
 
 [[package]]
@@ -2388,6 +2391,15 @@ checksum = "60b161f275cb337fe0a44d924a5f4df0ed69c2c39519858f931ce61c779d3475"
 dependencies = [
  "sha2",
  "walkdir",
+]
+
+[[package]]
+name = "rust_team_data"
+version = "1.0.0"
+source = "git+https://github.com/rust-lang/team#227d6e032ae42f42e0da2970dda37e4fd1a1ae5a"
+dependencies = [
+ "indexmap",
+ "serde",
 ]
 
 [[package]]
