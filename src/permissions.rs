@@ -22,24 +22,37 @@ impl fmt::Display for PermissionType {
     }
 }
 
-pub struct TeamDirectory {
-    usernames: HashSet<String>,
-    teams: HashSet<String>,
+// Separate module to ensure that the struct cannot be constructed without invoking `new`
+mod directory {
+    use std::collections::HashSet;
+
+    pub(super) struct TeamDirectory {
+        usernames: HashSet<String>,
+        teams: HashSet<String>,
+    }
+
+    impl TeamDirectory {
+        pub(super) fn new(usernames: HashSet<String>, teams: HashSet<String>) -> Self {
+            let usernames: HashSet<String> = usernames
+                .into_iter()
+                .map(|name| name.to_lowercase())
+                .collect();
+            let teams: HashSet<String> =
+                teams.into_iter().map(|name| name.to_lowercase()).collect();
+            Self { usernames, teams }
+        }
+
+        pub(super) fn user_exists(&self, username: &str) -> bool {
+            self.usernames.contains(&username.to_lowercase())
+        }
+
+        pub(super) fn team_exists(&self, team: &str) -> bool {
+            self.teams.contains(&team.to_lowercase())
+        }
+    }
 }
 
-impl TeamDirectory {
-    pub fn new(usernames: HashSet<String>, teams: HashSet<String>) -> Self {
-        Self { usernames, teams }
-    }
-
-    fn user_exists(&self, username: &str) -> bool {
-        self.usernames.contains(&username.to_lowercase())
-    }
-
-    fn team_exists(&self, team: &str) -> bool {
-        self.teams.contains(&team.to_lowercase())
-    }
-}
+use directory::TeamDirectory;
 
 pub struct UserPermissions {
     review_users: HashSet<UserId>,
@@ -48,32 +61,6 @@ pub struct UserPermissions {
 }
 
 impl UserPermissions {
-    pub fn new(
-        review_users: HashSet<UserId>,
-        try_users: HashSet<UserId>,
-        directory: TeamDirectory,
-    ) -> Self {
-        let team_names: HashSet<String> = directory
-            .teams
-            .iter()
-            .map(|name| name.to_lowercase())
-            .collect();
-        let people_names: HashSet<String> = directory
-            .usernames
-            .iter()
-            .map(|name| name.to_lowercase())
-            .collect();
-        let directory = TeamDirectory {
-            teams: team_names,
-            usernames: people_names,
-        };
-        Self {
-            review_users,
-            try_users,
-            directory,
-        }
-    }
-
     pub fn has_permission(&self, user_id: UserId, permission: PermissionType) -> bool {
         match permission {
             PermissionType::Review => self.review_users.contains(&user_id),
