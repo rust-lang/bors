@@ -11,7 +11,7 @@ use octocrab::models::pulls::MergeableState;
 use octocrab::models::workflows::Conclusion;
 use octocrab::models::{CheckSuiteId, JobId, RunId};
 use parking_lot::Mutex;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
@@ -22,6 +22,7 @@ pub struct GitHub {
     pub(super) repos: HashMap<GithubRepoName, Arc<Mutex<Repo>>>,
     comments: HashMap<String, Comment>,
     users: HashMap<String, User>,
+    teams: HashSet<String>,
     pub oauth_config: OAuthConfig,
     workflow_run_id_counter: u64,
 }
@@ -69,6 +70,14 @@ impl GitHub {
 
     pub fn users(&self) -> Vec<User> {
         self.users.values().cloned().collect()
+    }
+
+    pub fn add_team(&mut self, name: &str) {
+        self.teams.insert(name.to_string());
+    }
+
+    pub fn teams(&self) -> Vec<String> {
+        self.teams.iter().cloned().collect()
     }
 
     pub fn default_repo(&self) -> Arc<Mutex<Repo>> {
@@ -269,6 +278,7 @@ impl Default for GitHub {
             repos: HashMap::default(),
             comments: Default::default(),
             users: Default::default(),
+            teams: Default::default(),
             oauth_config: default_oauth_config(),
             workflow_run_id_counter: 0,
         };

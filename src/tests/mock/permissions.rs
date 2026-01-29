@@ -63,9 +63,17 @@ impl TeamApiMockServer {
             .mount(&mock_server)
             .await;
 
+        let teams: HashMap<String, serde_json::Value> = {
+            let gh = github.lock();
+            gh.teams()
+                .into_iter()
+                .map(|name| (name, json!({})))
+                .collect()
+        };
+
         Mock::given(method("GET"))
             .and(path("/v1/teams.json"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
+            .respond_with(ResponseTemplate::new(200).set_body_json(teams))
             .mount(&mock_server)
             .await;
 

@@ -783,6 +783,49 @@ approved = ["+approved"]
     }
 
     #[sqlx::test]
+    async fn approve_with_unknown_team(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            ctx.post_comment("@bors r=nonexistent-team").await?;
+            insta::assert_snapshot!(
+                ctx.get_next_comment_text(()).await?,
+                @r###"
+            :pushpin: Commit pr-1-sha has been approved by `nonexistent-team`
+
+            It is now in the [queue](https://bors-test.com/queue/borstest) for this repository.
+
+            :warning: The following reviewer(s) could not be found: `nonexistent-team`
+            "###
+            );
+
+            ctx.pr(()).await.expect_approved_by("nonexistent-team");
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn approve_with_known_team(pool: sqlx::PgPool) {
+        let mut gh = GitHub::default();
+        gh.add_team("team1");
+
+        run_test((pool, gh), async |ctx: &mut BorsTester| {
+            ctx.post_comment("@bors r=team1").await?;
+            insta::assert_snapshot!(
+                ctx.get_next_comment_text(()).await?,
+                @"
+            :pushpin: Commit pr-1-sha has been approved by `team1`
+
+            It is now in the [queue](https://bors-test.com/queue/borstest) for this repository.
+            "
+            );
+
+            ctx.pr(()).await.expect_approved_by("team1");
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
     async fn approve_with_known_reviewer_different_case(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.post_comment("@bors r=DEFAULT-USER").await?;
