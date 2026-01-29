@@ -1,7 +1,6 @@
 use crate::permissions::PermissionType;
 use parking_lot::Mutex;
-use serde_json::json;
-use std::collections::HashMap;
+use rust_team_data::v1::TeamKind;
 use std::sync::Arc;
 use wiremock::matchers::path;
 use wiremock::{Mock, MockServer, ResponseTemplate, matchers::method};
@@ -23,9 +22,13 @@ impl TeamApiMockServer {
             let mut users = repo.permissions.users.iter().collect::<Vec<_>>();
             users.sort_by_key(|p| p.0.github_id);
             users.retain(|p| p.1.contains(&kind));
-            let permissions = json!({
-                "github_ids": users.iter().map(|(user, _)| user.github_id).collect::<Vec<_>>(),
-            });
+
+            let permissions = rust_team_data::v1::Permission {
+                people: vec![],
+                github_users: vec![],
+                github_ids: users.iter().map(|(user, _)| user.github_id).collect(),
+                discord_ids: vec![],
+            };
 
             Mock::given(method("GET"))
                 .and(path(format!(
@@ -49,12 +52,25 @@ impl TeamApiMockServer {
                 .await;
         }
 
-        let people: HashMap<String, serde_json::Value> = {
+        let people: rust_team_data::v1::People = {
             let gh = github.lock();
-            gh.users()
-                .into_iter()
-                .map(|user| (user.name, json!({})))
-                .collect()
+            rust_team_data::v1::People {
+                people: gh
+                    .users()
+                    .into_iter()
+                    .map(|user| {
+                        (
+                            user.name.clone(),
+                            rust_team_data::v1::Person {
+                                name: user.name,
+                                email: None,
+                                github_id: user.github_id,
+                                github_sponsors: false,
+                            },
+                        )
+                    })
+                    .collect(),
+            }
         };
 
         Mock::given(method("GET"))
@@ -63,12 +79,30 @@ impl TeamApiMockServer {
             .mount(&mock_server)
             .await;
 
-        let teams: HashMap<String, serde_json::Value> = {
+        let teams: rust_team_data::v1::Teams = {
             let gh = github.lock();
-            gh.teams()
-                .into_iter()
-                .map(|name| (name, json!({})))
-                .collect()
+            rust_team_data::v1::Teams {
+                teams: gh
+                    .teams()
+                    .into_iter()
+                    .map(|name| {
+                        (
+                            name.clone(),
+                            rust_team_data::v1::Team {
+                                name,
+                                kind: TeamKind::Team,
+                                subteam_of: None,
+                                top_level: None,
+                                members: vec![],
+                                alumni: vec![],
+                                github: None,
+                                website_data: None,
+                                roles: vec![],
+                            },
+                        )
+                    })
+                    .collect(),
+            }
         };
 
         Mock::given(method("GET"))

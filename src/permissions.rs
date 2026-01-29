@@ -1,9 +1,8 @@
-use octocrab::models::UserId;
-use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
-use std::fmt;
-
 use crate::github::GithubRepoName;
+use octocrab::models::UserId;
+use serde::de::DeserializeOwned;
+use std::collections::HashSet;
+use std::fmt;
 
 #[derive(Eq, PartialEq, Debug, Clone)]
 pub enum PermissionType {
@@ -77,15 +76,6 @@ impl UserPermissions {
     }
 }
 
-#[derive(Deserialize, Serialize)]
-pub(crate) struct UserPermissionsResponse {
-    github_ids: HashSet<UserId>,
-}
-
-type PeopleResponse = HashMap<String, serde_json::Value>;
-
-type TeamResponse = HashMap<String, serde_json::Value>;
-
 enum TeamSource {
     Url(String),
     Directory(String),
@@ -123,8 +113,26 @@ impl TeamApiClient {
                     .await
                     .map_err(|error| anyhow::anyhow!("Cannot load try users: {error:?}"))
             },
-            self.load_people_names(),
-            self.load_team_names(),
+            async {
+                anyhow::Ok(
+                    self.load_team_data::<rust_team_data::v1::People>("people")
+                        .await
+                        .map_err(|error| anyhow::anyhow!("Cannot load people: {error:?}"))?
+                        .people
+                        .into_keys()
+                        .collect::<HashSet<String>>(),
+                )
+            },
+            async {
+                anyhow::Ok(
+                    self.load_team_data::<rust_team_data::v1::Teams>("teams")
+                        .await
+                        .map_err(|error| anyhow::anyhow!("Cannot load teams: {error:?}"))?
+                        .teams
+                        .into_keys()
+                        .collect::<HashSet<String>>(),
+                )
+            }
         )?;
         let directory = TeamDirectory::new(known_usernames, known_teams);
 
@@ -147,101 +155,62 @@ impl TeamApiClient {
             PermissionType::Try => "try",
         };
 
-        match &self.team_source {
+        let data = match &self.team_source {
             TeamSource::Url(base_url) => {
                 let normalized_name = repository_name.replace('-', "_");
                 let url =
                     format!("{base_url}/v1/permissions/bors.{normalized_name}.{permission}.json",);
-                let users = reqwest::get(url)
+                reqwest::get(url)
                     .await
                     .and_then(|res| res.error_for_status())
                     .map_err(|error| anyhow::anyhow!("Cannot load users from team API: {error:?}"))?
-                    .json::<UserPermissionsResponse>()
-                    .await
-                    .map_err(|error| {
-                        anyhow::anyhow!("Cannot deserialize users from team API: {error:?}")
-                    })?;
-                Ok(users.github_ids)
+                    .text()
+                    .await?
             }
             TeamSource::Directory(base_path) => {
                 let path = format!("{base_path}/bors.{permission}.json");
-                let data = std::fs::read_to_string(&path).map_err(|error| {
+                std::fs::read_to_string(&path).map_err(|error| {
                     anyhow::anyhow!("Could not read users from a file '{path}': {error:?}")
-                })?;
-                let users: UserPermissionsResponse =
-                    serde_json::from_str(&data).map_err(|error| {
-                        anyhow::anyhow!("Cannot deserialize users from a file '{path}': {error:?}")
-                    })?;
-                Ok(users.github_ids)
+                })?
             }
-        }
+        };
+        let permissions: rust_team_data::v1::Permission = serde_json::from_str(&data)
+            .map_err(|error| anyhow::anyhow!("Cannot deserialize team permissions: {error:?}"))?;
+        Ok(permissions.github_ids.into_iter().map(UserId).collect())
     }
 
-    async fn load_people_names(&self) -> anyhow::Result<HashSet<String>> {
-        match &self.team_source {
+    async fn load_team_data<T: DeserializeOwned>(&self, path: &str) -> anyhow::Result<T> {
+        let data = match &self.team_source {
             TeamSource::Url(base_url) => {
-                let url = format!("{base_url}/v1/people.json");
-                let response = reqwest::get(url)
+                let url = format!("{base_url}/v1/{path}.json");
+                reqwest::get(url)
                     .await
                     .and_then(|res| res.error_for_status())
                     .map_err(|error| {
                         anyhow::anyhow!("Cannot load people from team API: {error:?}")
                     })?
-                    .json::<PeopleResponse>()
+                    .text()
                     .await
                     .map_err(|error| {
-                        anyhow::anyhow!("Cannot deserialize people from team API: {error:?}")
+                        anyhow::anyhow!(
+                            "Cannot load {} from team: {error:?}",
+                            std::any::type_name::<T>()
+                        )
                     })?
-                    .into_keys()
-                    .collect();
-                Ok(response)
             }
             TeamSource::Directory(base_path) => {
-                let path = format!("{base_path}/people.json");
-                let data = std::fs::read_to_string(&path).map_err(|error| {
-                    anyhow::anyhow!("Could not read people from a file `{path}`: {error:?}")
-                })?;
-                let response = serde_json::from_str::<PeopleResponse>(&data)
-                    .map_err(|error| {
-                        anyhow::anyhow!("Cannot deserialize people from a file '{path}': {error:?}")
-                    })?
-                    .into_keys()
-                    .collect();
-                Ok(response)
+                let path = format!("{base_path}/{path}.json");
+                std::fs::read_to_string(&path).map_err(|error| {
+                    anyhow::anyhow!("Could not read data from file `{path}`: {error:?}")
+                })?
             }
-        }
-    }
-
-    async fn load_team_names(&self) -> anyhow::Result<HashSet<String>> {
-        match &self.team_source {
-            TeamSource::Url(base_url) => {
-                let url = format!("{base_url}/v1/teams.json");
-                let response = reqwest::get(url)
-                    .await
-                    .and_then(|res| res.error_for_status())
-                    .map_err(|error| anyhow::anyhow!("Cannot load teams from team API: {error:?}"))?
-                    .json::<TeamResponse>()
-                    .await
-                    .map_err(|error| {
-                        anyhow::anyhow!("Cannot deserialize teams from team API: {error:?}")
-                    })?
-                    .into_keys()
-                    .collect();
-                Ok(response)
-            }
-            TeamSource::Directory(base_path) => {
-                let path = format!("{base_path}/teams.json");
-                let data = std::fs::read_to_string(&path).map_err(|error| {
-                    anyhow::anyhow!("Could not read teams from a file '{path}': {error:?}")
-                })?;
-                let response = serde_json::from_str::<TeamResponse>(&data)
-                    .map_err(|error| {
-                        anyhow::anyhow!("Cannot deserialize teams from a file '{path}': {error:?}")
-                    })?
-                    .into_keys()
-                    .collect();
-                Ok(response)
-            }
-        }
+        };
+        let data: T = serde_json::from_str(&data).map_err(|error| {
+            anyhow::anyhow!(
+                "Cannot deserialize {}: {error:?}",
+                std::any::type_name::<T>()
+            )
+        })?;
+        Ok(data)
     }
 }
