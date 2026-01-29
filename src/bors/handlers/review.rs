@@ -117,11 +117,11 @@ async fn check_unknown_reviewers(
     repo_state: &RepositoryState,
     reviewers: &[String],
 ) -> Vec<String> {
-    let permission = repo_state.permissions.load();
+    let directory = repo_state.permissions.load();
 
     reviewers
         .iter()
-        .filter(|reviewer| !permission.has_reviewer(reviewer))
+        .filter(|reviewer| !directory.user_exists(reviewer) && !directory.team_exists(reviewer))
         .cloned()
         .collect()
 }
@@ -777,6 +777,49 @@ approved = ["+approved"]
             );
 
             ctx.pr(()).await.expect_approved_by("nonexistent-user");
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn approve_with_unknown_team(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            ctx.post_comment("@bors r=nonexistent-team").await?;
+            insta::assert_snapshot!(
+                ctx.get_next_comment_text(()).await?,
+                @r###"
+            :pushpin: Commit pr-1-sha has been approved by `nonexistent-team`
+
+            It is now in the [queue](https://bors-test.com/queue/borstest) for this repository.
+
+            :warning: The following reviewer(s) could not be found: `nonexistent-team`
+            "###
+            );
+
+            ctx.pr(()).await.expect_approved_by("nonexistent-team");
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn approve_with_known_team(pool: sqlx::PgPool) {
+        let mut gh = GitHub::default();
+        gh.add_team("team1");
+
+        run_test((pool, gh), async |ctx: &mut BorsTester| {
+            ctx.post_comment("@bors r=team1").await?;
+            insta::assert_snapshot!(
+                ctx.get_next_comment_text(()).await?,
+                @"
+            :pushpin: Commit pr-1-sha has been approved by `team1`
+
+            It is now in the [queue](https://bors-test.com/queue/borstest) for this repository.
+            "
+            );
+
+            ctx.pr(()).await.expect_approved_by("team1");
             Ok(())
         })
         .await;

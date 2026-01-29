@@ -1,6 +1,7 @@
 use crate::permissions::PermissionType;
 use parking_lot::Mutex;
 use serde_json::json;
+use std::collections::HashMap;
 use std::sync::Arc;
 use wiremock::matchers::path;
 use wiremock::{Mock, MockServer, ResponseTemplate, matchers::method};
@@ -24,7 +25,6 @@ impl TeamApiMockServer {
             users.retain(|p| p.1.contains(&kind));
             let permissions = json!({
                 "github_ids": users.iter().map(|(user, _)| user.github_id).collect::<Vec<_>>(),
-                "github_users": users.iter().map(|(user, _)| user.name.clone()).collect::<Vec<_>>()
             });
 
             Mock::given(method("GET"))
@@ -48,6 +48,34 @@ impl TeamApiMockServer {
                 .mount(&mock_server)
                 .await;
         }
+
+        let people: HashMap<String, serde_json::Value> = {
+            let gh = github.lock();
+            gh.users()
+                .into_iter()
+                .map(|user| (user.name, json!({})))
+                .collect()
+        };
+
+        Mock::given(method("GET"))
+            .and(path("/v1/people.json"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(people))
+            .mount(&mock_server)
+            .await;
+
+        let teams: HashMap<String, serde_json::Value> = {
+            let gh = github.lock();
+            gh.teams()
+                .into_iter()
+                .map(|name| (name, json!({})))
+                .collect()
+        };
+
+        Mock::given(method("GET"))
+            .and(path("/v1/teams.json"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(teams))
+            .mount(&mock_server)
+            .await;
 
         Self { mock_server }
     }

@@ -1,6 +1,6 @@
 use octocrab::models::UserId;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 
 use crate::github::GithubRepoName;
@@ -22,25 +22,55 @@ impl fmt::Display for PermissionType {
     }
 }
 
+pub struct TeamDirectory {
+    usernames: HashSet<String>,
+    teams: HashSet<String>,
+}
+
+impl TeamDirectory {
+    pub fn new(usernames: HashSet<String>, teams: HashSet<String>) -> Self {
+        Self { usernames, teams }
+    }
+
+    fn user_exists(&self, username: &str) -> bool {
+        self.usernames.contains(&username.to_lowercase())
+    }
+
+    fn team_exists(&self, team: &str) -> bool {
+        self.teams.contains(&team.to_lowercase())
+    }
+}
+
 pub struct UserPermissions {
     review_users: HashSet<UserId>,
-    review_usernames: HashSet<String>,
     try_users: HashSet<UserId>,
+    directory: TeamDirectory,
 }
 
 impl UserPermissions {
     pub fn new(
         review_users: HashSet<UserId>,
-        review_usernames: HashSet<String>,
         try_users: HashSet<UserId>,
+        directory: TeamDirectory,
     ) -> Self {
+        let team_names: HashSet<String> = directory
+            .teams
+            .iter()
+            .map(|name| name.to_lowercase())
+            .collect();
+        let people_names: HashSet<String> = directory
+            .usernames
+            .iter()
+            .map(|name| name.to_lowercase())
+            .collect();
+        let directory = TeamDirectory {
+            teams: team_names,
+            usernames: people_names,
+        };
         Self {
             review_users,
-            review_usernames: review_usernames
-                .into_iter()
-                .map(|username| username.to_lowercase())
-                .collect(),
             try_users,
+            directory,
         }
     }
 
@@ -51,18 +81,23 @@ impl UserPermissions {
         }
     }
 
-    /// Checks if the given username is a valid reviewer.
-    /// The usernames are checked in a case-insensitive manner.
-    pub fn has_reviewer(&self, username: &str) -> bool {
-        self.review_usernames.contains(&username.to_lowercase())
+    pub fn user_exists(&self, username: &str) -> bool {
+        self.directory.user_exists(username)
+    }
+
+    pub fn team_exists(&self, team: &str) -> bool {
+        self.directory.team_exists(team)
     }
 }
 
 #[derive(Deserialize, Serialize)]
 pub(crate) struct UserPermissionsResponse {
     github_ids: HashSet<UserId>,
-    github_users: HashSet<String>,
 }
+
+type PeopleResponse = HashMap<String, serde_json::Value>;
+
+type TeamResponse = HashMap<String, serde_json::Value>;
 
 enum TeamSource {
     Url(String),
@@ -90,20 +125,26 @@ impl TeamApiClient {
     ) -> anyhow::Result<UserPermissions> {
         tracing::info!("Reloading permissions for repository {repo}");
 
-        let (review_users, review_usernames) = self
-            .load_users(repo.name(), PermissionType::Review)
-            .await
-            .map_err(|error| anyhow::anyhow!("Cannot load review users: {error:?}"))?;
-
-        let (try_users, _try_usernames) =
-            self.load_users(repo.name(), PermissionType::Try)
-                .await
-                .map_err(|error| anyhow::anyhow!("Cannot load try users: {error:?}"))?;
+        let (review_users, try_users, known_usernames, known_teams) = tokio::try_join!(
+            async {
+                self.load_users(repo.name(), PermissionType::Review)
+                    .await
+                    .map_err(|error| anyhow::anyhow!("Cannot load review users: {error:?}"))
+            },
+            async {
+                self.load_users(repo.name(), PermissionType::Try)
+                    .await
+                    .map_err(|error| anyhow::anyhow!("Cannot load try users: {error:?}"))
+            },
+            self.load_people_names(),
+            self.load_team_names(),
+        )?;
+        let directory = TeamDirectory::new(known_usernames, known_teams);
 
         Ok(UserPermissions {
             review_users,
-            review_usernames,
             try_users,
+            directory,
         })
     }
 
@@ -113,7 +154,7 @@ impl TeamApiClient {
         &self,
         repository_name: &str,
         permission: PermissionType,
-    ) -> anyhow::Result<(HashSet<UserId>, HashSet<String>)> {
+    ) -> anyhow::Result<HashSet<UserId>> {
         let permission = match permission {
             PermissionType::Review => "review",
             PermissionType::Try => "try",
@@ -133,7 +174,7 @@ impl TeamApiClient {
                     .map_err(|error| {
                         anyhow::anyhow!("Cannot deserialize users from team API: {error:?}")
                     })?;
-                Ok((users.github_ids, users.github_users))
+                Ok(users.github_ids)
             }
             TeamSource::Directory(base_path) => {
                 let path = format!("{base_path}/bors.{permission}.json");
@@ -144,7 +185,75 @@ impl TeamApiClient {
                     serde_json::from_str(&data).map_err(|error| {
                         anyhow::anyhow!("Cannot deserialize users from a file '{path}': {error:?}")
                     })?;
-                Ok((users.github_ids, users.github_users))
+                Ok(users.github_ids)
+            }
+        }
+    }
+
+    async fn load_people_names(&self) -> anyhow::Result<HashSet<String>> {
+        match &self.team_source {
+            TeamSource::Url(base_url) => {
+                let url = format!("{base_url}/v1/people.json");
+                let response = reqwest::get(url)
+                    .await
+                    .and_then(|res| res.error_for_status())
+                    .map_err(|error| {
+                        anyhow::anyhow!("Cannot load people from team API: {error:?}")
+                    })?
+                    .json::<PeopleResponse>()
+                    .await
+                    .map_err(|error| {
+                        anyhow::anyhow!("Cannot deserialize people from team API: {error:?}")
+                    })?
+                    .into_keys()
+                    .collect();
+                Ok(response)
+            }
+            TeamSource::Directory(base_path) => {
+                let path = format!("{base_path}/people.json");
+                let data = std::fs::read_to_string(&path).map_err(|error| {
+                    anyhow::anyhow!("Could not read people from a file `{path}`: {error:?}")
+                })?;
+                let response = serde_json::from_str::<PeopleResponse>(&data)
+                    .map_err(|error| {
+                        anyhow::anyhow!("Cannot deserialize people from a file '{path}': {error:?}")
+                    })?
+                    .into_keys()
+                    .collect();
+                Ok(response)
+            }
+        }
+    }
+
+    async fn load_team_names(&self) -> anyhow::Result<HashSet<String>> {
+        match &self.team_source {
+            TeamSource::Url(base_url) => {
+                let url = format!("{base_url}/v1/teams.json");
+                let response = reqwest::get(url)
+                    .await
+                    .and_then(|res| res.error_for_status())
+                    .map_err(|error| anyhow::anyhow!("Cannot load teams from team API: {error:?}"))?
+                    .json::<TeamResponse>()
+                    .await
+                    .map_err(|error| {
+                        anyhow::anyhow!("Cannot deserialize teams from team API: {error:?}")
+                    })?
+                    .into_keys()
+                    .collect();
+                Ok(response)
+            }
+            TeamSource::Directory(base_path) => {
+                let path = format!("{base_path}/teams.json");
+                let data = std::fs::read_to_string(&path).map_err(|error| {
+                    anyhow::anyhow!("Could not read teams from a file '{path}': {error:?}")
+                })?;
+                let response = serde_json::from_str::<TeamResponse>(&data)
+                    .map_err(|error| {
+                        anyhow::anyhow!("Cannot deserialize teams from a file '{path}': {error:?}")
+                    })?
+                    .into_keys()
+                    .collect();
+                Ok(response)
             }
         }
     }
