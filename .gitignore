@@ -2,4 +2,4 @@ target/
 .env
 .DS_Store
 __pycache__/
-data/permissions/*.json
+data/team/*.json

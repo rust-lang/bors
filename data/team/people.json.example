@@ -1,0 +1,9 @@
+{
+  "people": {
+    "foobar": {
+      "name": "Foo Bar",
+      "github_id": 123,
+      "github_sponsors": false
+    }
+  }
+}
