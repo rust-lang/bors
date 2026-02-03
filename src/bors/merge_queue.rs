@@ -186,8 +186,29 @@ async fn process_repository(
                 // Unmergeable PRs should be ordered after mergeable ones, but we still try to merge
                 // approved unmergeable PRs, just in case our DB data is stale. That should
                 // hopefully happen only very rarely.
+                let queue_formatted = {
+                    use std::fmt::Write;
+
+                    let mut msg = String::new();
+                    for pr in prs.iter().take(50) {
+                        writeln!(
+                            msg, "#{} ({}): status={}, priority={:?}, rollup={:?}, mergeable={:?}, approved by={:?}, auto build={:?}, queue status={:?}",
+                            pr.number, pr.title, pr.status, pr.priority, pr.rollup, pr.mergeable_status(), pr.approver(),
+                            pr.auto_build.as_ref().map(|b| &b.status),
+                            match pr.queue_status() {
+                                QueueStatus::Pending(_, _) => "pending",
+                                QueueStatus::Failed(_, _) => "failed",
+                                QueueStatus::Approved(_) => "approved",
+                                QueueStatus::ReadyForMerge(_, _) => "ready for merge",
+                                QueueStatus::NotOpen => "not open",
+                                QueueStatus::NotApproved => "not approved"
+                            }
+                        ).unwrap();
+                    }
+                    msg
+                };
                 tracing::info!(
-                    "Attempting to start auto build for {pr_num}. Current queue: {prs:?}"
+                    "Attempting to start auto build for {pr_num}. First 50 PRs in the queue:\n{queue_formatted}"
                 );
                 match handle_start_auto_build(
                     repo,
@@ -778,7 +799,7 @@ merge_queue_enabled = false
             );
             Ok(())
         })
-        .await;
+            .await;
     }
 
     #[sqlx::test]
@@ -801,21 +822,21 @@ merge_queue_enabled = false
             );
             Ok(())
         })
-        .await;
+            .await;
     }
 
     #[sqlx::test]
     async fn auto_build_success_comment_duration_hours_minutes(pool: sqlx::PgPool) {
         // Test with hours and minutes (4800 seconds = 1h 20m)
         run_test(pool, async |ctx: &mut BorsTester| {
-              ctx.approve(()).await?;
-              ctx.start_auto_build(()).await?;
-              let w1 = ctx.auto_workflow();
-              ctx.modify_workflow(w1, |w| w.set_duration(Duration::from_secs(4800)));
-              ctx.workflow_full_success(w1).await?;
-              ctx.run_merge_queue_until_merge_attempt().await;
+            ctx.approve(()).await?;
+            ctx.start_auto_build(()).await?;
+            let w1 = ctx.auto_workflow();
+            ctx.modify_workflow(w1, |w| w.set_duration(Duration::from_secs(4800)));
+            ctx.workflow_full_success(w1).await?;
+            ctx.run_merge_queue_until_merge_attempt().await;
 
-              insta::assert_snapshot!(
+            insta::assert_snapshot!(
                   ctx.get_next_comment_text(()).await?,
                   @r#"
               :sunny: Test successful - [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1)
@@ -825,23 +846,23 @@ merge_queue_enabled = false
               <!-- homu: {"type":"BuildCompleted","base_ref":"main","merge_sha":"merge-0-pr-1-d7d45f1f-reauthored-to-bors"} -->
               "#
               );
-              Ok(())
-          })
-          .await;
+            Ok(())
+        })
+            .await;
     }
 
     #[sqlx::test]
     async fn auto_build_success_comment_duration_all_units(pool: sqlx::PgPool) {
         // Test with hours, minutes and seconds (12345 seconds = 3h 25m 45s)
         run_test(pool, async |ctx: &mut BorsTester| {
-              ctx.approve(()).await?;
-              ctx.start_auto_build(()).await?;
-              let w1 = ctx.auto_workflow();
-              ctx.modify_workflow(w1, |w| w.set_duration(Duration::from_secs(12345)));
-              ctx.workflow_full_success(w1).await?;
-              ctx.run_merge_queue_until_merge_attempt().await;
+            ctx.approve(()).await?;
+            ctx.start_auto_build(()).await?;
+            let w1 = ctx.auto_workflow();
+            ctx.modify_workflow(w1, |w| w.set_duration(Duration::from_secs(12345)));
+            ctx.workflow_full_success(w1).await?;
+            ctx.run_merge_queue_until_merge_attempt().await;
 
-              insta::assert_snapshot!(
+            insta::assert_snapshot!(
                   ctx.get_next_comment_text(()).await?,
                   @r#"
               :sunny: Test successful - [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1)
@@ -851,23 +872,23 @@ merge_queue_enabled = false
               <!-- homu: {"type":"BuildCompleted","base_ref":"main","merge_sha":"merge-0-pr-1-d7d45f1f-reauthored-to-bors"} -->
               "#
               );
-              Ok(())
-          })
-          .await;
+            Ok(())
+        })
+            .await;
     }
 
     #[sqlx::test]
     async fn auto_build_success_comment_duration_seconds_only(pool: sqlx::PgPool) {
         // Test with just seconds (45 seconds)
         run_test(pool, async |ctx: &mut BorsTester| {
-              ctx.approve(()).await?;
-              ctx.start_auto_build(()).await?;
-              let w1 = ctx.auto_workflow();
-              ctx.modify_workflow(w1, |w| w.set_duration(Duration::from_secs(45)));
-              ctx.workflow_full_success(w1).await?;
-              ctx.run_merge_queue_until_merge_attempt().await;
+            ctx.approve(()).await?;
+            ctx.start_auto_build(()).await?;
+            let w1 = ctx.auto_workflow();
+            ctx.modify_workflow(w1, |w| w.set_duration(Duration::from_secs(45)));
+            ctx.workflow_full_success(w1).await?;
+            ctx.run_merge_queue_until_merge_attempt().await;
 
-              insta::assert_snapshot!(
+            insta::assert_snapshot!(
                   ctx.get_next_comment_text(()).await?,
                   @r#"
               :sunny: Test successful - [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1)
@@ -877,9 +898,9 @@ merge_queue_enabled = false
               <!-- homu: {"type":"BuildCompleted","base_ref":"main","merge_sha":"merge-0-pr-1-d7d45f1f-reauthored-to-bors"} -->
               "#
               );
-              Ok(())
-          })
-          .await;
+            Ok(())
+        })
+            .await;
     }
 
     #[sqlx::test]
@@ -1080,9 +1101,9 @@ merge_queue_enabled = false
             ctx.approve(()).await?;
             ctx.start_auto_build(()).await?;
             ctx
-               .modify_repo((), |repo| {
-                   repo.push_behaviour = BranchPushBehaviour::always_fail(BranchPushError::Conflict)
-               });
+                .modify_repo((), |repo| {
+                    repo.push_behaviour = BranchPushBehaviour::always_fail(BranchPushError::Conflict)
+                });
             ctx.workflow_full_success(ctx.auto_workflow()).await?;
             ctx.run_merge_queue_until_merge_attempt().await;
             insta::assert_snapshot!(
@@ -1090,8 +1111,8 @@ merge_queue_enabled = false
                 @":eyes: Test was successful, but fast-forwarding failed: this PR has conflicts with the `main` branch"
             );
             Ok(())
-       })
-       .await;
+        })
+            .await;
     }
 
     #[sqlx::test]
@@ -1110,8 +1131,8 @@ merge_queue_enabled = false
                 @":eyes: Test was successful, but fast-forwarding failed: the tested commit was behind the `main` branch"
             );
             Ok(())
-       })
-       .await;
+        })
+            .await;
     }
 
     #[sqlx::test]
@@ -1205,7 +1226,7 @@ merge_queue_enabled = false
                 .expect_mergeable_state(MergeableState::HasConflicts);
             Ok(())
         })
-        .await;
+            .await;
     }
 
     #[sqlx::test]
@@ -1228,7 +1249,7 @@ merge_queue_enabled = false
             ");
             Ok(())
         })
-        .await;
+            .await;
     }
 
     #[sqlx::test]
@@ -1265,7 +1286,7 @@ merge_queue_enabled = false
 
             Ok(())
         })
-        .await;
+            .await;
     }
 
     #[sqlx::test]
@@ -1527,7 +1548,7 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
 
             Ok(())
         })
-        .await;
+            .await;
     }
 
     #[sqlx::test]
@@ -1576,7 +1597,7 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
 
             Ok(())
         })
-        .await;
+            .await;
     }
 
     #[sqlx::test]
@@ -1724,7 +1745,7 @@ also include this pls"
                 .expect_status(PullRequestStatus::Merged);
             Ok(())
         })
-        .await;
+            .await;
     }
 
     #[sqlx::test]
@@ -1742,14 +1763,14 @@ also include this pls"
                 insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @":boom: Test timed out after `3600`s");
                 anyhow::Ok(())
             })
-            .await?;
+                .await?;
             // Ensure that the PR does not receive any more comments and that it is not tested again
             ctx.run_merge_queue_now().await;
             ctx.pr(()).await.expect_auto_build(|build| build.status == BuildStatus::Timeouted);
 
             Ok(())
         })
-        .await;
+            .await;
     }
 
     #[sqlx::test]
