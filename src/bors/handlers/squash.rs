@@ -3,7 +3,9 @@ use crate::bors::gitops_queue::{
     GitOpsCommand, GitOpsQueueSender, PullRequestId, PushCallback, PushCommand,
 };
 use crate::bors::handlers::{PullRequestData, unapprove_pr};
-use crate::bors::{CommandPrefix, Comment, RepositoryState, bors_commit_author};
+use crate::bors::{
+    CommandPrefix, Comment, RepositoryState, bors_commit_author, format_commit_message,
+};
 use crate::database::BuildStatus;
 use crate::github::api::CommitAuthor;
 use crate::github::api::operations::Commit;
@@ -119,8 +121,10 @@ pub(super) async fn command_squash(
     // Create the squashed commit on the source repository.
     // We take the parents of the first commit, and the tree of the last commit, to create the
     // squashed commit.
-    let commit_msg =
-        commit_message.unwrap_or_else(|| generate_squashed_commit_msg(&pr.github.title, &commits));
+    let commit_msg = match commit_message {
+        Some(msg) => format_commit_message(&msg),
+        None => generate_squashed_commit_msg(&pr.github.title, &commits),
+    };
     let commit = match repo_state
         .client
         .create_commit(
@@ -547,6 +551,34 @@ mod tests {
             ctx.run_gitop_queue().await?;
             ctx.expect_comments((), 2).await;
             insta::assert_snapshot!(ctx.pr(()).await.get_gh_pr().head_branch_copy().get_commit().message(), @"This is a squashed commit");
+
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn squash_long_message(pool: sqlx::PgPool) {
+        run_test((pool, squash_state()), async |ctx: &mut BorsTester| {
+            ctx.modify_pr_in_gh((), |pr| {
+                pr.add_commits(vec![Commit::from_sha("sha2")]);
+            });
+            ctx.approve(()).await?;
+            ctx.post_comment(
+                "@bors squash msg=\"This is a squashed commit.\n\nLorem ipsum dolor sit amet, \
+                consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et \
+                dolore\"",
+            )
+            .await?;
+            ctx.run_gitop_queue().await?;
+            ctx.expect_comments((), 1).await;
+            insta::assert_snapshot!(
+                ctx.pr(()).await.get_gh_pr().head_branch_copy().get_commit().message(),
+                @"This is a squashed commit
+
+                Lorem ipsum dolor sit amet,
+                "
+            );
 
             Ok(())
         })

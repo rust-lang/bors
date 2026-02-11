@@ -1689,6 +1689,48 @@ also include this pls"
     }
 
     #[sqlx::test]
+    async fn commit_message_reflow(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            ctx.edit_pr((), |pr| {
+                pr.description = "This is a very good PR, but it has a rather long description.
+
+Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut \
+labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris \
+nisi ut aliquip ex ea commodo consequat.
+
+Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla \
+pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt \
+mollit anim id est laborum.
+"
+                .to_string();
+            })
+            .await?;
+
+            ctx.approve(()).await?;
+            ctx.start_and_finish_auto_build(()).await?;
+
+            insta::assert_snapshot!(ctx.auto_branch().get_commit().message(), @"
+            Auto merge of #1 - default-user:pr/1, r=default-user
+
+            Title of PR 1
+
+            This is a very good PR, but it has a rather long description.
+
+            Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod
+            tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim
+            veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea
+            commodo consequat.
+
+            Duis aute irure dolor in reprehenderit in voluptate velit esse cillum
+            dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non
+            proident, sunt in culpa qui officia deserunt mollit anim id est laborum.
+            ");
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
     async fn cancel_try_again(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.approve(()).await?;
