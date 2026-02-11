@@ -101,6 +101,8 @@ pub(super) async fn command_squash(
         return Ok(());
     }
 
+    send_comment(":construction: Squashing... this can take a few minutes.".to_string()).await?;
+
     // Extract the first and last commits
     let first_commit = &commits[0];
     let last_commit = commits.last().unwrap();
@@ -376,6 +378,10 @@ mod tests {
             ctx.run_gitop_queue().await?;
             insta::assert_snapshot!(
                 ctx.get_next_comment_text(()).await?,
+                @":construction: Squashing... this can take a few minutes."
+            );
+            insta::assert_snapshot!(
+                ctx.get_next_comment_text(()).await?,
                 @":hammer: 2 commits were squashed into sha2-reauthored-to-git-user."
             );
             let branch = ctx.pr(()).await.get_gh_pr().head_branch_copy();
@@ -411,6 +417,10 @@ mod tests {
             ctx.run_gitop_queue().await?;
             insta::assert_snapshot!(
                 ctx.get_next_comment_text(()).await?,
+                @":construction: Squashing... this can take a few minutes."
+            );
+            insta::assert_snapshot!(
+                ctx.get_next_comment_text(()).await?,
                 @":hammer: 2 commits were squashed into foo-reauthored-to-git-user."
             );
 
@@ -429,6 +439,10 @@ mod tests {
 
             insta::assert_snapshot!(
                 ctx.get_next_comment_text(()).await?,
+                @":construction: Squashing... this can take a few minutes."
+            );
+            insta::assert_snapshot!(
+                ctx.get_next_comment_text(()).await?,
                 @":hourglass: This PR already has a pending git operation in progress, please wait until it is completed."
             );
 
@@ -444,14 +458,14 @@ mod tests {
 
             ctx.post_comment("@bors squash").await?;
             ctx.run_gitop_queue().await?;
-            ctx.expect_comments((), 1).await;
+            ctx.expect_comments((), 2).await;
             let branch = ctx.pr(()).await.get_gh_pr().head_branch_copy();
             assert_eq!(branch.get_commits().len(), 1);
 
             ctx.modify_pr_in_gh((), |pr| pr.add_commits(vec![Commit::from_sha("bar")]));
             ctx.post_comment("@bors squash").await?;
             ctx.run_gitop_queue().await?;
-            ctx.expect_comments((), 1).await;
+            ctx.expect_comments((), 2).await;
             let branch = ctx.pr(()).await.get_gh_pr().head_branch_copy();
             assert_eq!(branch.get_commits().len(), 1);
 
@@ -479,6 +493,13 @@ mod tests {
             ctx.post_comment(Comment::new(pr2.id(), "@bors squash")).await?;
             ctx.post_comment(Comment::new(pr3.id(), "@bors squash")).await?;
             ctx.post_comment(Comment::new(pr4.id(), "@bors squash")).await?;
+            ctx.expect_comments((), 1).await;
+            ctx.expect_comments(pr2.id(), 1).await;
+            ctx.expect_comments(pr3.id(), 1).await;
+            insta::assert_snapshot!(
+                ctx.get_next_comment_text(pr4.id()).await?,
+                @":construction: Squashing... this can take a few minutes."
+            );
             insta::assert_snapshot!(
                 ctx.get_next_comment_text(pr4.id()).await?,
                 @":hourglass: There are too many git operations in progress at the moment. Please try again a few minutes later."
@@ -498,6 +519,10 @@ mod tests {
             ctx.approve(()).await?;
             ctx.post_comment("@bors squash").await?;
             ctx.run_gitop_queue().await?;
+            insta::assert_snapshot!(
+                ctx.get_next_comment_text(()).await?,
+                @":construction: Squashing... this can take a few minutes."
+            );
             insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
             :hammer: 2 commits were squashed into sha2-reauthored-to-git-user.
 
@@ -520,7 +545,7 @@ mod tests {
             ctx.post_comment("@bors squash msg=\"This is a squashed commit\"")
                 .await?;
             ctx.run_gitop_queue().await?;
-            ctx.expect_comments((), 1).await;
+            ctx.expect_comments((), 2).await;
             insta::assert_snapshot!(ctx.pr(()).await.get_gh_pr().head_branch_copy().get_commit().message(), @"This is a squashed commit");
 
             Ok(())
