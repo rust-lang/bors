@@ -293,6 +293,7 @@ pub fn approved_comment(
     reviewer: &str,
     unknown_reviewers: Vec<String>,
     tree_state: TreeState,
+    was_failed: bool,
 ) -> Comment {
     let approve_emoji = if is_holiday_season() {
         "star2"
@@ -306,6 +307,15 @@ It is now in the [queue]({web_url}/queue/{}) for this repository.
 ",
         repo.name()
     );
+
+    if was_failed {
+        writeln!(
+            comment,
+            "\nA failed build status on this PR was cleared due to the approval."
+        )
+        .unwrap();
+    }
+
     if !unknown_reviewers.is_empty() {
         writeln!(
             comment,
