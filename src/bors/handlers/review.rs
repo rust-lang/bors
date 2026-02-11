@@ -86,19 +86,56 @@ pub(super) async fn command_approve(
     db.approve(pr.db, approval_info, priority, rollup_mode)
         .await?;
 
+    let was_failed = pr
+        .db
+        .auto_build
+        .as_ref()
+        .map(|b| b.status.is_failure())
+        .unwrap_or(false);
+    // Re-approval should act as a retry
+    if was_failed {
+        db.clear_auto_build(pr.db).await?;
+    }
+
     let priority = priority.or(pr.db.priority.map(|p| p as u32));
 
     merge_queue_tx.notify().await?;
-    notify_of_approval(
-        ctx,
-        &db,
-        &repo_state,
-        pr,
-        priority,
-        approver.as_str(),
-        unknown_reviewers,
-    )
-    .await?;
+
+    let mut tree_state = ctx
+        .db
+        .repo_db(repo_state.repository())
+        .await?
+        .map(|r| r.tree_state.clone())
+        .unwrap_or(TreeState::Open);
+
+    // If the PR has high enough priority, do not post the tree closed message
+    if let TreeState::Closed {
+        priority: tree_priority,
+        ..
+    } = &tree_state
+        && let Some(priority) = priority
+        && priority >= *tree_priority
+    {
+        tree_state = TreeState::Open;
+    }
+
+    repo_state
+        .client
+        .post_comment(
+            pr.db.number,
+            approved_comment(
+                ctx.get_web_url(),
+                repo_state.repository(),
+                &pr.github.head.sha,
+                &approver,
+                unknown_reviewers,
+                tree_state,
+                was_failed,
+            ),
+            &db,
+        )
+        .await?;
+
     handle_label_trigger(&repo_state, pr.github, LabelTrigger::Approved).await
 }
 
@@ -550,50 +587,6 @@ async fn notify_of_tree_open(
         .post_comment(
             pr_number,
             Comment::new("Tree is now open for merging.".to_string()),
-            db,
-        )
-        .await?;
-    Ok(())
-}
-
-async fn notify_of_approval(
-    ctx: Arc<BorsContext>,
-    db: &PgDbClient,
-    repo: &RepositoryState,
-    pr: PullRequestData<'_>,
-    priority: Option<u32>,
-    approver: &str,
-    unknown_reviewers: Vec<String>,
-) -> anyhow::Result<()> {
-    let mut tree_state = ctx
-        .db
-        .repo_db(repo.repository())
-        .await?
-        .map(|r| r.tree_state.clone())
-        .unwrap_or(TreeState::Open);
-
-    // If the PR has high enough priority, do not post the tree closed message
-    if let TreeState::Closed {
-        priority: tree_priority,
-        ..
-    } = &tree_state
-        && let Some(priority) = priority
-        && priority >= *tree_priority
-    {
-        tree_state = TreeState::Open;
-    }
-
-    repo.client
-        .post_comment(
-            pr.db.number,
-            approved_comment(
-                ctx.get_web_url(),
-                repo.repository(),
-                &pr.github.head.sha,
-                approver,
-                unknown_reviewers,
-                tree_state,
-            ),
             db,
         )
         .await?;
@@ -1846,6 +1839,28 @@ labels_blocking_approval = ["proposed-final-comment-period", "final-comment-peri
             ctx.post_comment("@bors r+").await?;
             insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @":clipboard: This PR cannot be approved because it has merge conflicts. Please resolve the conflicts and try again.");
             ctx.pr(()).await.expect_unapproved();
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn reapprove_works_as_retry(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            ctx.approve(()).await?;
+            ctx.start_auto_build(()).await?;
+            ctx.workflow_full_failure(ctx.auto_workflow()).await?;
+            ctx.expect_comments((), 1).await; // build failed
+            ctx.post_comment("@bors r+").await?;
+            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
+            :pushpin: Commit pr-1-sha has been approved by `default-user`
+
+            It is now in the [queue](https://bors-test.com/queue/borstest) for this repository.
+
+            A failed build status on this PR was cleared due to the approval.
+            ");
+            ctx.start_and_finish_auto_build(()).await?;
+
             Ok(())
         })
         .await;

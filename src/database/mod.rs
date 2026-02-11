@@ -309,6 +309,13 @@ pub enum BuildStatus {
 }
 
 impl BuildStatus {
+    pub fn is_failure(&self) -> bool {
+        match self {
+            BuildStatus::Failure | BuildStatus::Timeouted => true,
+            BuildStatus::Pending | BuildStatus::Success | BuildStatus::Cancelled => false,
+        }
+    }
+
     pub fn is_failure_or_cancel(&self) -> bool {
         match self {
             BuildStatus::Failure | BuildStatus::Cancelled | BuildStatus::Timeouted => true,
