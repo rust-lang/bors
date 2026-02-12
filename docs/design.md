@@ -32,7 +32,7 @@ each loaded repository.
 
 ## Sending commands
 The bot can be controlled by commands embedded within pull request comments on GitHub. The supported command list
-can be found [here](commands.md). Each command is delivered as a webhook to the bot, which parses it,
+can be found [here](https://bors-prod.rust-lang.net/help). Each command is delivered as a webhook to the bot, which parses it,
 executes it and usually posts the result/response back onto the corresponding PR as a comment.
 
 ### User permissions
