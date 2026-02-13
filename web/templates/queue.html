@@ -293,9 +293,7 @@ Average duration of recent auto builds: {{ format_duration(*average_build_durati
                     <a href="{{ repo_url }}/pull/{{ pr.number }}">{{ pr.number.0 }}</a>
                 </td>
                 <td class="status{% if pending_build.is_some() %} has-progress{% endif %}" data-status="{{ crate::templates::status_text(pr) }}"
-                    {%- if let Some(build) = pending_build -%}
-                    data-created-at="{{ build.created_at.timestamp_millis() }}"
-                    {%- endif -%}>
+                    {%- if let Some(build) = pending_build %} data-created-at="{{ build.created_at.timestamp_millis() }}"{% endif %}>
                     {%- if let Some(build) = pending_build -%}
                     {%- let progress_percent = calculate_progress_pct(build, *average_build_duration) -%}
                     <div class="progress-bar-bg"
