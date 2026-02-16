@@ -161,7 +161,7 @@
 use super::{BorsContext, PullRequestStatus, RepositoryState};
 use crate::PgDbClient;
 use crate::bors::comment::merge_conflict_comment;
-use crate::bors::handlers::unapprove_pr;
+use crate::bors::handlers::{RollupUnapproval, unapprove_pr};
 use crate::bors::labels::handle_label_trigger;
 use crate::database::{MergeableState, OctocrabMergeableState, PullRequestModel};
 use crate::github::{GithubRepoName, LabelTrigger, PullRequest, PullRequestNumber};
@@ -643,7 +643,14 @@ pub async fn update_pr_with_known_mergeability(
     let unapproved = if let MergeableState::HasConflicts = new_mergeable_state
         && db_pr.is_approved()
     {
-        unapprove_pr(repo, db, db_pr, gh_pr).await?;
+        unapprove_pr(
+            repo,
+            db,
+            db_pr,
+            gh_pr,
+            RollupUnapproval::PrAndRollups { comment_url: None },
+        )
+        .await?;
         true
     } else {
         false

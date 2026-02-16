@@ -429,8 +429,8 @@ mod tests {
     use crate::github::{GithubRepoName, PullRequestNumber};
     use crate::permissions::PermissionType;
     use crate::tests::{
-        ApiRequest, ApiResponse, BorsTester, Comment, GitHub, MergeBehavior, PullRequest, Repo,
-        User, default_repo_name, run_test,
+        ApiRequest, ApiResponse, BorsTester, Comment, Commit, GitHub, MergeBehavior, PullRequest,
+        Repo, User, default_repo_name, run_test,
     };
     use http::StatusCode;
     use std::collections::{HashMap, HashSet};
@@ -1061,6 +1061,32 @@ also include this pls"
             Ok(())
         })
         .await;
+    }
+
+    #[sqlx::test]
+    async fn rollup_unapprove_member_on_push(pool: sqlx::PgPool) {
+        run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
+            let pr2 = ctx.open_pr((), |_| {}).await?;
+            ctx.approve(pr2.id()).await?;
+            let pr3 = ctx.open_pr((), |_| {}).await?;
+            ctx.approve(pr3.id()).await?;
+
+            make_rollup(ctx, &[&pr2, &pr3])
+                .await?
+                .assert_status(StatusCode::SEE_OTHER);
+            ctx.approve(4).await?;
+
+            ctx.push_to_pr(pr3.id(), Commit::from_sha("foo")).await?;
+            insta::assert_snapshot!(ctx.get_next_comment_text(pr3.id()).await?, @":warning: A new commit `foo` was pushed to the branch, the PR will need to be re-approved.");
+            insta::assert_snapshot!(ctx.get_next_comment_text(4).await?, @"
+            PR #3, which is a member of this rollup, was unapproved.
+            This rollup was thus also unapproved.
+            ");
+
+            ctx.pr(4).await.expect_unapproved();
+            Ok(())
+        })
+            .await;
     }
 
     async fn make_rollup(

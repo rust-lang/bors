@@ -2,7 +2,7 @@ use crate::PgDbClient;
 use crate::bors::gitops_queue::{
     GitOpsCommand, GitOpsQueueSender, PullRequestId, PushCallback, PushCommand,
 };
-use crate::bors::handlers::{PullRequestData, unapprove_pr};
+use crate::bors::handlers::{PullRequestData, RollupUnapproval, unapprove_pr};
 use crate::bors::{CommandPrefix, Comment, RepositoryState, bors_commit_author};
 use crate::database::BuildStatus;
 use crate::github::api::CommitAuthor;
@@ -24,11 +24,11 @@ pub(super) async fn command_squash(
     gitops_queue: &GitOpsQueueSender,
 ) -> anyhow::Result<()> {
     let send_comment = async |text: String| {
-        repo_state
+        let comment = repo_state
             .client
             .post_comment(pr.number(), Comment::new(text), &db)
             .await?;
-        anyhow::Ok(())
+        anyhow::Ok(comment)
     };
 
     let is_reviewer = repo_state
@@ -101,7 +101,9 @@ pub(super) async fn command_squash(
         return Ok(());
     }
 
-    send_comment(":construction: Squashing... this can take a few minutes.".to_string()).await?;
+    let notify_comment =
+        send_comment(":construction: Squashing... this can take a few minutes.".to_string())
+            .await?;
 
     // Extract the first and last commits
     let first_commit = &commits[0];
@@ -191,7 +193,16 @@ pub(super) async fn command_squash(
                 return Ok(());
             };
             let unapproved = if pr_model.is_approved() {
-                unapprove_pr(&repo_state, &db, &pr_model, &pr_github).await?;
+                unapprove_pr(
+                    &repo_state,
+                    &db,
+                    &pr_model,
+                    &pr_github,
+                    RollupUnapproval::PrAndRollups {
+                        comment_url: Some(notify_comment.html_url.to_string()),
+                    },
+                )
+                .await?;
                 true
             } else {
                 false
