@@ -13,7 +13,7 @@ use crate::bors::comment::{
     auto_build_push_failed_comment, auto_build_started_comment, auto_build_succeeded_comment,
     unapproved_because_of_sha_mismatch_comment,
 };
-use crate::bors::handlers::unapprove_pr;
+use crate::bors::handlers::{RollupUnapproval, unapprove_pr};
 use crate::bors::mergeability_queue::{MergeabilityQueueSender, update_pr_with_known_mergeability};
 use crate::bors::{AUTO_BRANCH_NAME, PullRequestStatus, RepositoryState};
 use crate::database::{
@@ -434,7 +434,14 @@ async fn handle_start_auto_build(
             // The PR head SHA does not match the approved SHA.
             // This should only happen if we missed a PR push webhook (which would normally unapprove
             // the PR). Let's unapprove it here instead to unblock the queue.
-            unapprove_pr(repo, &ctx.db, pr, &gh_pr).await?;
+            unapprove_pr(
+                repo,
+                &ctx.db,
+                pr,
+                &gh_pr,
+                RollupUnapproval::PrAndRollups { comment_url: None },
+            )
+            .await?;
             repo.client
                 .post_comment(
                     pr.number,

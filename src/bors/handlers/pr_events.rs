@@ -6,9 +6,9 @@ use crate::bors::event::{
 };
 
 use crate::bors::comment::CommentTag;
-use crate::bors::handlers::handle_comment;
 use crate::bors::handlers::unapprove_pr;
 use crate::bors::handlers::workflow::{AutoBuildCancelReason, maybe_cancel_auto_build};
+use crate::bors::handlers::{RollupUnapproval, handle_comment};
 use crate::bors::mergeability_queue::{
     MergeabilityQueueSender, set_pr_mergeability_based_on_user_action,
 };
@@ -43,7 +43,7 @@ pub(super) async fn handle_pull_request_edited(
         return Ok(());
     }
 
-    unapprove_pr(&repo_state, &db, &pr_model, pr).await?;
+    unapprove_pr(&repo_state, &db, &pr_model, pr, RollupUnapproval::OnlyPr).await?;
     notify_of_edited_pr(&repo_state, &db, pr_number, &payload.pull_request.base.name).await
 }
 
@@ -80,7 +80,14 @@ pub(super) async fn handle_push_to_pull_request(
         .as_ref()
         .map(|b| b.status.is_failure_or_cancel())
         .unwrap_or(false);
-    unapprove_pr(&repo_state, &db, &pr_model, pr).await?;
+    unapprove_pr(
+        &repo_state,
+        &db,
+        &pr_model,
+        pr,
+        RollupUnapproval::PrAndRollups { comment_url: None },
+    )
+    .await?;
 
     // If we had an approved PR with a failed build, there's not much point in sending this warning
     if !had_failed_build {

@@ -16,12 +16,16 @@ use crate::bors::handlers::review::{
     command_approve, command_close_tree, command_open_tree, command_unapprove,
 };
 use crate::bors::handlers::trybuild::{command_try_build, command_try_cancel};
-use crate::bors::handlers::workflow::{handle_workflow_completed, handle_workflow_started};
+use crate::bors::handlers::workflow::{
+    AutoBuildCancelReason, handle_workflow_completed, handle_workflow_started,
+    maybe_cancel_auto_build,
+};
 use crate::bors::labels::handle_label_trigger;
 use crate::bors::mergeability_queue::set_pr_mergeability_based_on_user_action;
 use crate::bors::process::QueueSenders;
 use crate::bors::{
-    AUTO_BRANCH_NAME, BorsContext, CommandPrefix, Comment, RepositoryState, TRY_BRANCH_NAME,
+    AUTO_BRANCH_NAME, BorsContext, CommandPrefix, Comment, PullRequestStatus, RepositoryState,
+    TRY_BRANCH_NAME,
 };
 use crate::database::{DelegatedPermission, PullRequestModel};
 use crate::github::{GithubUser, LabelTrigger, PullRequest, PullRequestNumber};
@@ -37,7 +41,7 @@ use pr_events::{
 };
 use refresh::sync_pull_requests_state;
 use review::{command_delegate, command_set_priority, command_set_rollup, command_undelegate};
-use tracing::Instrument;
+use tracing::{Instrument, debug_span};
 
 mod autobuild;
 mod help;
@@ -46,10 +50,9 @@ mod ping;
 mod pr_events;
 mod refresh;
 mod review;
+mod squash;
 mod trybuild;
 mod workflow;
-
-mod squash;
 
 /// This function executes a single bors repository event
 pub async fn handle_bors_repository_event(
@@ -697,15 +700,163 @@ async fn has_permission(
     Ok(is_delegated)
 }
 
+pub enum RollupUnapproval {
+    /// If a given PR was contained in some rollup(s), unapprove them.
+    PrAndRollups {
+        /// Comment URL in which the member PR was unapproved.
+        comment_url: Option<String>,
+    },
+    /// Only unapprove the given PR.
+    OnlyPr,
+}
+
 /// Unapprove a PR in the DB and apply the corresponding label trigger.
+///
+/// Optionally also unapproves any rollups that contain this PR.
+/// Returns a list of unapproved rollups.
 pub async fn unapprove_pr(
     repo_state: &RepositoryState,
     db: &PgDbClient,
     pr_db: &PullRequestModel,
     pr_gh: &PullRequest,
-) -> anyhow::Result<()> {
+    rollup_unapproval: RollupUnapproval,
+) -> anyhow::Result<Vec<PullRequestNumber>> {
     db.unapprove(pr_db).await?;
-    handle_label_trigger(repo_state, pr_gh, LabelTrigger::Unapproved).await
+    handle_label_trigger(repo_state, pr_gh, LabelTrigger::Unapproved).await?;
+
+    let comment_url = match rollup_unapproval {
+        RollupUnapproval::PrAndRollups { comment_url } => comment_url,
+        RollupUnapproval::OnlyPr => return Ok(vec![]),
+    };
+
+    // Rollups that contain this PR
+    let rollups = db.find_rollups_for_member_pr(pr_db).await?;
+
+    // Rollups which we will include in the unapproval comment on this PR
+    let rollups_to_notify = rollups
+        .iter()
+        .filter(|rollup| rollup.status == PullRequestStatus::Open && rollup.is_approved())
+        .map(|rollup| rollup.number)
+        .collect::<Vec<_>>();
+
+    // Rollups that we actually unapprove. Note that we will unapprove even closed/draft rollups,
+    // though that should not be needed in practice.
+    let unapprove_rollup_futs = rollups
+        .into_iter()
+        .filter(|rollup| rollup.is_approved())
+        // Just a sanity check to avoid doing too much work here
+        .take(10)
+        .map(|rollup_db| {
+            let span = debug_span!("Unapproving rollup", rollup = rollup_db.number.0);
+            let db = db.clone();
+            let comment_url = comment_url.clone();
+            async move {
+                let rollup_pr = repo_state.client.get_pull_request(rollup_db.number).await?;
+
+                let auto_build_cancel_message = maybe_cancel_auto_build(
+                    &repo_state.client,
+                    &db,
+                    &rollup_db,
+                    AutoBuildCancelReason::Unapproval,
+                )
+                .await?;
+                unapprove_pr(
+                    repo_state,
+                    &db,
+                    &rollup_db,
+                    &rollup_pr,
+                    RollupUnapproval::OnlyPr,
+                )
+                .await?;
+
+                if let Some(comment) = unapproval_comment(
+                    &rollup_pr,
+                    UnapprovalCause::MemberPrUnapproved {
+                        member: pr_db.number,
+                        comment_url,
+                    },
+                    auto_build_cancel_message,
+                ) {
+                    repo_state
+                        .client
+                        .post_comment(rollup_db.number, comment, &db)
+                        .await?;
+                }
+                anyhow::Ok(())
+            }
+            .instrument(span)
+        });
+
+    for res in futures::future::join_all(unapprove_rollup_futs).await {
+        if let Err(error) = res {
+            tracing::error!("It was not possible to unapprove rollup: {error:?}");
+        }
+    }
+    Ok(rollups_to_notify)
+}
+
+pub enum UnapprovalCause {
+    /// The PR was directly unapproved with `@bors r-`.
+    DirectUnapproval {
+        /// The following rollups have been unapproved because they contain this PR.
+        unapproved_rollups: Vec<PullRequestNumber>,
+    },
+    /// A member of a rollup was unapproved.
+    MemberPrUnapproved {
+        member: PullRequestNumber,
+        comment_url: Option<String>,
+    },
+}
+
+pub fn unapproval_comment(
+    pr: &PullRequest,
+    cause: UnapprovalCause,
+    build_cancelled_msg: Option<String>,
+) -> Option<Comment> {
+    use itertools::Itertools;
+    use std::fmt::Write;
+
+    let mut comment = match cause {
+        UnapprovalCause::DirectUnapproval {
+            mut unapproved_rollups,
+        } => {
+            // Only send unapproval comment when a build was canceled, to avoid needless spam
+            if unapproved_rollups.is_empty() && build_cancelled_msg.is_none() {
+                return None;
+            }
+            let mut msg = format!("Commit {} has been unapproved.", pr.head.sha);
+            if !unapproved_rollups.is_empty() {
+                if let [rollup] = unapproved_rollups.as_slice() {
+                    write!(msg, "\n\nThis PR was contained in a rollup (#{rollup}), which was also unapproved.").unwrap();
+                } else {
+                    unapproved_rollups.sort();
+                    write!(msg, "\n\nThis PR was contained in the following rollups: {}. They were also unapproved.",
+                           unapproved_rollups.into_iter().map(|num| format!("#{num}")).join(", ")
+                    ).unwrap();
+                }
+            }
+            msg
+        }
+        UnapprovalCause::MemberPrUnapproved {
+            member,
+            comment_url,
+        } => {
+            format!(
+                r#"PR #{member}, which is a member of this rollup, was {}.
+This rollup was thus also unapproved."#,
+                if let Some(comment_url) = comment_url {
+                    format!("[unapproved]({comment_url})")
+                } else {
+                    "unapproved".to_owned()
+                }
+            )
+        }
+    };
+
+    if let Some(cancel_msg) = build_cancelled_msg {
+        write!(comment, "\n\n{cancel_msg}").unwrap();
+    }
+    Some(Comment::new(comment))
 }
 
 /// Is this branch interesting for the bot?
@@ -745,6 +896,6 @@ mod tests {
             insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @r#"Unknown command "foo". Run `@bors help` to see available commands."#);
             Ok(())
         })
-        .await;
+            .await;
     }
 }
