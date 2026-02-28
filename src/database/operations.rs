@@ -1334,6 +1334,28 @@ pub(crate) async fn get_pending_rollup_unrolls(
     .await
 }
 
+pub(crate) async fn find_rollup_for_perf_build(
+    executor: impl PgExecutor<'_>,
+    perf_build_id: PrimaryKey,
+) -> anyhow::Result<Option<PullRequestNumber>> {
+    measure_db_query("find_rollup_for_perf_build", || async {
+        let row = sqlx::query!(
+            r#"
+        SELECT pr.number AS rollup_number
+        FROM unrolled_commit uc
+            JOIN pull_request pr ON pr.id = uc.rollup
+        WHERE uc.perf_build_id = $1
+        LIMIT 1
+            "#,
+            perf_build_id
+        )
+        .fetch_optional(executor)
+        .await?;
+
+        Ok(row.map(|row| PullRequestNumber(row.rollup_number as u64)))
+    })
+    .await
+}
 
 pub(crate) async fn get_nonclosed_rollups(
     executor: impl PgExecutor<'_>,

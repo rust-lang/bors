@@ -1,5 +1,6 @@
 use crate::bors::command::CommandPrefix;
 use crate::bors::{FailedWorkflowRun, WorkflowRun};
+use crate::database::{PullRequestModel, RollupMemberModel};
 use crate::github::{GithubRepoName, PullRequestNumber};
 use crate::utils::text::pluralize;
 use crate::{TreeState, database::WorkflowStatus, github::CommitSha};
@@ -483,6 +484,76 @@ pub fn auto_build_push_failed_comment(error: &str) -> Comment {
     Comment::new(format!(
         ":eyes: Test was successful, but fast-forwarding failed: {error}"
     ))
+}
+
+pub fn rollup_perf_table_comment(
+    repository: &GithubRepoName,
+    base_sha: &CommitSha,
+    members: &[RollupMemberModel],
+    member_prs: &[PullRequestModel],
+) -> Comment {
+    let member_titles = member_prs
+        .iter()
+        .map(|pr| (pr.id, pr.title.as_str()))
+        .collect::<std::collections::HashMap<_, _>>();
+
+    let mut mapping = String::new();
+    for member in members {
+        let unrolled_commit = member
+            .unrolled_commit
+            .as_ref()
+            .expect("all rollup members should be unrolled before posting comment");
+
+        let commit_cell = match unrolled_commit.build.as_ref() {
+            Some(build) => {
+                let sha = &build.commit_sha;
+                format!("`{sha}`<br>([link](https://github.com/{repository}/commit/{sha}))",)
+            }
+            None => {
+                let head = format_commit_link(repository, member.rolled_up_sha.as_str(), true);
+                format!("❌ conflicts merging '{head}' into previous master ❌")
+            }
+        };
+
+        let message = member_titles
+            .get(&member.member_id)
+            .map(|title| format_rollup_member_message(title))
+            .unwrap_or("unknown".to_string())
+            .replace('|', "\\|");
+        writeln!(
+            &mut mapping,
+            "|#{pr}|{message}|{commit_cell}|",
+            pr = member.member_number
+        )
+        .unwrap();
+    }
+
+    let previous_master = format_commit_link(repository, base_sha.as_ref(), true);
+    Comment::new(format!(
+        "📌 Perf builds for each rolled up PR:\n\n\
+        | PR# | Message | Perf Build Sha |\n|----|----|:-----:|\n\
+        {mapping}\n\
+        *previous master*: {previous_master}\n\nIn the case of a perf regression, \
+        run the following command for each PR you suspect might be the cause: `@rust-timer build $SHA`"
+    ))
+}
+
+fn format_commit_link(repository: &GithubRepoName, sha: &str, truncate: bool) -> String {
+    let display = if truncate {
+        sha.chars().take(10).collect::<String>()
+    } else {
+        sha.to_string()
+    };
+    format!("[{display}](https://github.com/{repository}/commit/{sha})")
+}
+
+fn format_rollup_member_message(message: &str) -> String {
+    let truncated = message.chars().take(59).collect::<String>();
+    if message.chars().count() > 60 {
+        format!("{truncated}…")
+    } else {
+        message.to_string()
+    }
 }
 
 pub fn merge_conflict_comment(source: Option<PullRequestNumber>, was_unapproved: bool) -> Comment {

@@ -1,8 +1,8 @@
 use super::operations::{
     approve_pull_request, clear_auto_build, create_build, create_unrolled_commit, create_workflow,
     delegate_pull_request, delete_tagged_bot_comment, find_build, find_pr_by_build,
+    find_rollup_for_perf_build, find_rollups_for_member_pr, get_last_n_successful_auto_builds,
     get_nonclosed_pull_requests, get_pending_builds, get_pending_rollup_unrolls,
-    find_rollups_for_member_pr, get_last_n_successful_auto_builds,
     get_prs_with_stale_mergeability_or_approved, get_pull_request, get_repository,
     get_repository_by_name, get_rollup_member_prs, get_rollup_members, get_tagged_bot_comments,
     get_unrolled_commits, get_workflow_urls_for_build, get_workflows_for_build,
@@ -442,6 +442,13 @@ impl PgDbClient {
         repo: &GithubRepoName,
     ) -> anyhow::Result<Vec<PullRequestNumber>> {
         get_pending_rollup_unrolls(&self.pool, repo).await
+    }
+
+    pub async fn find_rollup_for_perf_build(
+        &self,
+        perf_build_id: PrimaryKey,
+    ) -> anyhow::Result<Option<PullRequestNumber>> {
+        find_rollup_for_perf_build(&self.pool, perf_build_id).await
     }
 
     /// Returns a map of rollup PR numbers to the set of member PR numbers that are part of that rollup.
