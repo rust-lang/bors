@@ -382,13 +382,13 @@ impl PgDbClient {
     pub async fn register_rollup_members(
         &self,
         rollup: &PullRequestModel,
-        members: &[PullRequestModel],
+        members: &[(PullRequestModel, CommitSha)],
     ) -> anyhow::Result<()> {
         let mut tx = self.pool.begin().await?;
-        for member in members {
+        for (member, rolled_up_sha) in members {
             assert_ne!(rollup.id, member.id);
             assert_eq!(rollup.repository, member.repository);
-            register_rollup_pr_member(&mut *tx, rollup, member).await?;
+            register_rollup_pr_member(&mut *tx, rollup, member, rolled_up_sha.0.as_str()).await?;
         }
         tx.commit().await?;
         Ok(())

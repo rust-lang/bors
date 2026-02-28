@@ -1096,15 +1096,17 @@ pub(crate) async fn register_rollup_pr_member(
     executor: impl PgExecutor<'_>,
     rollup: &PullRequestModel,
     member: &PullRequestModel,
+    rolled_up_sha: &str,
 ) -> anyhow::Result<()> {
     measure_db_query("register_rollup_pr_member", || async {
         sqlx::query!(
             r#"
-        INSERT INTO rollup_member (rollup, member)
-        VALUES ($1, $2)
+        INSERT INTO rollup_member (rollup, member, rolled_up_sha)
+        VALUES ($1, $2, $3)
         "#,
             rollup.id,
-            member.id
+            member.id,
+            rolled_up_sha,
         )
         .execute(executor)
         .await?;
