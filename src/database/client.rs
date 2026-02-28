@@ -394,6 +394,17 @@ impl PgDbClient {
         Ok(())
     }
 
+    pub async fn create_build(
+        &self,
+        repo: &GithubRepoName,
+        branch: &str,
+        kind: BuildKind,
+        commit_sha: CommitSha,
+        parent: CommitSha,
+    ) -> anyhow::Result<i32> {
+        create_build(&self.pool, repo, branch, kind, &commit_sha, &parent).await
+    }
+
     /// Returns a map of rollup PR numbers to the set of member PR numbers that are part of that rollup.
     /// Only returns non-closed rollup PRs.
     pub async fn get_nonclosed_rollups(
