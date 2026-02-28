@@ -28,8 +28,8 @@ pub async fn mock_pull_requests(
 ) {
     mock_pr_list(repo.clone(), github.clone(), mock_server).await;
     mock_pr(repo.clone(), github.clone(), mock_server).await;
-    mock_pr_create(repo.clone(), github, mock_server).await;
-    mock_pr_comments(repo.clone(), mock_server).await;
+    mock_pr_create(repo.clone(), github.clone(), mock_server).await;
+    mock_pr_comments(repo.clone(), github, mock_server).await;
     mock_pr_labels(repo.clone(), mock_server).await;
     mock_pr_commits(repo, mock_server).await;
 }
@@ -166,7 +166,11 @@ async fn mock_pr_list(
         .await;
 }
 
-async fn mock_pr_comments(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
+async fn mock_pr_comments(
+    repo: Arc<Mutex<Repo>>,
+    github: Arc<Mutex<GitHub>>,
+    mock_server: &MockServer,
+) {
     let repo_name = repo.lock().full_name();
     dynamic_mock_req(
         move |req: &Request, [pr_number]: [&str; 1]| {
@@ -188,6 +192,12 @@ async fn mock_pr_comments(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
             let comment = Comment::new((repo_name.clone(), pr_number), &comment_payload.body)
                 .with_author(User::bors_bot())
                 .with_ids(id, node_id);
+
+            {
+                let mut gh_state = github.lock();
+                gh_state.insert_comment(comment.clone());
+            }
+            pr.add_comment_to_history(comment.clone());
 
             // We cannot use `tx.blocking_send()`, because this function is actually called
             // from within an async task, but it is not async, so we also cannot use

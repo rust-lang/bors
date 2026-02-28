@@ -110,6 +110,17 @@ impl GitHub {
             .clone()
     }
 
+    pub fn insert_comment(&mut self, comment: Comment) {
+        assert_eq!(
+            self.comments.insert(
+                comment.node_id().expect("Comment without node ID"),
+                comment.clone()
+            ),
+            None,
+            "Duplicated comment {comment:?}"
+        );
+    }
+
     pub fn modify_comment<F: FnOnce(&mut Comment)>(&mut self, node_id: &str, func: F) {
         func(self.comments.get_mut(node_id).unwrap());
     }
@@ -206,31 +217,6 @@ impl GitHub {
             CommentMsg::Comment(comment) => comment,
             CommentMsg::Close => unreachable!(),
         };
-
-        {
-            let mut gh_state = state.lock();
-            {
-                let repo = gh_state
-                    .repos
-                    .get_mut(&id.repo)
-                    .unwrap_or_else(|| panic!("Repository `{}` not found", id.repo));
-                let mut repo = repo.lock();
-                let pr = repo
-                    .pull_requests
-                    .get_mut(&id.number)
-                    .expect("Pull request not found");
-                pr.add_comment_to_history(comment.clone());
-            }
-
-            assert_eq!(
-                gh_state.comments.insert(
-                    comment.node_id.clone().expect("Comment without node ID"),
-                    comment.clone()
-                ),
-                None,
-                "Duplicated comment {comment:?}"
-            );
-        }
 
         eprintln!(
             "Received comment on {}#{}: {}",
