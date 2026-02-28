@@ -29,6 +29,8 @@ pub enum CommentTag {
     TryBuildStarted,
     AutoBuildStarted,
     MergeConflict,
+    /// A squash operation was started on a PR.
+    SquashStarted,
 }
 
 impl Comment {

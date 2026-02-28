@@ -1,9 +1,12 @@
 use crate::PgDbClient;
+use crate::bors::comment::CommentTag;
 use crate::bors::gitops_queue::{
     GitOpsCommand, GitOpsQueueSender, PullRequestId, PushCallback, PushCommand,
 };
 use crate::bors::handlers::{PullRequestData, RollupUnapproval, unapprove_pr};
-use crate::bors::{CommandPrefix, Comment, RepositoryState, bors_commit_author};
+use crate::bors::{
+    CommandPrefix, Comment, RepositoryState, bors_commit_author, hide_tagged_comments,
+};
 use crate::database::BuildStatus;
 use crate::github::api::CommitAuthor;
 use crate::github::api::operations::Commit;
@@ -101,9 +104,15 @@ pub(super) async fn command_squash(
         return Ok(());
     }
 
-    let notify_comment =
-        send_comment(":construction: Squashing... this can take a few minutes.".to_string())
-            .await?;
+    let notify_comment = repo_state
+        .client
+        .post_comment(
+            pr.number(),
+            Comment::new(":construction: Squashing... this can take a few minutes.".to_string())
+                .with_tag(CommentTag::SquashStarted),
+            &db,
+        )
+        .await?;
 
     // Extract the first and last commits
     let first_commit = &commits[0];
@@ -219,6 +228,8 @@ pub(super) async fn command_squash(
                 .client
                 .post_comment(pr_number, Comment::new(msg), &db)
                 .await?;
+            // Hide previous "squash started" comments.
+            hide_tagged_comments(&repo_state, &db, &pr_model, CommentTag::SquashStarted).await?;
             Ok(())
         })
     });
@@ -286,6 +297,7 @@ fn validate_fork(
 #[cfg(test)]
 mod tests {
     use crate::github::GithubRepoName;
+    use crate::github::api::client::HideCommentReason;
     use crate::tests::{
         BorsTester, Comment, Commit, GitHub, PullRequest, Repo, User, default_repo_name, run_test,
     };
@@ -515,6 +527,25 @@ mod tests {
                 ctx.get_next_comment_text(pr4.id()).await?,
                 @":hourglass: There are too many git operations in progress at the moment. Please try again a few minutes later."
             );
+
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn squash_hide_squash_started_comment(pool: sqlx::PgPool) {
+        run_test((pool, squash_state()), async |ctx: &mut BorsTester| {
+            ctx.modify_pr_in_gh((), |pr| pr.add_commits(vec![Commit::from_sha("foo")]));
+            ctx.post_comment("@bors squash").await?;
+            let comment = ctx.get_next_comment(()).await?;
+            insta::assert_snapshot!(
+                comment.content(),
+                @":construction: Squashing... this can take a few minutes."
+            );
+            ctx.run_gitop_queue().await?;
+            ctx.expect_comments((), 1).await;
+            ctx.expect_hidden_comment(&comment, HideCommentReason::Outdated);
 
             Ok(())
         })
