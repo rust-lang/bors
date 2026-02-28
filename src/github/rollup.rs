@@ -34,10 +34,10 @@ pub struct OAuthCallbackQuery {
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
-struct OAuthRollupState {
-    pr_nums: Vec<u32>,
-    repo_name: String,
-    repo_owner: String,
+pub(crate) struct OAuthRollupState {
+    pub(crate) pr_nums: Vec<u32>,
+    pub(crate) repo_name: String,
+    pub(crate) repo_owner: String,
 }
 
 #[derive(Debug)]

@@ -371,3 +371,394 @@ async fn start_perf_build(
     Ok(())
 }
 
+#[cfg(test)]
+mod tests {
+    use super::TRY_PERF_MERGE_BRANCH_NAME;
+    use crate::bors::TRY_PERF_BRANCH_NAME;
+    use crate::github::rollup::OAuthRollupState;
+    use crate::github::{GithubRepoName, PullRequestNumber};
+    use crate::permissions::PermissionType;
+    use crate::tests::default_repo_name;
+    use crate::tests::{
+        ApiRequest, ApiResponse, BorsTester, GitHub, MergeBehavior, PullRequest, Repo, User,
+        run_test,
+    };
+    use http::StatusCode;
+
+    #[sqlx::test]
+    async fn unroll_succeeds_comment(pool: sqlx::PgPool) {
+        run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
+            let pr2 = ctx.open_pr((), |_| {}).await?;
+            let pr3 = ctx.open_pr((), |_| {}).await?;
+            ctx.approve(pr2.id()).await?;
+            ctx.approve(pr3.id()).await?;
+
+            let rollup = make_merged_rollup(ctx, &[&pr2, &pr3], |_| {}).await?;
+            ctx.wait_for_unroll_queue().await;
+
+            ctx.workflow_full_success(ctx.try_perf_workflow()).await?;
+            ctx.wait_for_unroll_queue().await;
+            ctx.workflow_full_success(ctx.try_perf_workflow()).await?;
+            ctx.wait_for_unroll_queue().await;
+
+            let comment = ctx.get_next_comment_text(rollup).await?;
+            insta::assert_snapshot!(comment, @r"
+            📌 Perf builds for each rolled up PR:
+
+            | PR# | Message | Perf Build Sha |
+            |----|----|:-----:|
+            |#2|Title of PR 2|`merge-0-pr-2-f836d7c8`<br>([link](https://github.com/rust-lang/borstest/commit/merge-0-pr-2-f836d7c8))|
+            |#3|Title of PR 3|`merge-1-pr-3-b409ae01`<br>([link](https://github.com/rust-lang/borstest/commit/merge-1-pr-3-b409ae01))|
+
+            *previous master*: [main-sha1](https://github.com/rust-lang/borstest/commit/main-sha1)
+
+            In the case of a perf regression, run the following command for each PR you suspect might be the cause: `@rust-timer build $SHA`
+            ");
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn unroll_perf_build_commit_message(pool: sqlx::PgPool) {
+        run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
+            let pr2 = ctx.open_pr((), |_| {}).await?;
+            ctx.approve(pr2.id()).await?;
+
+            let rollup = make_merged_rollup(ctx, &[&pr2], |_| {}).await?;
+            ctx.workflow_full_success(ctx.try_perf_workflow()).await?;
+            ctx.expect_comments(rollup, 1).await;
+
+            insta::assert_snapshot!(ctx.try_perf_branch().get_commit().message(), @"
+            Unrolled build for #2
+            Rollup merge of #2 - default-user:pr/2, r=default-user
+
+            Title of PR 2
+
+            Description of PR 2
+            ");
+
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn unroll_merge_conflict_comment(pool: sqlx::PgPool) {
+        run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
+            let pr2 = ctx.open_pr((), |_| {}).await?;
+            let pr3 = ctx.open_pr((), |_| {}).await?;
+            ctx.approve(pr2.id()).await?;
+            ctx.approve(pr3.id()).await?;
+
+            let rollup = make_merged_rollup(ctx, &[&pr2, &pr3], |repo| {
+                let mut n = 0;
+                repo.merge_behavior = MergeBehavior::Custom(Box::new(move || {
+                    n += 1;
+                    // Cause a conflict on the first member merge
+                    (n == 2).then_some(StatusCode::CONFLICT)
+                }));
+            })
+            .await?;
+
+            ctx.workflow_full_success(ctx.try_perf_workflow()).await?;
+            ctx.workflow_full_success(ctx.try_perf_workflow()).await?;
+
+            let comment = ctx.get_next_comment_text(rollup).await?;
+            insta::assert_snapshot!(comment, @r"
+            📌 Perf builds for each rolled up PR:
+
+            | PR# | Message | Perf Build Sha |
+            |----|----|:-----:|
+            |#2|Title of PR 2|`merge-0-pr-2-f836d7c8`<br>([link](https://github.com/rust-lang/borstest/commit/merge-0-pr-2-f836d7c8))|
+            |#3|Title of PR 3|❌ conflicts merging '[pr-3-sha](https://github.com/rust-lang/borstest/commit/pr-3-sha)' into previous master ❌|
+
+            *previous master*: [main-sha1](https://github.com/rust-lang/borstest/commit/main-sha1)
+
+            In the case of a perf regression, run the following command for each PR you suspect might be the cause: `@rust-timer build $SHA`
+            ");
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn try_perf_build_branch_history(pool: sqlx::PgPool) {
+        let gh = run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
+            let pr2 = ctx.open_pr((), |_| {}).await?;
+            let pr3 = ctx.open_pr((), |_| {}).await?;
+            ctx.approve(pr2.id()).await?;
+            ctx.approve(pr3.id()).await?;
+
+            let rollup = make_merged_rollup(ctx, &[&pr2, &pr3], |_| {}).await?;
+            ctx.wait_for_unroll_queue().await;
+            ctx.workflow_full_success(ctx.try_perf_workflow()).await?;
+            ctx.wait_for_unroll_queue().await;
+            ctx.workflow_full_success(ctx.try_perf_workflow()).await?;
+            ctx.wait_for_unroll_queue().await;
+            ctx.expect_comments(rollup, 1).await;
+
+            Ok(())
+        })
+        .await;
+
+        insta::assert_snapshot!(gh.get_sha_history(
+            (),
+            TRY_PERF_MERGE_BRANCH_NAME,
+        ), @"
+        main-sha1
+        merge-0-pr-2-f836d7c8
+        main-sha1
+        merge-1-pr-3-b409ae01
+        ");
+        insta::assert_snapshot!(gh.get_sha_history(
+            (),
+            TRY_PERF_BRANCH_NAME,
+        ), @"
+        merge-0-pr-2-f836d7c8
+        merge-1-pr-3-b409ae01
+        ");
+    }
+
+    #[sqlx::test]
+    async fn unroll_merge_conflict_records_unrolled_commit_without_build(pool: sqlx::PgPool) {
+        run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
+            let pr2 = ctx.open_pr((), |_| {}).await?;
+            ctx.approve(pr2.id()).await?;
+
+            let rollup = make_merged_rollup(ctx, &[&pr2], |repo| {
+                let mut n = 0;
+                repo.merge_behavior = MergeBehavior::Custom(Box::new(move || {
+                    n += 1;
+                    // Cause a conflict on the first member merge
+                    (n == 1).then_some(StatusCode::CONFLICT)
+                }));
+            })
+            .await?;
+            ctx.wait_for_unroll_queue().await;
+            ctx.expect_comments(rollup, 1).await;
+
+            let rollup_db = ctx
+                .db()
+                .get_pull_request(&default_repo_name(), rollup)
+                .await?
+                .expect("Rollup not found");
+            let rollup_members = ctx.db().get_rollup_members(rollup_db.id).await?;
+            assert!(
+                rollup_members
+                    .first()
+                    .expect("Rollup should have one member")
+                    .unrolled_commit
+                    .as_ref()
+                    .expect("Missing unrolled commit")
+                    .build
+                    .is_none()
+            );
+
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn unroll_inserts_member_build(pool: sqlx::PgPool) {
+        run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
+            let pr2 = ctx.open_pr((), |_| {}).await?;
+            ctx.approve(pr2.id()).await?;
+
+            let rollup = make_merged_rollup(ctx, &[&pr2], |_| {}).await?;
+            ctx.refresh_pending_unrolls().await;
+
+            let rollup_db = ctx
+                .db()
+                .get_pull_request(&default_repo_name(), rollup)
+                .await?
+                .expect("Rollup not found");
+            let rollup_members = ctx.db().get_rollup_members(rollup_db.id).await?;
+            assert!(
+                rollup_members
+                    .first()
+                    .expect("Rollup should have one member")
+                    .unrolled_commit
+                    .as_ref()
+                    .expect("Missing unrolled commit")
+                    .build
+                    .is_some()
+            );
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn recover_unroll_transient_error(pool: sqlx::PgPool) {
+        run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
+            let pr2 = ctx.open_pr((), |_| {}).await?;
+            let pr3 = ctx.open_pr((), |_| {}).await?;
+            ctx.approve(pr2.id()).await?;
+            ctx.approve(pr3.id()).await?;
+
+            let rollup = make_merged_rollup(ctx, &[&pr2, &pr3], |repo| {
+                let mut n = 0;
+                repo.merge_behavior = MergeBehavior::Custom(Box::new(move || {
+                    n += 1;
+                    // Fail from second merge onwards
+                    (n >= 2).then_some(StatusCode::INTERNAL_SERVER_ERROR)
+                }));
+            })
+            .await?;
+            ctx.wait_for_unroll_queue().await;
+
+            let rollup_db = ctx
+                .db()
+                .get_pull_request(&default_repo_name(), rollup)
+                .await?
+                .expect("Rollup not found");
+            let members = ctx.db().get_rollup_members(rollup_db.id).await?;
+            let member2 = members
+                .iter()
+                .find(|member| member.member_number == pr2.number())
+                .expect("PR should be in rollup");
+            let member3 = members
+                .iter()
+                .find(|member| member.member_number == pr3.number())
+                .expect("PR should be in rollup");
+
+            assert!(
+                member2
+                    .unrolled_commit
+                    .as_ref()
+                    .expect("Missing unrolled commit")
+                    .build
+                    .is_some()
+            );
+            assert!(member3.unrolled_commit.is_none());
+
+            ctx.modify_repo((), |repo| {
+                repo.merge_behavior = MergeBehavior::Succeed;
+            });
+            ctx.refresh_pending_unrolls().await;
+            ctx.refresh_pending_unrolls().await;
+
+            let members = ctx.db().get_rollup_members(rollup_db.id).await?;
+            assert_eq!(members.len(), 2);
+            assert!(members.iter().all(|member| {
+                member
+                    .unrolled_commit
+                    .as_ref()
+                    .and_then(|unrolled| unrolled.build.as_ref())
+                    .is_some()
+            }));
+
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn try_perf_build_concurrent_bors_instances(pool: sqlx::PgPool) {
+        run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
+            let pr2 = ctx.open_pr((), |_| {}).await?;
+            let pr3 = ctx.open_pr((), |_| {}).await?;
+            ctx.approve(pr2.id()).await?;
+            ctx.approve(pr3.id()).await?;
+
+            let rollup = make_merged_rollup(ctx, &[&pr2, &pr3], |_| {}).await?;
+
+            let concurrent_futs = (0..10)
+                .map(|_| async { ctx.refresh_pending_unrolls().await })
+                .collect::<Vec<_>>();
+            futures::future::join_all(concurrent_futs).await;
+
+            let rollup_db = ctx
+                .db()
+                .get_pull_request(&default_repo_name(), rollup)
+                .await?
+                .expect("Rollup not found");
+            let members = ctx.db().get_rollup_members(rollup_db.id).await?;
+
+            assert_eq!(members.len(), 2);
+            assert!(
+                members
+                    .iter()
+                    .all(|member| member.unrolled_commit.is_some())
+            );
+            assert_eq!(ctx.try_perf_branch().get_commit_history().len(), 2);
+
+            Ok(())
+        })
+        .await;
+    }
+
+    async fn make_rollup(
+        ctx: &mut BorsTester,
+        prs: &[&PullRequest],
+    ) -> anyhow::Result<ApiResponse> {
+        let prs = prs.iter().map(|pr| pr.number()).collect::<Vec<_>>();
+        ctx.api_request(rollup_request(
+            &rollup_user().name,
+            default_repo_name(),
+            &prs,
+        ))
+        .await
+    }
+
+    async fn make_merged_rollup(
+        ctx: &mut BorsTester,
+        prs: &[&PullRequest],
+        modify_repo: impl FnOnce(&mut Repo),
+    ) -> anyhow::Result<PullRequestNumber> {
+        let response = make_rollup(ctx, prs).await?;
+        let location = response.get_header("location");
+        let rollup: u64 = location
+            .rsplit('/')
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("Invalid rollup redirect URL: {location}"))?
+            .parse()?;
+        let pr_number = PullRequestNumber(rollup);
+        ctx.approve(pr_number).await?;
+        ctx.start_auto_build(pr_number).await?;
+        ctx.modify_repo((), modify_repo);
+        // We need GH to report the rollup as merged for unroll sanity checks,
+        // but cannot send the merged webhook here because it would set DB status
+        // to merged before `finish_auto_build` finalizes the merge.
+        ctx.modify_pr_in_gh(pr_number, |pr| pr.merge());
+        ctx.finish_auto_build(pr_number).await?;
+        Ok(pr_number)
+    }
+
+    fn rollup_state() -> GitHub {
+        let mut gh = GitHub::default();
+        let rolluper = rollup_user();
+        gh.add_user(rolluper.clone());
+        gh.get_repo(())
+            .lock()
+            .permissions
+            .users
+            .insert(rolluper.clone(), vec![PermissionType::Review]);
+
+        // Create fork
+        let mut repo = Repo::new(rolluper, fork_repo().name());
+        repo.fork = true;
+        gh.with_repo(repo)
+    }
+
+    fn rollup_user() -> User {
+        User::new(2000, "rolluper")
+    }
+
+    fn fork_repo() -> GithubRepoName {
+        GithubRepoName::new(&rollup_user().name, default_repo_name().name())
+    }
+
+    fn rollup_request(code: &str, repo: GithubRepoName, prs: &[PullRequestNumber]) -> ApiRequest {
+        let state = OAuthRollupState {
+            pr_nums: prs.iter().map(|v| v.0 as u32).collect(),
+            repo_name: repo.name().to_string(),
+            repo_owner: repo.owner().to_string(),
+        };
+        ApiRequest::get("/oauth/callback")
+            .query("code", code)
+            .query("state", &serde_json::to_string(&state).unwrap())
+    }
+}
