@@ -52,6 +52,7 @@ repository:
 - Reload the mergeability status of open PRs from GitHub.
 - Sync the status of PRs between the DB and GitHub.
 - Run the merge queue.
+- Refresh pending rollup unrolls.
 
 ## Concurrency
 The bot is currently listening for GitHub webhooks concurrently, however it handles all commands serially, to avoid
@@ -194,6 +195,17 @@ preventing the problem where two PRs pass tests independently but fail when comb
 
 Note that `automation/bors/auto-merge` should not have any CI workflows configured! These should be configured for the
 `automation/bors/auto` branch instead.
+
+## Try-perf builds
+When a rollup PR is merged, bors enqueues it into the unroll queue. For each rollup member, bors:
+- Uses the `rolled_up_sha` captured when the rollup was created.
+- Attempts to merge that member SHA onto the rollup base in `automation/bors/try-perf-merge`.
+- If merge succeeds, force-pushes the merge commit to `automation/bors/try-perf` and creates a `TryPerf` build record.
+- If merge conflicts, records an unrolled commit entry without a build.
+
+The final perf table comment is posted on the merged rollup PR only when all members have concluded:
+- member has an unrolled entry with no build (merge conflict), or
+- member has a `TryPerf` build that has finished.
 
 ## Recognizing that CI has succeeded/failed
 With [homu](https://github.com/rust-lang/homu) (the old bors implementation), GitHub actions CI running repositories had
