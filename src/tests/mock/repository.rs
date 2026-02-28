@@ -162,6 +162,12 @@ async fn mock_create_branch(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
                 None => {
                     // Create a new branch
                     repo.add_branch(Branch::new(branch_name, commit));
+                    // Enqueue this SHA explicitly so the next workflow run for this
+                    // branch targets it
+                    repo.workflow_commit_queue
+                        .entry(branch_name.to_string())
+                        .or_default()
+                        .push_back(sha.clone());
                 }
             }
 

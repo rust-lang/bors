@@ -11,7 +11,7 @@ use octocrab::models::pulls::MergeableState;
 use octocrab::models::workflows::Conclusion;
 use octocrab::models::{CheckSuiteId, JobId, RunId};
 use parking_lot::Mutex;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
@@ -258,10 +258,15 @@ impl GitHub {
     pub fn new_workflow(&mut self, repo: &GithubRepoName, branch: &str) -> RunId {
         let repo = self.get_repo(repo);
         let mut repo = repo.lock();
+        let queued_sha = repo
+            .workflow_commit_queue
+            .get_mut(branch)
+            .and_then(VecDeque::pop_front);
         let branch = repo.get_branch_by_name(branch).expect("Branch not found");
         self.workflow_run_id_counter += 1;
         let run_id = RunId(self.workflow_run_id_counter);
-        let workflow = WorkflowRun::new(run_id, branch);
+        // Use next queued SHA, otherwise use branch head to allow repeated runs for one commit.
+        let workflow = WorkflowRun::new(run_id, branch, queued_sha.unwrap_or_else(|| branch.sha()));
         repo.workflow_runs.push(workflow);
         run_id
     }
@@ -388,6 +393,8 @@ pub struct Repo {
     pub workflow_cancel_error: bool,
     /// All workflows that we know about from the side of the test.
     workflow_runs: Vec<WorkflowRun>,
+    /// Per-branch queue of SHAs when creating new workflow runs.
+    pub workflow_commit_queue: HashMap<String, VecDeque<String>>,
     pull_requests: HashMap<u64, PullRequest>,
     check_runs: Vec<CheckRunData>,
     /// Cause pull request fetch to fail.
@@ -411,6 +418,7 @@ impl Repo {
             workflows_cancelled_by_bors: vec![],
             workflow_cancel_error: false,
             workflow_runs: vec![],
+            workflow_commit_queue: HashMap::default(),
             pull_request_error: false,
             check_runs: vec![],
             push_behaviour: BranchPushBehaviour::default(),
@@ -489,10 +497,15 @@ impl Repo {
     }
 
     pub fn push_commit(&mut self, branch_name: &str, commit: Commit, force: bool) {
+        let sha = commit.sha().to_owned();
         self.create_commit(commit.clone());
         self.get_branch_by_name(branch_name)
             .expect("Pushing to a non-existing branch")
             .push_commit(commit, force);
+        self.workflow_commit_queue
+            .entry(branch_name.to_string())
+            .or_default()
+            .push_back(sha);
     }
 
     pub fn create_commit(&mut self, commit: Commit) {
@@ -1125,7 +1138,7 @@ pub struct WorkflowRun {
 }
 
 impl WorkflowRun {
-    fn new(run_id: RunId, branch: &Branch) -> Self {
+    fn new(run_id: RunId, branch: &Branch, head_sha: String) -> Self {
         Self {
             status: WorkflowStatus::Pending,
             name: "Workflow1".to_string(),
@@ -1133,7 +1146,7 @@ impl WorkflowRun {
             check_suite_id: CheckSuiteId(run_id.0),
             head_branch: branch.name().to_string(),
             jobs: vec![],
-            head_sha: branch.sha(),
+            head_sha,
             duration: Duration::from_secs(3600),
         }
     }
