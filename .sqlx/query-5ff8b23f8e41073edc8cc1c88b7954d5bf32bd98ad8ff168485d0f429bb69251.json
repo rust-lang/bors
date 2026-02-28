@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO unrolled_commit (rollup, member, perf_build_id)\n        VALUES ($1, $2, $3)\n        ON CONFLICT (rollup, member) DO NOTHING\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int4",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "5ff8b23f8e41073edc8cc1c88b7954d5bf32bd98ad8ff168485d0f429bb69251"
+}

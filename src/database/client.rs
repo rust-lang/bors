@@ -1,14 +1,16 @@
 use super::operations::{
-    approve_pull_request, clear_auto_build, create_build, create_workflow, delegate_pull_request,
-    delete_tagged_bot_comment, find_build, find_pr_by_build, find_rollups_for_member_pr,
-    get_last_n_successful_auto_builds, get_nonclosed_pull_requests, get_pending_builds,
+    approve_pull_request, clear_auto_build, create_build, create_unrolled_commit, create_workflow,
+    delegate_pull_request, delete_tagged_bot_comment, find_build, find_pr_by_build,
+    get_nonclosed_pull_requests, get_pending_builds, get_pending_rollup_unrolls,
+    find_rollups_for_member_pr, get_last_n_successful_auto_builds,
     get_prs_with_stale_mergeability_or_approved, get_pull_request, get_repository,
-    get_repository_by_name, get_tagged_bot_comments, get_workflow_urls_for_build,
-    get_workflows_for_build, insert_repo_if_not_exists, is_rollup, record_tagged_bot_comment,
-    set_pr_assignees, set_pr_mergeability_state, set_pr_priority, set_pr_rollup_mode,
-    set_pr_status, set_stale_mergeability_status_by_base_branch, unapprove_pull_request,
-    undelegate_pull_request, update_build, update_pr_try_build_id, update_workflow_status,
-    upsert_pull_request, upsert_repository,
+    get_repository_by_name, get_rollup_member_prs, get_rollup_members, get_tagged_bot_comments,
+    get_unrolled_commits, get_workflow_urls_for_build, get_workflows_for_build,
+    insert_repo_if_not_exists, is_rollup, record_tagged_bot_comment, set_pr_assignees,
+    set_pr_mergeability_state, set_pr_priority, set_pr_rollup_mode, set_pr_status,
+    set_stale_mergeability_status_by_base_branch, unapprove_pull_request, undelegate_pull_request,
+    update_build, update_pr_try_build_id, update_workflow_status, upsert_pull_request,
+    upsert_repository,
 };
 use super::{
     ApprovalInfo, DelegatedPermission, MergeableState, PrimaryKey, RunId, UpdateBuildParams,
@@ -22,8 +24,8 @@ use crate::database::operations::{
     get_nonclosed_rollups, register_rollup_pr_member, update_pr_auto_build_id,
 };
 use crate::database::{
-    BuildModel, CommentModel, PullRequestModel, RepoModel, TreeState, WorkflowModel,
-    WorkflowStatus, WorkflowType,
+    BuildModel, CommentModel, PullRequestModel, RepoModel, RollupMemberModel, TreeState,
+    UnrolledCommitModel, WorkflowModel, WorkflowStatus, WorkflowType,
 };
 use crate::github::PullRequestNumber;
 use crate::github::{CommitSha, GithubRepoName};
@@ -403,6 +405,43 @@ impl PgDbClient {
         parent: CommitSha,
     ) -> anyhow::Result<i32> {
         create_build(&self.pool, repo, branch, kind, &commit_sha, &parent).await
+    }
+
+    pub async fn create_unrolled_commit(
+        &self,
+        rollup: PrimaryKey,
+        member: PrimaryKey,
+        perf_build_id: Option<PrimaryKey>,
+    ) -> anyhow::Result<()> {
+        create_unrolled_commit(&self.pool, rollup, member, perf_build_id).await
+    }
+
+    pub async fn get_rollup_members(
+        &self,
+        rollup: PrimaryKey,
+    ) -> anyhow::Result<Vec<RollupMemberModel>> {
+        get_rollup_members(&self.pool, rollup).await
+    }
+
+    pub async fn get_rollup_member_prs(
+        &self,
+        rollup: PrimaryKey,
+    ) -> anyhow::Result<Vec<PullRequestModel>> {
+        get_rollup_member_prs(&self.pool, rollup).await
+    }
+
+    pub async fn get_unrolled_commits(
+        &self,
+        rollup: PrimaryKey,
+    ) -> anyhow::Result<Vec<UnrolledCommitModel>> {
+        get_unrolled_commits(&self.pool, rollup).await
+    }
+
+    pub async fn get_pending_rollup_unrolls(
+        &self,
+        repo: &GithubRepoName,
+    ) -> anyhow::Result<Vec<PullRequestNumber>> {
+        get_pending_rollup_unrolls(&self.pool, repo).await
     }
 
     /// Returns a map of rollup PR numbers to the set of member PR numbers that are part of that rollup.

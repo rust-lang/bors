@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT pr.number AS rollup_number\n        FROM pull_request pr\n        WHERE pr.repository = $1\n          AND pr.status = 'merged'\n          AND EXISTS (\n            SELECT 1\n            FROM rollup_member rm\n                LEFT JOIN unrolled_commit uc\n                    ON uc.rollup = rm.rollup AND uc.member = rm.member\n                LEFT JOIN build b\n                    ON b.id = uc.perf_build_id\n            WHERE rm.rollup = pr.id\n              AND (\n                uc.rollup IS NULL\n                OR (\n                    uc.perf_build_id IS NOT NULL\n                    AND b.status = $2\n                )\n              )\n          )\n        ORDER BY pr.number\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "rollup_number",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "1e36ee002d9f18c5b1f5249a1d81696565d3021d99a8e31e5d89b075eeb26be5"
+}

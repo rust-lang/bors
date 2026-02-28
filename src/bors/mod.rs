@@ -35,6 +35,7 @@ mod labels;
 pub mod merge_queue;
 pub mod mergeability_queue;
 pub mod process;
+pub mod unroll_queue;
 
 use crate::PgDbClient;
 use crate::bors::command::BorsCommand;
@@ -51,10 +52,14 @@ pub const AUTO_BRANCH_NAME: &str = "automation/bors/auto";
 /// This branch should run CI checks.
 pub const TRY_BRANCH_NAME: &str = "automation/bors/try";
 
+/// This branch should run CI checks for rollup-unrolled perf builds.
+pub const TRY_PERF_BRANCH_NAME: &str = "automation/bors/try-perf";
+
 #[derive(PartialEq, Eq, Copy, Clone, Debug)]
 pub enum BuildKind {
     Try,
     Auto,
+    TryPerf,
 }
 
 /// Format the bors command help in Markdown format.
@@ -148,6 +153,9 @@ pub static WAIT_FOR_MERGE_QUEUE_MERGE_ATTEMPT: TestSyncMarker = TestSyncMarker::
 /// The build queue has handled a workflow completed event.
 #[cfg(test)]
 pub static WAIT_FOR_WORKFLOW_COMPLETED_HANDLED: TestSyncMarker = TestSyncMarker::new();
+
+#[cfg(test)]
+pub static WAIT_FOR_UNROLL_QUEUE: TestSyncMarker = TestSyncMarker::new();
 
 #[cfg(not(test))]
 fn now() -> DateTime<Utc> {

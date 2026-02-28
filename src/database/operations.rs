@@ -10,8 +10,10 @@ use super::CommentModel;
 use super::DelegatedPermission;
 use super::MergeableState;
 use super::PullRequestModel;
+use super::RollupMemberModel;
 use super::RunId;
 use super::TreeState;
+use super::UnrolledCommitModel;
 use super::UpsertPullRequestParams;
 use super::WorkflowStatus;
 use super::WorkflowType;
@@ -29,6 +31,23 @@ use crate::github::GithubRepoName;
 use crate::github::PullRequestNumber;
 use crate::utils::timing::measure_db_query;
 use futures::TryStreamExt;
+
+#[derive(Debug)]
+struct RollupMemberRow {
+    member_id: PrimaryKey,
+    member_number: i64,
+    rolled_up_sha: String,
+    unrolled_rollup: Option<PrimaryKey>,
+    unrolled_member: Option<PrimaryKey>,
+    perf_build: Option<BuildModel>,
+}
+
+#[derive(Debug)]
+struct UnrolledCommitRow {
+    rollup: PrimaryKey,
+    member: PrimaryKey,
+    build: Option<BuildModel>,
+}
 
 pub(crate) async fn get_pull_request(
     executor: impl PgExecutor<'_>,
@@ -1114,6 +1133,207 @@ pub(crate) async fn register_rollup_pr_member(
     })
     .await
 }
+
+pub(crate) async fn create_unrolled_commit(
+    executor: impl PgExecutor<'_>,
+    rollup: PrimaryKey,
+    member: PrimaryKey,
+    perf_build_id: Option<PrimaryKey>,
+) -> anyhow::Result<()> {
+    measure_db_query("create_unrolled_commit", || async {
+        sqlx::query!(
+            r#"
+        INSERT INTO unrolled_commit (rollup, member, perf_build_id)
+        VALUES ($1, $2, $3)
+        ON CONFLICT (rollup, member) DO NOTHING
+        "#,
+            rollup,
+            member,
+            perf_build_id
+        )
+        .execute(executor)
+        .await?;
+
+        Ok(())
+    })
+    .await
+}
+
+pub(crate) async fn get_rollup_members(
+    executor: impl PgExecutor<'_>,
+    rollup: PrimaryKey,
+) -> anyhow::Result<Vec<RollupMemberModel>> {
+    measure_db_query("get_rollup_members", || async {
+        let rows = sqlx::query_as!(
+            RollupMemberRow,
+            r#"
+        SELECT
+            rm.member AS member_id,
+            member.number AS "member_number!: i64",
+            rm.rolled_up_sha,
+            uc.rollup AS "unrolled_rollup?",
+            uc.member AS "unrolled_member?",
+            perf_build AS "perf_build: BuildModel"
+        FROM rollup_member rm
+            JOIN pull_request member ON member.id = rm.member
+            LEFT JOIN unrolled_commit uc ON uc.rollup = rm.rollup AND uc.member = rm.member
+            LEFT JOIN build perf_build ON perf_build.id = uc.perf_build_id
+        WHERE rm.rollup = $1
+        ORDER BY member.number
+            "#,
+            rollup
+        )
+        .fetch_all(executor)
+        .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(|row| RollupMemberModel {
+                member_id: row.member_id,
+                member_number: PullRequestNumber(row.member_number as u64),
+                rolled_up_sha: row.rolled_up_sha,
+                unrolled_commit: match (row.unrolled_rollup, row.unrolled_member) {
+                    (Some(unrolled_rollup), Some(unrolled_member)) => Some(UnrolledCommitModel {
+                        rollup: unrolled_rollup,
+                        member: unrolled_member,
+                        build: row.perf_build,
+                    }),
+                    (None, None) => None,
+                    _ => unreachable!(
+                        "left join of unrolled_commit should produce both keys or neither"
+                    ),
+                },
+            })
+            .collect())
+    })
+    .await
+}
+
+pub(crate) async fn get_rollup_member_prs(
+    executor: impl PgExecutor<'_>,
+    rollup: PrimaryKey,
+) -> anyhow::Result<Vec<PullRequestModel>> {
+    measure_db_query("get_rollup_member_prs", || async {
+        let prs = sqlx::query_as!(
+            PullRequestModel,
+            r#"
+    SELECT
+        pr.id,
+        pr.repository as "repository: GithubRepoName",
+        pr.number as "number!: i64",
+        pr.title,
+        pr.author,
+        pr.assignees as "assignees: Assignees",
+        (
+            pr.approved_by,
+            pr.approved_sha
+        ) AS "approval_status!: ApprovalStatus",
+        pr.status as "status: PullRequestStatus",
+        pr.priority,
+        pr.rollup as "rollup: RollupMode",
+        pr.delegated_permission as "delegated_permission: DelegatedPermission",
+        pr.head_branch,
+        pr.base_branch,
+        pr.mergeable_state as "mergeable_state: MergeableState",
+        pr.mergeable_state_is_stale,
+        pr.created_at as "created_at: DateTime<Utc>",
+        try_build AS "try_build: BuildModel",
+        auto_build AS "auto_build: BuildModel"
+    FROM pull_request as pr
+    LEFT JOIN build AS try_build ON pr.try_build_id = try_build.id
+    LEFT JOIN build AS auto_build ON pr.auto_build_id = auto_build.id
+    WHERE pr.id IN (
+        SELECT member
+        FROM rollup_member
+        WHERE rollup = $1
+    )
+    ORDER BY pr.number
+    "#,
+            rollup
+        )
+        .fetch_all(executor)
+        .await?;
+        Ok(prs)
+    })
+    .await
+}
+
+pub(crate) async fn get_unrolled_commits(
+    executor: impl PgExecutor<'_>,
+    rollup: PrimaryKey,
+) -> anyhow::Result<Vec<UnrolledCommitModel>> {
+    measure_db_query("get_unrolled_commits", || async {
+        let rows = sqlx::query_as!(
+            UnrolledCommitRow,
+            r#"
+        SELECT
+            uc.rollup,
+            uc.member,
+            perf_build AS "build: BuildModel"
+        FROM unrolled_commit uc
+            LEFT JOIN build perf_build ON perf_build.id = uc.perf_build_id
+        WHERE uc.rollup = $1
+            "#,
+            rollup
+        )
+        .fetch_all(executor)
+        .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(|row| UnrolledCommitModel {
+                rollup: row.rollup,
+                member: row.member,
+                build: row.build,
+            })
+            .collect())
+    })
+    .await
+}
+
+pub(crate) async fn get_pending_rollup_unrolls(
+    executor: impl PgExecutor<'_>,
+    repo: &GithubRepoName,
+) -> anyhow::Result<Vec<PullRequestNumber>> {
+    measure_db_query("get_pending_rollup_unrolls", || async {
+        let rows = sqlx::query!(
+            r#"
+        SELECT pr.number AS rollup_number
+        FROM pull_request pr
+        WHERE pr.repository = $1
+          AND pr.status = 'merged'
+          AND EXISTS (
+            SELECT 1
+            FROM rollup_member rm
+                LEFT JOIN unrolled_commit uc
+                    ON uc.rollup = rm.rollup AND uc.member = rm.member
+                LEFT JOIN build b
+                    ON b.id = uc.perf_build_id
+            WHERE rm.rollup = pr.id
+              AND (
+                uc.rollup IS NULL
+                OR (
+                    uc.perf_build_id IS NOT NULL
+                    AND b.status = $2
+                )
+              )
+          )
+        ORDER BY pr.number
+            "#,
+            repo as &GithubRepoName,
+            BuildStatus::Pending as BuildStatus
+        )
+        .fetch_all(executor)
+        .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(|row| PullRequestNumber(row.rollup_number as u64))
+            .collect())
+    })
+    .await
+}
+
 
 pub(crate) async fn get_nonclosed_rollups(
     executor: impl PgExecutor<'_>,

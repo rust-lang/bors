@@ -415,6 +415,7 @@ impl sqlx::Encode<'_, sqlx::Postgres> for BuildKind {
         let tag = match self {
             Self::Try => "try",
             Self::Auto => "auto",
+            Self::TryPerf => "try-perf",
         };
         <&str as sqlx::Encode<sqlx::Postgres>>::encode(tag, buf)
     }
@@ -425,7 +426,47 @@ impl sqlx::Decode<'_, sqlx::Postgres> for BuildKind {
         match <&str as sqlx::Decode<sqlx::Postgres>>::decode(value)? {
             "try" => Ok(Self::Try),
             "auto" => Ok(Self::Auto),
+            "try-perf" => Ok(Self::TryPerf),
             kind => Err(format!("Unknown build kind: {kind}").into()),
+        }
+    }
+}
+
+/// A commit representing a rolled up PR as it had been merged into the base branch directly.
+#[derive(Debug)]
+pub struct UnrolledCommitModel {
+    /// ID of the rollup PR in `pull_request` table.
+    pub rollup: PrimaryKey,
+    /// ID of the member PR in `pull_request` table.
+    pub member: PrimaryKey,
+    /// Try-perf build for this rollup member. `None` when creation fails due to merge conflicts.
+    pub build: Option<BuildModel>,
+}
+
+/// Rollup member data needed by the unroll queue.
+#[derive(Debug)]
+pub struct RollupMemberModel {
+    /// ID of the member PR in `pull_request` table.
+    pub member_id: PrimaryKey,
+    /// The GitHub pull request number of the rollup member.
+    pub member_number: PullRequestNumber,
+    /// SHA that was rolled up from the member when the rollup was created.
+    pub rolled_up_sha: String,
+    /// Result of an unroll of this member.
+    pub unrolled_commit: Option<UnrolledCommitModel>,
+}
+
+impl RollupMemberModel {
+    /// Returns `true` if unroll processing for this member has finished.
+    pub fn has_unroll_concluded(&self) -> bool {
+        match self.unrolled_commit.as_ref() {
+            // If it has no `unrolled_commit`, it has not been processed yet
+            None => false,
+            Some(unrolled_commit) => unrolled_commit
+                .build
+                .as_ref()
+                .map(|build| build.status != BuildStatus::Pending)
+                .unwrap_or(true),
         }
     }
 }
