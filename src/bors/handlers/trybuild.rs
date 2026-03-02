@@ -4,6 +4,10 @@ use super::has_permission;
 use super::{PullRequestData, deny_request};
 use crate::PgDbClient;
 use crate::bors::build::{CancelBuildConclusion, CancelBuildError, cancel_build};
+use crate::bors::build::{
+    StartBuildCheckRun, StartBuildCommit, StartBuildContext, StartBuildError, StartBuildOutcome,
+    start_build,
+};
 use crate::bors::command::{CommandPrefix, Parent};
 use crate::bors::comment::try_build_cancelled_comment;
 use crate::bors::comment::try_build_cancelled_with_failed_workflow_cancel_comment;
@@ -12,20 +16,13 @@ use crate::bors::comment::{
     cant_find_last_parent_comment, merge_attempt_merge_conflict_comment, try_build_started_comment,
 };
 use crate::bors::{
-    MergeType, RepositoryState, TRY_BRANCH_NAME, bors_commit_author, create_merge_commit_message,
-    hide_tagged_comments,
+    BuildKind, MergeType, RepositoryState, TRY_BRANCH_NAME, bors_commit_author,
+    create_merge_commit_message, hide_tagged_comments,
 };
-use crate::database::{
-    BuildModel, BuildStatus, ExclusiveOperationOutcome, PullRequestModel, UpdateBuildParams,
-};
-use crate::github::api::client::{CheckRunOutput, GithubRepositoryClient};
-use crate::github::api::operations::ForcePush;
+use crate::database::{BuildModel, BuildStatus, ExclusiveOperationOutcome, PullRequestModel};
 use crate::github::{CommitSha, GithubUser, PullRequestNumber};
-use crate::github::{MergeResult, attempt_merge};
 use crate::permissions::PermissionType;
-use anyhow::{Context, anyhow};
-use octocrab::params::checks::CheckRunStatus;
-use tracing::log;
+use anyhow::Context;
 
 // This branch serves for preparing the final commit.
 // It will be reset to master and merged with the branch that should be tested.
@@ -92,74 +89,45 @@ pub(super) async fn command_try_build(
                 vec![]
             };
 
-            // First, create the merge commit, using a temporary message that will not reference/spam any
-            // issue.
-            match attempt_merge(
-                &repo.client,
-                TRY_MERGE_BRANCH_NAME,
-                &pr.github.head.sha,
-                &base_sha,
-                "merge commit",
+            let build_commit_result = start_build(
+                &db,
+                repo,
                 &proof,
+                StartBuildContext {
+                    merge_branch: TRY_MERGE_BRANCH_NAME.to_string(),
+                    ci_branch: TRY_BRANCH_NAME.to_string(),
+                    base_sha: base_sha.clone(),
+                    head_sha: pr.github.head.sha.clone(),
+                    build_kind: BuildKind::Try,
+                },
+                StartBuildCommit {
+                    message: create_merge_commit_message(pr, MergeType::Try { try_jobs: jobs }),
+                    author: bors_commit_author(),
+                },
+                StartBuildCheckRun {
+                    name: TRY_BUILD_CHECK_RUN_NAME.to_string(),
+                    title: "Bors try build".to_string(),
+                },
+                pr.db,
             )
-            .await?
-            {
-                MergeResult::Success(merged_commit) => {
-                    // Then, create the actual merge commit with an explicit author, so that we can override
-                    // the author information to the bors account, to keep compatibility with various tools
-                    // that depend on it.
-                    let merged_commit = repo
-                        .client
-                        .create_commit(
-                            &merged_commit.tree,
-                            &merged_commit.parents,
-                            &create_merge_commit_message(pr, MergeType::Try { try_jobs: jobs }),
-                            &bors_commit_author(),
-                        )
-                        .await?;
+            .await
+            .map_err(|error| match error {
+                StartBuildError::GithubError(error) | StartBuildError::DatabaseError(error) => {
+                    error
+                }
+            })?;
 
-                    // If the merge was succesful, run CI with merged commit
-                    let build_id =
-                        run_try_build(&repo.client, &db, pr.db, merged_commit.clone(), base_sha)
-                            .await?;
-
-                    // Create a check run to track the try build status in GitHub's UI.
-                    // This gets added to the PR's head SHA so GitHub shows UI in the checks tab and
-                    // the bottom of the PR.
-                    match repo
-                        .client
-                        .create_check_run(
-                            TRY_BUILD_CHECK_RUN_NAME,
-                            &pr.github.head.sha,
-                            CheckRunStatus::InProgress,
-                            CheckRunOutput {
-                                title: "Bors try build".to_string(),
-                                summary: "".to_string(),
-                            },
-                            &build_id.to_string(),
-                        )
-                        .await
-                    {
-                        Ok(check_run) => {
-                            db.update_build(
-                                build_id,
-                                UpdateBuildParams::default()
-                                    .check_run_id(check_run.id.into_inner() as i64),
-                            )
-                            .await?;
-                        }
-                        Err(error) => {
-                            // Check runs aren't critical, don't block progress if they fail
-                            log::error!("Cannot create check run: {error:?}");
-                        }
-                    }
-
+            match build_commit_result {
+                StartBuildOutcome::Success {
+                    build_commit_sha,
+                    build_id: _,
+                } => {
                     repo.client
                         .post_comment(
                             pr.number(),
                             try_build_started_comment(
                                 &pr.github.head.sha,
-                                &merged_commit,
+                                &build_commit_sha,
                                 bot_prefix,
                                 cancelled_workflow_urls,
                             ),
@@ -167,7 +135,7 @@ pub(super) async fn command_try_build(
                         )
                         .await?;
                 }
-                MergeResult::Conflict => {
+                StartBuildOutcome::MergeConflict => {
                     repo.client
                         .post_comment(
                             pr.number(),
@@ -176,7 +144,7 @@ pub(super) async fn command_try_build(
                         )
                         .await?;
                 }
-            };
+            }
             Ok(())
         })
         .await?;
@@ -211,26 +179,6 @@ async fn cancel_previous_try_build(
             Ok(vec![])
         }
     }
-}
-
-async fn run_try_build(
-    client: &GithubRepositoryClient,
-    db: &PgDbClient,
-    pr: &PullRequestModel,
-    commit_sha: CommitSha,
-    parent_sha: CommitSha,
-) -> anyhow::Result<i32> {
-    client
-        .set_branch_to_sha(TRY_BRANCH_NAME, &commit_sha, ForcePush::Yes)
-        .await
-        .map_err(|error| anyhow!("Cannot set try branch to main branch: {error:?}"))?;
-
-    let build_id = db
-        .attach_try_build(pr, TRY_BRANCH_NAME.to_string(), commit_sha, parent_sha)
-        .await?;
-
-    tracing::info!("Try build started");
-    Ok(build_id)
 }
 
 fn get_base_sha(pr_model: &PullRequestModel, parent: Option<Parent>) -> Option<CommitSha> {
