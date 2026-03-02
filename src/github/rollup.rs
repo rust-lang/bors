@@ -34,10 +34,10 @@ pub struct OAuthCallbackQuery {
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
-struct OAuthRollupState {
-    pr_nums: Vec<u32>,
-    repo_name: String,
-    repo_owner: String,
+pub(crate) struct OAuthRollupState {
+    pub(crate) pr_nums: Vec<u32>,
+    pub(crate) repo_name: String,
+    pub(crate) repo_owner: String,
 }
 
 #[derive(Debug)]
@@ -339,7 +339,7 @@ async fn create_rollup(
 
         match merge_attempt {
             Ok(_) => {
-                successes.push(pr);
+                successes.push((pr, head_sha));
             }
             Err(error) => match error {
                 MergeError::Conflict => {
@@ -357,7 +357,7 @@ async fn create_rollup(
     }
 
     let mut body = "Successful merges:\n\n".to_string();
-    for pr in &successes {
+    for (pr, _) in &successes {
         body.push_str(&format!(
             " - {}#{} ({})\n",
             gh_client.repository(),

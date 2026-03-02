@@ -1,7 +1,7 @@
 use crate::bors::{
     CommandPrefix, PullRequestStatus, RollupMode, WAIT_FOR_BUILD_QUEUE, WAIT_FOR_MERGE_QUEUE,
     WAIT_FOR_MERGE_QUEUE_MERGE_ATTEMPT, WAIT_FOR_MERGEABILITY_STATUS_REFRESH,
-    WAIT_FOR_PR_STATUS_REFRESH, WAIT_FOR_WEBHOOK_COMPLETED,
+    WAIT_FOR_PR_STATUS_REFRESH, WAIT_FOR_UNROLL_QUEUE, WAIT_FOR_WEBHOOK_COMPLETED,
 };
 use crate::database::{
     BuildModel, BuildStatus, DelegatedPermission, MergeableState, OctocrabMergeableState,
@@ -82,6 +82,7 @@ const COMMENT_RECEIVE_TIMEOUT: Duration = TEST_CONDITION_TIMEOUT;
 
 const TRY_BRANCH: &str = "automation/bors/try";
 const AUTO_BRANCH: &str = "automation/bors/auto";
+const TRY_PERF_BRANCH: &str = "automation/bors/try-perf";
 
 pub fn default_cmd_prefix() -> CommandPrefix {
     "@bors".to_string().into()
@@ -301,6 +302,10 @@ impl BorsTester {
         self.create_workflow(default_repo_name(), AUTO_BRANCH)
     }
 
+    pub fn try_perf_workflow(&self) -> RunId {
+        self.create_workflow(default_repo_name(), TRY_PERF_BRANCH)
+    }
+
     pub fn create_workflow<Id: Into<RepoIdentifier>>(&self, id: Id, branch: &str) -> RunId {
         let mut gh = self.github.lock();
         gh.new_workflow(&id.into().0, branch)
@@ -355,6 +360,14 @@ impl BorsTester {
         self.repo()
             .lock()
             .get_branch_by_name(AUTO_BRANCH)
+            .unwrap()
+            .clone()
+    }
+
+    pub fn try_perf_branch(&self) -> Branch {
+        self.repo()
+            .lock()
+            .get_branch_by_name(TRY_PERF_BRANCH)
             .unwrap()
             .clone()
     }
@@ -514,6 +527,29 @@ impl BorsTester {
         .unwrap();
     }
 
+    pub async fn refresh_pending_unrolls(&self) {
+        // Wait until the refresh is fully handled
+        wait_for_marker(
+            async || {
+                self.global_tx
+                    .send(BorsGlobalEvent::RefreshPendingUnrolls)
+                    .await
+                    .unwrap();
+                Ok(())
+            },
+            &WAIT_FOR_UNROLL_QUEUE,
+        )
+        .await
+        .unwrap();
+    }
+
+    /// Wait until a single unroll queue event has been processed.
+    pub async fn wait_for_unroll_queue(&self) {
+        tokio::time::timeout(SYNC_MARKER_TIMEOUT, WAIT_FOR_UNROLL_QUEUE.sync())
+            .await
+            .unwrap_or_else(|_| panic!("Timed out waiting for unroll queue"));
+    }
+
     /// Enqueue PRs with stale/unknown mergeability into the mergeability queue.
     pub async fn refresh_mergeability_queue(&self) {
         // Wait until the refresh is fully handled
@@ -570,9 +606,13 @@ impl BorsTester {
     pub async fn run_merge_queue_directly(&self) {
         wait_for_marker(
             async || {
-                merge_queue_tick(self.ctx.clone(), self.senders.mergeability_queue())
-                    .await
-                    .unwrap();
+                merge_queue_tick(
+                    self.ctx.clone(),
+                    self.senders.mergeability_queue(),
+                    self.senders.unroll_queue(),
+                )
+                .await
+                .unwrap();
                 Ok(())
             },
             &WAIT_FOR_MERGE_QUEUE,

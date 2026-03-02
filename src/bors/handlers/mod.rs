@@ -25,7 +25,7 @@ use crate::bors::mergeability_queue::set_pr_mergeability_based_on_user_action;
 use crate::bors::process::QueueSenders;
 use crate::bors::{
     AUTO_BRANCH_NAME, BorsContext, CommandPrefix, Comment, PullRequestStatus, RepositoryState,
-    TRY_BRANCH_NAME,
+    TRY_BRANCH_NAME, TRY_PERF_BRANCH_NAME,
 };
 use crate::database::{DelegatedPermission, PullRequestModel};
 use crate::github::{GithubUser, LabelTrigger, PullRequest, PullRequestNumber};
@@ -303,6 +303,19 @@ pub async fn handle_bors_global_event(
         }
         BorsGlobalEvent::ProcessMergeQueue => {
             senders.merge_queue().maybe_perform_tick().await?;
+        }
+        BorsGlobalEvent::RefreshPendingUnrolls => {
+            let span = tracing::info_span!("Refresh pending unrolls");
+            let outer_span = span.clone();
+            for_each_repo(&ctx, |repo| {
+                senders
+                    .unroll_queue()
+                    .refresh_pending_rollups(repo.repository().clone())
+                    .instrument(span.clone())
+                    .map_err(|e| e.into())
+            })
+            .instrument(outer_span)
+            .await?;
         }
     }
     Ok(())
@@ -861,7 +874,7 @@ This rollup was thus also unapproved."#,
 
 /// Is this branch interesting for the bot?
 fn is_bors_observed_branch(branch: &str) -> bool {
-    branch == TRY_BRANCH_NAME || branch == AUTO_BRANCH_NAME
+    branch == TRY_BRANCH_NAME || branch == AUTO_BRANCH_NAME || branch == TRY_PERF_BRANCH_NAME
 }
 
 #[cfg(test)]

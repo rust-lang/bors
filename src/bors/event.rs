@@ -73,6 +73,8 @@ pub enum BorsGlobalEvent {
     RefreshPullRequestState,
     /// Try to process the merge queue.
     ProcessMergeQueue,
+    /// Refresh pending unrolls.
+    RefreshPendingUnrolls,
 }
 
 #[derive(Debug)]

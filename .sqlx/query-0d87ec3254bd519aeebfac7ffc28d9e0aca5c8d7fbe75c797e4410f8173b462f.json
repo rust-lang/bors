@@ -1,0 +1,82 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            uc.rollup,\n            uc.member,\n            perf_build AS \"build: BuildModel\"\n        FROM unrolled_commit uc\n            LEFT JOIN build perf_build ON perf_build.id = uc.perf_build_id\n        WHERE uc.rollup = $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "rollup",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "member",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "build: BuildModel",
+        "type_info": {
+          "Custom": {
+            "name": "build",
+            "kind": {
+              "Composite": [
+                [
+                  "id",
+                  "Int4"
+                ],
+                [
+                  "repository",
+                  "Text"
+                ],
+                [
+                  "branch",
+                  "Text"
+                ],
+                [
+                  "commit_sha",
+                  "Text"
+                ],
+                [
+                  "status",
+                  "Text"
+                ],
+                [
+                  "parent",
+                  "Text"
+                ],
+                [
+                  "created_at",
+                  "Timestamptz"
+                ],
+                [
+                  "check_run_id",
+                  "Int8"
+                ],
+                [
+                  "kind",
+                  "Text"
+                ],
+                [
+                  "duration",
+                  "Interval"
+                ]
+              ]
+            }
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      null
+    ]
+  },
+  "hash": "0d87ec3254bd519aeebfac7ffc28d9e0aca5c8d7fbe75c797e4410f8173b462f"
+}

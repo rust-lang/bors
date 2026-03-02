@@ -18,8 +18,10 @@ use crate::bors::comment::{
 use crate::bors::event::WorkflowRunCompleted;
 use crate::bors::labels::handle_label_trigger;
 use crate::bors::merge_queue::MergeQueueSender;
+use crate::bors::unroll_queue::UnrollQueueSender;
 use crate::bors::{
-    BuildKind, FailedWorkflowRun, RepositoryState, elapsed_time_since, hide_tagged_comments,
+    BuildKind, Comment, FailedWorkflowRun, RepositoryState, elapsed_time_since,
+    hide_tagged_comments,
 };
 use crate::database::{
     BuildModel, BuildStatus, PullRequestModel, UpdateBuildParams, WorkflowStatus,
@@ -96,6 +98,7 @@ pub async fn handle_build_queue_event(
     ctx: Arc<BorsContext>,
     event: BuildQueueEvent,
     merge_queue_tx: MergeQueueSender,
+    unroll_queue_tx: UnrollQueueSender,
 ) -> anyhow::Result<()> {
     let db = &ctx.db;
     match event {
@@ -107,31 +110,28 @@ pub async fn handle_build_queue_event(
             let timeout = repo.config.load().timeout;
             for build in running_builds {
                 let handle = async {
-                    if let Some(pr) = db.find_pr_by_build(&build).await? {
-                        // First try to complete builds, and only then timeout then
-                        // Because if the bot was offline for some time, we want to first attempt to
-                        // actually finish the build, otherwise it might get instantly timeouted.
-                        if !maybe_complete_build(&repo, db, &build, &pr, &merge_queue_tx, None)
-                            .await?
-                        {
-                            maybe_timeout_build(&repo, db, &build, &pr, timeout).await?;
-                        }
-                    } else {
-                        // This is an orphaned build. It should never be created, unless we have some bug or
-                        // unexpected race condition in bors.
-                        // When we do encounter such a build, we can mark it as timeouted, as it is no longer
-                        // relevant.
-                        // Note that we could write an explicit query for finding these orphaned builds,
-                        // but that could be quite expensive. Instead we piggyback on the existing logic
-                        // for timed out builds; if a build is still pending and has no PR attached, then
-                        // there likely won't be any additional event that could mark it as finished.
-                        // So eventually all such builds will arrive here
-                        tracing::warn!(
-                            "Detected orphaned pending without a PR, marking it as timeouted: {build:?}"
-                        );
-                        db.update_build(
-                            build.id,
-                            UpdateBuildParams::default().status(BuildStatus::Timeouted),
+                    let pr = db.find_pr_by_build(&build).await?;
+                    // First try to complete builds, and only then timeout them.
+                    // Because if the bot was offline for some time, we want to first attempt to
+                    // actually finish the build, otherwise it might get instantly timeouted.
+                    if !maybe_complete_build(
+                        &repo,
+                        db,
+                        &build,
+                        pr.as_ref(),
+                        &merge_queue_tx,
+                        &unroll_queue_tx,
+                        None,
+                    )
+                    .await?
+                    {
+                        maybe_timeout_build(
+                            &repo,
+                            db,
+                            &build,
+                            pr.as_ref(),
+                            timeout,
+                            &unroll_queue_tx,
                         )
                         .await?;
                     }
@@ -157,16 +157,15 @@ pub async fn handle_build_queue_event(
                     tracing::warn!("Received workflow completed for an already completed build");
                     return Ok(());
                 }
-                let Some(pr) = db.find_pr_by_build(&build).await? else {
-                    return Ok(());
-                };
+                let pr = db.find_pr_by_build(&build).await?;
                 let repo = ctx.get_repo(&event.repository)?;
                 maybe_complete_build(
                     &repo,
                     db,
                     &build,
-                    &pr,
+                    pr.as_ref(),
                     &merge_queue_tx,
+                    &unroll_queue_tx,
                     Some(CompletionTrigger { error_context }),
                 )
                 .await?;
@@ -189,8 +188,9 @@ async fn maybe_timeout_build(
     repo: &RepositoryState,
     db: &PgDbClient,
     build: &BuildModel,
-    pr: &PullRequestModel,
+    pr: Option<&PullRequestModel>,
     timeout: Duration,
+    unroll_queue_tx: &UnrollQueueSender,
 ) -> anyhow::Result<()> {
     if elapsed_time_since(build.created_at) >= timeout {
         tracing::info!("Cancelling build {build:?}");
@@ -207,20 +207,36 @@ async fn maybe_timeout_build(
             }
         }
 
-        // Also handle label triggers
-        let trigger = match build.kind {
-            BuildKind::Try => LabelTrigger::TryBuildFailed,
-            BuildKind::Auto => LabelTrigger::AutoBuildFailed,
-        };
-        let gh_pr = repo.client.get_pull_request(pr.number).await?;
-        handle_label_trigger(repo, &gh_pr, trigger).await?;
+        match build.kind {
+            BuildKind::Try | BuildKind::Auto => {
+                let Some(pr) = pr else {
+                    return Ok(());
+                };
 
-        if let Err(error) = repo
-            .client
-            .post_comment(pr.number, build_timed_out_comment(timeout), db)
-            .await
-        {
-            tracing::error!("Could not send comment to PR {}: {error:?}", pr.number);
+                // Also handle label triggers
+                let trigger = match build.kind {
+                    BuildKind::Try => LabelTrigger::TryBuildFailed,
+                    BuildKind::Auto => LabelTrigger::AutoBuildFailed,
+                    BuildKind::TryPerf => unreachable!(),
+                };
+                let gh_pr = repo.client.get_pull_request(pr.number).await?;
+                handle_label_trigger(repo, &gh_pr, trigger).await?;
+
+                if let Err(error) = repo
+                    .client
+                    .post_comment(pr.number, build_timed_out_comment(timeout), db)
+                    .await
+                {
+                    tracing::error!("Could not send comment to PR {}: {error:?}", pr.number);
+                }
+            }
+            BuildKind::TryPerf => {
+                if let Some(rollup_number) = db.find_rollup_for_perf_build(build.id).await? {
+                    unroll_queue_tx
+                        .enqueue_rollup(build.repository.clone(), rollup_number)
+                        .await?;
+                }
+            }
         }
     }
     Ok(())
@@ -245,8 +261,9 @@ async fn maybe_complete_build(
     repo: &RepositoryState,
     db: &PgDbClient,
     build: &BuildModel,
-    pr: &PullRequestModel,
+    pr: Option<&PullRequestModel>,
     merge_queue_tx: &MergeQueueSender,
+    unroll_queue_tx: &UnrollQueueSender,
     completion_trigger: Option<CompletionTrigger>,
 ) -> anyhow::Result<bool> {
     assert_eq!(
@@ -306,7 +323,7 @@ async fn maybe_complete_build(
     // Either all workflow runs attached to the corresponding commit SHA are completed or there
     // was at least one failure.
     let build_succeeded = !has_failure;
-    let pr_num = pr.number;
+    let pr_num = pr.map(|pr| pr.number);
 
     let status = if build_succeeded {
         BuildStatus::Success
@@ -326,6 +343,7 @@ async fn maybe_complete_build(
         } else {
             LabelTrigger::AutoBuildFailed
         }),
+        BuildKind::TryPerf => None,
     };
 
     let compute_duration = || {
@@ -346,7 +364,7 @@ async fn maybe_complete_build(
             .duration(compute_duration()),
     )
     .await?;
-    if let Some(trigger) = trigger {
+    if let (Some(trigger), Some(pr_num)) = (trigger, pr_num) {
         let pr = repo.client.get_pull_request(pr_num).await?;
         handle_label_trigger(repo, &pr, trigger).await?;
     }
@@ -371,9 +389,17 @@ async fn maybe_complete_build(
     if build.kind == BuildKind::Auto {
         merge_queue_tx.notify().await?;
     }
+    // Enqueue rollup for unroll check
+    if build.kind == BuildKind::TryPerf
+        && let Some(rollup_number) = db.find_rollup_for_perf_build(build.id).await?
+    {
+        unroll_queue_tx
+            .enqueue_rollup(build.repository.clone(), rollup_number)
+            .await?;
+    }
 
     let comment_opt = if build_succeeded {
-        tracing::info!("Build succeeded for PR {pr_num}");
+        tracing::info!("Build succeeded for {:?} (kind={:?})", pr_num, build.kind);
 
         if build.kind == BuildKind::Try {
             Some(try_build_succeeded_comment(
@@ -386,45 +412,64 @@ async fn maybe_complete_build(
             None
         }
     } else {
-        tracing::info!("Build failed for PR {pr_num}");
+        tracing::info!("Build failed for {:?} (kind={:?})", pr_num, build.kind);
 
-        // Download failed jobs
-        let mut failed_workflow_runs: Vec<FailedWorkflowRun> = vec![];
-        for workflow_run in workflow_runs {
-            let failed_jobs = match get_failed_jobs(repo, workflow_run.id).await {
-                Ok(jobs) => jobs,
-                Err(error) => {
-                    tracing::error!(
-                        "Cannot download jobs for workflow run {}: {error:?}",
-                        workflow_run.id
-                    );
-                    vec![]
-                }
-            };
-            failed_workflow_runs.push(FailedWorkflowRun {
-                workflow_run,
-                failed_jobs,
-            })
+        if build.kind == BuildKind::TryPerf {
+            None
+        } else {
+            Some(build_failure_comment(repo, build, workflow_runs, completion_trigger).await)
         }
+    };
 
-        let error_context = completion_trigger.and_then(|t| t.error_context);
-        Some(build_failed_comment(
-            repo.repository(),
-            CommitSha(build.commit_sha.clone()),
-            failed_workflow_runs,
-            error_context,
-        ))
+    let Some(pr) = pr else {
+        return Ok(true);
     };
 
     let tag = match build.kind {
-        BuildKind::Try => CommentTag::TryBuildStarted,
-        BuildKind::Auto => CommentTag::AutoBuildStarted,
+        BuildKind::Try => Some(CommentTag::TryBuildStarted),
+        BuildKind::Auto => Some(CommentTag::AutoBuildStarted),
+        BuildKind::TryPerf => None,
     };
-    hide_tagged_comments(repo, db, pr, tag).await?;
+    if let Some(tag) = tag {
+        hide_tagged_comments(repo, db, pr, tag).await?;
+    }
 
     if let Some(comment) = comment_opt {
-        repo.client.post_comment(pr_num, comment, db).await?;
+        repo.client.post_comment(pr.number, comment, db).await?;
     }
 
     Ok(true)
+}
+
+async fn build_failure_comment(
+    repo: &RepositoryState,
+    build: &BuildModel,
+    workflow_runs: Vec<crate::bors::WorkflowRun>,
+    completion_trigger: Option<CompletionTrigger>,
+) -> Comment {
+    let mut failed_workflow_runs: Vec<FailedWorkflowRun> = vec![];
+    for workflow_run in workflow_runs {
+        let failed_jobs = match get_failed_jobs(repo, workflow_run.id).await {
+            Ok(jobs) => jobs,
+            Err(error) => {
+                tracing::error!(
+                    "Cannot download jobs for workflow run {}: {error:?}",
+                    workflow_run.id
+                );
+                vec![]
+            }
+        };
+        failed_workflow_runs.push(FailedWorkflowRun {
+            workflow_run,
+            failed_jobs,
+        })
+    }
+
+    let error_context = completion_trigger.and_then(|t| t.error_context);
+    build_failed_comment(
+        repo.repository(),
+        CommitSha(build.commit_sha.clone()),
+        failed_workflow_runs,
+        error_context,
+    )
 }

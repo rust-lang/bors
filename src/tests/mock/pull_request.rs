@@ -88,12 +88,15 @@ async fn mock_pr_create(
                 .expect("Fork not found")
                 .clone();
             assert!(fork.lock().fork);
-            let commit = fork
+            let source_commits = fork
                 .lock()
                 .get_branch_by_name(branch)
                 .expect("Fork PR source branch not found")
-                .get_commit()
-                .clone();
+                .get_commits()
+                .to_vec();
+            let (first_commit, rest_commits) = source_commits
+                .split_first()
+                .expect("Fork PR source branch has no commits");
 
             let pr_author = github
                 .lock()
@@ -107,7 +110,8 @@ async fn mock_pr_create(
             let pr = repo.add_pr(pr_author);
             pr.title = data.title;
             pr.description = data.body;
-            pr.reset_to_single_commit(commit);
+            pr.reset_to_single_commit(first_commit.clone());
+            pr.add_commits(rest_commits.to_vec());
             pr.base_branch = base_branch;
             ResponseTemplate::new(200)
                 .set_body_json(GitHubPullRequest::new(&github.lock(), pr.clone()))

@@ -1,8 +1,11 @@
 use crate::PgDbClient;
-use crate::bors::{RepositoryState, WorkflowRun};
-use crate::database::{BuildModel, BuildStatus, UpdateBuildParams, WorkflowModel};
-use crate::github::CommitSha;
-use crate::github::api::client::GithubRepositoryClient;
+use crate::bors::{BuildKind, RepositoryState, WorkflowRun};
+use crate::database::{
+    BuildModel, BuildStatus, ExclusiveLockProof, PullRequestModel, UpdateBuildParams, WorkflowModel,
+};
+use crate::github::api::client::{CheckRunOutput, GithubRepositoryClient};
+use crate::github::api::operations::{CommitAuthor, ForcePush};
+use crate::github::{CommitSha, MergeResult, attempt_merge};
 use octocrab::models::CheckRunId;
 use octocrab::models::workflows::{Conclusion, Job, Status};
 use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
@@ -166,4 +169,206 @@ pub async fn load_workflow_runs(
         }
     }
     Ok(workflow_runs)
+}
+
+/// Choose how the final build commit should be produced.
+pub enum StartBuildCommitStrategy {
+    /// Use the generated merge commit as-is.
+    UseMergeCommit { message: String },
+    /// Recreate the merge commit.
+    /// This is useful for overriding the author to the bors account, to keep
+    /// compatibility with tools that depend on it.
+    RecreateCommit {
+        message: String,
+        author: CommitAuthor,
+    },
+}
+
+pub struct StartBuildContext {
+    /// Temporary branch used for merge preparation.
+    pub merge_branch: String,
+    /// Branch where CI should run.
+    pub ci_branch: String,
+    /// Base branch SHA.
+    pub base_sha: CommitSha,
+    /// PR head SHA.
+    pub head_sha: CommitSha,
+    pub build_kind: BuildKind,
+}
+
+/// Check run shown in the GitHub UI checks tab.
+pub struct CheckRunConfig {
+    pub name: String,
+    pub title: String,
+}
+
+pub enum StartBuildOutcome {
+    Success {
+        build_commit_sha: CommitSha,
+        build_id: i32,
+    },
+    /// The merge between `head_sha` and `base_sha` had a conflict.
+    MergeConflict,
+}
+
+pub enum BuildStartError {
+    /// GitHub API error.
+    GithubError(anyhow::Error),
+    /// Database error while recording the started build.
+    DatabaseError(anyhow::Error),
+}
+
+/// Start a build by preparing a commit, pushing it to CI, and recording the build.
+///
+/// Steps:
+/// 1. Reset `merge_branch` to `base_sha` and merge `head_sha`.
+/// 2. Select the build commit:
+///    - use the merge commit as-is, or
+///    - recreate it with given author/message.
+/// 3. Push the selected commit to `ci_branch`.
+/// 4. Record the build.
+/// 5. Create and record a check run.
+pub async fn start_build(
+    db: &PgDbClient,
+    repo: &RepositoryState,
+    proof: &ExclusiveLockProof,
+    context: StartBuildContext,
+    commit_strategy: StartBuildCommitStrategy,
+    check_run_config: Option<CheckRunConfig>,
+    pr: Option<&PullRequestModel>,
+) -> Result<StartBuildOutcome, BuildStartError> {
+    let StartBuildContext {
+        merge_branch,
+        ci_branch,
+        base_sha,
+        head_sha,
+        build_kind,
+    } = context;
+
+    let (merge_message, recreate_commit) = match commit_strategy {
+        StartBuildCommitStrategy::UseMergeCommit { message } => (message, None),
+        StartBuildCommitStrategy::RecreateCommit { message, author } => {
+            ("merge commit".to_string(), Some((message, author)))
+        }
+    };
+
+    // First, create the merge result commit on the merge branch.
+    // The message used here comes from the selected commit strategy.
+    let merged_commit = match attempt_merge(
+        &repo.client,
+        &merge_branch,
+        &head_sha,
+        &base_sha,
+        &merge_message,
+        proof,
+    )
+    .await
+    .map_err(BuildStartError::GithubError)?
+    {
+        MergeResult::Success(commit) => commit,
+        MergeResult::Conflict => return Ok(StartBuildOutcome::MergeConflict),
+    };
+
+    // Then, choose the final build commit:
+    // - keep the generated merge commit as-is, or
+    // - create a new commit from the merge result with an explicit message/author.
+    let build_commit_sha = match recreate_commit {
+        None => merged_commit.sha,
+        Some((message, author)) => repo
+            .client
+            .create_commit(
+                &merged_commit.tree,
+                &merged_commit.parents,
+                &message,
+                &author,
+            )
+            .await
+            .map_err(|error| BuildStartError::GithubError(error.into()))?,
+    };
+
+    // Push the build commit to the CI branch where workflows run.
+    repo.client
+        .set_branch_to_sha(&ci_branch, &build_commit_sha, ForcePush::Yes)
+        .await
+        .map_err(|error| BuildStartError::GithubError(error.into()))?;
+
+    // Record the build.
+    let build_id = match build_kind {
+        BuildKind::Try => {
+            let pr = pr.expect("BuildKind::Try requires PR");
+            db.attach_try_build(
+                pr,
+                ci_branch.clone(),
+                build_commit_sha.clone(),
+                base_sha.clone(),
+            )
+            .await
+        }
+        BuildKind::Auto => {
+            let pr = pr.expect("BuildKind::Auto requires PR");
+            db.attach_auto_build(
+                pr,
+                ci_branch.clone(),
+                build_commit_sha.clone(),
+                base_sha.clone(),
+            )
+            .await
+        }
+        BuildKind::TryPerf => {
+            db.create_build(
+                repo.repository(),
+                &ci_branch,
+                BuildKind::TryPerf,
+                build_commit_sha.clone(),
+                base_sha.clone(),
+            )
+            .await
+        }
+    }
+    .map_err(BuildStartError::DatabaseError)?;
+
+    // Create a check run to track the build status in GitHub's UI.
+    // This gets added to the PR's head SHA so GitHub shows UI in the checks tab and
+    // the bottom of the PR.
+    if let Some(check_run_cfg) = check_run_config {
+        let check_run_result = repo
+            .client
+            .create_check_run(
+                &check_run_cfg.name,
+                &head_sha,
+                CheckRunStatus::InProgress,
+                CheckRunOutput {
+                    title: check_run_cfg.title,
+                    summary: "".to_string(),
+                },
+                &build_id.to_string(),
+            )
+            .await;
+        match check_run_result {
+            Ok(check_run) => {
+                let check_run_id = check_run.id.into_inner() as i64;
+                if let Err(error) = db
+                    .update_build(
+                        build_id,
+                        UpdateBuildParams::default().check_run_id(check_run_id),
+                    )
+                    .await
+                {
+                    tracing::error!(
+                        "Failed to update build {build_id} with check run id {check_run_id}: {error:?}"
+                    );
+                }
+            }
+            Err(error) => {
+                // Check runs are non-critical; the build has already started, so do not block
+                // progress if they fail.
+                tracing::error!("Failed to create check run: {error:?}");
+            }
+        }
+    }
+
+    Ok(StartBuildOutcome::Success {
+        build_commit_sha,
+        build_id,
+    })
 }

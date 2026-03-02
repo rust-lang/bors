@@ -1,7 +1,5 @@
 use anyhow::Context;
 use chrono::{DateTime, Utc};
-use octocrab::models::checks::CheckRun;
-use octocrab::params::checks::CheckRunStatus;
 use std::future::Future;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -9,21 +7,24 @@ use tracing::Instrument;
 
 use super::{MergeType, bors_commit_author, create_merge_commit_message};
 use crate::bors::build::load_workflow_runs;
+use crate::bors::build::{
+    BuildStartError, CheckRunConfig, StartBuildCommitStrategy, StartBuildContext,
+    StartBuildOutcome, start_build,
+};
 use crate::bors::comment::{
     auto_build_push_failed_comment, auto_build_started_comment, auto_build_succeeded_comment,
     unapproved_because_of_sha_mismatch_comment,
 };
 use crate::bors::handlers::{RollupUnapproval, unapprove_pr};
 use crate::bors::mergeability_queue::{MergeabilityQueueSender, update_pr_with_known_mergeability};
-use crate::bors::{AUTO_BRANCH_NAME, PullRequestStatus, RepositoryState};
+use crate::bors::unroll_queue::UnrollQueueSender;
+use crate::bors::{AUTO_BRANCH_NAME, BuildKind, PullRequestStatus, RepositoryState};
 use crate::database::{
     ApprovalInfo, BuildModel, BuildStatus, ExclusiveLockProof, ExclusiveOperationOutcome,
     MergeableState, PullRequestModel, QueueStatus, UpdateBuildParams,
 };
-use crate::github::api::client::CheckRunOutput;
 use crate::github::api::operations::{BranchUpdateError, ForcePush};
 use crate::github::{CommitSha, PullRequest, PullRequestNumber};
-use crate::github::{MergeResult, attempt_merge};
 use crate::utils::sort_queue::sort_queue_prs;
 use crate::{BorsContext, PgDbClient};
 
@@ -89,6 +90,7 @@ pub(super) const AUTO_BUILD_CHECK_RUN_NAME: &str = "Bors auto build";
 pub async fn merge_queue_tick(
     ctx: Arc<BorsContext>,
     mergeability_sender: &MergeabilityQueueSender,
+    unroll_queue_sender: &UnrollQueueSender,
 ) -> anyhow::Result<()> {
     let repos: Vec<Arc<RepositoryState>> = ctx.repositories.repositories();
 
@@ -103,8 +105,14 @@ pub async fn merge_queue_tick(
             .ensure_not_concurrent(
                 &format!("{}-auto-build", repo.repository()),
                 async |proof| {
-                    if let Err(error) =
-                        process_repository(&repo, &ctx, mergeability_sender, proof).await
+                    if let Err(error) = process_repository(
+                        &repo,
+                        &ctx,
+                        mergeability_sender,
+                        unroll_queue_sender,
+                        proof,
+                    )
+                    .await
                     {
                         tracing::error!("Error running merge queue for {repo_name}: {error:?}");
                     }
@@ -132,6 +140,7 @@ async fn process_repository(
     repo: &RepositoryState,
     ctx: &BorsContext,
     mergeability_sender: &MergeabilityQueueSender,
+    unroll_queue_sender: &UnrollQueueSender,
     proof: ExclusiveLockProof,
 ) -> anyhow::Result<()> {
     if !repo.config.load().merge_queue_enabled {
@@ -169,7 +178,16 @@ async fn process_repository(
                 #[cfg(test)]
                 crate::bors::WAIT_FOR_MERGE_QUEUE_MERGE_ATTEMPT.mark();
 
-                handle_successful_build(repo, ctx, pr, auto_build, approval_info, pr_num).await?;
+                handle_successful_build(
+                    repo,
+                    ctx,
+                    pr,
+                    auto_build,
+                    approval_info,
+                    pr_num,
+                    unroll_queue_sender,
+                )
+                .await?;
                 break;
             }
             QueueStatus::Approved(approval_info) => {
@@ -255,6 +273,7 @@ async fn handle_successful_build(
     auto_build: &BuildModel,
     approval_info: &ApprovalInfo,
     pr_num: PullRequestNumber,
+    unroll_queue_sender: &UnrollQueueSender,
 ) -> anyhow::Result<()> {
     let commit_sha = CommitSha(auto_build.commit_sha.clone());
     let workflow_runs = load_workflow_runs(repo, &ctx.db, auto_build)
@@ -304,6 +323,18 @@ async fn handle_successful_build(
         ctx.db
             .set_pr_status(&pr.repository, pr.number, PullRequestStatus::Merged)
             .await?;
+
+        if ctx.db.is_rollup(pr).await?
+            && let Err(error) = unroll_queue_sender
+                .enqueue_rollup(repo.repository().clone(), pr.number)
+                .await
+        {
+            tracing::error!(
+                "Cannot enqueue merged rollup #{} into unroll queue: {error}",
+                pr.number
+            );
+        }
+
         repo.client
             .post_comment(pr.number, comment, &ctx.db)
             .await?;
@@ -555,92 +586,51 @@ async fn start_auto_build(
 
     let auto_merge_commit_message = create_merge_commit_message(pr_data, MergeType::Auto);
 
-    // 1. Merge PR head with base branch on `AUTO_MERGE_BRANCH_NAME`
-    // Use a temporary message to not reference/spam any issue
-    let merged_commit = match attempt_merge(
-        client,
-        AUTO_MERGE_BRANCH_NAME,
-        &head_sha,
-        &base_sha,
-        "merge commit",
+    let build_commit_result = start_build(
+        &ctx.db,
+        repo,
         proof,
+        StartBuildContext {
+            merge_branch: AUTO_MERGE_BRANCH_NAME.to_string(),
+            ci_branch: AUTO_BRANCH_NAME.to_string(),
+            base_sha: base_sha.clone(),
+            head_sha: head_sha.clone(),
+            build_kind: BuildKind::Auto,
+        },
+        // Create the actual merge commit with an explicit author, so that we can override
+        // the author information to the bors account, to keep compatibility with various tools
+        // that depend on it.
+        StartBuildCommitStrategy::RecreateCommit {
+            message: auto_merge_commit_message,
+            author: bors_commit_author(),
+        },
+        Some(CheckRunConfig {
+            name: AUTO_BUILD_CHECK_RUN_NAME.to_string(),
+            title: AUTO_BUILD_CHECK_RUN_NAME.to_string(),
+        }),
+        Some(pr),
     )
     .await
-    {
-        Ok(MergeResult::Success(merged_commit)) => merged_commit,
-        Ok(MergeResult::Conflict) => return Err(StartAutoBuildError::MergeConflict(gh_pr)),
-        Err(error) => return Err(StartAutoBuildError::GitHubError(error)),
+    .map_err(|error| match error {
+        BuildStartError::GithubError(error) => StartAutoBuildError::GitHubError(error),
+        BuildStartError::DatabaseError(error) => StartAutoBuildError::DatabaseError(error),
+    })?;
+
+    let (build_commit_sha, _) = match build_commit_result {
+        StartBuildOutcome::Success {
+            build_commit_sha,
+            build_id,
+        } => (build_commit_sha, build_id),
+        StartBuildOutcome::MergeConflict => {
+            return Err(StartAutoBuildError::MergeConflict(gh_pr));
+        }
     };
-    // Then, create the actual merge commit with an explicit author, so that we can override
-    // the author information to the bors account, to keep compatibility with various tools
-    // that depend on it.
-    let merged_commit = repo
-        .client
-        .create_commit(
-            &merged_commit.tree,
-            &merged_commit.parents,
-            &auto_merge_commit_message,
-            &bors_commit_author(),
-        )
-        .await
-        .map_err(|error| StartAutoBuildError::GitHubError(anyhow::anyhow!("{error}")))?;
-
-    // 2. Push that merge commit to `AUTO_BRANCH_NAME` where CI runs
-    client
-        .set_branch_to_sha(AUTO_BRANCH_NAME, &merged_commit, ForcePush::Yes)
-        .await
-        .map_err(|e| StartAutoBuildError::GitHubError(e.into()))?;
-
-    // 3. Record the build in the database
-    let build_id = ctx
-        .db
-        .attach_auto_build(
-            pr,
-            AUTO_BRANCH_NAME.to_string(),
-            merged_commit.clone(),
-            base_sha,
-        )
-        .await
-        .map_err(StartAutoBuildError::DatabaseError)?;
 
     // After this point, this function will always return Ok,
     // since the auto build has been started and recorded in the DB.
 
-    // 4. Set GitHub check run to pending on PR head
-    match client
-        .create_check_run(
-            AUTO_BUILD_CHECK_RUN_NAME,
-            &head_sha,
-            CheckRunStatus::InProgress,
-            CheckRunOutput {
-                title: AUTO_BUILD_CHECK_RUN_NAME.to_string(),
-                summary: "".to_string(),
-            },
-            &build_id.to_string(),
-        )
-        .await
-    {
-        Ok(CheckRun { id, .. }) => {
-            tracing::info!("Created check run {id} for build {build_id}");
-
-            if let Err(error) = ctx
-                .db
-                .update_build(
-                    build_id,
-                    UpdateBuildParams::default().check_run_id(id.into_inner() as i64),
-                )
-                .await
-            {
-                tracing::error!("Failed to update database with build check run id {id}: {error:?}",)
-            };
-        }
-        Err(error) => {
-            tracing::error!("Failed to create check run: {error:?}");
-        }
-    }
-
     // 5. Post status comment
-    let comment = auto_build_started_comment(&head_sha, &merged_commit);
+    let comment = auto_build_started_comment(&head_sha, &build_commit_sha);
     if let Err(error) = client.post_comment(pr.number, comment, &ctx.db).await {
         tracing::error!("Failed to post auto build started comment: {error:?}");
     };
@@ -667,6 +657,7 @@ pub fn start_merge_queue(
     ctx: Arc<BorsContext>,
     max_interval: chrono::Duration,
     mergeability_sender: MergeabilityQueueSender,
+    unroll_queue_sender: UnrollQueueSender,
 ) -> (MergeQueueSender, impl Future<Output = ()>) {
     let (tx, mut rx) = mpsc::channel::<MergeQueueEvent>(1024);
     let sender = MergeQueueSender { inner: tx };
@@ -680,15 +671,17 @@ pub fn start_merge_queue(
             notified: &mut bool,
             last_executed_at: &mut DateTime<Utc>,
             mergeability_sender: &MergeabilityQueueSender,
+            unroll_queue_sender: &UnrollQueueSender,
         ) {
             *notified = false;
             *last_executed_at = Utc::now();
 
             let span = tracing::info_span!("MergeQueue");
             tracing::debug!("Processing merge queue");
-            if let Err(error) = merge_queue_tick(ctx.clone(), mergeability_sender)
-                .instrument(span.clone())
-                .await
+            if let Err(error) =
+                merge_queue_tick(ctx.clone(), mergeability_sender, unroll_queue_sender)
+                    .instrument(span.clone())
+                    .await
             {
                 // In tests, we want to panic on all errors.
                 #[cfg(test)]
@@ -712,6 +705,7 @@ pub fn start_merge_queue(
                         &mut notified,
                         &mut last_executed_at,
                         &mergeability_sender,
+                        &unroll_queue_sender,
                     )
                     .await;
                 }
@@ -723,6 +717,7 @@ pub fn start_merge_queue(
                             &mut notified,
                             &mut last_executed_at,
                             &mergeability_sender,
+                            &unroll_queue_sender,
                         )
                         .await;
                     }

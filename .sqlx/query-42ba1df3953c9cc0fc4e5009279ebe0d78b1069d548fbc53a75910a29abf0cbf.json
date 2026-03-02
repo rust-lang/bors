@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT pr.number AS rollup_number\n        FROM unrolled_commit uc\n            JOIN pull_request pr ON pr.id = uc.rollup\n        WHERE uc.perf_build_id = $1\n        LIMIT 1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "rollup_number",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "42ba1df3953c9cc0fc4e5009279ebe0d78b1069d548fbc53a75910a29abf0cbf"
+}

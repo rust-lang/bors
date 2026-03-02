@@ -37,6 +37,9 @@ const PR_STATE_PERIODIC_REFRESH: Duration = Duration::from_secs(60 * 15);
 /// some notification has happened in the meantime.
 const MERGE_QUEUE_CHECK_INTERVAL: Duration = Duration::from_secs(5);
 
+/// How often should the bot try to process the unroll queue.
+const UNROLL_QUEUE_CHECK_INTERVAL: Duration = Duration::from_secs(5);
+
 /// Longest duration between two ticks of the merge queue.
 const MERGE_QUEUE_MAX_INTERVAL: Duration = Duration::from_secs(30);
 
@@ -211,6 +214,7 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
             BorsGlobalEvent::RefreshPullRequestMergeability,
             BorsGlobalEvent::RefreshPendingBuilds,
             BorsGlobalEvent::ProcessMergeQueue,
+            BorsGlobalEvent::RefreshPendingUnrolls,
         ];
         for event in startup_events {
             refresh_tx.send(event).await?;
@@ -222,6 +226,7 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
         let mut mergeability_status_refresh = make_interval(MERGEABILITY_STATUS_INTERVAL);
         let mut prs_interval = make_interval(PR_STATE_PERIODIC_REFRESH);
         let mut merge_queue_interval = make_interval(MERGE_QUEUE_CHECK_INTERVAL);
+        let mut unroll_queue_interval = make_interval(UNROLL_QUEUE_CHECK_INTERVAL);
         loop {
             tokio::select! {
                 _ = config_refresh.tick() => {
@@ -241,6 +246,9 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
                 }
                 _ = merge_queue_interval.tick() => {
                     refresh_tx.send(BorsGlobalEvent::ProcessMergeQueue).await?;
+                }
+                _ = unroll_queue_interval.tick() => {
+                    refresh_tx.send(BorsGlobalEvent::RefreshPendingUnrolls).await?;
                 }
             }
         }

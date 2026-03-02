@@ -1,0 +1,100 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            rm.member AS member_id,\n            member.number AS \"member_number!: i64\",\n            rm.rolled_up_sha,\n            uc.rollup AS \"unrolled_rollup?\",\n            uc.member AS \"unrolled_member?\",\n            perf_build AS \"perf_build: BuildModel\"\n        FROM rollup_member rm\n            JOIN pull_request member ON member.id = rm.member\n            LEFT JOIN unrolled_commit uc ON uc.rollup = rm.rollup AND uc.member = rm.member\n            LEFT JOIN build perf_build ON perf_build.id = uc.perf_build_id\n        WHERE rm.rollup = $1\n        ORDER BY member.number\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "member_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "member_number!: i64",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "rolled_up_sha",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "unrolled_rollup?",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 4,
+        "name": "unrolled_member?",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 5,
+        "name": "perf_build: BuildModel",
+        "type_info": {
+          "Custom": {
+            "name": "build",
+            "kind": {
+              "Composite": [
+                [
+                  "id",
+                  "Int4"
+                ],
+                [
+                  "repository",
+                  "Text"
+                ],
+                [
+                  "branch",
+                  "Text"
+                ],
+                [
+                  "commit_sha",
+                  "Text"
+                ],
+                [
+                  "status",
+                  "Text"
+                ],
+                [
+                  "parent",
+                  "Text"
+                ],
+                [
+                  "created_at",
+                  "Timestamptz"
+                ],
+                [
+                  "check_run_id",
+                  "Int8"
+                ],
+                [
+                  "kind",
+                  "Text"
+                ],
+                [
+                  "duration",
+                  "Interval"
+                ]
+              ]
+            }
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      null
+    ]
+  },
+  "hash": "23b8d49e4185c0ee311392d02aacb15a070db8bdbd3400d0be7162185ac7419e"
+}

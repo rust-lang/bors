@@ -8,6 +8,9 @@ use crate::bors::merge_queue::{MergeQueueSender, start_merge_queue};
 use crate::bors::mergeability_queue::{
     MergeabilityQueueReceiver, MergeabilityQueueSender, create_mergeability_queue,
 };
+use crate::bors::unroll_queue::{
+    UnrollQueueReceiver, UnrollQueueSender, create_unroll_queue, handle_unroll_queue_event,
+};
 use crate::bors::{handle_bors_global_event, handle_bors_repository_event};
 use crate::{BorsContext, BorsGlobalEvent, BorsRepositoryEvent, TeamApiClient};
 use anyhow::Error;
@@ -45,10 +48,12 @@ pub fn create_bors_process(
     let (mergeability_queue_tx, mergeability_queue_rx) = create_mergeability_queue();
     let (gitops_queue_tx, gitops_queue_rx) = create_gitops_queue(ctx.get_git());
 
+    let (unroll_queue_tx, unroll_queue_rx) = create_unroll_queue();
     let (merge_queue_tx, merge_queue_fut) = start_merge_queue(
         ctx.clone(),
         merge_queue_max_interval,
         mergeability_queue_tx.clone(),
+        unroll_queue_tx.clone(),
     );
 
     let (build_queue_tx, build_queue_rx) = create_build_queue();
@@ -58,6 +63,7 @@ pub fn create_bors_process(
         mergeability_queue: mergeability_queue_tx,
         build_queue: build_queue_tx,
         gitops_queue: gitops_queue_tx,
+        unroll_queue: unroll_queue_tx.clone(),
     };
     let senders2 = senders.clone();
 
@@ -71,8 +77,14 @@ pub fn create_bors_process(
             let _ = tokio::join!(
                 consume_repository_events(ctx.clone(), repository_rx, senders2.clone()),
                 consume_global_events(ctx.clone(), global_rx, senders2, gh_client, team_api),
-                consume_build_queue_events(ctx.clone(), build_queue_rx, merge_queue_tx),
-                merge_queue_fut
+                consume_build_queue_events(
+                    ctx.clone(),
+                    build_queue_rx,
+                    merge_queue_tx,
+                    unroll_queue_tx
+                ),
+                consume_unroll_queue_events(ctx.clone(), unroll_queue_rx),
+                merge_queue_fut,
             );
             // Note that we do not run the mergeability queue or gitops queue automatically in
             // tests, to have more control over them. Instead, we add them to the bors context
@@ -93,8 +105,19 @@ pub fn create_bors_process(
                 _ = consume_mergeability_queue_events(ctx.clone(), mergeability_queue_rx) => {
                     tracing::error!("Mergeability queue handling process has ended")
                 }
-                _ = consume_build_queue_events(ctx.clone(), build_queue_rx, merge_queue_tx) => {
+                _ = consume_build_queue_events(
+                    ctx.clone(),
+                    build_queue_rx,
+                    merge_queue_tx,
+                    unroll_queue_tx
+                ) => {
                     tracing::error!("Build queue handling process has ended")
+                }
+                _ = consume_unroll_queue_events(
+                    ctx.clone(),
+                    unroll_queue_rx
+                ) => {
+                    tracing::error!("Unroll queue handling process has ended");
                 }
                 _ = consume_gitops_queue_events(gitops_queue_rx) => {
                     tracing::error!("Gitops queue handling process has ended")
@@ -124,6 +147,7 @@ pub struct QueueSenders {
     merge_queue: MergeQueueSender,
     build_queue: BuildQueueSender,
     gitops_queue: GitOpsQueueSender,
+    unroll_queue: UnrollQueueSender,
 }
 
 impl QueueSenders {
@@ -138,6 +162,9 @@ impl QueueSenders {
     }
     pub fn gitops_queue(&self) -> &GitOpsQueueSender {
         &self.gitops_queue
+    }
+    pub fn unroll_queue(&self) -> &UnrollQueueSender {
+        &self.unroll_queue
     }
 }
 
@@ -210,12 +237,34 @@ async fn consume_build_queue_events(
     ctx: Arc<BorsContext>,
     mut build_queue_rx: BuildQueueReceiver,
     merge_queue_tx: MergeQueueSender,
+    unroll_queue_tx: UnrollQueueSender,
 ) {
     while let Some(event) = build_queue_rx.recv().await {
         let ctx = ctx.clone();
 
         let span = tracing::debug_span!("Build queue event", "{event:?}");
-        if let Err(error) = handle_build_queue_event(ctx, event, merge_queue_tx.clone())
+        if let Err(error) =
+            handle_build_queue_event(ctx, event, merge_queue_tx.clone(), unroll_queue_tx.clone())
+                .instrument(span.clone())
+                .await
+        {
+            handle_root_error(span, error);
+        }
+
+        #[cfg(test)]
+        crate::bors::WAIT_FOR_BUILD_QUEUE.mark();
+    }
+}
+
+async fn consume_unroll_queue_events(
+    ctx: Arc<BorsContext>,
+    mut unroll_queue_rx: UnrollQueueReceiver,
+) {
+    while let Some(event) = unroll_queue_rx.recv().await {
+        let ctx = ctx.clone();
+
+        let span = tracing::debug_span!("Unroll queue event", "{event:?}");
+        if let Err(error) = handle_unroll_queue_event(ctx, event)
             .instrument(span.clone())
             .await
         {
@@ -223,7 +272,7 @@ async fn consume_build_queue_events(
         }
 
         #[cfg(test)]
-        crate::bors::WAIT_FOR_BUILD_QUEUE.mark();
+        crate::bors::WAIT_FOR_UNROLL_QUEUE.mark();
     }
 }
 

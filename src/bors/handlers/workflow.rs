@@ -68,6 +68,10 @@ async fn add_workflow_links_to_build_start_comment(
     build: &BuildModel,
     payload: WorkflowRunStarted,
 ) -> anyhow::Result<()> {
+    if build.kind == BuildKind::TryPerf {
+        return Ok(());
+    }
+
     let Some(pr) = db.find_pr_by_build(build).await? else {
         tracing::warn!("PR for build not found");
         return Ok(());
@@ -76,6 +80,7 @@ async fn add_workflow_links_to_build_start_comment(
     let tag = match build.kind {
         BuildKind::Try => CommentTag::TryBuildStarted,
         BuildKind::Auto => CommentTag::AutoBuildStarted,
+        BuildKind::TryPerf => unreachable!(),
     };
     let comments = db
         .get_tagged_bot_comments(&payload.repository, pr.number, tag)
