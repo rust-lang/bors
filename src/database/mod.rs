@@ -244,10 +244,9 @@ pub enum MergeableState {
 impl From<OctocrabMergeableState> for MergeableState {
     fn from(state: OctocrabMergeableState) -> Self {
         match state {
-            OctocrabMergeableState::Blocked | OctocrabMergeableState::Dirty => {
-                MergeableState::HasConflicts
-            }
-            OctocrabMergeableState::Clean
+            OctocrabMergeableState::Dirty => MergeableState::HasConflicts,
+            OctocrabMergeableState::Blocked
+            | OctocrabMergeableState::Clean
             | OctocrabMergeableState::Behind
             | OctocrabMergeableState::HasHooks
             | OctocrabMergeableState::Unstable => MergeableState::Mergeable,

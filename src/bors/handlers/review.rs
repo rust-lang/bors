@@ -1739,6 +1739,23 @@ labels_blocking_approval = ["proposed-final-comment-period", "final-comment-peri
     }
 
     #[sqlx::test]
+    async fn approve_pr_with_merge_conflict_blocked(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            ctx.modify_pr_in_gh((), |pr| {
+                pr.mergeable_state = OctocrabMergeableState::Blocked;
+            });
+            ctx.post_comment("@bors r+").await?;
+            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
+            :pushpin: Commit pr-1-sha has been approved by `default-user`
+
+            It is now in the [queue](https://bors-test.com/queue/borstest) for this repository.
+            ");
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
     async fn reapprove_works_as_retry(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.approve(()).await?;
