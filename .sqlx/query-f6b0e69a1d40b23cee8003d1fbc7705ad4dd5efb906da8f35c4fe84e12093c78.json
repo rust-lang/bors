@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT rollup, member, rolled_up_sha\n        FROM rollup_member\n        WHERE rollup = $1\n        LIMIT 1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "rollup",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "member",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "rolled_up_sha",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "f6b0e69a1d40b23cee8003d1fbc7705ad4dd5efb906da8f35c4fe84e12093c78"
+}
