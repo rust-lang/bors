@@ -1030,6 +1030,29 @@ conflict = ["+conflict"]
     }
 
     #[sqlx::test]
+    async fn cancel_pending_auto_build_on_close(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            ctx.approve(()).await?;
+            ctx.start_auto_build(()).await?;
+            ctx.pr(()).await.expect_auto_build(|_| true);
+
+            let run_id = ctx.auto_workflow();
+            ctx.workflow_start(run_id).await?;
+            ctx.set_pr_status_closed(()).await?;
+            assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
+            This pull request was unapproved due to being closed.
+
+            Auto build was cancelled due to the PR being closed. Cancelled workflows:
+
+            - https://github.com/rust-lang/borstest/actions/runs/1
+            ");
+            ctx.expect_cancelled_workflows((), &[run_id]);
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
     async fn process_bors_commands_in_pr_description(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             let pr = ctx

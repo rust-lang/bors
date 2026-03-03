@@ -821,7 +821,7 @@ pub async fn invalidate_pr(
     fn get_cancel_reason(reason: &InvalidationReason) -> AutoBuildCancelReason {
         match reason {
             InvalidationReason::CommitShaChanged => AutoBuildCancelReason::PushToPR,
-            InvalidationReason::Close => AutoBuildCancelReason::Cancel,
+            InvalidationReason::Close => AutoBuildCancelReason::Close,
             InvalidationReason::Unapproval => AutoBuildCancelReason::Unapproval,
             InvalidationReason::RollupMemberInvalidated { reason, .. } => get_cancel_reason(reason),
         }
@@ -968,7 +968,7 @@ pub fn invalidation_comment(
         if !msg.is_empty() {
             msg.push_str("\n\n");
         }
-        write!(msg, "{}", fmt).unwrap();
+        write!(msg, "{fmt}").unwrap();
     };
 
     // Rollup was invalidated
