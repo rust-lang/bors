@@ -6,17 +6,16 @@ use crate::bors::event::{
 };
 
 use crate::bors::comment::CommentTag;
-use crate::bors::handlers::unapprove_pr;
-use crate::bors::handlers::workflow::{AutoBuildCancelReason, maybe_cancel_auto_build};
-use crate::bors::handlers::{RollupUnapproval, handle_comment};
+use crate::bors::handlers::{InvalidationComment, InvalidationInfo, invalidate_pr};
+use crate::bors::handlers::{InvalidationReason, handle_comment};
 use crate::bors::mergeability_queue::{
     MergeabilityQueueSender, set_pr_mergeability_based_on_user_action,
 };
 use crate::bors::process::QueueSenders;
 use crate::bors::{AUTO_BRANCH_NAME, BorsContext, hide_tagged_comments};
-use crate::bors::{Comment, PullRequestStatus, RepositoryState};
+use crate::bors::{PullRequestStatus, RepositoryState};
 use crate::database::{PullRequestModel, UpsertPullRequestParams};
-use crate::github::{CommitSha, PullRequestNumber};
+use crate::github::CommitSha;
 use crate::utils::text::pluralize;
 use std::sync::Arc;
 
@@ -27,24 +26,30 @@ pub(super) async fn handle_pull_request_edited(
     payload: PullRequestEdited,
 ) -> anyhow::Result<()> {
     let pr = &payload.pull_request;
-    let pr_number = pr.number;
     let pr_model = db
         .upsert_pull_request(repo_state.repository(), pr.clone().into())
         .await?;
 
     set_pr_mergeability_based_on_user_action(&db, pr, &pr_model, mergeability_queue).await?;
 
-    // If the base branch has changed, unapprove the PR
+    // If the base branch has changed, invalidate the PR
     let Some(_) = payload.from_base_sha else {
         return Ok(());
     };
 
-    if !pr_model.is_approved() {
-        return Ok(());
-    }
-
-    unapprove_pr(&repo_state, &db, &pr_model, pr, RollupUnapproval::OnlyPr).await?;
-    notify_of_edited_pr(&repo_state, &db, pr_number, &payload.pull_request.base.name).await
+    invalidate_pr(
+        &repo_state,
+        &db,
+        &pr_model,
+        pr,
+        InvalidationInfo::new(InvalidationReason::CommitShaChanged),
+        Some(InvalidationComment::new(format!(
+            ":warning: The base branch changed to `{base_name}`.",
+            base_name = payload.pull_request.base.name
+        ))),
+    )
+    .await?;
+    Ok(())
 }
 
 pub(super) async fn handle_push_to_pull_request(
@@ -54,54 +59,27 @@ pub(super) async fn handle_push_to_pull_request(
     payload: PullRequestPushed,
 ) -> anyhow::Result<()> {
     let pr = &payload.pull_request;
-    let pr_number = pr.number;
     let pr_model = db
         .upsert_pull_request(repo_state.repository(), pr.clone().into())
         .await?;
 
     set_pr_mergeability_based_on_user_action(&db, pr, &pr_model, mergeability_queue).await?;
 
-    let auto_build_cancel_message = maybe_cancel_auto_build(
-        &repo_state.client,
-        &db,
-        &pr_model,
-        AutoBuildCancelReason::PushToPR,
-    )
-    .await?;
-
     hide_tagged_comments(&repo_state, &db, &pr_model, CommentTag::MergeConflict).await?;
 
-    if !pr_model.is_approved() {
-        return Ok(());
-    }
-
-    let had_failed_build = pr_model
-        .auto_build
-        .as_ref()
-        .map(|b| b.status.is_failure_or_cancel())
-        .unwrap_or(false);
-    unapprove_pr(
+    invalidate_pr(
         &repo_state,
         &db,
         &pr_model,
         pr,
-        RollupUnapproval::PrAndRollups { comment_url: None },
+        InvalidationInfo::new(InvalidationReason::CommitShaChanged),
+        Some(InvalidationComment::new(format!(
+            ":warning: A new commit `{}` was pushed.",
+            pr.head.sha
+        ))),
     )
     .await?;
-
-    // If we had an approved PR with a failed build, there's not much point in sending this warning
-    if !had_failed_build {
-        notify_of_pushed_pr(
-            &repo_state,
-            &db,
-            pr_number,
-            pr.head.sha.clone(),
-            auto_build_cancel_message,
-        )
-        .await
-    } else {
-        Ok(())
-    }
+    Ok(())
 }
 
 pub(super) async fn handle_pull_request_opened(
@@ -150,12 +128,20 @@ pub(super) async fn handle_pull_request_closed(
     db: Arc<PgDbClient>,
     payload: PullRequestClosed,
 ) -> anyhow::Result<()> {
-    db.set_pr_status(
-        repo_state.repository(),
-        payload.pull_request.number,
-        PullRequestStatus::Closed,
+    // The status is already closed on GitHub, so we can just upsert it
+    let pr_model = db
+        .upsert_pull_request(repo_state.repository(), payload.pull_request.clone().into())
+        .await?;
+    invalidate_pr(
+        &repo_state,
+        &db,
+        &pr_model,
+        &payload.pull_request,
+        InvalidationInfo::new(InvalidationReason::Close),
+        None,
     )
-    .await
+    .await?;
+    Ok(())
 }
 
 pub(super) async fn handle_pull_request_merged(
@@ -331,46 +317,6 @@ fn create_pr_description_comment(payload: &PullRequestOpened) -> PullRequestComm
     }
 }
 
-async fn notify_of_edited_pr(
-    repo: &RepositoryState,
-    db: &PgDbClient,
-    pr_number: PullRequestNumber,
-    base_name: &str,
-) -> anyhow::Result<()> {
-    repo.client
-        .post_comment(
-            pr_number,
-            Comment::new(format!(
-                r#":warning: The base branch changed to `{base_name}`, and the
-PR will need to be re-approved."#,
-            )),
-            db,
-        )
-        .await?;
-    Ok(())
-}
-
-async fn notify_of_pushed_pr(
-    repo: &RepositoryState,
-    db: &PgDbClient,
-    pr_number: PullRequestNumber,
-    head_sha: CommitSha,
-    cancel_message: Option<String>,
-) -> anyhow::Result<()> {
-    let mut comment = format!(
-        r#":warning: A new commit `{head_sha}` was pushed to the branch, the PR will need to be re-approved."#
-    );
-
-    if let Some(message) = cancel_message {
-        comment.push_str(&format!("\n\n{message}"));
-    }
-
-    repo.client
-        .post_comment(pr_number, Comment::new(comment), db)
-        .await?;
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use insta::assert_snapshot;
@@ -396,11 +342,12 @@ mod tests {
             })
             .await?;
 
-            insta::assert_snapshot!(
+            assert_snapshot!(
                 ctx.get_next_comment_text(()).await?,
                 @"
-            :warning: The base branch changed to `beta`, and the
-            PR will need to be re-approved.
+            :warning: The base branch changed to `beta`.
+
+            This pull request was unapproved.
             "
             );
             ctx.pr(()).await.expect_unapproved();
@@ -424,7 +371,7 @@ mod tests {
     }
 
     #[sqlx::test]
-    async fn edit_pr_do_nothing_when_not_approved(pool: sqlx::PgPool) {
+    async fn change_pr_base_branch_warning(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             let branch = ctx.create_branch("beta");
             ctx.edit_pr((), |pr| {
@@ -444,14 +391,18 @@ mod tests {
             ctx.approve(()).await?;
             ctx.push_to_pr((), Commit::from_sha("foo")).await?;
 
-            insta::assert_snapshot!(
+            assert_snapshot!(
                 ctx.get_next_comment_text(()).await?,
-                @":warning: A new commit `foo` was pushed to the branch, the PR will need to be re-approved."
+                @"
+            :warning: A new commit `foo` was pushed.
+
+            This pull request was unapproved.
+            "
             );
             ctx.pr(()).await.expect_unapproved();
             Ok(())
         })
-            .await;
+        .await;
     }
 
     #[sqlx::test]
@@ -641,6 +592,18 @@ mod tests {
             ctx.reopen_pr(pr.id()).await?;
             ctx.wait_for_pr(pr.id(), |pr| pr.status == PullRequestStatus::Open)
                 .await?;
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn unapprove_on_close(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            ctx.approve(()).await?;
+            ctx.set_pr_status_closed(()).await?;
+            assert_snapshot!(ctx.get_next_comment_text(()).await?, @"This pull request was unapproved due to being closed.");
+            ctx.pr(()).await.expect_unapproved();
             Ok(())
         })
         .await;
@@ -1003,44 +966,45 @@ conflict = ["+conflict"]
             ctx.pr(()).await.expect_auto_build(|_| true);
 
             let run_id = ctx.auto_workflow();
-            ctx
-                .workflow_start(run_id)
-                .await?;
+            ctx.workflow_start(run_id).await?;
             ctx.push_to_pr((), Commit::from_sha("foo")).await?;
-            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
-            :warning: A new commit `foo` was pushed to the branch, the PR will need to be re-approved.
+            assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
+            :warning: A new commit `foo` was pushed.
 
-            Auto build cancelled due to push. Cancelled workflows:
+            This pull request was unapproved.
+
+            Auto build was cancelled due to push. Cancelled workflows:
 
             - https://github.com/rust-lang/borstest/actions/runs/1
             ");
             ctx.expect_cancelled_workflows((), &[run_id]);
             Ok(())
         })
-            .await;
+        .await;
     }
 
     #[sqlx::test]
     async fn cancel_pending_auto_build_on_push_error_comment(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
-            ctx
-                .modify_repo((), |repo| {
-                    repo.workflow_cancel_error = true;
-                });
+            ctx.modify_repo((), |repo| {
+                repo.workflow_cancel_error = true;
+            });
             ctx.approve(()).await?;
             ctx.start_auto_build(()).await?;
             ctx.pr(()).await.expect_auto_build(|_| true);
 
             ctx.workflow_start(ctx.auto_workflow()).await?;
             ctx.push_to_pr((), Commit::from_sha("foo")).await?;
-            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
-            :warning: A new commit `foo` was pushed to the branch, the PR will need to be re-approved.
+            assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
+            :warning: A new commit `foo` was pushed.
 
-            Auto build cancelled due to push. It was not possible to cancel some workflows.
+            This pull request was unapproved.
+
+            Auto build was cancelled due to push. It was not possible to cancel some workflows.
             ");
             Ok(())
         })
-            .await;
+        .await;
     }
 
     #[sqlx::test]

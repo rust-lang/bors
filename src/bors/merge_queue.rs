@@ -11,9 +11,10 @@ use super::{MergeType, bors_commit_author, create_merge_commit_message};
 use crate::bors::build::load_workflow_runs;
 use crate::bors::comment::{
     auto_build_push_failed_comment, auto_build_started_comment, auto_build_succeeded_comment,
-    unapproved_because_of_sha_mismatch_comment,
 };
-use crate::bors::handlers::{RollupUnapproval, unapprove_pr};
+use crate::bors::handlers::{
+    InvalidationComment, InvalidationInfo, InvalidationReason, invalidate_pr,
+};
 use crate::bors::mergeability_queue::{MergeabilityQueueSender, update_pr_with_known_mergeability};
 use crate::bors::{AUTO_BRANCH_NAME, PullRequestStatus, RepositoryState};
 use crate::database::{
@@ -434,24 +435,24 @@ async fn handle_start_auto_build(
             // The PR head SHA does not match the approved SHA.
             // This should only happen if we missed a PR push webhook (which would normally unapprove
             // the PR). Let's unapprove it here instead to unblock the queue.
-            unapprove_pr(
+            invalidate_pr(
                 repo,
                 &ctx.db,
                 pr,
                 &gh_pr,
-                RollupUnapproval::PrAndRollups { comment_url: None },
+                InvalidationInfo::new(InvalidationReason::CommitShaChanged),
+                Some(
+                    InvalidationComment::new(format!(
+                        r#"Commit SHA did not match the approved SHA during a merge attempt.
+Approved commit SHA: {expected_sha}
+Actual head SHA: {actual_sha}"#,
+                        expected_sha = pr.approved_sha().unwrap_or("<missing>").to_owned(),
+                        actual_sha = gh_pr.head.sha
+                    ))
+                    .post_always(),
+                ),
             )
             .await?;
-            repo.client
-                .post_comment(
-                    pr.number,
-                    unapproved_because_of_sha_mismatch_comment(
-                        &CommitSha(pr.approved_sha().unwrap_or("<missing>").to_owned()),
-                        &gh_pr.head.sha,
-                    ),
-                    &ctx.db,
-                )
-                .await?;
             Ok(AutoBuildStartOutcome::ContinueToNextPr)
         }
         StartAutoBuildError::GitHubError(error) => {
@@ -1317,19 +1318,24 @@ merge_queue_enabled = false
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.approve(()).await?;
             ctx.modify_pr_in_gh((), |pr| {
-                pr.reset_to_single_commit(Commit::new(&format!("{}-modified", pr.head_sha()), "force push"));
+                pr.reset_to_single_commit(Commit::new(
+                    &format!("{}-modified", pr.head_sha()),
+                    "force push",
+                ));
             });
             ctx.run_merge_queue_now().await;
             insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
-            The pull request was unapproved, because its SHA did not match the approved SHA during a merge attempt.
+            Commit SHA did not match the approved SHA during a merge attempt.
             Approved commit SHA: pr-1-sha
             Actual head SHA: pr-1-sha-modified
+
+            This pull request was unapproved.
             ");
             ctx.pr(()).await.expect_unapproved();
 
             Ok(())
         })
-            .await;
+        .await;
     }
 
     #[sqlx::test]
@@ -1735,7 +1741,7 @@ also include this pls"
             // Cancel the running build
             ctx.post_comment("@bors cancel").await?;
             insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
-            Auto build cancelled. Cancelled workflows:
+            Auto build was cancelled. Cancelled workflows:
 
             - https://github.com/rust-lang/borstest/actions/runs/1
 

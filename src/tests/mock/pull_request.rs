@@ -29,6 +29,7 @@ pub async fn mock_pull_requests(
     mock_pr_list(repo.clone(), github.clone(), mock_server).await;
     mock_pr(repo.clone(), github.clone(), mock_server).await;
     mock_pr_create(repo.clone(), github.clone(), mock_server).await;
+    mock_pr_update(repo.clone(), github.clone(), mock_server).await;
     mock_pr_comments(repo.clone(), github, mock_server).await;
     mock_pr_labels(repo.clone(), mock_server).await;
     mock_pr_commits(repo, mock_server).await;
@@ -114,6 +115,41 @@ async fn mock_pr_create(
         },
         "POST",
         format!("^/repos/{repo_name}/pulls$"),
+    )
+    .mount(mock_server)
+    .await;
+}
+
+async fn mock_pr_update(
+    repo: Arc<Mutex<Repo>>,
+    github: Arc<Mutex<GitHub>>,
+    mock_server: &MockServer,
+) {
+    let repo_name = repo.lock().full_name();
+    dynamic_mock_req(
+        move |req: &Request, [pr_number]: [&str; 1]| {
+            let pr_number: u64 = pr_number.parse().unwrap();
+
+            #[derive(serde::Deserialize)]
+            struct RequestData {
+                state: String,
+            }
+
+            let data: RequestData = req.body_json::<RequestData>().unwrap();
+
+            let mut repo = repo.lock();
+            let pr = repo.get_pr_mut(pr_number);
+
+            if data.state == "closed" {
+                pr.close();
+            } else {
+                panic!("Invalid PR update state {}", data.state);
+            }
+            ResponseTemplate::new(200)
+                .set_body_json(GitHubPullRequest::new(&github.lock(), pr.clone()))
+        },
+        "PATCH",
+        format!("^/repos/{repo_name}/pulls/([0-9]+)$"),
     )
     .mount(mock_server)
     .await;

@@ -275,7 +275,7 @@ auto_build_failed = ["-foo"]
             ctx.workflow_start(w2).await?;
             ctx.post_comment("@bors cancel").await?;
             insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
-            Auto build cancelled. Cancelled workflows:
+            Auto build was cancelled. Cancelled workflows:
 
             - https://github.com/rust-lang/borstest/actions/runs/1
             - https://github.com/rust-lang/borstest/actions/runs/2
@@ -300,7 +300,7 @@ auto_build_failed = ["-foo"]
             ctx.workflow_start(ctx.auto_workflow()).await?;
             ctx.post_comment("@bors cancel").await?;
             insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
-            Auto build cancelled. It was not possible to cancel some workflows.
+            Auto build was cancelled. It was not possible to cancel some workflows.
 
             The next pull request likely to be tested is https://github.com/rust-lang/borstest/pull/1.
             ");

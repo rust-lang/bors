@@ -424,7 +424,7 @@ async fn create_rollup(
 
 #[cfg(test)]
 mod tests {
-    use crate::bors::RollupMode;
+    use crate::bors::{PullRequestStatus, RollupMode};
     use crate::github::rollup::OAuthRollupState;
     use crate::github::{GithubRepoName, PullRequestNumber};
     use crate::permissions::PermissionType;
@@ -964,13 +964,14 @@ also include this pls"
             ctx.approve(4).await?;
             ctx.post_comment(Comment::new(pr3.id(), "@bors r-")).await?;
             insta::assert_snapshot!(ctx.get_next_comment_text(pr3.id()).await?, @"
-            Commit pr-3-sha has been unapproved.
+            This pull request was unapproved.
 
-            This PR was contained in a rollup (#4), which was also unapproved.
+            This PR was contained in a rollup (#4), which was unapproved.
             ");
             insta::assert_snapshot!(ctx.get_next_comment_text(4).await?, @"
             PR #3, which is a member of this rollup, was [unapproved](https://github.com/rust-lang/borstest/pull/3#issuecomment-3).
-            This rollup was thus also unapproved.
+
+            This rollup was thus unapproved.
             ");
 
             ctx.pr(4).await.expect_unapproved();
@@ -998,17 +999,21 @@ also include this pls"
             ctx.post_comment(Comment::new(pr3.id(), "@bors r-")).await?;
 
             insta::assert_snapshot!(ctx.get_next_comment_text(pr3.id()).await?, @"
-            Commit pr-3-sha has been unapproved.
+            This pull request was unapproved.
 
-            This PR was contained in the following rollups: #4, #5. They were also unapproved.
+            This PR was contained in the following rollups:
+            - #4 was unapproved
+            - #5 was unapproved
             ");
             insta::assert_snapshot!(ctx.get_next_comment_text(4).await?, @"
             PR #3, which is a member of this rollup, was [unapproved](https://github.com/rust-lang/borstest/pull/3#issuecomment-3).
-            This rollup was thus also unapproved.
+
+            This rollup was thus unapproved.
             ");
             insta::assert_snapshot!(ctx.get_next_comment_text(5).await?, @"
             PR #3, which is a member of this rollup, was [unapproved](https://github.com/rust-lang/borstest/pull/3#issuecomment-3).
-            This rollup was thus also unapproved.
+
+            This rollup was thus unapproved.
             ");
             Ok(())
         })
@@ -1027,6 +1032,9 @@ also include this pls"
                 .await?
                 .assert_status(StatusCode::SEE_OTHER);
             ctx.post_comment(Comment::new(pr3.id(), "@bors r-")).await?;
+            insta::assert_snapshot!(ctx.get_next_comment_text(4).await?, @"
+            PR #3, which is a member of this rollup, was [unapproved](https://github.com/rust-lang/borstest/pull/3#issuecomment-3).
+            ");
             Ok(())
         })
         .await;
@@ -1051,9 +1059,10 @@ also include this pls"
             ctx.expect_comments(pr3.id(), 1).await;
             insta::assert_snapshot!(ctx.get_next_comment_text(4).await?, @"
             PR #3, which is a member of this rollup, was [unapproved](https://github.com/rust-lang/borstest/pull/3#issuecomment-3).
-            This rollup was thus also unapproved.
 
-            Auto build cancelled due to unapproval. Cancelled workflows:
+            This rollup was thus unapproved.
+
+            Auto build was cancelled due to unapproval. Cancelled workflows:
             ");
 
             ctx.pr(4).await.expect_unapproved();
@@ -1064,7 +1073,7 @@ also include this pls"
     }
 
     #[sqlx::test]
-    async fn rollup_unapprove_member_on_push(pool: sqlx::PgPool) {
+    async fn rollup_close_on_member_push(pool: sqlx::PgPool) {
         run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
             let pr2 = ctx.open_pr((), |_| {}).await?;
             ctx.approve(pr2.id()).await?;
@@ -1077,16 +1086,58 @@ also include this pls"
             ctx.approve(4).await?;
 
             ctx.push_to_pr(pr3.id(), Commit::from_sha("foo")).await?;
-            insta::assert_snapshot!(ctx.get_next_comment_text(pr3.id()).await?, @":warning: A new commit `foo` was pushed to the branch, the PR will need to be re-approved.");
+            insta::assert_snapshot!(ctx.get_next_comment_text(pr3.id()).await?, @"
+            :warning: A new commit `foo` was pushed.
+
+            This pull request was unapproved.
+
+            This PR was contained in a rollup (#4), which was closed.
+            ");
             insta::assert_snapshot!(ctx.get_next_comment_text(4).await?, @"
-            PR #3, which is a member of this rollup, was unapproved.
-            This rollup was thus also unapproved.
+            PR #3, which is a member of this rollup, changed its commit SHA.
+
+            This rollup was thus unapproved due to being closed.
             ");
 
-            ctx.pr(4).await.expect_unapproved();
+            let pr = ctx.pr(4).await;
+            pr.expect_unapproved();
+            assert_eq!(pr.get_gh_pr().status(), PullRequestStatus::Closed);
             Ok(())
         })
-            .await;
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn rollup_close_on_member_close(pool: sqlx::PgPool) {
+        run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
+            let pr2 = ctx.open_pr((), |_| {}).await?;
+            ctx.approve(pr2.id()).await?;
+            let pr3 = ctx.open_pr((), |_| {}).await?;
+            ctx.approve(pr3.id()).await?;
+
+            make_rollup(ctx, &[&pr2, &pr3])
+                .await?
+                .assert_status(StatusCode::SEE_OTHER);
+            ctx.approve(4).await?;
+
+            ctx.set_pr_status_closed(pr3.id()).await?;
+            insta::assert_snapshot!(ctx.get_next_comment_text(pr3.id()).await?, @"
+            This pull request was unapproved due to being closed.
+
+            This PR was contained in a rollup (#4), which was closed.
+            ");
+            insta::assert_snapshot!(ctx.get_next_comment_text(4).await?, @"
+            PR #3, which is a member of this rollup, was closed.
+
+            This rollup was thus unapproved due to being closed.
+            ");
+
+            let pr = ctx.pr(4).await;
+            pr.expect_unapproved();
+            assert_eq!(pr.get_gh_pr().status(), PullRequestStatus::Closed);
+            Ok(())
+        })
+        .await;
     }
 
     async fn make_rollup(

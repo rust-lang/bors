@@ -203,7 +203,7 @@ fn auto_build_cancelled_msg(
         AutoBuildCancelReason::Unapproval => " due to unapproval",
         AutoBuildCancelReason::Cancel => "",
     };
-    let mut comment = format!("Auto build cancelled{reason}.");
+    let mut comment = format!("Auto build was cancelled{reason}.");
     match cancelled_workflow_urls {
         Some(workflow_urls) => {
             comment.push_str(" Cancelled workflows:\n");

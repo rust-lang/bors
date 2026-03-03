@@ -792,6 +792,10 @@ impl PullRequest {
         self.labels_removed_by_bors.push(label.to_owned());
         self.labels.retain(|l| l != label);
     }
+
+    pub fn status(&self) -> PullRequestStatus {
+        self.status
+    }
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]
