@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT pr.number AS number, rm.rolled_up_sha AS sha\n        FROM rollup_member rm\n        JOIN pull_request AS pr ON pr.id = rm.member\n        WHERE rm.rollup = $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "number",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "sha",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "d6d03306575c3b113eb45cc94f535eccfda685ac21534c6be2648fb0552c1852"
+}
