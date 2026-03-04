@@ -6,7 +6,7 @@ use crate::bors::comment::{CommentTag, append_workflow_links_to_comment};
 use crate::bors::event::{WorkflowRunCompleted, WorkflowRunStarted};
 use crate::bors::handlers::is_bors_observed_branch;
 use crate::bors::{BuildKind, build};
-use crate::database::{BuildModel, BuildStatus, PullRequestModel, QueueStatus, WorkflowStatus};
+use crate::database::{BuildModel, BuildStatus, PullRequestModel, WorkflowStatus};
 use crate::github::api::client::GithubRepositoryClient;
 use std::sync::Arc;
 use std::time::Duration;
@@ -152,6 +152,8 @@ pub enum AutoBuildCancelReason {
     PushToPR,
     /// A PR was unapproved while it was being tested in an auto build.
     Unapproval,
+    /// A PR was closed while it was being tested in an auto build.
+    Close,
     /// An auto build was manually cancelled with `@bors cancel`.
     Cancel,
 }
@@ -167,8 +169,12 @@ pub async fn maybe_cancel_auto_build(
     pr: &PullRequestModel,
     reason: AutoBuildCancelReason,
 ) -> anyhow::Result<Option<String>> {
-    let auto_build = match pr.queue_status() {
-        QueueStatus::Pending(_, build) => build,
+    let auto_build = match pr
+        .auto_build
+        .as_ref()
+        .take_if(|b| b.status == BuildStatus::Pending)
+    {
+        Some(build) => build,
         _ => return Ok(None),
     };
 
@@ -201,9 +207,10 @@ fn auto_build_cancelled_msg(
     let reason = match reason {
         AutoBuildCancelReason::PushToPR => " due to push",
         AutoBuildCancelReason::Unapproval => " due to unapproval",
+        AutoBuildCancelReason::Close => " due to the PR being closed",
         AutoBuildCancelReason::Cancel => "",
     };
-    let mut comment = format!("Auto build cancelled{reason}.");
+    let mut comment = format!("Auto build was cancelled{reason}.");
     match cancelled_workflow_urls {
         Some(workflow_urls) => {
             comment.push_str(" Cancelled workflows:\n");

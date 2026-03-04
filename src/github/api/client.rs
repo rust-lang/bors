@@ -258,6 +258,21 @@ impl GithubRepositoryClient {
         Ok(gh_comment)
     }
 
+    /// Close the given pull request.
+    pub async fn close_pr(&self, pr: PullRequestNumber) -> anyhow::Result<()> {
+        perform_retryable("close_pr", RetryMethod::default(), || async {
+            self.client
+                .pulls(&self.repository().owner, &self.repository().name)
+                .update(pr.0)
+                .state(octocrab::params::pulls::State::Closed)
+                .send()
+                .await
+                .with_context(|| format!("Cannot close PR {}", self.format_pr(pr)))
+        })
+        .await?;
+        Ok(())
+    }
+
     /// Set the given branch to a commit with the given `sha`.
     pub async fn set_branch_to_sha(
         &self,

@@ -3,7 +3,9 @@ use crate::bors::comment::CommentTag;
 use crate::bors::gitops_queue::{
     GitOpsCommand, GitOpsQueueSender, PullRequestId, PushCallback, PushCommand,
 };
-use crate::bors::handlers::{PullRequestData, RollupUnapproval, unapprove_pr};
+use crate::bors::handlers::{
+    InvalidationComment, InvalidationInfo, InvalidationReason, PullRequestData, invalidate_pr,
+};
 use crate::bors::{
     CommandPrefix, Comment, RepositoryState, bors_commit_author, hide_tagged_comments,
 };
@@ -201,33 +203,22 @@ pub(super) async fn command_squash(
             else {
                 return Ok(());
             };
-            let unapproved = if pr_model.is_approved() {
-                unapprove_pr(
-                    &repo_state,
-                    &db,
-                    &pr_model,
-                    &pr_github,
-                    RollupUnapproval::PrAndRollups {
-                        comment_url: Some(notify_comment.html_url.to_string()),
-                    },
-                )
-                .await?;
-                true
-            } else {
-                false
-            };
-
-            let mut msg = format!(
-                ":hammer: {} commits were squashed into {commit}.",
-                pr_github.commit_count,
-            );
-            if unapproved {
-                writeln!(msg, "\n\nThe pull request was unapproved.").unwrap();
-            }
-            repo_state
-                .client
-                .post_comment(pr_number, Comment::new(msg), &db)
-                .await?;
+            invalidate_pr(
+                &repo_state,
+                &db,
+                &pr_model,
+                &pr_github,
+                InvalidationInfo::new(InvalidationReason::CommitShaChanged)
+                    .with_comment_url(notify_comment.html_url.to_string()),
+                Some(
+                    InvalidationComment::new(format!(
+                        ":hammer: {} commits were squashed into {commit}.",
+                        pr_github.commit_count,
+                    ))
+                    .post_always(),
+                ),
+            )
+            .await?;
             // Hide previous "squash started" comments.
             hide_tagged_comments(&repo_state, &db, &pr_model, CommentTag::SquashStarted).await?;
             Ok(())
@@ -568,7 +559,7 @@ mod tests {
             insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
             :hammer: 2 commits were squashed into sha2-reauthored-to-git-user.
 
-            The pull request was unapproved.
+            This pull request was unapproved.
             ");
             ctx.pr(()).await.expect_unapproved();
 

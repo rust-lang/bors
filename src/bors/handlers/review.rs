@@ -6,11 +6,8 @@ use crate::bors::comment::{
     approve_wip_title, approved_comment, delegate_comment, delegate_try_builds_comment,
     unapprove_non_open_pr_comment,
 };
-use crate::bors::handlers::workflow::{AutoBuildCancelReason, maybe_cancel_auto_build};
-use crate::bors::handlers::{
-    PullRequestData, RollupUnapproval, UnapprovalCause, deny_request, unapproval_comment,
-};
-use crate::bors::handlers::{has_permission, unapprove_pr};
+use crate::bors::handlers::{InvalidationInfo, InvalidationReason, PullRequestData, deny_request};
+use crate::bors::handlers::{has_permission, invalidate_pr};
 use crate::bors::labels::handle_label_trigger;
 use crate::bors::merge_queue::MergeQueueSender;
 use crate::bors::{Comment, PullRequestStatus};
@@ -239,36 +236,16 @@ pub(super) async fn command_unapprove(
         return Ok(());
     }
 
-    let auto_build_cancel_message = maybe_cancel_auto_build(
-        &repo_state.client,
-        &db,
-        pr.db,
-        AutoBuildCancelReason::Unapproval,
-    )
-    .await?;
-    let rollups_to_notify = unapprove_pr(
+    invalidate_pr(
         &repo_state,
         &db,
         pr.db,
         pr.github,
-        RollupUnapproval::PrAndRollups {
-            comment_url: Some(comment_url.to_owned()),
-        },
+        InvalidationInfo::new(InvalidationReason::Unapproval)
+            .with_comment_url(comment_url.to_string()),
+        None,
     )
     .await?;
-
-    if let Some(comment) = unapproval_comment(
-        pr.github,
-        UnapprovalCause::DirectUnapproval {
-            unapproved_rollups: rollups_to_notify,
-        },
-        auto_build_cancel_message,
-    ) {
-        repo_state
-            .client
-            .post_comment(pr.number(), comment, &db)
-            .await?;
-    }
 
     Ok(())
 }
@@ -896,19 +873,21 @@ approved = { modifications = ["+foo", "+baz"], unless = ["label1", "label2"] }
     }
 
     #[sqlx::test]
-    async fn unapprove_merged_pr(pool: sqlx::PgPool) {
+    async fn unapprove_closed_pr(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.approve(()).await?;
             ctx.set_pr_status_closed(()).await?;
+            insta::assert_snapshot!(
+                ctx.get_next_comment_text(()).await?,
+                @"This pull request was unapproved due to being closed."
+            );
             ctx.post_comment("@bors r-").await?;
             insta::assert_snapshot!(
                 ctx.get_next_comment_text(()).await?,
                 @":clipboard: Only unclosed PRs can be unapproved."
             );
 
-            ctx.pr(())
-                .await
-                .expect_approved_by(&User::default_pr_author().name);
+            ctx.pr(()).await.expect_unapproved();
             Ok(())
         })
         .await;
@@ -1671,9 +1650,9 @@ labels_blocking_approval = ["proposed-final-comment-period", "final-comment-peri
             ctx.workflow_start(ctx.auto_workflow()).await?;
             ctx.post_comment("@bors r-").await?;
             insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
-            Commit pr-1-sha has been unapproved.
+            This pull request was unapproved.
 
-            Auto build cancelled due to unapproval. Cancelled workflows:
+            Auto build was cancelled due to unapproval. Cancelled workflows:
 
             - https://github.com/rust-lang/borstest/actions/runs/1
             ");
@@ -1693,9 +1672,9 @@ labels_blocking_approval = ["proposed-final-comment-period", "final-comment-peri
             ctx.workflow_start(ctx.auto_workflow()).await?;
             ctx.post_comment("@bors r-").await?;
             insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
-            Commit pr-1-sha has been unapproved.
+            This pull request was unapproved.
 
-            Auto build cancelled due to unapproval. It was not possible to cancel some workflows.
+            Auto build was cancelled due to unapproval. It was not possible to cancel some workflows.
             ");
             Ok(())
         })

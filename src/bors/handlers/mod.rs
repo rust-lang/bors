@@ -700,163 +700,375 @@ async fn has_permission(
     Ok(is_delegated)
 }
 
-pub enum RollupUnapproval {
-    /// If a given PR was contained in some rollup(s), unapprove them.
-    PrAndRollups {
-        /// Comment URL in which the member PR was unapproved.
-        comment_url: Option<String>,
-    },
-    /// Only unapprove the given PR.
-    OnlyPr,
+pub struct InvalidationInfo {
+    reason: InvalidationReason,
+    /// URL to a comment that provides mores context about the invalidation.
+    comment_url: Option<String>,
 }
 
-/// Unapprove a PR in the DB and apply the corresponding label trigger.
-///
-/// Optionally also unapproves any rollups that contain this PR.
-/// Returns a list of unapproved rollups.
+impl InvalidationInfo {
+    pub fn new(reason: InvalidationReason) -> Self {
+        Self {
+            reason,
+            comment_url: None,
+        }
+    }
+
+    pub fn with_comment_url<C: Into<Option<String>>>(self, comment_url: C) -> Self {
+        Self {
+            comment_url: comment_url.into(),
+            ..self
+        }
+    }
+}
+
+/// Why was a pull request invalidated?
+#[derive(Debug, Clone)]
+pub enum InvalidationReason {
+    /// A new commit was pushed to the pull request.
+    /// If it was approved, it will be unapproved.
+    /// If it was contained in any rollups, they will be closed.
+    CommitShaChanged,
+    /// The pull request was closed.
+    /// If it was approved, it will be unapproved.
+    /// If it was contained in any rollups, they will be closed.
+    Close,
+    /// The pull request was unapproved, but its contents (HEAD SHA) should still be the same.
+    Unapproval,
+    /// A member of a rollup was invalidated.
+    RollupMemberInvalidated {
+        member: PullRequestNumber,
+        reason: Box<InvalidationReason>,
+    },
+}
+
 pub async fn unapprove_pr(
     repo_state: &RepositoryState,
     db: &PgDbClient,
     pr_db: &PullRequestModel,
     pr_gh: &PullRequest,
-    rollup_unapproval: RollupUnapproval,
-) -> anyhow::Result<Vec<PullRequestNumber>> {
+) -> anyhow::Result<()> {
     db.unapprove(pr_db).await?;
     handle_label_trigger(repo_state, pr_gh, LabelTrigger::Unapproved).await?;
+    Ok(())
+}
 
-    let comment_url = match rollup_unapproval {
-        RollupUnapproval::PrAndRollups { comment_url } => comment_url,
-        RollupUnapproval::OnlyPr => return Ok(vec![]),
-    };
+pub struct InvalidationComment {
+    /// Start of the invalidation comment
+    base_text: String,
+    /// Should the comment be sent even if no unapproval happened and thus only `base_text`
+    /// would be sent?
+    post_always: bool,
+}
 
-    // Rollups that contain this PR
-    let rollups = db.find_rollups_for_member_pr(pr_db).await?;
-
-    // Rollups which we will include in the unapproval comment on this PR
-    let rollups_to_notify = rollups
-        .iter()
-        .filter(|rollup| rollup.status == PullRequestStatus::Open && rollup.is_approved())
-        .map(|rollup| rollup.number)
-        .collect::<Vec<_>>();
-
-    // Rollups that we actually unapprove. Note that we will unapprove even closed/draft rollups,
-    // though that should not be needed in practice.
-    let unapprove_rollup_futs = rollups
-        .into_iter()
-        .filter(|rollup| rollup.is_approved())
-        // Just a sanity check to avoid doing too much work here
-        .take(10)
-        .map(|rollup_db| {
-            let span = debug_span!("Unapproving rollup", rollup = rollup_db.number.0);
-            let db = db.clone();
-            let comment_url = comment_url.clone();
-            async move {
-                let rollup_pr = repo_state.client.get_pull_request(rollup_db.number).await?;
-
-                let auto_build_cancel_message = maybe_cancel_auto_build(
-                    &repo_state.client,
-                    &db,
-                    &rollup_db,
-                    AutoBuildCancelReason::Unapproval,
-                )
-                .await?;
-                unapprove_pr(
-                    repo_state,
-                    &db,
-                    &rollup_db,
-                    &rollup_pr,
-                    RollupUnapproval::OnlyPr,
-                )
-                .await?;
-
-                if let Some(comment) = unapproval_comment(
-                    &rollup_pr,
-                    UnapprovalCause::MemberPrUnapproved {
-                        member: pr_db.number,
-                        comment_url,
-                    },
-                    auto_build_cancel_message,
-                ) {
-                    repo_state
-                        .client
-                        .post_comment(rollup_db.number, comment, &db)
-                        .await?;
-                }
-                anyhow::Ok(())
-            }
-            .instrument(span)
-        });
-
-    for res in futures::future::join_all(unapprove_rollup_futs).await {
-        if let Err(error) = res {
-            tracing::error!("It was not possible to unapprove rollup: {error:?}");
+impl InvalidationComment {
+    pub fn new(base_text: String) -> Self {
+        Self {
+            base_text,
+            post_always: false,
         }
     }
-    Ok(rollups_to_notify)
+
+    pub fn post_always(self) -> Self {
+        Self {
+            post_always: true,
+            ..self
+        }
+    }
 }
 
-pub enum UnapprovalCause {
-    /// The PR was directly unapproved with `@bors r-`.
-    DirectUnapproval {
-        /// The following rollups have been unapproved because they contain this PR.
-        unapproved_rollups: Vec<PullRequestNumber>,
-    },
-    /// A member of a rollup was unapproved.
-    MemberPrUnapproved {
-        member: PullRequestNumber,
-        comment_url: Option<String>,
-    },
+#[derive(Copy, Clone, Debug)]
+pub struct InvalidationOutcome {
+    unapproved: bool,
+    closed: bool,
 }
 
-pub fn unapproval_comment(
-    pr: &PullRequest,
-    cause: UnapprovalCause,
+pub struct MaybeInvalidatedRollup {
+    number: PullRequestNumber,
+    outcome: InvalidationOutcome,
+}
+
+/// In several situations, we need to "invalidate" a pull request, which amounts to doing several
+/// things:
+///
+/// 1. Unapprove the PR if it was approved, and apply the corresponding unapproval label trigger.
+/// 2. Cancel a running auto build, if there was any.
+/// 3. "Recursively" invalidate all rollups containing the given pull request.
+///   - If a rollup is invalidated due to a member PR changing its commit SHA, it will be closed.
+///
+/// This function does all that.
+///
+/// `comment` may contain the start of a comment that will be posted on the PR if invalidation
+/// actually happened.
+/// If nothing else would be added to the `comment` text, no comment will be sent!
+pub async fn invalidate_pr(
+    repo_state: &RepositoryState,
+    db: &PgDbClient,
+    pr_db: &PullRequestModel,
+    pr_gh: &PullRequest,
+    info: InvalidationInfo,
+    comment: Option<InvalidationComment>,
+) -> anyhow::Result<InvalidationOutcome> {
+    // Step 1: unapprove the pull request if it was approved
+    // This happens everytime the PR is invalidated, if it was approved before
+    let pr_unapproved = if pr_db.is_approved() {
+        unapprove_pr(repo_state, db, pr_db, pr_gh).await?;
+        true
+    } else {
+        false
+    };
+
+    fn get_cancel_reason(reason: &InvalidationReason) -> AutoBuildCancelReason {
+        match reason {
+            InvalidationReason::CommitShaChanged => AutoBuildCancelReason::PushToPR,
+            InvalidationReason::Close => AutoBuildCancelReason::Close,
+            InvalidationReason::Unapproval => AutoBuildCancelReason::Unapproval,
+            InvalidationReason::RollupMemberInvalidated { reason, .. } => get_cancel_reason(reason),
+        }
+    }
+
+    // Step 2: if there was a running auto build on the PR, cancel it
+    let auto_build_cancel_message = maybe_cancel_auto_build(
+        &repo_state.client,
+        db,
+        pr_db,
+        get_cancel_reason(&info.reason),
+    )
+    .await?;
+
+    // Step 3: close the rollup if its member was closed or received a new push
+    // Note that we don't do this on `InvalidationReason::Close` itself, because that happens after
+    // the PR has been closed already.
+    let pr_closed = if let InvalidationReason::RollupMemberInvalidated { reason, .. } = &info.reason
+        && let InvalidationReason::Close | InvalidationReason::CommitShaChanged = &**reason
+        && matches!(
+            pr_gh.status,
+            PullRequestStatus::Open | PullRequestStatus::Draft
+        ) {
+        repo_state.client.close_pr(pr_gh.number).await?;
+        true
+    } else {
+        matches!(info.reason, InvalidationReason::Close)
+    };
+
+    let comment_url = info.comment_url;
+
+    // Step 4: recursively invalidate all open rollups containing this PR
+    let invalidate_rollups = match info.reason {
+        InvalidationReason::CommitShaChanged
+        | InvalidationReason::Close
+        | InvalidationReason::Unapproval => true,
+        // We do not assume that rollups contain other rollups
+        InvalidationReason::RollupMemberInvalidated { .. } => false,
+    };
+    let invalidated_rollups = if invalidate_rollups {
+        let rollups = db
+            .find_rollups_for_member_pr(pr_db)
+            .await?
+            .into_iter()
+            // We do not deal with
+            .filter(|rollup| match rollup.status {
+                PullRequestStatus::Closed | PullRequestStatus::Merged => false,
+                PullRequestStatus::Draft | PullRequestStatus::Open => true,
+            })
+            // Just to avoid weird edge cases, shouldn't happen ~ever
+            .take(10)
+            .collect::<Vec<_>>();
+
+        let invalidate_rollup_futs = rollups.iter().map(|rollup_db| {
+            let span =
+                debug_span!("Invalidating rollup", rollup = rollup_db.number.0, reason = ?info.reason);
+            let db = db.clone();
+            let comment_url = comment_url.clone();
+            let reason = info.reason.clone();
+            async move {
+                let rollup_pr = repo_state.client.get_pull_request(rollup_db.number).await?;
+                let outcome = invalidate_pr(
+                    repo_state,
+                    &db,
+                    rollup_db,
+                    &rollup_pr,
+                    InvalidationInfo::new(InvalidationReason::RollupMemberInvalidated {
+                        member: pr_gh.number,
+                        reason: Box::new(reason),
+                    })
+                        .with_comment_url(comment_url),
+                    None,
+                )
+                    .await?;
+                anyhow::Ok(MaybeInvalidatedRollup {
+                    number: rollup_pr.number,
+                    outcome
+                })
+            }
+                .instrument(span)
+        });
+
+        let mut invalidated_rollups = vec![];
+        for res in futures::future::join_all(invalidate_rollup_futs).await {
+            match res {
+                Ok(rollup) => {
+                    invalidated_rollups.push(rollup);
+                }
+                Err(error) => {
+                    tracing::error!("It was not possible to invalidate rollup: {error:?}");
+                }
+            }
+        }
+        invalidated_rollups
+    } else {
+        vec![]
+    };
+
+    let outcome = InvalidationOutcome {
+        unapproved: pr_unapproved,
+        closed: pr_closed,
+    };
+    if let Some(comment) = invalidation_comment(
+        pr_db,
+        auto_build_cancel_message,
+        comment_url,
+        comment,
+        info.reason,
+        invalidated_rollups,
+        outcome,
+    ) {
+        repo_state
+            .client
+            .post_comment(pr_gh.number, comment, db)
+            .await?;
+    }
+
+    Ok(outcome)
+}
+
+pub fn invalidation_comment(
+    pr_db: &PullRequestModel,
     build_cancelled_msg: Option<String>,
+    invalidation_comment_url: Option<String>,
+    comment: Option<InvalidationComment>,
+    reason: InvalidationReason,
+    invalidated_rollups: Vec<MaybeInvalidatedRollup>,
+    outcome: InvalidationOutcome,
 ) -> Option<Comment> {
     use itertools::Itertools;
     use std::fmt::Write;
 
-    let mut comment = match cause {
-        UnapprovalCause::DirectUnapproval {
-            mut unapproved_rollups,
-        } => {
-            // Only send unapproval comment when a build was canceled, to avoid needless spam
-            if unapproved_rollups.is_empty() && build_cancelled_msg.is_none() {
-                return None;
-            }
-            let mut msg = format!("Commit {} has been unapproved.", pr.head.sha);
-            if !unapproved_rollups.is_empty() {
-                if let [rollup] = unapproved_rollups.as_slice() {
-                    write!(msg, "\n\nThis PR was contained in a rollup (#{rollup}), which was also unapproved.").unwrap();
-                } else {
-                    unapproved_rollups.sort();
-                    write!(msg, "\n\nThis PR was contained in the following rollups: {}. They were also unapproved.",
-                           unapproved_rollups.into_iter().map(|num| format!("#{num}")).join(", ")
-                    ).unwrap();
-                }
-            }
-            msg
+    let mut invalidated_rollups: Vec<MaybeInvalidatedRollup> = invalidated_rollups
+        .into_iter()
+        .filter(|rollup| rollup.outcome.unapproved || rollup.outcome.closed)
+        .collect();
+
+    let mut msg = comment
+        .as_ref()
+        .map(|c| c.base_text.clone())
+        .unwrap_or_default();
+
+    let mut append = |fmt| {
+        if !msg.is_empty() {
+            msg.push_str("\n\n");
         }
-        UnapprovalCause::MemberPrUnapproved {
-            member,
-            comment_url,
-        } => {
-            format!(
-                r#"PR #{member}, which is a member of this rollup, was {}.
-This rollup was thus also unapproved."#,
-                if let Some(comment_url) = comment_url {
-                    format!("[unapproved]({comment_url})")
-                } else {
-                    "unapproved".to_owned()
-                }
-            )
-        }
+        write!(msg, "{fmt}").unwrap();
     };
 
-    if let Some(cancel_msg) = build_cancelled_msg {
-        write!(comment, "\n\n{cancel_msg}").unwrap();
+    // Rollup was invalidated
+    let is_rollup = if let InvalidationReason::RollupMemberInvalidated { reason, member } = &reason
+    {
+        let wrap = |text: &str| {
+            if let Some(comment_url) = invalidation_comment_url {
+                format!("[{text}]({comment_url})")
+            } else {
+                text.to_string()
+            }
+        };
+
+        let action = match &**reason {
+            InvalidationReason::CommitShaChanged => format!("{} its commit SHA", wrap("changed")),
+            InvalidationReason::Close => format!("was {}", wrap("closed")),
+            InvalidationReason::Unapproval => format!("was {}", wrap("unapproved")),
+            InvalidationReason::RollupMemberInvalidated { .. } => {
+                format!("was {}", wrap("invalidated"))
+            }
+        };
+        append(format!(
+            "PR #{member}, which is a member of this rollup, {action}.",
+        ));
+        true
+    } else {
+        false
+    };
+
+    let pr_label = if is_rollup { "rollup" } else { "pull request" };
+    // If we had an approved PR with a failed build, there's not much point in sending this warning
+    let had_failed_build = pr_db
+        .auto_build
+        .as_ref()
+        .map(|b| b.status.is_failure_or_cancel())
+        .unwrap_or(false);
+
+    // In this case we do not have to post a comment, to avoid needless spam
+    // It would be nicer to solve this in some more robust way..
+    let is_simple_unapproval = matches!(reason, InvalidationReason::Unapproval)
+        && !outcome.closed
+        && build_cancelled_msg.is_none()
+        && invalidated_rollups.is_empty();
+
+    if outcome.unapproved && !is_simple_unapproval && (!had_failed_build || outcome.closed) {
+        append(format!(
+            "This {pr_label} was{} unapproved{}.",
+            if is_rollup { " thus" } else { "" },
+            if outcome.closed {
+                " due to being closed"
+            } else {
+                ""
+            }
+        ));
     }
-    Some(Comment::new(comment))
+
+    // Rollup member was invalidated
+    if !invalidated_rollups.is_empty() {
+        let action = |outcome: InvalidationOutcome| {
+            if outcome.closed {
+                "closed"
+            } else if outcome.unapproved {
+                "unapproved"
+            } else {
+                "invalidated"
+            }
+        };
+
+        if let [rollup] = invalidated_rollups.as_slice() {
+            append(format!(
+                "This PR was contained in a rollup (#{}), which was {}.",
+                rollup.number,
+                action(rollup.outcome)
+            ));
+        } else {
+            invalidated_rollups.sort_by_key(|pr| pr.number);
+            append(format!(
+                "This PR was contained in the following rollups:\n{}",
+                invalidated_rollups
+                    .into_iter()
+                    .map(|rollup| format!("- #{} was {}", rollup.number, action(rollup.outcome)))
+                    .join("\n")
+            ));
+        }
+    }
+
+    // Auto build was cancelled
+    if let Some(cancel_msg) = build_cancelled_msg {
+        append(cancel_msg.to_string());
+    }
+
+    let post_always = comment.as_ref().map(|c| c.post_always).unwrap_or(false);
+
+    // If we have nothing to post or the comment equals the base comment and post_always is false,
+    // do not send any comment.
+    if msg.is_empty() || (msg == comment.map(|c| c.base_text).unwrap_or_default() && !post_always) {
+        None
+    } else {
+        Some(Comment::new(msg))
+    }
 }
 
 /// Is this branch interesting for the bot?
