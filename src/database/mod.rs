@@ -686,10 +686,10 @@ impl From<PullRequest> for UpsertPullRequestParams {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct RegisterRollupMemberParams {
-    /// Pull request ID of the member PR.
-    pub member_id: PrimaryKey,
+    /// Pull request model of the member PR.
+    pub member: PullRequestModel,
     /// HEAD SHA of the member PR at rollup creation.
     pub rolled_up_sha: CommitSha,
 }

@@ -1095,9 +1095,9 @@ pub(crate) async fn clear_auto_build(
 
 pub(crate) async fn register_rollup_pr_member(
     executor: impl PgExecutor<'_>,
-    rollup_id: PrimaryKey,
-    member_id: PrimaryKey,
-    rolled_up_sha: &str,
+    rollup: &PullRequestModel,
+    member: &PullRequestModel,
+    rolled_up_sha: &CommitSha,
 ) -> anyhow::Result<()> {
     measure_db_query("register_rollup_pr_member", || async {
         sqlx::query!(
@@ -1105,9 +1105,9 @@ pub(crate) async fn register_rollup_pr_member(
         INSERT INTO rollup_member (rollup, member, rolled_up_sha)
         VALUES ($1, $2, $3)
         "#,
-            rollup_id,
-            member_id,
-            rolled_up_sha
+            rollup.id,
+            member.id,
+            rolled_up_sha.as_ref()
         )
         .execute(executor)
         .await?;

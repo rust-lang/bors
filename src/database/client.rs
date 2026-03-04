@@ -381,19 +381,14 @@ impl PgDbClient {
     /// All records are inserted in a single transaction.
     pub async fn register_rollup_members(
         &self,
-        rollup_id: PrimaryKey,
+        rollup: &PullRequestModel,
         members: &[RegisterRollupMemberParams],
     ) -> anyhow::Result<()> {
         let mut tx = self.pool.begin().await?;
         for member in members {
-            assert_ne!(rollup_id, member.member_id);
-            register_rollup_pr_member(
-                &mut *tx,
-                rollup_id,
-                member.member_id,
-                member.rolled_up_sha.as_ref(),
-            )
-            .await?;
+            assert_ne!(rollup.id, member.member.id);
+            register_rollup_pr_member(&mut *tx, rollup, &member.member, &member.rolled_up_sha)
+                .await?;
         }
         tx.commit().await?;
         Ok(())

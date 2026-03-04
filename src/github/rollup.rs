@@ -410,16 +410,16 @@ async fn create_rollup(
     // Mark it as rollup=never
     db.set_rollup_mode(&rollup_db, RollupMode::Never).await?;
 
-    let rollup_members = successes
-        .iter()
+    let members = successes
+        .into_iter()
         .map(|(member, rolled_up_sha)| RegisterRollupMemberParams {
-            member_id: member.id,
-            rolled_up_sha: rolled_up_sha.clone(),
+            member,
+            rolled_up_sha,
         })
         .collect::<Vec<_>>();
 
     // And register its rollup member PRs
-    db.register_rollup_members(rollup_db.id, &rollup_members)
+    db.register_rollup_members(&rollup_db, &members)
         .await
         .context("Cannot register rollup members")?;
 
