@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT 1 AS _output\n        FROM rollup_member rm\n        WHERE rollup = $1\n        LIMIT 1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "_output",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "698f8c6058cbe0f7250fa7f2b987cb3959a666da62b67fddb20f52935fa68a13"
+}

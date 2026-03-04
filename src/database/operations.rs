@@ -10,7 +10,6 @@ use super::CommentModel;
 use super::DelegatedPermission;
 use super::MergeableState;
 use super::PullRequestModel;
-use super::RollupMemberModel;
 use super::RunId;
 use super::TreeState;
 use super::UpsertPullRequestParams;
@@ -1153,11 +1152,10 @@ pub(crate) async fn is_rollup(
     id: PrimaryKey,
 ) -> anyhow::Result<bool> {
     measure_db_query("is_rollup", || async {
-        let row = sqlx::query_as!(
-            RollupMemberModel,
+        let row = sqlx::query!(
             r#"
-        SELECT rollup, member, rolled_up_sha
-        FROM rollup_member
+        SELECT 1 AS _output
+        FROM rollup_member rm
         WHERE rollup = $1
         LIMIT 1
             "#,
