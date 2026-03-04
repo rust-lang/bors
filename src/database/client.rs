@@ -11,8 +11,8 @@ use super::operations::{
     upsert_pull_request, upsert_repository,
 };
 use super::{
-    ApprovalInfo, DelegatedPermission, MergeableState, PrimaryKey, RunId, UpdateBuildParams,
-    UpsertPullRequestParams,
+    ApprovalInfo, DelegatedPermission, MergeableState, PrimaryKey, RegisterRollupMemberParams,
+    RunId, UpdateBuildParams, UpsertPullRequestParams,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -382,13 +382,13 @@ impl PgDbClient {
     pub async fn register_rollup_members(
         &self,
         rollup: &PullRequestModel,
-        members: &[PullRequestModel],
+        members: &[RegisterRollupMemberParams],
     ) -> anyhow::Result<()> {
         let mut tx = self.pool.begin().await?;
         for member in members {
-            assert_ne!(rollup.id, member.id);
-            assert_eq!(rollup.repository, member.repository);
-            register_rollup_pr_member(&mut *tx, rollup, member).await?;
+            assert_ne!(rollup.id, member.member.id);
+            register_rollup_pr_member(&mut *tx, rollup, &member.member, &member.rolled_up_sha)
+                .await?;
         }
         tx.commit().await?;
         Ok(())

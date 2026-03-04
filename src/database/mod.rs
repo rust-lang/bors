@@ -8,7 +8,7 @@ use crate::bors::BuildKind;
 use crate::bors::comment::CommentTag;
 use crate::{
     bors::{PullRequestStatus, RollupMode},
-    github::{GithubRepoName, PullRequest, PullRequestNumber},
+    github::{CommitSha, GithubRepoName, PullRequest, PullRequestNumber},
 };
 use chrono::{DateTime, Utc};
 pub use client::{ExclusiveLockProof, ExclusiveOperationOutcome, PgDbClient};
@@ -673,6 +673,14 @@ impl From<PullRequest> for UpsertPullRequestParams {
             status: pr.status,
         }
     }
+}
+
+#[derive(Debug)]
+pub struct RegisterRollupMemberParams {
+    /// Pull request model of the member PR.
+    pub member: PullRequestModel,
+    /// HEAD SHA of the member PR at rollup creation.
+    pub rolled_up_sha: CommitSha,
 }
 
 /// Updates the build table with the given fields.
