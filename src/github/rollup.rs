@@ -1,6 +1,7 @@
 use super::{GithubRepoName, PullRequest, PullRequestNumber};
 use crate::PgDbClient;
 use crate::bors::{RollupMode, make_text_ignored_by_bors, normalize_merge_message};
+use crate::database::RegisterRollupMemberParams;
 use crate::github::api::client::GithubRepositoryClient;
 use crate::github::api::operations::MergeError;
 use crate::github::oauth::{OAuthClient, UserGitHubClient};
@@ -409,8 +410,16 @@ async fn create_rollup(
     // Mark it as rollup=never
     db.set_rollup_mode(&rollup_db, RollupMode::Never).await?;
 
+    let rollup_members = successes
+        .iter()
+        .map(|(member, rolled_up_sha)| RegisterRollupMemberParams {
+            member_id: member.id,
+            rolled_up_sha: rolled_up_sha.clone(),
+        })
+        .collect::<Vec<_>>();
+
     // And register its rollup member PRs
-    db.register_rollup_members(&rollup_db, &successes)
+    db.register_rollup_members(rollup_db.id, &rollup_members)
         .await
         .context("Cannot register rollup members")?;
 

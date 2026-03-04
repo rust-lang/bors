@@ -10,6 +10,7 @@ use super::CommentModel;
 use super::DelegatedPermission;
 use super::MergeableState;
 use super::PullRequestModel;
+use super::RollupMemberModel;
 use super::RunId;
 use super::TreeState;
 use super::UpsertPullRequestParams;
@@ -1094,9 +1095,9 @@ pub(crate) async fn clear_auto_build(
 
 pub(crate) async fn register_rollup_pr_member(
     executor: impl PgExecutor<'_>,
-    rollup: &PullRequestModel,
-    member: &PullRequestModel,
-    rolled_up_sha: &CommitSha,
+    rollup_id: PrimaryKey,
+    member_id: PrimaryKey,
+    rolled_up_sha: &str,
 ) -> anyhow::Result<()> {
     measure_db_query("register_rollup_pr_member", || async {
         sqlx::query!(
@@ -1104,9 +1105,9 @@ pub(crate) async fn register_rollup_pr_member(
         INSERT INTO rollup_member (rollup, member, rolled_up_sha)
         VALUES ($1, $2, $3)
         "#,
-            rollup.id,
-            member.id,
-            rolled_up_sha.as_ref()
+            rollup_id,
+            member_id,
+            rolled_up_sha
         )
         .execute(executor)
         .await?;
@@ -1152,10 +1153,11 @@ pub(crate) async fn is_rollup(
     id: PrimaryKey,
 ) -> anyhow::Result<bool> {
     measure_db_query("is_rollup", || async {
-        let row = sqlx::query!(
+        let row = sqlx::query_as!(
+            RollupMemberModel,
             r#"
-        SELECT 1 AS _output
-        FROM rollup_member rm
+        SELECT rollup, member, rolled_up_sha
+        FROM rollup_member
         WHERE rollup = $1
         LIMIT 1
             "#,

@@ -11,8 +11,8 @@ use super::operations::{
     upsert_pull_request, upsert_repository,
 };
 use super::{
-    ApprovalInfo, DelegatedPermission, MergeableState, PrimaryKey, RunId, UpdateBuildParams,
-    UpsertPullRequestParams,
+    ApprovalInfo, DelegatedPermission, MergeableState, PrimaryKey, RegisterRollupMemberParams,
+    RunId, UpdateBuildParams, UpsertPullRequestParams,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -381,14 +381,19 @@ impl PgDbClient {
     /// All records are inserted in a single transaction.
     pub async fn register_rollup_members(
         &self,
-        rollup: &PullRequestModel,
-        members: &[(PullRequestModel, CommitSha)],
+        rollup_id: PrimaryKey,
+        members: &[RegisterRollupMemberParams],
     ) -> anyhow::Result<()> {
         let mut tx = self.pool.begin().await?;
-        for (member, rolled_up_sha) in members {
-            assert_ne!(rollup.id, member.id);
-            assert_eq!(rollup.repository, member.repository);
-            register_rollup_pr_member(&mut *tx, rollup, member, rolled_up_sha).await?;
+        for member in members {
+            assert_ne!(rollup_id, member.member_id);
+            register_rollup_pr_member(
+                &mut *tx,
+                rollup_id,
+                member.member_id,
+                member.rolled_up_sha.as_ref(),
+            )
+            .await?;
         }
         tx.commit().await?;
         Ok(())

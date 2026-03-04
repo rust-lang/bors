@@ -8,7 +8,7 @@ use crate::bors::BuildKind;
 use crate::bors::comment::CommentTag;
 use crate::{
     bors::{PullRequestStatus, RollupMode},
-    github::{GithubRepoName, PullRequest, PullRequestNumber},
+    github::{CommitSha, GithubRepoName, PullRequest, PullRequestNumber},
 };
 use chrono::{DateTime, Utc};
 pub use client::{ExclusiveLockProof, ExclusiveOperationOutcome, PgDbClient};
@@ -429,6 +429,17 @@ impl sqlx::Decode<'_, sqlx::Postgres> for BuildKind {
     }
 }
 
+/// Represents membership of a PR in a rollup PR.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RollupMemberModel {
+    /// Pull request ID of the rollup.
+    pub rollup: PrimaryKey,
+    /// Pull request ID of the member PR.
+    pub member: PrimaryKey,
+    /// HEAD SHA of the member PR at rollup creation.
+    pub rolled_up_sha: String,
+}
+
 /// Represents a pull request.
 #[derive(Debug)]
 pub struct PullRequestModel {
@@ -673,6 +684,14 @@ impl From<PullRequest> for UpsertPullRequestParams {
             status: pr.status,
         }
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct RegisterRollupMemberParams {
+    /// Pull request ID of the member PR.
+    pub member_id: PrimaryKey,
+    /// HEAD SHA of the member PR at rollup creation.
+    pub rolled_up_sha: CommitSha,
 }
 
 /// Updates the build table with the given fields.
