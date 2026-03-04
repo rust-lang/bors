@@ -82,11 +82,9 @@ fn extract_text_from_markdown(text: &str) -> String {
 
     for event in md_parser.into_iter() {
         match event {
-            Event::Text(text) | Event::Html(text) => {
+            Event::Text(text) | Event::Html(text) if stack.is_empty() => {
                 // Only consider commands in raw text outside of wrapping elements
-                if stack.is_empty() {
-                    cleaned_text.push_str(&text);
-                }
+                cleaned_text.push_str(&text);
             }
             Event::SoftBreak | Event::HardBreak | Event::End(TagEnd::Paragraph) => {
                 cleaned_text.push('\n');
