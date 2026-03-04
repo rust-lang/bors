@@ -3,7 +3,6 @@ use chrono::Utc;
 use sqlx::postgres::PgExecutor;
 use std::collections::{HashMap, HashSet};
 
-use super::ApprovalStatus;
 use super::Assignees;
 use super::BuildModel;
 use super::CommentModel;
@@ -16,6 +15,7 @@ use super::UpsertPullRequestParams;
 use super::WorkflowStatus;
 use super::WorkflowType;
 use super::{ApprovalInfo, PrimaryKey, UpdateBuildParams};
+use super::{ApprovalStatus, RollupMember};
 use crate::bors::PullRequestStatus;
 use crate::bors::RollupMode;
 use crate::bors::comment::CommentTag;
@@ -1164,6 +1164,33 @@ pub(crate) async fn is_rollup(
         .fetch_optional(executor)
         .await?;
         Ok(row.is_some())
+    })
+    .await
+}
+
+pub(crate) async fn get_rollup_members(
+    executor: impl PgExecutor<'_>,
+    pr_id: PrimaryKey,
+) -> anyhow::Result<Vec<RollupMember>> {
+    measure_db_query("get_rollup_members", || async {
+        let rows = sqlx::query!(
+            r#"
+        SELECT pr.number AS number, rm.rolled_up_sha AS sha
+        FROM rollup_member rm
+        JOIN pull_request AS pr ON pr.id = rm.member
+        WHERE rm.rollup = $1
+            "#,
+            pr_id
+        )
+        .fetch_all(executor)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|row| RollupMember {
+                member: PullRequestNumber(row.number as u64),
+                rolled_up_sha: CommitSha(row.sha),
+            })
+            .collect())
     })
     .await
 }

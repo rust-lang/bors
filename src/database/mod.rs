@@ -683,6 +683,14 @@ pub struct RegisterRollupMemberParams {
     pub rolled_up_sha: CommitSha,
 }
 
+#[derive(Debug)]
+pub struct RollupMember {
+    /// Pull request number of the member PR.
+    pub member: PullRequestNumber,
+    /// HEAD SHA of the member PR at rollup creation.
+    pub rolled_up_sha: CommitSha,
+}
+
 /// Updates the build table with the given fields.
 /// If `None`, the given column will not be updated.
 /// In other words, none of those columns can be set to `None` after being set at least once.

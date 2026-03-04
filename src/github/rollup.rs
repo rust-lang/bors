@@ -1149,6 +1149,46 @@ also include this pls"
         .await;
     }
 
+    #[sqlx::test]
+    async fn rollup_member_sha_failed_sanity_check(pool: sqlx::PgPool) {
+        run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
+            let pr2 = ctx.open_pr((), |_| {}).await?;
+            ctx.approve(pr2.id()).await?;
+            let pr3 = ctx.open_pr((), |_| {}).await?;
+            ctx.approve(pr3.id()).await?;
+
+            make_rollup(ctx, &[&pr2, &pr3])
+                .await?
+                .assert_status(StatusCode::SEE_OTHER);
+            ctx.approve(4).await?;
+
+            ctx.modify_pr_in_gh(pr2.id(), |pr| {
+                pr.add_commits(vec![Commit::new("foobar", "unexpected commit")]);
+            });
+
+            ctx.run_merge_queue_now().await;
+            insta::assert_snapshot!(ctx.get_next_comment_text(4).await?, @"
+            The following member(s) of this rollup had a different HEAD SHA during a merge attempt than the one from which this rollup was created:
+            - #2 (expected SHA: pr-2-sha, current SHA: foobar)
+
+            This rollup has been unapproved.
+            ");
+            insta::assert_snapshot!(ctx.get_next_comment_text(2).await?, @"
+            Commit SHA did not match the approved SHA during a merge attempt.
+            Approved commit SHA: pr-2-sha
+            Actual head SHA: foobar
+
+            This pull request was unapproved.
+
+            This PR was contained in a rollup (#4), which was closed.
+            ");
+            insta::assert_snapshot!(ctx.get_next_comment_text(3).await?, @":hourglass: Testing commit pr-3-sha with merge merge-0-pr-3-d7d45f1f-reauthored-to-bors...");
+
+            Ok(())
+        })
+        .await;
+    }
+
     async fn make_rollup(
         ctx: &mut BorsTester,
         prs: &[&PullRequest],

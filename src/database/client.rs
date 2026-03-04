@@ -3,16 +3,16 @@ use super::operations::{
     delete_tagged_bot_comment, find_build, find_pr_by_build, find_rollups_for_member_pr,
     get_last_n_successful_auto_builds, get_nonclosed_pull_requests, get_pending_builds,
     get_prs_with_stale_mergeability_or_approved, get_pull_request, get_repository,
-    get_repository_by_name, get_tagged_bot_comments, get_workflow_urls_for_build,
-    get_workflows_for_build, insert_repo_if_not_exists, is_rollup, record_tagged_bot_comment,
-    set_pr_assignees, set_pr_mergeability_state, set_pr_priority, set_pr_rollup_mode,
-    set_pr_status, set_stale_mergeability_status_by_base_branch, unapprove_pull_request,
-    undelegate_pull_request, update_build, update_pr_try_build_id, update_workflow_status,
-    upsert_pull_request, upsert_repository,
+    get_repository_by_name, get_rollup_members, get_tagged_bot_comments,
+    get_workflow_urls_for_build, get_workflows_for_build, insert_repo_if_not_exists, is_rollup,
+    record_tagged_bot_comment, set_pr_assignees, set_pr_mergeability_state, set_pr_priority,
+    set_pr_rollup_mode, set_pr_status, set_stale_mergeability_status_by_base_branch,
+    unapprove_pull_request, undelegate_pull_request, update_build, update_pr_try_build_id,
+    update_workflow_status, upsert_pull_request, upsert_repository,
 };
 use super::{
     ApprovalInfo, DelegatedPermission, MergeableState, PrimaryKey, RegisterRollupMemberParams,
-    RunId, UpdateBuildParams, UpsertPullRequestParams,
+    RollupMember, RunId, UpdateBuildParams, UpsertPullRequestParams,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -406,6 +406,15 @@ impl PgDbClient {
     /// Returns true if the given PR is a rollup.
     pub async fn is_rollup(&self, pr: &PullRequestModel) -> anyhow::Result<bool> {
         is_rollup(&self.pool, pr.id).await
+    }
+
+    /// Returns true if the given PR is a rollup.
+    /// If the returned Vec is empty, the given pull request is not a rollup.
+    pub async fn get_rollup_members(
+        &self,
+        pr: &PullRequestModel,
+    ) -> anyhow::Result<Vec<RollupMember>> {
+        get_rollup_members(&self.pool, pr.id).await
     }
 
     /// Return all rollups that contain `pr` as a member.
