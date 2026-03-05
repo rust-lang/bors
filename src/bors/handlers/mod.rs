@@ -1023,6 +1023,8 @@ pub fn invalidation_comment(
                 ""
             }
         ));
+    } else if is_rollup && outcome.closed {
+        append("This rollup was closed.".to_string());
     }
 
     // Rollup member was invalidated

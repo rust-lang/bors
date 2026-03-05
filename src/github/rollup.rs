@@ -1183,7 +1183,12 @@ also include this pls"
             This PR was contained in a rollup (#4), which was closed.
             ");
             insta::assert_snapshot!(ctx.get_next_comment_text(3).await?, @":hourglass: Testing commit pr-3-sha with merge merge-0-pr-3-d7d45f1f-reauthored-to-bors...");
+            insta::assert_snapshot!(ctx.get_next_comment_text(4).await?, @"
+            PR #2, which is a member of this rollup, changed its commit SHA.
 
+            This rollup was closed.
+            ");
+            assert_eq!(ctx.pr(4).await.get_gh_pr().status(), PullRequestStatus::Closed);
             Ok(())
         })
         .await;
