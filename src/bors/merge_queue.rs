@@ -1,11 +1,12 @@
 use anyhow::Context;
 use chrono::{DateTime, Utc};
+use futures::StreamExt;
 use std::future::Future;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::Instrument;
 
-use super::{MergeType, bors_commit_author, create_merge_commit_message};
+use super::{Comment, MergeType, bors_commit_author, create_merge_commit_message};
 use crate::bors::build::load_workflow_runs;
 use crate::bors::build::{
     StartBuildCheckRun, StartBuildCommit, StartBuildContext, StartBuildError, StartBuildOutcome,
@@ -15,7 +16,7 @@ use crate::bors::comment::{
     auto_build_push_failed_comment, auto_build_started_comment, auto_build_succeeded_comment,
 };
 use crate::bors::handlers::{
-    InvalidationComment, InvalidationInfo, InvalidationReason, invalidate_pr,
+    InvalidationComment, InvalidationInfo, InvalidationReason, invalidate_pr, unapprove_pr,
 };
 use crate::bors::mergeability_queue::{MergeabilityQueueSender, update_pr_with_known_mergeability};
 use crate::bors::{AUTO_BRANCH_NAME, BuildKind, PullRequestStatus, RepositoryState};
@@ -455,6 +456,39 @@ Actual head SHA: {actual_sha}"#,
             .await?;
             Ok(AutoBuildStartOutcome::ContinueToNextPr)
         }
+        StartAutoBuildError::SanityCheckFailed {
+            error: SanityCheckError::RollupMemberMismatch(mut mismatches),
+            pr: gh_pr,
+        } => {
+            // One or more rollup members have a different commit SHA than what was approved.
+            // This should only happen if we missed a PR push webhook (which would normally unapprove
+            // both the PR and close the rollup). Let's unapprove it here instead to unblock the queue.
+
+            // Note: we don't use invalidate_pr here, because we know that the PR is a rollup,
+            // to have more control over the message.
+            unapprove_pr(repo, &ctx.db, pr, &gh_pr).await?;
+
+            mismatches.sort_by_key(|mismatch| mismatch.member);
+
+            let msg = format!(
+                r#"The following member(s) of this rollup had a different HEAD SHA during a merge attempt than the one from which this rollup was created:
+{}
+
+This rollup has been unapproved."#,
+                mismatches
+                    .into_iter()
+                    .map(|member| format!(
+                        "- #{} (expected SHA: {}, current SHA: {})",
+                        member.member, member.expected, member.actual
+                    ))
+                    .collect::<Vec<String>>()
+                    .join("\n")
+            );
+            repo.client
+                .post_comment(gh_pr.number, Comment::new(msg), &ctx.db)
+                .await?;
+            Ok(AutoBuildStartOutcome::ContinueToNextPr)
+        }
         StartAutoBuildError::GitHubError(error) => {
             tracing::debug!(
                 "Failed to start auto build for PR {pr_num} due to a GitHub error: {error:?}"
@@ -492,13 +526,21 @@ enum SanityCheckError {
         actual: CommitSha,
     },
     /// The pull request was not mergeable.
-    NotMergeable { mergeable_state: MergeableState },
+    NotMergeable {
+        mergeable_state: MergeableState,
+    },
     /// The pull request was not open.
-    WrongStatus { status: PullRequestStatus },
+    WrongStatus {
+        status: PullRequestStatus,
+    },
+    RollupMemberMismatch(Vec<RollupMemberMismatch>),
 }
 
 async fn sanity_check_pr(
+    repo_state: &RepositoryState,
+    db: &PgDbClient,
     gh_pr: &PullRequest,
+    db_pr: &PullRequestModel,
     approval_info: &ApprovalInfo,
 ) -> Result<(), SanityCheckError> {
     if gh_pr.status != PullRequestStatus::Open {
@@ -518,7 +560,73 @@ async fn sanity_check_pr(
             actual: gh_pr.head.sha.clone(),
         });
     }
+
+    let mismatches = sanity_check_rollup(repo_state, db, db_pr).await;
+    if !mismatches.is_empty() {
+        return Err(SanityCheckError::RollupMemberMismatch(mismatches));
+    }
+
     Ok(())
+}
+
+/// A rollup member SHA was `actual` instead of `expected` at the time of the merge of the rollup.
+struct RollupMemberMismatch {
+    member: PullRequestNumber,
+    expected: CommitSha,
+    actual: CommitSha,
+}
+
+/// If `pr` is a rollup, perform a sanity check if its member HEAD SHAs on GitHub
+/// match the state recorded in the database.
+/// Returns a list of mismatches.
+async fn sanity_check_rollup(
+    repo_state: &RepositoryState,
+    db: &PgDbClient,
+    pr: &PullRequestModel,
+) -> Vec<RollupMemberMismatch> {
+    let members = match db.get_rollup_members(pr).await {
+        Ok(members) => members,
+        Err(error) => {
+            tracing::error!(
+                "Cannot perform sanity check to see if PR {pr:?} is a rollup: {error:?}"
+            );
+            return vec![];
+        }
+    };
+
+    // The PR is not a rollup
+    if members.is_empty() {
+        return vec![];
+    }
+
+    // Load rollup members concurrently to make it faster
+    let mut mismatches = vec![];
+    let mut pr_stream = futures::stream::iter(members.into_iter().map(|member| async move {
+        let member_num = member.member;
+        (member, repo_state.client.get_pull_request(member_num).await)
+    }))
+    .buffer_unordered(10);
+    while let Some((member, res)) = pr_stream.next().await {
+        let member_gh = match res {
+            Ok(member_gh) => member_gh,
+            Err(error) => {
+                tracing::error!(
+                    "Cannot fetch member PR {} for a sanity check: {error:?}",
+                    member.member
+                );
+                continue;
+            }
+        };
+        if member_gh.head.sha != member.rolled_up_sha {
+            mismatches.push(RollupMemberMismatch {
+                member: member.member,
+                expected: member.rolled_up_sha,
+                actual: member_gh.head.sha,
+            });
+        }
+    }
+
+    mismatches
 }
 
 /// Starts a new auto build for a pull request.
@@ -536,7 +644,7 @@ async fn start_auto_build(
         .await
         .map_err(StartAutoBuildError::GitHubError)?;
 
-    sanity_check_pr(&gh_pr, approval_info)
+    sanity_check_pr(repo, &ctx.db, &gh_pr, pr, approval_info)
         .await
         .map_err(|error| StartAutoBuildError::SanityCheckFailed {
             error,

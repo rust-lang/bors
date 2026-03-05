@@ -306,8 +306,8 @@ impl MergeabilityQueueSender {
             .queues
             .lock()
             .unwrap()
-            .iter()
-            .flat_map(|(_, q)| {
+            .values()
+            .flat_map(|q| {
                 let mut queue = q.clone();
                 let mut items = vec![];
                 while let Some(item) = queue.pop() {
@@ -356,8 +356,8 @@ impl MergeabilityQueueSender {
         };
         let queues = self.inner.queues.lock().unwrap();
         queues
-            .iter()
-            .flat_map(|(_, queue)| queue.iter())
+            .values()
+            .flat_map(|queue| queue.iter())
             .find(|entry| entry.0.entry.pull_request == pr_data)
             .and_then(|entry| entry.0.entry.conflict_source)
     }
@@ -420,8 +420,8 @@ impl MergeabilityQueueSender {
         // but that would require using e.g. Cell to mutate the attempt counter through &, which
         // doesn't seem necessary at the moment.
         if queues
-            .iter()
-            .flat_map(|(_, queue)| queue.iter())
+            .values()
+            .flat_map(|queue| queue.iter())
             .any(|entry| entry.0.entry.pull_request == item.pull_request)
         {
             return;

@@ -55,15 +55,15 @@ pub(super) async fn command_approve(
         return Ok(());
     }
 
-    if let Some(rollup_mode) = rollup_mode {
-        let is_rollup = db.is_rollup(pr.db).await?;
-        if is_rollup && rollup_mode != RollupMode::Never {
-            repo_state
-                .client
-                .post_comment(pr.number(), rollup_pr_invalid_rollup_mode_comment(), &db)
-                .await?;
-            return Ok(());
-        }
+    if let Some(rollup_mode) = rollup_mode
+        && rollup_mode != RollupMode::Never
+        && db.is_rollup(pr.db).await?
+    {
+        repo_state
+            .client
+            .post_comment(pr.number(), rollup_pr_invalid_rollup_mode_comment(), &db)
+            .await?;
+        return Ok(());
     }
 
     let (approver, unknown_reviewers) = match approver {
