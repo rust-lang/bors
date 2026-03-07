@@ -97,7 +97,7 @@ fn check_non_null_column_without_default() {
                 std::fs::read_to_string(file.path()).expect("cannot read migration file");
 
             let ast = Parser::parse_sql(&PostgreSqlDialect {}, &contents).unwrap_or_else(|_| {
-                panic!("Cannot parse migration {} as SQLL", file.path().display())
+                panic!("Cannot parse migration {} as SQL", file.path().display())
             });
             let mut visitor = CheckNotNullWithoutDefault {
                 error: None,
