@@ -22,6 +22,9 @@ const GITOPS_QUEUE_CAPACITY: usize = 3;
 /// Maximum duration of a local git operation before it times out.
 const GITOP_TIMEOUT: Duration = Duration::from_secs(60);
 
+/// Special pull request number used for clone operations.
+const CLONE_PR_NUMBER: PullRequestNumber = PullRequestNumber(0);
+
 #[derive(Debug, Hash, PartialEq, Eq, Clone)]
 pub struct PullRequestId {
     pub repo: GithubRepoName,
@@ -82,6 +85,28 @@ impl GitOpsQueueSender {
                 Err(anyhow::anyhow!("Gitops queue was closed"))
             }
         }
+    }
+
+    pub fn enqueue_clone_repository(&self, repository: GithubRepoName) -> anyhow::Result<bool> {
+        let log_repo = repository.clone();
+        let pr_id = PullRequestId {
+            repo: repository.clone(),
+            pr: CLONE_PR_NUMBER,
+        };
+        let command = GitOpsCommand::CloneRepository(CloneRepositoryCommand {
+            repository,
+            on_finish: Box::new(|result| {
+                Box::pin(async move {
+                    if let Err(error) = result {
+                        tracing::warn!(
+                            "Repository cache initialization failed for {log_repo}: {error:?}"
+                        );
+                    }
+                    Ok(())
+                })
+            }),
+        });
+        self.try_send(pr_id, command)
     }
 }
 
