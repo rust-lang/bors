@@ -8,10 +8,12 @@ use secrecy::SecretString;
 use std::collections::HashSet;
 use std::fmt::{Debug, Formatter};
 use std::future::Future;
+#[cfg(not(test))]
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
+use tempfile::TempDir;
 use tokio::sync::mpsc;
 use tracing::Instrument;
 
@@ -39,8 +41,8 @@ pub struct GitOpsQueueEntry {
 
 struct GitOpsSharedState {
     git: Option<Git>,
-    /// Directory used for caching local repository clones.
-    cache_dir: PathBuf,
+    /// Temporary directory used for caching local repository clones.
+    cache_dir: TempDir,
     /// Pull requests on which a local git operation is currently queued or in-progress.
     pending_prs: HashSet<PullRequestId>,
 }
@@ -181,11 +183,18 @@ impl Debug for PushCommand {
 pub fn create_gitops_queue(git: Option<Git>) -> (GitOpsQueueSender, GitOpsQueueReceiver) {
     let (tx, rx) = mpsc::channel(GITOPS_QUEUE_CAPACITY);
     #[cfg(test)]
-    let cache_dir = std::env::temp_dir().join("bors-gitops-cache");
+    let cache_dir = tempfile::Builder::new()
+        .prefix("bors-gitops-cache-")
+        .tempdir()
+        .expect("Cannot create gitops cache temp dir");
     #[cfg(not(test))]
-    let cache_dir = std::env::current_dir()
-        .unwrap_or_else(|_| PathBuf::from("."))
-        .join("gitops-cache");
+    let cache_dir = {
+        let base_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        tempfile::Builder::new()
+            .prefix("gitops-cache-")
+            .tempdir_in(&base_dir)
+            .expect("Cannot create gitops cache temp dir")
+    };
     let state = Arc::new(RwLock::new(GitOpsSharedState {
         pending_prs: Default::default(),
         git,
@@ -225,7 +234,7 @@ pub async fn handle_gitops_entry(
 
                 let (git, _cache_dir) = {
                     let state = rx.state.read().unwrap();
-                    (state.git.clone(), state.cache_dir.clone())
+                    (state.git.clone(), state.cache_dir.path().to_path_buf())
                 };
                 let res = if let Some(_git) = git {
                     let fut = async move {
@@ -278,7 +287,7 @@ pub async fn handle_gitops_entry(
                 let span = tracing::debug_span!("clone repository cache", "{repository}");
                 let (git, cache_dir) = {
                     let state = rx.state.read().unwrap();
-                    (state.git.clone(), state.cache_dir.clone())
+                    (state.git.clone(), state.cache_dir.path().to_path_buf())
                 };
                 let res = if let Some(_git) = git {
                     let fut = async move {
