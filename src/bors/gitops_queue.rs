@@ -8,6 +8,7 @@ use secrecy::SecretString;
 use std::collections::HashSet;
 use std::fmt::{Debug, Formatter};
 use std::future::Future;
+use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
@@ -35,6 +36,8 @@ pub struct GitOpsQueueEntry {
 
 struct GitOpsSharedState {
     git: Option<Git>,
+    /// Directory used for caching local repository clones.
+    cache_dir: PathBuf,
     /// Pull requests on which a local git operation is currently queued or in-progress.
     pending_prs: HashSet<PullRequestId>,
 }
@@ -87,9 +90,16 @@ impl GitOpsQueueSender {
 pub enum GitOpsCommand {
     /// Push a commit from one repository to another.
     Push(PushCommand),
+    /// Clone or initialize a repository cache for later operations.
+    CloneRepository(CloneRepositoryCommand),
 }
 
 pub type PushCallback = Box<
+    dyn FnOnce(anyhow::Result<()>) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>>
+        + Send,
+>;
+
+pub type CloneCallback = Box<
     dyn FnOnce(anyhow::Result<()>) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>>
         + Send,
 >;
@@ -105,6 +115,23 @@ pub struct PushCommand {
     pub commit: CommitSha,
     pub token: SecretString,
     pub on_finish: PushCallback,
+}
+
+pub struct CloneRepositoryCommand {
+    pub repository: GithubRepoName,
+    pub on_finish: CloneCallback,
+}
+
+impl Debug for CloneRepositoryCommand {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let Self {
+            repository,
+            on_finish: _,
+        } = self;
+        f.debug_struct("CloneRepositoryCommand")
+            .field("repository", repository)
+            .finish()
+    }
 }
 
 impl Debug for PushCommand {
@@ -128,9 +155,16 @@ impl Debug for PushCommand {
 
 pub fn create_gitops_queue(git: Option<Git>) -> (GitOpsQueueSender, GitOpsQueueReceiver) {
     let (tx, rx) = mpsc::channel(GITOPS_QUEUE_CAPACITY);
+    #[cfg(test)]
+    let cache_dir = std::env::temp_dir().join("bors-gitops-cache");
+    #[cfg(not(test))]
+    let cache_dir = std::env::current_dir()
+        .unwrap_or_else(|_| PathBuf::from("."))
+        .join("gitops-cache");
     let state = Arc::new(RwLock::new(GitOpsSharedState {
         pending_prs: Default::default(),
         git,
+        cache_dir,
     }));
     (
         GitOpsQueueSender {
@@ -164,7 +198,10 @@ pub async fn handle_gitops_entry(
                     "{source_repo}:{commit} -> {target_repo}:{target_branch}"
                 );
 
-                let git = rx.state.read().unwrap().git.clone();
+                let (git, _cache_dir) = {
+                    let state = rx.state.read().unwrap();
+                    (state.git.clone(), state.cache_dir.clone())
+                };
                 let res = if let Some(_git) = git {
                     let fut = async move {
                         use std::time::Instant;
@@ -173,15 +210,20 @@ pub async fn handle_gitops_entry(
                         #[cfg(test)]
                         let res = anyhow::Ok(());
                         #[cfg(not(test))]
-                        let res = _git
-                            .transfer_commit_between_repositories(
-                                &source_repo,
+                        let res = async {
+                            let repo_path = _cache_dir.join(source_repo.to_string());
+                            _git.prepare_repository_for_commit(&repo_path, &source_repo, &commit)
+                                .await?;
+                            _git.transfer_commit_between_repositories(
+                                &repo_path,
                                 &target_repo,
                                 &commit,
                                 &target_branch,
                                 _token,
                             )
-                            .await;
+                            .await
+                        }
+                        .await;
                         tracing::trace!("Push took {:.3}s", start.elapsed().as_secs_f64());
                         res
                     }
@@ -194,6 +236,42 @@ pub async fn handle_gitops_entry(
                     Err(anyhow::anyhow!("Local git is not available"))
                 };
 
+                if let Err(error) = on_finish(res).instrument(span.clone()).await {
+                    span.in_scope(|| {
+                        tracing::error!("Completion callback failed: {error:?}");
+                    });
+
+                    #[cfg(test)]
+                    return Err(error);
+                }
+                Ok(())
+            }
+            GitOpsCommand::CloneRepository(CloneRepositoryCommand {
+                repository,
+                on_finish,
+            }) => {
+                let span = tracing::debug_span!("clone repository cache", "{repository}");
+                let (git, cache_dir) = {
+                    let state = rx.state.read().unwrap();
+                    (state.git.clone(), state.cache_dir.clone())
+                };
+                let res = if let Some(_git) = git {
+                    let fut = async move {
+                        let _repo_path = cache_dir.join(repository.to_string());
+                        #[cfg(test)]
+                        let res = anyhow::Ok(());
+                        #[cfg(not(test))]
+                        let res = _git.init_repository_cache(&_repo_path).await;
+                        res
+                    }
+                    .instrument(span.clone());
+                    match tokio::time::timeout(GITOP_TIMEOUT, fut).await {
+                        Ok(res) => res,
+                        Err(_) => Err(anyhow::anyhow!("Clone timeouted")),
+                    }
+                } else {
+                    Err(anyhow::anyhow!("Local git is not available"))
+                };
                 if let Err(error) = on_finish(res).instrument(span.clone()).await {
                     span.in_scope(|| {
                         tracing::error!("Completion callback failed: {error:?}");
