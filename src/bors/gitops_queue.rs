@@ -90,24 +90,11 @@ impl GitOpsQueueSender {
     }
 
     pub fn enqueue_clone_repository(&self, repository: GithubRepoName) -> anyhow::Result<bool> {
-        let log_repo = repository.clone();
         let pr_id = PullRequestId {
             repo: repository.clone(),
             pr: CLONE_PR_NUMBER,
         };
-        let command = GitOpsCommand::CloneRepository(CloneRepositoryCommand {
-            repository,
-            on_finish: Box::new(|result| {
-                Box::pin(async move {
-                    if let Err(error) = result {
-                        tracing::warn!(
-                            "Repository cache initialization failed for {log_repo}: {error:?}"
-                        );
-                    }
-                    Ok(())
-                })
-            }),
-        });
+        let command = GitOpsCommand::CloneRepository(CloneRepositoryCommand { repository });
         self.try_send(pr_id, command)
     }
 }
@@ -122,11 +109,6 @@ pub enum GitOpsCommand {
 }
 
 pub type PushCallback = Box<
-    dyn FnOnce(anyhow::Result<()>) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>>
-        + Send,
->;
-
-pub type CloneCallback = Box<
     dyn FnOnce(anyhow::Result<()>) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>>
         + Send,
 >;
@@ -146,15 +128,11 @@ pub struct PushCommand {
 
 pub struct CloneRepositoryCommand {
     pub repository: GithubRepoName,
-    pub on_finish: CloneCallback,
 }
 
 impl Debug for CloneRepositoryCommand {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let Self {
-            repository,
-            on_finish: _,
-        } = self;
+        let Self { repository } = self;
         f.debug_struct("CloneRepositoryCommand")
             .field("repository", repository)
             .finish()
@@ -280,16 +258,13 @@ pub async fn handle_gitops_entry(
                 }
                 Ok(())
             }
-            GitOpsCommand::CloneRepository(CloneRepositoryCommand {
-                repository,
-                on_finish,
-            }) => {
+            GitOpsCommand::CloneRepository(CloneRepositoryCommand { repository }) => {
                 let span = tracing::debug_span!("clone repository cache", "{repository}");
                 let (git, cache_dir) = {
                     let state = rx.state.read().unwrap();
                     (state.git.clone(), state.cache_dir.path().to_path_buf())
                 };
-                let res = if let Some(_git) = git {
+                if let Some(_git) = git {
                     let fut = async move {
                         let _repo_path = cache_dir.join(repository.to_string());
                         #[cfg(test)]
@@ -305,16 +280,7 @@ pub async fn handle_gitops_entry(
                     }
                 } else {
                     Err(anyhow::anyhow!("Local git is not available"))
-                };
-                if let Err(error) = on_finish(res).instrument(span.clone()).await {
-                    span.in_scope(|| {
-                        tracing::error!("Completion callback failed: {error:?}");
-                    });
-
-                    #[cfg(test)]
-                    return Err(error);
                 }
-                Ok(())
             }
         }
     };
