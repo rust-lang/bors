@@ -270,7 +270,7 @@ pub async fn handle_gitops_entry(
                         #[cfg(test)]
                         let res = anyhow::Ok(());
                         #[cfg(not(test))]
-                        let res = _git.init_repository_cache(&_repo_path).await;
+                        let res = _git.init_repository_cache(&_repo_path, &repository).await;
                         res
                     }
                     .instrument(span.clone());

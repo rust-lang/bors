@@ -33,20 +33,35 @@ impl Git {
     }
 
     /// Initialize a local bare repository cache if it hasn't been initialized yet.
-    pub async fn init_repository_cache(&self, repo_path: &Path) -> anyhow::Result<()> {
-        std::fs::create_dir_all(repo_path).context("Cannot create repository cache directory")?;
+    /// This clones the repository in blobless mode to seed the cache.
+    pub async fn init_repository_cache(
+        &self,
+        repo_path: &Path,
+        repository: &GithubRepoName,
+    ) -> anyhow::Result<()> {
         let head_path = repo_path.join("HEAD");
-        if !head_path.exists() {
-            run_command(
-                tokio::process::Command::new(&self.git)
-                    .kill_on_drop(true)
-                    .current_dir(repo_path)
-                    .arg("init")
-                    .arg("--bare"),
-            )
-            .await
-            .context("Cannot perform git init")?;
+        if head_path.exists() {
+            return Ok(());
         }
+        if repo_path.exists() {
+            std::fs::remove_dir_all(repo_path)
+                .context("Cannot reset repository cache directory")?;
+        }
+        if let Some(parent) = repo_path.parent() {
+            std::fs::create_dir_all(parent).context("Cannot create repository cache directory")?;
+        }
+        let repo_url = format!("https://github.com/{repository}.git");
+        run_command(
+            tokio::process::Command::new(&self.git)
+                .kill_on_drop(true)
+                .arg("clone")
+                .arg("--bare")
+                .arg("--filter=blob:none")
+                .arg(&repo_url)
+                .arg(repo_path),
+        )
+        .await
+        .context("Cannot perform git clone")?;
         Ok(())
     }
 
@@ -58,20 +73,18 @@ impl Git {
         source_repo: &GithubRepoName,
         commit: &CommitSha,
     ) -> anyhow::Result<()> {
-        self.init_repository_cache(repo_path).await?;
+        self.init_repository_cache(repo_path, source_repo).await?;
 
         let source_repo_url = format!("https://github.com/{source_repo}.git");
 
-        // It **should** be much faster to do a partial clone than a fetch with depth=1.
-        // However, on the production server, the partial clone of rust-lang/rust seems to choke :(
-        // So we use the fetch as an alternative.
+        // We now reuse a cached bare repository, so a regular fetch is appropriate.
+        // Partial clone previously caused issues on rust-lang/rust, so we avoid it here.
         tracing::debug!("Fetching commit");
         run_command(
             tokio::process::Command::new(&self.git)
                 .kill_on_drop(true)
                 .current_dir(repo_path)
                 .arg("fetch")
-                .arg("--depth=1")
                 // Note: using --filter=tree:0 makes the fetch much faster, but the resulting push
                 // becomes MUCH slower :(
                 .arg(source_repo_url)
