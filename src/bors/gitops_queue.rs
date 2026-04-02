@@ -22,9 +22,6 @@ const GITOPS_QUEUE_CAPACITY: usize = 3;
 /// Maximum duration of a local git operation before it times out.
 const GITOP_TIMEOUT: Duration = Duration::from_secs(60);
 
-/// Special pull request number used for clone operations.
-const CLONE_PR_NUMBER: PullRequestNumber = PullRequestNumber(0);
-
 #[derive(Debug, Hash, PartialEq, Eq, Clone)]
 pub struct PullRequestId {
     pub repo: GithubRepoName,
@@ -34,7 +31,7 @@ pub struct PullRequestId {
 #[derive(Debug)]
 pub struct GitOpsQueueEntry {
     command: GitOpsCommand,
-    pr: PullRequestId,
+    pr: Option<PullRequestId>,
 }
 
 struct GitOpsSharedState {
@@ -70,14 +67,20 @@ impl GitOpsQueueSender {
 
     /// Try to enqueue a git operation.
     /// Returns `true` if the operation was enqueued or `false` if the queue is full.
-    pub fn try_send(&self, id: PullRequestId, command: GitOpsCommand) -> anyhow::Result<bool> {
+    pub fn try_send(
+        &self,
+        pr: Option<PullRequestId>,
+        command: GitOpsCommand,
+    ) -> anyhow::Result<bool> {
         let entry = GitOpsQueueEntry {
             command,
-            pr: id.clone(),
+            pr: pr.clone(),
         };
         match self.sender.try_send(entry) {
             Ok(_) => {
-                self.state.write().unwrap().pending_prs.insert(id);
+                if let Some(id) = pr {
+                    self.state.write().unwrap().pending_prs.insert(id);
+                }
                 Ok(true)
             }
             Err(mpsc::error::TrySendError::Full(_)) => Ok(false),
@@ -87,13 +90,17 @@ impl GitOpsQueueSender {
         }
     }
 
+    pub fn try_send_for_pr(
+        &self,
+        id: PullRequestId,
+        command: GitOpsCommand,
+    ) -> anyhow::Result<bool> {
+        self.try_send(Some(id), command)
+    }
+
     pub fn enqueue_clone_repository(&self, repository: GithubRepoName) -> anyhow::Result<bool> {
-        let pr_id = PullRequestId {
-            repo: repository.clone(),
-            pr: CLONE_PR_NUMBER,
-        };
         let command = GitOpsCommand::CloneRepository(CloneRepositoryCommand { repository });
-        self.try_send(pr_id, command)
+        self.try_send(None, command)
     }
 }
 
@@ -277,6 +284,8 @@ pub async fn handle_gitops_entry(
     };
 
     let res = handle.await;
-    rx.state.write().unwrap().pending_prs.remove(&pr);
+    if let Some(pr) = pr {
+        rx.state.write().unwrap().pending_prs.remove(&pr);
+    }
     res
 }
