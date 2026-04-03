@@ -3,13 +3,13 @@ use std::collections::HashSet;
 use tracing::log;
 
 use crate::bors::RepositoryState;
-use crate::github::{LabelModification, LabelTrigger, PullRequest};
+use crate::github::{LabelModification, LabelTrigger, PullRequestSummary};
 
 /// If there are any label modifications that should be performed on the given PR when `trigger`
 /// happens, this function will perform them.
 pub async fn handle_label_trigger(
     repo: &RepositoryState,
-    pr: &PullRequest,
+    pr: &PullRequestSummary,
     trigger: LabelTrigger,
 ) -> anyhow::Result<()> {
     let mut add: Vec<String> = Vec::new();

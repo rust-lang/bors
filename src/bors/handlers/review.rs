@@ -133,7 +133,12 @@ pub(super) async fn command_approve(
         )
         .await?;
 
-    handle_label_trigger(&repo_state, pr.github, LabelTrigger::Approved).await
+    handle_label_trigger(
+        &repo_state,
+        &pr.github.clone().into(),
+        LabelTrigger::Approved,
+    )
+    .await
 }
 
 /// Normalize approvers (given after @bors r=) by removing leading @, possibly from multiple

@@ -1,6 +1,8 @@
 use anyhow::Context;
+use chrono::{DateTime, Utc};
 use octocrab::Octocrab;
 use octocrab::models::checks::CheckRun;
+use octocrab::models::pulls::MergeableState;
 use octocrab::models::{CheckRunId, Repository, RunId};
 use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
 use serde::{Deserialize, Serialize};
@@ -10,7 +12,7 @@ use tracing::log;
 
 use crate::PgDbClient;
 use crate::bors::event::PullRequestComment;
-use crate::bors::{Comment, WorkflowRun};
+use crate::bors::{Comment, PullRequestStatus, WorkflowRun};
 use crate::config::{CONFIG_FILE_PATH, RepositoryConfig, deserialize_config};
 use crate::database::WorkflowStatus;
 use crate::github::api::CommitAuthor;
@@ -18,7 +20,9 @@ use crate::github::api::operations::{
     BranchUpdateError, Commit, CommitCreateError, ForcePush, MergeError, create_branch,
     create_check_run, create_commit, merge_branches, set_branch_to_commit, update_check_run,
 };
-use crate::github::{CommitSha, GithubRepoName, PullRequest, PullRequestNumber, TreeSha};
+use crate::github::{
+    CommitSha, GithubRepoName, PullRequest, PullRequestNumber, PullRequestSummary, TreeSha,
+};
 use crate::utils::timing::{RetryMethod, RetryableOpError, ShouldRetry, perform_retryable};
 use futures::TryStreamExt;
 use octocrab::models::workflows::{Job, Run};
@@ -772,6 +776,153 @@ impl GithubRepositoryClient {
         })
         .await?;
         Ok(())
+    }
+
+    /// Resolve pull requests from this repository as a batch.
+    pub async fn get_pull_requests_batch(
+        &self,
+        base_branch: &str,
+        after: Option<&str>,
+    ) -> anyhow::Result<(Vec<PullRequestSummary>, Option<String>)> {
+        const QUERY: &str = r#"
+            query($owner: String!, $name: String!, $base_branch: String!, $after: String) {
+                repository(owner: $owner, name: $name) {
+                    pullRequests(
+                        baseRefName: $base_branch,
+                        states: [OPEN],
+                        first: 100,
+                        after: $after,
+                        orderBy: {field: CREATED_AT, direction: DESC},
+                    ) {
+                        nodes {
+                            number
+                            mergedAt
+                            closedAt
+                            isDraft
+                            mergeable
+                            labels(first: 100){
+                                nodes {
+                                    name
+                                }
+                                pageInfo {
+                                    endCursor
+                                    hasNextPage
+                                }
+                            }
+                        }
+                        pageInfo {
+                            endCursor
+                            hasNextPage
+                        }
+                    }
+                }
+            }
+        "#;
+        #[derive(serde::Serialize)]
+        struct Variables<'v> {
+            owner: &'v str,
+            name: &'v str,
+            base_branch: &'v str,
+            after: Option<&'v str>,
+        }
+
+        #[derive(serde::Deserialize)]
+        struct Output {
+            data: OutputInner,
+        }
+        #[derive(serde::Deserialize)]
+        struct OutputInner {
+            repository: RepositoryNode,
+        }
+        #[derive(serde::Deserialize)]
+        struct RepositoryNode {
+            #[serde(rename = "pullRequests")]
+            pull_requests: Connection<PullRequestNode>,
+        }
+        #[derive(serde::Deserialize)]
+        struct Connection<T> {
+            nodes: Vec<T>,
+            #[serde(rename = "pageInfo")]
+            page_info: PageInfo,
+        }
+        #[derive(serde::Deserialize)]
+        struct PageInfo {
+            #[serde(rename = "hasNextPage")]
+            has_next_page: bool,
+            #[serde(rename = "endCursor")]
+            end_cursor: Option<String>,
+        }
+        #[derive(serde::Deserialize)]
+        struct PullRequestNode {
+            number: u64,
+            #[serde(rename = "mergedAt")]
+            merged_at: Option<DateTime<Utc>>,
+            #[serde(rename = "closedAt")]
+            closed_at: Option<DateTime<Utc>>,
+            #[serde(rename = "isDraft")]
+            is_draft: bool,
+            mergeable: GraphQLMergeableState,
+            labels: Connection<LabelNode>,
+        }
+        #[derive(serde::Deserialize)]
+        enum GraphQLMergeableState {
+            #[serde(rename = "MERGEABLE")]
+            Mergeable,
+            #[serde(rename = "CONFLICTING")]
+            Conflicting,
+            #[serde(rename = "UNKNOWN")]
+            Unknown,
+        }
+
+        #[derive(serde::Deserialize, Clone)]
+        struct LabelNode {
+            name: String,
+        }
+
+        let vars = Variables {
+            owner: self.repo_name.owner(),
+            name: self.repo_name.name(),
+            base_branch,
+            after,
+        };
+
+        let response: Output = self.graphql(QUERY, vars).await?;
+
+        Ok((
+            response
+                .data
+                .repository
+                .pull_requests
+                .nodes
+                .into_iter()
+                .map(|n| PullRequestSummary {
+                    number: PullRequestNumber(n.number),
+                    status: if n.merged_at.is_some() {
+                        PullRequestStatus::Merged
+                    } else if n.closed_at.is_some() {
+                        PullRequestStatus::Closed
+                    } else if n.is_draft {
+                        PullRequestStatus::Draft
+                    } else {
+                        PullRequestStatus::Open
+                    },
+                    mergeable_state: match n.mergeable {
+                        GraphQLMergeableState::Mergeable => MergeableState::Clean,
+                        GraphQLMergeableState::Conflicting => MergeableState::Dirty,
+                        GraphQLMergeableState::Unknown => MergeableState::Unknown,
+                    },
+                    labels: n.labels.nodes.into_iter().map(|label| label.name).collect(),
+                })
+                .collect(),
+            response
+                .data
+                .repository
+                .pull_requests
+                .page_info
+                .has_next_page
+                .then_some(response.data.repository.pull_requests.page_info.end_cursor)
+                .flatten(),
+        ))
     }
 }
 

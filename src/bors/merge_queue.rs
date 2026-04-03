@@ -352,7 +352,7 @@ async fn handle_start_auto_build(
             update_pr_with_known_mergeability(
                 repo,
                 &ctx.db,
-                &gh_pr,
+                &gh_pr.into(),
                 pr,
                 mergeability_sender.get_conflict_source(pr),
             )
@@ -405,7 +405,7 @@ async fn handle_start_auto_build(
                     update_pr_with_known_mergeability(
                         repo,
                         &ctx.db,
-                        &gh_pr,
+                        &gh_pr.into(),
                         pr,
                         mergeability_sender.get_conflict_source(pr),
                     )
@@ -466,7 +466,7 @@ Actual head SHA: {actual_sha}"#,
 
             // Note: we don't use invalidate_pr here, because we know that the PR is a rollup,
             // to have more control over the message.
-            unapprove_pr(repo, &ctx.db, pr, &gh_pr).await?;
+            unapprove_pr(repo, &ctx.db, pr, &gh_pr.clone().into()).await?;
 
             mismatches.sort_by_key(|mismatch| mismatch.member);
 
