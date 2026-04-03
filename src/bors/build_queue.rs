@@ -213,7 +213,7 @@ async fn maybe_timeout_build(
             BuildKind::Auto => LabelTrigger::AutoBuildFailed,
         };
         let gh_pr = repo.client.get_pull_request(pr.number).await?;
-        handle_label_trigger(repo, &gh_pr, trigger).await?;
+        handle_label_trigger(repo, &gh_pr.into(), trigger).await?;
 
         if let Err(error) = repo
             .client
@@ -348,7 +348,7 @@ async fn maybe_complete_build(
     .await?;
     if let Some(trigger) = trigger {
         let pr = repo.client.get_pull_request(pr_num).await?;
-        handle_label_trigger(repo, &pr, trigger).await?;
+        handle_label_trigger(repo, &pr.into(), trigger).await?;
     }
 
     if let Some(check_run_id) = build.check_run_id {
