@@ -47,14 +47,14 @@ impl Git {
                 .context("Cannot reset repository cache directory")?;
         }
         let repo_url = format!("https://github.com/{repository}.git");
-        // Note: partial clones caused all sorts of git errors and performance problems.
-        // So we just do a normal full clone, though still use a bare checkout
         run_command(
             tokio::process::Command::new(&self.git)
                 .kill_on_drop(true)
                 .arg("clone")
                 // --bare is used to avoid checking out the repository on disk, which is not needed
                 .arg("--bare")
+                // Treeless clone is used to avoid downloading history of all blobs and trees
+                .arg("--filter=tree:0")
                 .arg(&repo_url)
                 .arg(repo_path),
         )
