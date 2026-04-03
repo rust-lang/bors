@@ -39,24 +39,22 @@ impl Git {
         repo_path: &Path,
         repository: &GithubRepoName,
     ) -> anyhow::Result<()> {
-        let head_path = repo_path.join("HEAD");
-        if head_path.exists() {
+        if repo_path.join(".git").exists() || repo_path.join("HEAD").exists() {
             return Ok(());
         }
         if repo_path.exists() {
             std::fs::remove_dir_all(repo_path)
                 .context("Cannot reset repository cache directory")?;
         }
-        if let Some(parent) = repo_path.parent() {
-            std::fs::create_dir_all(parent).context("Cannot create repository cache directory")?;
-        }
         let repo_url = format!("https://github.com/{repository}.git");
         run_command(
             tokio::process::Command::new(&self.git)
                 .kill_on_drop(true)
                 .arg("clone")
+                // --bare is used to avoid checking out the repository on disk, which is not needed
                 .arg("--bare")
-                .arg("--filter=blob:none")
+                // Treeless clone is used to avoid downloading history of all blobs and trees
+                .arg("--filter=tree:0")
                 .arg(&repo_url)
                 .arg(repo_path),
         )
@@ -77,16 +75,13 @@ impl Git {
 
         let source_repo_url = format!("https://github.com/{source_repo}.git");
 
-        // We now reuse a cached bare repository, so a regular fetch is appropriate.
-        // Partial clone previously caused issues on rust-lang/rust, so we avoid it here.
+        // We reuse a cached bare repository, so we perform a regular fetch.
         tracing::debug!("Fetching commit");
         run_command(
             tokio::process::Command::new(&self.git)
                 .kill_on_drop(true)
                 .current_dir(repo_path)
                 .arg("fetch")
-                // Note: using --filter=tree:0 makes the fetch much faster, but the resulting push
-                // becomes MUCH slower :(
                 .arg(source_repo_url)
                 .arg(commit.as_ref()),
         )

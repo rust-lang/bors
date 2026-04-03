@@ -22,6 +22,10 @@ const GITOPS_QUEUE_CAPACITY: usize = 3;
 /// Maximum duration of a local git operation before it times out.
 const GITOP_TIMEOUT: Duration = Duration::from_secs(60);
 
+/// Maximum duration of an init git operation before it times out.
+/// Init operation (cloning a repo) is performed at the start of bors, so it can take a longer time.
+const GITOP_INIT_TIMEOUT: Duration = Duration::from_secs(60 * 5);
+
 #[derive(Debug, Hash, PartialEq, Eq, Clone)]
 pub struct PullRequestId {
     pub repo: GithubRepoName,
@@ -67,6 +71,8 @@ impl GitOpsQueueSender {
 
     /// Try to enqueue a git operation.
     /// Returns `true` if the operation was enqueued or `false` if the queue is full.
+    ///
+    /// If the git operation is associated with a PR, it should be passed in the `pr` parameter.
     pub fn try_send(
         &self,
         pr: Option<PullRequestId>,
@@ -90,14 +96,6 @@ impl GitOpsQueueSender {
         }
     }
 
-    pub fn try_send_for_pr(
-        &self,
-        id: PullRequestId,
-        command: GitOpsCommand,
-    ) -> anyhow::Result<bool> {
-        self.try_send(Some(id), command)
-    }
-
     pub fn enqueue_clone_repository(&self, repository: GithubRepoName) -> anyhow::Result<bool> {
         let command = GitOpsCommand::CloneRepository(CloneRepositoryCommand { repository });
         self.try_send(None, command)
@@ -109,7 +107,7 @@ impl GitOpsQueueSender {
 pub enum GitOpsCommand {
     /// Push a commit from one repository to another.
     Push(PushCommand),
-    /// Clone or initialize a repository cache for later operations.
+    /// Clone a repository on disk to serve as a cache for later operations.
     CloneRepository(CloneRepositoryCommand),
 }
 
@@ -234,7 +232,7 @@ pub async fn handle_gitops_entry(
                             .await
                         }
                         .await;
-                        tracing::trace!("Push took {:.3}s", start.elapsed().as_secs_f64());
+                        tracing::trace!("Git push took {:.3}s", start.elapsed().as_secs_f64());
                         res
                     }
                     .instrument(span.clone());
@@ -263,17 +261,30 @@ pub async fn handle_gitops_entry(
                     (state.git.clone(), state.cache_dir.clone())
                 };
                 if let Some(_git) = git {
+                    use std::time::Instant;
+
+                    let start = Instant::now();
+
+                    let repository2 = repository.clone();
                     let fut = async move {
-                        let _repo_path = cache_dir.join(repository.to_string());
+                        let _repo_path = cache_dir.join(repository2.to_string());
                         #[cfg(test)]
                         let res = anyhow::Ok(());
                         #[cfg(not(test))]
-                        let res = _git.init_repository_cache(&_repo_path, &repository).await;
+                        let res = _git.init_repository_cache(&_repo_path, &repository2).await;
                         res
                     }
                     .instrument(span.clone());
-                    match tokio::time::timeout(GITOP_TIMEOUT, fut).await {
-                        Ok(res) => res,
+
+                    match tokio::time::timeout(GITOP_INIT_TIMEOUT, fut).await {
+                        Ok(res) => {
+                            tracing::trace!(
+                                "Repository `{}` git init took {:.3}s",
+                                repository,
+                                start.elapsed().as_secs_f64()
+                            );
+                            res
+                        }
                         Err(_) => Err(anyhow::anyhow!("Clone timeouted")),
                     }
                 } else {

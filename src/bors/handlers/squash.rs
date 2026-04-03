@@ -245,7 +245,7 @@ pub(super) async fn command_squash(
         on_finish,
     });
 
-    if !gitops_queue.try_send_for_pr(pr_id, command)? {
+    if !gitops_queue.try_send(Some(pr_id), command)? {
         send_comment(
             ":hourglass: There are too many git operations in progress at the moment. Please try again a few minutes later."
                 .to_string(),
