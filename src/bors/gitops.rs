@@ -1,7 +1,7 @@
 use crate::github::{CommitSha, GithubRepoName};
 use anyhow::Context;
 use secrecy::SecretString;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Command;
 
 /// Represents a git binary.
@@ -32,75 +32,63 @@ impl Git {
         Self { git: path }
     }
 
-    /// Initialize a local bare repository cache if it hasn't been initialized yet.
-    /// This clones the repository in blobless mode to seed the cache.
-    pub async fn init_repository_cache(
-        &self,
-        repo_path: &Path,
-        repository: &GithubRepoName,
-    ) -> anyhow::Result<()> {
-        if repo_path.join(".git").exists() || repo_path.join("HEAD").exists() {
-            return Ok(());
-        }
-        if repo_path.exists() {
-            std::fs::remove_dir_all(repo_path)
-                .context("Cannot reset repository cache directory")?;
-        }
-        let repo_url = format!("https://github.com/{repository}.git");
-        run_command(
-            tokio::process::Command::new(&self.git)
-                .kill_on_drop(true)
-                .arg("clone")
-                // --bare is used to avoid checking out the repository on disk, which is not needed
-                .arg("--bare")
-                // Treeless clone is used to avoid downloading history of all blobs and trees
-                .arg("--filter=tree:0")
-                .arg(&repo_url)
-                .arg(repo_path),
-        )
-        .await
-        .context("Cannot perform git clone")?;
-        Ok(())
-    }
-
-    /// Prepare a local bare repository for transferring a commit.
-    /// This initializes the repository (if needed) and fetches the requested commit.
-    pub async fn prepare_repository_for_commit(
-        &self,
-        repo_path: &Path,
-        source_repo: &GithubRepoName,
-        commit: &CommitSha,
-    ) -> anyhow::Result<()> {
-        self.init_repository_cache(repo_path, source_repo).await?;
-
-        let source_repo_url = format!("https://github.com/{source_repo}.git");
-
-        // We reuse a cached bare repository, so we perform a regular fetch.
-        tracing::debug!("Fetching commit");
-        run_command(
-            tokio::process::Command::new(&self.git)
-                .kill_on_drop(true)
-                .current_dir(repo_path)
-                .arg("fetch")
-                .arg(source_repo_url)
-                .arg(commit.as_ref()),
-        )
-        .await
-        .context("Cannot perform git fetch")?;
-        Ok(())
-    }
-
-    /// Pushes a commit from the prepared local repository to the target repository.
-    /// Note: the repository at `repo_path` must already contain `commit`.
+    /// Pushes a commit from the source repository to the target repository.
+    /// Note: to achieve higher performance, this does not fetch or push any trees!
+    /// It can be used only to push a single commit between two repositories.
     pub async fn transfer_commit_between_repositories(
         &self,
-        repo_path: &Path,
+        source_repo: &GithubRepoName,
         target_repo: &GithubRepoName,
         commit: &CommitSha,
         target_branch: &str,
         token: SecretString,
     ) -> anyhow::Result<()> {
         use secrecy::ExposeSecret;
+
+        // What we want to do here is to push a commit A from repo R1 (source) to repo R2 (target)
+        // as quickly as possible, and in a stateless way.
+        // Previously, we used libgit2 to do essentially `fetch --depth=1` followed by a `git push`.
+        // However, this is wasteful, because we do not actually need to download any blobs or
+        // trees.
+        // For the transfer, we simply need to transfer a simply commit between those two
+        // repositories.
+        // So we first do a blob/treeless clone of the source repository, and then push a single
+        // commit to the target repository. git will use its unshallowing logic to lazily download
+        // the pushed commit from the source repo, and then push it to the target repo.
+
+        // Create a temporary directory for the local repository
+        let temp_dir = tempfile::tempdir()?;
+        let root_path = temp_dir.path();
+
+        let source_repo_url = format!("https://github.com/{source_repo}.git");
+
+        run_command(
+            tokio::process::Command::new(&self.git)
+                .kill_on_drop(true)
+                .current_dir(root_path)
+                .arg("init")
+                .arg("--bare"),
+        )
+        .await
+        .context("Cannot perform git init")?;
+
+        // It **should** be much faster to do a partial clone than a fetch with depth=1.
+        // However, on the production server, the partial clone of rust-lang/rust seems to choke :(
+        // So we use the fetch as an alternative.
+        tracing::debug!("Fetching commit");
+        run_command(
+            tokio::process::Command::new(&self.git)
+                .kill_on_drop(true)
+                .current_dir(root_path)
+                .arg("fetch")
+                .arg("--depth=1")
+                // Note: using --filter=tree:0 makes the fetch much faster, but the resulting push
+                // becomes MUCH slower :(
+                .arg(source_repo_url)
+                .arg(commit.as_ref()),
+        )
+        .await
+        .context("Cannot perform git clone")?;
 
         let target_branch = format!("refs/heads/{target_branch}");
         // Create the refspec: push the commit to the target branch
@@ -120,7 +108,7 @@ impl Git {
         run_command(
             tokio::process::Command::new(&self.git)
                 .kill_on_drop(true)
-                .current_dir(repo_path)
+                .current_dir(root_path)
                 // Do not store the token on disk
                 .arg("-c")
                 .arg("credential.helper=")
