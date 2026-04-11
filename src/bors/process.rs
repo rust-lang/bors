@@ -61,29 +61,6 @@ pub fn create_bors_process(
     };
     let senders2 = senders.clone();
 
-    #[cfg(not(test))]
-    {
-        if ctx.local_git_available() {
-            for repo in ctx.repositories.repositories() {
-                let repo_name = repo.repository().clone();
-                let log_repo = repo_name.clone();
-                match senders.gitops_queue().enqueue_clone_repository(repo_name) {
-                    Ok(true) => {}
-                    Ok(false) => {
-                        tracing::warn!(
-                            "Gitops queue is full; cache initialization skipped for {log_repo}"
-                        );
-                    }
-                    Err(error) => {
-                        tracing::warn!(
-                            "Failed to enqueue repository cache initialization for {log_repo}: {error:?}"
-                        );
-                    }
-                }
-            }
-        }
-    }
-
     let service = async move {
         // In tests, we shutdown these futures by dropping the channel sender,
         // In that case, we need to wait until both of these futures resolve,
