@@ -1,0 +1,41 @@
+name: Zizmor Security Audit
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/**"
+      - ".github/actions/**"
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/**"
+      - ".github/actions/**"
+
+jobs:
+  zizmor:
+    name: Run zizmor security audit
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Install zizmor
+        run: |
+          # Install zizmor from PyPI
+          pip install zizmor
+
+      - name: Run zizmor pedantic audit
+        run: |
+          zizmor --pedantic .github/workflows/ .github/actions/
