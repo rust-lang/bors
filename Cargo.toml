@@ -47,7 +47,7 @@ askama = "0.15"
 
 # Cryptography
 sha2 = "0.10"
-hmac = "0.12"
+hmac = "0.13"
 hex = "0.4"
 secrecy = "0.10"
 
