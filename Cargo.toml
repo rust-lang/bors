@@ -60,7 +60,7 @@ chrono = "0.4"
 # Utilities
 arc-swap = "1"
 itertools = "0.14"
-rand = { version = "0.9", features = ["alloc"] }
+rand = { version = "0.10", features = ["alloc"] }
 
 # Paths
 tempfile = "3"
