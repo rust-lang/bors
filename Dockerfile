@@ -13,6 +13,9 @@ FROM base AS build
 WORKDIR /app
 COPY --from=planner /app/recipe.json recipe.json
 
+# Enable offline mode for sqlx (uses .sqlx/ directory)
+ENV SQLX_OFFLINE=1
+
 RUN cargo chef cook --release --recipe-path recipe.json
 
 COPY askama.toml .

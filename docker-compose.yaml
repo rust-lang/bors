@@ -1,17 +1,30 @@
-version: '3.7'
+version: '3.9'
+
 services:
   db:
     image: postgres:16.9
+    container_name: bors_db
     environment:
       POSTGRES_USER: bors
       POSTGRES_PASSWORD: bors
       POSTGRES_DB: bors
     ports:
       - "5432:5432"
-    # Optimize DB in tests
-    command: -c fsync=off
+
+    # Faster local dev (unsafe for prod — fine here)
+    command: ["postgres", "-c", "fsync=off"]
+
+    # Persist data locally (VERY important)
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready" ]
-      interval: 10s
+      test: ["CMD-SHELL", "pg_isready -U bors -d bors"]
+      interval: 5s
       timeout: 5s
       retries: 5
+
+    restart: unless-stopped
+
+volumes:
+  postgres_data:

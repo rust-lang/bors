@@ -1,5 +1,11 @@
 name: Test
 
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   pull_request: { }
   merge_group: { }
@@ -15,6 +21,8 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     env:
       # Matches docker-compose.yaml
       DATABASE_URL: postgres://bors:bors@localhost:5432/bors
@@ -57,6 +65,8 @@ jobs:
   docker:
     name: Test Docker
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - name: Checkout repo
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
