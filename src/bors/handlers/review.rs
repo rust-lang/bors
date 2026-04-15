@@ -14,7 +14,7 @@ use crate::bors::{Comment, PullRequestStatus};
 use crate::database::ApprovalInfo;
 use crate::database::DelegatedPermission;
 use crate::database::{MergeableState, TreeState};
-use crate::github::LabelTrigger;
+use crate::github::{CommitSha, LabelTrigger};
 use crate::github::{GithubUser, PullRequestNumber};
 use crate::permissions::PermissionType;
 use crate::{BorsContext, PgDbClient};
@@ -249,8 +249,11 @@ pub(super) async fn command_unapprove(
         &db,
         pr.db,
         pr.github,
-        InvalidationInfo::new(InvalidationReason::Unapproval)
-            .with_comment_url(comment_url.to_string()),
+        InvalidationInfo::new(InvalidationReason::Unapproval {
+            base_sha: pr.github.base.sha.clone(),
+            previously_approved_sha: CommitSha(approved_sha.to_owned()),
+        })
+        .with_comment_url(comment_url.to_string()),
         None,
     )
     .await?;
@@ -855,6 +858,7 @@ approved = { modifications = ["+foo", "+baz"], unless = ["label1", "label2"] }
                 .await
                 .expect_approved_by(&User::default_pr_author().name);
             ctx.post_comment("@bors r-").await?;
+            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"[View changes since this unapproval](https://triagebot.infra.rust-lang.org/gh-changes-since/rust-lang/borstest/1/main-sha1..pr-1-sha)");
             ctx.pr(()).await.expect_unapproved();
             Ok(())
         })
@@ -1210,6 +1214,7 @@ approved = { modifications = ["+foo", "+baz"], unless = ["label1", "label2"] }
                     .expect_approved_by(&User::default_pr_author().name);
 
                 ctx.post_comment(review_comment("@bors r-")).await?;
+                insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"[View changes since this unapproval](https://triagebot.infra.rust-lang.org/gh-changes-since/rust-lang/borstest/1/main-sha1..pr-1-sha)");
                 ctx.pr(()).await.expect_unapproved();
 
                 Ok(())
@@ -1676,6 +1681,8 @@ labels_blocking_approval = ["proposed-final-comment-period", "final-comment-peri
             Auto build was cancelled due to unapproval. Cancelled workflows:
 
             - https://github.com/rust-lang/borstest/actions/runs/1
+
+            [View changes since this unapproval](https://triagebot.infra.rust-lang.org/gh-changes-since/rust-lang/borstest/1/main-sha1..pr-1-sha)
             ");
             Ok(())
         })
@@ -1696,6 +1703,8 @@ labels_blocking_approval = ["proposed-final-comment-period", "final-comment-peri
             This pull request was unapproved.
 
             Auto build was cancelled due to unapproval. It was not possible to cancel some workflows.
+
+            [View changes since this unapproval](https://triagebot.infra.rust-lang.org/gh-changes-since/rust-lang/borstest/1/main-sha1..pr-1-sha)
             ");
             Ok(())
         })

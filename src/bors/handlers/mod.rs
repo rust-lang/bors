@@ -28,7 +28,7 @@ use crate::bors::{
     TRY_BRANCH_NAME,
 };
 use crate::database::{DelegatedPermission, PullRequestModel};
-use crate::github::{GithubUser, LabelTrigger, PullRequest, PullRequestNumber};
+use crate::github::{CommitSha, GithubUser, LabelTrigger, PullRequest, PullRequestNumber};
 use crate::permissions::PermissionType;
 use crate::{PgDbClient, TeamApiClient, load_repositories};
 use anyhow::Context;
@@ -734,7 +734,12 @@ pub enum InvalidationReason {
     /// If it was contained in any rollups, they will be closed.
     Close,
     /// The pull request was unapproved, but its contents (HEAD SHA) should still be the same.
-    Unapproval,
+    Unapproval {
+        /// Base SHA of the PR at the time of unapproval.
+        base_sha: CommitSha,
+        /// SHA that was previously approved before `@bors r-` was issued.
+        previously_approved_sha: CommitSha,
+    },
     /// A member of a rollup was invalidated.
     RollupMemberInvalidated {
         member: PullRequestNumber,
@@ -822,7 +827,7 @@ pub async fn invalidate_pr(
         match reason {
             InvalidationReason::CommitShaChanged => AutoBuildCancelReason::PushToPR,
             InvalidationReason::Close => AutoBuildCancelReason::Close,
-            InvalidationReason::Unapproval => AutoBuildCancelReason::Unapproval,
+            InvalidationReason::Unapproval { .. } => AutoBuildCancelReason::Unapproval,
             InvalidationReason::RollupMemberInvalidated { reason, .. } => get_cancel_reason(reason),
         }
     }
@@ -857,7 +862,7 @@ pub async fn invalidate_pr(
     let invalidate_rollups = match info.reason {
         InvalidationReason::CommitShaChanged
         | InvalidationReason::Close
-        | InvalidationReason::Unapproval => true,
+        | InvalidationReason::Unapproval { .. } => true,
         // We do not assume that rollups contain other rollups
         InvalidationReason::RollupMemberInvalidated { .. } => false,
     };
@@ -985,7 +990,7 @@ pub fn invalidation_comment(
         let action = match &**reason {
             InvalidationReason::CommitShaChanged => format!("{} its commit SHA", wrap("changed")),
             InvalidationReason::Close => format!("was {}", wrap("closed")),
-            InvalidationReason::Unapproval => format!("was {}", wrap("unapproved")),
+            InvalidationReason::Unapproval { .. } => format!("was {}", wrap("unapproved")),
             InvalidationReason::RollupMemberInvalidated { .. } => {
                 format!("was {}", wrap("invalidated"))
             }
@@ -1008,7 +1013,7 @@ pub fn invalidation_comment(
 
     // In this case we do not have to post a comment, to avoid needless spam
     // It would be nicer to solve this in some more robust way..
-    let is_simple_unapproval = matches!(reason, InvalidationReason::Unapproval)
+    let is_simple_unapproval = matches!(reason, InvalidationReason::Unapproval { .. })
         && !outcome.closed
         && build_cancelled_msg.is_none()
         && invalidated_rollups.is_empty();
@@ -1060,6 +1065,21 @@ pub fn invalidation_comment(
     // Auto build was cancelled
     if let Some(cancel_msg) = build_cancelled_msg {
         append(cancel_msg.to_string());
+    }
+
+    // Add triagebot "View changes since this review" link
+    if let InvalidationReason::Unapproval {
+        previously_approved_sha,
+        base_sha,
+    } = reason
+        && outcome.unapproved
+    {
+        append(format!(
+            "[View changes since this unapproval](https://triagebot.infra.rust-lang.org/gh-changes-since/{}/{}/{}/{base_sha}..{previously_approved_sha})",
+            pr_db.repository.owner(),
+            pr_db.repository.name(),
+            pr_db.number,
+        ));
     }
 
     let post_always = comment.as_ref().map(|c| c.post_always).unwrap_or(false);
