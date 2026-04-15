@@ -1,0 +1,12 @@
+rules:
+  anonymous-definition:
+    ignore:
+      - audit.yml
+
+  concurrency-limits:
+    ignore:
+      - audit.yml
+      - deploy-production.yml
+      - deploy-staging.yml
+      - test.yml
+      - zizmor.yml
