@@ -4,7 +4,7 @@ use crate::bors::command::{Approver, CommandPrefix};
 use crate::bors::comment::{
     approve_blocking_labels_present, approve_merge_conflict_comment, approve_non_open_pr_comment,
     approve_wip_title, approved_comment, delegate_comment, delegate_try_builds_comment,
-    unapprove_non_open_pr_comment,
+    unapprove_non_open_pr_comment, unapprove_not_approved,
 };
 use crate::bors::handlers::{InvalidationInfo, InvalidationReason, PullRequestData, deny_request};
 use crate::bors::handlers::{has_permission, invalidate_pr};
@@ -235,6 +235,14 @@ pub(super) async fn command_unapprove(
             .await?;
         return Ok(());
     }
+
+    let Some(approved_sha) = pr.db.approved_sha() else {
+        repo_state
+            .client
+            .post_comment(pr_num, unapprove_not_approved(), &db)
+            .await?;
+        return Ok(());
+    };
 
     invalidate_pr(
         &repo_state,
@@ -888,6 +896,19 @@ approved = { modifications = ["+foo", "+baz"], unless = ["label1", "label2"] }
             );
 
             ctx.pr(()).await.expect_unapproved();
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn unapprove_unapproved_pr(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            ctx.post_comment("@bors r-").await?;
+            insta::assert_snapshot!(
+                ctx.get_next_comment_text(()).await?,
+                @"This pull request was not previously approved."
+            );
             Ok(())
         })
         .await;

@@ -334,6 +334,10 @@ pub fn unapprove_non_open_pr_comment() -> Comment {
     Comment::new(":clipboard: Only unclosed PRs can be unapproved.".to_string())
 }
 
+pub fn unapprove_not_approved() -> Comment {
+    Comment::new("This pull request was not previously approved.".to_string())
+}
+
 pub fn approve_wip_title(keyword: &str) -> Comment {
     Comment::new(format!(
         r":clipboard: Looks like this PR is still in progress, ignoring approval.
