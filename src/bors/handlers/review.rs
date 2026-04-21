@@ -219,8 +219,10 @@ pub(super) async fn command_unapprove(
 ) -> anyhow::Result<()> {
     let pr_num = pr.number();
 
-    tracing::info!("Unapproving PR {}", pr_num);
-    if !has_permission(&repo_state, author, pr, PermissionType::Review).await? {
+    tracing::info!("Unapproving PR {pr_num}");
+    let can_unapprove = has_permission(&repo_state, author, pr, PermissionType::Review).await?
+        || author.id == pr.github.author.id;
+    if !can_unapprove {
         deny_request(&repo_state, &db, pr_num, author, PermissionType::Review).await?;
         return Ok(());
     };
@@ -764,7 +766,7 @@ approved = ["+approved"]
             );
             Ok(())
         })
-        .await;
+            .await;
     }
 
     #[sqlx::test]
@@ -862,7 +864,7 @@ approved = { modifications = ["+foo", "+baz"], unless = ["label1", "label2"] }
             ctx.pr(()).await.expect_unapproved();
             Ok(())
         })
-        .await;
+            .await;
     }
 
     #[sqlx::test]
@@ -916,6 +918,28 @@ approved = { modifications = ["+foo", "+baz"], unless = ["label1", "label2"] }
             Ok(())
         })
         .await;
+    }
+
+    #[sqlx::test]
+    async fn unapprove_author(pool: sqlx::PgPool) {
+        run_test(
+            (pool, GitHub::unauthorized_pr_author()),
+            async |ctx: &mut BorsTester| {
+                ctx.post_comment(Comment::from("@bors r+").with_author(User::reviewer()))
+                    .await?;
+                insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
+                :pushpin: Commit pr-1-sha has been approved by `reviewer`
+
+                It is now in the [queue](https://bors-test.com/queue/borstest) for this repository.
+                ");
+                ctx.post_comment("@bors r-").await?;
+                insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"[View changes since this unapproval](https://triagebot.infra.rust-lang.org/gh-changes-since/rust-lang/borstest/1/main-sha1..pr-1-sha)");
+                ctx.pr(()).await.expect_unapproved();
+
+                Ok(())
+            },
+        )
+            .await;
     }
 
     #[sqlx::test]
@@ -1565,7 +1589,7 @@ approved = { modifications = ["+foo", "+baz"], unless = ["label1", "label2"] }
             ctx.pr(()).await.expect_unapproved();
             Ok(())
         })
-        .await;
+            .await;
     }
 
     #[sqlx::test]
@@ -1686,7 +1710,7 @@ labels_blocking_approval = ["proposed-final-comment-period", "final-comment-peri
             ");
             Ok(())
         })
-        .await;
+            .await;
     }
 
     #[sqlx::test]
@@ -1708,7 +1732,7 @@ labels_blocking_approval = ["proposed-final-comment-period", "final-comment-peri
             ");
             Ok(())
         })
-        .await;
+            .await;
     }
 
     #[sqlx::test]
@@ -1744,7 +1768,7 @@ labels_blocking_approval = ["proposed-final-comment-period", "final-comment-peri
             ctx.pr(()).await.expect_unapproved();
             Ok(())
         })
-        .await;
+            .await;
     }
 
     #[sqlx::test]
