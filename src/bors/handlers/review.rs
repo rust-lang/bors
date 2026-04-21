@@ -860,7 +860,11 @@ approved = { modifications = ["+foo", "+baz"], unless = ["label1", "label2"] }
                 .await
                 .expect_approved_by(&User::default_pr_author().name);
             ctx.post_comment("@bors r-").await?;
-            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"[View changes since this unapproval](https://triagebot.infra.rust-lang.org/gh-changes-since/rust-lang/borstest/1/main-sha1..pr-1-sha)");
+            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
+            This pull request was unapproved.
+
+            [View changes since this unapproval](https://triagebot.infra.rust-lang.org/gh-changes-since/rust-lang/borstest/1/main-sha1..pr-1-sha)
+            ");
             ctx.pr(()).await.expect_unapproved();
             Ok(())
         })
@@ -933,7 +937,11 @@ approved = { modifications = ["+foo", "+baz"], unless = ["label1", "label2"] }
                 It is now in the [queue](https://bors-test.com/queue/borstest) for this repository.
                 ");
                 ctx.post_comment("@bors r-").await?;
-                insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"[View changes since this unapproval](https://triagebot.infra.rust-lang.org/gh-changes-since/rust-lang/borstest/1/main-sha1..pr-1-sha)");
+                insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
+                This pull request was unapproved.
+
+                [View changes since this unapproval](https://triagebot.infra.rust-lang.org/gh-changes-since/rust-lang/borstest/1/main-sha1..pr-1-sha)
+                ");
                 ctx.pr(()).await.expect_unapproved();
 
                 Ok(())
@@ -1238,7 +1246,11 @@ approved = { modifications = ["+foo", "+baz"], unless = ["label1", "label2"] }
                     .expect_approved_by(&User::default_pr_author().name);
 
                 ctx.post_comment(review_comment("@bors r-")).await?;
-                insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"[View changes since this unapproval](https://triagebot.infra.rust-lang.org/gh-changes-since/rust-lang/borstest/1/main-sha1..pr-1-sha)");
+                insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
+                This pull request was unapproved.
+
+                [View changes since this unapproval](https://triagebot.infra.rust-lang.org/gh-changes-since/rust-lang/borstest/1/main-sha1..pr-1-sha)
+                ");
                 ctx.pr(()).await.expect_unapproved();
 
                 Ok(())

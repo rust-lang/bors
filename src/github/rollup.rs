@@ -1045,7 +1045,11 @@ also include this pls"
                 .await?
                 .assert_status(StatusCode::SEE_OTHER);
             ctx.post_comment(Comment::new(pr3.id(), "@bors r-")).await?;
-            insta::assert_snapshot!(ctx.get_next_comment_text(3).await?, @"[View changes since this unapproval](https://triagebot.infra.rust-lang.org/gh-changes-since/rust-lang/borstest/3/main-sha1..pr-3-sha)");
+            insta::assert_snapshot!(ctx.get_next_comment_text(3).await?, @"
+            This pull request was unapproved.
+
+            [View changes since this unapproval](https://triagebot.infra.rust-lang.org/gh-changes-since/rust-lang/borstest/3/main-sha1..pr-3-sha)
+            ");
             insta::assert_snapshot!(ctx.get_next_comment_text(4).await?, @"
             PR #3, which is a member of this rollup, was [unapproved](https://github.com/rust-lang/borstest/pull/3#issuecomment-3).
             ");

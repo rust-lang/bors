@@ -1011,14 +1011,7 @@ pub fn invalidation_comment(
         .map(|b| b.status.is_failure_or_cancel())
         .unwrap_or(false);
 
-    // In this case we do not have to post a comment, to avoid needless spam
-    // It would be nicer to solve this in some more robust way..
-    let is_simple_unapproval = matches!(reason, InvalidationReason::Unapproval { .. })
-        && !outcome.closed
-        && build_cancelled_msg.is_none()
-        && invalidated_rollups.is_empty();
-
-    if outcome.unapproved && !is_simple_unapproval && (!had_failed_build || outcome.closed) {
+    if outcome.unapproved && (!had_failed_build || outcome.closed) {
         append(format!(
             "This {pr_label} was{} unapproved{}.",
             if is_rollup { " thus" } else { "" },
