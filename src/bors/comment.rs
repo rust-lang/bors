@@ -1,5 +1,6 @@
 use crate::bors::command::CommandPrefix;
 use crate::bors::{FailedWorkflowRun, WorkflowRun};
+use crate::database::PullRequestModel;
 use crate::github::{GithubRepoName, PullRequestNumber};
 use crate::utils::text::pluralize;
 use crate::{TreeState, database::WorkflowStatus, github::CommitSha};
@@ -375,12 +376,24 @@ You can now post `{bot_prefix} try` to start a try build.
 
 /// `delegatee` is the user who received the delegation privileges, while `delegator` is the user
 /// who gave these privileges to the `delegatee`.
-pub fn delegate_comment(delegatee: &str, delegator: &str, bot_prefix: &CommandPrefix) -> Comment {
+pub fn delegate_comment(
+    pr: &PullRequestModel,
+    base_sha: &CommitSha,
+    current_sha: &CommitSha,
+    delegatee: &str,
+    delegator: &str,
+    bot_prefix: &CommandPrefix,
+) -> Comment {
     Comment::new(format!(
         r#":v: @{delegatee}, you can now approve this pull request!
 
 If @{delegator} told you to "`r=me`" after making some further change, then please make that change and post `{bot_prefix} r={delegator}`.
-"#
+
+[View changes since this delegation](https://triagebot.infra.rust-lang.org/gh-changes-since/{}/{}/{}/{base_sha}..{current_sha}).
+"#,
+        pr.repository.owner(),
+        pr.repository.name(),
+        pr.number,
     ))
 }
 

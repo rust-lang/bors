@@ -11,10 +11,10 @@ use crate::bors::handlers::{has_permission, invalidate_pr};
 use crate::bors::labels::handle_label_trigger;
 use crate::bors::merge_queue::MergeQueueSender;
 use crate::bors::{Comment, PullRequestStatus};
-use crate::database::ApprovalInfo;
 use crate::database::DelegatedPermission;
+use crate::database::{ApprovalInfo, PullRequestModel};
 use crate::database::{MergeableState, TreeState};
-use crate::github::{CommitSha, LabelTrigger};
+use crate::github::{CommitSha, LabelTrigger, PullRequest};
 use crate::github::{GithubUser, PullRequestNumber};
 use crate::permissions::PermissionType;
 use crate::{BorsContext, PgDbClient};
@@ -316,8 +316,8 @@ pub(super) async fn command_delegate(
     notify_of_delegation(
         &repo_state,
         &db,
-        pr.number(),
-        &pr.github.author.username,
+        pr.db,
+        pr.github,
         &author.username,
         delegated_permission,
         bot_prefix,
@@ -480,18 +480,26 @@ async fn notify_of_tree_open(
 async fn notify_of_delegation(
     repo: &RepositoryState,
     db: &PgDbClient,
-    pr_number: PullRequestNumber,
-    delegatee: &str,
+    pr_db: &PullRequestModel,
+    pr_gh: &PullRequest,
     delegator: &str,
     delegated_permission: DelegatedPermission,
     bot_prefix: &CommandPrefix,
 ) -> anyhow::Result<()> {
+    let delegatee = pr_gh.author.username.as_str();
     let comment = match delegated_permission {
         DelegatedPermission::Try => delegate_try_builds_comment(delegatee, bot_prefix),
-        DelegatedPermission::Review => delegate_comment(delegatee, delegator, bot_prefix),
+        DelegatedPermission::Review => delegate_comment(
+            pr_db,
+            &pr_gh.base.sha,
+            &pr_gh.head.sha,
+            delegatee,
+            delegator,
+            bot_prefix,
+        ),
     };
 
-    repo.client.post_comment(pr_number, comment, db).await?;
+    repo.client.post_comment(pr_db.number, comment, db).await?;
     Ok(())
 }
 
@@ -644,13 +652,13 @@ approved = ["+approved"]
             ctx.post_comment("@bors r=nonexistent-user").await?;
             insta::assert_snapshot!(
                 ctx.get_next_comment_text(()).await?,
-                @r###"
+                @"
             :pushpin: Commit pr-1-sha has been approved by `nonexistent-user`
 
             It is now in the [queue](https://bors-test.com/queue/borstest) for this repository.
 
             :warning: The following reviewer(s) could not be found: `nonexistent-user`
-            "###
+            "
             );
 
             ctx.pr(()).await.expect_approved_by("nonexistent-user");
@@ -665,13 +673,13 @@ approved = ["+approved"]
             ctx.post_comment("@bors r=nonexistent-team").await?;
             insta::assert_snapshot!(
                 ctx.get_next_comment_text(()).await?,
-                @r###"
+                @"
             :pushpin: Commit pr-1-sha has been approved by `nonexistent-team`
 
             It is now in the [queue](https://bors-test.com/queue/borstest) for this repository.
 
             :warning: The following reviewer(s) could not be found: `nonexistent-team`
-            "###
+            "
             );
 
             ctx.pr(()).await.expect_approved_by("nonexistent-team");
@@ -1098,6 +1106,8 @@ approved = { modifications = ["+foo", "+baz"], unless = ["label1", "label2"] }
                 :v: @default-user, you can now approve this pull request!
 
                 If @reviewer told you to "`r=me`" after making some further change, then please make that change and post `@bors r=reviewer`.
+
+                [View changes since this delegation](https://triagebot.infra.rust-lang.org/gh-changes-since/rust-lang/borstest/1/main-sha1..pr-1-sha).
                 "#
                 );
 
