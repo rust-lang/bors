@@ -911,12 +911,12 @@ merge_queue_enabled = false
             insta::assert_snapshot!(
                   ctx.get_next_comment_text(()).await?,
                   @r#"
-              :sunny: Test successful - [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1)
-              Approved by: `default-user`
-              Duration: `1h 20m`
-              Pushing merge-0-pr-1-d7d45f1f-reauthored-to-bors to `main`...
-              <!-- homu: {"type":"BuildCompleted","base_ref":"main","merge_sha":"merge-0-pr-1-d7d45f1f-reauthored-to-bors"} -->
-              "#
+            :sunny: Test successful - [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1)
+            Approved by: `default-user`
+            Duration: `1h 20m`
+            Pushing merge-0-pr-1-d7d45f1f-reauthored-to-bors to `main`...
+            <!-- homu: {"type":"BuildCompleted","base_ref":"main","merge_sha":"merge-0-pr-1-d7d45f1f-reauthored-to-bors"} -->
+            "#
               );
             Ok(())
         })
@@ -937,12 +937,12 @@ merge_queue_enabled = false
             insta::assert_snapshot!(
                   ctx.get_next_comment_text(()).await?,
                   @r#"
-              :sunny: Test successful - [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1)
-              Approved by: `default-user`
-              Duration: `3h 25m 45s`
-              Pushing merge-0-pr-1-d7d45f1f-reauthored-to-bors to `main`...
-              <!-- homu: {"type":"BuildCompleted","base_ref":"main","merge_sha":"merge-0-pr-1-d7d45f1f-reauthored-to-bors"} -->
-              "#
+            :sunny: Test successful - [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1)
+            Approved by: `default-user`
+            Duration: `3h 25m 45s`
+            Pushing merge-0-pr-1-d7d45f1f-reauthored-to-bors to `main`...
+            <!-- homu: {"type":"BuildCompleted","base_ref":"main","merge_sha":"merge-0-pr-1-d7d45f1f-reauthored-to-bors"} -->
+            "#
               );
             Ok(())
         })
@@ -963,12 +963,12 @@ merge_queue_enabled = false
             insta::assert_snapshot!(
                   ctx.get_next_comment_text(()).await?,
                   @r#"
-              :sunny: Test successful - [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1)
-              Approved by: `default-user`
-              Duration: `45s`
-              Pushing merge-0-pr-1-d7d45f1f-reauthored-to-bors to `main`...
-              <!-- homu: {"type":"BuildCompleted","base_ref":"main","merge_sha":"merge-0-pr-1-d7d45f1f-reauthored-to-bors"} -->
-              "#
+            :sunny: Test successful - [Workflow1](https://github.com/rust-lang/borstest/actions/runs/1)
+            Approved by: `default-user`
+            Duration: `45s`
+            Pushing merge-0-pr-1-d7d45f1f-reauthored-to-bors to `main`...
+            <!-- homu: {"type":"BuildCompleted","base_ref":"main","merge_sha":"merge-0-pr-1-d7d45f1f-reauthored-to-bors"} -->
+            "#
               );
             Ok(())
         })
