@@ -4,7 +4,7 @@ use std::time::Duration;
 use serde::de::Error;
 use serde::{Deserialize, Deserializer};
 
-use crate::github::{LabelModification, LabelTrigger, PullRequest};
+use crate::github::{LabelModification, LabelTrigger, PullRequestSummary};
 
 pub const CONFIG_FILE_PATH: &str = "rust-bors.toml";
 
@@ -84,7 +84,7 @@ impl LabelOperation {
         &self.modifications
     }
 
-    pub fn should_apply_to(&self, pr: &PullRequest) -> bool {
+    pub fn should_apply_to(&self, pr: &PullRequestSummary) -> bool {
         // If there is any overlap, do not apply the operation
         !self
             .unless_has_labels
