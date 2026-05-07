@@ -1900,4 +1900,32 @@ also include this pls"
         })
         .await;
     }
+
+    #[sqlx::test]
+    async fn github_reopens_merged_pr(pool: sqlx::PgPool) {
+        // Sometimes, GitHub does not notice that a pull request was actually merged, and it still
+        // claims that it is open.
+        // We should not ever reopen a PR that was already merged in our DB though, as that can
+        // break merge queue invariants.
+        // We thus simulate what happens when we run the PR refresh job while GitHub changes its
+        // mind.
+        // See https://github.com/rust-lang/rust/pull/154327 and
+        // https://rust-lang.zulipchat.com/#narrow/channel/242791-t-infra/topic/Bors.20posting.20success.20message.20a.20dozen.20times/with/593477072
+        run_test(pool, async |ctx: &mut BorsTester| {
+            ctx.approve(()).await?;
+            ctx.start_and_finish_auto_build(()).await?;
+
+            ctx.pr(()).await.expect_status(PullRequestStatus::Merged);
+
+            // Simulate GitHub thinking that the PR has been reopened
+            ctx.edit_pr((), |pr| pr.reopen()).await?;
+            // Refresh PRs, which must not reopen the PR in the DB
+            ctx.refresh_prs().await;
+
+            ctx.pr(()).await.expect_status(PullRequestStatus::Merged);
+
+            Ok(())
+        })
+        .await;
+    }
 }
