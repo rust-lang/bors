@@ -151,7 +151,16 @@ pub(crate) async fn upsert_pull_request(
                             WHEN $9 = true THEN true
                             ELSE pull_request.mergeable_state_is_stale
                           END,
-                    status = $10
+                    -- The merged state is final, there is no going back from it.
+                    -- Sometimes, GitHub can return inconsistent data, and claim that a merged PR
+                    -- is open again.
+                    -- We do not ever want to revert a merged state in the DB, as that could
+                    -- break some invariants in the merge queue.
+                    status =
+                        CASE
+                            WHEN pull_request.status = 'merged' THEN pull_request.status
+                            ELSE $10
+                        END
                 RETURNING *
             )
             SELECT
