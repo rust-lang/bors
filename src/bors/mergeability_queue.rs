@@ -164,8 +164,10 @@ use crate::bors::comment::merge_conflict_comment;
 use crate::bors::handlers::unapprove_pr;
 use crate::bors::labels::handle_label_trigger;
 use crate::database::{MergeableState, OctocrabMergeableState, PullRequestModel};
-use crate::github::{GithubRepoName, LabelTrigger, PullRequest, PullRequestNumber};
-use std::cmp::Reverse;
+use crate::github::{
+    GithubRepoName, LabelTrigger, PullRequest, PullRequestNumber, PullRequestSummary,
+};
+use std::cmp::{Ordering, Reverse};
 use std::collections::{BTreeMap, BinaryHeap};
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
@@ -181,8 +183,11 @@ const BASE_DELAY: Duration = Duration::from_secs(5);
 #[cfg(test)]
 const BASE_DELAY: Duration = Duration::from_millis(500);
 
-/// Max number of mergeable check retries before giving up.
+/// Max number of single PR mergeable check retries before giving up.
 const MAX_RETRIES: u32 = 5;
+
+/// Max number of batched mergeable check retries before giving up.
+const BATCH_MAX_RETRIES: u32 = 10;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub struct MergeabilityCheckPriority(u32);
@@ -213,8 +218,24 @@ pub struct PullRequestToCheck {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PullRequestBatchToCheck {
+    repo: GithubRepoName,
+    base_branch: String,
+    /// Which attempt to check mergeability are we processing?
+    attempt: u32,
+    /// Merged pull request that *might* have caused a merge conflict for this PR.
+    conflict_source: Option<PullRequestNumber>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MergeabilityCheckEntry {
+    Single(PullRequestToCheck),
+    Batch(PullRequestBatchToCheck),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct QueueItem {
-    entry: PullRequestToCheck,
+    entry: MergeabilityCheckEntry,
     /// When to process item (None = immediate is ordered before Some).
     expiration: Option<Instant>,
 }
@@ -241,15 +262,34 @@ impl Ord for QueueItem {
         {
             // Note: we don't order by priority, because items with a different priority should
             // be in different queues altogether. Let's check that here
-            assert_eq!(entry1.priority, entry2.priority);
+            // TODO: uncomment this
+            // assert_eq!(entry1.priority, entry2.priority);
 
             // Order by expiration => None before Some
-            expire1
-                .cmp(expire2)
-                // Then order by PR number
-                .then_with(|| entry1.pull_request.cmp(&entry2.pull_request))
-                // And finally by attempt
-                .then_with(|| entry1.attempt.cmp(&entry2.attempt))
+            expire1.cmp(expire2).then_with(|| match (entry1, entry2) {
+                // Prioritize batches
+                (MergeabilityCheckEntry::Batch(_), MergeabilityCheckEntry::Single(_)) => {
+                    Ordering::Less
+                }
+                (MergeabilityCheckEntry::Single(_), MergeabilityCheckEntry::Batch(_)) => {
+                    Ordering::Greater
+                }
+                // For batches...
+                (MergeabilityCheckEntry::Batch(batch1), MergeabilityCheckEntry::Batch(batch2)) =>
+                // Order by base branch
+                {
+                    batch1.base_branch.cmp(&batch2.base_branch)
+                }
+                // For single PRs...
+                (MergeabilityCheckEntry::Single(pr1), MergeabilityCheckEntry::Single(pr2)) =>
+                // Order by PR number
+                {
+                    pr1.pull_request
+                        .cmp(&pr2.pull_request)
+                        // And finally by attempt
+                        .then_with(|| pr1.attempt.cmp(&pr2.attempt))
+                }
+            })
         }
     }
 }
@@ -301,7 +341,7 @@ impl MergeabilityQueueSender {
 
     /// Return the PRs currently in the mergeability queue.
     #[cfg(test)]
-    pub fn get_queue_prs(&self) -> Vec<PullRequestToCheck> {
+    pub fn get_queue_entries(&self) -> Vec<MergeabilityCheckEntry> {
         self.inner
             .queues
             .lock()
@@ -348,6 +388,29 @@ impl MergeabilityQueueSender {
         );
     }
 
+    /// Enqueues a batch for mergeability checking of PRs based on the given base branch.
+    /// The PRs will be repeatedly fetched in the background from the GH API, until we can figure out
+    /// every PR's mergeability status.
+    ///
+    /// If a batch for the given base branch already exists, it will stay there.
+    /// Notably, its conflict source will *not* get overridden by `None` if it was set before.
+    pub fn enqueue_batch(
+        &self,
+        repo: &GithubRepoName,
+        base_branch: &str,
+        conflict_source: Option<PullRequestNumber>,
+    ) {
+        self.insert_pr_item(
+            MergeabilityCheckEntry::Batch(PullRequestBatchToCheck {
+                repo: repo.clone(),
+                base_branch: base_branch.to_owned(),
+                attempt: 1,
+                conflict_source,
+            }),
+            None,
+        );
+    }
+
     /// Try to return an existing conflict source for the given PR.
     pub fn get_conflict_source(&self, model: &PullRequestModel) -> Option<PullRequestNumber> {
         let pr_data = PullRequestData {
@@ -358,8 +421,15 @@ impl MergeabilityQueueSender {
         queues
             .values()
             .flat_map(|queue| queue.iter())
-            .find(|entry| entry.0.entry.pull_request == pr_data)
-            .and_then(|entry| entry.0.entry.conflict_source)
+            .find_map(|entry| match &entry.0.entry {
+                MergeabilityCheckEntry::Single(pr) => {
+                    (pr.pull_request == pr_data).then_some(pr.conflict_source)
+                }
+                MergeabilityCheckEntry::Batch(batch) => (batch.repo == pr_data.repo
+                    && batch.base_branch == model.base_branch)
+                    .then_some(batch.conflict_source),
+            })
+            .flatten()
     }
 
     pub fn enqueue(
@@ -370,7 +440,7 @@ impl MergeabilityQueueSender {
         conflict_source: Option<PullRequestNumber>,
     ) {
         self.insert_pr_item(
-            PullRequestToCheck {
+            MergeabilityCheckEntry::Single(PullRequestToCheck {
                 pull_request: PullRequestData {
                     pr_number: number,
                     repo: repo.clone(),
@@ -378,18 +448,16 @@ impl MergeabilityQueueSender {
                 attempt: 1,
                 priority,
                 conflict_source,
-            },
+            }),
             None,
         );
     }
 
-    fn enqueue_retry(&self, pr_item: PullRequestToCheck) {
-        let PullRequestToCheck {
-            pull_request,
-            attempt,
-            priority,
-            conflict_source,
-        } = pr_item;
+    fn enqueue_retry(&self, pr_item: MergeabilityCheckEntry) {
+        let attempt = match pr_item {
+            MergeabilityCheckEntry::Single(PullRequestToCheck { attempt, .. }) => attempt,
+            MergeabilityCheckEntry::Batch(PullRequestBatchToCheck { attempt, .. }) => attempt,
+        };
 
         // First attempt = BASE_DELAY
         // Second attempt = BASE_DELAY * 2
@@ -399,35 +467,58 @@ impl MergeabilityQueueSender {
         let expiration = Some(Instant::now() + delay);
         let next_attempt = attempt + 1;
 
-        self.insert_pr_item(
-            PullRequestToCheck {
-                pull_request,
-                attempt: next_attempt,
-                priority,
-                conflict_source,
-            },
-            expiration,
-        );
+        let updated_item = match pr_item {
+            MergeabilityCheckEntry::Single(pr) => {
+                MergeabilityCheckEntry::Single(PullRequestToCheck {
+                    attempt: next_attempt,
+                    ..pr
+                })
+            }
+            MergeabilityCheckEntry::Batch(batch) => {
+                MergeabilityCheckEntry::Batch(PullRequestBatchToCheck {
+                    attempt: next_attempt,
+                    ..batch
+                })
+            }
+        };
+
+        self.insert_pr_item(updated_item, expiration)
     }
 
-    fn insert_pr_item(&self, item: PullRequestToCheck, expiration: Option<Instant>) {
+    fn insert_pr_item(&self, item: MergeabilityCheckEntry, expiration: Option<Instant>) {
         let mut queues = self.inner.queues.lock().unwrap();
 
-        // Make sure that we don't ever put the same pull request twice into the queues
+        // Make sure that we don't ever put the same entry twice into the queues
         // This might seem a bit inefficient, but linearly iterating through e.g. 1000 PRs should
         // be fine.
-        // We could maybe reset the attempt counter of the PR if it's "refreshed" from the outside,
+        // We could maybe reset the attempt counter of the entry if it's "refreshed" from the outside,
         // but that would require using e.g. Cell to mutate the attempt counter through &, which
         // doesn't seem necessary at the moment.
-        if queues
-            .values()
-            .flat_map(|queue| queue.iter())
-            .any(|entry| entry.0.entry.pull_request == item.pull_request)
-        {
+        if queues.values().flat_map(|queue| queue.iter()).any(|entry| {
+            match (&entry.0.entry, &item) {
+                (
+                    MergeabilityCheckEntry::Single(entry_pr),
+                    MergeabilityCheckEntry::Single(item_pr),
+                ) => entry_pr.pull_request == item_pr.pull_request,
+                (
+                    MergeabilityCheckEntry::Batch(entry_batch),
+                    MergeabilityCheckEntry::Batch(item_batch),
+                ) => {
+                    entry_batch.repo == item_batch.repo
+                        && entry_batch.base_branch == item_batch.base_branch
+                }
+                _ => false,
+            }
+        }) {
             return;
         }
 
-        let queue = queues.entry(item.priority).or_default();
+        let queue = queues
+            .entry(match &item {
+                MergeabilityCheckEntry::Batch(_) => MergeabilityCheckPriority(0),
+                MergeabilityCheckEntry::Single(pr) => pr.priority,
+            })
+            .or_default();
 
         // Notify when:
         // 1. The current item expires sooner than the head of the queue or has higher
@@ -455,7 +546,7 @@ impl MergeabilityQueueSender {
 
 impl MergeabilityQueueReceiver {
     /// Get the next item from the queue.
-    pub async fn dequeue(&self) -> Option<(PullRequestToCheck, MergeabilityQueueSender)> {
+    pub async fn dequeue(&self) -> Option<(MergeabilityCheckEntry, MergeabilityQueueSender)> {
         loop {
             match self.peek_inner() {
                 // Shutdown signal
@@ -555,63 +646,132 @@ impl MergeabilityQueueReceiver {
 pub async fn check_mergeability(
     ctx: Arc<BorsContext>,
     mq_tx: MergeabilityQueueSender,
-    mq_item: PullRequestToCheck,
+    mq_item: MergeabilityCheckEntry,
 ) -> anyhow::Result<()> {
-    let PullRequestToCheck {
-        ref pull_request,
-        ref attempt,
-        priority: _,
-        conflict_source,
-    } = mq_item;
-
-    if *attempt >= MAX_RETRIES {
-        tracing::warn!("Exceeded max mergeable state attempts for PR: {pull_request}");
-        return Ok(());
-    }
-
-    let repo_state = ctx.get_repo(&pull_request.repo)?;
-
-    // Load the PR from GitHub.
-    // - If the PR's mergeability is unknown, and the GH background job hasn't been started yet,
-    //   this PR fetch will trigger its start.
-    // - If the PR mergeability is known, we will be able to read it and update it in the DB.
-    let fetched_pr = repo_state
-        .client
-        .get_pull_request(pull_request.pr_number)
-        .await?;
-    let new_mergeable_state = fetched_pr.mergeable_state.clone();
-
-    // We don't know the mergeability state yet. Retry the PR after some delay
-    if new_mergeable_state == OctocrabMergeableState::Unknown {
-        match &fetched_pr.status {
-            PullRequestStatus::Open | PullRequestStatus::Draft => {
-                tracing::info!("Mergeability status unknown, scheduling retry.");
-                mq_tx.enqueue_retry(mq_item);
-            }
-            PullRequestStatus::Closed | PullRequestStatus::Merged => {
-                tracing::info!("Mergeability status unknown, but pull request is no longer open.");
-            }
-        }
-
-        return Ok(());
-    } else if let Some(db_pr) = ctx
-        .db
-        .get_pull_request(repo_state.repository(), fetched_pr.number)
-        .await?
-    {
-        update_pr_with_known_mergeability(
-            &repo_state,
-            &ctx.db,
-            &fetched_pr,
-            &db_pr,
+    match mq_item {
+        MergeabilityCheckEntry::Single(PullRequestToCheck {
+            ref pull_request,
+            ref attempt,
             conflict_source,
-        )
-        .await?;
-    } else {
-        tracing::warn!("Cannot find DB pull request for {fetched_pr:?}");
-    }
+            ..
+        }) => {
+            if *attempt >= MAX_RETRIES {
+                tracing::warn!("Exceeded max mergeable state attempts for PR: {pull_request}");
+                return Ok(());
+            }
 
-    Ok(())
+            let repo_state = ctx.get_repo(&pull_request.repo)?;
+
+            // Load the PR from GitHub.
+            // - If the PR's mergeability is unknown, and the GH background job hasn't been started yet,
+            //   this PR fetch will trigger its start.
+            // - If the PR mergeability is known, we will be able to read it and update it in the DB.
+            let fetched_pr = repo_state
+                .client
+                .get_pull_request(pull_request.pr_number)
+                .await?;
+            let new_mergeable_state = fetched_pr.mergeable_state.clone();
+
+            // We don't know the mergeability state yet. Retry the PR after some delay
+            if new_mergeable_state == OctocrabMergeableState::Unknown {
+                match &fetched_pr.status {
+                    PullRequestStatus::Open | PullRequestStatus::Draft => {
+                        tracing::info!("Mergeability status unknown, scheduling retry.");
+                        mq_tx.enqueue_retry(mq_item);
+                    }
+                    PullRequestStatus::Closed | PullRequestStatus::Merged => {
+                        tracing::info!(
+                            "Mergeability status unknown, but pull request is no longer open."
+                        );
+                    }
+                }
+
+                return Ok(());
+            } else if let Some(db_pr) = ctx
+                .db
+                .get_pull_request(repo_state.repository(), fetched_pr.number)
+                .await?
+            {
+                update_pr_with_known_mergeability(
+                    &repo_state,
+                    &ctx.db,
+                    &fetched_pr.into(),
+                    &db_pr,
+                    conflict_source,
+                )
+                .await?;
+            } else {
+                tracing::warn!("Cannot find DB pull request for {fetched_pr:?}");
+            }
+
+            Ok(())
+        }
+        MergeabilityCheckEntry::Batch(PullRequestBatchToCheck {
+            ref repo,
+            ref base_branch,
+            ref attempt,
+            conflict_source,
+        }) => {
+            if *attempt >= BATCH_MAX_RETRIES {
+                tracing::warn!(
+                    "Exceeded max mergeable state attempts for batch in repo {repo} with base branch: {base_branch}"
+                );
+                return Ok(());
+            }
+
+            let repo_state = ctx.get_repo(repo)?;
+
+            let mut after = None;
+            loop {
+                let (fetched_prs, cursor) = repo_state
+                    .client
+                    .get_pull_requests_batch(base_branch, after.as_deref())
+                    .await?;
+
+                for pr in fetched_prs {
+                    let new_mergeable_state = pr.mergeable_state.clone();
+                    if new_mergeable_state == OctocrabMergeableState::Unknown {
+                        match pr.status {
+                            PullRequestStatus::Open | PullRequestStatus::Draft => {
+                                tracing::info!("Mergeability status unknown, scheduling retry.");
+                                mq_tx.enqueue_retry(mq_item);
+                                return Ok(());
+                            }
+                            PullRequestStatus::Closed | PullRequestStatus::Merged => {
+                                tracing::info!(
+                                    "Mergeability status unknown, but pull request is no longer open."
+                                );
+                            }
+                        }
+                    } else if let Some(db_pr) = ctx
+                        .db
+                        .get_pull_request(repo_state.repository(), pr.number)
+                        .await?
+                    {
+                        update_pr_with_known_mergeability(
+                            &repo_state,
+                            &ctx.db,
+                            &pr,
+                            &db_pr,
+                            conflict_source,
+                        )
+                        .await?;
+                    } else {
+                        let pr_number = pr.number;
+                        tracing::warn!("Cannot find DB pull request for {repo}#{pr_number}");
+                    }
+                }
+
+                if cursor.is_some() {
+                    after = cursor;
+                } else {
+                    break;
+                }
+            }
+
+            Ok(())
+        }
+    }
 }
 
 /// This method should be called once we learn about the mergeability status of a PR from GitHub
@@ -625,7 +785,7 @@ pub async fn check_mergeability(
 pub async fn update_pr_with_known_mergeability(
     repo: &RepositoryState,
     db: &PgDbClient,
-    gh_pr: &PullRequest,
+    gh_pr: &PullRequestSummary,
     db_pr: &PullRequestModel,
     conflict_source: Option<PullRequestNumber>,
 ) -> anyhow::Result<()> {
@@ -732,8 +892,8 @@ pub async fn set_pr_mergeability_based_on_user_action(
 #[cfg(test)]
 mod tests {
     use crate::bors::mergeability_queue::{
-        BASE_DELAY, MergeabilityCheckPriority, MergeabilityQueueSender, PullRequestData,
-        PullRequestToCheck, create_mergeability_queue,
+        BASE_DELAY, MergeabilityCheckEntry, MergeabilityCheckPriority, MergeabilityQueueSender,
+        PullRequestData, PullRequestToCheck, create_mergeability_queue,
     };
     use crate::github::{GithubRepoName, PullRequestNumber};
     use crate::tests::default_repo_name;
@@ -746,10 +906,10 @@ mod tests {
         item(2).enqueue(&tx);
 
         for expected in [1, 2, 3] {
-            assert_eq!(
-                rx.dequeue().await.unwrap().0.pull_request.pr_number.0,
-                expected
-            );
+            let MergeabilityCheckEntry::Single(pr) = rx.dequeue().await.unwrap().0 else {
+                unreachable!()
+            };
+            assert_eq!(pr.pull_request.pr_number.0, expected);
         }
     }
 
@@ -760,10 +920,10 @@ mod tests {
         item(2).enqueue(&tx);
 
         for expected in [2, 10] {
-            assert_eq!(
-                rx.dequeue().await.unwrap().0.pull_request.pr_number.0,
-                expected
-            );
+            let MergeabilityCheckEntry::Single(pr) = rx.dequeue().await.unwrap().0 else {
+                unreachable!()
+            };
+            assert_eq!(pr.pull_request.pr_number.0, expected);
         }
     }
 
@@ -800,10 +960,10 @@ mod tests {
         item(1).enqueue(&tx);
 
         for expected in [3, 1] {
-            assert_eq!(
-                rx.dequeue().await.unwrap().0.pull_request.pr_number.0,
-                expected
-            );
+            let MergeabilityCheckEntry::Single(pr) = rx.dequeue().await.unwrap().0 else {
+                unreachable!()
+            };
+            assert_eq!(pr.pull_request.pr_number.0, expected);
         }
     }
 
@@ -814,17 +974,20 @@ mod tests {
         item(1).enqueue(&tx);
         item(2).enqueue(&tx);
 
-        assert_eq!(rx.dequeue().await.unwrap().0.pull_request.pr_number.0, 1);
+        let MergeabilityCheckEntry::Single(pr) = rx.dequeue().await.unwrap().0 else {
+            unreachable!()
+        };
+        assert_eq!(pr.pull_request.pr_number.0, 1);
 
         // Wait for the higher priority item to have expiration set
         tokio::time::sleep(BASE_DELAY * 2).await;
 
         // And check that it is returned before the immediate item with lower priority
         for expected in [3, 2] {
-            assert_eq!(
-                rx.dequeue().await.unwrap().0.pull_request.pr_number.0,
-                expected
-            );
+            let MergeabilityCheckEntry::Single(pr) = rx.dequeue().await.unwrap().0 else {
+                unreachable!()
+            };
+            assert_eq!(pr.pull_request.pr_number.0, expected);
         }
     }
 
@@ -853,7 +1016,7 @@ mod tests {
         }
 
         fn enqueue_retry(&self, tx: &MergeabilityQueueSender, attempt: u32) {
-            tx.enqueue_retry(PullRequestToCheck {
+            tx.enqueue_retry(MergeabilityCheckEntry::Single(PullRequestToCheck {
                 pull_request: PullRequestData {
                     repo: self.repo.clone(),
                     pr_number: self.number,
@@ -861,7 +1024,7 @@ mod tests {
                 attempt,
                 priority: self.priority,
                 conflict_source: None,
-            });
+            }));
         }
     }
 
