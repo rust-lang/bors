@@ -466,7 +466,7 @@ impl BorsTester {
     #[allow(unused)]
     pub fn dump_mergeability_queue(&self) {
         eprintln!("Mergeability queue contents:");
-        let prs = self.senders.mergeability_queue().get_queue_prs();
+        let prs = self.senders.mergeability_queue().get_queue_entries();
         for pr in prs {
             eprintln!("{pr:?}");
         }

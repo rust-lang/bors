@@ -38,7 +38,12 @@ pub(super) async fn command_retry(
         merge_queue_tx.notify().await?;
 
         // Retrying is essentially like a reapproval
-        handle_label_trigger(&repo_state, pr.github, LabelTrigger::Approved).await?;
+        handle_label_trigger(
+            &repo_state,
+            &pr.github.clone().into(),
+            LabelTrigger::Approved,
+        )
+        .await?;
     } else {
         let pending_auto_build = pr_model
             .auto_build
