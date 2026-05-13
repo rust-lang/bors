@@ -24,7 +24,7 @@ pub struct RepositoryConfig {
     /// Maps trigger events (approve, try, etc.) to label additions/removals.
     /// Format (one of):
     /// - `<trigger> = ["+label_to_add", "-label_to_remove"]`
-    /// - `<trigger> = { modifications = ["+add", "-remove"], unless = ["label1", "label"] }
+    /// - `<trigger> = { modifications = ["+add", "-remove"], unless = ["label1", "label"] }`
     #[serde(default, deserialize_with = "deserialize_labels")]
     pub labels: HashMap<LabelTrigger, LabelOperation>,
     /// Labels that will block a PR from being approved when present on the PR.

@@ -1287,7 +1287,7 @@ merge_queue_enabled = false
             insta::assert_snapshot!(
                 ctx.get_next_comment_text(()).await?,
                 @"
-            :umbrella: The latest upstream changes made this pull request unmergeable. Please [resolve the merge conflicts](https://rustc-dev-guide.rust-lang.org/git.html#rebasing-and-conflicts).
+            :umbrella: The latest upstream changes made this pull request unmergeable. Please [resolve the merge conflicts by rebasing](https://rustc-dev-guide.rust-lang.org/git.html#rebasing-and-conflicts).
 
             This pull request was unapproved.
             "
@@ -1315,7 +1315,7 @@ merge_queue_enabled = false
                 .expect_no_auto_build()
                 .expect_unapproved();
             insta::assert_snapshot!(ctx.get_next_comment_text(pr.id()).await?, @"
-            :umbrella: The latest upstream changes made this pull request unmergeable. Please [resolve the merge conflicts](https://rustc-dev-guide.rust-lang.org/git.html#rebasing-and-conflicts).
+            :umbrella: The latest upstream changes made this pull request unmergeable. Please [resolve the merge conflicts by rebasing](https://rustc-dev-guide.rust-lang.org/git.html#rebasing-and-conflicts).
 
             This pull request was unapproved.
             ");
@@ -1351,7 +1351,7 @@ merge_queue_enabled = false
 
             // Ensure that the conflict source was taken from the mergeability queue
             insta::assert_snapshot!(ctx.get_next_comment_text(pr3.id()).await?, @"
-            :umbrella: The latest upstream changes (presumably #2) made this pull request unmergeable. Please [resolve the merge conflicts](https://rustc-dev-guide.rust-lang.org/git.html#rebasing-and-conflicts).
+            :umbrella: The latest upstream changes (presumably #2) made this pull request unmergeable. Please [resolve the merge conflicts by rebasing](https://rustc-dev-guide.rust-lang.org/git.html#rebasing-and-conflicts).
 
             This pull request was unapproved.
             ");

@@ -361,7 +361,7 @@ pub fn approve_blocking_labels_present(blocking_labels: &[&str]) -> Comment {
 
 pub fn approve_merge_conflict_comment() -> Comment {
     Comment::new(
-        ":clipboard: This PR cannot be approved because it has merge conflicts. Please resolve the conflicts and try again.".to_string()
+        ":clipboard: This PR cannot be approved because it has merge conflicts. Please [resolve the merge conflicts by rebasing](https://rustc-dev-guide.rust-lang.org/git.html#rebasing-and-conflicts), and try again.".to_string()
     )
 }
 
@@ -494,7 +494,7 @@ pub fn auto_build_push_failed_comment(error: &str) -> Comment {
 
 pub fn merge_conflict_comment(source: Option<PullRequestNumber>, was_unapproved: bool) -> Comment {
     Comment::new(format!(
-        r#":umbrella: The latest upstream changes{} made this pull request unmergeable. Please [resolve the merge conflicts](https://rustc-dev-guide.rust-lang.org/git.html#rebasing-and-conflicts).{}"#,
+        r#":umbrella: The latest upstream changes{} made this pull request unmergeable. Please [resolve the merge conflicts by rebasing](https://rustc-dev-guide.rust-lang.org/git.html#rebasing-and-conflicts).{}"#,
         source
             .map(|n| format!(" (presumably #{n})"))
             .unwrap_or_default(),
