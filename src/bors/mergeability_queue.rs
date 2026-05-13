@@ -45,7 +45,7 @@
 //! ### Mergeability queue
 //! To reload the mergeability of PRs, we use a mergeability queue, which is implemented in this
 //! module. Sadly, the mergeability status cannot be determined directly from GitHub, because it is
-//! computed by a background job (see https://docs.github.com/en/rest/guides/using-the-rest-api-to-interact-with-your-git-database).
+//! computed by a background job (see <https://docs.github.com/en/rest/guides/using-the-rest-api-to-interact-with-your-git-database>).
 //! Instead, we have to poll GitHub repeatedly, which is what the queue does.
 //!
 //! When you add a PR to the mergeability queue, it will then immediately contact the GH API
