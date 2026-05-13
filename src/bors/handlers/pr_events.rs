@@ -771,7 +771,7 @@ report_merge_conflicts = false
 
             ctx.push_to_branch(default_branch_name(), Commit::new("sha", "push")).await?;
             ctx.run_mergeability_check().await?;
-            assert_snapshot!(ctx.get_next_comment_text(pr).await?, @":umbrella: The latest upstream changes made this pull request unmergeable. Please [resolve the merge conflicts](https://rustc-dev-guide.rust-lang.org/git.html#rebasing-and-conflicts).");
+            assert_snapshot!(ctx.get_next_comment_text(pr).await?, @":umbrella: The latest upstream changes made this pull request unmergeable. Please [resolve the merge conflicts by rebasing](https://rustc-dev-guide.rust-lang.org/git.html#rebasing-and-conflicts).");
 
             Ok(())
         })
@@ -794,7 +794,7 @@ report_merge_conflicts = false
             ctx.push_to_branch(default_branch_name(), Commit::new("sha", "push")).await?;
             ctx.run_mergeability_check().await?;
             assert_snapshot!(ctx.get_next_comment_text(pr.id()).await?, @"
-            :umbrella: The latest upstream changes made this pull request unmergeable. Please [resolve the merge conflicts](https://rustc-dev-guide.rust-lang.org/git.html#rebasing-and-conflicts).
+            :umbrella: The latest upstream changes made this pull request unmergeable. Please [resolve the merge conflicts by rebasing](https://rustc-dev-guide.rust-lang.org/git.html#rebasing-and-conflicts).
 
             This pull request was unapproved.
             ");
@@ -833,7 +833,7 @@ report_merge_conflicts = false
             // Ideally, the tests should do that automatically...
             ctx.push_to_branch(default_branch_name(), commit).await?;
             ctx.run_mergeability_check().await?;
-            assert_snapshot!(ctx.get_next_comment_text(pr2.id()).await?, @":umbrella: The latest upstream changes (presumably #3) made this pull request unmergeable. Please [resolve the merge conflicts](https://rustc-dev-guide.rust-lang.org/git.html#rebasing-and-conflicts).");
+            assert_snapshot!(ctx.get_next_comment_text(pr2.id()).await?, @":umbrella: The latest upstream changes (presumably #3) made this pull request unmergeable. Please [resolve the merge conflicts by rebasing](https://rustc-dev-guide.rust-lang.org/git.html#rebasing-and-conflicts).");
 
             Ok(())
         })
@@ -868,7 +868,7 @@ report_merge_conflicts = false
             // information.
             ctx.push_to_branch(default_branch_name(), commit).await?;
             ctx.run_mergeability_check().await?;
-            assert_snapshot!(ctx.get_next_comment_text(pr3.id()).await?, @":umbrella: The latest upstream changes made this pull request unmergeable. Please [resolve the merge conflicts](https://rustc-dev-guide.rust-lang.org/git.html#rebasing-and-conflicts).");
+            assert_snapshot!(ctx.get_next_comment_text(pr3.id()).await?, @":umbrella: The latest upstream changes made this pull request unmergeable. Please [resolve the merge conflicts by rebasing](https://rustc-dev-guide.rust-lang.org/git.html#rebasing-and-conflicts).");
 
             Ok(())
         })

@@ -1786,7 +1786,7 @@ labels_blocking_approval = ["proposed-final-comment-period", "final-comment-peri
                 pr.mergeable_state = OctocrabMergeableState::Dirty;
             });
             ctx.post_comment("@bors r+").await?;
-            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @":clipboard: This PR cannot be approved because it has merge conflicts. Please resolve the conflicts and try again.");
+            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @":clipboard: This PR cannot be approved because it has merge conflicts. Please [resolve the merge conflicts by rebasing](https://rustc-dev-guide.rust-lang.org/git.html#rebasing-and-conflicts), and try again.");
             ctx.pr(()).await.expect_unapproved();
             Ok(())
         })
