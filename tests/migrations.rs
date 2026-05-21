@@ -5,7 +5,7 @@ use sqlparser::ast::{
 };
 use sqlparser::dialect::PostgreSqlDialect;
 use sqlparser::parser::Parser;
-use sqlx::{Executor, PgPool};
+use sqlx::{AssertSqlSafe, Executor, PgPool};
 use std::collections::{BTreeSet, HashSet};
 use std::ffi::OsStr;
 use std::ops::ControlFlow;
@@ -170,7 +170,7 @@ async fn apply_migrations_with_test_data(pool: PgPool) -> sqlx::Result<()> {
         let migration_sql = std::fs::read_to_string(&migration_path)
             .unwrap_or_else(|_| panic!("Failed to read migration file: {migration_path:?}"));
 
-        pool.execute(&*migration_sql)
+        pool.execute(AssertSqlSafe(migration_sql))
             .await
             .unwrap_or_else(|e| panic!("Failed to apply migration {migration_path:?}: {e}"));
 
@@ -182,9 +182,11 @@ async fn apply_migrations_with_test_data(pool: PgPool) -> sqlx::Result<()> {
             )
         });
 
-        pool.execute(&*test_data).await.unwrap_or_else(|e| {
-            panic!("Failed to apply migration test data {test_data_path:?}: {e}")
-        });
+        pool.execute(AssertSqlSafe(test_data))
+            .await
+            .unwrap_or_else(|e| {
+                panic!("Failed to apply migration test data {test_data_path:?}: {e}")
+            });
     }
 
     Ok(())
