@@ -73,7 +73,7 @@ $ export DATABASE_URL=postgres://bors:bors@localhost:5432/bors
 ### Applying migrations
 You must have `sqlx-cli` installed for the following commands to work.
 ```console
-$ cargo install sqlx-cli@0.7.4 --no-default-features --features native-tls,postgres
+$ cargo install sqlx-cli@0.9 --no-default-features --features native-tls,postgres
 ```
 
 To apply migrations to your Postgres DB, you can execute the `cargo sqlx migrate run` command. To delete the whole database and recreate it from scratch (including applying) migrations, run `cargo sqlx database reset`.
