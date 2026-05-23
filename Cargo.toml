@@ -90,3 +90,4 @@ opt-level = 3
 
 [profile.test]
 codegen-units = 32
+debug = "limited"
