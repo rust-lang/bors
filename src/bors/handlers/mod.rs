@@ -598,10 +598,12 @@ async fn handle_comment(
                     }
                     CommandParseError::UnclosedQuote => "Unclosed quote in argument.".to_string(),
                 };
+                let help_url = ctx.get_web_url();
                 writeln!(
                     message,
-                    " Run `{} help` to see available commands.",
-                    ctx.parser.prefix()
+                    " Run `{} help` or go to <{help_url}{}help> to see available commands.",
+                    ctx.parser.prefix(),
+                    if help_url.ends_with('/') { "" } else { "/" },
                 )?;
                 tracing::warn!("{}", message);
                 repo.client
@@ -1120,7 +1122,7 @@ mod tests {
     async fn unknown_command(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.post_comment(Comment::from("@bors foo")).await?;
-            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @r#"Unknown command "foo". Run `@bors help` to see available commands."#);
+            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @r#"Unknown command "foo". Run `@bors help` or go to <https://bors-test.com/help> to see available commands."#);
             Ok(())
         })
             .await;

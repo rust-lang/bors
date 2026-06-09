@@ -1145,7 +1145,7 @@ approved = { modifications = ["+foo", "+baz"], unless = ["label1", "label2"] }
             .run_test(async |ctx: &mut BorsTester| {
                 ctx.post_comment(review_comment("@bors delegate try"))
                     .await?;
-                insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @r#"Unknown argument "try". Did you mean to use `@bors delegate=<try|review>`? Run `@bors help` to see available commands."#);
+                insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @r#"Unknown argument "try". Did you mean to use `@bors delegate=<try|review>`? Run `@bors help` or go to <https://bors-test.com/help> to see available commands."#);
                 Ok(())
             })
             .await;
