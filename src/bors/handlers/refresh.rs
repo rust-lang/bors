@@ -443,7 +443,8 @@ auto_build_failed = ["+failed"]
                 // The try build was completed successfully, not timed out
                 insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @r#"
                 :sunny: Try build successful ([Workflow1](https://github.com/rust-lang/borstest/actions/runs/1))
-                Build commit: merge-0-pr-1-d7d45f1f-reauthored-to-bors (`merge-0-pr-1-d7d45f1f-reauthored-to-bors`, parent: `main-sha1`)
+                Build commit: merge-0-pr-1-d7d45f1f-reauthored-to-bors (`merge-0-pr-1-d7d45f1f-reauthored-to-bors`)
+                Base parent: main-sha1 (`main-sha1`)
 
                 <!-- homu: {"type":"TryBuildCompleted","merge_sha":"merge-0-pr-1-d7d45f1f-reauthored-to-bors"} -->
                 "#);

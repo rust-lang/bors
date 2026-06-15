@@ -84,7 +84,8 @@ pub fn try_build_succeeded_comment(
     }
     writeln!(
         text,
-        "Build commit: {commit_sha} (`{commit_sha}`, parent: `{parent_sha}`)",
+        r#"Build commit: {commit_sha} (`{commit_sha}`)
+Base parent: {parent_sha} (`{parent_sha}`)"#,
     )
     .unwrap();
 
