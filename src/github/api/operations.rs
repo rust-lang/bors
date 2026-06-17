@@ -182,7 +182,7 @@ impl From<CommitResponse> for Commit {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct CommitAuthor {
     pub name: String,
     pub email: String,
