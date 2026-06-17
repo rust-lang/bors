@@ -14,6 +14,7 @@ use crate::github::api::CommitAuthor;
 use crate::github::api::operations::Commit;
 use crate::github::{GithubRepoName, GithubUser};
 use crate::permissions::PermissionType;
+use std::collections::HashSet;
 use std::fmt::Write;
 use std::sync::Arc;
 
@@ -75,7 +76,7 @@ pub(super) async fn command_squash(
         send_comment(
             format!(":exclamation: Cannot squash a PR that is currently being tested. Unapprove the PR first using `{bot_prefix} r-`."),
         )
-        .await?;
+            .await?;
         return Ok(());
     }
 
@@ -119,13 +120,22 @@ pub(super) async fn command_squash(
     // Extract the first and last commits
     let first_commit = &commits[0];
     let last_commit = commits.last().unwrap();
-    let commit_author = last_commit.author.clone().unwrap_or_else(|| CommitAuthor {
+
+    // It's not really possible to tell who should be the main author.
+    // The easiest would be to take the PR author, but we don't know their e-mail through GitHub
+    // easily.
+    // So we instead take the authorship from the commits.
+    // We choose the first commit, as it seems like a reasonable expectation that it will be made
+    // by the PR author.
+    // Later we also add "Co-authored-by" trailers to add all other authors from the squashed
+    // commits.
+    let commit_author = first_commit.author.clone().unwrap_or_else(|| CommitAuthor {
         name: pr.github.author.username.clone(),
         email: pr
             .github
             .author
-            .email
-            .clone()
+            .email_probably_missing()
+            .map(|s| s.to_string())
             .unwrap_or_else(|| bors_commit_author().email),
     });
 
@@ -134,6 +144,7 @@ pub(super) async fn command_squash(
     // squashed commit.
     let commit_msg =
         commit_message.unwrap_or_else(|| generate_squashed_commit_msg(&pr.github.title, &commits));
+    let commit_msg = add_coauthored_authors(commit_msg, &commits, &commit_author);
     let commit = match repo_state
         .client
         .create_commit(
@@ -190,9 +201,9 @@ pub(super) async fn command_squash(
             if let Err(error) = push_result {
                 tracing::error!("Push failed: {error:?}",);
                 repo_state.client.post_comment(pr_number, Comment::new(format!(
-                        ":exclamation: Failed to push the squashed commit to `{fork_repository}:{target_branch}`: {error}"
-                    )), &db)
-                        .await?;
+                    ":exclamation: Failed to push the squashed commit to `{fork_repository}:{target_branch}`: {error}"
+                )), &db)
+                    .await?;
                 return Ok(());
             }
 
@@ -250,10 +261,51 @@ pub(super) async fn command_squash(
             ":hourglass: There are too many git operations in progress at the moment. Please try again a few minutes later."
                 .to_string(),
         )
-        .await?;
+            .await?;
         return Ok(());
     }
     Ok(())
+}
+
+/// Add "Co-authored-by: [name] <[email]>" trailer(s) to the commit message to properly reflect
+/// all authors who authored the specified `commits`.
+fn add_coauthored_authors(
+    mut commit_msg: String,
+    commits: &[Commit],
+    author: &CommitAuthor,
+) -> String {
+    // Gather all commit authors.
+    // Note that we ignore previous "Co-authored-by" trailers in the original commit messages, to
+    // simplify the implementation.
+    let mut authors = commits
+        .iter()
+        .filter_map(|commit| commit.author.clone())
+        .collect::<HashSet<CommitAuthor>>();
+    // Remove the author of the final commit, because that will be attributed through normal git
+    // commit authorship.
+    authors.remove(author);
+
+    let mut authors: Vec<_> = authors.into_iter().collect();
+    authors.sort();
+
+    if authors.is_empty() {
+        return commit_msg;
+    }
+
+    while !commit_msg.ends_with("\n\n") {
+        commit_msg.push('\n');
+    }
+
+    for author in authors {
+        writeln!(
+            commit_msg,
+            "Co-authored-by: {} <{}>",
+            author.name, author.email
+        )
+        .unwrap();
+    }
+
+    commit_msg
 }
 
 fn generate_squashed_commit_msg(pr_title: &str, commits: &[Commit]) -> String {
@@ -290,7 +342,8 @@ mod tests {
     use crate::github::GithubRepoName;
     use crate::github::api::client::HideCommentReason;
     use crate::tests::{
-        BorsTester, Comment, Commit, GitHub, PullRequest, Repo, User, default_repo_name, run_test,
+        BorsTester, Comment, Commit, GitHub, GitUser, PullRequest, Repo, User, default_repo_name,
+        run_test,
     };
 
     #[sqlx::test]
@@ -318,7 +371,7 @@ mod tests {
             );
             Ok(())
         })
-        .await;
+            .await;
     }
 
     #[sqlx::test]
@@ -347,7 +400,7 @@ mod tests {
             );
             Ok(())
         })
-        .await;
+            .await;
     }
 
     #[sqlx::test]
@@ -435,7 +488,17 @@ mod tests {
             );
             insta::assert_snapshot!(
                 ctx.get_next_comment_text(()).await?,
-                @":hammer: 2 commits were squashed into foo-reauthored-to-git-user."
+                @":hammer: 2 commits were squashed into foo-reauthored-to-default-user."
+            );
+            insta::assert_snapshot!(
+                ctx.pr(())
+                    .await
+                    .get_gh_pr()
+                    .head_branch_copy()
+                    .get_commit()
+                    .author()
+                    .name,
+                @"default-user"
             );
 
             Ok(())
@@ -489,9 +552,9 @@ mod tests {
         insta::assert_snapshot!(gh.get_sha_history((), "pr/1"), @"
         pr-1-sha
         foo
-        foo-reauthored-to-git-user
+        foo-reauthored-to-default-user
         bar
-        bar-reauthored-to-git-user
+        bar-reauthored-to-default-user
         ");
     }
 
@@ -521,7 +584,7 @@ mod tests {
 
             Ok(())
         })
-        .await;
+            .await;
     }
 
     #[sqlx::test]
@@ -557,7 +620,7 @@ mod tests {
                 @":construction: Squashing... this can take a few minutes."
             );
             insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
-            :hammer: 2 commits were squashed into sha2-reauthored-to-git-user.
+            :hammer: 2 commits were squashed into sha2-reauthored-to-default-user.
 
             This pull request was unapproved.
             ");
@@ -579,11 +642,61 @@ mod tests {
                 .await?;
             ctx.run_gitop_queue().await?;
             ctx.expect_comments((), 2).await;
-            insta::assert_snapshot!(ctx.pr(()).await.get_gh_pr().head_branch_copy().get_commit().message(), @"This is a squashed commit");
+            insta::assert_snapshot!(ctx.pr(()).await.get_gh_pr().head_branch_copy().get_commit().message(), @"
+            This is a squashed commit
+
+            Co-authored-by: git-user <git-user@git.com>
+            ");
 
             Ok(())
         })
-        .await;
+            .await;
+    }
+
+    #[sqlx::test]
+    async fn squash_add_coauthored_by(pool: sqlx::PgPool) {
+        run_test((pool, squash_state()), async |ctx: &mut BorsTester| {
+            ctx.modify_pr_in_gh((), |pr| {
+                let pr_author = pr.head_branch_copy().get_commit().author().clone();
+                let user1 = GitUser {
+                    name: "User 1".to_string(),
+                    email: "user1@users.com".to_string(),
+                };
+                let user2 = GitUser {
+                    name: "User 2".to_string(),
+                    email: "user2@users.com".to_string(),
+                };
+
+                pr.add_commits(vec![
+                    Commit::from_sha("sha2").with_author(pr_author.clone()),
+                    Commit::from_sha("sha3").with_author(user1.clone()),
+                    Commit::from_sha("sha4").with_author(user2),
+                    Commit::from_sha("sha5").with_author(user1),
+                    Commit::from_sha("sha6").with_author(pr_author)
+                ]);
+            });
+            ctx.approve(()).await?;
+            ctx.post_comment("@bors squash")
+                .await?;
+            ctx.run_gitop_queue().await?;
+            ctx.expect_comments((), 2).await;
+            insta::assert_snapshot!(ctx.pr(()).await.get_gh_pr().head_branch_copy().get_commit().message(), @"
+            Title of PR 1
+
+            * initial PR#1 commit
+            * Commit sha2
+            * Commit sha3
+            * Commit sha4
+            * Commit sha5
+            * Commit sha6
+
+            Co-authored-by: User 1 <user1@users.com>
+            Co-authored-by: User 2 <user2@users.com>
+            ");
+
+            Ok(())
+        })
+            .await;
     }
 
     fn squash_state() -> GitHub {

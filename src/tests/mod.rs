@@ -53,6 +53,7 @@ pub use github::Branch;
 pub use github::Comment;
 pub use github::Commit;
 pub use github::GitHub;
+pub use github::GitUser;
 pub use github::Permissions;
 pub use github::PrIdentifier;
 pub use github::PullRequest;
