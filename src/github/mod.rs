@@ -83,8 +83,16 @@ impl FromStr for GithubRepoName {
 pub struct GithubUser {
     pub id: UserId,
     pub username: String,
-    pub email: Option<String>,
+    email: Option<String>,
     pub html_url: Url,
+}
+
+impl GithubUser {
+    /// Get the e-mail of the GitHub user.
+    /// Note that it will be likely not filled in.
+    pub fn email_probably_missing(&self) -> Option<&str> {
+        self.email.as_deref()
+    }
 }
 
 impl From<octocrab::models::Author> for GithubUser {

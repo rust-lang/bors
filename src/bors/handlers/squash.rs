@@ -120,13 +120,22 @@ pub(super) async fn command_squash(
     // Extract the first and last commits
     let first_commit = &commits[0];
     let last_commit = commits.last().unwrap();
-    let commit_author = last_commit.author.clone().unwrap_or_else(|| CommitAuthor {
+
+    // It's not really possible to tell who should be the main author.
+    // The easiest would be to take the PR author, but we don't know their e-mail through GitHub
+    // easily.
+    // So we instead take the authorship from the commits.
+    // We choose the first commit, as it seems like a reasonable expectation that it will be made
+    // by the PR author.
+    // Later we also add "Co-authored-by" trailers to add all other authors from the squashed
+    // commits.
+    let commit_author = first_commit.author.clone().unwrap_or_else(|| CommitAuthor {
         name: pr.github.author.username.clone(),
         email: pr
             .github
             .author
-            .email
-            .clone()
+            .email_probably_missing()
+            .map(|s| s.to_string())
             .unwrap_or_else(|| bors_commit_author().email),
     });
 
@@ -262,7 +271,7 @@ pub(super) async fn command_squash(
 /// all authors who authored the specified `commits`.
 fn add_coauthored_authors(
     mut commit_msg: String,
-    commits: &Vec<Commit>,
+    commits: &[Commit],
     author: &CommitAuthor,
 ) -> String {
     // Gather all commit authors.
@@ -479,7 +488,17 @@ mod tests {
             );
             insta::assert_snapshot!(
                 ctx.get_next_comment_text(()).await?,
-                @":hammer: 2 commits were squashed into foo-reauthored-to-git-user."
+                @":hammer: 2 commits were squashed into foo-reauthored-to-default-user."
+            );
+            insta::assert_snapshot!(
+                ctx.pr(())
+                    .await
+                    .get_gh_pr()
+                    .head_branch_copy()
+                    .get_commit()
+                    .author()
+                    .name,
+                @"default-user"
             );
 
             Ok(())
@@ -533,9 +552,9 @@ mod tests {
         insta::assert_snapshot!(gh.get_sha_history((), "pr/1"), @"
         pr-1-sha
         foo
-        foo-reauthored-to-git-user
+        foo-reauthored-to-default-user
         bar
-        bar-reauthored-to-git-user
+        bar-reauthored-to-default-user
         ");
     }
 
@@ -601,7 +620,7 @@ mod tests {
                 @":construction: Squashing... this can take a few minutes."
             );
             insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
-            :hammer: 2 commits were squashed into sha2-reauthored-to-git-user.
+            :hammer: 2 commits were squashed into sha2-reauthored-to-default-user.
 
             This pull request was unapproved.
             ");
@@ -626,7 +645,7 @@ mod tests {
             insta::assert_snapshot!(ctx.pr(()).await.get_gh_pr().head_branch_copy().get_commit().message(), @"
             This is a squashed commit
 
-            Co-authored-by: default-user <default-user@email.com>
+            Co-authored-by: git-user <git-user@git.com>
             ");
 
             Ok(())
