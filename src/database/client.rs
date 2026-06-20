@@ -29,6 +29,7 @@ use crate::github::PullRequestNumber;
 use crate::github::{CommitSha, GithubRepoName};
 use anyhow::Context;
 use itertools::Either;
+use octocrab::models::UserId;
 use sqlx::PgPool;
 use sqlx::postgres::PgAdvisoryLock;
 use tracing::log;
@@ -108,9 +109,16 @@ impl PgDbClient {
     pub async fn delegate(
         &self,
         pr: &PullRequestModel,
+        delegatee_id: UserId,
         delegated_permission: DelegatedPermission,
     ) -> anyhow::Result<()> {
-        delegate_pull_request(&self.pool, pr.id, delegated_permission).await
+        delegate_pull_request(
+            &self.pool,
+            pr.id,
+            delegatee_id.0 as i64,
+            delegated_permission,
+        )
+        .await
     }
 
     pub async fn undelegate(&self, pr: &PullRequestModel) -> anyhow::Result<()> {

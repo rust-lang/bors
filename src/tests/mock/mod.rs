@@ -52,6 +52,7 @@ struct GitHubUser {
     received_events_url: Url,
     r#type: String,
     site_admin: bool,
+    email: Option<String>,
 }
 
 impl From<User> for GitHubUser {
@@ -101,6 +102,7 @@ impl From<User> for GitHubUser {
                 .unwrap(),
             r#type: "User".to_string(),
             site_admin: false,
+            email: None,
         }
     }
 }
@@ -150,6 +152,7 @@ impl GitHubMockServer {
             mock_repo_list(github.clone(), &mock_server).await;
             mock_oauth(github.clone(), &mock_server).await;
             mock_graphql(github.clone(), &mock_server).await;
+            mock_users(github.clone(), &mock_server).await;
 
             // Repositories are mocked separately to make it easier to
             // pass comm. channels to them.
@@ -324,6 +327,24 @@ async fn mock_graphql(github: Arc<Mutex<GitHub>>, mock_server: &MockServer) {
         },
         "POST",
         "^/graphql$".to_string(),
+    )
+    .mount(mock_server)
+    .await;
+}
+
+async fn mock_users(github: Arc<Mutex<GitHub>>, mock_server: &MockServer) {
+    dynamic_mock_req(
+        move |_: &Request, [username]: [&str; 1]| {
+            let gh = github.lock();
+            match gh.get_user(username) {
+                Some(user) => {
+                    ResponseTemplate::new(200).set_body_json(GitHubUser::from(user.clone()))
+                }
+                None => ResponseTemplate::new(404),
+            }
+        },
+        "GET",
+        "^/users/(.*)$".to_string(),
     )
     .mount(mock_server)
     .await;

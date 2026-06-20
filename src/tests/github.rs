@@ -64,6 +64,11 @@ impl GitHub {
         assert!(self.users.insert(user.name.clone(), user).is_none());
     }
 
+    pub fn with_user(mut self, user: User) -> Self {
+        self.add_user(user);
+        self
+    }
+
     pub fn get_user(&self, name: &str) -> Option<&User> {
         self.users.get(name)
     }

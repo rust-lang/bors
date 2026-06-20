@@ -21,6 +21,7 @@ use crate::bors::RollupMode;
 use crate::bors::comment::CommentTag;
 use crate::database::BuildKind;
 use crate::database::BuildStatus;
+use crate::database::DelegationStatus;
 use crate::database::PgDuration;
 use crate::database::RepoModel;
 use crate::database::WorkflowModel;
@@ -53,7 +54,10 @@ pub(crate) async fn get_pull_request(
         pr.status as "status: PullRequestStatus",
         pr.priority,
         pr.rollup as "rollup: RollupMode",
-        pr.delegated_permission as "delegated_permission: DelegatedPermission",
+        (
+            pr.delegatee_id,
+            pr.delegated_permission
+        ) AS "delegation!: DelegationStatus",
         pr.head_branch,
         pr.base_branch,
         pr.mergeable_state as "mergeable_state: MergeableState",
@@ -177,7 +181,10 @@ pub(crate) async fn upsert_pull_request(
                 pr.status as "status: PullRequestStatus",
                 pr.priority,
                 pr.rollup as "rollup: RollupMode",
-                pr.delegated_permission as "delegated_permission: DelegatedPermission",
+                (
+                    pr.delegatee_id,
+                    pr.delegated_permission
+                ) AS "delegation!: DelegationStatus",
                 pr.head_branch,
                 pr.base_branch,
                 pr.mergeable_state as "mergeable_state: MergeableState",
@@ -229,7 +236,10 @@ pub(crate) async fn get_nonclosed_pull_requests(
                 pr.status as "status: PullRequestStatus",
                 pr.priority,
                 pr.rollup as "rollup: RollupMode",
-                pr.delegated_permission as "delegated_permission: DelegatedPermission",
+                (
+                    pr.delegatee_id,
+                    pr.delegated_permission
+                ) AS "delegation!: DelegationStatus",
                 pr.head_branch,
                 pr.base_branch,
                 pr.mergeable_state as "mergeable_state: MergeableState",
@@ -310,7 +320,10 @@ pub(crate) async fn get_prs_with_stale_mergeability_or_approved(
                 pr.status as "status: PullRequestStatus",
                 pr.priority,
                 pr.rollup as "rollup: RollupMode",
-                pr.delegated_permission as "delegated_permission: DelegatedPermission",
+                (
+                    pr.delegatee_id,
+                    pr.delegated_permission
+                ) AS "delegation!: DelegationStatus",
                 pr.head_branch,
                 pr.base_branch,
                 pr.mergeable_state as "mergeable_state: MergeableState",
@@ -366,7 +379,10 @@ pub(crate) async fn set_stale_mergeability_status_by_base_branch(
                 pr.status as "status: PullRequestStatus",
                 pr.priority,
                 pr.rollup as "rollup: RollupMode",
-                pr.delegated_permission as "delegated_permission: DelegatedPermission",
+                (
+                    pr.delegatee_id,
+                    pr.delegated_permission
+                ) AS "delegation!: DelegationStatus",
                 pr.head_branch,
                 pr.base_branch,
                 pr.mergeable_state as "mergeable_state: MergeableState",
@@ -445,11 +461,18 @@ pub(crate) async fn unapprove_pull_request(
 pub(crate) async fn delegate_pull_request(
     executor: impl PgExecutor<'_>,
     pr_id: i32,
+    delegatee_id: i64,
     delegated_permission: DelegatedPermission,
 ) -> anyhow::Result<()> {
     measure_db_query("delegate_pull_request", || async {
         sqlx::query!(
-            "UPDATE pull_request SET delegated_permission = $1 WHERE id = $2",
+            r#"
+UPDATE pull_request
+SET
+    delegatee_id = $1,
+    delegated_permission = $2
+WHERE id = $3"#,
+            delegatee_id,
             delegated_permission as _,
             pr_id
         )
@@ -466,7 +489,12 @@ pub(crate) async fn undelegate_pull_request(
 ) -> anyhow::Result<()> {
     measure_db_query("undelegate_pull_request", || async {
         sqlx::query!(
-            "UPDATE pull_request SET delegated_permission = NULL WHERE id = $1",
+            r#"
+UPDATE pull_request
+SET
+    delegatee_id = NULL,
+    delegated_permission = NULL
+WHERE id = $1"#,
             pr_id
         )
         .execute(executor)
@@ -496,7 +524,10 @@ SELECT
         pr.approved_sha
     ) AS "approval_status!: ApprovalStatus",
     pr.status as "status: PullRequestStatus",
-    pr.delegated_permission as "delegated_permission: DelegatedPermission",
+    (
+        pr.delegatee_id,
+        pr.delegated_permission
+    ) AS "delegation!: DelegationStatus",
     pr.priority,
     pr.head_branch,
     pr.base_branch,
@@ -1226,7 +1257,10 @@ pub(crate) async fn find_rollups_for_member_pr(
         pr.status as "status: PullRequestStatus",
         pr.priority,
         pr.rollup as "rollup: RollupMode",
-        pr.delegated_permission as "delegated_permission: DelegatedPermission",
+        (
+            pr.delegatee_id,
+            pr.delegated_permission
+        ) AS "delegation!: DelegationStatus",
         pr.head_branch,
         pr.base_branch,
         pr.mergeable_state as "mergeable_state: MergeableState",

@@ -1,6 +1,6 @@
 use crate::bors::RepositoryState;
-use crate::bors::command::RollupMode;
-use crate::bors::command::{Approver, CommandPrefix};
+use crate::bors::command::{Approver, CommandPrefix, Delegatee};
+use crate::bors::command::{DelegateCommand, RollupMode};
 use crate::bors::comment::{
     approve_blocking_labels_present, approve_merge_conflict_comment, approve_non_open_pr_comment,
     approve_wip_title, approved_comment, delegate_comment, delegate_try_builds_comment,
@@ -19,6 +19,7 @@ use crate::github::{GithubUser, PullRequestNumber};
 use crate::permissions::PermissionType;
 use crate::{BorsContext, PgDbClient};
 use std::sync::Arc;
+use tracing::log;
 
 /// Approve a pull request.
 /// A pull request can only be approved by a user of sufficient authority.
@@ -296,9 +297,13 @@ pub(super) async fn command_delegate(
     bot_prefix: &CommandPrefix,
 ) -> anyhow::Result<()> {
     tracing::info!(
-        "Delegating PR {} {} permissions",
+        "Delegating PR {} to {} ({} permission)",
         pr.number(),
-        delegated_permission
+        match &delegate_cmd.delegatee {
+            Delegatee::PullRequestAuthor | Delegatee::PullRequestAuthorLegacy => "PR author",
+            Delegatee::User(user) => user,
+        },
+        delegate_cmd.permission
     );
     if !sufficient_delegate_permission(repo_state.clone(), author) {
         deny_request(
@@ -312,14 +317,42 @@ pub(super) async fn command_delegate(
         return Ok(());
     }
 
-    db.delegate(pr.db, delegated_permission).await?;
+    let delegatee = match &delegate_cmd.delegatee {
+        Delegatee::PullRequestAuthor | Delegatee::PullRequestAuthorLegacy => {
+            pr.github.author.clone()
+        }
+        Delegatee::User(username) => {
+            let user = repo_state.client.get_user(username).await;
+            match user {
+                Ok(user) => user,
+                Err(error) => {
+                    log::error!("Cannot fetch delegatee username `{username}`: {error:?}");
+                    repo_state
+                        .client
+                        .post_comment(
+                            pr.number(),
+                            Comment::new(format!(
+                                "Cannot fetch information about user `{username}`."
+                            )),
+                            &db,
+                        )
+                        .await?;
+                    return Ok(());
+                }
+            }
+        }
+    };
+
+    db.delegate(pr.db, delegatee.id, delegate_cmd.permission)
+        .await?;
     notify_of_delegation(
         &repo_state,
         &db,
         pr.db,
         pr.github,
         &author.username,
-        delegated_permission,
+        &delegatee,
+        delegate_cmd,
         bot_prefix,
     )
     .await
@@ -477,24 +510,31 @@ async fn notify_of_tree_open(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn notify_of_delegation(
     repo: &RepositoryState,
     db: &PgDbClient,
     pr_db: &PullRequestModel,
     pr_gh: &PullRequest,
     delegator: &str,
-    delegated_permission: DelegatedPermission,
+    delegatee: &GithubUser,
+    delegate_cmd: DelegateCommand,
     bot_prefix: &CommandPrefix,
 ) -> anyhow::Result<()> {
-    let delegatee = pr_gh.author.username.as_str();
-    let comment = match delegated_permission {
-        DelegatedPermission::Try => delegate_try_builds_comment(delegatee, bot_prefix),
+    let legacy = match delegate_cmd.delegatee {
+        Delegatee::PullRequestAuthorLegacy => true,
+        Delegatee::PullRequestAuthor | Delegatee::User(_) => false,
+    };
+
+    let comment = match delegate_cmd.permission {
+        DelegatedPermission::Try => delegate_try_builds_comment(delegatee, legacy, bot_prefix),
         DelegatedPermission::Review => delegate_comment(
             pr_db,
             &pr_gh.base.sha,
             &pr_gh.head.sha,
             delegatee,
             delegator,
+            legacy,
             bot_prefix,
         ),
     };
@@ -513,7 +553,9 @@ mod tests {
 
     use crate::bors::TRY_BRANCH_NAME;
     use crate::bors::merge_queue::AUTO_BUILD_CHECK_RUN_NAME;
-    use crate::database::{DelegatedPermission, OctocrabMergeableState, TreeState};
+    use crate::database::{
+        DelegatedPermission, DelegationStatus, OctocrabMergeableState, TreeState,
+    };
     use crate::permissions::PermissionType;
     use crate::tests::default_repo_name;
     use crate::tests::{BorsTester, Commit};
@@ -1114,7 +1156,7 @@ approved = { modifications = ["+foo", "+baz"], unless = ["label1", "label2"] }
                 ctx
                     .pr(())
                     .await
-                    .expect_delegated(DelegatedPermission::Review);
+                    .expect_delegated(User::default_pr_author().github_id, DelegatedPermission::Review);
                 Ok(())
             })
             .await;
@@ -1139,13 +1181,37 @@ approved = { modifications = ["+foo", "+baz"], unless = ["label1", "label2"] }
     }
 
     #[sqlx::test]
+    async fn delegatee_custom_user_can_approve(pool: sqlx::PgPool) {
+        let user = User::new(1000, "user1");
+        BorsBuilder::new(pool)
+            .github(GitHub::unauthorized_pr_author().with_user(user.clone()))
+            .run_test(async |ctx: &mut BorsTester| {
+                ctx.post_comment(review_comment("@bors delegate=user1"))
+                    .await?;
+                ctx.expect_comments((), 1).await;
+
+                ctx.post_comment(Comment::new((), "@bors r+").with_author(user.clone()))
+                    .await?;
+                insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
+                :pushpin: Commit pr-1-sha has been approved by `user1`
+
+                It is now in the [queue](https://bors-test.com/queue/borstest) for this repository.
+                ");
+
+                ctx.pr(()).await.expect_approved_by(&user.name);
+                Ok(())
+            })
+            .await;
+    }
+
+    #[sqlx::test]
     async fn delegate_error_message(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
             .github(GitHub::unauthorized_pr_author())
             .run_test(async |ctx: &mut BorsTester| {
-                ctx.post_comment(review_comment("@bors delegate try"))
+                ctx.post_comment(review_comment("@bors delegate foo"))
                     .await?;
-                insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @r#"Unknown argument "try". Did you mean to use `@bors delegate=<try|review>`? Run `@bors help` or go to <https://bors-test.com/help> to see available commands."#);
+                insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @r#"Unknown argument "foo". Did you mean to use `@bors `try` or `review``? Run `@bors help` or go to <https://bors-test.com/help> to see available commands."#);
                 Ok(())
             })
             .await;
@@ -1212,13 +1278,16 @@ approved = { modifications = ["+foo", "+baz"], unless = ["label1", "label2"] }
             .run_test(async |ctx: &mut BorsTester| {
                 ctx.post_comment(review_comment("@bors delegate+")).await?;
                 ctx.expect_comments((), 1).await;
-                ctx.pr(())
-                    .await
-                    .expect_delegated(DelegatedPermission::Review);
+                ctx.pr(()).await.expect_delegated(
+                    User::default_pr_author().github_id,
+                    DelegatedPermission::Review,
+                );
 
                 ctx.post_comment(review_comment("@bors delegate-")).await?;
-                ctx.wait_for_pr((), |pr| pr.delegated_permission.is_none())
-                    .await?;
+                ctx.wait_for_pr((), |pr| {
+                    matches!(pr.delegation, DelegationStatus::NotDelegated)
+                })
+                .await?;
 
                 Ok(())
             })
@@ -1234,8 +1303,10 @@ approved = { modifications = ["+foo", "+baz"], unless = ["label1", "label2"] }
                 ctx.expect_comments((), 1).await;
 
                 ctx.post_comment("@bors delegate-").await?;
-                ctx.wait_for_pr((), |pr| pr.delegated_permission.is_none())
-                    .await?;
+                ctx.wait_for_pr((), |pr| {
+                    matches!(pr.delegation, DelegationStatus::NotDelegated)
+                })
+                .await?;
 
                 Ok(())
             })
@@ -1520,7 +1591,7 @@ approved = { modifications = ["+foo", "+baz"], unless = ["label1", "label2"] }
         BorsBuilder::new(pool)
             .github(GitHub::unauthorized_pr_author())
             .run_test(async |ctx: &mut BorsTester| {
-                ctx.post_comment(review_comment("@bors delegate=try"))
+                ctx.post_comment(review_comment("@bors delegate try"))
                     .await?;
                 insta::assert_snapshot!(
                     ctx.get_next_comment_text(()).await?,
@@ -1530,7 +1601,34 @@ approved = { modifications = ["+foo", "+baz"], unless = ["label1", "label2"] }
                 You can now post `@bors try` to start a try build.
                 "
                 );
-                ctx.pr(()).await.expect_delegated(DelegatedPermission::Try);
+                ctx.pr(()).await.expect_delegated(
+                    User::default_pr_author().github_id,
+                    DelegatedPermission::Try,
+                );
+                Ok(())
+            })
+            .await;
+    }
+
+    #[sqlx::test]
+    async fn delegate_try_legacy(pool: sqlx::PgPool) {
+        BorsBuilder::new(pool)
+            .github(GitHub::unauthorized_pr_author())
+            .run_test(async |ctx: &mut BorsTester| {
+                ctx.post_comment(review_comment("@bors delegate try"))
+                    .await?;
+                insta::assert_snapshot!(
+                    ctx.get_next_comment_text(()).await?,
+                    @"
+                :v: @default-user, you can now perform try builds on this pull request!
+
+                You can now post `@bors try` to start a try build.
+                "
+                );
+                ctx.pr(()).await.expect_delegated(
+                    User::default_pr_author().github_id,
+                    DelegatedPermission::Try,
+                );
                 Ok(())
             })
             .await;
@@ -1541,7 +1639,7 @@ approved = { modifications = ["+foo", "+baz"], unless = ["label1", "label2"] }
         BorsBuilder::new(pool)
             .github(GitHub::unauthorized_pr_author())
             .run_test(async |ctx: &mut BorsTester| {
-                ctx.post_comment(review_comment("@bors delegate=try"))
+                ctx.post_comment(review_comment("@bors delegate try"))
                     .await?;
                 ctx.expect_comments((), 1).await;
 
@@ -1562,10 +1660,13 @@ approved = { modifications = ["+foo", "+baz"], unless = ["label1", "label2"] }
         BorsBuilder::new(pool)
             .github(GitHub::unauthorized_pr_author())
             .run_test(async |ctx: &mut BorsTester| {
-                ctx.post_comment(review_comment("@bors delegate=try"))
+                ctx.post_comment(review_comment("@bors delegate try"))
                     .await?;
                 ctx.expect_comments((), 1).await;
-                ctx.pr(()).await.expect_delegated(DelegatedPermission::Try);
+                ctx.pr(()).await.expect_delegated(
+                    User::default_pr_author().github_id,
+                    DelegatedPermission::Try,
+                );
 
                 ctx.post_comment("@bors r+").await?;
                 insta::assert_snapshot!(
@@ -1574,6 +1675,49 @@ approved = { modifications = ["+foo", "+baz"], unless = ["label1", "label2"] }
                 );
                 ctx.pr(()).await.expect_unapproved();
 
+                Ok(())
+            })
+            .await;
+    }
+
+    #[sqlx::test]
+    async fn delegate_custom_user(pool: sqlx::PgPool) {
+        let user = User::new(1000, "user1");
+        BorsBuilder::new(pool)
+            .github(GitHub::unauthorized_pr_author().with_user(user.clone()))
+            .run_test(async |ctx: &mut BorsTester| {
+                ctx.post_comment(review_comment("@bors delegate=user1"))
+                    .await?;
+                insta::assert_snapshot!(
+                    ctx.get_next_comment_text(()).await?,
+                    @r#"
+                :v: @user1, you can now approve this pull request!
+
+                If @reviewer told you to "`r=me`" after making some further change, then please make that change and post `@bors r=reviewer`.
+
+                [View changes since this delegation](https://triagebot.infra.rust-lang.org/gh-changes-since/rust-lang/borstest/1/main-sha1..pr-1-sha).
+                "#
+                );
+                ctx.pr(())
+                    .await
+                    .expect_delegated(user.github_id, DelegatedPermission::Review);
+                Ok(())
+            })
+            .await;
+    }
+
+    #[sqlx::test]
+    async fn delegate_invalid_user(pool: sqlx::PgPool) {
+        BorsBuilder::new(pool)
+            .github(GitHub::unauthorized_pr_author())
+            .run_test(async |ctx: &mut BorsTester| {
+                ctx.post_comment(review_comment("@bors delegate=foo"))
+                    .await?;
+                insta::assert_snapshot!(
+                    ctx.get_next_comment_text(()).await?,
+                    @"Cannot fetch information about user `foo`."
+                );
+                ctx.pr(()).await.expect_not_delegated();
                 Ok(())
             })
             .await;

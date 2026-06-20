@@ -96,8 +96,8 @@ pub enum Delegatee {
 
 #[derive(Debug, PartialEq)]
 pub struct DelegateCommand {
-    delegatee: Delegatee,
-    permission: DelegatedPermission,
+    pub delegatee: Delegatee,
+    pub permission: DelegatedPermission,
 }
 
 /// Bors command specified by a user.

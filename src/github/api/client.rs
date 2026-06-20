@@ -1,7 +1,7 @@
 use anyhow::Context;
 use octocrab::Octocrab;
 use octocrab::models::checks::CheckRun;
-use octocrab::models::{CheckRunId, Repository, RunId};
+use octocrab::models::{CheckRunId, Repository, RunId, UserId};
 use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
@@ -18,7 +18,9 @@ use crate::github::api::operations::{
     BranchUpdateError, Commit, CommitCreateError, ForcePush, MergeError, create_branch,
     create_check_run, create_commit, merge_branches, set_branch_to_commit, update_check_run,
 };
-use crate::github::{CommitSha, GithubRepoName, PullRequest, PullRequestNumber, TreeSha};
+use crate::github::{
+    CommitSha, GithubRepoName, GithubUser, PullRequest, PullRequestNumber, TreeSha,
+};
 use crate::utils::timing::{RetryMethod, RetryableOpError, ShouldRetry, perform_retryable};
 use futures::TryStreamExt;
 use octocrab::models::workflows::{Job, Run};
@@ -57,6 +59,41 @@ impl GithubRepositoryClient {
     /// Was the comment created by the bot?
     pub async fn is_comment_internal(&self, comment: &PullRequestComment) -> anyhow::Result<bool> {
         Ok(comment.author.html_url == self.author_html_url)
+    }
+
+    /// Load information of the given GitHub user.
+    pub async fn get_user(&self, username: &str) -> anyhow::Result<GithubUser> {
+        let user = perform_retryable::<GithubUser, anyhow::Error, _, _, _>(
+            "get_user",
+            RetryMethod::default(),
+            || async {
+                // We could use octocrab's user profile method, but the profile has many attributes,
+                // making it more difficult to mock.
+                #[derive(Deserialize)]
+                struct UserResponse {
+                    id: UserId,
+                    login: String,
+                    email: Option<String>,
+                    html_url: Url,
+                }
+
+                let response: UserResponse = self
+                    .client
+                    .get(format!("/users/{username}"), None::<&()>)
+                    .await
+                    .map_err(|error| {
+                        anyhow::anyhow!("Could not fetch user `{username}`: {error:?}")
+                    })?;
+                anyhow::Ok(GithubUser {
+                    id: response.id,
+                    username: response.login,
+                    email: response.email,
+                    html_url: response.html_url,
+                })
+            },
+        )
+        .await?;
+        Ok(user)
     }
 
     /// Load repository information for the current client
