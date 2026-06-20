@@ -456,8 +456,8 @@ pub struct PullRequestModel {
     mergeable_state_is_stale: bool,
     /// Approval status including approver and approved commit SHA.
     pub approval_status: ApprovalStatus,
-    /// Temporary permissions granted to the PR author by a reviewer (try or review).
-    pub delegated_permission: Option<DelegatedPermission>,
+    /// Pull request-scoped permissions (try or review) granted to a GitHub user by a reviewer.
+    pub delegation: DelegationStatus,
     /// Priority for merge queue ordering. Higher priority PRs are merged first.
     pub priority: Option<i32>,
     /// Rollup mode determining if this PR can be included in rollup builds.
@@ -536,6 +536,54 @@ impl PullRequestModel {
             | QueueStatus::ReadyForMerge(_, _)
             | QueueStatus::NotApproved
             | QueueStatus::NotOpen => false,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum DelegationStatus {
+    NotDelegated,
+    Delegated(Delegation),
+}
+
+#[derive(Debug)]
+pub struct Delegation {
+    /// GitHub ID of the user who was delegated the permissions.
+    delegatee: u64,
+    permission: DelegatedPermission,
+}
+
+impl Delegation {
+    pub fn delegatee(&self) -> u64 {
+        self.delegatee
+    }
+
+    pub fn permission(&self) -> DelegatedPermission {
+        self.permission
+    }
+}
+
+impl sqlx::Type<sqlx::Postgres> for DelegationStatus {
+    fn type_info() -> sqlx::postgres::PgTypeInfo {
+        <(Option<i64>, Option<String>) as sqlx::Type<sqlx::Postgres>>::type_info()
+    }
+}
+
+impl<'r> sqlx::Decode<'r, sqlx::Postgres> for DelegationStatus {
+    fn decode(value: sqlx::postgres::PgValueRef<'r>) -> Result<Self, BoxDynError> {
+        let (delegatee, permission) =
+            <(Option<i64>, Option<String>) as sqlx::Decode<sqlx::Postgres>>::decode(value)?;
+
+        match (delegatee, permission) {
+            (Some(delegatee), Some(permission)) => Ok(DelegationStatus::Delegated(Delegation {
+                delegatee: delegatee as u64,
+                permission: DelegatedPermission::from_str(&permission)?,
+            })),
+            (None, None) => Ok(DelegationStatus::NotDelegated),
+            (delegatee, permission) => Err(format!(
+                "Inconsistent delegation status: delegatee={delegatee:?}, permission={permission:?}"
+            )
+            .into()),
         }
     }
 }
@@ -793,7 +841,7 @@ pub fn pr_needs_update_in_db(db_pr: &PullRequestModel, gh_pr: &PullRequest) -> b
         mergeable_state: _,
         mergeable_state_is_stale: _,
         approval_status: _,
-        delegated_permission: _,
+        delegation: _,
         priority: _,
         rollup: _,
         try_build: _,

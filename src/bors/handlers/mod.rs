@@ -27,7 +27,7 @@ use crate::bors::{
     AUTO_BRANCH_NAME, BorsContext, CommandPrefix, Comment, PullRequestStatus, RepositoryState,
     TRY_BRANCH_NAME,
 };
-use crate::database::{DelegatedPermission, PullRequestModel};
+use crate::database::{DelegatedPermission, DelegationStatus, PullRequestModel};
 use crate::github::{CommitSha, GithubUser, LabelTrigger, PullRequest, PullRequestNumber};
 use crate::permissions::PermissionType;
 use crate::{PgDbClient, TeamApiClient, load_repositories};
@@ -450,14 +450,14 @@ async fn handle_comment(
                             .instrument(span)
                             .await
                     }
-                    BorsCommand::SetDelegate(delegate_type) => {
+                    BorsCommand::Delegate(cmd) => {
                         let span = tracing::info_span!("Delegate");
                         command_delegate(
                             repo,
                             database,
                             pr,
                             &comment.author,
-                            delegate_type,
+                            cmd,
                             ctx.parser.prefix(),
                         )
                         .instrument(span)
@@ -685,19 +685,23 @@ async fn has_permission(
         return Ok(true);
     }
 
-    if user.id != pr.github.author.id {
-        return Ok(false);
-    }
-
-    let is_delegated = pr
-        .db
-        .delegated_permission
-        .is_some_and(|perm| match permission {
-            PermissionType::Review => matches!(perm, DelegatedPermission::Review),
-            PermissionType::Try => {
-                matches!(perm, DelegatedPermission::Try | DelegatedPermission::Review)
+    let is_delegated = match &pr.db.delegation {
+        DelegationStatus::NotDelegated => false,
+        DelegationStatus::Delegated(delegation) => {
+            if delegation.delegatee() == *user.id {
+                match delegation.permission() {
+                    DelegatedPermission::Review => {
+                        matches!(permission, PermissionType::Review | PermissionType::Try)
+                    }
+                    DelegatedPermission::Try => {
+                        matches!(permission, PermissionType::Try)
+                    }
+                }
+            } else {
+                false
             }
-        });
+        }
+    };
 
     Ok(is_delegated)
 }

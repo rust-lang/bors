@@ -84,6 +84,22 @@ impl FromStr for RollupMode {
     }
 }
 
+#[derive(Debug, PartialEq)]
+pub enum Delegatee {
+    /// Delegate to the PR author.
+    PullRequestAuthor,
+    /// Legacy way to delegate to the PR author, via e.g. `@bors delegate=try`.
+    PullRequestAuthorLegacy,
+    /// Delegate to a specific user.
+    User(String),
+}
+
+#[derive(Debug, PartialEq)]
+pub struct DelegateCommand {
+    pub delegatee: Delegatee,
+    pub permission: DelegatedPermission,
+}
+
 /// Bors command specified by a user.
 ///
 /// When modifying commands, remember to also update:
@@ -120,7 +136,7 @@ pub enum BorsCommand {
     /// Get information about the current PR.
     Info,
     /// Delegate approval authority to the pull request author.
-    SetDelegate(DelegatedPermission),
+    Delegate(DelegateCommand),
     /// Revoke any previously granted delegation.
     Undelegate,
     /// Set the rollup mode of a PRstatus.

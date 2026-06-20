@@ -1,7 +1,7 @@
 use crate::bors::command::CommandPrefix;
 use crate::bors::{FailedWorkflowRun, WorkflowRun};
 use crate::database::PullRequestModel;
-use crate::github::{GithubRepoName, PullRequestNumber};
+use crate::github::{GithubRepoName, GithubUser, PullRequestNumber};
 use crate::utils::text::pluralize;
 use crate::{TreeState, database::WorkflowStatus, github::CommitSha};
 use itertools::Itertools;
@@ -366,12 +366,18 @@ pub fn approve_merge_conflict_comment() -> Comment {
     )
 }
 
-pub fn delegate_try_builds_comment(delegatee: &str, bot_prefix: &CommandPrefix) -> Comment {
+pub fn delegate_try_builds_comment(
+    delegatee: &GithubUser,
+    legacy: bool,
+    bot_prefix: &CommandPrefix,
+) -> Comment {
     Comment::new(format!(
-        r":v: @{delegatee}, you can now perform try builds on this pull request!
-
+        r":v: @{}, you can now perform try builds on this pull request!
+{}
 You can now post `{bot_prefix} try` to start a try build.
     ",
+        delegatee.username,
+        delegation_legacy_warning(legacy)
     ))
 }
 
@@ -381,21 +387,37 @@ pub fn delegate_comment(
     pr: &PullRequestModel,
     base_sha: &CommitSha,
     current_sha: &CommitSha,
-    delegatee: &str,
+    delegatee: &GithubUser,
     delegator: &str,
+    legacy: bool,
     bot_prefix: &CommandPrefix,
 ) -> Comment {
     Comment::new(format!(
-        r#":v: @{delegatee}, you can now approve this pull request!
+        r#":v: @{}, you can now approve this pull request!
 
 If @{delegator} told you to "`r=me`" after making some further change, then please make that change and post `{bot_prefix} r={delegator}`.
-
+{}
 [View changes since this delegation](https://triagebot.infra.rust-lang.org/gh-changes-since/{}/{}/{}/{base_sha}..{current_sha}).
 "#,
+        delegatee.username,
+        delegation_legacy_warning(legacy),
         pr.repository.owner(),
         pr.repository.name(),
         pr.number,
     ))
+}
+
+fn delegation_legacy_warning(legacy: bool) -> String {
+    if legacy {
+        r#"
+> [!WARNING]
+> You used the legacy format of the delegate command.
+> The new format is `@bors delegate[=<username>] [<try|review>]`.
+"#
+        .to_string()
+    } else {
+        String::new()
+    }
 }
 
 pub fn build_timed_out_comment(timeout: Duration) -> Comment {

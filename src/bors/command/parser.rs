@@ -1,6 +1,8 @@
 //! Defines parsers for bors commands.
 
-use crate::bors::command::{Approver, BorsCommand, CommandPrefix, Parent};
+use crate::bors::command::{
+    Approver, BorsCommand, CommandPrefix, DelegateCommand, Delegatee, Parent,
+};
 use crate::database::DelegatedPermission;
 use crate::github::CommitSha;
 use pulldown_cmark::{Event, Parser, Tag, TagEnd, TextMergeStream};
@@ -394,31 +396,80 @@ fn parser_try_cancel(command: &CommandPart<'_>, parts: &[CommandPart<'_>]) -> Pa
     }
 }
 
-/// Parses `@bors delegate=<try|review>` or `@bors delegate+`.
+/// Parses:
+/// - `@bors delegate+`
+/// - `@bors delegate=<username>`
+/// - `@bors delegate <try|review>`
+///
+/// And also the legacy format:
+/// - `@bors delegate=<try|review>`
 fn parser_delegate(command: &CommandPart<'_>, parts: &[CommandPart<'_>]) -> ParseResult {
-    match command {
-        CommandPart::Bare("delegate+") => {
-            Some(Ok(BorsCommand::SetDelegate(DelegatedPermission::Review)))
-        }
-        CommandPart::Bare("delegate") => {
-            if !parts.is_empty() {
-                Some(Err(CommandParseError::UnknownArg {
-                    arg: match parts[0] {
-                        CommandPart::Bare(arg) => arg.to_owned(),
-                        CommandPart::KeyValue { key, .. } => key.to_owned(),
-                    },
-                    did_you_mean: "delegate=<try|review>".to_string(),
-                }))
-            } else {
-                Some(Ok(BorsCommand::SetDelegate(DelegatedPermission::Review)))
+    let parse_permission = || {
+        let mut permission = None;
+        for part in parts {
+            match part {
+                CommandPart::Bare("try") => {
+                    if permission.is_some() {
+                        return Err(CommandParseError::ValidationError(
+                            "Only one `try` or `review` argument can be specified".to_string(),
+                        ));
+                    }
+                    permission = Some(DelegatedPermission::Try);
+                }
+                CommandPart::Bare("review") => {
+                    if permission.is_some() {
+                        return Err(CommandParseError::ValidationError(
+                            "Only one try or review argument can be specified".to_string(),
+                        ));
+                    }
+                    permission = Some(DelegatedPermission::Review);
+                }
+                CommandPart::Bare(arg) => {
+                    return Err(CommandParseError::UnknownArg {
+                        arg: arg.to_string(),
+                        did_you_mean: "`try` or `review`".to_string(),
+                    });
+                }
+                CommandPart::KeyValue { key, .. } => {
+                    return Err(CommandParseError::ValidationError(format!(
+                        "Key-value argument `{key}` is not supported"
+                    )));
+                }
             }
+        }
+        let permission = permission.unwrap_or(DelegatedPermission::Review);
+        Ok(permission)
+    };
+
+    match command {
+        CommandPart::Bare("delegate+" | "delegate") => {
+            Some(Ok(BorsCommand::Delegate(DelegateCommand {
+                delegatee: Delegatee::PullRequestAuthor,
+                permission: match parse_permission() {
+                    Ok(p) => p,
+                    Err(err) => return Some(Err(err)),
+                },
+            })))
         }
         CommandPart::KeyValue {
             key: "delegate",
             value,
         } => match DelegatedPermission::from_str(value) {
-            Ok(permission) => Some(Ok(BorsCommand::SetDelegate(permission))),
-            Err(error) => Some(Err(CommandParseError::ValidationError(error))),
+            // The legacy format, delegate=try or delegate=review was used.
+            Ok(permission) => Some(Ok(BorsCommand::Delegate(DelegateCommand {
+                delegatee: Delegatee::PullRequestAuthorLegacy,
+                permission,
+            }))),
+            Err(_) => {
+                // The value is the username of the delegatee
+                Some(Ok(BorsCommand::Delegate(DelegateCommand {
+                    delegatee: Delegatee::User(value.to_string()),
+                    permission: match parse_permission() {
+                        Ok(p) => p,
+                        Err(err) => return Some(Err(err)),
+                    },
+                })))
+            }
         },
         _ => None,
     }
@@ -562,7 +613,6 @@ fn parser_squash(command: &CommandPart<'_>, parts: &[CommandPart<'_>]) -> ParseR
 mod tests {
     use crate::bors::command::parser::{CommandParseError, CommandParser};
     use crate::bors::command::{Approver, BorsCommand, Parent, RollupMode};
-    use crate::database::DelegatedPermission;
     use crate::github::CommitSha;
 
     #[test]
@@ -1363,55 +1413,189 @@ for the crater",
     fn parse_delegate_plus_author() {
         let cmds = parse_commands("@bors delegate+");
         assert_eq!(cmds.len(), 1);
-        assert!(matches!(
-            cmds[0],
-            Ok(BorsCommand::SetDelegate(DelegatedPermission::Review))
-        ));
+        insta::assert_debug_snapshot!(cmds[0], @"
+        Ok(
+            Delegate(
+                DelegateCommand {
+                    delegatee: PullRequestAuthor,
+                    permission: Review,
+                },
+            ),
+        )
+        ");
     }
 
     #[test]
     fn parse_delegate_author() {
         let cmds = parse_commands("@bors delegate");
         assert_eq!(cmds.len(), 1);
-        assert!(matches!(
-            cmds[0],
-            Ok(BorsCommand::SetDelegate(DelegatedPermission::Review))
-        ));
-    }
-
-    #[test]
-    fn parse_delegate_unknown_arg() {
-        let cmds = parse_commands("@bors delegate try");
-        insta::assert_debug_snapshot!(cmds, @r#"
-        [
-            Err(
-                UnknownArg {
-                    arg: "try",
-                    did_you_mean: "delegate=<try|review>",
+        insta::assert_debug_snapshot!(cmds[0], @"
+        Ok(
+            Delegate(
+                DelegateCommand {
+                    delegatee: PullRequestAuthor,
+                    permission: Review,
                 },
             ),
-        ]
-        "#);
+        )
+        ");
     }
 
     #[test]
-    fn parse_delegate_review_author() {
+    fn parse_delegate_try() {
+        let cmds = parse_commands("@bors delegate try");
+        insta::assert_debug_snapshot!(cmds, @"
+        [
+            Ok(
+                Delegate(
+                    DelegateCommand {
+                        delegatee: PullRequestAuthor,
+                        permission: Try,
+                    },
+                ),
+            ),
+        ]
+        ");
+    }
+
+    #[test]
+    fn parse_delegate_legacy_review_author() {
         let cmds = parse_commands("@bors delegate=review");
         assert_eq!(cmds.len(), 1);
-        assert!(matches!(
-            cmds[0],
-            Ok(BorsCommand::SetDelegate(DelegatedPermission::Review))
-        ));
+        insta::assert_debug_snapshot!(cmds[0], @"
+        Ok(
+            Delegate(
+                DelegateCommand {
+                    delegatee: PullRequestAuthorLegacy,
+                    permission: Review,
+                },
+            ),
+        )
+        ");
+    }
+
+    #[test]
+    fn parse_delegate_legacy_try_author() {
+        let cmds = parse_commands("@bors delegate=try");
+        assert_eq!(cmds.len(), 1);
+        insta::assert_debug_snapshot!(cmds[0], @"
+        Ok(
+            Delegate(
+                DelegateCommand {
+                    delegatee: PullRequestAuthorLegacy,
+                    permission: Try,
+                },
+            ),
+        )
+        ");
     }
 
     #[test]
     fn parse_delegate_try_author() {
-        let cmds = parse_commands("@bors delegate=try");
+        let cmds = parse_commands("@bors delegate try");
         assert_eq!(cmds.len(), 1);
-        assert!(matches!(
-            cmds[0],
-            Ok(BorsCommand::SetDelegate(DelegatedPermission::Try))
-        ));
+        insta::assert_debug_snapshot!(cmds[0], @"
+        Ok(
+            Delegate(
+                DelegateCommand {
+                    delegatee: PullRequestAuthor,
+                    permission: Try,
+                },
+            ),
+        )
+        ");
+    }
+
+    #[test]
+    fn parse_delegate_review_author() {
+        let cmds = parse_commands("@bors delegate review");
+        assert_eq!(cmds.len(), 1);
+        insta::assert_debug_snapshot!(cmds[0], @"
+        Ok(
+            Delegate(
+                DelegateCommand {
+                    delegatee: PullRequestAuthor,
+                    permission: Review,
+                },
+            ),
+        )
+        ");
+    }
+
+    #[test]
+    fn parse_delegate_named_user() {
+        let cmds = parse_commands("@bors delegate=foo");
+        assert_eq!(cmds.len(), 1);
+        insta::assert_debug_snapshot!(cmds[0], @r#"
+        Ok(
+            Delegate(
+                DelegateCommand {
+                    delegatee: User(
+                        "foo",
+                    ),
+                    permission: Review,
+                },
+            ),
+        )
+        "#);
+    }
+
+    #[test]
+    fn parse_delegate_named_user_try() {
+        let cmds = parse_commands("@bors delegate=foo try");
+        assert_eq!(cmds.len(), 1);
+        insta::assert_debug_snapshot!(cmds[0], @r#"
+        Ok(
+            Delegate(
+                DelegateCommand {
+                    delegatee: User(
+                        "foo",
+                    ),
+                    permission: Try,
+                },
+            ),
+        )
+        "#);
+    }
+
+    #[test]
+    fn parse_delegate_multiple_args() {
+        let cmds = parse_commands("@bors delegate try review");
+        assert_eq!(cmds.len(), 1);
+        insta::assert_debug_snapshot!(cmds[0], @r#"
+        Err(
+            ValidationError(
+                "Only one try or review argument can be specified",
+            ),
+        )
+        "#);
+    }
+
+    #[test]
+    fn parse_delegate_key_value_arg() {
+        let cmds = parse_commands("@bors delegate review=foo");
+        assert_eq!(cmds.len(), 1);
+        insta::assert_debug_snapshot!(cmds[0], @r#"
+        Err(
+            ValidationError(
+                "Key-value argument `review` is not supported",
+            ),
+        )
+        "#);
+    }
+
+    #[test]
+    fn parse_delegate_author_unknown_arg() {
+        let cmds = parse_commands("@bors delegate+ a");
+        assert_eq!(cmds.len(), 1);
+        insta::assert_debug_snapshot!(cmds[0], @r#"
+        Err(
+            UnknownArg {
+                arg: "a",
+                did_you_mean: "`try` or `review`",
+            },
+        )
+        "#);
     }
 
     #[test]
@@ -1419,29 +1603,6 @@ for the crater",
         let cmds = parse_commands("@bors delegate-");
         assert_eq!(cmds.len(), 1);
         assert_eq!(cmds[0], Ok(BorsCommand::Undelegate));
-    }
-
-    #[test]
-    fn parse_delegate_author_unknown_arg() {
-        let cmds = parse_commands("@bors delegate+ a");
-        assert_eq!(cmds.len(), 1);
-        assert_eq!(
-            cmds[0],
-            Ok(BorsCommand::SetDelegate(DelegatedPermission::Review))
-        );
-    }
-
-    #[test]
-    fn parse_delegate_invalid_value() {
-        let cmds = parse_commands("@bors delegate=invalid");
-        assert_eq!(cmds.len(), 1);
-        insta::assert_debug_snapshot!(cmds[0], @r#"
-        Err(
-            ValidationError(
-                "Invalid delegation type `invalid`. Possible values are try/review",
-            ),
-        )
-        "#);
     }
 
     #[test]
