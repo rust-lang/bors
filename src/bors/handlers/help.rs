@@ -40,11 +40,13 @@ mod tests {
             - `rollup=<never|iffy|maybe|always>`: Set the rollup status of the PR
             - `rollup`: Short for `rollup=always`
             - `rollup-`: Short for `rollup=maybe`
-            - `delegate=<try|review>`: Delegate permissions for running try builds or approving to the PR author
-                - `try` allows the PR author to start try builds.
-                - `review` allows the PR author to both start try builds and approve the PR.
+            - `delegate[=<user>] [try|review]`: Delegate permissions for running try builds or approving to the PR author or the specified `<user>`.
+                - If no `<user>` is specified, the PR author is delegated the permission.
+                - The default permission is `review`.
+                - `try` allows the delegatee to start try builds.
+                - `review` allows the delegatee to both start try builds and approve the PR.
             - `delegate` | `delegate+`: Delegate approval permissions to the PR author
-                - Shortcut for `delegate=review`
+                - Shortcut for `delegate review`
             - `delegate-`: Remove any previously granted permission delegation
             - `try [parent=<parent>] [job|jobs=<jobs>]`: Start a try build.
                 - Optionally, you can specify a `<parent>` SHA with which will the PR be merged. You can specify `parent=last` to use the same parent SHA as the previous try build.

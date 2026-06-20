@@ -292,7 +292,7 @@ pub(super) async fn command_delegate(
     db: Arc<PgDbClient>,
     pr: PullRequestData<'_>,
     author: &GithubUser,
-    delegated_permission: DelegatedPermission,
+    delegate_cmd: DelegateCommand,
     bot_prefix: &CommandPrefix,
 ) -> anyhow::Result<()> {
     tracing::info!(
