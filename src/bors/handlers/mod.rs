@@ -28,7 +28,9 @@ use crate::bors::{
     TRY_BRANCH_NAME,
 };
 use crate::database::{DelegatedPermission, DelegationStatus, PullRequestModel};
-use crate::github::{CommitSha, GithubUser, LabelTrigger, PullRequest, PullRequestNumber, PullRequestSummary};
+use crate::github::{
+    CommitSha, GithubUser, LabelTrigger, PullRequest, PullRequestInfo, PullRequestNumber,
+};
 use crate::permissions::PermissionType;
 use crate::{PgDbClient, TeamApiClient, load_repositories};
 use anyhow::Context;
@@ -757,7 +759,7 @@ pub async fn unapprove_pr(
     repo_state: &RepositoryState,
     db: &PgDbClient,
     pr_db: &PullRequestModel,
-    pr_gh: &PullRequestSummary,
+    pr_gh: &PullRequestInfo,
 ) -> anyhow::Result<()> {
     db.unapprove(pr_db).await?;
     handle_label_trigger(repo_state, pr_gh, LabelTrigger::Unapproved).await?;

@@ -151,14 +151,15 @@ pub struct Branch {
 }
 
 #[derive(Debug)]
-pub struct PullRequestSummary {
+/// Basic information about a PR needed to handle mergeability checks and label changes.
+pub struct PullRequestInfo {
     pub number: PullRequestNumber,
     pub status: PullRequestStatus,
     pub mergeable_state: MergeableState,
     pub labels: Vec<String>,
 }
 
-impl From<PullRequest> for PullRequestSummary {
+impl From<PullRequest> for PullRequestInfo {
     fn from(pr: PullRequest) -> Self {
         Self {
             number: pr.number,
@@ -169,7 +170,7 @@ impl From<PullRequest> for PullRequestSummary {
     }
 }
 
-impl From<octocrab::models::pulls::PullRequest> for PullRequestSummary {
+impl From<octocrab::models::pulls::PullRequest> for PullRequestInfo {
     fn from(pr: octocrab::models::pulls::PullRequest) -> Self {
         PullRequest::from(pr).into()
     }

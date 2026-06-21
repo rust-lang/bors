@@ -21,7 +21,8 @@ use crate::github::api::operations::{
     create_check_run, create_commit, merge_branches, set_branch_to_commit, update_check_run,
 };
 use crate::github::{
-    CommitSha, GithubRepoName, GithubUser, PullRequest, PullRequestNumber, PullRequestSummary, TreeSha,
+    CommitSha, GithubRepoName, GithubUser, PullRequest, PullRequestNumber, PullRequestInfo, Tr
+   eeSha,
 };
 use crate::utils::timing::{RetryMethod, RetryableOpError, ShouldRetry, perform_retryable};
 use futures::TryStreamExt;
@@ -817,7 +818,7 @@ impl GithubRepositoryClient {
     pub async fn get_pull_requests_by_base_branch(
         &self,
         base_branch: &str,
-    ) -> anyhow::Result<Vec<PullRequestSummary>> {
+    ) -> anyhow::Result<Vec<PullRequestInfo>> {
         const QUERY: &str = r#"
             query($owner: String!, $name: String!, $base_branch: String!, $after: String) {
                 repository(owner: $owner, name: $name) {
@@ -931,7 +932,7 @@ impl GithubRepositoryClient {
                     .pull_requests
                     .nodes
                     .into_iter()
-                    .map(|n| PullRequestSummary {
+                    .map(|n| PullRequestInfo {
                         number: PullRequestNumber(n.number),
                         status: if n.merged_at.is_some() {
                             PullRequestStatus::Merged
