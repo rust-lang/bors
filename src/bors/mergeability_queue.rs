@@ -721,51 +721,42 @@ pub async fn check_mergeability(
 
             let repo_state = ctx.get_repo(repo)?;
 
-            let mut after = None;
-            loop {
-                let (fetched_prs, cursor) = repo_state
-                    .client
-                    .get_pull_requests_batch(base_branch, after.as_deref())
-                    .await?;
+            let fetched_prs = repo_state
+                .client
+                .get_pull_requests_by_base_branch(base_branch)
+                .await?;
 
-                for pr in fetched_prs {
-                    let new_mergeable_state = pr.mergeable_state.clone();
-                    if new_mergeable_state == OctocrabMergeableState::Unknown {
-                        match pr.status {
-                            PullRequestStatus::Open | PullRequestStatus::Draft => {
-                                tracing::info!("Mergeability status unknown, scheduling retry.");
-                                mq_tx.enqueue_retry(mq_item);
-                                return Ok(());
-                            }
-                            PullRequestStatus::Closed | PullRequestStatus::Merged => {
-                                tracing::info!(
-                                    "Mergeability status unknown, but pull request is no longer open."
-                                );
-                            }
+            for pr in fetched_prs {
+                let new_mergeable_state = pr.mergeable_state.clone();
+                if new_mergeable_state == OctocrabMergeableState::Unknown {
+                    match pr.status {
+                        PullRequestStatus::Open | PullRequestStatus::Draft => {
+                            tracing::info!("Mergeability status unknown, scheduling retry.");
+                            mq_tx.enqueue_retry(mq_item);
+                            return Ok(());
                         }
-                    } else if let Some(db_pr) = ctx
-                        .db
-                        .get_pull_request(repo_state.repository(), pr.number)
-                        .await?
-                    {
-                        update_pr_with_known_mergeability(
-                            &repo_state,
-                            &ctx.db,
-                            &pr,
-                            &db_pr,
-                            conflict_source,
-                        )
-                        .await?;
-                    } else {
-                        let pr_number = pr.number;
-                        tracing::warn!("Cannot find DB pull request for {repo}#{pr_number}");
+                        PullRequestStatus::Closed | PullRequestStatus::Merged => {
+                            tracing::info!(
+                                "Mergeability status unknown, but pull request is no longer open."
+                            );
+                        }
                     }
-                }
-
-                if cursor.is_some() {
-                    after = cursor;
+                } else if let Some(db_pr) = ctx
+                    .db
+                    .get_pull_request(repo_state.repository(), pr.number)
+                    .await?
+                {
+                    update_pr_with_known_mergeability(
+                        &repo_state,
+                        &ctx.db,
+                        &pr,
+                        &db_pr,
+                        conflict_source,
+                    )
+                    .await?;
                 } else {
-                    break;
+                    let pr_number = pr.number;
+                    tracing::warn!("Cannot find DB pull request for {repo}#{pr_number}");
                 }
             }
 
