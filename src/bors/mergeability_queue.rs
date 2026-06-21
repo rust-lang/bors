@@ -709,10 +709,10 @@ pub async fn check_mergeability(
         MergeabilityCheckEntry::Batch(PullRequestBatchToCheck {
             ref repo,
             ref base_branch,
-            ref attempt,
+            attempt,
             conflict_source,
         }) => {
-            if *attempt >= BATCH_MAX_RETRIES {
+            if attempt >= BATCH_MAX_RETRIES {
                 tracing::warn!(
                     "Exceeded max mergeable state attempts for batch in repo {repo} with base branch: {base_branch}"
                 );
@@ -725,15 +725,15 @@ pub async fn check_mergeability(
                 .client
                 .get_pull_requests_by_base_branch(base_branch)
                 .await?;
+            let mut unknown_prs = Vec::new();
 
-            for pr in fetched_prs {
+            for pr in &fetched_prs {
                 let new_mergeable_state = pr.mergeable_state.clone();
                 if new_mergeable_state == OctocrabMergeableState::Unknown {
                     match pr.status {
                         PullRequestStatus::Open | PullRequestStatus::Draft => {
-                            tracing::info!("Mergeability status unknown, scheduling retry.");
-                            mq_tx.enqueue_retry(mq_item);
-                            return Ok(());
+                            tracing::info!("Mergeability status unknown.");
+                            unknown_prs.push(pr);
                         }
                         PullRequestStatus::Closed | PullRequestStatus::Merged => {
                             tracing::info!(
@@ -749,7 +749,7 @@ pub async fn check_mergeability(
                     update_pr_with_known_mergeability(
                         &repo_state,
                         &ctx.db,
-                        &pr,
+                        pr,
                         &db_pr,
                         conflict_source,
                     )
@@ -757,6 +757,22 @@ pub async fn check_mergeability(
                 } else {
                     let pr_number = pr.number;
                     tracing::warn!("Cannot find DB pull request for {repo}#{pr_number}");
+                }
+            }
+
+            if unknown_prs.len() > fetched_prs.len() / 5 {
+                mq_tx.enqueue_retry(mq_item);
+            } else {
+                for pr in unknown_prs {
+                    mq_tx.enqueue_retry(MergeabilityCheckEntry::Single(PullRequestToCheck {
+                        pull_request: PullRequestData {
+                            repo: repo.clone(),
+                            pr_number: pr.number,
+                        },
+                        priority: MergeabilityCheckPriority(0),
+                        attempt,
+                        conflict_source,
+                    }));
                 }
             }
 
