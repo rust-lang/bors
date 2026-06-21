@@ -165,7 +165,7 @@ use crate::bors::handlers::unapprove_pr;
 use crate::bors::labels::handle_label_trigger;
 use crate::database::{MergeableState, OctocrabMergeableState, PullRequestModel};
 use crate::github::{
-    GithubRepoName, LabelTrigger, PullRequest, PullRequestNumber, PullRequestSummary,
+    GithubRepoName, LabelTrigger, PullRequest, PullRequestInfo, PullRequestNumber,
 };
 use std::cmp::{Ordering, Reverse};
 use std::collections::{BTreeMap, BinaryHeap};
@@ -809,7 +809,7 @@ pub async fn check_mergeability(
 pub async fn update_pr_with_known_mergeability(
     repo: &RepositoryState,
     db: &PgDbClient,
-    gh_pr: &PullRequestSummary,
+    gh_pr: &PullRequestInfo,
     db_pr: &PullRequestModel,
     conflict_source: Option<PullRequestNumber>,
 ) -> anyhow::Result<()> {
