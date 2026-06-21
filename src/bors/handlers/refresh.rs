@@ -143,7 +143,7 @@ mod tests {
     use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
     use std::time::Duration;
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn refresh_no_builds(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.refresh_pending_builds().await;
@@ -152,7 +152,7 @@ mod tests {
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn refresh_pr_state(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.refresh_prs().await;
@@ -161,7 +161,7 @@ mod tests {
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn refresh_do_nothing_before_timeout(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.post_comment("@bors try").await?;
@@ -175,7 +175,7 @@ mod tests {
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn refresh_cancel_build_after_timeout(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
                 ctx.post_comment("@bors try").await?;
@@ -208,7 +208,7 @@ mod tests {
             .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn refresh_cancel_build_apply_timeout(pool: sqlx::PgPool) {
         let gh = GitHub::default().append_to_default_config(
             r#"
@@ -232,7 +232,7 @@ auto_build_failed = ["+failed"]
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn refresh_cancel_build_updates_check_run(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.post_comment("@bors try").await?;
@@ -257,7 +257,7 @@ auto_build_failed = ["+failed"]
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn refresh_cancel_workflow_after_timeout(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.post_comment("@bors try").await?;
@@ -277,7 +277,7 @@ auto_build_failed = ["+failed"]
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn refresh_enqueues_unknown_mergeable_prs(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.edit_pr((), |pr| {
@@ -299,7 +299,7 @@ auto_build_failed = ["+failed"]
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn refresh_enqueues_approved_prs(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.approve(()).await?;
@@ -317,7 +317,7 @@ auto_build_failed = ["+failed"]
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn refresh_new_pr(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             let pr_id = ctx.repo().lock().add_pr(User::default_pr_author()).id();
@@ -336,7 +336,7 @@ auto_build_failed = ["+failed"]
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn refresh_pr_with_status_closed(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             let pr = ctx.open_pr((), |_| {}).await?;
@@ -354,7 +354,7 @@ auto_build_failed = ["+failed"]
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn refresh_pr_with_status_draft(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             let pr = ctx.open_pr((), |_| {}).await?;
@@ -369,7 +369,7 @@ auto_build_failed = ["+failed"]
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn refresh_pr_with_status_closed_draft(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             let pr = ctx.open_pr((), |_| {}).await?;
@@ -388,7 +388,7 @@ auto_build_failed = ["+failed"]
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn refresh_pr_properties(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             let pr = ctx.open_pr((), |_| {}).await?;
@@ -418,7 +418,7 @@ auto_build_failed = ["+failed"]
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn refresh_complete_before_timeout(pool: sqlx::PgPool) {
         run_test(
             pool,
@@ -455,7 +455,7 @@ auto_build_failed = ["+failed"]
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn complete_build_missed_complete_webhook(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             // Start an auto build
@@ -488,7 +488,7 @@ auto_build_failed = ["+failed"]
             .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn complete_build_missed_all_webhooks(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             // Start an auto build

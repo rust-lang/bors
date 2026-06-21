@@ -277,7 +277,7 @@ mod tests {
     use crate::tests::{Comment, GitHub, User, WorkflowEvent, run_test};
     use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn try_success(pool: sqlx::PgPool) {
         run_test(pool.clone(), async |ctx: &mut BorsTester| {
             ctx.post_comment("@bors try").await?;
@@ -298,7 +298,7 @@ mod tests {
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn try_failure(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.post_comment("@bors try").await?;
@@ -313,7 +313,7 @@ mod tests {
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn try_failure_job(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.post_comment("@bors try").await?;
@@ -341,7 +341,7 @@ mod tests {
             .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn try_no_permissions(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.post_comment(Comment::from("@bors try").with_author(User::unprivileged()))
@@ -355,7 +355,7 @@ mod tests {
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn try_only_requires_try_permission(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.post_comment(Comment::from("@bors try").with_author(User::try_user()))
@@ -373,7 +373,7 @@ mod tests {
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn try_merge_comment(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.post_comment("@bors try").await?;
@@ -390,7 +390,7 @@ mod tests {
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn try_commit_message_strip_description(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.edit_pr((), |pr| {
@@ -414,7 +414,7 @@ It fixes so many issues, sir."
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn try_commit_message_strip_description_keep_try_jobs(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.edit_pr((), |pr| {
@@ -446,7 +446,7 @@ try-job: Bar
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn try_commit_message_overwrite_try_jobs(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.edit_pr((), |pr| {
@@ -476,7 +476,7 @@ try-job: Bar
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn try_merge_branch_history(pool: sqlx::PgPool) {
         let gh = run_test(pool, async |ctx: &mut BorsTester| {
             ctx.post_comment("@bors try").await?;
@@ -497,7 +497,7 @@ try-job: Bar
         ), @"merge-0-pr-1-d7d45f1f-reauthored-to-bors");
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn try_merge_commit_author(pool: sqlx::PgPool) {
         let gh = run_test(pool, async |ctx: &mut BorsTester| {
             ctx.post_comment("@bors try").await?;
@@ -521,7 +521,7 @@ try-job: Bar
         "#);
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn try_merge_explicit_parent(pool: sqlx::PgPool) {
         let gh = run_test(pool, async |ctx: &mut BorsTester| {
             ctx.modify_repo((), |repo| {
@@ -545,7 +545,7 @@ try-job: Bar
         ");
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn try_merge_last_parent(pool: sqlx::PgPool) {
         let gh = run_test(pool, async |ctx: &mut BorsTester| {
             ctx.modify_repo((), |repo| {
@@ -579,7 +579,7 @@ try-job: Bar
         ");
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn try_merge_last_parent_unknown(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx
@@ -591,7 +591,7 @@ try-job: Bar
             .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn try_merge_conflict(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.modify_branch(TRY_MERGE_BRANCH_NAME, |branch| branch.merge_conflict = true);
@@ -632,7 +632,7 @@ try-job: Bar
             .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn try_merge_insert_into_db(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.post_comment("@bors try").await?;
@@ -652,7 +652,7 @@ try-job: Bar
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn try_cancel_previous_build_no_workflows(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.post_comment("@bors try").await?;
@@ -669,7 +669,7 @@ try-job: Bar
     }
 
     // Make sure that the second try command knows about the result of the first one.
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn multiple_commands_in_one_comment(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx
@@ -691,7 +691,7 @@ try-job: Bar
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn try_cancel_previous_build_running_workflows(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.post_comment("@bors try").await?;
@@ -714,7 +714,7 @@ try-job: Bar
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn try_again_after_checks_finish(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.post_comment("@bors try").await?;
@@ -745,7 +745,7 @@ try-job: Bar
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn try_cancel_no_running_build(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.post_comment("@bors try cancel").await?;
@@ -755,7 +755,7 @@ try-job: Bar
             .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn try_cancel_cancel_workflows(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.post_comment("@bors try").await?;
@@ -778,7 +778,7 @@ try-job: Bar
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn try_cancel_error(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.modify_repo((), |repo| repo.workflow_cancel_error = true);
@@ -796,7 +796,7 @@ try-job: Bar
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn try_cancel_cancel_in_db(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.modify_repo((), |repo| repo.workflow_cancel_error = true);
@@ -811,7 +811,7 @@ try-job: Bar
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn try_cancel_ignore_finished_workflows(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.post_comment("@bors try").await?;
@@ -835,7 +835,7 @@ try-job: Bar
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn try_workflow_start_after_cancel(pool: sqlx::PgPool) {
         run_test(pool.clone(), async |ctx: &mut BorsTester| {
             ctx.post_comment("@bors try").await?;
@@ -851,7 +851,7 @@ try-job: Bar
         assert_eq!(get_all_workflows(&pool).await.unwrap().len(), 0);
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn try_build_failed_modify_labels(pool: sqlx::PgPool) {
         let gh = GitHub::default().append_to_default_config(
             r#"
@@ -880,7 +880,7 @@ try_failed = ["+foo", "+bar", "-baz"]
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn try_build_creates_check_run(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.post_comment("@bors try").await?;
@@ -899,7 +899,7 @@ try_failed = ["+foo", "+bar", "-baz"]
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn try_build_updates_check_run_on_success(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.post_comment("@bors try").await?;
@@ -921,7 +921,7 @@ try_failed = ["+foo", "+bar", "-baz"]
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn try_build_updates_check_run_on_failure(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.post_comment("@bors try").await?;
@@ -943,7 +943,7 @@ try_failed = ["+foo", "+bar", "-baz"]
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn try_cancel_updates_check_run_to_cancelled(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.post_comment("@bors try").await?;
@@ -965,7 +965,7 @@ try_failed = ["+foo", "+bar", "-baz"]
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn new_try_build_cancels_previous_and_updates_check_run(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.post_comment("@bors try").await?;
@@ -995,7 +995,7 @@ try_failed = ["+foo", "+bar", "-baz"]
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn hide_try_build_started_comment_after_success(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.post_comment("@bors try").await?;
@@ -1009,7 +1009,7 @@ try_failed = ["+foo", "+bar", "-baz"]
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn hide_try_build_started_comment_after_failure(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.post_comment("@bors try").await?;
@@ -1023,7 +1023,7 @@ try_failed = ["+foo", "+bar", "-baz"]
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn hide_try_build_started_comment_after_restart(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.post_comment("@bors try").await?;
@@ -1039,7 +1039,7 @@ try_failed = ["+foo", "+bar", "-baz"]
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn update_try_build_started_comment_after_workflow_starts(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.post_comment("@bors try").await?;

@@ -432,7 +432,7 @@ mod tests {
         assert_eq!(author.email, expected_email);
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn squash_non_author_non_reviewer(pool: sqlx::PgPool) {
         run_test((pool, squash_state()), async |ctx: &mut BorsTester| {
             ctx.post_comment(Comment::new((), "@bors squash").with_author(User::try_user()))
@@ -446,7 +446,7 @@ mod tests {
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn squash_maintainers_can_edit_disabled(pool: sqlx::PgPool) {
         run_test((pool, squash_state()), async |ctx: &mut BorsTester| {
             ctx.modify_pr_in_gh((), |pr| pr.maintainers_can_modify = false);
@@ -460,7 +460,7 @@ mod tests {
             .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn squash_non_fork_pr(pool: sqlx::PgPool) {
         run_test((pool, squash_state()), async |ctx: &mut BorsTester| {
             ctx.modify_pr_in_gh((), |pr| pr.head_repository = None);
@@ -474,7 +474,7 @@ mod tests {
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn squash_tested_pr(pool: sqlx::PgPool) {
         run_test((pool, squash_state()), async |ctx: &mut BorsTester| {
             ctx.approve(()).await?;
@@ -489,7 +489,7 @@ mod tests {
             .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn squash_too_many_commits(pool: sqlx::PgPool) {
         run_test((pool, squash_state()), async |ctx: &mut BorsTester| {
             ctx.modify_pr_in_gh((), |pr| {
@@ -506,7 +506,7 @@ mod tests {
             .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn squash_single_commit(pool: sqlx::PgPool) {
         run_test((pool, squash_state()), async |ctx: &mut BorsTester| {
             ctx.post_comment("@bors squash").await?;
@@ -519,7 +519,7 @@ mod tests {
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn squash_two_commits(pool: sqlx::PgPool) {
         let gh = run_test((pool, squash_state()), async |ctx: &mut BorsTester| {
             ctx.modify_pr_in_gh((), |pr| {
@@ -561,7 +561,7 @@ mod tests {
         ");
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn squash_reviewer(pool: sqlx::PgPool) {
         run_test((pool, squash_state()), async |ctx: &mut BorsTester| {
             ctx.modify_pr_in_gh((), |pr| pr.add_commits(vec![Commit::from_sha("foo")]));
@@ -592,7 +592,7 @@ mod tests {
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn squash_pending_git_op_same_pr(pool: sqlx::PgPool) {
         run_test((pool, squash_state()), async |ctx: &mut BorsTester| {
             ctx.modify_pr_in_gh((), |pr| pr.add_commits(vec![Commit::from_sha("foo")]));
@@ -614,7 +614,7 @@ mod tests {
             .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn squash_twice(pool: sqlx::PgPool) {
         let gh = run_test((pool, squash_state()), async |ctx: &mut BorsTester| {
             ctx.modify_pr_in_gh((), |pr| pr.add_commits(vec![Commit::from_sha("foo")]));
@@ -644,7 +644,7 @@ mod tests {
         ");
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn squash_queue_full(pool: sqlx::PgPool) {
         run_test((pool, squash_state()), async |ctx: &mut BorsTester| {
             let pr2 = open_fork_pr(ctx).await?;
@@ -673,7 +673,7 @@ mod tests {
             .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn squash_hide_squash_started_comment(pool: sqlx::PgPool) {
         run_test((pool, squash_state()), async |ctx: &mut BorsTester| {
             ctx.modify_pr_in_gh((), |pr| pr.add_commits(vec![Commit::from_sha("foo")]));
@@ -692,7 +692,7 @@ mod tests {
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn squash_unapprove(pool: sqlx::PgPool) {
         run_test((pool, squash_state()), async |ctx: &mut BorsTester| {
             ctx.modify_pr_in_gh((), |pr| {
@@ -717,7 +717,7 @@ mod tests {
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn squash_custom_message(pool: sqlx::PgPool) {
         run_test((pool, squash_state()), async |ctx: &mut BorsTester| {
             ctx.modify_pr_in_gh((), |pr| {
@@ -739,7 +739,7 @@ mod tests {
             .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn squash_add_coauthored_by(pool: sqlx::PgPool) {
         run_test((pool, squash_state()), async |ctx: &mut BorsTester| {
             ctx.modify_pr_in_gh((), |pr| {
@@ -785,7 +785,7 @@ mod tests {
             .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn squash_add_coauthored_by_from_commit_messages(pool: sqlx::PgPool) {
         run_test((pool, squash_state()), async |ctx: &mut BorsTester| {
             ctx.modify_pr_in_gh((), |pr| {

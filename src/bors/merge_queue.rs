@@ -820,7 +820,7 @@ mod tests {
         tests::{BorsTester, BranchPushBehaviour, BranchPushError, Comment},
     };
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn disabled_merge_queue(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
             .github(GitHub::default().with_default_config(
@@ -843,7 +843,7 @@ merge_queue_enabled = false
             .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn auto_build_check_run_created(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.approve(()).await?;
@@ -860,7 +860,7 @@ merge_queue_enabled = false
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn auto_build_started_comment(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.approve(()).await?;
@@ -874,7 +874,7 @@ merge_queue_enabled = false
             .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn auto_build_success_comment(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.approve(()).await?;
@@ -897,7 +897,7 @@ merge_queue_enabled = false
             .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn auto_build_success_comment_duration_hours_minutes(pool: sqlx::PgPool) {
         // Test with hours and minutes (4800 seconds = 1h 20m)
         run_test(pool, async |ctx: &mut BorsTester| {
@@ -923,7 +923,7 @@ merge_queue_enabled = false
             .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn auto_build_success_comment_duration_all_units(pool: sqlx::PgPool) {
         // Test with hours, minutes and seconds (12345 seconds = 3h 25m 45s)
         run_test(pool, async |ctx: &mut BorsTester| {
@@ -949,7 +949,7 @@ merge_queue_enabled = false
             .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn auto_build_success_comment_duration_seconds_only(pool: sqlx::PgPool) {
         // Test with just seconds (45 seconds)
         run_test(pool, async |ctx: &mut BorsTester| {
@@ -975,7 +975,7 @@ merge_queue_enabled = false
             .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn auto_build_failure_comment(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.approve(()).await?;
@@ -991,7 +991,7 @@ merge_queue_enabled = false
             .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn auto_build_insert_into_db(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.approve(()).await?;
@@ -1011,7 +1011,7 @@ merge_queue_enabled = false
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn auto_build_succeeds_and_merges_in_db(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.approve(()).await?;
@@ -1025,7 +1025,7 @@ merge_queue_enabled = false
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn auto_build_branch_history(pool: sqlx::PgPool) {
         let gh = run_test(pool, async |ctx: &mut BorsTester| {
             ctx.approve(()).await?;
@@ -1053,7 +1053,7 @@ merge_queue_enabled = false
         ), @"merge-0-pr-1-d7d45f1f-reauthored-to-bors");
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn auto_build_commit_author(pool: sqlx::PgPool) {
         let gh = run_test(pool, async |ctx: &mut BorsTester| {
             ctx.approve(()).await?;
@@ -1077,7 +1077,7 @@ merge_queue_enabled = false
 
     /// Make sure that when running bors concurrently, we will not start an auto build for a PR
     /// more than once.
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn auto_build_concurrent_bors_instances(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.approve(()).await?;
@@ -1097,7 +1097,7 @@ merge_queue_enabled = false
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn merge_queue_sequential_order(pool: sqlx::PgPool) {
         let gh = run_test(pool, async |ctx: &mut BorsTester| {
             let prs = [
@@ -1134,7 +1134,7 @@ merge_queue_enabled = false
         ");
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn merge_queue_priority_order(pool: sqlx::PgPool) {
         let gh = run_test(pool, async |ctx: &mut BorsTester| {
             let pr2 = ctx.open_pr((), |_| {}).await?;
@@ -1167,7 +1167,7 @@ merge_queue_enabled = false
         ");
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn auto_build_push_conflict(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.approve(()).await?;
@@ -1187,7 +1187,7 @@ merge_queue_enabled = false
             .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn auto_build_push_validation_failed(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.approve(()).await?;
@@ -1207,7 +1207,7 @@ merge_queue_enabled = false
             .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn auto_build_push_error_transient_error(pool: sqlx::PgPool) {
         let gh = run_test(pool, async |ctx: &mut BorsTester| {
             ctx.approve(()).await?;
@@ -1225,7 +1225,7 @@ merge_queue_enabled = false
         insta::assert_snapshot!(gh.get_sha_history((), default_branch_name()), @"main-sha1");
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn auto_build_push_error_fails_in_db(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.approve(()).await?;
@@ -1246,7 +1246,7 @@ merge_queue_enabled = false
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn auto_build_push_error_retry_recovers_and_merges(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.approve(()).await?;
@@ -1275,7 +1275,7 @@ merge_queue_enabled = false
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn auto_build_start_merge_conflict(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx
@@ -1301,7 +1301,7 @@ merge_queue_enabled = false
             .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn auto_build_mergeable_state_sanity_check_fails(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             let pr = ctx.open_pr((), |_| {}).await?;
@@ -1324,7 +1324,7 @@ merge_queue_enabled = false
             .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn auto_build_mergeable_state_sanity_check_fails_conflict_source(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             let pr2 = ctx.open_pr((), |_| {}).await?;
@@ -1361,7 +1361,7 @@ merge_queue_enabled = false
             .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn auto_build_status_sanity_check_fails(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             let pr = ctx.open_pr((), |_| {}).await?;
@@ -1377,7 +1377,7 @@ merge_queue_enabled = false
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn auto_build_sha_mismatch_sanity_check_fails(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.approve(()).await?;
@@ -1402,7 +1402,7 @@ merge_queue_enabled = false
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn auto_build_success_updates_check_run(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.approve(()).await?;
@@ -1419,7 +1419,7 @@ merge_queue_enabled = false
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn auto_build_success_labels(pool: sqlx::PgPool) {
         let github = GitHub::default().append_to_default_config(
             r#"
@@ -1449,7 +1449,7 @@ auto_build_succeeded = ["+foo", "+bar", "-baz"]
             .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn auto_build_failed_labels(pool: sqlx::PgPool) {
         let github = GitHub::default().append_to_default_config(
             r#"
@@ -1481,7 +1481,7 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
             .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn auto_build_failure_updates_check_run(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.approve(()).await?;
@@ -1501,7 +1501,7 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn finish_auto_build_while_tree_is_closed_1(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             // Start an auto build with the default priority (0)
@@ -1526,7 +1526,7 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn finish_auto_build_while_tree_is_closed_2(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             // Start an auto build with the default priority (0)
@@ -1552,7 +1552,7 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn tree_closed_merge_open(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.post_comment("@bors treeclosed=100").await?;
@@ -1588,7 +1588,7 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
             .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn run_empty_queue(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             // This PR should not be in the queue
@@ -1604,7 +1604,7 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn update_auto_build_started_comment_after_workflow_starts(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.approve(()).await?;
@@ -1628,7 +1628,7 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
             .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn hide_auto_build_started_comment_after_workflow_finish(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.approve(()).await?;
@@ -1646,7 +1646,7 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
 
     // Recover from a situation where an approved PR goes to the head of the queue, but it received
     // a new push in the meantime, but bors missed the webhook about that push.
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn recover_approved_sha_mismatch_missed_webhook(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             let pr2 = ctx.open_pr(default_repo_name(), |_| {}).await?;
@@ -1677,7 +1677,7 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
             .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn recover_wrong_pr_status_missed_webhook(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             let pr2 = ctx.open_pr(default_repo_name(), |_| {}).await?;
@@ -1705,7 +1705,7 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
             .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn try_build_while_auto_build_is_running(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.approve(()).await?;
@@ -1721,7 +1721,7 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn commit_message_skip_ignore_block(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.edit_pr((), |pr| {
@@ -1765,7 +1765,7 @@ also include this pls"
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn cancel_try_again(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.approve(()).await?;
@@ -1787,7 +1787,7 @@ also include this pls"
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn cancel_change_order(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             let pr2 = ctx.open_pr((), |_| {}).await?;
@@ -1825,7 +1825,7 @@ also include this pls"
             .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn do_not_merge_timed_out_pr(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.approve(()).await?;
@@ -1850,7 +1850,7 @@ also include this pls"
             .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn wait_for_unknown_mergeability_status(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             let pr2 = ctx.open_pr((), |_| {}).await?;
@@ -1878,7 +1878,7 @@ also include this pls"
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn unapprove_conflicted_pr(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             let pr2 = ctx.open_pr((), |_| {}).await?;
@@ -1901,7 +1901,7 @@ also include this pls"
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn github_reopens_merged_pr(pool: sqlx::PgPool) {
         // Sometimes, GitHub does not notice that a pull request was actually merged, and it still
         // claims that it is open.

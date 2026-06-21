@@ -444,7 +444,7 @@ mod tests {
     use http::StatusCode;
     use std::collections::{HashMap, HashSet};
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn rollup_missing_fork(pool: sqlx::PgPool) {
         let mut gh = GitHub::default();
         gh.add_user(rollup_user());
@@ -470,7 +470,7 @@ mod tests {
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn rollup_non_rollupable_pr(pool: sqlx::PgPool) {
         run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
             let pr1 = ctx.open_pr((), |_| {}).await?;
@@ -488,7 +488,7 @@ mod tests {
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn rollup_nonexistent_pr(pool: sqlx::PgPool) {
         run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
             ctx.api_request(rollup_request(
@@ -504,7 +504,7 @@ mod tests {
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn rollup_too_many_prs(pool: sqlx::PgPool) {
         run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
             let prs = (1..60).map(PullRequestNumber).collect::<Vec<_>>();
@@ -521,7 +521,7 @@ mod tests {
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn rollup_missing_review_permissions(pool: sqlx::PgPool) {
         let mut gh = GitHub::default();
         gh.add_user(rollup_user());
@@ -539,7 +539,7 @@ mod tests {
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn rollup_merge_conflict(pool: sqlx::PgPool) {
         let gh = run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
             ctx.modify_repo(fork_repo(), |repo| {
@@ -599,7 +599,7 @@ mod tests {
         ");
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn rollup_different_base_branch(pool: sqlx::PgPool) {
         let gh = run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
             let beta = ctx.create_branch("beta");
@@ -639,7 +639,7 @@ mod tests {
         ");
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn rollup_recover_merge_error(pool: sqlx::PgPool) {
         let gh = run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
             let pr2 = ctx.open_pr((), |_| {}).await?;
@@ -683,7 +683,7 @@ mod tests {
         ");
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn rollup(pool: sqlx::PgPool) {
         let gh = run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
             let pr2 = ctx.open_pr((), |_| {}).await?;
@@ -726,7 +726,7 @@ mod tests {
 
     /// Ensure that a PR can be associated to multiple rollups.
     /// This can happen when opening a new rollup similar to an existing one, before closing the old one.
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn multiple_rollups_same_pr(pool: sqlx::PgPool) {
         let gh = run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
             let pr2 = ctx.open_pr((), |_| {}).await?;
@@ -767,7 +767,7 @@ mod tests {
         ");
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn rollup_order_by_priority(pool: sqlx::PgPool) {
         let gh = run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
             let pr2 = ctx.open_pr((), |_| {}).await?;
@@ -807,7 +807,7 @@ mod tests {
         ");
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn rollup_duplicates(pool: sqlx::PgPool) {
         let gh = run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
             let pr2 = ctx.open_pr((), |_| {}).await?;
@@ -836,7 +836,7 @@ mod tests {
         ");
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn rollup_remove_homu_ignore_block(pool: sqlx::PgPool) {
         let gh = run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
             let pr2 = ctx
@@ -892,7 +892,7 @@ also include this pls"
         ");
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn rollup_marked_as_rollup_never(pool: sqlx::PgPool) {
         run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
             let pr2 = ctx.open_pr((), |_| {}).await?;
@@ -907,7 +907,7 @@ also include this pls"
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn rollup_mark_as_rollup_always(pool: sqlx::PgPool) {
         run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
             let pr2 = ctx.open_pr((), |_| {}).await?;
@@ -924,7 +924,7 @@ also include this pls"
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn rollup_mark_as_rollup_always_in_approve(pool: sqlx::PgPool) {
         run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
             let pr2 = ctx.open_pr((), |_| {}).await?;
@@ -941,7 +941,7 @@ also include this pls"
             .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn rollup_draft_pr(pool: sqlx::PgPool) {
         run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
             let pr2 = ctx.open_pr((), |_| {}).await?;
@@ -959,7 +959,7 @@ also include this pls"
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn rollup_unapprove_member(pool: sqlx::PgPool) {
         run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
             let pr2 = ctx.open_pr((), |_| {}).await?;
@@ -991,7 +991,7 @@ also include this pls"
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn rollup_unapprove_member_contained_in_multiple_rollups(pool: sqlx::PgPool) {
         run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
             let pr2 = ctx.open_pr((), |_| {}).await?;
@@ -1033,7 +1033,7 @@ also include this pls"
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn rollup_unapprove_member_rollup_not_approved(pool: sqlx::PgPool) {
         run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
             let pr2 = ctx.open_pr((), |_| {}).await?;
@@ -1058,7 +1058,7 @@ also include this pls"
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn rollup_unapprove_member_cancel_auto_build(pool: sqlx::PgPool) {
         run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
             let pr2 = ctx.open_pr((), |_| {}).await?;
@@ -1090,7 +1090,7 @@ also include this pls"
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn rollup_close_on_member_push(pool: sqlx::PgPool) {
         run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
             let pr2 = ctx.open_pr((), |_| {}).await?;
@@ -1125,7 +1125,7 @@ also include this pls"
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn rollup_close_on_member_close(pool: sqlx::PgPool) {
         run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
             let pr2 = ctx.open_pr((), |_| {}).await?;
@@ -1158,7 +1158,7 @@ also include this pls"
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn rollup_member_sha_failed_sanity_check(pool: sqlx::PgPool) {
         run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
             let pr2 = ctx.open_pr((), |_| {}).await?;
