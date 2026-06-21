@@ -174,7 +174,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::sync::Notify;
 use tokio::time::timeout;
-use tracing::Instrument;
+use tracing::{Instrument, debug_span};
 
 /// Base delay before two mergeability check attempts.
 #[cfg(not(test))]
@@ -746,6 +746,12 @@ pub async fn check_mergeability(
                     .get_pull_request(repo_state.repository(), pr.number)
                     .await?
                 {
+                    let span = debug_span!(
+                        "Update PR with known mergeability",
+                        "{}#{}",
+                        repo,
+                        pr.number,
+                    );
                     update_pr_with_known_mergeability(
                         &repo_state,
                         &ctx.db,
@@ -753,6 +759,7 @@ pub async fn check_mergeability(
                         &db_pr,
                         conflict_source,
                     )
+                    .instrument(span)
                     .await?;
                 } else {
                     let pr_number = pr.number;
