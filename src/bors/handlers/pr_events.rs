@@ -242,22 +242,25 @@ pub(super) async fn handle_push_to_branch(
     mergeability_queue: &MergeabilityQueueSender,
     payload: PushToBranch,
 ) -> anyhow::Result<()> {
-    db.set_stale_mergeability_status_by_base_branch(repo_state.repository(), &payload.branch)
+    let affected_prs = db
+        .set_stale_mergeability_status_by_base_branch(repo_state.repository(), &payload.branch)
         .await?;
 
-    tracing::info!(
-        "Adding a batch to the mergeability queue due to a new commit pushed to base branch `{}`",
-        payload.branch
-    );
+    if !affected_prs.is_empty() {
+        tracing::info!(
+            "Adding a batch to the mergeability queue due to a new commit pushed to base branch `{}`",
+            payload.branch
+        );
 
-    // Try to find an auto build that matches this SHA
-    let merged_pr = find_pr_by_merged_commit(&repo_state, &db, CommitSha(payload.sha))
-        .await
-        .ok()
-        .flatten()
-        .map(|pr| pr.number);
+        // Try to find an auto build that matches this SHA
+        let merged_pr = find_pr_by_merged_commit(&repo_state, &db, CommitSha(payload.sha))
+            .await
+            .ok()
+            .flatten()
+            .map(|pr| pr.number);
 
-    mergeability_queue.enqueue_batch(repo_state.repository(), &payload.branch, merged_pr);
+        mergeability_queue.enqueue_batch(repo_state.repository(), &payload.branch, merged_pr);
+    }
 
     Ok(())
 }
