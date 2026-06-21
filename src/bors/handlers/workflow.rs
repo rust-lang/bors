@@ -234,7 +234,7 @@ mod tests {
     use crate::tests::{BorsBuilder, BorsTester, GitHub, default_repo_name};
     use crate::tests::{WorkflowEvent, run_test};
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn workflow_started_unknown_build(pool: sqlx::PgPool) {
         run_test(pool.clone(), async |ctx: &mut BorsTester| {
             ctx.create_branch("unknown");
@@ -246,7 +246,7 @@ mod tests {
         assert_eq!(get_all_workflows(&pool).await.unwrap().len(), 0);
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn workflow_completed_unknown_build(pool: sqlx::PgPool) {
         run_test(pool.clone(), async |ctx: &mut BorsTester| {
             ctx.create_branch("unknown");
@@ -258,7 +258,7 @@ mod tests {
         assert_eq!(get_all_workflows(&pool).await.unwrap().len(), 0);
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn try_workflow_started(pool: sqlx::PgPool) {
         run_test(pool.clone(), async |ctx: &mut BorsTester| {
             ctx.post_comment("@bors try").await?;
@@ -272,7 +272,7 @@ mod tests {
         assert_eq!(suite.status, WorkflowStatus::Pending);
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn try_workflow_start_twice(pool: sqlx::PgPool) {
         run_test(pool.clone(), async |ctx: &mut BorsTester| {
             ctx.post_comment("@bors try").await?;
@@ -289,7 +289,7 @@ mod tests {
     }
 
     // First start both workflows, then finish both of them.
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn try_success_multiple_workflows_per_suite_1(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.post_comment("@bors try").await?;
@@ -320,7 +320,7 @@ mod tests {
     }
 
     // First start and finish the first workflow, then do the same for the second one.
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn try_success_multiple_workflows_per_suite_2(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.post_comment("@bors try").await?;
@@ -351,7 +351,7 @@ mod tests {
     }
 
     // Finish the build early when we encounter the first failure
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn try_failure_multiple_workflows_early(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.post_comment("@bors try").await?;
@@ -372,7 +372,7 @@ mod tests {
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn min_ci_time_mark_too_short_workflow_as_failed(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
             .github(GitHub::default().append_to_default_config(
@@ -400,7 +400,7 @@ min_ci_time = 10
             .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn min_ci_time_ignore_failed_workflow(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
             .github(GitHub::default().append_to_default_config(
@@ -425,7 +425,7 @@ min_ci_time = 10
             .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn min_ci_time_ignore_long_enough_workflow(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
             .github(GitHub::default().append_to_default_config(
@@ -454,7 +454,7 @@ min_ci_time = 20
             .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn build_success_duration(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.post_comment("@bors try").await?;
@@ -481,7 +481,7 @@ min_ci_time = 20
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn build_failed_duration(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.post_comment("@bors try").await?;

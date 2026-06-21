@@ -1333,7 +1333,7 @@ mod tests {
     use crate::github::{GithubRepoName, PullRequestNumber};
     use sqlx::PgPool;
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn upsert_pr_do_not_clear_mergeable_stale_flag(pool: PgPool) {
         let make_pr = |mergeable_state| UpsertPullRequestParams {
             pr_number: PullRequestNumber(1),

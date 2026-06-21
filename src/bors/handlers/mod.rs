@@ -1101,7 +1101,7 @@ fn is_bors_observed_branch(branch: &str) -> bool {
 mod tests {
     use crate::tests::{BorsTester, Comment, User, run_test};
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn ignore_bot_comment(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.post_comment(Comment::from("@bors ping").with_author(User::bors_bot()))
@@ -1112,7 +1112,7 @@ mod tests {
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn do_not_load_pr_on_unrelated_comment(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.modify_repo((), |repo| repo.pull_request_error = true);
@@ -1122,7 +1122,7 @@ mod tests {
         .await;
     }
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn unknown_command(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.post_comment(Comment::from("@bors foo")).await?;

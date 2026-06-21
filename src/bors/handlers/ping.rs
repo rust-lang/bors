@@ -28,7 +28,7 @@ pub(super) async fn command_ping(
 mod tests {
     use crate::tests::{BorsTester, run_test};
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn ping_command(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.post_comment("@bors ping").await?;

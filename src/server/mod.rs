@@ -484,7 +484,7 @@ mod tests {
     use crate::tests::{ApiRequest, default_repo_name};
     use crate::tests::{BorsTester, run_test};
 
-    #[sqlx::test]
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn api_queue_page(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.approve(()).await?;
