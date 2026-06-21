@@ -16,7 +16,6 @@ use crate::bors::{AUTO_BRANCH_NAME, BorsContext, hide_tagged_comments};
 use crate::bors::{PullRequestStatus, RepositoryState};
 use crate::database::{PullRequestModel, UpsertPullRequestParams};
 use crate::github::CommitSha;
-use crate::utils::text::pluralize;
 use std::sync::Arc;
 
 pub(super) async fn handle_pull_request_edited(
@@ -249,9 +248,7 @@ pub(super) async fn handle_push_to_branch(
 
     if !affected_prs.is_empty() {
         tracing::info!(
-            "Adding {} {} to the mergeability queue due to a new commit pushed to base branch `{}`",
-            affected_prs.len(),
-            pluralize("PR", affected_prs.len()),
+            "Adding a batch to the mergeability queue due to a new commit pushed to base branch `{}`",
             payload.branch
         );
 
@@ -262,9 +259,7 @@ pub(super) async fn handle_push_to_branch(
             .flatten()
             .map(|pr| pr.number);
 
-        for pr in affected_prs {
-            mergeability_queue.enqueue_pr(&pr, merged_pr);
-        }
+        mergeability_queue.enqueue_batch(repo_state.repository(), &payload.branch, merged_pr);
     }
 
     Ok(())
