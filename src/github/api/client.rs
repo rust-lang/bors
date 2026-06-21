@@ -813,12 +813,11 @@ impl GithubRepositoryClient {
         Ok(())
     }
 
-    /// Resolve pull requests from this repository as a batch.
-    pub async fn get_pull_requests_batch(
+    /// Resolve pull requests from this repository by base branch.
+    pub async fn get_pull_requests_by_base_branch(
         &self,
         base_branch: &str,
-        after: Option<&str>,
-    ) -> anyhow::Result<(Vec<PullRequestSummary>, Option<String>)> {
+    ) -> anyhow::Result<Vec<PullRequestSummary>> {
         const QUERY: &str = r#"
             query($owner: String!, $name: String!, $base_branch: String!, $after: String) {
                 repository(owner: $owner, name: $name) {
@@ -858,7 +857,7 @@ impl GithubRepositoryClient {
             owner: &'v str,
             name: &'v str,
             base_branch: &'v str,
-            after: Option<&'v str>,
+            after: Option<String>,
         }
 
         #[derive(serde::Deserialize)]
@@ -914,50 +913,59 @@ impl GithubRepositoryClient {
             name: String,
         }
 
-        let vars = Variables {
+        let mut vars = Variables {
             owner: self.repo_name.owner(),
             name: self.repo_name.name(),
             base_branch,
-            after,
+            after: None,
         };
+        let mut result = Vec::new();
 
-        let response: Output = self.graphql(QUERY, vars).await?;
+        loop {
+            let response: Output = self.graphql(QUERY, &vars).await?;
 
-        Ok((
-            response
-                .data
-                .repository
-                .pull_requests
-                .nodes
-                .into_iter()
-                .map(|n| PullRequestSummary {
-                    number: PullRequestNumber(n.number),
-                    status: if n.merged_at.is_some() {
-                        PullRequestStatus::Merged
-                    } else if n.closed_at.is_some() {
-                        PullRequestStatus::Closed
-                    } else if n.is_draft {
-                        PullRequestStatus::Draft
-                    } else {
-                        PullRequestStatus::Open
-                    },
-                    mergeable_state: match n.mergeable {
-                        GraphQLMergeableState::Mergeable => MergeableState::Clean,
-                        GraphQLMergeableState::Conflicting => MergeableState::Dirty,
-                        GraphQLMergeableState::Unknown => MergeableState::Unknown,
-                    },
-                    labels: n.labels.nodes.into_iter().map(|label| label.name).collect(),
-                })
-                .collect(),
-            response
+            result.extend(
+                response
+                    .data
+                    .repository
+                    .pull_requests
+                    .nodes
+                    .into_iter()
+                    .map(|n| PullRequestSummary {
+                        number: PullRequestNumber(n.number),
+                        status: if n.merged_at.is_some() {
+                            PullRequestStatus::Merged
+                        } else if n.closed_at.is_some() {
+                            PullRequestStatus::Closed
+                        } else if n.is_draft {
+                            PullRequestStatus::Draft
+                        } else {
+                            PullRequestStatus::Open
+                        },
+                        mergeable_state: match n.mergeable {
+                            GraphQLMergeableState::Mergeable => MergeableState::Clean,
+                            GraphQLMergeableState::Conflicting => MergeableState::Dirty,
+                            GraphQLMergeableState::Unknown => MergeableState::Unknown,
+                        },
+                        labels: n.labels.nodes.into_iter().map(|label| label.name).collect(),
+                    }),
+            );
+
+            vars.after = response
                 .data
                 .repository
                 .pull_requests
                 .page_info
                 .has_next_page
                 .then_some(response.data.repository.pull_requests.page_info.end_cursor)
-                .flatten(),
-        ))
+                .flatten();
+
+            if vars.after.is_none() {
+                break;
+            }
+        }
+
+        Ok(result)
     }
 }
 
