@@ -712,6 +712,11 @@ pub async fn check_mergeability(
             attempt,
             conflict_source,
         }) => {
+            let start = Instant::now();
+            tracing::info!(
+                "Starting mergeability check for batch in repo {repo} with base branch: {base_branch}"
+            );
+
             if attempt >= BATCH_MAX_RETRIES {
                 tracing::warn!(
                     "Exceeded max mergeable state attempts for batch in repo {repo} with base branch: {base_branch}"
@@ -768,7 +773,7 @@ pub async fn check_mergeability(
             }
 
             if unknown_prs.len() > fetched_prs.len() / 5 {
-                mq_tx.enqueue_retry(mq_item);
+                mq_tx.enqueue_retry(mq_item.clone());
             } else {
                 for pr in unknown_prs {
                     mq_tx.enqueue_retry(MergeabilityCheckEntry::Single(PullRequestToCheck {
@@ -782,6 +787,11 @@ pub async fn check_mergeability(
                     }));
                 }
             }
+
+            tracing::info!(
+                "Finished mergeability check for batch in repo {repo} with base branch: {base_branch} in {:.3}s",
+                start.elapsed().as_secs_f64()
+            );
 
             Ok(())
         }
