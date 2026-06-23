@@ -11,7 +11,7 @@ services:
     # Optimize DB in tests
     command: -c fsync=off
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready" ]
+      test: ["CMD-SHELL", "pg_isready --username=bors"]
       interval: 10s
       timeout: 5s
       retries: 5
