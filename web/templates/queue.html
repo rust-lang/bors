@@ -680,9 +680,7 @@ Average duration of recent auto builds: {{ format_duration(*average_build_durati
     });
 
     {% if let Some(client_id) = oauth_client_id %}
-    rollupContinueButton.addEventListener("click", () => {
-        const scopes = ["public_repo", "workflow"];
-
+    rollupContinueButton.addEventListener("click", async () => {
         // Gather PR numbers
         let selectedRows = table.rows({ selected: true }).nodes().toArray();
         let nums = selectedRows
@@ -692,18 +690,11 @@ Average duration of recent auto builds: {{ format_duration(*average_build_durati
             })
             .filter(num => num !== null);
 
-        let state = JSON.stringify({
-            pr_nums: nums,
-            repo_name: "{{ repo_name }}",
-            repo_owner: "{{ repo_owner }}"
-        });
-
-        const oauthUrl = new URL("https://github.com/login/oauth/authorize");
-        oauthUrl.searchParams.set("client_id", "{{ client_id }}");
-        oauthUrl.searchParams.set("scope", scopes.join(","));
-        oauthUrl.searchParams.set("state", state);
-
-        window.location.href = oauthUrl.toString();
+        const submitUrl = new URL("/rollup/submit", window.location.href);
+        submitUrl.searchParams.set("pr_nums", JSON.stringify(nums));
+        submitUrl.searchParams.set("repo_owner", "{{ repo_owner }}");
+        submitUrl.searchParams.set("repo_name", "{{ repo_name }}");
+        window.location.href = submitUrl.toString();
     });
     {% endif %}
 

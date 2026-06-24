@@ -69,6 +69,8 @@ which = "8"
 # Text processing
 pulldown-cmark = "0.13"
 regex = "1"
+axum_session = { version = "0.20.1", features = ["key-store"] }
+base64 = "0.22"
 
 [dev-dependencies]
 insta = "1.26"

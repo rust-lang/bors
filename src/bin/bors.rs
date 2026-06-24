@@ -81,12 +81,16 @@ struct Opts {
         default_value = "https://team-api.infra.rust-lang.org"
     )]
     permissions: String,
+
+    /// Disable the use of `Secure` cookies for session management. Only recommended in local dev.
+    #[arg(long, env = "INSECURE_COOKIES")]
+    insecure_cookies: bool,
 }
 
 /// Starts a server that receives GitHub webhooks and generates events into a queue
 /// that is then handled by the Bors process.
-async fn webhook_server(state: ServerState) -> anyhow::Result<()> {
-    let app = create_app(state);
+async fn webhook_server(state: ServerState, insecure_cookies: bool) -> anyhow::Result<()> {
+    let app = create_app(state, insecure_cookies).await?;
 
     let addr = SocketAddr::from(([0, 0, 0, 0], 8080));
     let listener = tokio::net::TcpListener::bind(addr)
@@ -275,7 +279,7 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
         oauth_client,
         ctx,
     );
-    let server_process = webhook_server(state);
+    let server_process = webhook_server(state, opts.insecure_cookies);
 
     let fut = async move {
         tokio::select! {

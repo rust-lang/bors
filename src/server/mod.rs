@@ -1,7 +1,7 @@
 use crate::bors::event::BorsEvent;
 use crate::bors::{CommandPrefix, RepositoryState, format_help};
 use crate::database::{ApprovalStatus, QueueStatus};
-use crate::github::{GithubRepoName, PullRequestNumber, rollup};
+use crate::github::{GitHubSession, GithubRepoName, OAuthExchangeCode, PullRequestNumber, rollup};
 use crate::templates::{
     HelpTemplate, HtmlTemplate, NotFoundTemplate, PullRequestStats, QueueTemplate, RepositoryView,
     RollupsInfo,
@@ -16,6 +16,9 @@ use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use axum_embed::ServeEmbed;
+use axum_session::{SessionConfig, SessionLayer, SessionNullSession, SessionNullSessionStore};
+use base64::Engine;
+use base64::prelude::BASE64_URL_SAFE;
 use chrono::Utc;
 use http::{Request, StatusCode};
 use pulldown_cmark::Parser;
@@ -95,7 +98,7 @@ impl FromRef<ServerStateRef> for Arc<PgDbClient> {
 #[derive(Clone)]
 pub struct ServerStateRef(pub Arc<ServerState>);
 
-pub fn create_app(state: ServerState) -> Router {
+pub async fn create_app(state: ServerState, insecure_cookies: bool) -> anyhow::Result<Router> {
     let compression_layer = CompressionLayer::new()
         .br(true)
         .gzip(true)
@@ -120,6 +123,18 @@ pub fn create_app(state: ServerState) -> Router {
             },
         );
 
+    if insecure_cookies {
+        tracing::warn!("Secure cookies are disabled. This is only recommended in local dev");
+    }
+
+    let session_config = SessionConfig::default()
+        .with_http_only(true)
+        .with_key(axum_session::Key::generate())
+        .with_memory_lifetime(chrono::Duration::hours(2))
+        .with_secure(!insecure_cookies)
+        .with_table_name("web_sessions");
+    let session_store = SessionNullSessionStore::new(None, session_config).await?;
+
     #[derive(Embed, Clone)]
     #[folder = "web/assets/"]
     struct Assets;
@@ -127,7 +142,7 @@ pub fn create_app(state: ServerState) -> Router {
     let serve_assets = ServeEmbed::<Assets>::new();
 
     let api = create_api_router();
-    Router::new()
+    Ok(Router::new()
         .route("/", get(index_handler))
         .route("/help", get(help_handler))
         .route(
@@ -136,14 +151,16 @@ pub fn create_app(state: ServerState) -> Router {
         )
         .route("/github", post(github_webhook_handler))
         .route("/health", get(health_handler))
-        .route("/oauth/callback", get(rollup::oauth_callback_handler))
+        .route("/oauth/callback", get(oauth_callback_handler))
+        .route("/rollup/submit", get(rollup::submit))
         .nest("/api", api)
         .nest_service("/assets", serve_assets)
+        .layer(SessionLayer::new(session_store))
         .layer(ConcurrencyLimitLayer::new(100))
         .layer(CatchPanicLayer::custom(handle_panic))
         .layer(trace_layer)
         .with_state(ServerStateRef(Arc::new(state)))
-        .fallback(not_found_handler)
+        .fallback(not_found_handler))
 }
 
 fn create_api_router() -> Router<ServerStateRef> {
@@ -477,6 +494,60 @@ pub async fn github_webhook_handler(
             }
         },
     }
+}
+
+/// Query parameters received from GitHub's OAuth callback.
+///
+/// Documentation: https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps#2-users-are-redirected-back-to-your-site-by-github
+#[derive(serde::Deserialize)]
+struct OAuthCallbackQuery {
+    code: OAuthExchangeCode,
+    /// Contains the endpoint to redirect to
+    state: Option<String>,
+}
+
+async fn oauth_callback_handler(
+    session: SessionNullSession,
+    State(oauth): State<Option<OAuthClient>>,
+    Query(query): Query<OAuthCallbackQuery>,
+) -> Response {
+    tracing::debug!(
+        session_id = session.get_session_id(),
+        "oauth callback for session"
+    );
+    let Some(oauth_client) = oauth else {
+        let error = anyhow::anyhow!(
+            "OAuth not configured. Please set OAUTH_CLIENT_ID and OAUTH_CLIENT_SECRET."
+        );
+        tracing::error!("{error}");
+        return (StatusCode::INTERNAL_SERVER_ERROR, format!("{error:?}")).into_response();
+    };
+
+    let prev = GitHubSession::restore(&session);
+    match oauth_client.get_access_token(query.code).await {
+        Ok(access_token) => GitHubSession::save(&session, access_token),
+        Err(error) if prev.is_some() => {
+            tracing::warn!("Ignoring invalid GitHub access code: {error}")
+        }
+        Err(error) => {
+            tracing::error!("{error}");
+            return (StatusCode::INTERNAL_SERVER_ERROR, format!("{error:?}")).into_response();
+        }
+    }
+
+    let mut endpoint = None;
+    if let Some(query_state) = query.state {
+        // don't fail if the endpoint can't be decoded
+        if let Ok(bytes) = BASE64_URL_SAFE.decode(query_state) {
+            if let Ok(bytes_str) = std::str::from_utf8(&bytes) {
+                endpoint = Some(bytes_str.to_string());
+            }
+        }
+    }
+
+    let target = endpoint.as_deref().unwrap_or("/");
+    tracing::debug!("Redirecting after oauth to: {target}");
+    Redirect::to(target).into_response()
 }
 
 #[cfg(test)]

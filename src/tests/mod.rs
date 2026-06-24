@@ -14,6 +14,7 @@ use crate::{
 };
 use anyhow::Context;
 use axum::Router;
+use http::header::{COOKIE, SET_COOKIE};
 use http::{HeaderMap, Method, Request, StatusCode};
 use octocrab::models::RunId;
 use octocrab::models::workflows::Conclusion;
@@ -194,6 +195,7 @@ pub struct BorsTester {
     mergeability_queue_rx: MergeabilityQueueReceiver,
     gitops_queue_rx: GitOpsQueueReceiver,
     ctx: Arc<BorsContext>,
+    current_session: Option<String>,
 }
 
 impl BorsTester {
@@ -251,7 +253,7 @@ impl BorsTester {
             Some(oauth_client),
             ctx.clone(),
         );
-        let app = create_app(state);
+        let app = create_app(state, true).await.unwrap();
         let bors = tokio::spawn(bors_process);
         (
             Self {
@@ -264,6 +266,7 @@ impl BorsTester {
                 mergeability_queue_rx,
                 gitops_queue_rx,
                 ctx,
+                current_session: None,
             },
             bors,
         )
@@ -1030,15 +1033,14 @@ impl BorsTester {
             write!(path, "{c}{key}={}", urlencoding::encode(value))?;
         }
 
+        let mut req = Request::builder().uri(&path).method(request.method);
+        if let Some(session_id) = self.current_session.as_ref() {
+            req = req.header(COOKIE, format!("session={session_id}"));
+        }
+
         let response = self
             .app
-            .call(
-                Request::builder()
-                    .uri(&path)
-                    .method(request.method)
-                    .body(String::new())
-                    .unwrap(),
-            )
+            .call(req.body(String::new()).unwrap())
             .await
             .context("Cannot send REST API request")?;
         let headers = response.headers().clone();
@@ -1048,6 +1050,14 @@ impl BorsTester {
                 .await?
                 .to_vec(),
         );
+        for set_cookie in headers.get_all(SET_COOKIE) {
+            let set_cookie = set_cookie.to_str().unwrap();
+            let Some(session_cookie) = set_cookie.strip_prefix("session=") else {
+                continue;
+            };
+            let session_id = session_cookie.split(";").next().unwrap_or(session_cookie);
+            self.current_session = Some(session_id.to_string());
+        }
         Ok(ApiResponse {
             status,
             headers,
@@ -1177,6 +1187,13 @@ impl BorsTester {
         self.db()
             .get_pull_request(&id.repo, PullRequestNumber(id.number))
             .await
+    }
+
+    pub async fn authenticate(&mut self, code: &str) -> anyhow::Result<()> {
+        self.api_request(ApiRequest::get("/oauth/callback").query("code", code))
+            .await?
+            .assert_status(StatusCode::from_u16(303).unwrap());
+        Ok(())
     }
 
     async fn finish(self, bors: JoinHandle<()>) -> anyhow::Result<GitHub> {

@@ -17,7 +17,7 @@ mod labels;
 mod oauth;
 pub mod rollup;
 
-pub use oauth::{OAuthClient, OAuthConfig};
+pub use oauth::{ExchangeCode as OAuthExchangeCode, GitHubSession, OAuthClient, OAuthConfig};
 
 pub use crate::server::webhook::WebhookSecret;
 pub use api::operations::{MergeResult, attempt_merge};
@@ -47,6 +47,17 @@ impl GithubRepoName {
 
     pub fn name(&self) -> &str {
         &self.name
+    }
+
+    pub async fn is_visible_to_client(&self, client: &Octocrab) -> anyhow::Result<bool> {
+        let repo = client.repos(&self.owner, &self.name);
+        match repo.get().await {
+            Ok(_) => Ok(true),
+            Err(octocrab::Error::GitHub { .. }) => Ok(false),
+            Err(error) => {
+                Err(anyhow::anyhow!(error).context("Failed to test repository access for user"))
+            }
+        }
     }
 }
 
@@ -214,7 +225,8 @@ impl From<octocrab::models::pulls::PullRequest> for PullRequest {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize)]
+#[serde(transparent)]
 pub struct PullRequestNumber(pub u64);
 
 impl From<u64> for PullRequestNumber {

@@ -1,8 +1,21 @@
 use crate::github::api::client::GithubRepositoryClient;
 use crate::github::{GithubRepoName, GithubUser, prepare_octocrab_client};
 use anyhow::Context;
+use axum_session::SessionNullSession;
+use base64::Engine;
+use base64::prelude::BASE64_URL_SAFE;
+use octocrab::Octocrab;
 use secrecy::{ExposeSecret, SecretString};
 use std::collections::HashMap;
+use std::fmt::Write;
+
+#[derive(serde::Deserialize)]
+#[serde(transparent)]
+pub struct ExchangeCode(String);
+
+#[derive(serde::Deserialize, serde::Serialize)]
+#[serde(transparent)]
+pub struct AccessToken(String);
 
 /// Client that handles OAuth authentication used for rollups.
 /// It is able to provide a GitHub client authenticated as a given GitHub user.
@@ -26,12 +39,11 @@ impl OAuthClient {
         &self.config
     }
 
-    /// Create a GitHub client authenticated as a user with the given OAuth exchange code.
-    pub async fn get_authenticated_client(
+    /// Upgrades a OAuth exchange code from the callback into a GitHub access token.
+    pub async fn get_access_token(
         &self,
-        repo: GithubRepoName,
-        code: &str,
-    ) -> anyhow::Result<UserGitHubClient> {
+        ExchangeCode(code): ExchangeCode,
+    ) -> anyhow::Result<AccessToken> {
         tracing::info!("Exchanging OAuth code for access token");
         let client = reqwest::Client::new();
         let token_response = client
@@ -39,7 +51,7 @@ impl OAuthClient {
             .form(&[
                 ("client_id", self.config.client_id()),
                 ("client_secret", self.config.client_secret()),
-                ("code", code),
+                ("code", &code),
             ])
             .send()
             .await
@@ -57,22 +69,54 @@ impl OAuthClient {
             .ok_or_else(|| anyhow::anyhow!("No OAuth access token in response"))?;
 
         tracing::info!("Retrieved OAuth access token");
+        Ok(AccessToken(access_token.to_owned()))
+    }
 
-        let user_client = prepare_octocrab_client(&self.github_api_base_url)?
-            .user_access_token(access_token.clone())
-            .build()?;
-        let user = user_client
+    /// Create an authenticated Octocrab client with the given OAuth access token.
+    pub fn get_authenticated_client(
+        &self,
+        AccessToken(access_token): &AccessToken,
+    ) -> anyhow::Result<Octocrab> {
+        prepare_octocrab_client(&self.github_api_base_url)?
+            .user_access_token(access_token.as_str())
+            .build()
+            .context("Unable to build GitHub client")
+    }
+
+    /// Wrap an authenticated Octocrab client for accessing the given repo.
+    pub async fn get_user_client(
+        &self,
+        authenticated_client: Octocrab,
+        repo: GithubRepoName,
+    ) -> anyhow::Result<UserGitHubClient> {
+        let user = authenticated_client
             .current()
             .user()
             .await
             .context("Cannot get user authenticated with OAuth")?;
 
         let client_repo = GithubRepoName::new(&user.login, repo.name());
-        let client = GithubRepositoryClient::new(user.html_url.clone(), user_client, client_repo);
+        let client =
+            GithubRepositoryClient::new(user.html_url.clone(), authenticated_client, client_repo);
         Ok(UserGitHubClient {
             user: user.into(),
             client,
         })
+    }
+
+    /// Return a constructed GitHub OAuth URL for navigation
+    pub fn authorization_url(&self, redirect_uri: Option<String>) -> String {
+        let mut url = format!(
+            "{base_url}/login/oauth/authorize?client_id={client_id}&scope={scope}",
+            base_url = self.github_base_url,
+            client_id = self.config.client_id(),
+            scope = "public_repo,workflow",
+        );
+        if let Some(redirect_uri) = redirect_uri {
+            let state = BASE64_URL_SAFE.encode(redirect_uri);
+            write!(&mut url, "&state={state}").unwrap();
+        }
+        url
     }
 }
 
@@ -102,5 +146,22 @@ impl OAuthConfig {
 
     pub fn client_secret(&self) -> &str {
         self.client_secret.expose_secret()
+    }
+}
+
+#[derive(serde::Deserialize, serde::Serialize)]
+pub struct GitHubSession {
+    pub access_token: AccessToken,
+}
+
+impl GitHubSession {
+    const SESSION_KEY: &str = "github-session";
+
+    pub fn save(session: &SessionNullSession, access_token: AccessToken) {
+        session.set(Self::SESSION_KEY, GitHubSession { access_token });
+    }
+
+    pub fn restore(session: &SessionNullSession) -> Option<GitHubSession> {
+        session.get(Self::SESSION_KEY)
     }
 }
