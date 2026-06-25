@@ -166,5 +166,9 @@ $ python scripts/seed.py --repo owner/repo-name --token $GITHUB_TOKEN --count 5
 2. Opens pull requests for each branch
 3. Posts `@bors r+` comments to approve each PR
 
+The following options are also available:
+- `--prefix <CMD_PREFIX>` the command prefix for invoking bors, defaults to `@bors`
+- `--no-approve` disables posting `@bors r+` comments to approve each PR
+
 ## Updating commands
 When modifying commands, make sure to update the `@bors help` command in `src/bors/handlers/help.rs`.

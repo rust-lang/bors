@@ -61,6 +61,8 @@ def main():
     parser.add_argument("--repo", required=True, help="Repository in format owner/repo-name")
     parser.add_argument("--token", required=True, help="GitHub personal access token")
     parser.add_argument("--count", type=int, default=3, help="Number of PRs to create (default: 3)")
+    parser.add_argument("--cmd-prefix", default="@bors", help="Bors command prefix")
+    parser.add_argument("--no-approve", default=False, help="Auto-approve using @bors r+", action='store_true')
 
     args = parser.parse_args()
 
@@ -90,16 +92,17 @@ def main():
         print("No PRs were created successfully.")
         sys.exit(1)
 
-    # Approve all PRs
-    print(f"\nApproving {len(pr_numbers)} PRs with `@bors r+`...")
-    for pr_number in pr_numbers:
-        try:
-            issue = repo.get_issue(pr_number)
-            issue.create_comment("@bors r+")
-
-            print(f"✓ Approved PR #{pr_number}")
-        except GithubException as e:
-            print(f"✗ Failed to approve PR #{pr_number}: {e}")
+    if not args.no_approve:
+        # Approve all PRs
+        print(f"\nApproving {len(pr_numbers)} PRs with `{args.cmd_prefix} r+`...")
+        for pr_number in pr_numbers:
+            try:
+                issue = repo.get_issue(pr_number)
+                issue.create_comment(f"{args.cmd_prefix} r+")
+    
+                print(f"✓ Approved PR #{pr_number}")
+            except GithubException as e:
+                print(f"✗ Failed to approve PR #{pr_number}: {e}")
 
     print(f"\n{len(pr_numbers)} PRs:")
 
