@@ -2,4 +2,6 @@ target/
 .env
 .DS_Store
 __pycache__/
+data/*/
+!data/team/
 data/team/*.json
