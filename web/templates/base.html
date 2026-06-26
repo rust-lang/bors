@@ -174,10 +174,36 @@
           content: "-";
           color: var(--color-text-muted);
       }
+
+      .navbar {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          border-bottom-width: 2px;
+          border-bottom-color: black;
+      }
+
+      .container {
+          display: flex;
+          flex-direction: column;
+      }
   </style>
   {% block head %}{% endblock %}
 </head>
 <body>
+    <div class="container">
+        <div class="navbar">
+            <h1>{% block heading %}{% endblock %}</h1>
+            {%- if let Some(github_user) = github_user -%}
+            <div>
+                Signed in to GitHub as <a href="{{ github_user.html_url }}">{{ github_user.username }}</a>
+            </div>
+            <button><a href="/logout">Log out</a></button>
+            {%- else if let Some(login_url) = login_url -%}
+            <button><a href='{{ "{}" | format(login_url | safe) }}'>Sign in with GitHub</a></button>
+            {%- endif -%}
+        </div>
 {% block body %}{% endblock %}
+    </div>
 </body>
 </html>

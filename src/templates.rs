@@ -3,7 +3,7 @@ use crate::database::{
     BuildModel, BuildStatus, MergeableState::*, PullRequestModel, QueueStatus, TreeState,
     WorkflowModel,
 };
-use crate::github::PullRequestNumber;
+use crate::github::{GitHubSession, PullRequestNumber};
 use askama::Template;
 use axum::response::{Html, IntoResponse, Response};
 use chrono::Utc;
@@ -42,9 +42,26 @@ where
     }
 }
 
+pub struct GitHubUser {
+    pub username: String,
+    pub html_url: String,
+}
+
+impl From<&GitHubSession> for GitHubUser {
+    fn from(value: &GitHubSession) -> Self {
+        GitHubUser {
+            username: value.username.clone(),
+            html_url: value.html_url.clone(),
+        }
+    }
+}
+
 #[derive(Template)]
 #[template(path = "help.html")]
 pub struct HelpTemplate {
+    pub login_url: Option<String>,
+    /// Can only be Some if login_url is as well
+    pub github_user: Option<GitHubUser>,
     pub repos: Vec<RepositoryView>,
     pub cmd_prefix: String,
     pub help: String,
@@ -82,7 +99,9 @@ pub struct QueueTemplate {
     pub prs: Vec<PullRequestModel>,
     pub rollups_info: RollupsInfo,
     pub tree_state: TreeState,
-    pub oauth_client_id: Option<String>,
+    pub login_url: Option<String>,
+    /// Can only be Some if login_url is as well
+    pub github_user: Option<GitHubUser>,
     // PRs that should be pre-selected for being included in a rollup
     pub selected_rollup_prs: Vec<u32>,
     // Active workflow for an active pending auto build
@@ -153,4 +172,7 @@ impl QueueTemplate {
 
 #[derive(Template)]
 #[template(path = "not_found.html")]
-pub struct NotFoundTemplate {}
+pub struct NotFoundTemplate {
+    pub login_url: Option<String>,
+    pub github_user: Option<GitHubUser>,
+}

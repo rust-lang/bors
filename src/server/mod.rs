@@ -18,7 +18,7 @@ use axum::{Json, Router};
 use axum_embed::ServeEmbed;
 use axum_session::{SessionConfig, SessionLayer, SessionNullSession, SessionNullSessionStore};
 use base64::Engine;
-use base64::prelude::BASE64_URL_SAFE;
+use base64::prelude::BASE64_URL_SAFE_NO_PAD;
 use chrono::Utc;
 use http::{Request, StatusCode};
 use pulldown_cmark::Parser;
@@ -153,6 +153,7 @@ pub async fn create_app(state: ServerState, insecure_cookies: bool) -> anyhow::R
         .route("/health", get(health_handler))
         .route("/oauth/callback", get(oauth_callback_handler))
         .route("/rollup/submit", get(rollup::submit))
+        .route("/logout", get(logout_handler))
         .nest("/api", api)
         .nest_service("/assets", serve_assets)
         .layer(SessionLayer::new(session_store))
@@ -260,7 +261,13 @@ fn handle_panic(_err: Box<dyn Any + Send + 'static>) -> Response {
 }
 
 async fn not_found_handler() -> impl IntoResponse {
-    (StatusCode::NOT_FOUND, HtmlTemplate(NotFoundTemplate {}))
+    (
+        StatusCode::NOT_FOUND,
+        HtmlTemplate(NotFoundTemplate {
+            login_url: None,
+            github_user: None,
+        }),
+    )
 }
 
 async fn health_handler() -> impl IntoResponse {
@@ -306,10 +313,11 @@ async fn help_handler(
     State(ServerStateRef(state)): State<ServerStateRef>,
     State(oauth): State<Option<OAuthClient>>,
 ) -> impl IntoResponse {
-    let authenticated_client = match GitHubSession::restore(&session) {
+    let github_session = GitHubSession::restore(&session);
+    let authenticated_client = match github_session.as_ref() {
         None => None,
         Some(gh_session) => {
-            let oauth_client = oauth.unwrap();
+            let oauth_client = oauth.as_ref().unwrap();
             match oauth_client.get_authenticated_client(&gh_session.access_token) {
                 Ok(client) => Some(client),
                 Err(error) => {
@@ -357,6 +365,10 @@ async fn help_handler(
     pulldown_cmark::html::push_html(&mut help_html, markdown);
 
     HtmlTemplate(HelpTemplate {
+        login_url: oauth
+            .as_ref()
+            .map(|oauth_client| oauth_client.authorization_url(None)),
+        github_user: github_session.as_ref().map(Into::into),
         repos,
         help: help_html,
         cmd_prefix: state.get_cmd_prefix().as_ref().to_string(),
@@ -397,8 +409,9 @@ pub async fn queue_handler(
     Query(params): Query<QueueParams>,
 ) -> Result<impl IntoResponse, AppError> {
     let repo_name = GithubRepoName::new(&repo_owner, &repo_name);
+    let gh_session = GitHubSession::restore(&session);
     let mut is_visible = false;
-    if let Some(gh_session) = GitHubSession::restore(&session) {
+    if let Some(gh_session) = gh_session.as_ref() {
         let oauth_client = oauth.as_ref().unwrap();
         let authenticated_client =
             oauth_client.get_authenticated_client(&gh_session.access_token)?;
@@ -520,9 +533,10 @@ pub async fn queue_handler(
     }
 
     Ok(HtmlTemplate(QueueTemplate {
-        oauth_client_id: oauth
+        login_url: oauth
             .as_ref()
-            .map(|client| client.config().client_id().to_string()),
+            .map(|client| client.authorization_url(Some(format!("/queue/{}", repo.name)))),
+        github_user: gh_session.as_ref().map(Into::into),
         repo_name: repo.name.name().to_string(),
         repo_owner: repo.name.owner().to_string(),
         repo_url: format!("https://github.com/{}", repo.name),
@@ -594,7 +608,11 @@ async fn oauth_callback_handler(
 
     let prev = GitHubSession::restore(&session);
     match oauth_client.get_access_token(query.code).await {
-        Ok(access_token) => GitHubSession::save(&session, access_token),
+        Ok(access_token) => {
+            if let Err(error) = GitHubSession::save(&session, &oauth_client, access_token).await {
+                tracing::warn!("Unable to save GitHub session: {error}");
+            }
+        }
         Err(error) if prev.is_some() => {
             tracing::warn!("Ignoring invalid GitHub access code: {error}")
         }
@@ -607,16 +625,25 @@ async fn oauth_callback_handler(
     let mut endpoint = None;
     if let Some(query_state) = query.state {
         // don't fail if the endpoint can't be decoded
-        if let Ok(bytes) = BASE64_URL_SAFE.decode(query_state) {
-            if let Ok(bytes_str) = std::str::from_utf8(&bytes) {
-                endpoint = Some(bytes_str.to_string());
-            }
+        match BASE64_URL_SAFE_NO_PAD.decode(&query_state) {
+            Ok(bytes) => match std::str::from_utf8(&bytes) {
+                Ok(decoded) => endpoint = Some(decoded.to_string()),
+                Err(error) => {
+                    tracing::warn!(state = query_state, %error, "invalid utf-8 from endpoint")
+                }
+            },
+            Err(error) => tracing::warn!(state = query_state, %error, "invalid base64 encoding"),
         }
     }
 
     let target = endpoint.as_deref().unwrap_or("/");
     tracing::debug!("Redirecting after oauth to: {target}");
     Redirect::to(target).into_response()
+}
+
+async fn logout_handler(session: SessionNullSession) -> Redirect {
+    session.destroy();
+    Redirect::to("/")
 }
 
 #[cfg(test)]

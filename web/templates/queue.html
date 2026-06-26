@@ -213,19 +213,19 @@
 </style>
 {% endblock %}
 
+{% block heading %}
+<a href="/help">Bors</a> queue - <a href="{{ repo_url }}" target="_blank">{{ repo_name }}</a>
+{% if tree_state.is_closed() %}
+{% if let Some(comment_source) = tree_state.comment_source() %}
+{% if let Some(priority) = tree_state.priority() %}
+[<a href="{{ comment_source }}">TREECLOSED</a> below priority {{ priority }}]
+{% endif %}
+{% endif %}
+{% endif %}
+{% endblock %}
+
 {% block body %}
 <main>
-  <h1>
-    <a href="/help">Bors</a> queue - <a href="{{ repo_url }}" target="_blank">{{ repo_name }}</a>
-    {% if tree_state.is_closed() %}
-    {% if let Some(comment_source) = tree_state.comment_source() %}
-    {% if let Some(priority) = tree_state.priority() %}
-    [<a href="{{ comment_source }}">TREECLOSED</a> below priority {{ priority }}]
-    {% endif %}
-    {% endif %}
-    {% endif %}
-  </h1>
-
   <div style="margin-bottom: 1rem; display: flex; align-items: center;">
     <button id="showRollupSelection">Create rollup</button>
     <p style="margin-left: 10px; margin-bottom: 0;">
@@ -657,7 +657,7 @@ Average duration of recent auto builds: {{ format_duration(*average_build_durati
     });
 
     createRollupButton.addEventListener("click", () => {
-        {% if oauth_client_id.is_none() %}
+        {% if login_url.is_none() %}
         alert("Both CLIENT_ID and CLIENT_SECRET must be set to enabled OAuth.");
         return;
         {% endif %}
@@ -679,7 +679,7 @@ Average duration of recent auto builds: {{ format_duration(*average_build_durati
         modal.style.display = "block";
     });
 
-    {% if let Some(client_id) = oauth_client_id %}
+    {% if let Some(login_url) = login_url %}
     rollupContinueButton.addEventListener("click", async () => {
         // Gather PR numbers
         let selectedRows = table.rows({ selected: true }).nodes().toArray();
@@ -694,7 +694,18 @@ Average duration of recent auto builds: {{ format_duration(*average_build_durati
         submitUrl.searchParams.set("pr_nums", JSON.stringify(nums));
         submitUrl.searchParams.set("repo_owner", "{{ repo_owner }}");
         submitUrl.searchParams.set("repo_name", "{{ repo_name }}");
-        window.location.href = submitUrl.toString();
+
+        {% if github_user.is_some() %}
+        const dest = submitUrl;
+        {% else %}
+        const dest = new URL('{{ "{}" | format(login_url | safe) }}');
+        const finalDestination = btoa(`${submitUrl.pathname}${submitUrl.search}`)
+            .replace(/=*$/, '') // remove padding
+            .replace(/\+/g, '-').replace(/\//g, '_'); // url-safe alphabet
+        dest.searchParams.set('state', finalDestination);
+        {% endif %}
+
+        window.location.href = dest.toString();
     });
     {% endif %}
 

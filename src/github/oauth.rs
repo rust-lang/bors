@@ -3,7 +3,7 @@ use crate::github::{GithubRepoName, GithubUser, prepare_octocrab_client};
 use anyhow::Context;
 use axum_session::SessionNullSession;
 use base64::Engine;
-use base64::prelude::BASE64_URL_SAFE;
+use base64::prelude::BASE64_URL_SAFE_NO_PAD;
 use octocrab::Octocrab;
 use secrecy::{ExposeSecret, SecretString};
 use std::collections::HashMap;
@@ -113,7 +113,7 @@ impl OAuthClient {
             scope = "public_repo,workflow",
         );
         if let Some(redirect_uri) = redirect_uri {
-            let state = BASE64_URL_SAFE.encode(redirect_uri);
+            let state = BASE64_URL_SAFE_NO_PAD.encode(redirect_uri);
             write!(&mut url, "&state={state}").unwrap();
         }
         url
@@ -152,13 +152,33 @@ impl OAuthConfig {
 #[derive(serde::Deserialize, serde::Serialize)]
 pub struct GitHubSession {
     pub access_token: AccessToken,
+    pub username: String,
+    pub html_url: String,
 }
 
 impl GitHubSession {
     const SESSION_KEY: &str = "github-session";
 
-    pub fn save(session: &SessionNullSession, access_token: AccessToken) {
-        session.set(Self::SESSION_KEY, GitHubSession { access_token });
+    pub async fn save(
+        session: &SessionNullSession,
+        oauth_client: &OAuthClient,
+        access_token: AccessToken,
+    ) -> anyhow::Result<()> {
+        let authenticated_client = oauth_client.get_authenticated_client(&access_token)?;
+        let user = authenticated_client
+            .current()
+            .user()
+            .await
+            .context("Unable to fetch current GitHub user")?;
+        session.set(
+            Self::SESSION_KEY,
+            GitHubSession {
+                access_token,
+                username: user.login,
+                html_url: user.html_url.to_string(),
+            },
+        );
+        Ok(())
     }
 
     pub fn restore(session: &SessionNullSession) -> Option<GitHubSession> {
