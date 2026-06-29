@@ -21,8 +21,7 @@ use crate::github::api::operations::{
     create_check_run, create_commit, merge_branches, set_branch_to_commit, update_check_run,
 };
 use crate::github::{
-    CommitSha, GithubRepoName, GithubUser, PullRequest, PullRequestNumber, PullRequestInfo, Tr
-   eeSha,
+    CommitSha, GithubRepoName, GithubUser, PullRequest, PullRequestInfo, PullRequestNumber, TreeSha,
 };
 use crate::utils::timing::{RetryMethod, RetryableOpError, ShouldRetry, perform_retryable};
 use futures::TryStreamExt;

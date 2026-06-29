@@ -836,41 +836,6 @@ report_merge_conflicts = false
     }
 
     #[sqlx::test(migrator = "crate::MIGRATOR")]
-    async fn conflict_message_known_sha_race_condition(pool: sqlx::PgPool) {
-        run_test(pool, async |ctx: &mut BorsTester| {
-            let pr2 = ctx
-                .open_pr((), |_| {})
-                .await?;
-            ctx.approve(pr2.id()).await?;
-            ctx.start_and_finish_auto_build(pr2.id()).await?;
-            let commit = ctx.auto_branch().get_commit().clone();
-
-            // Drain the queue
-            ctx.drain_mergeability_queue().await?;
-
-            // Open a new PR
-            let pr3 = ctx
-                .open_pr((), |_| {})
-                .await?;
-            ctx.pr(pr3.id()).await.expect_mergeable_state(MergeableState::Mergeable);
-            ctx
-                .modify_pr_in_gh(pr3.id(), |pr| {
-                    pr.mergeable_state = OctocrabMergeableState::Dirty;
-                });
-
-            // Now PR 3 is in the mergeability queue. We do not drain it, so after the push,
-            // the conflict source will not get updated. So we will lose the conflict source
-            // information.
-            ctx.push_to_branch(default_branch_name(), commit).await?;
-            ctx.run_mergeability_check().await?;
-            assert_snapshot!(ctx.get_next_comment_text(pr3.id()).await?, @":umbrella: The latest upstream changes made this pull request unmergeable. Please [resolve the merge conflicts by rebasing](https://rustc-dev-guide.rust-lang.org/git.html#rebasing-and-conflicts).");
-
-            Ok(())
-        })
-            .await;
-    }
-
-    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn conflict_label(pool: sqlx::PgPool) {
         BorsBuilder::new(pool)
             .github(GitHub::default().append_to_default_config(

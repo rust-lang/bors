@@ -772,7 +772,10 @@ pub async fn check_mergeability(
                 }
             }
 
-            if unknown_prs.len() > fetched_prs.len() / 5 {
+            // With the GraphQL endpoint, we cannot easily load only the unknown PRs.
+            // If there is only a few PRs left, just load them one by one.
+            // Otherwise reload all PRs next time.
+            if unknown_prs.len() > 20 {
                 mq_tx.enqueue_retry(mq_item.clone());
             } else {
                 for pr in unknown_prs {
