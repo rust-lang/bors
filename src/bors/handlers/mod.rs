@@ -28,7 +28,9 @@ use crate::bors::{
     TRY_BRANCH_NAME,
 };
 use crate::database::{DelegatedPermission, DelegationStatus, PullRequestModel};
-use crate::github::{CommitSha, GithubUser, LabelTrigger, PullRequest, PullRequestNumber};
+use crate::github::{
+    CommitSha, GithubUser, LabelTrigger, PullRequest, PullRequestInfo, PullRequestNumber,
+};
 use crate::permissions::PermissionType;
 use crate::{PgDbClient, TeamApiClient, load_repositories};
 use anyhow::Context;
@@ -757,7 +759,7 @@ pub async fn unapprove_pr(
     repo_state: &RepositoryState,
     db: &PgDbClient,
     pr_db: &PullRequestModel,
-    pr_gh: &PullRequest,
+    pr_gh: &PullRequestInfo,
 ) -> anyhow::Result<()> {
     db.unapprove(pr_db).await?;
     handle_label_trigger(repo_state, pr_gh, LabelTrigger::Unapproved).await?;
@@ -823,7 +825,7 @@ pub async fn invalidate_pr(
     // Step 1: unapprove the pull request if it was approved
     // This happens everytime the PR is invalidated, if it was approved before
     let pr_unapproved = if pr_db.is_approved() {
-        unapprove_pr(repo_state, db, pr_db, pr_gh).await?;
+        unapprove_pr(repo_state, db, pr_db, &pr_gh.clone().into()).await?;
         true
     } else {
         false
