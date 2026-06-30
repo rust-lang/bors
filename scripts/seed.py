@@ -5,7 +5,7 @@ Bors Seed Script
 This script creates multiple PRs and approves them with `@bors r+` comments.
 
 Usage:
-    python seed.py --repo owner/repo-name --token $GITHUB_TOKEN --count 5
+    python seed.py --repo owner/repo-name --token $GITHUB_TOKEN --count 5 --file test.md
 
 Requirements:
     pip install PyGithub
@@ -17,7 +17,7 @@ import time
 from github import Github, Auth
 from github.GithubException import GithubException
 
-def create_pr(repo, index):
+def create_pr(repo, index, file_path):
     timestamp = int(time.time())
     branch_name = f"test-pr-{index}-{timestamp}"
 
@@ -31,10 +31,10 @@ def create_pr(repo, index):
         sha=base_branch.commit.sha
     )
 
-    # Create markdown file
+    # Create file
     content = f"# Test File {index}\n\nGenerated at: {time.strftime('%Y-%m-%d %H:%M:%S')}\n"
     repo.create_file(
-        path=f"test-file-{index}-{timestamp}.md",
+        path=file_path.format(index=index, timestamp=timestamp),
         message=f"Test change {index}: Add test file",
         content=content,
         branch=branch_name
@@ -61,6 +61,8 @@ def main():
     parser.add_argument("--repo", required=True, help="Repository in format owner/repo-name")
     parser.add_argument("--token", required=True, help="GitHub personal access token")
     parser.add_argument("--count", type=int, default=3, help="Number of PRs to create (default: 3)")
+    parser.add_argument("--file", default="test-file-{index}-{timestamp}.md",
+                        help="File path to create in each PR. Supports {index} and {timestamp} placeholders (default: test-file-{index}-{timestamp}.md)")
 
     args = parser.parse_args()
 
@@ -80,7 +82,7 @@ def main():
     print(f"\nCreating {args.count} PRs...")
     for i in range(1, args.count + 1):
         try:
-            pr_number = create_pr(repo, i)
+            pr_number = create_pr(repo, i, args.file)
             pr_numbers.append(pr_number)
             print(f"✓ Created PR #{pr_number}")
         except GithubException as e:

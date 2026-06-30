@@ -670,18 +670,21 @@ pub async fn check_mergeability(
                 .client
                 .get_pull_request(pull_request.pr_number)
                 .await?;
-            let new_mergeable_state = fetched_pr.mergeable_state.clone();
 
             // We don't know the mergeability state yet. Retry the PR after some delay
-            if new_mergeable_state == OctocrabMergeableState::Unknown {
+            if fetched_pr.mergeable_state == OctocrabMergeableState::Unknown {
                 match &fetched_pr.status {
                     PullRequestStatus::Open | PullRequestStatus::Draft => {
-                        tracing::info!("Mergeability status unknown, scheduling retry.");
+                        tracing::info!(
+                            "Mergeability status of #{} is unknown, scheduling retry.",
+                            fetched_pr.number
+                        );
                         mq_tx.enqueue_retry(mq_item);
                     }
                     PullRequestStatus::Closed | PullRequestStatus::Merged => {
                         tracing::info!(
-                            "Mergeability status unknown, but pull request is no longer open."
+                            "Mergeability status of #{} is unknown, but pull request is no longer open.",
+                            fetched_pr.number
                         );
                     }
                 }
@@ -733,16 +736,16 @@ pub async fn check_mergeability(
             let mut unknown_prs = Vec::new();
 
             for pr in &fetched_prs {
-                let new_mergeable_state = pr.mergeable_state.clone();
-                if new_mergeable_state == OctocrabMergeableState::Unknown {
+                if pr.mergeable_state == OctocrabMergeableState::Unknown {
                     match pr.status {
                         PullRequestStatus::Open | PullRequestStatus::Draft => {
-                            tracing::info!("Mergeability status unknown.");
+                            tracing::info!("Mergeability status of #{} is unknown.", pr.number);
                             unknown_prs.push(pr);
                         }
                         PullRequestStatus::Closed | PullRequestStatus::Merged => {
                             tracing::info!(
-                                "Mergeability status unknown, but pull request is no longer open."
+                                "Mergeability status of #{} is unknown, but pull request is no longer open.",
+                                pr.number
                             );
                         }
                     }
