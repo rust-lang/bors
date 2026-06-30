@@ -267,31 +267,85 @@ async fn health_handler() -> impl IntoResponse {
     (StatusCode::OK, "")
 }
 
-async fn index_handler(State(ServerStateRef(state)): State<ServerStateRef>) -> impl IntoResponse {
+async fn index_handler(
+    session: SessionNullSession,
+    State(ServerStateRef(state)): State<ServerStateRef>,
+    State(oauth): State<Option<OAuthClient>>,
+) -> impl IntoResponse {
     // If we manage exactly one repo, redirect to its queue page directly
-    if let Some(repo_name) = state.ctx.repositories.repository_names().pop()
+    if let Some(repo) = state.ctx.repositories.repositories().pop()
         && state.ctx.repositories.repo_count() == 1
     {
-        return Redirect::temporary(&format!("/queue/{}", repo_name)).into_response();
-    };
-    help_handler(State(ServerStateRef(state)))
+        let repo_name = repo.repository();
+        let mut is_visible = !repo.private;
+        if !is_visible && let Some(gh_session) = GitHubSession::restore(&session) {
+            let oauth_client = oauth.as_ref().unwrap();
+            // if there's an error with determining if the repo is visible, then fall back to not redirecting
+            match oauth_client.get_authenticated_client(&gh_session.access_token) {
+                Ok(authenticated_client) => {
+                    match repo_name.is_visible_to_client(&authenticated_client).await {
+                        Ok(visibility) => is_visible = visibility,
+                        Err(error) => tracing::warn!("{error}"),
+                    }
+                }
+                Err(error) => tracing::warn!("{error}"),
+            }
+        }
+
+        if is_visible {
+            return Redirect::temporary(&format!("/queue/{repo_name}")).into_response();
+        }
+    }
+    help_handler(session, State(ServerStateRef(state)), State(oauth))
         .await
         .into_response()
 }
 
-async fn help_handler(State(ServerStateRef(state)): State<ServerStateRef>) -> impl IntoResponse {
+async fn help_handler(
+    session: SessionNullSession,
+    State(ServerStateRef(state)): State<ServerStateRef>,
+    State(oauth): State<Option<OAuthClient>>,
+) -> impl IntoResponse {
+    let authenticated_client = match GitHubSession::restore(&session) {
+        None => None,
+        Some(gh_session) => {
+            let oauth_client = oauth.unwrap();
+            match oauth_client.get_authenticated_client(&gh_session.access_token) {
+                Ok(client) => Some(client),
+                Err(error) => {
+                    tracing::warn!("{error}");
+                    None
+                }
+            }
+        }
+    };
+
     let mut repos = Vec::with_capacity(state.ctx.repositories.repo_count());
-    for repo in state.ctx.repositories.repository_names() {
+    for repo in state.ctx.repositories.repositories() {
+        let repo_name = repo.repository();
+        if repo.private {
+            let Some(authenticated_client) = authenticated_client.as_ref() else {
+                continue;
+            };
+            if !repo_name
+                .is_visible_to_client(authenticated_client)
+                .await
+                .unwrap_or(false)
+            {
+                continue;
+            }
+        }
+
         let treeclosed = state
             .ctx
             .db
-            .repo_db(&repo)
+            .repo_db(repo_name)
             .await
             .ok()
             .flatten()
             .is_some_and(|repo| repo.tree_state.is_closed());
         repos.push(RepositoryView {
-            name: repo.to_string(),
+            name: repo_name.to_string(),
             treeclosed,
         });
     }
