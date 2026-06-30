@@ -155,11 +155,13 @@ async fn create_repo_state(
         .with_context(|| format!("Could not load permissions for repository {name}"))?;
 
     let config = load_config(&client).await?;
+    let repo = client.get_repo().await?;
 
     Ok(RepositoryState {
         client,
         config: ArcSwap::new(Arc::new(config)),
         permissions: ArcSwap::new(Arc::new(permissions)),
+        private: repo.private.unwrap_or(true),
     })
 }
 

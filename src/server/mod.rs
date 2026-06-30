@@ -146,7 +146,7 @@ pub async fn create_app(state: ServerState, insecure_cookies: bool) -> anyhow::R
         .route("/", get(index_handler))
         .route("/help", get(help_handler))
         .route(
-            "/queue/{repo_name}",
+            "/queue/{repo_owner}/{repo_name}",
             get(queue_handler).layer(compression_layer),
         )
         .route("/github", post(github_webhook_handler))
@@ -272,7 +272,7 @@ async fn index_handler(State(ServerStateRef(state)): State<ServerStateRef>) -> i
     if let Some(repo_name) = state.ctx.repositories.repository_names().pop()
         && state.ctx.repositories.repo_count() == 1
     {
-        return Redirect::temporary(&format!("/queue/{}", repo_name.name())).into_response();
+        return Redirect::temporary(&format!("/queue/{}", repo_name)).into_response();
     };
     help_handler(State(ServerStateRef(state)))
         .await
@@ -291,7 +291,7 @@ async fn help_handler(State(ServerStateRef(state)): State<ServerStateRef>) -> im
             .flatten()
             .is_some_and(|repo| repo.tree_state.is_closed());
         repos.push(RepositoryView {
-            name: repo.name().to_string(),
+            name: repo.to_string(),
             treeclosed,
         });
     }
@@ -335,14 +335,29 @@ impl<'de> Deserialize<'de> for PullRequestList {
 }
 
 pub async fn queue_handler(
-    Path(repo_name): Path<String>,
+    session: SessionNullSession,
+    Path((repo_owner, repo_name)): Path<(String, String)>,
     State(db): State<Arc<PgDbClient>>,
     State(oauth): State<Option<OAuthClient>>,
+    State(ServerStateRef(state)): State<ServerStateRef>,
     Query(params): Query<QueueParams>,
 ) -> Result<impl IntoResponse, AppError> {
-    let repo = match db.repo_by_name(&repo_name).await? {
-        Some(repo) => repo,
-        None => {
+    let repo_name = GithubRepoName::new(&repo_owner, &repo_name);
+    let mut is_visible = false;
+    if let Some(gh_session) = GitHubSession::restore(&session) {
+        let oauth_client = oauth.as_ref().unwrap();
+        let authenticated_client =
+            oauth_client.get_authenticated_client(&gh_session.access_token)?;
+        is_visible = repo_name
+            .is_visible_to_client(&authenticated_client)
+            .await?;
+    } else if let Some(repo) = state.get_repo(&repo_name) {
+        is_visible = !repo.private;
+    }
+
+    let repo = match db.repo_db(&repo_name).await? {
+        Some(repo) if is_visible => repo,
+        _ => {
             return Ok((
                 StatusCode::NOT_FOUND,
                 format!("Repository {repo_name} not found"),

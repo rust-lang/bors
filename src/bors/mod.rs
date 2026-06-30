@@ -215,6 +215,7 @@ pub struct RepositoryState {
     pub client: GithubRepositoryClient,
     pub permissions: ArcSwap<UserPermissions>,
     pub config: ArcSwap<RepositoryConfig>,
+    pub private: bool,
 }
 
 impl RepositoryState {
