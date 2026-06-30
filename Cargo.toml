@@ -52,7 +52,7 @@ hex = "0.4"
 secrecy = "0.10"
 
 # Database
-sqlx = { version = "0.8", features = ["runtime-tokio", "tls-rustls", "postgres", "chrono"] }
+sqlx = { version = "0.9", features = ["runtime-tokio", "tls-rustls", "postgres", "chrono"] }
 
 # Time
 chrono = "0.4"
