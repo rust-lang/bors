@@ -1051,8 +1051,11 @@ impl BorsTester {
                 .to_vec(),
         );
         for set_cookie in headers.get_all(SET_COOKIE) {
-            let set_cookie = set_cookie.to_str().unwrap();
-            let Some(session_cookie) = set_cookie.strip_prefix("session=") else {
+            let Some(session_cookie) = set_cookie
+                .to_str()
+                .ok()
+                .and_then(|cookie| cookie.strip_prefix("session="))
+            else {
                 continue;
             };
             let session_id = session_cookie.split(";").next().unwrap_or(session_cookie);

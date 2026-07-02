@@ -286,7 +286,9 @@ async fn index_handler(
         let repo_name = repo.repository();
         let mut is_visible = !repo.private;
         if !is_visible && let Some(gh_session) = GitHubSession::restore(&session) {
-            let oauth_client = oauth.as_ref().unwrap();
+            let oauth_client = oauth
+                .as_ref()
+                .expect("github session without oauth configurations");
             // if there's an error with determining if the repo is visible, then fall back to not redirecting
             match oauth_client.get_authenticated_client(&gh_session.access_token) {
                 Ok(authenticated_client) => {
@@ -317,7 +319,9 @@ async fn help_handler(
     let authenticated_client = match github_session.as_ref() {
         None => None,
         Some(gh_session) => {
-            let oauth_client = oauth.as_ref().unwrap();
+            let oauth_client = oauth
+                .as_ref()
+                .expect("github session without oauth configurations");
             match oauth_client.get_authenticated_client(&gh_session.access_token) {
                 Ok(client) => Some(client),
                 Err(error) => {
