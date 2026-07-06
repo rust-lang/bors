@@ -43,10 +43,12 @@
 </style>
 {% endblock %}
 
+{% block heading %}
+Bors
+{% endblock %}
+
 {% block body %}
 <main>
-  <h1>Bors</h1>
-
   <h2>Repositories</h2>
   <ul class="repos">
     {% for repo in repos %}

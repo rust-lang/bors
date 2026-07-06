@@ -129,6 +129,7 @@ Nevertheless, sometimes it might be easier to test it on your own repository. Th
 - If you want to use custom permissions for PR approvals, create team data files for GitHub users in `data/team`. You can find examples in that directory, which you should copy and remove the `.example` suffix. 
   - Get your GitHub user `ID` `https://api.github.com/users/<your_github_user_name>`
   - Edit both `bors.review.json` and `bors.try.json` files to include your GitHub `ID`: `{ "github_ids": [123] }`
+- Add `<WEB_URL>/oauth/callback` as a callback URL (usually substituting `<WEB_URL>` below with `http://localhost:8080`)
 
 ### Everytime you run bors
 1. Start the Postgres [database](#Database)
@@ -139,6 +140,7 @@ Nevertheless, sometimes it might be easier to test it on your own repository. Th
    - (optional) Set `WEB_URL` to the public URL of the website of the app.
    - (optional) Set `CMD_PREFIX` to the command prefix used to control the bot (e.g. `@bors`).
    - (optional) Set `PERMISSIONS` `"data/permissions"` directory path to list users with permissions to perform try/review.
+   - (optional) Set `INSECURE_COOKIES` if you're accessing the web server UI via `http`. This allows github authentication to persist in browser sessions.
 3. Redirect webhooks from your test repository to bors. You can [gh webhook](https://docs.github.com/en/webhooks/testing-and-troubleshooting-webhooks/using-the-github-cli-to-forward-webhooks-for-testing) for that.
    - If you want to do it manually, you need to configure a globally reachable URL/IP address for your computer e.g. using [ngrok](https://ngrok.com/), and then configure the webhook URL of your GitHub app to point to `<your-pc-address>/github`.
 4. Try `@bors ping` on some PR on your test repository :)
@@ -165,6 +167,10 @@ $ python scripts/seed.py --repo owner/repo-name --token $GITHUB_TOKEN --count 5
 1. Creates multiple branches with simple changes (new markdown files)
 2. Opens pull requests for each branch
 3. Posts `@bors r+` comments to approve each PR
+
+The following options are also available:
+- `--prefix <CMD_PREFIX>` the command prefix for invoking bors, defaults to `@bors`
+- `--no-approve` disables posting `@bors r+` comments to approve each PR
 
 ## Updating commands
 When modifying commands, make sure to update the `@bors help` command in `src/bors/handlers/help.rs`.
