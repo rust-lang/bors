@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            id,\n            name as \"name: GithubRepoName\",\n            (\n                tree_state,\n                treeclosed_src,\n                treeclosed_reason\n            ) AS \"tree_state!: TreeState\",\n            created_at\n        FROM repository\n        WHERE name LIKE $1\n        LIMIT 1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "name: GithubRepoName",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "tree_state!: TreeState",
+        "type_info": "Record"
+      },
+      {
+        "ordinal": 3,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      null,
+      false
+    ]
+  },
+  "hash": "b5fe510b4c79a9ebda9f163ce113b237ce13c0087d498cf2311aba57f46c9399"
+}

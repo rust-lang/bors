@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO repository (name, tree_state, treeclosed_src, treeclosed_reason)\n        VALUES ($1, $2, $3, $4)\n        ON CONFLICT (name) DO NOTHING\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int4",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "372bd89e9a21aef22564229b5e81180b480f77c35856a4b542e4fcd4d0e542c5"
+}

@@ -316,13 +316,27 @@ It is now in the [queue]({web_url}/queue/{}) for this repository.
         )
         .unwrap();
     }
-    if let TreeState::Closed { priority, source } = tree_state {
+    if let TreeState::Closed {
+        priority,
+        source,
+        reason,
+    } = tree_state
+    {
         let tree_emoji = if is_holiday_season() {
             "christmas_tree"
         } else {
             "evergreen_tree"
         };
         writeln!(comment, "\n:{tree_emoji}: The tree is currently [closed]({source}) for pull requests below priority {priority}. This pull request will be tested once the tree is reopened.").unwrap();
+        if let Some(reason) = reason {
+            writeln!(
+                comment,
+                r#"
+Reason for tree closure: `{reason}`
+"#
+            )
+            .unwrap();
+        }
     }
 
     Comment::new(comment)

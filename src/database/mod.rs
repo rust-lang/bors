@@ -649,6 +649,8 @@ pub enum TreeState {
         priority: u32,
         /// URL to a PR comment that closed the tree.
         source: String,
+        /// Optional reason that specifies why was the tree closed.
+        reason: Option<String>,
     },
 }
 
@@ -664,6 +666,13 @@ impl TreeState {
         }
     }
 
+    pub fn reason(&self) -> Option<&str> {
+        match self {
+            TreeState::Closed { reason, .. } => reason.as_deref(),
+            TreeState::Open => None,
+        }
+    }
+
     pub fn comment_source(&self) -> Option<&str> {
         match self {
             TreeState::Closed { source, .. } => Some(source),
@@ -674,19 +683,22 @@ impl TreeState {
 
 impl sqlx::Type<sqlx::Postgres> for TreeState {
     fn type_info() -> sqlx::postgres::PgTypeInfo {
-        <(Option<i32>, Option<String>) as sqlx::Type<sqlx::Postgres>>::type_info()
+        <(Option<i32>, Option<String>, Option<String>) as sqlx::Type<sqlx::Postgres>>::type_info()
     }
 }
 
 impl sqlx::Decode<'_, sqlx::Postgres> for TreeState {
     fn decode(value: <Postgres as Database>::ValueRef<'_>) -> Result<Self, BoxDynError> {
-        let data = <(Option<i32>, Option<String>) as sqlx::Decode<sqlx::Postgres>>::decode(value)?;
+        let data = <(Option<i32>, Option<String>, Option<String>) as sqlx::Decode<
+            sqlx::Postgres,
+        >>::decode(value)?;
         match data {
-            (Some(priority), Some(source)) => Ok(TreeState::Closed {
+            (Some(priority), Some(source), reason) => Ok(TreeState::Closed {
                 priority: priority as u32,
+                reason,
                 source,
             }),
-            (None, None) => Ok(TreeState::Open),
+            (None, None, _) => Ok(TreeState::Open),
             _ => Err(
                 "Cannot deserialize TreeState, priority is non-NULL, but source is NULL"
                     .to_string()

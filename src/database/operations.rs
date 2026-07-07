@@ -938,7 +938,8 @@ pub(crate) async fn get_repository(
             name as "name: GithubRepoName",
             (
                 tree_state,
-                treeclosed_src
+                treeclosed_src,
+                treeclosed_reason
             ) AS "tree_state!: TreeState",
             created_at
         FROM repository
@@ -959,20 +960,25 @@ pub(crate) async fn insert_repo_if_not_exists(
     repo: &GithubRepoName,
     tree_state: TreeState,
 ) -> anyhow::Result<()> {
-    let (priority, src) = match tree_state {
-        TreeState::Open => (None, None),
-        TreeState::Closed { priority, source } => (Some(priority as i32), Some(source)),
+    let (priority, src, reason) = match tree_state {
+        TreeState::Open => (None, None, None),
+        TreeState::Closed {
+            priority,
+            source,
+            reason,
+        } => (Some(priority as i32), Some(source), reason),
     };
     measure_db_query("insert_repository_if_not_exists", || async {
         sqlx::query!(
             r#"
-        INSERT INTO repository (name, tree_state, treeclosed_src)
-        VALUES ($1, $2, $3)
+        INSERT INTO repository (name, tree_state, treeclosed_src, treeclosed_reason)
+        VALUES ($1, $2, $3, $4)
         ON CONFLICT (name) DO NOTHING
         "#,
             repo as &GithubRepoName,
             priority,
-            src
+            src,
+            reason
         )
         .execute(executor)
         .await?;
@@ -997,7 +1003,8 @@ pub(crate) async fn get_repository_by_name(
             name as "name: GithubRepoName",
             (
                 tree_state,
-                treeclosed_src
+                treeclosed_src,
+                treeclosed_reason
             ) AS "tree_state!: TreeState",
             created_at
         FROM repository
@@ -1020,21 +1027,29 @@ pub(crate) async fn upsert_repository(
     repo: &GithubRepoName,
     tree_state: TreeState,
 ) -> anyhow::Result<()> {
-    let (priority, src) = match tree_state {
-        TreeState::Open => (None, None),
-        TreeState::Closed { priority, source } => (Some(priority as i32), Some(source)),
+    let (priority, src, reason) = match tree_state {
+        TreeState::Open => (None, None, None),
+        TreeState::Closed {
+            priority,
+            source,
+            reason,
+        } => (Some(priority as i32), Some(source), reason),
     };
     measure_db_query("upsert_repository", || async {
         sqlx::query!(
             r#"
-        INSERT INTO repository (name, tree_state, treeclosed_src)
-        VALUES ($1, $2, $3)
+        INSERT INTO repository (name, tree_state, treeclosed_src, treeclosed_reason)
+        VALUES ($1, $2, $3, $4)
         ON CONFLICT (name)
-        DO UPDATE SET tree_state = EXCLUDED.tree_state, treeclosed_src = EXCLUDED.treeclosed_src
+        DO UPDATE SET
+          tree_state = EXCLUDED.tree_state,
+          treeclosed_src = EXCLUDED.treeclosed_src,
+          treeclosed_reason = EXCLUDED.treeclosed_reason
         "#,
             repo as &GithubRepoName,
             priority,
-            src
+            src,
+            reason
         )
         .execute(executor)
         .await?;

@@ -79,7 +79,7 @@ pub fn format_help() -> &'static str {
         BorsCommand::Undelegate => {}
         BorsCommand::SetRollupMode(_) => {}
         BorsCommand::OpenTree => {}
-        BorsCommand::TreeClosed(_) => {}
+        BorsCommand::TreeClosed { .. } => {}
         BorsCommand::Retry => {}
         BorsCommand::Cancel => {}
         BorsCommand::Squash { .. } => {}
@@ -121,7 +121,7 @@ You can use the following commands:
 - `info`: Get information about the current PR
 
 ## Repository management
-- `treeclosed=<priority>`: Close the tree for PRs with priority less than `<priority>`
+- `treeclosed=<priority> [reason]`: Close the tree for PRs with priority less than `<priority>`. Optionally, you can specify a `<reason>`.
 - `treeclosed-` or `treeopen`: Open the repository tree for merging
 
 ## Meta commands
