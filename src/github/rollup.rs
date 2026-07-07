@@ -14,7 +14,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Redirect, Response};
 use futures::StreamExt;
 use itertools::Itertools;
-use rand::{Rng, distr::Alphanumeric};
+use rand::{RngExt, distr::Alphanumeric};
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 use std::sync::Arc;
