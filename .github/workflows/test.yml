@@ -30,11 +30,11 @@ jobs:
       - name: Install stable toolchain
         uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 # v1.16.1
         with:
-          toolchain: 1.88.0
+          toolchain: 1.94.0
           components: clippy, rustfmt
 
       - name: Install sqlx-cli
-        run: cargo install sqlx-cli@0.7.4 --locked --no-default-features --features native-tls,postgres
+        run: cargo install sqlx-cli@0.9 --no-default-features --features native-tls,postgres
 
       - name: Run SQLx migrations
         run: cargo sqlx database create && sqlx migrate run
