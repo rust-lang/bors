@@ -38,7 +38,7 @@ axum = { version = "0.8", features = ["http2"] }
 axum-embed = "0.1"
 rust-embed = "8"
 tower = { version = "0.5", features = ["limit"] }
-tower-http = { version = "0.6.4", features = ["catch-panic", "compression-br", "compression-gzip"] }
+tower-http = { version = "0.7", features = ["catch-panic", "compression-br", "compression-gzip", "trace"] }
 jsonwebtoken = "10"
 url = "2"
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
@@ -46,8 +46,8 @@ http = "1"
 askama = "0.16"
 
 # Cryptography
-sha2 = "0.10"
-hmac = "0.12"
+sha2 = "0.11"
+hmac = "0.13"
 hex = "0.4"
 secrecy = "0.10"
 
@@ -60,7 +60,7 @@ chrono = "0.4"
 # Utilities
 arc-swap = "1"
 itertools = "0.15"
-rand = { version = "0.9", features = ["alloc"] }
+rand = { version = "0.10", features = ["alloc"] }
 
 # Paths
 tempfile = "3"

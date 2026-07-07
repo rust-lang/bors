@@ -429,6 +429,8 @@ fn verify_gh_signature(
     body: &[u8],
     secret: &WebhookSecret,
 ) -> bool {
+    use hmac::KeyInit;
+
     let Some(signature) = headers.get("x-hub-signature-256").map(|v| v.as_bytes()) else {
         return false;
     };

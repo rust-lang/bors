@@ -6,6 +6,8 @@ use sha2::Sha256;
 pub const TEST_WEBHOOK_SECRET: &str = "ABCDEF";
 
 pub fn create_webhook_request(event: &str, body: &str) -> Request<Body> {
+    use hmac::KeyInit;
+
     let mut mac = Hmac::<Sha256>::new_from_slice(TEST_WEBHOOK_SECRET.as_bytes()).unwrap();
     mac.update(body.as_bytes());
     let signature = hex::encode(mac.finalize().into_bytes());
