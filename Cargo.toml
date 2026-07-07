@@ -38,7 +38,7 @@ axum = { version = "0.8", features = ["http2"] }
 axum-embed = "0.1"
 rust-embed = "8"
 tower = { version = "0.5", features = ["limit"] }
-tower-http = { version = "0.6.4", features = ["catch-panic", "compression-br", "compression-gzip"] }
+tower-http = { version = "0.7", features = ["catch-panic", "compression-br", "compression-gzip", "trace"] }
 jsonwebtoken = "10"
 url = "2"
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
