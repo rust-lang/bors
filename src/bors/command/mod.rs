@@ -144,7 +144,10 @@ pub enum BorsCommand {
     /// Open the repository tree for merging.
     OpenTree,
     /// Set the tree closed with a priority level.
-    TreeClosed(Priority),
+    TreeClosed {
+        priority: Priority,
+        reason: Option<String>,
+    },
     /// Clear a failed auto build status from an approved PR.
     /// This will cause the merge queue to eventually attempt to try to test the PR again.
     Retry,

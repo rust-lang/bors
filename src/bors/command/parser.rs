@@ -555,7 +555,7 @@ fn parser_retry(command: &CommandPart<'_>, _parts: &[CommandPart<'_>]) -> ParseR
 }
 
 /// Parses `@bors treeclosed-`, `@bors treeopen` and `@bors treeclosed=<priority>`
-fn parser_tree_ops(command: &CommandPart<'_>, _parts: &[CommandPart<'_>]) -> ParseResult {
+fn parser_tree_ops(command: &CommandPart<'_>, parts: &[CommandPart<'_>]) -> ParseResult {
     match command {
         CommandPart::Bare("treeclosed-") | CommandPart::Bare("treeopen") => {
             Some(Ok(BorsCommand::OpenTree))
@@ -568,9 +568,32 @@ fn parser_tree_ops(command: &CommandPart<'_>, _parts: &[CommandPart<'_>]) -> Par
                 Ok(p) => p,
                 Err(error) => return Some(Err(error)),
             };
-            Some(Ok(BorsCommand::TreeClosed(priority)))
+            let reason = join_parts(parts);
+
+            Some(Ok(BorsCommand::TreeClosed { priority, reason }))
         }
         _ => None,
+    }
+}
+
+/// Join all the command parts into a single string.
+/// If there are no other parts, returns `None`.
+fn join_parts(parts: &[CommandPart<'_>]) -> Option<String> {
+    if parts.is_empty() {
+        None
+    } else {
+        Some(
+            parts
+                .iter()
+                .map(|part| match part {
+                    CommandPart::Bare(v) => v.to_string(),
+                    CommandPart::KeyValue { key, value } => {
+                        format!("{key}={value}")
+                    }
+                })
+                .collect::<Vec<String>>()
+                .join(" "),
+        )
     }
 }
 
@@ -1609,7 +1632,13 @@ for the crater",
     fn parse_tree_closed() {
         let cmds = parse_commands("@bors treeclosed=5");
         assert_eq!(cmds.len(), 1);
-        assert_eq!(cmds[0], Ok(BorsCommand::TreeClosed(5)));
+        assert_eq!(
+            cmds[0],
+            Ok(BorsCommand::TreeClosed {
+                priority: 5,
+                reason: None
+            })
+        );
     }
 
     #[test]
@@ -1630,6 +1659,19 @@ for the crater",
             cmds[0],
             Err(CommandParseError::MissingArgValue {
                 arg: "treeclosed".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn parse_tree_closed_comment() {
+        let cmds = parse_commands("@bors treeclosed=1 foo bar baz");
+        assert_eq!(cmds.len(), 1);
+        assert_eq!(
+            cmds[0],
+            Ok(BorsCommand::TreeClosed {
+                priority: 1,
+                reason: Some("foo bar baz".to_string())
             })
         );
     }

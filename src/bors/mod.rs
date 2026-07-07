@@ -79,7 +79,7 @@ pub fn format_help() -> &'static str {
         BorsCommand::Undelegate => {}
         BorsCommand::SetRollupMode(_) => {}
         BorsCommand::OpenTree => {}
-        BorsCommand::TreeClosed(_) => {}
+        BorsCommand::TreeClosed { .. } => {}
         BorsCommand::Retry => {}
         BorsCommand::Cancel => {}
         BorsCommand::Squash { .. } => {}

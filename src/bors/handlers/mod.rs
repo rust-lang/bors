@@ -426,7 +426,7 @@ async fn handle_comment(
                         .instrument(span)
                         .await
                     }
-                    BorsCommand::TreeClosed(priority) => {
+                    BorsCommand::TreeClosed { priority, reason } => {
                         let span = tracing::info_span!("TreeClosed");
                         command_close_tree(
                             repo,
