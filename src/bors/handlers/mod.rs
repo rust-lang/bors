@@ -13,7 +13,7 @@ use crate::bors::handlers::refresh::{
     reload_mergeability_status, reload_repository_config, reload_repository_permissions,
 };
 use crate::bors::handlers::review::{
-    command_approve, command_close_tree, command_open_tree, command_unapprove,
+    TreeCloseArguments, command_approve, command_close_tree, command_open_tree, command_unapprove,
 };
 use crate::bors::handlers::trybuild::{command_try_build, command_try_cancel};
 use crate::bors::handlers::workflow::{
@@ -433,8 +433,11 @@ async fn handle_comment(
                             database,
                             pr,
                             &comment.author,
-                            priority,
-                            &comment.html_url,
+                            TreeCloseArguments {
+                                priority,
+                                reason,
+                                comment_url: &comment.html_url,
+                            },
                             senders.merge_queue(),
                         )
                         .instrument(span)

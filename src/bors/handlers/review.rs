@@ -411,15 +411,26 @@ pub(super) async fn command_set_rollup(
     db.set_rollup_mode(pr.db, rollup_mode).await
 }
 
+pub struct TreeCloseArguments<'a> {
+    pub priority: u32,
+    pub reason: Option<String>,
+    pub comment_url: &'a str,
+}
+
 pub(super) async fn command_close_tree(
     repo_state: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
     pr: PullRequestData<'_>,
     author: &GithubUser,
-    priority: u32,
-    comment_url: &str,
+    args: TreeCloseArguments<'_>,
     merge_queue_tx: &MergeQueueSender,
 ) -> anyhow::Result<()> {
+    let TreeCloseArguments {
+        priority,
+        reason,
+        comment_url,
+    } = args;
+
     if !sufficient_approve_permission(repo_state.clone(), author) {
         deny_request(
             &repo_state,
@@ -435,6 +446,7 @@ pub(super) async fn command_close_tree(
         repo_state.repository(),
         TreeState::Closed {
             priority,
+            reason,
             source: comment_url.to_string(),
         },
     )
@@ -1090,11 +1102,54 @@ approved = { modifications = ["+foo", "+baz"], unless = ["label1", "label2"] }
                 repo.unwrap().tree_state,
                 TreeState::Closed {
                     priority: 5,
+                    reason: None,
                     source: format!(
                         "https://github.com/{}/pull/1#issuecomment-1",
                         default_repo_name()
                     ),
                 }
+            );
+
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
+    async fn tree_closed_with_reason(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            ctx.post_comment("@bors treeclosed=5 CI is flaky").await?;
+            insta::assert_snapshot!(
+                ctx.get_next_comment_text(()).await?,
+                @"Tree closed for PRs with priority less than 5."
+            );
+
+            let repo = ctx.db().repo_db(&default_repo_name()).await?;
+            assert_eq!(
+                repo.unwrap().tree_state,
+                TreeState::Closed {
+                    priority: 5,
+                    reason: Some("CI is flaky".to_string()),
+                    source: format!(
+                        "https://github.com/{}/pull/1#issuecomment-1",
+                        default_repo_name()
+                    ),
+                }
+            );
+
+            let pr = ctx.open_pr((), |_| {}).await?;
+            ctx.post_comment(Comment::new(pr.id(), "@bors r+")).await?;
+            insta::assert_snapshot!(
+                ctx.get_next_comment_text(pr.id()).await?,
+                @"
+            :pushpin: Commit pr-2-sha has been approved by `default-user`
+
+            It is now in the [queue](https://bors-test.com/queue/borstest) for this repository.
+
+            :evergreen_tree: The tree is currently [closed](https://github.com/rust-lang/borstest/pull/1#issuecomment-1) for pull requests below priority 5. This pull request will be tested once the tree is reopened.
+
+            Reason for tree closure: `CI is flaky`
+            "
             );
 
             Ok(())

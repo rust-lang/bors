@@ -220,7 +220,7 @@
     {% if tree_state.is_closed() %}
     {% if let Some(comment_source) = tree_state.comment_source() %}
     {% if let Some(priority) = tree_state.priority() %}
-    [<a href="{{ comment_source }}">TREECLOSED</a> below priority {{ priority }}]
+    [<a href="{{ comment_source }}">TREECLOSED</a> below priority {{ priority }}{% if let Some(reason) = tree_state.reason() %} ({{ reason }}){% endif %}]
     {% endif %}
     {% endif %}
     {% endif %}
