@@ -264,8 +264,8 @@ fn parse_parts(input: &str) -> Result<Vec<CommandPart<'_>>, CommandParseError> {
 }
 
 /// Parses:
-/// - "@bors r+ [p=<priority>] [rollup=<never|iffy|maybe|always>]"
-/// - "@bors r=<user> [p=<priority>] [rollup=<never|iffy|maybe|always>]"
+/// - "@bors r+ [p=<priority>] [rollup=<never|iffy|maybe|always>] [note=<note>]"
+/// - "@bors r=<user> [p=<priority>] [rollup=<never|iffy|maybe|always>] [note=<note>]"
 fn parser_approval(command: &CommandPart<'_>, parts: &[CommandPart<'_>]) -> ParseResult {
     let approver = match command {
         CommandPart::Bare("r+") => Approver::Myself,
@@ -290,10 +290,18 @@ fn parser_approval(command: &CommandPart<'_>, parts: &[CommandPart<'_>]) -> Pars
         Some(Err(e)) => return Some(Err(e)),
         None => None,
     };
+    let note = parts
+        .iter()
+        .filter_map(|part| match part {
+            CommandPart::KeyValue { key: "note", value } => Some(value.to_string()),
+            _ => None,
+        })
+        .next();
     Some(Ok(BorsCommand::Approve {
         approver,
         priority,
         rollup,
+        note,
     }))
 }
 
@@ -508,8 +516,13 @@ fn parse_priority(parts: &[CommandPart<'_>]) -> ParseResult<Priority> {
 }
 
 /// Parses "@bors p=<priority>"
-fn parser_priority(command: &CommandPart<'_>, _parts: &[CommandPart<'_>]) -> ParseResult {
-    parse_priority(std::slice::from_ref(command)).map(|res| res.map(BorsCommand::SetPriority))
+fn parser_priority(command: &CommandPart<'_>, parts: &[CommandPart<'_>]) -> ParseResult {
+    let priority = match parse_priority(std::slice::from_ref(command))? {
+        Ok(p) => p,
+        Err(e) => return Some(Err(e)),
+    };
+    let note = join_parts(parts);
+    Some(Ok(BorsCommand::SetPriority { priority, note }))
 }
 
 /// Parses the first occurrence of `rollup=<never/iffy/maybe/always>` in `parts`.
@@ -532,8 +545,13 @@ fn parse_rollup(parts: &[CommandPart<'_>]) -> ParseResult<RollupMode> {
 }
 
 /// Parses "rollup=<never/iffy/maybe/always>"
-fn parser_rollup(command: &CommandPart<'_>, _parts: &[CommandPart<'_>]) -> ParseResult {
-    parse_rollup(std::slice::from_ref(command)).map(|res| res.map(BorsCommand::SetRollupMode))
+fn parser_rollup(command: &CommandPart<'_>, parts: &[CommandPart<'_>]) -> ParseResult {
+    let rollup_mode = match parse_rollup(std::slice::from_ref(command))? {
+        Ok(r) => r,
+        Err(e) => return Some(Err(e)),
+    };
+    let note = join_parts(parts);
+    Some(Ok(BorsCommand::SetRollupMode { rollup_mode, note }))
 }
 
 /// Parses "@bors info"
@@ -635,7 +653,7 @@ fn parser_squash(command: &CommandPart<'_>, parts: &[CommandPart<'_>]) -> ParseR
 #[cfg(test)]
 mod tests {
     use crate::bors::command::parser::{CommandParseError, CommandParser};
-    use crate::bors::command::{Approver, BorsCommand, Parent, RollupMode};
+    use crate::bors::command::{BorsCommand, Parent};
     use crate::github::CommitSha;
 
     #[test]
@@ -686,15 +704,18 @@ mod tests {
     #[test]
     fn parse_default_approve() {
         let cmds = parse_commands("@bors r+");
-        assert_eq!(cmds.len(), 1);
-        assert_eq!(
-            cmds[0],
-            Ok(BorsCommand::Approve {
-                approver: Approver::Myself,
-                priority: None,
-                rollup: None,
-            })
-        );
+        insta::assert_debug_snapshot!(cmds, @"
+        [
+            Ok(
+                Approve {
+                    approver: Myself,
+                    priority: None,
+                    rollup: None,
+                    note: None,
+                },
+            ),
+        ]
+        ");
     }
 
     #[test]
@@ -709,6 +730,7 @@ mod tests {
                 ),
                 priority: None,
                 rollup: None,
+                note: None,
             },
         )
         "#);
@@ -726,6 +748,7 @@ mod tests {
                 ),
                 priority: None,
                 rollup: None,
+                note: None,
             },
         )
         "#);
@@ -760,29 +783,41 @@ mod tests {
     #[test]
     fn parse_approve_with_priority() {
         let cmds = parse_commands("@bors r+ p=1");
-        assert_eq!(cmds.len(), 1);
-        assert_eq!(
-            cmds[0],
-            Ok(BorsCommand::Approve {
-                approver: Approver::Myself,
-                priority: Some(1),
-                rollup: None
-            })
-        )
+        insta::assert_debug_snapshot!(cmds, @"
+        [
+            Ok(
+                Approve {
+                    approver: Myself,
+                    priority: Some(
+                        1,
+                    ),
+                    rollup: None,
+                    note: None,
+                },
+            ),
+        ]
+        ");
     }
 
     #[test]
     fn parse_approve_on_behalf_with_priority() {
         let cmds = parse_commands("@bors r=user1 p=2");
-        assert_eq!(cmds.len(), 1);
-        assert_eq!(
-            cmds[0],
-            Ok(BorsCommand::Approve {
-                approver: Approver::Specified("user1".to_string()),
-                priority: Some(2),
-                rollup: None
-            })
-        )
+        insta::assert_debug_snapshot!(cmds, @r#"
+        [
+            Ok(
+                Approve {
+                    approver: Specified(
+                        "user1",
+                    ),
+                    priority: Some(
+                        2,
+                    ),
+                    rollup: None,
+                    note: None,
+                },
+            ),
+        ]
+        "#);
     }
 
     #[test]
@@ -793,23 +828,32 @@ mod tests {
 @bors r=user2 p=2
         "#,
         );
-        assert_eq!(cmds.len(), 2);
-        assert_eq!(
-            cmds[0],
-            Ok(BorsCommand::Approve {
-                approver: Approver::Myself,
-                priority: Some(1),
-                rollup: None
-            })
-        );
-        assert_eq!(
-            cmds[1],
-            Ok(BorsCommand::Approve {
-                approver: Approver::Specified("user2".to_string()),
-                priority: Some(2),
-                rollup: None
-            })
-        );
+        insta::assert_debug_snapshot!(cmds, @r#"
+        [
+            Ok(
+                Approve {
+                    approver: Myself,
+                    priority: Some(
+                        1,
+                    ),
+                    rollup: None,
+                    note: None,
+                },
+            ),
+            Ok(
+                Approve {
+                    approver: Specified(
+                        "user2",
+                    ),
+                    priority: Some(
+                        2,
+                    ),
+                    rollup: None,
+                    note: None,
+                },
+            ),
+        ]
+        "#);
     }
 
     #[test]
@@ -828,15 +872,22 @@ mod tests {
     #[test]
     fn parse_approve_on_behalf_with_priority_alias() {
         let cmds = parse_commands("@bors r=user1 priority=2");
-        assert_eq!(cmds.len(), 1);
-        assert_eq!(
-            cmds[0],
-            Ok(BorsCommand::Approve {
-                approver: Approver::Specified("user1".to_string()),
-                priority: Some(2),
-                rollup: None
-            })
-        )
+        insta::assert_debug_snapshot!(cmds, @r#"
+        [
+            Ok(
+                Approve {
+                    approver: Specified(
+                        "user1",
+                    ),
+                    priority: Some(
+                        2,
+                    ),
+                    rollup: None,
+                    note: None,
+                },
+            ),
+        ]
+        "#);
     }
 
     #[test]
@@ -881,15 +932,27 @@ mod tests {
     #[test]
     fn parse_priority() {
         let cmds = parse_commands("@bors p=5");
-        assert_eq!(cmds.len(), 1);
-        assert_eq!(cmds[0], Ok(BorsCommand::SetPriority(5)));
+        insta::assert_debug_snapshot!(cmds[0], @"
+        Ok(
+            SetPriority {
+                priority: 5,
+                note: None,
+            },
+        )
+        ");
     }
 
     #[test]
     fn parse_priority_alias() {
         let cmds = parse_commands("@bors priority=5");
-        assert_eq!(cmds.len(), 1);
-        assert_eq!(cmds[0], Ok(BorsCommand::SetPriority(5)));
+        insta::assert_debug_snapshot!(cmds[0], @"
+        Ok(
+            SetPriority {
+                priority: 5,
+                note: None,
+            },
+        )
+        ");
     }
 
     #[test]
@@ -944,64 +1007,100 @@ mod tests {
     #[test]
     fn parse_priority_unknown_arg() {
         let cmds = parse_commands("@bors p=1 a");
-        assert_eq!(cmds.len(), 1);
-        assert_eq!(cmds[0], Ok(BorsCommand::SetPriority(1)));
+        insta::assert_debug_snapshot!(cmds, @r#"
+        [
+            Ok(
+                SetPriority {
+                    priority: 1,
+                    note: Some(
+                        "a",
+                    ),
+                },
+            ),
+        ]
+        "#);
     }
 
     #[test]
     fn parse_approve_with_rollup() {
         let cmds = parse_commands("@bors r+ rollup");
-        assert_eq!(cmds.len(), 1);
-        assert_eq!(
-            cmds[0],
-            Ok(BorsCommand::Approve {
-                approver: Approver::Myself,
-                priority: None,
-                rollup: Some(RollupMode::Always)
-            })
-        )
+        insta::assert_debug_snapshot!(cmds, @"
+        [
+            Ok(
+                Approve {
+                    approver: Myself,
+                    priority: None,
+                    rollup: Some(
+                        Always,
+                    ),
+                    note: None,
+                },
+            ),
+        ]
+        ");
     }
 
     #[test]
     fn parse_approve_on_behalf_with_rollup_value() {
         let cmds = parse_commands("@bors r=user1 rollup=never");
-        assert_eq!(cmds.len(), 1);
-        assert_eq!(
-            cmds[0],
-            Ok(BorsCommand::Approve {
-                approver: Approver::Specified("user1".to_string()),
-                priority: None,
-                rollup: Some(RollupMode::Never)
-            })
-        )
+        insta::assert_debug_snapshot!(cmds, @r#"
+        [
+            Ok(
+                Approve {
+                    approver: Specified(
+                        "user1",
+                    ),
+                    priority: None,
+                    rollup: Some(
+                        Never,
+                    ),
+                    note: None,
+                },
+            ),
+        ]
+        "#);
     }
 
     #[test]
     fn parse_approve_on_behalf_with_rollup_bare() {
         let cmds = parse_commands("@bors r=user1 rollup");
-        assert_eq!(cmds.len(), 1);
-        assert_eq!(
-            cmds[0],
-            Ok(BorsCommand::Approve {
-                approver: Approver::Specified("user1".to_string()),
-                priority: None,
-                rollup: Some(RollupMode::Always)
-            })
-        )
+        insta::assert_debug_snapshot!(cmds, @r#"
+        [
+            Ok(
+                Approve {
+                    approver: Specified(
+                        "user1",
+                    ),
+                    priority: None,
+                    rollup: Some(
+                        Always,
+                    ),
+                    note: None,
+                },
+            ),
+        ]
+        "#);
     }
 
     #[test]
     fn parse_approve_on_behalf_with_rollup_bare_maybe() {
         let cmds = parse_commands("@bors r=user1 rollup-");
-        assert_eq!(cmds.len(), 1);
-        assert_eq!(
-            cmds[0],
-            Ok(BorsCommand::Approve {
-                approver: Approver::Specified("user1".to_string()),
-                priority: None,
-                rollup: Some(RollupMode::Maybe)
-            })
-        )
+        insta::assert_debug_snapshot!(cmds, @r#"
+        [
+            Ok(
+                Approve {
+                    approver: Specified(
+                        "user1",
+                    ),
+                    priority: None,
+                    rollup: Some(
+                        Maybe,
+                    ),
+                    note: None,
+                },
+            ),
+        ]
+        "#);
     }
 
     #[test]
@@ -1012,23 +1111,32 @@ mod tests {
 @bors r=user2 rollup=iffy
         "#,
         );
-        assert_eq!(cmds.len(), 2);
-        assert_eq!(
-            cmds[0],
-            Ok(BorsCommand::Approve {
-                approver: Approver::Myself,
-                priority: None,
-                rollup: Some(RollupMode::Always)
-            })
-        );
-        assert_eq!(
-            cmds[1],
-            Ok(BorsCommand::Approve {
-                approver: Approver::Specified("user2".to_string()),
-                priority: None,
-                rollup: Some(RollupMode::Iffy)
-            })
-        );
+        insta::assert_debug_snapshot!(cmds, @r#"
+        [
+            Ok(
+                Approve {
+                    approver: Myself,
+                    priority: None,
+                    rollup: Some(
+                        Always,
+                    ),
+                    note: None,
+                },
+            ),
+            Ok(
+                Approve {
+                    approver: Specified(
+                        "user2",
+                    ),
+                    priority: None,
+                    rollup: Some(
+                        Iffy,
+                    ),
+                    note: None,
+                },
+            ),
+        ]
+        "#);
     }
 
     #[test]
@@ -1060,22 +1168,46 @@ mod tests {
     #[test]
     fn parse_rollup_bare() {
         let cmds = parse_commands("@bors rollup");
-        assert_eq!(cmds.len(), 1);
-        assert_eq!(cmds[0], Ok(BorsCommand::SetRollupMode(RollupMode::Always)));
+        insta::assert_debug_snapshot!(cmds, @"
+        [
+            Ok(
+                SetRollupMode {
+                    rollup_mode: Always,
+                    note: None,
+                },
+            ),
+        ]
+        ");
     }
 
     #[test]
     fn parse_rollup_bare_maybe() {
         let cmds = parse_commands("@bors rollup-");
-        assert_eq!(cmds.len(), 1);
-        assert_eq!(cmds[0], Ok(BorsCommand::SetRollupMode(RollupMode::Maybe)));
+        insta::assert_debug_snapshot!(cmds, @"
+        [
+            Ok(
+                SetRollupMode {
+                    rollup_mode: Maybe,
+                    note: None,
+                },
+            ),
+        ]
+        ");
     }
 
     #[test]
     fn parse_priority_rollup() {
         let cmds = parse_commands("@bors rollup=always");
-        assert_eq!(cmds.len(), 1);
-        assert_eq!(cmds[0], Ok(BorsCommand::SetRollupMode(RollupMode::Always)));
+        insta::assert_debug_snapshot!(cmds, @"
+        [
+            Ok(
+                SetRollupMode {
+                    rollup_mode: Always,
+                    note: None,
+                },
+            ),
+        ]
+        ");
     }
 
     #[test]
@@ -1107,36 +1239,83 @@ mod tests {
     #[test]
     fn parse_rollup_unknown_arg() {
         let cmds = parse_commands("@bors rollup a");
-        assert_eq!(cmds.len(), 1);
-        assert_eq!(cmds[0], Ok(BorsCommand::SetRollupMode(RollupMode::Always)));
+        insta::assert_debug_snapshot!(cmds, @r#"
+        [
+            Ok(
+                SetRollupMode {
+                    rollup_mode: Always,
+                    note: Some(
+                        "a",
+                    ),
+                },
+            ),
+        ]
+        "#);
     }
 
     #[test]
     fn parse_approve_with_rollup_bare_priority() {
         let cmds = parse_commands("@bors r+ rollup p=1");
-        assert_eq!(cmds.len(), 1);
-        assert_eq!(
-            cmds[0],
-            Ok(BorsCommand::Approve {
-                approver: Approver::Myself,
-                priority: Some(1),
-                rollup: Some(RollupMode::Always)
-            })
-        );
+        insta::assert_debug_snapshot!(cmds, @"
+        [
+            Ok(
+                Approve {
+                    approver: Myself,
+                    priority: Some(
+                        1,
+                    ),
+                    rollup: Some(
+                        Always,
+                    ),
+                    note: None,
+                },
+            ),
+        ]
+        ");
     }
 
     #[test]
     fn parse_approve_with_rollup_value_priority() {
         let cmds = parse_commands("@bors r+ rollup=iffy p=1");
-        assert_eq!(cmds.len(), 1);
-        assert_eq!(
-            cmds[0],
-            Ok(BorsCommand::Approve {
-                approver: Approver::Myself,
-                priority: Some(1),
-                rollup: Some(RollupMode::Iffy)
-            })
-        );
+        insta::assert_debug_snapshot!(cmds, @"
+        [
+            Ok(
+                Approve {
+                    approver: Myself,
+                    priority: Some(
+                        1,
+                    ),
+                    rollup: Some(
+                        Iffy,
+                    ),
+                    note: None,
+                },
+            ),
+        ]
+        ");
+    }
+
+    #[test]
+    fn parse_approve_complete() {
+        let cmds = parse_commands(r#"@bors r+ rollup=iffy p=1 note="foo bar""#);
+        insta::assert_debug_snapshot!(cmds, @r#"
+        [
+            Ok(
+                Approve {
+                    approver: Myself,
+                    priority: Some(
+                        1,
+                    ),
+                    rollup: Some(
+                        Iffy,
+                    ),
+                    note: Some(
+                        "foo bar",
+                    ),
+                },
+            ),
+        ]
+        "#);
     }
 
     #[test]
@@ -1861,6 +2040,7 @@ I am markdown HTML comment
                 ),
                 priority: None,
                 rollup: None,
+                note: None,
             },
         )
         "#);

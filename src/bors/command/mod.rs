@@ -115,6 +115,8 @@ pub enum BorsCommand {
         priority: Option<Priority>,
         /// Rollup status of the commit.
         rollup: Option<RollupMode>,
+        /// Optional note attached at the end of the command.
+        note: Option<String>,
     },
     /// Unapprove a commit.
     Unapprove,
@@ -132,7 +134,10 @@ pub enum BorsCommand {
     /// Cancel a try build currently running on a given PR.
     TryCancel,
     /// Set the priority of a PR.
-    SetPriority(Priority),
+    SetPriority {
+        priority: Priority,
+        note: Option<String>,
+    },
     /// Get information about the current PR.
     Info,
     /// Delegate approval authority to the pull request author.
@@ -140,7 +145,10 @@ pub enum BorsCommand {
     /// Revoke any previously granted delegation.
     Undelegate,
     /// Set the rollup mode of a PRstatus.
-    SetRollupMode(RollupMode),
+    SetRollupMode {
+        rollup_mode: RollupMode,
+        note: Option<String>,
+    },
     /// Open the repository tree for merging.
     OpenTree,
     /// Set the tree closed with a priority level.

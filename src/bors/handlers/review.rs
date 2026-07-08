@@ -33,6 +33,7 @@ pub(super) async fn command_approve(
     approver: &Approver,
     priority: Option<u32>,
     rollup_mode: Option<RollupMode>,
+    note: Option<String>,
     merge_queue_tx: &MergeQueueSender,
 ) -> anyhow::Result<()> {
     tracing::info!("Approving PR {}", pr.number());
@@ -277,6 +278,7 @@ pub(super) async fn command_set_priority(
     pr: PullRequestData<'_>,
     author: &GithubUser,
     priority: u32,
+    note: Option<String>,
 ) -> anyhow::Result<()> {
     if !has_permission(&repo_state, author, pr, PermissionType::Review).await? {
         deny_request(
@@ -393,6 +395,7 @@ pub(super) async fn command_set_rollup(
     pr: PullRequestData<'_>,
     author: &GithubUser,
     rollup_mode: RollupMode,
+    note: Option<String>,
 ) -> anyhow::Result<()> {
     // Require only try for rollup commands, because rust-timer uses them, and we don't want to
     // grant it approve permissions.

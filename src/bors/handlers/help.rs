@@ -30,14 +30,18 @@ mod tests {
             You can use the following commands:
 
             ## PR management
-            - `r+ [p=<priority>] [rollup=<never|iffy|maybe|always>]`: Approve this PR on your behalf
+            - `r+ [p=<priority>] [rollup=<never|iffy|maybe|always>] [note=<note>]`: Approve this PR on your behalf
                 - Optionally, you can specify the `<priority>` of the PR and if it is eligible for rollups (`<rollup>)`.
-            - `r=<user> [p=<priority>] [rollup=<never|iffy|maybe|always>]`: Approve this PR on behalf of `<user>`
+                - Optionally, you can attach a `<note>` to the PR that will be displayed on the queue page.
+            - `r=<user> [p=<priority>] [rollup=<never|iffy|maybe|always>] [note=<note>]`: Approve this PR on behalf of `<user>`
                 - Optionally, you can specify the `<priority>` of the PR and if it is eligible for rollups (`<rollup>)`.
                 - You can pass a comma-separated list of GitHub usernames.
+                - Optionally, you can attach a `<note>` to the PR that will be displayed on the queue page.
             - `r-`: Unapprove this PR
-            - `p=<priority>` or `priority=<priority>`: Set the priority of this PR
-            - `rollup=<never|iffy|maybe|always>`: Set the rollup status of the PR
+            - `p=<priority> [note]` | `priority=<priority> [<note>]`: Set the priority of this PR
+                - Optionally, you can attach a `<note>` to the PR that will be displayed on the queue page.
+            - `rollup=<never|iffy|maybe|always> [<note>]`: Set the rollup status of the PR
+                - Optionally, you can attach a `<note>` to the PR that will be displayed on the queue page.
             - `rollup`: Short for `rollup=always`
             - `rollup-`: Short for `rollup=maybe`
             - `delegate[=<user>] [try|review]`: Delegate permissions for running try builds or approving to the PR author or the specified `<user>`.
