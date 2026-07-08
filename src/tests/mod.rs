@@ -1403,6 +1403,12 @@ impl PullRequestProxy {
     }
 
     #[track_caller]
+    pub fn expect_note(&self, note: Option<&str>) -> &Self {
+        assert_eq!(self.require_db_pr().note(), note);
+        self
+    }
+
+    #[track_caller]
     pub fn expect_not_delegated(&self) -> &Self {
         assert!(matches!(
             self.require_db_pr().delegation,

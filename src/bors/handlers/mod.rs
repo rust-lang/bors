@@ -398,6 +398,7 @@ async fn handle_comment(
                         approver,
                         priority,
                         rollup,
+                        note,
                     } => {
                         let span = tracing::info_span!("Approve");
                         command_approve(
@@ -409,6 +410,7 @@ async fn handle_comment(
                             &approver,
                             priority,
                             rollup,
+                            note,
                             senders.merge_queue(),
                         )
                         .instrument(span)
@@ -449,9 +451,9 @@ async fn handle_comment(
                             .instrument(span)
                             .await
                     }
-                    BorsCommand::SetPriority(priority) => {
+                    BorsCommand::SetPriority { priority, note } => {
                         let span = tracing::info_span!("Priority");
-                        command_set_priority(repo, database, pr, &comment.author, priority)
+                        command_set_priority(repo, database, pr, &comment.author, priority, note)
                             .instrument(span)
                             .await
                     }
@@ -514,9 +516,9 @@ async fn handle_comment(
                         let span = tracing::info_span!("Info");
                         command_info(repo, pr, database).instrument(span).await
                     }
-                    BorsCommand::SetRollupMode(rollup) => {
+                    BorsCommand::SetRollupMode { rollup_mode, note } => {
                         let span = tracing::info_span!("Rollup");
-                        command_set_rollup(repo, database, pr, &comment.author, rollup)
+                        command_set_rollup(repo, database, pr, &comment.author, rollup_mode, note)
                             .instrument(span)
                             .await
                     }
