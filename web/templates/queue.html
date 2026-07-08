@@ -279,7 +279,9 @@ Average duration of recent auto builds: {{ format_duration(*average_build_durati
             <tr data-pr-number="{{ pr.number.0 }}"
                 {% if let Some(rollup_members) = rollups_info.rollups.get(pr.number) %}
                 data-rollup-pr-members='{{ rollup_members.iter().join(",")  }}'
-                title="Select PRs of this rollup"
+                {% endif %}
+                {% if let Some(title) = compute_title(pr) %}
+                title="{{ title }}"
                 {% endif %}
                 data-rollupable="{{ pr.is_rollupable() }}"
                 data-preselected="{{ selected_rollup_prs.contains(pr.number.0 as u32) }}"
@@ -290,7 +292,10 @@ Average duration of recent auto builds: {{ format_duration(*average_build_durati
                 {% endif %}>
                 <td class="select-checkbox"></td>
                 <td data-pr-number="{{ pr.number.0 }}">
-                    <a href="{{ repo_url }}/pull/{{ pr.number }}">{{ pr.number.0 }}</a>
+                    <a href="{{ repo_url }}/pull/{{ pr.number }}">
+                      {{ pr.number.0 }}
+                      {%- if pr.note().is_some() %}*{% endif %}
+                    </a>
                 </td>
                 <td class="status{% if pending_build.is_some() %} has-progress{% endif %}" data-status="{{ crate::templates::status_text(pr) }}"
                     {%- if let Some(build) = pending_build %} data-created-at="{{ build.created_at.timestamp_millis() }}"{% endif %}>
@@ -422,7 +427,7 @@ Average duration of recent auto builds: {{ format_duration(*average_build_durati
             pageLength: 75,
             columns: [
                 { name: "select", orderable: false, className: "select-checkbox", width: "10px" },
-                { name: "number" },
+                { name: "number", className: "dt-right" },
                 { name: "status" },
                 { name: "mergeable" },
                 { name: "title", width: "40%" },

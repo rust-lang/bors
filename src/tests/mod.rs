@@ -1404,7 +1404,7 @@ impl PullRequestProxy {
 
     #[track_caller]
     pub fn expect_note(&self, note: Option<&str>) -> &Self {
-        assert_eq!(self.require_db_pr().note().as_deref(), note);
+        assert_eq!(self.require_db_pr().note(), note);
         self
     }
 
