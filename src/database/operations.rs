@@ -54,6 +54,7 @@ pub(crate) async fn get_pull_request(
         pr.status as "status: PullRequestStatus",
         pr.priority,
         pr.rollup as "rollup: RollupMode",
+        pr.note,
         (
             pr.delegatee_id,
             pr.delegated_permission
@@ -181,6 +182,7 @@ pub(crate) async fn upsert_pull_request(
                 pr.status as "status: PullRequestStatus",
                 pr.priority,
                 pr.rollup as "rollup: RollupMode",
+                pr.note,
                 (
                     pr.delegatee_id,
                     pr.delegated_permission
@@ -236,6 +238,7 @@ pub(crate) async fn get_nonclosed_pull_requests(
                 pr.status as "status: PullRequestStatus",
                 pr.priority,
                 pr.rollup as "rollup: RollupMode",
+                pr.note,
                 (
                     pr.delegatee_id,
                     pr.delegated_permission
@@ -320,6 +323,7 @@ pub(crate) async fn get_prs_with_stale_mergeability_or_approved(
                 pr.status as "status: PullRequestStatus",
                 pr.priority,
                 pr.rollup as "rollup: RollupMode",
+                pr.note,
                 (
                     pr.delegatee_id,
                     pr.delegated_permission
@@ -379,6 +383,7 @@ pub(crate) async fn set_stale_mergeability_status_by_base_branch(
                 pr.status as "status: PullRequestStatus",
                 pr.priority,
                 pr.rollup as "rollup: RollupMode",
+                pr.note,
                 (
                     pr.delegatee_id,
                     pr.delegated_permission
@@ -529,6 +534,7 @@ SELECT
         pr.delegated_permission
     ) AS "delegation!: DelegationStatus",
     pr.priority,
+    pr.note,
     pr.head_branch,
     pr.base_branch,
     pr.mergeable_state as "mergeable_state: MergeableState",
@@ -1272,6 +1278,7 @@ pub(crate) async fn find_rollups_for_member_pr(
         pr.status as "status: PullRequestStatus",
         pr.priority,
         pr.rollup as "rollup: RollupMode",
+        pr.note,
         (
             pr.delegatee_id,
             pr.delegated_permission

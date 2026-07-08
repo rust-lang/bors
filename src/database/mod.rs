@@ -462,6 +462,8 @@ pub struct PullRequestModel {
     pub priority: Option<i32>,
     /// Rollup mode determining if this PR can be included in rollup builds.
     pub rollup: Option<RollupMode>,
+    /// Optional note that can be attached while approving or setting the rollup mode or priority.
+    note: Option<String>,
     /// The (latest) try build associated with this PR, if any.
     pub try_build: Option<BuildModel>,
     /// The (latest) auto merge build associated with this PR, if any.
@@ -537,6 +539,10 @@ impl PullRequestModel {
             | QueueStatus::NotApproved
             | QueueStatus::NotOpen => false,
         }
+    }
+
+    pub fn note(&self) -> Option<&str> {
+        self.note.as_deref()
     }
 }
 
@@ -856,6 +862,7 @@ pub fn pr_needs_update_in_db(db_pr: &PullRequestModel, gh_pr: &PullRequest) -> b
         delegation: _,
         priority: _,
         rollup: _,
+        note: _,
         try_build: _,
         auto_build: _,
         created_at: _,
