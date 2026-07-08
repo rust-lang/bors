@@ -416,6 +416,7 @@ pub(crate) async fn approve_pull_request(
     approval_info: ApprovalInfo,
     priority: Option<u32>,
     rollup: Option<RollupMode>,
+    note: Option<String>,
 ) -> anyhow::Result<()> {
     let priority_i32 = priority.map(|p| p as i32);
 
@@ -426,13 +427,15 @@ UPDATE pull_request
 SET approved_by = $1,
     approved_sha = $2,
     priority = COALESCE($3, priority),
-    rollup = COALESCE($4, rollup)
-WHERE id = $5
+    rollup = COALESCE($4, rollup),
+    note = COALESCE($5, note)
+WHERE id = $6
 "#,
             approval_info.approver,
             approval_info.sha,
             priority_i32,
             rollup as Option<RollupMode>,
+            note,
             pr_id,
         )
         .execute(executor)
@@ -777,11 +780,17 @@ pub(crate) async fn set_pr_priority(
     executor: impl PgExecutor<'_>,
     pr_id: i32,
     priority: u32,
+    note: Option<String>,
 ) -> anyhow::Result<()> {
     measure_db_query("set_pr_priority", || async {
         sqlx::query!(
-            "UPDATE pull_request SET priority = $1 WHERE id = $2",
+            r#"
+UPDATE pull_request
+SET priority = $1,
+    note = COALESCE($2, note)
+WHERE id = $3"#,
             priority as i32,
+            note,
             pr_id,
         )
         .execute(executor)
@@ -795,11 +804,17 @@ pub(crate) async fn set_pr_rollup_mode(
     executor: impl PgExecutor<'_>,
     pr_id: i32,
     rollup: RollupMode,
+    note: Option<String>,
 ) -> anyhow::Result<()> {
     measure_db_query("set_pr_rollup", || async {
         sqlx::query!(
-            "UPDATE pull_request SET rollup = $1 WHERE id = $2",
+            r#"
+UPDATE pull_request
+SET rollup = $1,
+    note = COALESCE($2, note)
+WHERE id = $3"#,
             rollup as RollupMode,
+            note,
             pr_id,
         )
         .execute(executor)

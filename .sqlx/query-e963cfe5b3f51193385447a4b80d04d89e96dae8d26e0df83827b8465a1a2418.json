@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\nUPDATE pull_request\nSET priority = $1,\n    note = COALESCE($2, note)\nWHERE id = $3",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Text",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e963cfe5b3f51193385447a4b80d04d89e96dae8d26e0df83827b8465a1a2418"
+}

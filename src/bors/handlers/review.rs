@@ -82,7 +82,7 @@ pub(super) async fn command_approve(
         sha: pr.github.head.sha.to_string(),
     };
 
-    db.approve(pr.db, approval_info, priority, rollup_mode)
+    db.approve(pr.db, approval_info, priority, rollup_mode, note)
         .await?;
 
     let was_failed = pr
@@ -291,7 +291,7 @@ pub(super) async fn command_set_priority(
         .await?;
         return Ok(());
     };
-    db.set_priority(pr.db, priority).await
+    db.set_priority(pr.db, priority, note).await
 }
 
 /// Delegate permissions of a pull request to its author.
@@ -411,7 +411,7 @@ pub(super) async fn command_set_rollup(
         return Ok(());
     }
 
-    db.set_rollup_mode(pr.db, rollup_mode).await
+    db.set_rollup_mode(pr.db, rollup_mode, note).await
 }
 
 pub struct TreeCloseArguments<'a> {
@@ -1497,6 +1497,23 @@ approved = { modifications = ["+foo", "+baz"], unless = ["label1", "label2"] }
     }
 
     #[sqlx::test(migrator = "crate::MIGRATOR")]
+    async fn approve_with_note(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            ctx.post_comment(r#"@bors r+ rollup=never p=5 note="foo bar""#)
+                .await?;
+            ctx.expect_comments((), 1).await;
+
+            ctx.pr(())
+                .await
+                .expect_rollup(Some(RollupMode::Never))
+                .expect_approved_by(&User::default_pr_author().name)
+                .expect_note(Some("foo bar"));
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn approve_on_behalf_with_rollup_bare(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.post_comment("@bors r=user1 rollup").await?;
@@ -1607,6 +1624,51 @@ approved = { modifications = ["+foo", "+baz"], unless = ["label1", "label2"] }
                 .await
                 .expect_rollup(Some(RollupMode::Always))
                 .expect_approved_by(&User::default_pr_author().name);
+
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
+    async fn set_rollup_with_note(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            ctx.post_comment("@bors rollup=never foo bar").await?;
+            ctx.pr(())
+                .await
+                .expect_rollup(Some(RollupMode::Never))
+                .expect_note(Some("foo bar"));
+
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
+    async fn set_priority_with_note(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            ctx.post_comment("@bors p=5 foo").await?;
+            ctx.pr(())
+                .await
+                .expect_priority(Some(5))
+                .expect_note(Some("foo"));
+
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
+    async fn override_note(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            ctx.post_comment("@bors r+ note=foo").await?;
+            ctx.expect_comments((), 1).await;
+            ctx.post_comment("@bors rollup=never bar").await?;
+            ctx.pr(())
+                .await
+                .expect_approved_by(&User::default_pr_author().name)
+                .expect_rollup(Some(RollupMode::Never))
+                .expect_note(Some("bar"));
 
             Ok(())
         })

@@ -408,7 +408,8 @@ async fn create_rollup(
         .context("Cannot store the created rollup into the DB")?;
 
     // Mark it as rollup=never
-    db.set_rollup_mode(&rollup_db, RollupMode::Never).await?;
+    db.set_rollup_mode(&rollup_db, RollupMode::Never, None)
+        .await?;
 
     let members = successes
         .into_iter()
