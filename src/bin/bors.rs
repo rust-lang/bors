@@ -149,9 +149,8 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
                 repo
             }
             Err(error) => {
-                return Err(anyhow::anyhow!(
-                    "Failed to load repository {name}: {error:?}"
-                ));
+                tracing::error!("Failed to load repository {name}: {error:?}");
+                continue;
             }
         };
 
