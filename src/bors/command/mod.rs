@@ -100,6 +100,16 @@ pub struct DelegateCommand {
     pub permission: DelegatedPermission,
 }
 
+#[derive(Debug, PartialEq)]
+pub enum SquashCommitMessage {
+    /// Automatically generate a commit message based on the messages of the squashed commits.
+    AutoGenerate,
+    /// Set the commit message to the PR body.
+    PullRequestDescription,
+    /// Set an explicit commit message.
+    Explicit(String),
+}
+
 /// Bors command specified by a user.
 ///
 /// When modifying commands, remember to also update:
@@ -162,5 +172,5 @@ pub enum BorsCommand {
     /// Cancel an auto build currently running on a given PR (without removing it from the queue).
     Cancel,
     /// Squash all commits of a pull request into a single commit.
-    Squash { commit_message: Option<String> },
+    Squash { commit_message: SquashCommitMessage },
 }

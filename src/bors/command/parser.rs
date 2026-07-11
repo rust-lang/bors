@@ -1,7 +1,7 @@
 //! Defines parsers for bors commands.
 
 use crate::bors::command::{
-    Approver, BorsCommand, CommandPrefix, DelegateCommand, Delegatee, Parent,
+    Approver, BorsCommand, CommandPrefix, DelegateCommand, Delegatee, Parent, SquashCommitMessage,
 };
 use crate::database::DelegatedPermission;
 use crate::github::CommitSha;
@@ -630,7 +630,7 @@ fn parser_squash(command: &CommandPart<'_>, parts: &[CommandPart<'_>]) -> ParseR
     match command {
         CommandPart::Bare("squash") => match parts {
             &[] => Some(Ok(BorsCommand::Squash {
-                commit_message: None,
+                commit_message: SquashCommitMessage::AutoGenerate,
             })),
             &[
                 CommandPart::KeyValue {
@@ -638,12 +638,20 @@ fn parser_squash(command: &CommandPart<'_>, parts: &[CommandPart<'_>]) -> ParseR
                     value,
                 },
                 ..,
-            ] => Some(Ok(BorsCommand::Squash {
-                commit_message: Some(value.to_owned()),
-            })),
+            ] => {
+                if value == "description" {
+                    Some(Ok(BorsCommand::Squash {
+                        commit_message: SquashCommitMessage::PullRequestDescription,
+                    }))
+                } else {
+                    Some(Ok(BorsCommand::Squash {
+                        commit_message: SquashCommitMessage::Explicit(value.to_owned()),
+                    }))
+                }
+            }
             [part, ..] => Some(Err(CommandParseError::UnknownArg {
                 arg: part.as_key().to_owned(),
-                did_you_mean: "squash [msg|message=\"<commit-msg>\"]".to_string(),
+                did_you_mean: "squash [msg|message=\"<commit-msg>\"|description]".to_string(),
             })),
         },
         _ => None,
@@ -1896,13 +1904,15 @@ for the crater",
     #[test]
     fn parse_squash() {
         let cmds = parse_commands("@bors squash");
-        assert_eq!(cmds.len(), 1);
-        assert_eq!(
-            cmds[0],
-            Ok(BorsCommand::Squash {
-                commit_message: None
-            })
-        );
+        insta::assert_debug_snapshot!(cmds, @"
+        [
+            Ok(
+                Squash {
+                    commit_message: AutoGenerate,
+                },
+            ),
+        ]
+        ");
     }
 
     #[test]
@@ -1912,7 +1922,7 @@ for the crater",
         [
             Ok(
                 Squash {
-                    commit_message: Some(
+                    commit_message: Explicit(
                         "foo",
                     ),
                 },
@@ -1928,7 +1938,7 @@ for the crater",
         [
             Ok(
                 Squash {
-                    commit_message: Some(
+                    commit_message: Explicit(
                         "foo",
                     ),
                 },
@@ -1944,13 +1954,27 @@ for the crater",
         [
             Ok(
                 Squash {
-                    commit_message: Some(
+                    commit_message: Explicit(
                         "foo bar baz",
                     ),
                 },
             ),
         ]
         "#);
+    }
+
+    #[test]
+    fn parse_squash_msg_description() {
+        let cmds = parse_commands("@bors squash msg=description");
+        insta::assert_debug_snapshot!(cmds, @"
+        [
+            Ok(
+                Squash {
+                    commit_message: PullRequestDescription,
+                },
+            ),
+        ]
+        ");
     }
 
     #[test]
@@ -1961,7 +1985,7 @@ for the crater",
             Err(
                 UnknownArg {
                     arg: "commit",
-                    did_you_mean: "squash [msg|message=\"<commit-msg>\"]",
+                    did_you_mean: "squash [msg|message=\"<commit-msg>\"|description]",
                 },
             ),
         ]
@@ -1975,7 +1999,7 @@ for the crater",
         [
             Ok(
                 Squash {
-                    commit_message: Some(
+                    commit_message: Explicit(
                         "foo",
                     ),
                 },
