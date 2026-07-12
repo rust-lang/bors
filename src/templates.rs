@@ -166,6 +166,12 @@ impl QueueTemplate {
 
         if !title.is_empty() { Some(title) } else { None }
     }
+
+    fn has_significant_perf(&self, pr: &PullRequestModel) -> bool {
+        // This is a special note added by rustc-perf when it performs a try benchmark on a PR
+        // and the result is significant
+        pr.note() == Some("rustc-perf")
+    }
 }
 
 #[derive(Template)]
