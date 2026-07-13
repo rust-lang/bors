@@ -210,6 +210,16 @@
         position: relative;
         z-index: 1;
     }
+
+    .rollup-mode {
+        display: inline-flex;
+        flex-direction: row;
+        align-items: center;
+    }
+    .rustc-perf {
+        display: flex;
+        margin-left: 5px;
+    }
 </style>
 {% endblock %}
 
@@ -294,7 +304,7 @@ Average duration of recent auto builds: {{ format_duration(*average_build_durati
                 <td data-pr-number="{{ pr.number.0 }}">
                     <a href="{{ repo_url }}/pull/{{ pr.number }}">
                       {{ pr.number.0 }}
-                      {%- if pr.note().is_some() %}*{% endif %}
+                      {%- if pr.note().is_some() && !has_significant_perf(pr) %}*{% endif %}
                     </a>
                 </td>
                 <td class="status{% if pending_build.is_some() %} has-progress{% endif %}" data-status="{{ crate::templates::status_text(pr) }}"
@@ -367,6 +377,7 @@ Average duration of recent auto builds: {{ format_duration(*average_build_durati
                       {%- endmatch -%}
                     {%- endif -%}
                 ">
+                  <div class="rollup-mode">
                     {%- if let Some(rollup) = pr.rollup -%}
                       {%- match rollup -%}
                         {%- when Always -%}
@@ -378,6 +389,22 @@ Average duration of recent auto builds: {{ format_duration(*average_build_durati
                           never
                       {%- endmatch -%}
                     {%- endif -%}
+                    {% if has_significant_perf(pr) %}
+                    <!-- Bootstrap stopwatch icon, MIT licensed -->
+                    <div class="rustc-perf" title="A rustc-perf benchmark with significant results was performed on this pull request.">
+                      <svg
+                              xmlns="http://www.w3.org/2000/svg"
+                              width="16"
+                              height="16"
+                              fill="black"
+                              viewBox="0 0 16 16"
+                      >
+                        <path d="M8.5 5.6a.5.5 0 1 0-1 0v2.9h-3a.5.5 0 0 0 0 1H8a.5.5 0 0 0 .5-.5z"/>
+                        <path d="M6.5 1A.5.5 0 0 1 7 .5h2a.5.5 0 0 1 0 1v.57c1.36.196 2.594.78 3.584 1.64l.012-.013.354-.354-.354-.353a.5.5 0 0 1 .707-.708l1.414 1.415a.5.5 0 1 1-.707.707l-.353-.354-.354.354-.013.012A7 7 0 1 1 7 2.071V1.5a.5.5 0 0 1-.5-.5M8 3a6 6 0 1 0 .001 12A6 6 0 0 0 8 3"/>
+                      </svg>
+                    </div>
+                    {% endif %}
+                  </div>
                 </td>
                 {%- endif -%}
             </tr>
