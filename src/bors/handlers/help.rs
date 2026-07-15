@@ -38,9 +38,9 @@ mod tests {
                 - You can pass a comma-separated list of GitHub usernames.
                 - Optionally, you can attach a `<note>` to the PR that will be displayed on the queue page.
             - `r-`: Unapprove this PR
-            - `p=<priority> [note]` | `priority=<priority> [<note>]`: Set the priority of this PR
+            - `p=<priority> [note=[<note>]]` | `priority=<priority> [note=[<note>]]`: Set the priority of this PR
                 - Optionally, you can attach a `<note>` to the PR that will be displayed on the queue page.
-            - `rollup=<never|iffy|maybe|always> [<note>]`: Set the rollup status of the PR
+            - `rollup=<never|iffy|maybe|always> [note=[<note>]]`: Set the rollup status of the PR
                 - Optionally, you can attach a `<note>` to the PR that will be displayed on the queue page.
             - `rollup`: Short for `rollup=always`
             - `rollup-`: Short for `rollup=maybe`

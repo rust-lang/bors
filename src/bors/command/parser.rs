@@ -521,7 +521,7 @@ fn parser_priority(command: &CommandPart<'_>, parts: &[CommandPart<'_>]) -> Pars
         Ok(p) => p,
         Err(e) => return Some(Err(e)),
     };
-    let note = join_parts(parts);
+    let note = parse_note(parts);
     Some(Ok(BorsCommand::SetPriority { priority, note }))
 }
 
@@ -550,7 +550,7 @@ fn parser_rollup(command: &CommandPart<'_>, parts: &[CommandPart<'_>]) -> ParseR
         Ok(r) => r,
         Err(e) => return Some(Err(e)),
     };
-    let note = join_parts(parts);
+    let note = parse_note(parts);
     Some(Ok(BorsCommand::SetRollupMode { rollup_mode, note }))
 }
 
@@ -591,6 +591,13 @@ fn parser_tree_ops(command: &CommandPart<'_>, parts: &[CommandPart<'_>]) -> Pars
             Some(Ok(BorsCommand::TreeClosed { priority, reason }))
         }
         _ => None,
+    }
+}
+
+fn parse_note(parts: &[CommandPart<'_>]) -> Option<String> {
+    match parts {
+        &[CommandPart::KeyValue { key: "note", value }] => Some(value.to_string()),
+        parts => join_parts(parts),
     }
 }
 
@@ -1013,6 +1020,23 @@ mod tests {
     }
 
     #[test]
+    fn parse_priority_explicit_note() {
+        let cmds = parse_commands("@bors p=1 note=a");
+        insta::assert_debug_snapshot!(cmds, @r#"
+        [
+            Ok(
+                SetPriority {
+                    priority: 1,
+                    note: Some(
+                        "a",
+                    ),
+                },
+            ),
+        ]
+        "#);
+    }
+
+    #[test]
     fn parse_priority_unknown_arg() {
         let cmds = parse_commands("@bors p=1 a");
         insta::assert_debug_snapshot!(cmds, @r#"
@@ -1241,6 +1265,23 @@ mod tests {
                 "Invalid rollup mode `3`. Possible values are always/iffy/never/maybe",
             ),
         )
+        "#);
+    }
+
+    #[test]
+    fn parse_rollup_explicit_note() {
+        let cmds = parse_commands("@bors rollup note=a");
+        insta::assert_debug_snapshot!(cmds, @r#"
+        [
+            Ok(
+                SetRollupMode {
+                    rollup_mode: Always,
+                    note: Some(
+                        "a",
+                    ),
+                },
+            ),
+        ]
         "#);
     }
 
