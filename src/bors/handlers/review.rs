@@ -17,7 +17,7 @@ use crate::database::{MergeableState, TreeState};
 use crate::github::{CommitSha, LabelTrigger, PullRequest};
 use crate::github::{GithubUser, PullRequestNumber};
 use crate::permissions::PermissionType;
-use crate::{BorsContext, PgDbClient};
+use crate::{BorsContext, PgDbClient, ZulipClient};
 use std::sync::Arc;
 use tracing::log;
 
@@ -427,7 +427,10 @@ pub(super) async fn command_close_tree(
     author: &GithubUser,
     args: TreeCloseArguments<'_>,
     merge_queue_tx: &MergeQueueSender,
+    zulip_api: Option<&ZulipClient>,
 ) -> anyhow::Result<()> {
+    use std::fmt::Write;
+
     let TreeCloseArguments {
         priority,
         reason,
@@ -449,11 +452,33 @@ pub(super) async fn command_close_tree(
         repo_state.repository(),
         TreeState::Closed {
             priority,
-            reason,
+            reason: reason.clone(),
             source: comment_url.to_string(),
         },
     )
     .await?;
+
+    if let Some(zulip_api) = zulip_api {
+        let mut message = format!(
+            r#"The tree of `{}` was [closed]({}) for PRs with priority below `{priority}` by `{}`."#,
+            repo_state.repository(),
+            comment_url,
+            author.username
+        );
+        if let Some(reason) = reason {
+            // Just as a pre-caution, to avoid pinging anyone.
+            let reason = reason.replace("@", "");
+            writeln!(message, "\n\nReason: {reason}").unwrap();
+        }
+
+        // This should not break the command execution
+        if let Err(error) = zulip_api
+            .send_message(zulip_api.tree_ops_topic(), &message)
+            .await
+        {
+            tracing::error!("Could not send Zulip message when closing a tree: {error:?}");
+        }
+    }
 
     merge_queue_tx.notify().await?;
     notify_of_tree_closed(&repo_state, &db, pr.number(), priority).await
@@ -464,7 +489,9 @@ pub(super) async fn command_open_tree(
     db: Arc<PgDbClient>,
     pr: PullRequestData<'_>,
     author: &GithubUser,
+    comment_url: &str,
     merge_queue_tx: &MergeQueueSender,
+    zulip_api: Option<&ZulipClient>,
 ) -> anyhow::Result<()> {
     if !sufficient_delegate_permission(repo_state.clone(), author) {
         deny_request(
@@ -480,6 +507,20 @@ pub(super) async fn command_open_tree(
 
     db.upsert_repository(repo_state.repository(), TreeState::Open)
         .await?;
+
+    if let Some(zulip_api) = zulip_api {
+        let message = format!(
+            "The tree of `{}` was [reopened]({comment_url}) by `{}`.",
+            repo_state.repository(),
+            author.username
+        );
+        if let Err(error) = zulip_api
+            .send_message(zulip_api.tree_ops_topic(), &message)
+            .await
+        {
+            tracing::error!("Could not send Zulip message when opening a tree: {error:?}");
+        }
+    }
 
     merge_queue_tx.notify().await?;
     notify_of_tree_open(&repo_state, &db, pr.number()).await

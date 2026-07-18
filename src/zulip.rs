@@ -17,10 +17,18 @@ impl ZulipClient {
             .build()?;
         Ok(Self {
             client,
-            url,
+            url: url.trim_end_matches('/').to_string(),
             username,
             token,
         })
+    }
+
+    // The channel is hardcoded for now
+    pub fn tree_ops_topic(&self) -> Recipient<'_> {
+        Recipient::Stream {
+            id: 242791,
+            topic: "Tree ops",
+        }
     }
 
     /// Sends a message to a Zulip topic.

@@ -423,7 +423,9 @@ async fn handle_comment(
                             database,
                             pr,
                             &comment.author,
+                            &comment.html_url,
                             senders.merge_queue(),
+                            ctx.get_zulip_api(),
                         )
                         .instrument(span)
                         .await
@@ -441,6 +443,7 @@ async fn handle_comment(
                                 comment_url: &comment.html_url,
                             },
                             senders.merge_queue(),
+                            ctx.get_zulip_api(),
                         )
                         .instrument(span)
                         .await
