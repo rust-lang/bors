@@ -544,7 +544,7 @@ pub fn default_repo_name() -> GithubRepoName {
 }
 
 pub fn default_oauth_config() -> OAuthConfig {
-    OAuthConfig::new(test_oauth_client_id(), test_oauth_client_secret())
+    OAuthConfig::new(test_oauth_client_id(), test_oauth_client_secret().into())
 }
 
 fn test_oauth_client_id() -> String {

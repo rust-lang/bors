@@ -32,8 +32,8 @@ use crate::server::ServerStateRef;
 pub struct WebhookSecret(SecretString);
 
 impl WebhookSecret {
-    pub fn new(secret: String) -> Self {
-        Self(secret.into())
+    pub fn new(secret: SecretString) -> Self {
+        Self(secret)
     }
 
     pub fn expose(&self) -> &str {
@@ -1750,7 +1750,7 @@ mod tests {
         let server_ref = ServerStateRef(Arc::new(ServerState::new(
             repository_tx,
             global_tx,
-            WebhookSecret::new(TEST_WEBHOOK_SECRET.to_string()),
+            WebhookSecret::new(TEST_WEBHOOK_SECRET.into()),
             None,
             Arc::new(BorsContext::new(
                 CommandParser::new(default_cmd_prefix()),
@@ -1758,6 +1758,7 @@ mod tests {
                 Arc::new(RepositoryStore::default()),
                 None,
                 "",
+                None,
             )),
         )));
         GitHubWebhook::from_request(request, &server_ref).await

@@ -89,10 +89,10 @@ pub struct OAuthConfig {
 }
 
 impl OAuthConfig {
-    pub fn new(client_id: String, client_secret: String) -> Self {
+    pub fn new(client_id: String, client_secret: SecretString) -> Self {
         Self {
             client_id,
-            client_secret: client_secret.into(),
+            client_secret,
         }
     }
 

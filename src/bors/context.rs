@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use super::{RepositoryState, RepositoryStore};
 use crate::bors::gitops::Git;
-use crate::{PgDbClient, bors::command::CommandParser, github::GithubRepoName};
+use crate::{PgDbClient, ZulipClient, bors::command::CommandParser, github::GithubRepoName};
 
 pub struct BorsContext {
     pub parser: CommandParser,
@@ -10,6 +10,7 @@ pub struct BorsContext {
     pub repositories: Arc<RepositoryStore>,
     git: Option<Git>,
     web_url: String,
+    zulip_client: Option<ZulipClient>,
 }
 
 impl BorsContext {
@@ -19,6 +20,7 @@ impl BorsContext {
         repositories: Arc<RepositoryStore>,
         git: Option<Git>,
         web_url: &str,
+        zulip_client: Option<ZulipClient>,
     ) -> Self {
         Self {
             parser,
@@ -26,6 +28,7 @@ impl BorsContext {
             repositories,
             git,
             web_url: web_url.trim_end_matches('/').to_string(),
+            zulip_client,
         }
     }
 
@@ -50,5 +53,9 @@ impl BorsContext {
             }
         };
         Ok(repo_state)
+    }
+
+    pub fn get_zulip_api(&self) -> Option<&ZulipClient> {
+        self.zulip_client.as_ref()
     }
 }
