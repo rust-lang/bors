@@ -7,10 +7,11 @@ use anyhow::Context;
 use bors::server::{ServerState, create_app};
 use bors::{
     BorsContext, BorsGlobalEvent, BorsProcess, CommandParser, Git, OAuthClient, OAuthConfig,
-    PgDbClient, RepositoryStore, TeamApiClient, TreeState, WebhookSecret, create_bors_process,
-    create_github_client, load_repositories,
+    PgDbClient, RepositoryStore, TeamApiClient, TreeState, WebhookSecret, ZulipClient,
+    create_bors_process, create_github_client, load_repositories,
 };
 use clap::Parser;
+use secrecy::{ExposeSecret, SecretString};
 use sqlx::postgres::PgConnectOptions;
 use sqlx::{ConnectOptions, PgPool};
 use tokio::time::{Interval, MissedTickBehavior};
@@ -48,7 +49,7 @@ struct Opts {
 
     /// Private key used to authenticate as a Github App.
     #[arg(long, env = "PRIVATE_KEY", allow_hyphen_values = true)]
-    private_key: String,
+    private_key: SecretString,
 
     /// GitHub OAuth client ID for rollups.
     #[arg(long, env = "OAUTH_CLIENT_ID")]
@@ -56,15 +57,27 @@ struct Opts {
 
     /// GitHub OAuth client secret for rollups.
     #[arg(long, env = "OAUTH_CLIENT_SECRET")]
-    client_secret: Option<String>,
+    client_secret: Option<SecretString>,
+
+    /// Zulip account username for sending messages to Zulip.
+    #[arg(long, env = "ZULIP_USERNAME")]
+    zulip_username: Option<String>,
+
+    /// Zulip account token for sending messages to Zulip.
+    #[arg(long, env = "ZULIP_TOKEN")]
+    zulip_token: Option<SecretString>,
+
+    /// Zulip server for sending messages.
+    #[arg(long, env = "ZULIP_SERVER")]
+    zulip_server: Option<String>,
 
     /// Secret used to authenticate webhooks.
     #[arg(long, env = "WEBHOOK_SECRET")]
-    webhook_secret: String,
+    webhook_secret: SecretString,
 
     /// Database connection string.
     #[arg(long, env = "DATABASE_URL")]
-    db: String,
+    db: SecretString,
 
     /// Prefix used for bot commands in PR comments.
     #[arg(long, env = "CMD_PREFIX", default_value = "@bors")]
@@ -124,10 +137,10 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
         .context("Cannot build tokio runtime")?;
 
     let db = runtime
-        .block_on(initialize_db(&opts.db))
+        .block_on(initialize_db(opts.db.expose_secret()))
         .context("Cannot initialize database")?;
     let team_api = TeamApiClient::new(opts.permissions);
-    let (client, loaded_repos) = runtime.block_on(async {
+    let (gh_client, loaded_repos) = runtime.block_on(async {
         let client = create_github_client(
             opts.app_id.into(),
             "https://api.github.com".to_string(),
@@ -136,6 +149,17 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
         let repos = load_repositories(&client, &team_api).await?;
         Ok::<_, anyhow::Error>((client, repos))
     })?;
+    let zulip_client = match (opts.zulip_server, opts.zulip_username, opts.zulip_token) {
+        (Some(url), Some(username), Some(token)) => {
+            Some(ZulipClient::new(url, username, token).context("Cannot create Zulip client")?)
+        }
+        (None, None, None) => None,
+        _ => {
+            return Err(anyhow::anyhow!(
+                "You have to provide the Zulip URL, username and token when providing at least one of them"
+            ));
+        }
+    };
 
     let repos = Arc::new(RepositoryStore::default());
     for (name, repo) in loaded_repos {
@@ -177,6 +201,7 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
         repos.clone(),
         git,
         &opts.web_url,
+        zulip_client,
     ));
     let BorsProcess {
         repository_tx,
@@ -185,7 +210,7 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
         ..
     } = create_bors_process(
         ctx.clone(),
-        client,
+        gh_client,
         team_api,
         chrono::Duration::from_std(MERGE_QUEUE_MAX_INTERVAL).unwrap(),
     );

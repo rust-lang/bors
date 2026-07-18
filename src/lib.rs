@@ -23,6 +23,7 @@ pub use github::{
 pub use permissions::TeamApiClient;
 pub use server::ServerState;
 pub use server::create_app;
+pub use zulip::ZulipClient;
 
 /// This migrator serves for including a single place in the test code that stores all migrations
 /// loaded from disk. All sqlx tests should then reference it using
@@ -36,3 +37,4 @@ static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!();
 
 #[cfg(test)]
 mod tests;
+mod zulip;

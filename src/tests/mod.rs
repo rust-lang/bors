@@ -226,6 +226,7 @@ impl BorsTester {
             // local git ops, but we do not currently mock git in tests.
             Some(Git::from_path(PathBuf::from("/tmp/git"))),
             "https://bors-test.com",
+            None,
         ));
 
         let BorsProcess {
@@ -248,7 +249,7 @@ impl BorsTester {
         let state = ServerState::new(
             repository_tx,
             global_tx.clone(),
-            WebhookSecret::new(TEST_WEBHOOK_SECRET.to_string()),
+            WebhookSecret::new(TEST_WEBHOOK_SECRET.into()),
             Some(oauth_client),
             ctx.clone(),
         );
