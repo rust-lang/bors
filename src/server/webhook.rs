@@ -13,7 +13,7 @@ use octocrab::models::events::payload::{
 };
 use octocrab::models::pulls::{PullRequest, Review};
 use octocrab::models::webhook_events::payload::PullRequestWebhookEventAction;
-use octocrab::models::{Author, CheckSuiteId, Repository, workflows};
+use octocrab::models::{Author, CheckSuiteId, Repository, RunId, workflows};
 use secrecy::{ExposeSecret, SecretString};
 use sha2::Sha256;
 
@@ -21,7 +21,8 @@ use crate::bors::event::{
     BorsEvent, BorsGlobalEvent, BorsRepositoryEvent, PullRequestAssigned, PullRequestClosed,
     PullRequestComment, PullRequestConvertedToDraft, PullRequestEdited, PullRequestMerged,
     PullRequestOpened, PullRequestPushed, PullRequestReadyForReview, PullRequestReopened,
-    PullRequestUnassigned, PushToBranch, WorkflowRunCompleted, WorkflowRunStarted,
+    PullRequestUnassigned, PushToBranch, WorkflowJobStarted, WorkflowRunCompleted,
+    WorkflowRunStarted,
 };
 use crate::database::{WorkflowStatus, WorkflowType};
 use crate::github::{CommitSha, GithubRepoName, PullRequestNumber};
@@ -68,6 +69,22 @@ struct WorkflowRunInner {
     check_suite_id: CheckSuiteId,
     #[serde(flatten)]
     run: workflows::Run,
+}
+
+#[derive(serde::Deserialize, Debug)]
+struct WebhookWorkflowJob<'a> {
+    action: &'a str,
+    workflow_job: WorkflowJobInner,
+    repository: Repository,
+}
+
+#[derive(serde::Deserialize, Debug)]
+struct WorkflowJobInner {
+    run_id: RunId,
+    head_branch: String,
+    head_sha: String,
+    name: String,
+    labels: Vec<String>,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -164,6 +181,7 @@ fn parse_webhook_event(request: Parts, body: &[u8]) -> anyhow::Result<Option<Bor
             BorsGlobalEvent::InstallationsChanged,
         ))),
         b"workflow_run" => parse_workflow_run_events(body),
+        b"workflow_job" => parse_workflow_job_events(body),
         _ => {
             tracing::debug!(
                 "Ignoring unknown webhook event type {:?}",
@@ -360,6 +378,25 @@ fn parse_workflow_run_events(body: &[u8]) -> anyhow::Result<Option<BorsEvent>> {
                 }),
             ))
         }
+        _ => None,
+    };
+    Ok(result)
+}
+
+fn parse_workflow_job_events(body: &[u8]) -> anyhow::Result<Option<BorsEvent>> {
+    let payload: WebhookWorkflowJob = serde_json::from_slice(body)?;
+    let repository_name = parse_repository_name(&payload.repository)?;
+    let result = match payload.action {
+        "queued" => Some(BorsEvent::Repository(
+            BorsRepositoryEvent::WorkflowJobStarted(WorkflowJobStarted {
+                repository: repository_name,
+                name: payload.workflow_job.name,
+                branch: payload.workflow_job.head_branch,
+                commit_sha: CommitSha(payload.workflow_job.head_sha),
+                run_id: payload.workflow_job.run_id,
+                labels: payload.workflow_job.labels,
+            }),
+        )),
         _ => None,
     };
     Ok(result)
@@ -1715,6 +1752,37 @@ mod tests {
                             check_suite_id: CheckSuiteId(
                                 12717696197,
                             ),
+                        },
+                    ),
+                ),
+            ),
+        )
+        "#
+        );
+    }
+
+    #[tokio::test]
+    async fn workflow_job_started() {
+        insta::assert_debug_snapshot!(
+            check_webhook("webhook/workflow-job-queued.json", "workflow_job").await,
+            @r#"
+        Ok(
+            GitHubWebhook(
+                Repository(
+                    WorkflowJobStarted(
+                        WorkflowJobStarted {
+                            repository: kobzol/bors-kindergarten2,
+                            name: "init",
+                            branch: "automation/bors/try",
+                            commit_sha: CommitSha(
+                                "13e4ae6263d3ffab811a472772e03b7d345e81fb",
+                            ),
+                            run_id: RunId(
+                                30009847987,
+                            ),
+                            labels: [
+                                "ubuntu-latest",
+                            ],
                         },
                     ),
                 ),

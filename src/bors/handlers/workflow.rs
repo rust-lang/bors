@@ -3,7 +3,7 @@ use crate::bors::RepositoryState;
 use crate::bors::build::{CancelBuildConclusion, CancelBuildError};
 use crate::bors::build_queue::BuildQueueSender;
 use crate::bors::comment::{CommentTag, append_workflow_links_to_comment};
-use crate::bors::event::{WorkflowRunCompleted, WorkflowRunStarted};
+use crate::bors::event::{WorkflowJobStarted, WorkflowRunCompleted, WorkflowRunStarted};
 use crate::bors::handlers::is_bors_observed_branch;
 use crate::bors::{BuildKind, build};
 use crate::database::{BuildModel, BuildStatus, PullRequestModel, WorkflowStatus};
@@ -143,6 +143,18 @@ pub(super) async fn handle_workflow_completed(
     build_queue_tx
         .on_workflow_completed(payload, error_context)
         .await?;
+    Ok(())
+}
+
+pub(super) async fn handle_workflow_job_started(
+    _repo: Arc<RepositoryState>,
+    _db: Arc<PgDbClient>,
+    payload: WorkflowJobStarted,
+) -> anyhow::Result<()> {
+    if !is_bors_observed_branch(&payload.branch) {
+        return Ok(());
+    }
+
     Ok(())
 }
 
