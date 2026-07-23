@@ -42,6 +42,18 @@ pub struct RepositoryConfig {
     /// Defaults to false.
     #[serde(default)]
     pub report_merge_conflicts: bool,
+    /// Optional configuration for spawning EC2 instances that will execute certain
+    /// jobs in the repositories that bors manages.
+    #[serde(default)]
+    pub ec2_runners: Option<Ec2RunnersConfig>,
+}
+
+#[derive(serde::Deserialize, Debug)]
+#[serde(deny_unknown_fields)]
+pub struct Ec2RunnersConfig {
+    pub destination_account: String,
+    pub runner_group_id: u64,
+    pub label_prefix: String,
 }
 
 /// Load a repository config from TOML.
