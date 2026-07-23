@@ -73,7 +73,7 @@ regex = "1"
 [dev-dependencies]
 insta = "1.26"
 wiremock = "0.6"
-base64 = "0.22"
+base64 = "0.23"
 tracing-test = "0.2"
 regex = "1"
 parking_lot = "0.12"
