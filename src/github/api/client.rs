@@ -35,7 +35,7 @@ pub struct GithubRepositoryClient {
     author_html_url: Url,
     /// The client caches the access token for this given repository and refreshes it once it
     /// expires.
-    client: Octocrab,
+    pub client: Octocrab,
     // We store the name separately, because repository has an optional owner, but at this point
     // we must always have some owner of the repo.
     repo_name: GithubRepoName,

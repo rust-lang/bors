@@ -4,11 +4,13 @@
 mod bors;
 mod config;
 mod database;
+mod ec2_runners;
 mod github;
 mod permissions;
 pub mod server;
 mod templates;
 mod utils;
+mod zulip;
 
 pub use self::bors::process::{BorsProcess, create_bors_process};
 pub use bors::{
@@ -37,4 +39,3 @@ static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!();
 
 #[cfg(test)]
 mod tests;
-mod zulip;

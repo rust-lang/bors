@@ -61,6 +61,7 @@ chrono = "0.4"
 arc-swap = "1"
 itertools = "0.15"
 rand = { version = "0.10", features = ["alloc"] }
+uuid = { version = "1", features = ["v4"] }
 
 # Paths
 tempfile = "3"
@@ -69,6 +70,10 @@ which = "8"
 # Text processing
 pulldown-cmark = "0.13"
 regex = "1"
+
+# AWS
+aws-config = { version = "1.1.7", features = ["behavior-version-latest"], default-features = false }
+aws-sdk-ssm = { version = "1.117.0", default-features = false }
 
 [dev-dependencies]
 insta = "1.26"
