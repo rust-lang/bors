@@ -42,6 +42,41 @@ pub struct RepositoryConfig {
     /// Defaults to false.
     #[serde(default)]
     pub report_merge_conflicts: bool,
+    /// Optional configuration for spawning EC2 instances that will execute certain
+    /// jobs in the repositories that bors manages.
+    #[serde(default)]
+    pub ec2_runners: Option<Ec2RunnersConfig>,
+}
+
+#[derive(serde::Deserialize, Debug, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum JitRunnerKind {
+    /// Create a GitHub runner JIT config for a repository.
+    Repository,
+    /// Create a GitHub runner JIT config for an organization.
+    #[default]
+    Organization,
+}
+
+#[derive(serde::Deserialize, Debug)]
+#[serde(deny_unknown_fields)]
+pub struct Ec2RunnersConfig {
+    /// GitHub Actions self-hosted runner group ID in which should the EC2 runner be launched.
+    pub runner_group_id: u64,
+    /// Prefix of labels (the value of the `runs-on` field of a GitHub Actions job)
+    /// that will trigger the launch of an EC2 runner.
+    pub label_prefix: String,
+    /// In which AWS region should the runners be launched.
+    pub region: String,
+    /// Image types allowed to be launched.
+    pub images: HashMap<String, String>,
+    #[serde(default)]
+    /// The kind of JIT runner config to create.
+    pub jit_runner: JitRunnerKind,
+    /// Allowed instance types that can be launched.
+    /// If empty, bors will launch any instance specified in the `runs-on` field.
+    #[serde(default)]
+    pub allowed_instances: Vec<String>,
 }
 
 /// Load a repository config from TOML.
@@ -401,6 +436,46 @@ approved = { modifications = ["+add", "-remove"], unless = ["bar"] }
     fn deserialize_unknown_key_fail() {
         let content = r#"labels-blocking-approval = ["foo", "bar"]"#;
         load_config(content);
+    }
+
+    #[test]
+    fn deserialize_ec2_runners() {
+        let content = r#"
+[ec2_runners]
+runner_group_id = 1
+label_prefix = "ec2"
+region = "us-east-2"
+images = {
+    "ubuntu26.04" = "/aws/service/canonical/ubuntu/server/26.04/stable/current/amd64/hvm/ebs-gp3/ami-id"
+}
+jit_runner = "repository"
+allowed_instances = ["c8a.12xlarge"]
+"#;
+        let config = load_config(content);
+        insta::assert_debug_snapshot!(config, @r#"
+        RepositoryConfig {
+            timeout: 3600s,
+            labels: {},
+            labels_blocking_approval: [],
+            min_ci_time: None,
+            merge_queue_enabled: false,
+            report_merge_conflicts: false,
+            ec2_runners: Some(
+                Ec2RunnersConfig {
+                    runner_group_id: 1,
+                    label_prefix: "ec2",
+                    region: "us-east-2",
+                    images: {
+                        "ubuntu26.04": "/aws/service/canonical/ubuntu/server/26.04/stable/current/amd64/hvm/ebs-gp3/ami-id",
+                    },
+                    jit_runner: Repository,
+                    allowed_instances: [
+                        "c8a.12xlarge",
+                    ],
+                },
+            ),
+        }
+        "#);
     }
 
     #[test]

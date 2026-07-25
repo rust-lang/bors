@@ -135,7 +135,7 @@ pub async fn handle_bors_repository_event(
                 repo = payload.repository.to_string(),
                 id = payload.run_id.into_inner()
             );
-            handle_workflow_job_started(repo, db, payload)
+            handle_workflow_job_started(repo, payload)
                 .instrument(span)
                 .await?;
         }

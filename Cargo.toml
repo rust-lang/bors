@@ -61,6 +61,7 @@ chrono = "0.4"
 arc-swap = "1"
 itertools = "0.15"
 rand = { version = "0.10", features = ["alloc"] }
+uuid = { version = "1", features = ["v4"] }
 
 # Paths
 tempfile = "3"

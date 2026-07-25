@@ -3,7 +3,7 @@ use chrono::{DateTime, Utc};
 use octocrab::Octocrab;
 use octocrab::models::checks::CheckRun;
 use octocrab::models::pulls::MergeableState;
-use octocrab::models::{CheckRunId, Repository, RunId, UserId};
+use octocrab::models::{CheckRunId, Repository, RunId, RunnerGroupId, UserId};
 use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
@@ -25,6 +25,7 @@ use crate::github::{
 };
 use crate::utils::timing::{RetryMethod, RetryableOpError, ShouldRetry, perform_retryable};
 use futures::TryStreamExt;
+use octocrab::models::actions::SelfHostedRunnerJitConfig;
 use octocrab::models::workflows::{Job, Run};
 use serde::de::DeserializeOwned;
 use url::Url;
@@ -637,6 +638,67 @@ impl GithubRepositoryClient {
         )
         .await?;
         Ok(prs)
+    }
+
+    pub async fn create_repo_jit_runner_config(
+        &self,
+        org: &str,
+        repo: &str,
+        runner_name: &str,
+        runner_group_id: RunnerGroupId,
+        labels: Vec<String>,
+    ) -> anyhow::Result<SelfHostedRunnerJitConfig> {
+        let jitconfig = perform_retryable(
+            "create_repo_jit_runner_config",
+            RetryMethod::default(),
+            || {
+                let labels = labels.clone();
+                async move {
+                    anyhow::Ok(
+                        self.client
+                            .actions()
+                            .create_repo_jit_runner_config(
+                                org,
+                                repo,
+                                runner_name,
+                                runner_group_id,
+                                labels,
+                            )
+                            .send()
+                            .await?,
+                    )
+                }
+            },
+        )
+        .await?;
+        Ok(jitconfig)
+    }
+
+    pub async fn create_org_jit_runner_config(
+        &self,
+        org: &str,
+        runner_name: &str,
+        runner_group_id: RunnerGroupId,
+        labels: Vec<String>,
+    ) -> anyhow::Result<SelfHostedRunnerJitConfig> {
+        let jitconfig = perform_retryable(
+            "create_org_jit_runner_config",
+            RetryMethod::default(),
+            || {
+                let labels = labels.clone();
+                async move {
+                    anyhow::Ok(
+                        self.client
+                            .actions()
+                            .create_org_jit_runner_config(org, runner_name, runner_group_id, labels)
+                            .send()
+                            .await?,
+                    )
+                }
+            },
+        )
+        .await?;
+        Ok(jitconfig)
     }
 
     async fn get_request<T: DeserializeOwned + Debug>(&self, path: &str) -> anyhow::Result<T> {

@@ -7,6 +7,7 @@ use crate::bors::event::{WorkflowJobStarted, WorkflowRunCompleted, WorkflowRunSt
 use crate::bors::handlers::is_bors_observed_branch;
 use crate::bors::{BuildKind, build};
 use crate::database::{BuildModel, BuildStatus, PullRequestModel, WorkflowStatus};
+use crate::ec2::{ParsedLabel, start_ec2_github_runner};
 use crate::github::api::client::GithubRepositoryClient;
 use std::sync::Arc;
 use std::time::Duration;
@@ -147,13 +148,26 @@ pub(super) async fn handle_workflow_completed(
 }
 
 pub(super) async fn handle_workflow_job_started(
-    _repo: Arc<RepositoryState>,
-    _db: Arc<PgDbClient>,
+    repo: Arc<RepositoryState>,
     payload: WorkflowJobStarted,
 ) -> anyhow::Result<()> {
     if !is_bors_observed_branch(&payload.branch) {
         return Ok(());
     }
+
+    let config = repo.config.load();
+    let Some(ec2) = &config.ec2_runners else {
+        return Ok(());
+    };
+    let Some(label) = payload
+        .labels
+        .iter()
+        .find_map(|label| ParsedLabel::parse(label, &ec2.label_prefix))
+    else {
+        return Ok(());
+    };
+
+    start_ec2_github_runner(ec2, &repo, label).await?;
 
     Ok(())
 }
