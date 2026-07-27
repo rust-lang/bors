@@ -49,7 +49,8 @@ pub async fn start_ec2_github_runner(
         ));
     };
 
-    let runner_name = uuid::Uuid::new_v4();
+    // Emulate a "UUID" to avoid adding dependency on the uuid crate just for this one line.
+    let runner_name = format!("{:x}", rand::random::<u128>());
     let jit_config = match ec2.jit_runner {
         JitRunnerKind::Repository => {
             repo.client
