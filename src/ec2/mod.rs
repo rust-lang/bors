@@ -1,7 +1,11 @@
 use crate::bors::RepositoryState;
 use crate::config::{Ec2RunnersConfig, JitRunnerKind};
 use anyhow::Context;
+use chrono::Utc;
+use std::sync::Arc;
+use std::time::Duration;
 
+/// Script that will be executed on the launched EC2 instance.
 const LAUNCH_SCRIPT: &str = include_str!("ec2-runner-script.sh");
 
 #[derive(Debug)]
@@ -96,6 +100,9 @@ pub async fn start_ec2_github_runner(
         .arg(format!("resolve:ssm:{image_name}"))
         .arg("--instance-type")
         .arg(instance_type)
+        // Delete the instance once it stops itself
+        .arg("--instance-initiated-shutdown-behavior")
+        .arg("terminate")
         .arg("--launch-template")
         // FIXME: use the latest version before pushing to production
         .arg("LaunchTemplateName=gha-runner,Version=14")
@@ -116,6 +123,80 @@ pub async fn start_ec2_github_runner(
     Ok(())
 }
 
+pub async fn terminate_old_ec2_instances(repo: Arc<RepositoryState>) -> anyhow::Result<()> {
+    if repo.config.load().ec2_runners.is_none() {
+        return Ok(());
+    };
+
+    let timeout = repo.config.load().timeout;
+
+    #[derive(serde::Deserialize, Debug)]
+    struct InstanceState {
+        #[serde(rename = "Name")]
+        name: String,
+    }
+
+    #[derive(serde::Deserialize, Debug)]
+    struct Instance {
+        #[serde(rename = "InstanceId")]
+        id: String,
+        #[serde(rename = "LaunchTime")]
+        launch_time: chrono::DateTime<Utc>,
+        #[serde(rename = "State")]
+        state: InstanceState,
+    }
+
+    #[derive(serde::Deserialize, Debug)]
+    struct Reservation {
+        #[serde(rename = "Instances")]
+        instances: Vec<Instance>,
+    }
+
+    #[derive(serde::Deserialize, Debug)]
+    struct Instances {
+        #[serde(rename = "Reservations")]
+        reservations: Vec<Reservation>,
+    }
+
+    let instances = run_command(prepare_aws_cli().arg("ec2").arg("describe-instances"))
+        .await
+        .context("Cannot list running EC2 instances")?;
+    let instances: Vec<Instance> = serde_json::from_str::<Instances>(&instances)?
+        .reservations
+        .into_iter()
+        .flat_map(|r| r.instances)
+        .collect();
+    tracing::debug!(
+        "Found the following EC2 instances ({}): {instances:?}",
+        instances.len()
+    );
+
+    let deadline = Utc::now() - timeout;
+    let too_old_ids = instances
+        .into_iter()
+        .filter(|instance| instance.launch_time < deadline)
+        .filter(|instance| instance.state.name != "terminated")
+        .map(|instance| instance.id)
+        .collect::<Vec<String>>();
+
+    if !too_old_ids.is_empty() {
+        let too_old_ids = too_old_ids.join(",");
+        tracing::info!("Cancelling EC2 instance(s) {too_old_ids}");
+
+        run_command(
+            prepare_aws_cli()
+                .arg("ec2")
+                .arg("terminate-instances")
+                .arg("--instance-ids")
+                .arg(too_old_ids),
+        )
+        .await
+        .context("Cannot terminate EC2 instances")?;
+    }
+
+    Ok(())
+}
+
 fn prepare_aws_cli() -> tokio::process::Command {
     let mut cmd = tokio::process::Command::new("aws");
     cmd.kill_on_drop(true);
@@ -123,7 +204,14 @@ fn prepare_aws_cli() -> tokio::process::Command {
 }
 
 async fn run_command(cmd: &mut tokio::process::Command) -> anyhow::Result<String> {
-    let output = cmd.output().await?;
+    let output = match tokio::time::timeout(Duration::from_secs(60), cmd.output()).await? {
+        Ok(output) => output,
+        Err(_) => {
+            return Err(anyhow::anyhow!(
+                "Command {cmd:?} has timeouted after one minute"
+            ));
+        }
+    };
     if !output.status.success() {
         Err(anyhow::anyhow!(
             "Command {cmd:?} ended with status {}.\nStdout:\n{}\n\nStderr:\n{}\n",

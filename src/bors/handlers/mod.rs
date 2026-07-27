@@ -28,6 +28,7 @@ use crate::bors::{
     TRY_BRANCH_NAME,
 };
 use crate::database::{DelegatedPermission, DelegationStatus, PullRequestModel};
+use crate::ec2::terminate_old_ec2_instances;
 use crate::github::{
     CommitSha, GithubUser, LabelTrigger, PullRequest, PullRequestInfo, PullRequestNumber,
 };
@@ -315,6 +316,15 @@ pub async fn handle_bors_global_event(
         }
         BorsGlobalEvent::ProcessMergeQueue => {
             senders.merge_queue().maybe_perform_tick().await?;
+        }
+        BorsGlobalEvent::TerminateOldEC2Instances => {
+            let span = tracing::info_span!("Terminate old EC2 instances");
+            for_each_repo(&ctx, |repo| {
+                let subspan = tracing::info_span!("Repo", "{}", repo.repository());
+                terminate_old_ec2_instances(repo).instrument(subspan)
+            })
+            .instrument(span)
+            .await?;
         }
     }
     Ok(())

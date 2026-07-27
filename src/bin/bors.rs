@@ -41,6 +41,9 @@ const MERGE_QUEUE_CHECK_INTERVAL: Duration = Duration::from_secs(5);
 /// Longest duration between two ticks of the merge queue.
 const MERGE_QUEUE_MAX_INTERVAL: Duration = Duration::from_secs(30);
 
+/// How often should the bot try to terminate running EC2 instances that are too old.
+const EC2_INSTANCE_CHECK_INTERVAL: Duration = Duration::from_secs(60 * 10);
+
 #[derive(clap::Parser)]
 struct Opts {
     /// Github App ID.
@@ -247,6 +250,7 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
         let mut mergeability_status_refresh = make_interval(MERGEABILITY_STATUS_INTERVAL);
         let mut prs_interval = make_interval(PR_STATE_PERIODIC_REFRESH);
         let mut merge_queue_interval = make_interval(MERGE_QUEUE_CHECK_INTERVAL);
+        let mut ec2_check_interval = make_interval(EC2_INSTANCE_CHECK_INTERVAL);
         loop {
             tokio::select! {
                 _ = config_refresh.tick() => {
@@ -266,6 +270,9 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
                 }
                 _ = merge_queue_interval.tick() => {
                     refresh_tx.send(BorsGlobalEvent::ProcessMergeQueue).await?;
+                }
+                _ = ec2_check_interval.tick() => {
+                    refresh_tx.send(BorsGlobalEvent::TerminateOldEC2Instances).await?;
                 }
             }
         }

@@ -76,6 +76,8 @@ pub enum BorsGlobalEvent {
     RefreshPullRequestState,
     /// Try to process the merge queue.
     ProcessMergeQueue,
+    /// Try to terminate old EC2 running instances.
+    TerminateOldEC2Instances,
 }
 
 #[derive(Debug)]
