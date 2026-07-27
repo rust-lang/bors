@@ -25,30 +25,17 @@ sudo --login -u ubuntu bash -c 'curl --proto '=https' --tlsv1.2 -sSf https://sh.
 
 ulimit -n $(ulimit -n -H)
 
-if $INSTALL_RUNNER; then
-    # Provision github actions runner
-    # https://github.com/actions/runner/blob/main/docs/start/envlinux.md
-    apt install -y liblttng-ust1t64 libkrb5-3 zlib1g libssl3 libicu78
-    apt install -y docker.io docker-buildx jq python3-pip
-    usermod -a -G docker ubuntu
-    systemctl start docker
-    sudo --login -u ubuntu bash -c 'mkdir actions-runner'
-    sudo --login -u ubuntu bash -c 'cd actions-runner && curl -o runner.tar.gz -L https://github.com/actions/runner/releases/download/v2.335.1/actions-runner-linux-x64-2.335.1.tar.gz'
-    sudo --login -u ubuntu bash -c 'cd actions-runner && tar xzf runner.tar.gz'
-    sudo --login -u ubuntu bash -c 'cd actions-runner && ./run.sh --jitconfig "$JITCONFIG"'
-    sleep 30
-    shutdown now
-else
-    apt install -y podman-docker
-    sudo --login -u ubuntu git config --global --add safe.directory /home/ubuntu/rust
-    sudo --login -u ubuntu git init rust
-    sudo --login -u ubuntu git -C rust remote add origin https://github.com/Mark-Simulacrum/rust
-    sudo --login -u ubuntu git -C rust config --local gc.auto 0
-    sudo --login -u ubuntu git -C rust fetch --no-tags --prune --no-recurse-submodules --depth=2 origin \
-        +1c8426f372151fd686fd27497827d402d66855f8:refs/remotes/origin/automation/bors/auto
-    sudo --login -u ubuntu git -C rust checkout --progress --force -B automation/bors/auto refs/remotes/origin/automation/bors/auto
-    sudo --login -u ubuntu bash -c 'cd rust && ulimit -n $(ulimit -n -H) && ./src/ci/scripts/checkout-submodules.sh'
-    sudo --login -u ubuntu bash -c 'cd rust && ulimit -n $(ulimit -n -H) && cargo run --manifest-path src/ci/citool/Cargo.toml run-local dist-x86_64-linux'
-    sleep 30
-    shutdown now
-fi
+# Provision github actions runner
+# https://github.com/actions/runner/blob/main/docs/start/envlinux.md
+apt install -y liblttng-ust1t64 libkrb5-3 zlib1g libssl3 libicu78
+apt install -y docker.io docker-buildx jq python3-pip
+usermod -a -G docker ubuntu
+systemctl start docker
+sudo --login -u ubuntu bash -c 'mkdir actions-runner'
+
+# Note: the runner should self-update
+sudo --login -u ubuntu bash -c 'cd actions-runner && curl -o runner.tar.gz -L https://github.com/actions/runner/releases/download/v2.335.1/actions-runner-linux-x64-2.335.1.tar.gz'
+sudo --login -u ubuntu bash -c 'cd actions-runner && tar xzf runner.tar.gz'
+sudo --login -u ubuntu bash -c 'cd actions-runner && ./run.sh --jitconfig "$JITCONFIG"'
+sleep 30
+shutdown now

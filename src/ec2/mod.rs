@@ -80,8 +80,7 @@ pub async fn start_ec2_github_runner(
         jit_config.runner.name
     );
 
-    let script = LAUNCH_SCRIPT.replace("$INSTALL_RUNNER", "true");
-    let script = script.replace("$JITCONFIG", &jit_config.encoded_jit_config);
+    let script = LAUNCH_SCRIPT.replace("$JITCONFIG", &jit_config.encoded_jit_config);
 
     // Using the AWS cli is not ideal, but the alternative (depending on aws-config, aws-sdk-ssm and
     // asd-sdk-ec2) has a massive impact on build times and binary size, plus it currently runs into
@@ -98,6 +97,7 @@ pub async fn start_ec2_github_runner(
         .arg("--instance-type")
         .arg(instance_type)
         .arg("--launch-template")
+        // FIXME: use the latest version before pushing to production
         .arg("LaunchTemplateName=gha-runner,Version=14")
         .arg("--user-data")
         .arg(script);
