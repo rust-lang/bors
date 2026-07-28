@@ -62,7 +62,7 @@ pub use github::User;
 pub use github::{BranchPushBehaviour, BranchPushError, MergeBehavior};
 pub use github::{WorkflowEvent, WorkflowJob};
 pub use github::{default_branch_name, default_repo_name};
-pub use mock::ExternalHttpMock;
+pub use mock::{ExternalHttpMock, ZulipMessage};
 pub use utils::io::load_test_file;
 pub use utils::sync::TestSyncMarker;
 pub use utils::webhook::{TEST_WEBHOOK_SECRET, create_webhook_request};
@@ -226,7 +226,7 @@ impl BorsTester {
             // local git ops, but we do not currently mock git in tests.
             Some(Git::from_path(PathBuf::from("/tmp/git"))),
             "https://bors-test.com",
-            None,
+            Some(mock.zulip_client()),
             None,
         ));
 
@@ -426,6 +426,10 @@ impl BorsTester {
         id: Id,
     ) -> anyhow::Result<Comment> {
         GitHub::get_next_comment(self.github.clone(), id).await
+    }
+
+    pub async fn zulip_messages(&self) -> anyhow::Result<Vec<ZulipMessage>> {
+        self.http_mock.zulip_messages().await
     }
 
     pub async fn post_comment<C: Into<Comment>>(&mut self, comment: C) -> anyhow::Result<Comment> {

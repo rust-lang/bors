@@ -622,7 +622,7 @@ mod tests {
     use crate::tests::{BorsTester, Commit};
     use crate::{
         bors::{RollupMode, handlers::trybuild::TRY_MERGE_BRANCH_NAME},
-        tests::{BorsBuilder, Comment, GitHub, Permissions, User, run_test},
+        tests::{BorsBuilder, Comment, GitHub, Permissions, User, ZulipMessage, run_test},
     };
 
     #[sqlx::test(migrator = "crate::MIGRATOR")]
@@ -1140,6 +1140,18 @@ approved = { modifications = ["+foo", "+baz"], unless = ["label1", "label2"] }
                 ctx.get_next_comment_text(()).await?,
                 @"Tree closed for PRs with priority less than 5."
             );
+            assert_eq!(
+                ctx.zulip_messages().await?,
+                vec![ZulipMessage::stream(
+                    242791,
+                    "Tree ops",
+                    format!(
+                        "The tree of `{}` was [closed](https://github.com/{}/pull/1#issuecomment-1) for PRs with priority below `5` by `default-user`.",
+                        default_repo_name(),
+                        default_repo_name()
+                    )
+                )]
+            );
 
             let repo = ctx.db().repo_db(&default_repo_name()).await?;
             assert_eq!(
@@ -1162,10 +1174,23 @@ approved = { modifications = ["+foo", "+baz"], unless = ["label1", "label2"] }
     #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn tree_closed_with_reason(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
-            ctx.post_comment("@bors treeclosed=5 CI is flaky").await?;
+            ctx.post_comment("@bors treeclosed=5 CI is flaky (@infra)")
+                .await?;
             insta::assert_snapshot!(
                 ctx.get_next_comment_text(()).await?,
                 @"Tree closed for PRs with priority less than 5."
+            );
+            assert_eq!(
+                ctx.zulip_messages().await?,
+                vec![ZulipMessage::stream(
+                    242791,
+                    "Tree ops",
+                    format!(
+                        "The tree of `{}` was [closed](https://github.com/{}/pull/1#issuecomment-1) for PRs with priority below `5` by `default-user`.\n\nReason: CI is flaky (infra)\n",
+                        default_repo_name(),
+                        default_repo_name()
+                    )
+                )]
             );
 
             let repo = ctx.db().repo_db(&default_repo_name()).await?;
@@ -1173,7 +1198,7 @@ approved = { modifications = ["+foo", "+baz"], unless = ["label1", "label2"] }
                 repo.unwrap().tree_state,
                 TreeState::Closed {
                     priority: 5,
-                    reason: Some("CI is flaky".to_string()),
+                    reason: Some("CI is flaky (@infra)".to_string()),
                     source: format!(
                         "https://github.com/{}/pull/1#issuecomment-1",
                         default_repo_name()
@@ -1192,9 +1217,53 @@ approved = { modifications = ["+foo", "+baz"], unless = ["label1", "label2"] }
 
             :evergreen_tree: The tree is currently [closed](https://github.com/rust-lang/borstest/pull/1#issuecomment-1) for pull requests below priority 5. This pull request will be tested once the tree is reopened.
 
-            Reason for tree closure: `CI is flaky`
+            Reason for tree closure: `CI is flaky (@infra)`
             "
             );
+
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
+    async fn tree_open(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            ctx.post_comment("@bors treeclosed=5").await?;
+            ctx.expect_comments((), 1).await;
+
+            ctx.post_comment("@bors treeopen").await?;
+            insta::assert_snapshot!(
+                ctx.get_next_comment_text(()).await?,
+                @"Tree is now open for merging."
+            );
+
+            assert_eq!(
+                ctx.zulip_messages().await?,
+                vec![
+                    ZulipMessage::stream(
+                        242791,
+                        "Tree ops",
+                        format!(
+                            "The tree of `{}` was [closed](https://github.com/{}/pull/1#issuecomment-1) for PRs with priority below `5` by `default-user`.",
+                            default_repo_name(),
+                            default_repo_name()
+                        )
+                    ),
+                    ZulipMessage::stream(
+                        242791,
+                        "Tree ops",
+                        format!(
+                            "The tree of `{}` was [reopened](https://github.com/{}/pull/1#issuecomment-3) by `default-user`.",
+                            default_repo_name(),
+                            default_repo_name()
+                        )
+                    ),
+                ]
+            );
+
+            let repo = ctx.db().repo_db(&default_repo_name()).await?;
+            assert_eq!(repo.unwrap().tree_state, TreeState::Open);
 
             Ok(())
         })
@@ -1214,6 +1283,7 @@ approved = { modifications = ["+foo", "+baz"], unless = ["label1", "label2"] }
                     ctx.get_next_comment_text(()).await?,
                     @"@default-user: :key: Insufficient privileges: not in review users"
                 );
+                assert!(ctx.zulip_messages().await?.is_empty());
                 Ok(())
             })
             .await;
