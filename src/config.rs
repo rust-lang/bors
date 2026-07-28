@@ -69,6 +69,13 @@ pub struct Ec2RunnersConfig {
     /// In which AWS region should the runners be launched.
     pub region: String,
     /// Image types allowed to be launched.
+    /// The key is a human-readable name for the instance, and the value is an AMI SSM parameter
+    /// name.
+    ///
+    /// Example:
+    /// ```toml
+    /// { "ubuntu26.04": "/aws/service/canonical/ubuntu/server/26.04/stable/current/amd64/hvm/ebs-gp3/ami-id" }
+    /// ```
     pub images: HashMap<String, String>,
     #[serde(default)]
     /// The kind of JIT runner config to create.
