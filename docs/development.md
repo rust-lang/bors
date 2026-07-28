@@ -128,6 +128,7 @@ Nevertheless, sometimes it might be easier to test it on your own repository. Th
     - `Contents` (r/w)
     - `Issues` (r/w)
     - `Pull requests` (r/w)
+    - `Self-hosted runners` (r/w) if you want to spawn EC2 CI runners
   - Subscribe it to the following webhook events:
     - `Issue comment`
     - `Push`
