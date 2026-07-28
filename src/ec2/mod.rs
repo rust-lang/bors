@@ -55,22 +55,30 @@ pub async fn start_ec2_github_runner(
 
     // Emulate a "UUID" to avoid adding dependency on the uuid crate just for this one line.
     let runner_name = format!("{:x}", rand::random::<u128>());
+
+    // For production usage, we want the organization JIT config kind, because it can be created
+    // using a GitHub App with the `Self-hosted runners` organization permission.
+    // The repository JIT runner config instead requires administrator permissions for the
+    // repository, which is not great.
+    //
+    // We allow configuring the repository JIT runner mostly just to make local testing on personal
+    // repos easier.
     let jit_config = match ec2.jit_runner {
-        JitRunnerKind::Repository => {
+        JitRunnerKind::Organization => {
             repo.client
-                .create_repo_jit_runner_config(
+                .create_org_jit_runner_config(
                     repo.repository().owner(),
-                    repo.repository().name(),
                     &runner_name.to_string(),
                     ec2.runner_group_id.into(),
                     vec![label.label.to_string()],
                 )
                 .await?
         }
-        JitRunnerKind::Organization => {
+        JitRunnerKind::Repository => {
             repo.client
-                .create_org_jit_runner_config(
+                .create_repo_jit_runner_config(
                     repo.repository().owner(),
+                    repo.repository().name(),
                     &runner_name.to_string(),
                     ec2.runner_group_id.into(),
                     vec![label.label.to_string()],
