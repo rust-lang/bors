@@ -187,6 +187,10 @@ pub async fn terminate_old_ec2_instances(repo: Arc<RepositoryState>) -> anyhow::
             prepare_aws_cli()
                 .arg("ec2")
                 .arg("terminate-instances")
+                // No need for graceful shutdown, we just want to terminate the instances
+                // as fast as possible.
+                .arg("--force")
+                .arg("--skip-os-shutdown")
                 .arg("--instance-ids")
                 .arg(too_old_ids),
         )
