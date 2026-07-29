@@ -216,8 +216,8 @@ fn prepare_aws_cli() -> tokio::process::Command {
 }
 
 async fn run_command(cmd: &mut tokio::process::Command) -> anyhow::Result<String> {
-    let output = match tokio::time::timeout(Duration::from_secs(60), cmd.output()).await? {
-        Ok(output) => output,
+    let output = match tokio::time::timeout(Duration::from_secs(60), cmd.output()).await {
+        Ok(output) => output?,
         Err(_) => {
             return Err(anyhow::anyhow!(
                 "Command {cmd:?} has timeouted after one minute"

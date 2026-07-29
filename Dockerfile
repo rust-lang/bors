@@ -37,7 +37,11 @@ WORKDIR /
 
 # curl is needed for healthcheck
 # git is needed for local git operations
-RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl git
+# unzip is needed for aws
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl git unzip
+
+RUN curl -fsSL https://awscli.amazonaws.com/v2/install.sh | bash
+ENV PATH="$PATH:/root/.local/bin"
 
 COPY --from=build /app/target/release/bors .
 
