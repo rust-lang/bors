@@ -18,6 +18,7 @@ pub use bors::{
     event::BorsRepositoryEvent,
 };
 pub use database::{PgDbClient, TreeState};
+pub use ec2::Ec2Context;
 pub use github::{
     AppError, OAuthClient, OAuthConfig, WebhookSecret, api::create_github_client,
     api::load_repositories,

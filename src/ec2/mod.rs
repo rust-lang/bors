@@ -2,6 +2,7 @@ use crate::bors::RepositoryState;
 use crate::config::{Ec2RunnersConfig, JitRunnerKind};
 use anyhow::Context;
 use chrono::Utc;
+use serde::Deserialize;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -38,9 +39,21 @@ impl<'a> ParsedLabel<'a> {
     }
 }
 
+/// Context necessary to perform actions related to EC2.
+pub struct Ec2Context {
+    role_arn: String,
+}
+
+impl Ec2Context {
+    pub fn new(role_arn: String) -> Self {
+        Self { role_arn }
+    }
+}
+
 /// Starts an EC2 instance on AWS, which should run a self-hosted GitHub Actions runner
 /// that will be able to execute a job with the given `label`.
 pub async fn start_ec2_github_runner(
+    ec2_ctx: &Ec2Context,
     ec2: &Ec2RunnersConfig,
     repo: &RepositoryState,
     label: ParsedLabel<'_>,
@@ -94,11 +107,13 @@ pub async fn start_ec2_github_runner(
 
     let script = LAUNCH_SCRIPT.replace("$JITCONFIG", &jit_config.encoded_jit_config);
 
+    let creds = get_aws_credentials(&ec2_ctx.role_arn).await?;
+
     // Using the AWS cli is not ideal, but the alternative (depending on aws-config, aws-sdk-ssm and
     // asd-sdk-ec2) has a massive impact on build times and binary size, plus it currently runs into
     // feature hell (ring vs aws-lc-sys). The choice might be reevaluated in the future.
     let instance_type = label.instance_type;
-    let mut ec2_cli = prepare_aws_cli();
+    let mut ec2_cli = prepare_aws_cli(Some(&creds));
     ec2_cli
         .arg("ec2")
         .arg("run-instances")
@@ -131,7 +146,10 @@ pub async fn start_ec2_github_runner(
     Ok(())
 }
 
-pub async fn terminate_old_ec2_instances(repo: Arc<RepositoryState>) -> anyhow::Result<()> {
+pub async fn terminate_old_ec2_instances(
+    ec2_ctx: &Ec2Context,
+    repo: Arc<RepositoryState>,
+) -> anyhow::Result<()> {
     if repo.config.load().ec2_runners.is_none() {
         return Ok(());
     };
@@ -166,9 +184,14 @@ pub async fn terminate_old_ec2_instances(repo: Arc<RepositoryState>) -> anyhow::
         reservations: Vec<Reservation>,
     }
 
-    let instances = run_command(prepare_aws_cli().arg("ec2").arg("describe-instances"))
-        .await
-        .context("Cannot list running EC2 instances")?;
+    let creds = get_aws_credentials(&ec2_ctx.role_arn).await?;
+    let instances = run_command(
+        prepare_aws_cli(Some(&creds))
+            .arg("ec2")
+            .arg("describe-instances"),
+    )
+    .await
+    .context("Cannot list running EC2 instances")?;
     let instances: Vec<Instance> = serde_json::from_str::<Instances>(&instances)?
         .reservations
         .into_iter()
@@ -192,7 +215,7 @@ pub async fn terminate_old_ec2_instances(repo: Arc<RepositoryState>) -> anyhow::
         tracing::info!("Cancelling EC2 instance(s) {too_old_ids}");
 
         run_command(
-            prepare_aws_cli()
+            prepare_aws_cli(Some(&creds))
                 .arg("ec2")
                 .arg("terminate-instances")
                 // No need for graceful shutdown, we just want to terminate the instances
@@ -209,10 +232,48 @@ pub async fn terminate_old_ec2_instances(repo: Arc<RepositoryState>) -> anyhow::
     Ok(())
 }
 
-fn prepare_aws_cli() -> tokio::process::Command {
+fn prepare_aws_cli(creds: Option<&RoleCredentials>) -> tokio::process::Command {
     let mut cmd = tokio::process::Command::new("aws");
+    if let Some(creds) = creds {
+        cmd.env("AWS_ACCESS_KEY_ID", &creds.access_key_id);
+        cmd.env("AWS_SECRET_ACCESS_KEY", &creds.secret_access_key);
+        cmd.env("AWS_SESSION_TOKEN", &creds.session_token);
+    }
     cmd.kill_on_drop(true);
     cmd
+}
+
+#[derive(Deserialize)]
+struct RoleCredentials {
+    #[serde(rename = "AccessKeyId")]
+    access_key_id: String,
+    #[serde(rename = "SecretAccessKey")]
+    secret_access_key: String,
+    #[serde(rename = "SessionToken")]
+    session_token: String,
+}
+
+/// Assume the given role with the current AWS credentials, to create credentials for the role.
+async fn get_aws_credentials(role_arn: &str) -> anyhow::Result<RoleCredentials> {
+    #[derive(Deserialize)]
+    struct Root {
+        #[serde(rename = "Credentials")]
+        pub credentials: RoleCredentials,
+    }
+
+    let mut cli = prepare_aws_cli(None);
+    cli.arg("sts")
+        .arg("assume-role")
+        .arg("--role-arn")
+        .arg(role_arn)
+        .arg("--role-session-name")
+        .arg("bors");
+    let output = run_command(&mut cli)
+        .await
+        .context("Cannot assume role for AWS")?;
+    let creds: Root =
+        serde_json::from_str(&output).context("Cannot deserialize aws sts assume-role output")?;
+    Ok(creds.credentials)
 }
 
 async fn run_command(cmd: &mut tokio::process::Command) -> anyhow::Result<String> {

@@ -227,6 +227,7 @@ impl BorsTester {
             Some(Git::from_path(PathBuf::from("/tmp/git"))),
             "https://bors-test.com",
             None,
+            None,
         ));
 
         let BorsProcess {
