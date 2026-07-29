@@ -17,8 +17,8 @@ use crate::bors::handlers::review::{
 };
 use crate::bors::handlers::trybuild::{command_try_build, command_try_cancel};
 use crate::bors::handlers::workflow::{
-    AutoBuildCancelReason, handle_workflow_completed, handle_workflow_started,
-    maybe_cancel_auto_build,
+    AutoBuildCancelReason, handle_workflow_completed, handle_workflow_job_started,
+    handle_workflow_started, maybe_cancel_auto_build,
 };
 use crate::bors::labels::handle_label_trigger;
 use crate::bors::mergeability_queue::set_pr_mergeability_based_on_user_action;
@@ -28,6 +28,7 @@ use crate::bors::{
     TRY_BRANCH_NAME,
 };
 use crate::database::{DelegatedPermission, DelegationStatus, PullRequestModel};
+use crate::ec2::terminate_old_ec2_instances;
 use crate::github::{
     CommitSha, GithubUser, LabelTrigger, PullRequest, PullRequestInfo, PullRequestNumber,
 };
@@ -126,7 +127,17 @@ pub async fn handle_bors_repository_event(
                 id = payload.run_id.into_inner()
             );
             handle_workflow_completed(repo, db, payload, senders.build_queue())
-                .instrument(span.clone())
+                .instrument(span)
+                .await?;
+        }
+        BorsRepositoryEvent::WorkflowJobStarted(payload) => {
+            let span = tracing::info_span!(
+                "Workflow job started",
+                repo = payload.repository.to_string(),
+                id = payload.run_id.into_inner()
+            );
+            handle_workflow_job_started(repo, payload)
+                .instrument(span)
                 .await?;
         }
         BorsRepositoryEvent::PullRequestEdited(payload) => {
@@ -134,7 +145,7 @@ pub async fn handle_bors_repository_event(
                 tracing::info_span!("Pull request edited", repo = payload.repository.to_string());
 
             handle_pull_request_edited(repo, db, senders.mergeability_queue(), payload)
-                .instrument(span.clone())
+                .instrument(span)
                 .await?;
         }
         BorsRepositoryEvent::PullRequestCommitPushed(payload) => {
@@ -142,7 +153,7 @@ pub async fn handle_bors_repository_event(
                 tracing::info_span!("Pull request pushed", repo = payload.repository.to_string());
 
             handle_push_to_pull_request(repo, db, senders.mergeability_queue(), payload)
-                .instrument(span.clone())
+                .instrument(span)
                 .await?;
         }
         BorsRepositoryEvent::PullRequestOpened(payload) => {
@@ -150,7 +161,7 @@ pub async fn handle_bors_repository_event(
                 tracing::info_span!("Pull request opened", repo = payload.repository.to_string());
 
             handle_pull_request_opened(repo, db, ctx, &senders, payload)
-                .instrument(span.clone())
+                .instrument(span)
                 .await?;
         }
         BorsRepositoryEvent::PullRequestClosed(payload) => {
@@ -158,7 +169,7 @@ pub async fn handle_bors_repository_event(
                 tracing::info_span!("Pull request closed", repo = payload.repository.to_string());
 
             handle_pull_request_closed(repo, db, payload)
-                .instrument(span.clone())
+                .instrument(span)
                 .await?;
         }
         BorsRepositoryEvent::PullRequestMerged(payload) => {
@@ -166,7 +177,7 @@ pub async fn handle_bors_repository_event(
                 tracing::info_span!("Pull request merged", repo = payload.repository.to_string());
 
             handle_pull_request_merged(repo, db, payload)
-                .instrument(span.clone())
+                .instrument(span)
                 .await?;
         }
         BorsRepositoryEvent::PullRequestReopened(payload) => {
@@ -176,7 +187,7 @@ pub async fn handle_bors_repository_event(
             );
 
             handle_pull_request_reopened(repo, db, senders.mergeability_queue(), payload)
-                .instrument(span.clone())
+                .instrument(span)
                 .await?;
         }
         BorsRepositoryEvent::PullRequestConvertedToDraft(payload) => {
@@ -186,7 +197,7 @@ pub async fn handle_bors_repository_event(
             );
 
             handle_pull_request_converted_to_draft(repo, db, payload)
-                .instrument(span.clone())
+                .instrument(span)
                 .await?;
         }
         BorsRepositoryEvent::PullRequestAssigned(payload) => {
@@ -196,7 +207,7 @@ pub async fn handle_bors_repository_event(
             );
 
             handle_pull_request_assigned(repo, db, payload)
-                .instrument(span.clone())
+                .instrument(span)
                 .await?;
         }
         BorsRepositoryEvent::PullRequestUnassigned(payload) => {
@@ -206,7 +217,7 @@ pub async fn handle_bors_repository_event(
             );
 
             handle_pull_request_unassigned(repo, db, payload)
-                .instrument(span.clone())
+                .instrument(span)
                 .await?;
         }
         BorsRepositoryEvent::PullRequestReadyForReview(payload) => {
@@ -216,7 +227,7 @@ pub async fn handle_bors_repository_event(
             );
 
             handle_pull_request_ready_for_review(repo, db, payload)
-                .instrument(span.clone())
+                .instrument(span)
                 .await?;
         }
         BorsRepositoryEvent::PushToBranch(payload) => {
@@ -224,7 +235,7 @@ pub async fn handle_bors_repository_event(
                 tracing::info_span!("Pushed to branch", repo = payload.repository.to_string());
 
             handle_push_to_branch(repo, db, senders.mergeability_queue(), payload)
-                .instrument(span.clone())
+                .instrument(span)
                 .await?;
         }
     }
@@ -305,6 +316,15 @@ pub async fn handle_bors_global_event(
         }
         BorsGlobalEvent::ProcessMergeQueue => {
             senders.merge_queue().maybe_perform_tick().await?;
+        }
+        BorsGlobalEvent::TerminateOldEC2Instances => {
+            let span = tracing::info_span!("Terminate old EC2 instances");
+            for_each_repo(&ctx, |repo| {
+                let subspan = tracing::info_span!("Repo", "{}", repo.repository());
+                terminate_old_ec2_instances(repo).instrument(subspan)
+            })
+            .instrument(span)
+            .await?;
         }
     }
     Ok(())
