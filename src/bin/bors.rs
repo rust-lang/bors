@@ -6,8 +6,8 @@ use std::time::Duration;
 use anyhow::Context;
 use bors::server::{ServerState, create_app};
 use bors::{
-    BorsContext, BorsGlobalEvent, BorsProcess, CommandParser, Git, OAuthClient, OAuthConfig,
-    PgDbClient, RepositoryStore, TeamApiClient, TreeState, WebhookSecret, ZulipClient,
+    BorsContext, BorsGlobalEvent, BorsProcess, CommandParser, Ec2Context, Git, OAuthClient,
+    OAuthConfig, PgDbClient, RepositoryStore, TeamApiClient, TreeState, WebhookSecret, ZulipClient,
     create_bors_process, create_github_client, load_repositories,
 };
 use clap::Parser;
@@ -97,6 +97,10 @@ struct Opts {
         default_value = "https://team-api.infra.rust-lang.org"
     )]
     permissions: String,
+
+    /// Optional EC2 role that will be used when
+    #[arg(long, env = "CI_EC2_RUNNER_ROLE")]
+    ec2_role: Option<String>,
 }
 
 /// Starts a server that receives GitHub webhooks and generates events into a queue
@@ -134,25 +138,40 @@ async fn initialize_db(connection_string: &str) -> anyhow::Result<PgDbClient> {
 }
 
 fn try_main(opts: Opts) -> anyhow::Result<()> {
+    let Opts {
+        app_id,
+        private_key,
+        client_id,
+        client_secret,
+        zulip_username,
+        zulip_token,
+        zulip_server,
+        webhook_secret,
+        db,
+        cmd_prefix,
+        web_url,
+        permissions,
+        ec2_role,
+    } = opts;
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
         .context("Cannot build tokio runtime")?;
 
     let db = runtime
-        .block_on(initialize_db(opts.db.expose_secret()))
+        .block_on(initialize_db(db.expose_secret()))
         .context("Cannot initialize database")?;
-    let team_api = TeamApiClient::new(opts.permissions);
+    let team_api = TeamApiClient::new(permissions);
     let (gh_client, loaded_repos) = runtime.block_on(async {
         let client = create_github_client(
-            opts.app_id.into(),
+            app_id.into(),
             "https://api.github.com".to_string(),
-            opts.private_key,
+            private_key,
         )?;
         let repos = load_repositories(&client, &team_api).await?;
         Ok::<_, anyhow::Error>((client, repos))
     })?;
-    let zulip_client = match (opts.zulip_server, opts.zulip_username, opts.zulip_token) {
+    let zulip_client = match (zulip_server, zulip_username, zulip_token) {
         (Some(url), Some(username), Some(token)) => {
             Some(ZulipClient::new(url, username, token).context("Cannot create Zulip client")?)
         }
@@ -197,14 +216,17 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
         }
     };
 
+    let ec2_ctx = ec2_role.map(Ec2Context::new);
+
     let db = Arc::new(db);
     let ctx = Arc::new(BorsContext::new(
-        CommandParser::new(opts.cmd_prefix.clone().into()),
+        CommandParser::new(cmd_prefix.clone().into()),
         db.clone(),
         repos.clone(),
         git,
-        &opts.web_url,
+        &web_url,
         zulip_client,
+        ec2_ctx,
     ));
     let BorsProcess {
         repository_tx,
@@ -278,7 +300,7 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
         }
     };
 
-    let oauth_client = match (opts.client_id.clone(), opts.client_secret.clone()) {
+    let oauth_client = match (client_id.clone(), client_secret.clone()) {
         (Some(client_id), Some(client_secret)) => {
             let config = OAuthConfig::new(client_id, client_secret);
             Some(OAuthClient::new(
@@ -303,7 +325,7 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
     let state = ServerState::new(
         repository_tx,
         global_tx,
-        WebhookSecret::new(opts.webhook_secret),
+        WebhookSecret::new(webhook_secret),
         oauth_client,
         ctx,
     );

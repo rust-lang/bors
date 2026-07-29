@@ -1,4 +1,3 @@
-use crate::PgDbClient;
 use crate::bors::RepositoryState;
 use crate::bors::build::{CancelBuildConclusion, CancelBuildError};
 use crate::bors::build_queue::BuildQueueSender;
@@ -9,6 +8,7 @@ use crate::bors::{BuildKind, build};
 use crate::database::{BuildModel, BuildStatus, PullRequestModel, WorkflowStatus};
 use crate::ec2::{ParsedLabel, start_ec2_github_runner};
 use crate::github::api::client::GithubRepositoryClient;
+use crate::{BorsContext, PgDbClient};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -148,6 +148,7 @@ pub(super) async fn handle_workflow_completed(
 }
 
 pub(super) async fn handle_workflow_job_started(
+    ctx: &BorsContext,
     repo: Arc<RepositoryState>,
     payload: WorkflowJobStarted,
 ) -> anyhow::Result<()> {
@@ -155,19 +156,23 @@ pub(super) async fn handle_workflow_job_started(
         return Ok(());
     }
 
+    let Some(ec2_ctx) = ctx.get_ec2_ctx() else {
+        return Ok(());
+    };
+
     let config = repo.config.load();
-    let Some(ec2) = &config.ec2_runners else {
+    let Some(ec2_config) = &config.ec2_runners else {
         return Ok(());
     };
     let Some(label) = payload
         .labels
         .iter()
-        .find_map(|label| ParsedLabel::parse(label, &ec2.label_prefix))
+        .find_map(|label| ParsedLabel::parse(label, &ec2_config.label_prefix))
     else {
         return Ok(());
     };
 
-    start_ec2_github_runner(ec2, &repo, label).await?;
+    start_ec2_github_runner(ec2_ctx, ec2_config, &repo, label).await?;
 
     Ok(())
 }
