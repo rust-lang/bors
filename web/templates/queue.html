@@ -455,7 +455,8 @@ Average duration of recent auto builds: {{ format_duration(*average_build_durati
             columns: [
                 { name: "select", orderable: false, className: "select-checkbox", width: "10px" },
                 { name: "number", className: "dt-right" },
-                { name: "status" },
+                // Ensure that the status doesn't have too much padding on the right side
+                { name: "status", width: "5%" },
                 { name: "mergeable" },
                 { name: "title", width: "40%" },
                 { name: "author" },
