@@ -1511,6 +1511,7 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
             // Now close the tree for priority below 100
             ctx.post_comment("@bors treeclosed=100").await?;
             ctx.expect_comments((), 1).await;
+            ctx.expect_zulip_messages(1).await;
 
             // Then finish the auto build AFTER the tree has been closed and then
             // run the merge queue
@@ -1539,6 +1540,7 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
 
             ctx.post_comment("@bors treeclosed=100").await?;
             ctx.expect_comments((), 1).await;
+            ctx.expect_zulip_messages(1).await;
             ctx.run_merge_queue_until_merge_attempt().await;
             ctx.expect_comments((), 1).await;
 
@@ -1557,6 +1559,7 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.post_comment("@bors treeclosed=100").await?;
             ctx.expect_comments((), 1).await;
+            ctx.expect_zulip_messages(1).await;
 
             let pr2 = ctx.open_pr((), |_| {}).await?;
             let pr3 = ctx.open_pr((), |_| {}).await?;
@@ -1579,6 +1582,7 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
 
             ctx.post_comment("@bors treeopen").await?;
             insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"Tree is now open for merging.");
+            ctx.expect_zulip_messages(1).await;
 
             ctx.start_and_finish_auto_build(()).await?;
             ctx.start_and_finish_auto_build(pr3.id()).await?;

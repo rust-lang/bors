@@ -432,6 +432,19 @@ impl BorsTester {
         self.http_mock.zulip_messages().await
     }
 
+    /// Expect that `count` Zulip messages will be received, without checking their contents.
+    pub async fn expect_zulip_messages(&self, count: usize) {
+        let messages = self
+            .zulip_messages()
+            .await
+            .unwrap_or_else(|error| panic!("Failed to receive Zulip messages: {error:?}"));
+        assert_eq!(
+            messages.len(),
+            count,
+            "Expected {count} Zulip messages, got {messages:#?}"
+        );
+    }
+
     pub async fn post_comment<C: Into<Comment>>(&mut self, comment: C) -> anyhow::Result<Comment> {
         let comment = comment.into();
 
@@ -1210,7 +1223,7 @@ impl BorsTester {
             }
         };
         // Flush any local queues
-        self.http_mock.gh_server.assert_empty_queues().await?;
+        self.http_mock.assert_empty_queues().await?;
         Ok(Arc::into_inner(self.github).unwrap().into_inner())
     }
 }

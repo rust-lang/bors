@@ -622,7 +622,7 @@ mod tests {
     use crate::tests::{BorsTester, Commit};
     use crate::{
         bors::{RollupMode, handlers::trybuild::TRY_MERGE_BRANCH_NAME},
-        tests::{BorsBuilder, Comment, GitHub, Permissions, User, ZulipMessage, run_test},
+        tests::{BorsBuilder, Comment, GitHub, Permissions, User, run_test},
     };
 
     #[sqlx::test(migrator = "crate::MIGRATOR")]
@@ -864,6 +864,7 @@ approved = ["+approved"]
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.post_comment("@bors treeclosed=100").await?;
             ctx.expect_comments((), 1).await;
+            ctx.expect_zulip_messages(1).await;
             ctx.post_comment("@bors r+").await?;
             insta::assert_snapshot!(
                 ctx.get_next_comment_text(()).await?,
@@ -885,6 +886,7 @@ approved = ["+approved"]
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.post_comment("@bors treeclosed=100").await?;
             ctx.expect_comments((), 1).await;
+            ctx.expect_zulip_messages(1).await;
             ctx.post_comment("@bors r+ p=101").await?;
             insta::assert_snapshot!(
                 ctx.get_next_comment_text(()).await?,
@@ -1140,18 +1142,18 @@ approved = { modifications = ["+foo", "+baz"], unless = ["label1", "label2"] }
                 ctx.get_next_comment_text(()).await?,
                 @"Tree closed for PRs with priority less than 5."
             );
-            assert_eq!(
-                ctx.zulip_messages().await?,
-                vec![ZulipMessage::stream(
-                    242791,
-                    "Tree ops",
-                    format!(
-                        "The tree of `{}` was [closed](https://github.com/{}/pull/1#issuecomment-1) for PRs with priority below `5` by `default-user`.",
-                        default_repo_name(),
-                        default_repo_name()
-                    )
-                )]
-            );
+            let messages = ctx.zulip_messages().await?;
+            insta::assert_debug_snapshot!(messages, @r#"
+            [
+                ZulipMessage {
+                    recipient: Stream {
+                        id: 242791,
+                        topic: "Tree ops",
+                    },
+                    content: "The tree of `rust-lang/borstest` was [closed](https://github.com/rust-lang/borstest/pull/1#issuecomment-1) for PRs with priority below `5` by `default-user`.",
+                },
+            ]
+            "#);
 
             let repo = ctx.db().repo_db(&default_repo_name()).await?;
             assert_eq!(
@@ -1180,18 +1182,21 @@ approved = { modifications = ["+foo", "+baz"], unless = ["label1", "label2"] }
                 ctx.get_next_comment_text(()).await?,
                 @"Tree closed for PRs with priority less than 5."
             );
-            assert_eq!(
-                ctx.zulip_messages().await?,
-                vec![ZulipMessage::stream(
-                    242791,
-                    "Tree ops",
-                    format!(
-                        "The tree of `{}` was [closed](https://github.com/{}/pull/1#issuecomment-1) for PRs with priority below `5` by `default-user`.\n\nReason: CI is flaky (infra)\n",
-                        default_repo_name(),
-                        default_repo_name()
-                    )
-                )]
-            );
+
+            let messages = ctx.zulip_messages().await?;
+
+            // Ensure that messages are stripped from the reason before it is sent to Zulip.
+            insta::assert_debug_snapshot!(messages, @r#"
+            [
+                ZulipMessage {
+                    recipient: Stream {
+                        id: 242791,
+                        topic: "Tree ops",
+                    },
+                    content: "The tree of `rust-lang/borstest` was [closed](https://github.com/rust-lang/borstest/pull/1#issuecomment-1) for PRs with priority below `5` by `default-user`.\n\nReason: CI is flaky (infra)\n",
+                },
+            ]
+            "#);
 
             let repo = ctx.db().repo_db(&default_repo_name()).await?;
             assert_eq!(
@@ -1238,29 +1243,25 @@ approved = { modifications = ["+foo", "+baz"], unless = ["label1", "label2"] }
                 @"Tree is now open for merging."
             );
 
-            assert_eq!(
-                ctx.zulip_messages().await?,
-                vec![
-                    ZulipMessage::stream(
-                        242791,
-                        "Tree ops",
-                        format!(
-                            "The tree of `{}` was [closed](https://github.com/{}/pull/1#issuecomment-1) for PRs with priority below `5` by `default-user`.",
-                            default_repo_name(),
-                            default_repo_name()
-                        )
-                    ),
-                    ZulipMessage::stream(
-                        242791,
-                        "Tree ops",
-                        format!(
-                            "The tree of `{}` was [reopened](https://github.com/{}/pull/1#issuecomment-3) by `default-user`.",
-                            default_repo_name(),
-                            default_repo_name()
-                        )
-                    ),
-                ]
-            );
+            let messages = ctx.zulip_messages().await?;
+            insta::assert_debug_snapshot!(messages, @r#"
+            [
+                ZulipMessage {
+                    recipient: Stream {
+                        id: 242791,
+                        topic: "Tree ops",
+                    },
+                    content: "The tree of `rust-lang/borstest` was [closed](https://github.com/rust-lang/borstest/pull/1#issuecomment-1) for PRs with priority below `5` by `default-user`.",
+                },
+                ZulipMessage {
+                    recipient: Stream {
+                        id: 242791,
+                        topic: "Tree ops",
+                    },
+                    content: "The tree of `rust-lang/borstest` was [reopened](https://github.com/rust-lang/borstest/pull/1#issuecomment-3) by `default-user`.",
+                },
+            ]
+            "#);
 
             let repo = ctx.db().repo_db(&default_repo_name()).await?;
             assert_eq!(repo.unwrap().tree_state, TreeState::Open);
@@ -1283,7 +1284,6 @@ approved = { modifications = ["+foo", "+baz"], unless = ["label1", "label2"] }
                     ctx.get_next_comment_text(()).await?,
                     @"@default-user: :key: Insufficient privileges: not in review users"
                 );
-                assert!(ctx.zulip_messages().await?.is_empty());
                 Ok(())
             })
             .await;
