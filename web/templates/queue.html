@@ -331,7 +331,7 @@ Average duration of recent auto builds: {{ format_duration(*average_build_durati
                         {%- else -%}
                           pending
                         {%- endif -%}
-                        <span class="time-display"></span>
+                        <span class="elapsed-time-display"></span>
                         </div>
                       {%- when QueueStatus::Failed(_, _) -%}
                         failed
@@ -455,8 +455,7 @@ Average duration of recent auto builds: {{ format_duration(*average_build_durati
             columns: [
                 { name: "select", orderable: false, className: "select-checkbox", width: "10px" },
                 { name: "number", className: "dt-right" },
-                // Ensure that the status doesn't have too much padding on the right side
-                { name: "status", width: "5%" },
+                { name: "status" },
                 { name: "mergeable" },
                 { name: "title", width: "40%" },
                 { name: "author" },
@@ -740,7 +739,7 @@ Average duration of recent auto builds: {{ format_duration(*average_build_durati
     });
     {% endif %}
 
-    function formatDuration(ms) {
+    function formatElapsedTime(ms) {
         const totalSeconds = Math.floor(ms / 1000);
         const hours = Math.floor(totalSeconds / 3600);
         const remainingSeconds = totalSeconds % 3600;
@@ -759,7 +758,10 @@ Average duration of recent auto builds: {{ format_duration(*average_build_durati
         } else if (output.length === 0) {
             output = '<1m';
         }
-        return output;
+        if (output.length > 0) {
+            return ` (${output})`;
+        }
+        return '';
     }
 
     const AVERAGE_BUILD_DURATION_MS = {{ average_build_duration.as_millis() }};
@@ -770,10 +772,9 @@ Average duration of recent auto builds: {{ format_duration(*average_build_durati
             const createdAtMs = parseInt(td.dataset.createdAt, 10);
             if (createdAtMs > 0) {
                 const elapsedMs = now - createdAtMs;
-                const expectedMs = AVERAGE_BUILD_DURATION_MS - elapsedMs;
-                const formattedExpected = expectedMs < 0 ? `${formatDuration(-expectedMs)} overdue` : `${formatDuration(expectedMs)} left`;
-                const timeDisplay = td.querySelector('.time-display');
-                timeDisplay.textContent = ` (${formattedExpected})`;
+                const formattedTime = formatElapsedTime(elapsedMs);
+                const display = td.querySelector('.elapsed-time-display');
+                display.textContent = formattedTime;
 
                 // Update progress bar width and ARIA attribute
                 const progressBar = td.querySelector('.progress-bar-bg');
