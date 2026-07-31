@@ -1,8 +1,7 @@
 use crate::bors::BuildKind;
 use crate::bors::RollupMode::*;
 use crate::database::{
-    BuildModel, BuildStatus, MergeableState::*, PullRequestModel, QueueStatus, TreeState,
-    WorkflowModel,
+    BuildModel, MergeableState::*, PullRequestModel, QueueStatus, TreeState, WorkflowModel,
 };
 use crate::ec2::{Ec2Instance, Ec2InstanceStatus};
 use crate::github::PullRequestNumber;
@@ -74,6 +73,11 @@ impl From<HashMap<PullRequestNumber, HashSet<PullRequestNumber>>> for RollupsInf
     }
 }
 
+pub struct PendingBuild {
+    pub build: BuildModel,
+    pub workflow: Option<WorkflowModel>,
+}
+
 #[derive(Template)]
 #[template(path = "queue.html", whitespace = "minimize")]
 pub struct QueueTemplate {
@@ -87,8 +91,8 @@ pub struct QueueTemplate {
     pub oauth_client_id: Option<String>,
     // PRs that should be pre-selected for being included in a rollup
     pub selected_rollup_prs: Vec<u32>,
-    // Active workflow for an active pending auto build
-    pub pending_workflow: Option<WorkflowModel>,
+    // Pending auto build(s)
+    pub pending_builds: HashMap<PullRequestNumber, PendingBuild>,
     // Guesstimated duration to merge all current approved/pending PRs in the queue
     pub expected_remaining_duration: Option<Duration>,
     // Average build duration over the past few successful auto builds
@@ -104,13 +108,8 @@ impl QueueTemplate {
         (Utc::now() - build.created_at).to_std().unwrap_or_default()
     }
 
-    fn get_pending_auto_build<'a>(&self, pr: &'a PullRequestModel) -> Option<&'a BuildModel> {
-        if let Some(auto_build) = &pr.auto_build
-            && auto_build.status == BuildStatus::Pending
-        {
-            return Some(auto_build);
-        }
-        None
+    fn get_pending_auto_build<'a>(&'a self, pr: &'a PullRequestModel) -> Option<&'a PendingBuild> {
+        self.pending_builds.get(&pr.number)
     }
 
     /// Calculate the % progress of a build based on average build duration.

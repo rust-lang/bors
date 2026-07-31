@@ -5,7 +5,7 @@ use crate::ec2::{Ec2Instance, Ec2InstanceStatus, get_aws_credentials, get_ec2_in
 use crate::github::{GithubRepoName, PullRequestNumber, rollup};
 use crate::server::cached::Cached;
 use crate::templates::{
-    EC2Template, HelpTemplate, HtmlTemplate, NotFoundTemplate, PullRequestStats, QueueTemplate,
+    EC2Template, HelpTemplate, HtmlTemplate, NotFoundTemplate, PendingBuild, PullRequestStats, QueueTemplate,
     RepositoryView, RollupsInfo,
 };
 use crate::utils::sort_queue::sort_queue_prs;
@@ -371,15 +371,35 @@ pub async fn queue_handler(
 
     let prs = sort_queue_prs(prs);
 
-    // Note: this assumed that there is ever at most a single pending build
-    let pending_build = prs.iter().find_map(|pr| match pr.queue_status() {
-        QueueStatus::Pending(_, build) => Some(build),
-        _ => None,
-    });
-    let pending_workflow = match pending_build {
-        Some(build) => db.get_workflows_for_build(build).await?.into_iter().next(),
-        None => None,
+    let pending_builds = {
+        let builds = prs.iter().filter_map(|pr| match pr.queue_status() {
+            QueueStatus::Pending(_, build) => Some((pr.number, build)),
+            _ => None,
+        });
+        let mut pending = HashMap::new();
+        for (pr, build_model) in builds {
+            let workflow = db
+                .get_workflows_for_build(build_model)
+                .await?
+                .into_iter()
+                .next();
+            pending.insert(
+                pr,
+                PendingBuild {
+                    build: build_model.clone(),
+                    workflow,
+                },
+            );
+        }
+        pending
     };
+
+    // We assume that there is at most one of these, so the order doesn't matter
+    let pending_auto_workflow = pending_builds
+        .values()
+        .filter(|build| build.build.kind == BuildKind::Auto)
+        .filter_map(|b| b.workflow.as_ref())
+        .next();
 
     let average_build_duration = {
         let total_duration = last_ten_builds
@@ -418,7 +438,7 @@ pub async fn queue_handler(
         match &status {
             QueueStatus::Pending(_, _) => {
                 // Try to guess already elapsed time of the pending workflow
-                let elapsed = if let Some(workflow) = &pending_workflow {
+                let elapsed = if let Some(workflow) = &pending_auto_workflow {
                     (Utc::now() - workflow.created_at)
                         .to_std()
                         .unwrap_or_default()
@@ -471,7 +491,7 @@ pub async fn queue_handler(
             failed_count,
         },
         prs,
-        pending_workflow,
+        pending_builds,
         selected_rollup_prs: params.pull_requests.map(|prs| prs.0).unwrap_or_default(),
         rollups_info: RollupsInfo::from(rollups),
         expected_remaining_duration,
