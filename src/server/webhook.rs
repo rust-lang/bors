@@ -389,6 +389,7 @@ fn parse_workflow_job_events(body: &[u8]) -> anyhow::Result<Option<BorsEvent>> {
         "queued" => Some(BorsEvent::Repository(
             BorsRepositoryEvent::WorkflowJobStarted(WorkflowJobStarted {
                 repository: repository_name,
+                job_id: payload.workflow_job.id,
                 name: payload.workflow_job.name,
                 job_id: payload.workflow_job.id,
                 branch: payload.workflow_job.head_branch,
@@ -400,6 +401,7 @@ fn parse_workflow_job_events(body: &[u8]) -> anyhow::Result<Option<BorsEvent>> {
         "completed" => Some(BorsEvent::Repository(
             BorsRepositoryEvent::WorkflowJobCompleted(WorkflowJobCompleted {
                 repository: repository_name,
+                job_id: payload.workflow_job.id,
                 name: payload.workflow_job.name,
                 branch: payload.workflow_job.head_branch,
                 commit_sha: CommitSha(payload.workflow_job.head_sha),

@@ -1,5 +1,5 @@
-use crate::bors::BuildKind;
 use crate::bors::RollupMode::*;
+use crate::bors::{BuildKind, WorkflowJobData, WorkflowJobStatus};
 use crate::database::{
     BuildModel, MergeableState::*, PullRequestModel, QueueStatus, TreeState, WorkflowModel,
 };
@@ -74,9 +74,14 @@ impl From<HashMap<PullRequestNumber, HashSet<PullRequestNumber>>> for RollupsInf
     }
 }
 
+pub struct PendingWorkflow {
+    pub workflow: WorkflowModel,
+    pub jobs: Vec<WorkflowJobData>,
+}
+
 pub struct PendingBuild {
     pub build: BuildModel,
-    pub workflow: Option<WorkflowModel>,
+    pub workflow: Option<PendingWorkflow>,
 }
 
 #[derive(Template)]
@@ -122,7 +127,7 @@ impl QueueTemplate {
                 _ => {}
             }
 
-            pr1.cmp(&pr2)
+            pr1.cmp(pr2)
         });
         pending
     }
@@ -160,6 +165,46 @@ impl QueueTemplate {
         // and the result is significant
         pr.note() == Some("rustc-perf")
     }
+
+    fn count_completed_jobs(&self, jobs: &[WorkflowJobData]) -> u64 {
+        jobs.iter()
+            .filter(|j| matches!(j.status, WorkflowJobStatus::Completed))
+            .count() as u64
+    }
+
+    /// Format jobs that are not yet completed, to be rendered into a title attribute.
+    fn remaining_jobs_formatted_title(&self, jobs: &[WorkflowJobData]) -> String {
+        use std::fmt::Write;
+
+        let remaining = get_remaining_jobs(jobs);
+        if remaining.is_empty() {
+            return String::new();
+        }
+        let mut data = String::from("\n\nRemaining jobs:\n");
+        for job in remaining {
+            writeln!(data, "{}", job.name).unwrap();
+        }
+
+        data
+    }
+
+    /// Format jobs that are not yet completed, to be rendered into the jobs column.
+    fn remaining_jobs_formatted_column(&self, jobs: &[WorkflowJobData]) -> String {
+        let remaining = get_remaining_jobs(jobs);
+        if remaining.is_empty() {
+            return String::new();
+        }
+        format!(
+            " ({})",
+            remaining.iter().take(5).map(|j| &j.name).join(", ")
+        )
+    }
+}
+
+fn get_remaining_jobs(jobs: &[WorkflowJobData]) -> Vec<&WorkflowJobData> {
+    let mut remaining: Vec<_> = jobs.iter().filter(|j| !j.status.is_completed()).collect();
+    remaining.sort_by(|a, b| a.name.cmp(&b.name));
+    remaining
 }
 
 #[derive(Template)]

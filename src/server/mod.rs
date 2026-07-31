@@ -5,8 +5,8 @@ use crate::ec2::{Ec2Instance, Ec2InstanceStatus, get_aws_credentials, get_ec2_in
 use crate::github::{GithubRepoName, PullRequestNumber, rollup};
 use crate::server::cached::Cached;
 use crate::templates::{
-    EC2Template, HelpTemplate, HtmlTemplate, NotFoundTemplate, PendingBuild, PullRequestStats, QueueTemplate,
-    RepositoryView, RollupsInfo,
+    EC2Template, HelpTemplate, HtmlTemplate, NotFoundTemplate, PendingBuild, PendingWorkflow, PullRequestStats,
+    QueueTemplate, RepositoryView, RollupsInfo,
 };
 use crate::utils::sort_queue::sort_queue_prs;
 use crate::{
@@ -344,6 +344,7 @@ impl<'de> Deserialize<'de> for PullRequestList {
 pub async fn queue_handler(
     Path(repo_name): Path<String>,
     State(db): State<Arc<PgDbClient>>,
+    State(ServerStateRef(state)): State<ServerStateRef>,
     State(oauth): State<Option<OAuthClient>>,
     Query(params): Query<QueueParams>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -383,6 +384,14 @@ pub async fn queue_handler(
                 .await?
                 .into_iter()
                 .next();
+            let workflow = workflow.map(|workflow| {
+                let jobs = state
+                    .ctx
+                    .get_job_cache()
+                    .get_jobs(&repo.name, workflow.run_id.into());
+                PendingWorkflow { workflow, jobs }
+            });
+
             pending.insert(
                 pr,
                 PendingBuild {
@@ -439,7 +448,7 @@ pub async fn queue_handler(
             QueueStatus::Pending(_, _) => {
                 // Try to guess already elapsed time of the pending workflow
                 let elapsed = if let Some(workflow) = &pending_auto_workflow {
-                    (Utc::now() - workflow.created_at)
+                    (Utc::now() - workflow.workflow.created_at)
                         .to_std()
                         .unwrap_or_default()
                 } else {

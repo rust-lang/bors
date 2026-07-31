@@ -69,6 +69,11 @@
         padding: 6px 8px;
     }
 
+    td.job-list {
+        max-width: 1000px;
+        overflow-x: hidden;
+    }
+
     table.dataTable td.status {
         padding-left: 10px;
     }
@@ -279,6 +284,7 @@ Average duration of recent auto builds: {{ format_duration(*average_build_durati
             <th>Workflow URL</th>
             <th>Started at/elapsed</th>
             <th>Remaining time (est.)</th>
+            <th>Jobs</th>
           </tr>
         </thead>
         <tbody>
@@ -294,7 +300,7 @@ Average duration of recent auto builds: {{ format_duration(*average_build_durati
             </td>
             {% if let Some(workflow) = pending.workflow %}
               <td>
-                <a href="{{ workflow.url }}">{{ workflow.run_id }}</a>
+                <a href="{{ workflow.workflow.url }}">{{ workflow.workflow.run_id }}</a>
               </td>
             {% else %}
               <td></td>
@@ -306,6 +312,15 @@ Average duration of recent auto builds: {{ format_duration(*average_build_durati
             <td>
               <span class="remaining-time-display"></span>
             </td>
+            {% if let Some(workflow) = pending.workflow %}
+              <td
+                class="job-list"
+                title="Number of completed/started jobs. Note that this can be inaccurate!{{ remaining_jobs_formatted_title(&workflow.jobs) }}">
+                  {{ count_completed_jobs(&workflow.jobs) }}/{{ workflow.jobs.len() }}{{ remaining_jobs_formatted_column(&workflow.jobs) }}
+              </td>
+            {% else %}
+              <td class="job-list"></td>
+            {% endif %}
           </tr>
         {% endfor %}
         </tbody>
@@ -377,7 +392,7 @@ Average duration of recent auto builds: {{ format_duration(*average_build_durati
                       {%- when QueueStatus::Pending(_, _) -%}
                         <div>
                         {%- if let Some(pending) = pending && let Some(workflow) = pending.workflow -%}
-                          <a href="{{ workflow.url }}">pending</a>
+                          <a href="{{ workflow.workflow.url }}">pending</a>
                         {%- else -%}
                           pending
                         {%- endif -%}
@@ -741,6 +756,7 @@ Average duration of recent auto builds: {{ format_duration(*average_build_durati
           { name: "workflow-url" },
           { name: "started" },
           { name: "remaining" },
+          { name: "jobs" },
         ],
         ordering: false,
         autoWidth: false,

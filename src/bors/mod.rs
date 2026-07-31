@@ -31,6 +31,7 @@ pub mod event;
 mod gitops;
 pub mod gitops_queue;
 mod handlers;
+mod job_cache;
 mod labels;
 pub mod merge_queue;
 pub mod mergeability_queue;
@@ -43,6 +44,7 @@ use crate::database::{PullRequestModel, WorkflowStatus};
 use crate::github::api::operations::CommitAuthor;
 pub use command::CommandPrefix;
 pub use gitops::Git;
+pub use job_cache::{WorkflowJobData, WorkflowJobStatus};
 
 /// Branch where CI checks run for auto builds.
 /// This branch should run CI checks.

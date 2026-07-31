@@ -17,8 +17,8 @@ use crate::bors::handlers::review::{
 };
 use crate::bors::handlers::trybuild::{command_try_build, command_try_cancel};
 use crate::bors::handlers::workflow::{
-    AutoBuildCancelReason, handle_workflow_completed, handle_workflow_job_started,
-    handle_workflow_started, maybe_cancel_auto_build,
+    AutoBuildCancelReason, handle_workflow_completed, handle_workflow_job_completed,
+    handle_workflow_job_started, handle_workflow_started, maybe_cancel_auto_build,
 };
 use crate::bors::labels::handle_label_trigger;
 use crate::bors::mergeability_queue::set_pr_mergeability_based_on_user_action;
@@ -139,6 +139,17 @@ pub async fn handle_bors_repository_event(
                 job_id = payload.job_id.into_inner(),
             );
             handle_workflow_job_started(&ctx, db, repo, payload)
+                .instrument(span)
+                .await?;
+        }
+        BorsRepositoryEvent::WorkflowJobCompleted(payload) => {
+            let span = tracing::info_span!(
+                "Workflow job completed",
+                repo = payload.repository.to_string(),
+                id = payload.run_id.into_inner(),
+                name = payload.name
+            );
+            handle_workflow_job_completed(&ctx, repo, payload)
                 .instrument(span)
                 .await?;
         }

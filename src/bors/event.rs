@@ -196,6 +196,7 @@ pub struct WorkflowRunCompleted {
 #[derive(Debug)]
 pub struct WorkflowJobStarted {
     pub repository: GithubRepoName,
+    pub job_id: JobId,
     pub name: String,
     pub job_id: JobId,
     pub branch: String,
@@ -207,6 +208,7 @@ pub struct WorkflowJobStarted {
 #[derive(Debug)]
 pub struct WorkflowJobCompleted {
     pub repository: GithubRepoName,
+    pub job_id: JobId,
     pub name: String,
     pub branch: String,
     pub commit_sha: CommitSha,
