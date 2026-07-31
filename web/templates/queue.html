@@ -273,7 +273,7 @@ Average duration of recent auto builds: {{ format_duration(*average_build_durati
   {% let builds = get_pending_builds() %}
   {% if !builds.is_empty() %}
     <div class="toggle">
-      <button id="builds-toggle">Pending builds</button>
+      <button id="builds-toggle" title="Toggle pending builds table">Pending builds</button>
     </div>
     <div class="table-builds-wrapper" style="display: none; max-width: 800px;">
       <div id="loading-builds">Loading...</div>
