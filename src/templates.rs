@@ -10,6 +10,7 @@ use axum::response::{Html, IntoResponse, Response};
 use chrono::Utc;
 use http::StatusCode;
 use itertools::Itertools;
+use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 use std::time::Duration;
@@ -110,6 +111,20 @@ impl QueueTemplate {
 
     fn get_pending_auto_build<'a>(&'a self, pr: &'a PullRequestModel) -> Option<&'a PendingBuild> {
         self.pending_builds.get(&pr.number)
+    }
+
+    fn get_pending_builds(&self) -> Vec<(&PullRequestNumber, &PendingBuild)> {
+        let mut pending: Vec<_> = self.pending_builds.iter().collect();
+        pending.sort_by(|(pr1, a), (pr2, b)| {
+            match (a.build.kind, b.build.kind) {
+                (BuildKind::Auto, BuildKind::Try) => return Ordering::Less,
+                (BuildKind::Try, BuildKind::Auto) => return Ordering::Greater,
+                _ => {}
+            }
+
+            pr1.cmp(&pr2)
+        });
+        pending
     }
 
     /// Calculate the % progress of a build based on average build duration.
