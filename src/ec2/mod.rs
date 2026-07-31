@@ -127,8 +127,7 @@ pub async fn start_ec2_github_runner(
         .arg("--instance-initiated-shutdown-behavior")
         .arg("terminate")
         .arg("--launch-template")
-        // FIXME: use the latest version before pushing to production
-        .arg("LaunchTemplateName=gha-runner,Version=14")
+        .arg("LaunchTemplateName=gha-runner,Version=$Latest")
         .arg("--user-data")
         .arg(script);
 
