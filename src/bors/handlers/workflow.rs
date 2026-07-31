@@ -159,12 +159,14 @@ pub(super) async fn handle_workflow_job_started(
         return Ok(());
     };
 
-    ctx.get_job_cache().job_started(
-        repo.repository(),
-        payload.run_id,
-        payload.job_id,
-        &payload.name,
-    );
+    if let BuildKind::Auto = build_kind {
+        ctx.get_job_cache().auto_job_started(
+            repo.repository(),
+            payload.run_id,
+            payload.job_id,
+            &payload.name,
+        );
+    }
 
     let Some(ec2_ctx) = ctx.get_ec2_ctx() else {
         return Ok(());
@@ -223,16 +225,18 @@ pub(super) async fn handle_workflow_job_completed(
     repo: Arc<RepositoryState>,
     payload: WorkflowJobCompleted,
 ) -> anyhow::Result<()> {
-    if !is_bors_observed_branch(&payload.branch) {
+    let Some(build_kind) = get_build_kind_from_branch(&payload.branch) else {
         return Ok(());
-    }
+    };
 
-    ctx.get_job_cache().job_completed(
-        repo.repository(),
-        payload.run_id,
-        payload.job_id,
-        &payload.name,
-    );
+    if let BuildKind::Auto = build_kind {
+        ctx.get_job_cache().auto_job_completed(
+            repo.repository(),
+            payload.run_id,
+            payload.job_id,
+            &payload.name,
+        );
+    }
 
     Ok(())
 }
