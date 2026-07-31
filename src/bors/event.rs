@@ -198,7 +198,6 @@ pub struct WorkflowJobStarted {
     pub repository: GithubRepoName,
     pub job_id: JobId,
     pub name: String,
-    pub job_id: JobId,
     pub branch: String,
     pub commit_sha: CommitSha,
     pub run_id: RunId,

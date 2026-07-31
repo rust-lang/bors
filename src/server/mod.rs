@@ -5,8 +5,8 @@ use crate::ec2::{Ec2Instance, Ec2InstanceStatus, get_aws_credentials, get_ec2_in
 use crate::github::{GithubRepoName, PullRequestNumber, rollup};
 use crate::server::cached::Cached;
 use crate::templates::{
-    EC2Template, HelpTemplate, HtmlTemplate, NotFoundTemplate, PendingBuild, PendingWorkflow, PullRequestStats,
-    QueueTemplate, RepositoryView, RollupsInfo,
+    EC2Template, HelpTemplate, HtmlTemplate, NotFoundTemplate, PendingBuild, PendingWorkflow,
+    PullRequestStats, QueueTemplate, RepositoryView, RollupsInfo,
 };
 use crate::utils::sort_queue::sort_queue_prs;
 use crate::{

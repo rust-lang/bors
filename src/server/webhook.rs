@@ -391,7 +391,6 @@ fn parse_workflow_job_events(body: &[u8]) -> anyhow::Result<Option<BorsEvent>> {
                 repository: repository_name,
                 job_id: payload.workflow_job.id,
                 name: payload.workflow_job.name,
-                job_id: payload.workflow_job.id,
                 branch: payload.workflow_job.head_branch,
                 commit_sha: CommitSha(payload.workflow_job.head_sha),
                 run_id: payload.workflow_job.run_id,
@@ -1783,10 +1782,10 @@ mod tests {
                     WorkflowJobStarted(
                         WorkflowJobStarted {
                             repository: kobzol/bors-kindergarten2,
-                            name: "init",
                             job_id: JobId(
                                 89214823120,
                             ),
+                            name: "init",
                             branch: "automation/bors/try",
                             commit_sha: CommitSha(
                                 "13e4ae6263d3ffab811a472772e03b7d345e81fb",
@@ -1817,6 +1816,9 @@ mod tests {
                     WorkflowJobCompleted(
                         WorkflowJobCompleted {
                             repository: kobzol/bors-kindergarten2,
+                            job_id: JobId(
+                                91138434504,
+                            ),
                             name: "init",
                             branch: "automation/bors/auto",
                             commit_sha: CommitSha(
