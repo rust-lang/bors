@@ -154,6 +154,7 @@ pub struct EC2Template {
     pub repo_owner: String,
     pub repo_url: String,
     pub instances: Vec<Ec2Instance>,
+    pub loaded_at: chrono::DateTime<Utc>,
 }
 
 impl EC2Template {

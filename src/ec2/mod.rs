@@ -373,7 +373,7 @@ pub async fn get_ec2_instances(
     Ok(instances)
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum Ec2InstanceStatus {
     Pending,
     Running,
@@ -384,7 +384,7 @@ pub enum Ec2InstanceStatus {
     Unknown(String),
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Ec2Instance {
     pub id: String,
     pub job_id: JobId,

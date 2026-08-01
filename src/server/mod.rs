@@ -1,8 +1,9 @@
 use crate::bors::event::BorsEvent;
 use crate::bors::{CommandPrefix, RepositoryState, format_help};
 use crate::database::{ApprovalStatus, QueueStatus};
-use crate::ec2::{get_aws_credentials, get_ec2_instances};
+use crate::ec2::{Ec2Instance, get_aws_credentials, get_ec2_instances};
 use crate::github::{GithubRepoName, PullRequestNumber, rollup};
+use crate::server::cached::Cached;
 use crate::templates::{
     EC2Template, HelpTemplate, HtmlTemplate, NotFoundTemplate, PullRequestStats, QueueTemplate,
     RepositoryView, RollupsInfo,
@@ -36,7 +37,11 @@ use tower_http::trace::TraceLayer;
 use tracing::Span;
 use webhook::GitHubWebhook;
 
+mod cached;
 pub mod webhook;
+
+/// How often to reload EC2 instance list from AWS.
+const EC2_INSTANCE_RELOAD_DURATION: Duration = Duration::from_secs(60 * 2);
 
 /// Shared server state for all axum handlers.
 pub struct ServerState {
@@ -45,6 +50,7 @@ pub struct ServerState {
     webhook_secret: WebhookSecret,
     oauth: Option<OAuthClient>,
     ctx: Arc<BorsContext>,
+    cache: ServerCache,
 }
 
 impl ServerState {
@@ -61,6 +67,7 @@ impl ServerState {
             webhook_secret,
             oauth,
             ctx,
+            cache: ServerCache::default(),
         }
     }
 
@@ -95,6 +102,18 @@ impl FromRef<ServerStateRef> for Arc<PgDbClient> {
 
 #[derive(Clone)]
 pub struct ServerStateRef(pub Arc<ServerState>);
+
+struct ServerCache {
+    ec2_instances: Cached<Vec<Ec2Instance>>,
+}
+
+impl Default for ServerCache {
+    fn default() -> Self {
+        Self {
+            ec2_instances: Cached::new(EC2_INSTANCE_RELOAD_DURATION),
+        }
+    }
+}
 
 pub fn create_app(state: ServerState) -> Router {
     let compression_layer = CompressionLayer::new()
@@ -492,14 +511,19 @@ pub async fn ec2_handler(
             .into_response());
     };
 
-    let creds = get_aws_credentials(ec2_context).await?;
-    let instances = get_ec2_instances(&gh_repo_name, &creds, ec2_config).await?;
+    let load_instances = async || {
+        let creds = get_aws_credentials(ec2_context).await?;
+        let instances = get_ec2_instances(&gh_repo_name, &creds, ec2_config).await?;
+        anyhow::Ok(instances)
+    };
+    let cached = state.cache.ec2_instances.load(load_instances).await?;
 
     Ok(HtmlTemplate(EC2Template {
         repo_name,
         repo_owner,
         repo_url: format!("https://github.com/{gh_repo_name}"),
-        instances,
+        instances: cached.value,
+        loaded_at: cached.loaded_at,
     })
     .into_response())
 }
