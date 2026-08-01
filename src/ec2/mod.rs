@@ -197,40 +197,36 @@ pub async fn terminate_old_ec2_instances(
     let timeout = repo.config.load().timeout;
 
     #[derive(serde::Deserialize, Debug)]
+    #[serde(rename_all = "PascalCase")]
     struct InstanceState {
-        #[serde(rename = "Name")]
         name: String,
     }
 
     #[derive(serde::Deserialize, Debug)]
+    #[serde(rename_all = "PascalCase")]
     struct Tag {
-        #[serde(rename = "Key")]
         key: String,
-        #[serde(rename = "Value")]
         value: String,
     }
 
     #[derive(serde::Deserialize, Debug)]
+    #[serde(rename_all = "PascalCase")]
     struct Instance {
-        #[serde(rename = "InstanceId")]
         id: String,
-        #[serde(rename = "LaunchTime")]
         launch_time: chrono::DateTime<Utc>,
-        #[serde(rename = "State")]
         state: InstanceState,
-        #[serde(rename = "Tags")]
         tags: Vec<Tag>,
     }
 
     #[derive(serde::Deserialize, Debug)]
+    #[serde(rename_all = "PascalCase")]
     struct Reservation {
-        #[serde(rename = "Instances")]
         instances: Vec<Instance>,
     }
 
     #[derive(serde::Deserialize, Debug)]
+    #[serde(rename_all = "PascalCase")]
     struct Instances {
-        #[serde(rename = "Reservations")]
         reservations: Vec<Reservation>,
     }
 
@@ -311,21 +307,19 @@ fn prepare_aws_cli(creds: Option<&RoleCredentials>) -> tokio::process::Command {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "PascalCase")]
 struct RoleCredentials {
-    #[serde(rename = "AccessKeyId")]
     access_key_id: String,
-    #[serde(rename = "SecretAccessKey")]
     secret_access_key: String,
-    #[serde(rename = "SessionToken")]
     session_token: String,
 }
 
 /// Assume the given role with the current AWS credentials, to create credentials for the role.
 async fn get_aws_credentials(role_arn: &str) -> anyhow::Result<RoleCredentials> {
     #[derive(Deserialize)]
+    #[serde(rename_all = "PascalCase")]
     struct Root {
-        #[serde(rename = "Credentials")]
-        pub credentials: RoleCredentials,
+        credentials: RoleCredentials,
     }
 
     let mut cli = prepare_aws_cli(None);
