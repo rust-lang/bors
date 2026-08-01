@@ -320,6 +320,7 @@ pub async fn handle_bors_global_event(
             senders.merge_queue().maybe_perform_tick().await?;
         }
         BorsGlobalEvent::TerminateOldEC2Instances => {
+            tracing::info!("Attempt to terminate old EC2 instances");
             if let Some(ec2_ctx) = ctx.get_ec2_ctx() {
                 let span = tracing::info_span!("Terminate old EC2 instances");
                 for_each_repo(&ctx, |repo| {
