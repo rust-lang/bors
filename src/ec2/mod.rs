@@ -1,4 +1,5 @@
 use crate::bors::RepositoryState;
+use crate::bors::event::WorkflowJobStarted;
 use crate::config::{Ec2RunnersConfig, JitRunnerKind};
 use anyhow::Context;
 use chrono::Utc;
@@ -8,6 +9,11 @@ use std::time::Duration;
 
 /// Script that will be executed on the launched EC2 instance.
 const LAUNCH_SCRIPT: &str = include_str!("ec2-runner-script.sh");
+
+/// Instance tag that specifies that the given instance should be garbage collected by bors.
+const TAG_BORS_TERMINATE: &str = "bors-terminate";
+/// Tag with the job ID for which the instance was started.
+const TAG_JOB_ID: &str = "bors-job-id";
 
 #[derive(Debug)]
 pub struct ParsedLabel<'a> {
@@ -57,6 +63,7 @@ pub async fn start_ec2_github_runner(
     ec2: &Ec2RunnersConfig,
     repo: &RepositoryState,
     label: ParsedLabel<'_>,
+    payload: &WorkflowJobStarted,
 ) -> anyhow::Result<()> {
     tracing::info!("Trying to start EC2 runner for label {}", label.label);
     let Some(image_name) = ec2.images.get(label.image_name) else {
@@ -109,6 +116,36 @@ pub async fn start_ec2_github_runner(
 
     let creds = get_aws_credentials(&ec2_ctx.role_arn).await?;
 
+    // Hopefully a unique key that identifies this specific instance
+    let instance_name = format!(
+        "{}-{}-{}-{}-{}-{}",
+        repo.repository().owner(),
+        repo.repository().name(),
+        payload.name,
+        payload.run_id,
+        payload.job_id,
+        payload.commit_sha,
+    );
+
+    let job_id = payload.job_id.to_string();
+    let tags = [
+        ("Name", instance_name.as_str()),
+        (TAG_BORS_TERMINATE, "true"),
+        (TAG_JOB_ID, job_id.as_str()),
+    ];
+    let tags = tags
+        .into_iter()
+        .map(|(k, v)| format!("{{Key={k},Value={v}}}"))
+        .collect::<Vec<_>>()
+        .join(",");
+
+    // Idempotency token, to avoid starting the same instance multiple times
+    // For some reason, GitHub sometimes sends us the workflow job started webhook multiple
+    // times...
+    let mut idempotency_token = format!("{}-{}", payload.job_id, payload.commit_sha);
+    // The idempotency token cannot be longer than 64 characters
+    idempotency_token.truncate(64);
+
     // Using the AWS cli is not ideal, but the alternative (depending on aws-config, aws-sdk-ssm and
     // asd-sdk-ec2) has a massive impact on build times and binary size, plus it currently runs into
     // feature hell (ring vs aws-lc-sys). The choice might be reevaluated in the future.
@@ -119,6 +156,8 @@ pub async fn start_ec2_github_runner(
         .arg("run-instances")
         .arg("--region")
         .arg(&ec2.region)
+        .arg("--client-token")
+        .arg(&idempotency_token)
         .arg("--image-id")
         .arg(format!("resolve:ssm:{image_name}"))
         .arg("--instance-type")
@@ -128,6 +167,8 @@ pub async fn start_ec2_github_runner(
         .arg("terminate")
         .arg("--launch-template")
         .arg("LaunchTemplateName=gha-runner,Version=$Latest")
+        .arg("--tag-specifications")
+        .arg(format!("ResourceType=instance,Tags=[{tags}]"))
         .arg("--user-data")
         .arg(script);
 
@@ -162,6 +203,14 @@ pub async fn terminate_old_ec2_instances(
     }
 
     #[derive(serde::Deserialize, Debug)]
+    struct Tag {
+        #[serde(rename = "Key")]
+        key: String,
+        #[serde(rename = "Value")]
+        value: String,
+    }
+
+    #[derive(serde::Deserialize, Debug)]
     struct Instance {
         #[serde(rename = "InstanceId")]
         id: String,
@@ -169,6 +218,8 @@ pub async fn terminate_old_ec2_instances(
         launch_time: chrono::DateTime<Utc>,
         #[serde(rename = "State")]
         state: InstanceState,
+        #[serde(rename = "Tags")]
+        tags: Vec<Tag>,
     }
 
     #[derive(serde::Deserialize, Debug)]
@@ -183,6 +234,11 @@ pub async fn terminate_old_ec2_instances(
         reservations: Vec<Reservation>,
     }
 
+    #[derive(Debug)]
+    struct BorsInstance {
+        instance: Instance,
+    }
+
     let creds = get_aws_credentials(&ec2_ctx.role_arn).await?;
     let instances = run_command(
         prepare_aws_cli(Some(&creds))
@@ -191,22 +247,34 @@ pub async fn terminate_old_ec2_instances(
     )
     .await
     .context("Cannot list running EC2 instances")?;
-    let instances: Vec<Instance> = serde_json::from_str::<Instances>(&instances)?
+    let instances: Vec<BorsInstance> = serde_json::from_str::<Instances>(&instances)?
         .reservations
         .into_iter()
         .flat_map(|r| r.instances)
+        .filter_map(|instance| {
+            let terminate = instance.tags.iter().find(|t| t.key == TAG_BORS_TERMINATE)?;
+            if terminate.value != "true" {
+                return None;
+            }
+
+            Some(BorsInstance { instance })
+        })
         .collect();
+    if instances.is_empty() {
+        return Ok(());
+    }
     tracing::debug!(
-        "Found the following EC2 instances ({}): {instances:?}",
+        "Found the following bors EC2 instances ({}): {instances:?}",
         instances.len()
     );
 
+    // TODO: also terminate instances whose GitHub jobs are no longer running
     let deadline = Utc::now() - timeout;
     let too_old_ids = instances
         .into_iter()
-        .filter(|instance| instance.launch_time < deadline)
-        .filter(|instance| instance.state.name != "terminated")
-        .map(|instance| instance.id)
+        .filter(|instance| instance.instance.state.name != "terminated")
+        .filter(|instance| instance.instance.launch_time < deadline)
+        .map(|instance| instance.instance.id)
         .collect::<Vec<String>>();
 
     if !too_old_ids.is_empty() {

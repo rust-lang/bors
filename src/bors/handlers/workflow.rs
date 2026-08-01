@@ -172,7 +172,7 @@ pub(super) async fn handle_workflow_job_started(
         return Ok(());
     };
 
-    start_ec2_github_runner(ec2_ctx, ec2_config, &repo, label).await?;
+    start_ec2_github_runner(ec2_ctx, ec2_config, &repo, label, &payload).await?;
 
     Ok(())
 }

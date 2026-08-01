@@ -134,7 +134,9 @@ pub async fn handle_bors_repository_event(
             let span = tracing::info_span!(
                 "Workflow job started",
                 repo = payload.repository.to_string(),
-                id = payload.run_id.into_inner()
+                name = payload.name,
+                run_id = payload.run_id.into_inner(),
+                job_id = payload.job_id.into_inner(),
             );
             handle_workflow_job_started(&ctx, repo, payload)
                 .instrument(span)
