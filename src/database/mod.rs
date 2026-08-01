@@ -289,7 +289,7 @@ impl FromStr for DelegatedPermission {
 }
 
 /// Status of a GitHub build.
-#[derive(Debug, PartialEq, sqlx::Type)]
+#[derive(Copy, Clone, Debug, PartialEq, sqlx::Type)]
 #[sqlx(type_name = "TEXT")]
 #[sqlx(rename_all = "lowercase")]
 pub enum BuildStatus {
@@ -377,7 +377,7 @@ impl sqlx::Decode<'_, sqlx::Postgres> for PgDuration {
 }
 
 /// Represents a single (merged) commit.
-#[derive(Debug, PartialEq, sqlx::Type)]
+#[derive(Debug, Clone, PartialEq, sqlx::Type)]
 #[sqlx(type_name = "build")]
 pub struct BuildModel {
     pub id: PrimaryKey,

@@ -1,8 +1,7 @@
-use crate::bors::BuildKind;
 use crate::bors::RollupMode::*;
+use crate::bors::{BuildKind, WorkflowJobData, WorkflowJobStatus};
 use crate::database::{
-    BuildModel, BuildStatus, MergeableState::*, PullRequestModel, QueueStatus, TreeState,
-    WorkflowModel,
+    BuildModel, MergeableState::*, PullRequestModel, QueueStatus, TreeState, WorkflowModel,
 };
 use crate::ec2::{Ec2Instance, Ec2InstanceStatus};
 use crate::github::PullRequestNumber;
@@ -11,6 +10,7 @@ use axum::response::{Html, IntoResponse, Response};
 use chrono::Utc;
 use http::StatusCode;
 use itertools::Itertools;
+use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 use std::time::Duration;
@@ -74,6 +74,16 @@ impl From<HashMap<PullRequestNumber, HashSet<PullRequestNumber>>> for RollupsInf
     }
 }
 
+pub struct PendingWorkflow {
+    pub workflow: WorkflowModel,
+    pub jobs: Vec<WorkflowJobData>,
+}
+
+pub struct PendingBuild {
+    pub build: BuildModel,
+    pub workflow: Option<PendingWorkflow>,
+}
+
 #[derive(Template)]
 #[template(path = "queue.html", whitespace = "minimize")]
 pub struct QueueTemplate {
@@ -87,8 +97,8 @@ pub struct QueueTemplate {
     pub oauth_client_id: Option<String>,
     // PRs that should be pre-selected for being included in a rollup
     pub selected_rollup_prs: Vec<u32>,
-    // Active workflow for an active pending auto build
-    pub pending_workflow: Option<WorkflowModel>,
+    // Pending auto build(s)
+    pub pending_builds: HashMap<PullRequestNumber, PendingBuild>,
     // Guesstimated duration to merge all current approved/pending PRs in the queue
     pub expected_remaining_duration: Option<Duration>,
     // Average build duration over the past few successful auto builds
@@ -104,13 +114,22 @@ impl QueueTemplate {
         (Utc::now() - build.created_at).to_std().unwrap_or_default()
     }
 
-    fn get_pending_auto_build<'a>(&self, pr: &'a PullRequestModel) -> Option<&'a BuildModel> {
-        if let Some(auto_build) = &pr.auto_build
-            && auto_build.status == BuildStatus::Pending
-        {
-            return Some(auto_build);
-        }
-        None
+    fn get_pending_auto_build<'a>(&'a self, pr: &'a PullRequestModel) -> Option<&'a PendingBuild> {
+        self.pending_builds.get(&pr.number)
+    }
+
+    fn get_pending_builds(&self) -> Vec<(&PullRequestNumber, &PendingBuild)> {
+        let mut pending: Vec<_> = self.pending_builds.iter().collect();
+        pending.sort_by(|(pr1, a), (pr2, b)| {
+            match (a.build.kind, b.build.kind) {
+                (BuildKind::Auto, BuildKind::Try) => return Ordering::Less,
+                (BuildKind::Try, BuildKind::Auto) => return Ordering::Greater,
+                _ => {}
+            }
+
+            pr1.cmp(pr2)
+        });
+        pending
     }
 
     /// Calculate the % progress of a build based on average build duration.
@@ -146,6 +165,46 @@ impl QueueTemplate {
         // and the result is significant
         pr.note() == Some("rustc-perf")
     }
+
+    fn count_completed_jobs(&self, jobs: &[WorkflowJobData]) -> u64 {
+        jobs.iter()
+            .filter(|j| matches!(j.status, WorkflowJobStatus::Completed))
+            .count() as u64
+    }
+
+    /// Format jobs that are not yet completed, to be rendered into a title attribute.
+    fn remaining_jobs_formatted_title(&self, jobs: &[WorkflowJobData]) -> String {
+        use std::fmt::Write;
+
+        let remaining = get_remaining_jobs(jobs);
+        if remaining.is_empty() {
+            return String::new();
+        }
+        let mut data = String::from("\n\nRemaining jobs:\n");
+        for job in remaining {
+            writeln!(data, "{}", job.name).unwrap();
+        }
+
+        data
+    }
+
+    /// Format jobs that are not yet completed, to be rendered into the jobs column.
+    fn remaining_jobs_formatted_column(&self, jobs: &[WorkflowJobData]) -> String {
+        let remaining = get_remaining_jobs(jobs);
+        if remaining.is_empty() {
+            return String::new();
+        }
+        format!(
+            " ({})",
+            remaining.iter().take(5).map(|j| &j.name).join(", ")
+        )
+    }
+}
+
+fn get_remaining_jobs(jobs: &[WorkflowJobData]) -> Vec<&WorkflowJobData> {
+    let mut remaining: Vec<_> = jobs.iter().filter(|j| !j.status.is_completed()).collect();
+    remaining.sort_by(|a, b| a.name.cmp(&b.name));
+    remaining
 }
 
 #[derive(Template)]

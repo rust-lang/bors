@@ -69,6 +69,11 @@
         padding: 6px 8px;
     }
 
+    td.job-list {
+        max-width: 1000px;
+        overflow-x: hidden;
+    }
+
     table.dataTable td.status {
         padding-left: 10px;
     }
@@ -265,6 +270,64 @@ Average duration of recent auto builds: {{ format_duration(*average_build_durati
     </select></label>
   </div>
 
+  {% let builds = get_pending_builds() %}
+  {% if !builds.is_empty() %}
+    <div class="toggle">
+      <button id="builds-toggle" title="Toggle pending builds table">Pending builds</button>
+    </div>
+    <div class="table-builds-wrapper" style="display: none; max-width: 800px;">
+      <div id="loading-builds">Loading...</div>
+      <table id="table-builds" class="stripe" style="display: none;">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Workflow URL</th>
+            <th>Started at/elapsed</th>
+            <th>Remaining time (est.)</th>
+            <th>Jobs</th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for (pr, pending) in builds %}
+          <tr
+            data-created-at="{{ pending.build.created_at.timestamp_millis() }}"
+            data-pr-number-target="{{ pr.0 }}"
+          >
+            <td>
+              <a href="{{ repo_url }}/pull/{{ pr.0 }}">
+                {{ pr.0 }}
+              </a>
+            </td>
+            {% if let Some(workflow) = pending.workflow %}
+              <td>
+                <a href="{{ workflow.workflow.url }}">{{ workflow.workflow.run_id }}</a>
+              </td>
+            {% else %}
+              <td></td>
+            {% endif %}
+            <td>
+              <span class="timestamp"></span>
+              <span class="elapsed-time-display"></span>
+            </td>
+            <td>
+              <span class="remaining-time-display"></span>
+            </td>
+            {% if let Some(workflow) = pending.workflow %}
+              <td
+                class="job-list"
+                title="Number of completed/started jobs. Note that this can be inaccurate!{{ remaining_jobs_formatted_title(&workflow.jobs) }}">
+                  {{ count_completed_jobs(&workflow.jobs) }}/{{ workflow.jobs.len() }}{{ remaining_jobs_formatted_column(&workflow.jobs) }}
+              </td>
+            {% else %}
+              <td class="job-list"></td>
+            {% endif %}
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% endif %}
+
   <div class="table-wrapper">
     <div id="loading">Loading...</div>
     <table id="table" class="stripe" style="display: none;">
@@ -285,7 +348,7 @@ Average duration of recent auto builds: {{ format_duration(*average_build_durati
 
         <tbody>
             {%- for pr in prs %}
-            {% let pending_build = get_pending_auto_build(pr) %}
+            {% let pending = get_pending_auto_build(pr) %}
             <tr data-pr-number="{{ pr.number.0 }}"
                 {% if let Some(rollup_members) = rollups_info.rollups.get(pr.number) %}
                 data-rollup-pr-members='{{ rollup_members.iter().join(",")  }}'
@@ -297,7 +360,7 @@ Average duration of recent auto builds: {{ format_duration(*average_build_durati
                 data-preselected="{{ selected_rollup_prs.contains(pr.number.0 as u32) }}"
                 {% if let Some(priority) = tree_state.priority() &&
                       pr.priority.unwrap_or(0) < *priority as i32 &&
-                      pending_build.is_none() %}
+            pending.is_none() %}
                 class="treeclosed"
                 {% endif %}>
                 <td class="select-checkbox"></td>
@@ -307,10 +370,10 @@ Average duration of recent auto builds: {{ format_duration(*average_build_durati
                       {%- if pr.note().is_some() && !has_significant_perf(pr) %}*{% endif %}
                     </a>
                 </td>
-                <td class="status{% if pending_build.is_some() %} has-progress{% endif %}" data-status="{{ crate::templates::status_text(pr) }}"
-                    {%- if let Some(build) = pending_build %} data-created-at="{{ build.created_at.timestamp_millis() }}"{% endif %}>
-                    {%- if let Some(build) = pending_build -%}
-                    {%- let progress_percent = calculate_progress_pct(build, *average_build_duration) -%}
+                <td class="status times-title{% if pending.is_some() %} has-progress{% endif %}" data-status="{{ crate::templates::status_text(pr) }}"
+                    {%- if let Some(pending) = pending %} data-created-at="{{ pending.build.created_at.timestamp_millis() }}"{% endif %}>
+                    {%- if let Some(pending) = pending -%}
+                    {%- let progress_percent = calculate_progress_pct(pending.build, *average_build_duration) -%}
                     <div class="progress-bar-bg"
                          role="progressbar"
                          aria-valuenow="{{ progress_percent }}"
@@ -326,8 +389,8 @@ Average duration of recent auto builds: {{ format_duration(*average_build_durati
                         ready for merge
                       {%- when QueueStatus::Pending(_, _) -%}
                         <div>
-                        {%- if let Some(workflow) = pending_workflow -%}
-                          <a href="{{ workflow.url }}">pending</a>
+                        {%- if let Some(pending) = pending && let Some(workflow) = pending.workflow -%}
+                          <a href="{{ workflow.workflow.url }}">pending</a>
                         {%- else -%}
                           pending
                         {%- endif -%}
@@ -430,6 +493,8 @@ Average duration of recent auto builds: {{ format_duration(*average_build_durati
 <script src="/assets/js/datatables-dt-jq-3.7.0-dt-2.3.6-rg-1.6.0-sl-3.1.3.min.js"></script>
 
 <script>
+    const BUILDS_TABLE_SHOWN_KEY = "prefs.builds-table.shown";
+
     const getDataStatusFromCell = (cell) => cell?.dataset?.status || "";
     const interactiveSelector = "a, button, input, label, select, textarea";
 
@@ -675,6 +740,56 @@ Average duration of recent auto builds: {{ format_duration(*average_build_durati
 
     initialize(null);
 
+    function initializeBuildsTable() {
+      let config = {
+        layout: {
+          topEnd: null,
+          topStart: null,
+          bottomStart: null,
+          bottomEnd: null
+        },
+        pageLength: 100,
+        columns: [
+          { name: "pr", className: "dt-right" },
+          { name: "workflow-url" },
+          { name: "started" },
+          { name: "remaining" },
+          { name: "jobs" },
+        ],
+        ordering: false,
+        autoWidth: false,
+        initComplete: function() {
+          $("#table-builds").show();
+          $("#loading-builds").hide();
+
+          const tbody = document.querySelector("#table-builds tbody");
+          const clear = () => {
+            document.querySelectorAll(".rollup-hover").forEach(el => el.classList.remove("rollup-hover"));
+          };
+          const handler = (event) => {
+            // Reset highlight
+            clear();
+            const rowElement = event.target.closest("tr");
+            if (!rowElement) {
+              return;
+            }
+            let prNumberTarget = rowElement.dataset.prNumberTarget;
+            if (!prNumberTarget) {
+              return;
+            }
+            const element = document.querySelector(`tr[data-pr-number="${prNumberTarget}"]`);
+            if (element !== null) {
+              element.classList.add("rollup-hover");
+            }
+          }
+          tbody.addEventListener("mouseover", handler);
+          tbody.addEventListener("mouseleave", clear);
+        }
+      };
+      return new DataTable("#table-builds", config);
+    }
+    initializeBuildsTable();
+
     const createRollupButton = document.getElementById("showRollupSelection")
     const modal = document.getElementById("rollupModal");
     const modalMessage = document.getElementById("rollupModalMessage");
@@ -739,7 +854,51 @@ Average duration of recent auto builds: {{ format_duration(*average_build_durati
     });
     {% endif %}
 
-    function formatElapsedTime(ms) {
+    const buildsToggleButton = document.getElementById("builds-toggle");
+    if (buildsToggleButton !== null) {
+      buildsToggleButton.addEventListener("click", () => {
+        const table = document.querySelector(".table-builds-wrapper");
+        if (table === null) return;
+
+        const isHidden = window.getComputedStyle(table).display === 'none';
+        if (isHidden) {
+          storeBuildTableShown(true);
+          table.style.display = "block";
+        } else {
+          storeBuildTableShown(false);
+          table.style.display = "none";
+        }
+      });
+    }
+
+    function storeBuildTableShown(shown) {
+      if (localStorage !== null) {
+        localStorage.setItem(BUILDS_TABLE_SHOWN_KEY, JSON.stringify(shown));
+      }
+    }
+
+    function loadBuildTableShown() {
+      if (localStorage === null) {
+        return true;
+      }
+      const data = localStorage.getItem(BUILDS_TABLE_SHOWN_KEY);
+      if (data === null) return true;
+
+      try {
+        return JSON.parse(data);
+      } catch {
+        return true;
+      }
+    }
+
+    const buildTableWrapper = document.querySelector(".table-builds-wrapper");
+    if (buildTableWrapper !== null) {
+      if (loadBuildTableShown()) {
+        buildTableWrapper.style.display = "block";
+      }
+    }
+
+    function formatTimeMs(ms) {
         const totalSeconds = Math.floor(ms / 1000);
         const hours = Math.floor(totalSeconds / 3600);
         const remainingSeconds = totalSeconds % 3600;
@@ -758,10 +917,7 @@ Average duration of recent auto builds: {{ format_duration(*average_build_durati
         } else if (output.length === 0) {
             output = '<1m';
         }
-        if (output.length > 0) {
-            return ` (${output})`;
-        }
-        return '';
+        return output;
     }
 
     const AVERAGE_BUILD_DURATION_MS = {{ average_build_duration.as_millis() }};
@@ -772,9 +928,31 @@ Average duration of recent auto builds: {{ format_duration(*average_build_durati
             const createdAtMs = parseInt(td.dataset.createdAt, 10);
             if (createdAtMs > 0) {
                 const elapsedMs = now - createdAtMs;
-                const formattedTime = formatElapsedTime(elapsedMs);
-                const display = td.querySelector('.elapsed-time-display');
-                display.textContent = formattedTime;
+
+                let elapsedTime = formatTimeMs(elapsedMs);
+                if (elapsedTime.length > 0) {
+                  elapsedTime = ` (${elapsedTime})`;
+                }
+                const elapsedTimeElements = td.querySelector('.elapsed-time-display');
+                if (elapsedTimeElements !== null) {
+                  elapsedTimeElements.textContent = elapsedTime;
+                }
+                const timestampElements = td.querySelector('.timestamp');
+                if (timestampElements !== null) {
+                  timestampElements.textContent = new Date(createdAtMs).toLocaleString();
+                }
+
+                const expectedRemainingMs = AVERAGE_BUILD_DURATION_MS - elapsedMs;
+                let expectedRemaining;
+                if (expectedRemainingMs >= 0) {
+                  expectedRemaining = `${formatTimeMs(expectedRemainingMs)} left`;
+                } else {
+                  expectedRemaining = `${formatTimeMs(-expectedRemainingMs)} overdue`;
+                }
+                const remainingTimeElements = td.querySelector('.remaining-time-display');
+                if (remainingTimeElements !== null) {
+                  remainingTimeElements.textContent = expectedRemaining;
+                }
 
                 // Update progress bar width and ARIA attribute
                 const progressBar = td.querySelector('.progress-bar-bg');
@@ -786,8 +964,10 @@ Average duration of recent auto builds: {{ format_duration(*average_build_durati
 
                 const startedAt = new Date(createdAtMs);
                 const expectedEndAt = new Date(createdAtMs + AVERAGE_BUILD_DURATION_MS);
-                td.title = `Started at: ${startedAt.toLocaleString()}
+                if (td.classList.contains("times-title")) {
+                  td.title = `Started at: ${startedAt.toLocaleString()}
 Expected end: ${expectedEndAt.toLocaleString()}`;
+                }
             }
         });
     }

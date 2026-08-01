@@ -1,6 +1,4 @@
 //! This module handles parsing webhooks and generating [`BorsEvent`]s from them.
-use std::fmt::Debug;
-
 use axum::RequestExt;
 use axum::body::Bytes;
 use axum::extract::FromRequest;
@@ -21,8 +19,8 @@ use crate::bors::event::{
     BorsEvent, BorsGlobalEvent, BorsRepositoryEvent, PullRequestAssigned, PullRequestClosed,
     PullRequestComment, PullRequestConvertedToDraft, PullRequestEdited, PullRequestMerged,
     PullRequestOpened, PullRequestPushed, PullRequestReadyForReview, PullRequestReopened,
-    PullRequestUnassigned, PushToBranch, WorkflowJobStarted, WorkflowRunCompleted,
-    WorkflowRunStarted,
+    PullRequestUnassigned, PushToBranch, WorkflowJobCompleted, WorkflowJobStarted,
+    WorkflowRunCompleted, WorkflowRunStarted,
 };
 use crate::database::{WorkflowStatus, WorkflowType};
 use crate::github::{CommitSha, GithubRepoName, PullRequestNumber};
@@ -391,12 +389,22 @@ fn parse_workflow_job_events(body: &[u8]) -> anyhow::Result<Option<BorsEvent>> {
         "queued" => Some(BorsEvent::Repository(
             BorsRepositoryEvent::WorkflowJobStarted(WorkflowJobStarted {
                 repository: repository_name,
-                name: payload.workflow_job.name,
                 job_id: payload.workflow_job.id,
+                name: payload.workflow_job.name,
                 branch: payload.workflow_job.head_branch,
                 commit_sha: CommitSha(payload.workflow_job.head_sha),
                 run_id: payload.workflow_job.run_id,
                 labels: payload.workflow_job.labels,
+            }),
+        )),
+        "completed" => Some(BorsEvent::Repository(
+            BorsRepositoryEvent::WorkflowJobCompleted(WorkflowJobCompleted {
+                repository: repository_name,
+                job_id: payload.workflow_job.id,
+                name: payload.workflow_job.name,
+                branch: payload.workflow_job.head_branch,
+                commit_sha: CommitSha(payload.workflow_job.head_sha),
+                run_id: payload.workflow_job.run_id,
             }),
         )),
         _ => None,
@@ -1774,10 +1782,10 @@ mod tests {
                     WorkflowJobStarted(
                         WorkflowJobStarted {
                             repository: kobzol/bors-kindergarten2,
-                            name: "init",
                             job_id: JobId(
                                 89214823120,
                             ),
+                            name: "init",
                             branch: "automation/bors/try",
                             commit_sha: CommitSha(
                                 "13e4ae6263d3ffab811a472772e03b7d345e81fb",
@@ -1788,6 +1796,37 @@ mod tests {
                             labels: [
                                 "ubuntu-latest",
                             ],
+                        },
+                    ),
+                ),
+            ),
+        )
+        "#
+        );
+    }
+
+    #[tokio::test]
+    async fn workflow_job_completed() {
+        insta::assert_debug_snapshot!(
+            check_webhook("webhook/workflow-job-completed.json", "workflow_job").await,
+            @r#"
+        Ok(
+            GitHubWebhook(
+                Repository(
+                    WorkflowJobCompleted(
+                        WorkflowJobCompleted {
+                            repository: kobzol/bors-kindergarten2,
+                            job_id: JobId(
+                                91138434504,
+                            ),
+                            name: "init",
+                            branch: "automation/bors/auto",
+                            commit_sha: CommitSha(
+                                "a0455bb1ebc7d836b1d0d7acb60700787725ea4e",
+                            ),
+                            run_id: RunId(
+                                30625113817,
+                            ),
                         },
                     ),
                 ),

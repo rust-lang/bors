@@ -36,12 +36,14 @@ pub enum BorsRepositoryEvent {
     WorkflowCompleted(WorkflowRunCompleted),
     /// A workflow job on Github Actions has started.
     WorkflowJobStarted(WorkflowJobStarted),
+    /// A workflow job on Github Actions has completed.
+    WorkflowJobCompleted(WorkflowJobCompleted),
 }
 
 impl BorsRepositoryEvent {
     pub fn repository(&self) -> &GithubRepoName {
         match self {
-            BorsRepositoryEvent::Comment(comment) => &comment.repository,
+            BorsRepositoryEvent::Comment(payload) => &payload.repository,
             BorsRepositoryEvent::PullRequestCommitPushed(payload) => &payload.repository,
             BorsRepositoryEvent::PullRequestEdited(payload) => &payload.repository,
             BorsRepositoryEvent::PullRequestOpened(payload) => &payload.repository,
@@ -53,9 +55,10 @@ impl BorsRepositoryEvent {
             BorsRepositoryEvent::PullRequestUnassigned(payload) => &payload.repository,
             BorsRepositoryEvent::PullRequestReadyForReview(payload) => &payload.repository,
             BorsRepositoryEvent::PushToBranch(payload) => &payload.repository,
-            BorsRepositoryEvent::WorkflowStarted(workflow) => &workflow.repository,
-            BorsRepositoryEvent::WorkflowCompleted(workflow) => &workflow.repository,
-            BorsRepositoryEvent::WorkflowJobStarted(workflow) => &workflow.repository,
+            BorsRepositoryEvent::WorkflowStarted(payload) => &payload.repository,
+            BorsRepositoryEvent::WorkflowCompleted(payload) => &payload.repository,
+            BorsRepositoryEvent::WorkflowJobStarted(payload) => &payload.repository,
+            BorsRepositoryEvent::WorkflowJobCompleted(payload) => &payload.repository,
         }
     }
 }
@@ -193,10 +196,20 @@ pub struct WorkflowRunCompleted {
 #[derive(Debug)]
 pub struct WorkflowJobStarted {
     pub repository: GithubRepoName,
-    pub name: String,
     pub job_id: JobId,
+    pub name: String,
     pub branch: String,
     pub commit_sha: CommitSha,
     pub run_id: RunId,
     pub labels: Vec<String>,
+}
+
+#[derive(Debug)]
+pub struct WorkflowJobCompleted {
+    pub repository: GithubRepoName,
+    pub job_id: JobId,
+    pub name: String,
+    pub branch: String,
+    pub commit_sha: CommitSha,
+    pub run_id: RunId,
 }
