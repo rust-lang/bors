@@ -1,3 +1,4 @@
+use crate::bors::BuildKind;
 use crate::bors::RollupMode::*;
 use crate::database::{
     BuildModel, BuildStatus, MergeableState::*, PullRequestModel, QueueStatus, TreeState,
@@ -171,7 +172,7 @@ impl EC2Template {
     }
 
     fn get_lifetime(&self, instance: &Ec2Instance) -> String {
-        let end = instance.ended_at.unwrap_or_else(|| Utc::now());
+        let end = instance.ended_at.unwrap_or_else(Utc::now);
         let duration = end
             .signed_duration_since(instance.started_at)
             .to_std()

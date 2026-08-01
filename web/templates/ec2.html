@@ -39,6 +39,7 @@
     <tr>
       <th>ID</th>
       <th>PR</th>
+      <th>Build kind</th>
       <th>Job</th>
       <th>State</th>
       <th>Started at</th>
@@ -55,6 +56,14 @@
       {% else %}
       Unknown
       {% endif %}
+      <td>
+        {% match instance.build_kind %}
+        {% when BuildKind::Try %}
+        try
+        {% when BuildKind::Auto %}
+        auto
+        {% endmatch %}
+      </td>
       <td><a href="{{ repo_url }}/actions/runs/{{ instance.run_id }}/job/{{ instance.job_id }}">{{
         instance.job_name }}</a></td>
       <td>{{ format_status(&instance.status) }}</td>

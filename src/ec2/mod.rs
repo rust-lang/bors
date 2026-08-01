@@ -1,5 +1,5 @@
-use crate::bors::RepositoryState;
 use crate::bors::event::WorkflowJobStarted;
+use crate::bors::{BuildKind, RepositoryState};
 use crate::config::{Ec2RunnersConfig, JitRunnerKind};
 use crate::database::RunId;
 use crate::github::{GithubRepoName, PullRequestNumber};
@@ -27,6 +27,8 @@ const TAG_JOB_NAME: &str = "bors-job-name";
 const TAG_RUN_ID: &str = "bors-run-id";
 /// Tag with the pull request number for which the instance was started.
 const TAG_PR_NUMBER: &str = "bors-pr-number";
+/// Tag with the build kind (auto/try) for which the instance was started.
+const TAG_BUILD_KIND: &str = "bors-build-kind";
 
 /// How much time to wait before timeouting each aws command execution.
 const AWS_COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
@@ -81,6 +83,7 @@ pub async fn start_ec2_github_runner(
     label: ParsedLabel<'_>,
     payload: &WorkflowJobStarted,
     pr_number: Option<PullRequestNumber>,
+    build_kind: BuildKind,
 ) -> anyhow::Result<()> {
     tracing::info!("Trying to start EC2 runner for label {}", label.label);
     let Some(image_name) = ec2.images.get(label.image_name) else {
@@ -151,6 +154,14 @@ pub async fn start_ec2_github_runner(
         (TAG_JOB_ID, payload.job_id.to_string()),
         (TAG_JOB_NAME, payload.name.clone()),
         (TAG_RUN_ID, payload.run_id.to_string()),
+        (
+            TAG_BUILD_KIND,
+            match build_kind {
+                BuildKind::Try => "try",
+                BuildKind::Auto => "auto",
+            }
+            .to_string(),
+        ),
     ];
     if let Some(pr_number) = pr_number {
         tags.push((TAG_PR_NUMBER, pr_number.to_string()));
@@ -345,6 +356,13 @@ pub async fn get_ec2_instances(
             let pr_number = tags
                 .get(TAG_PR_NUMBER)
                 .and_then(|pr| pr.parse::<u64>().map(PullRequestNumber).ok());
+            let build_kind =
+                tags.get(TAG_BUILD_KIND)
+                    .and_then(|build_kind| match build_kind.as_str() {
+                        "try" => Some(BuildKind::Try),
+                        "auto" => Some(BuildKind::Auto),
+                        _ => None,
+                    })?;
 
             let status = match instance.state.name.as_str() {
                 "pending" => Ec2InstanceStatus::Pending,
@@ -360,13 +378,14 @@ pub async fn get_ec2_instances(
 
             Some(Ec2Instance {
                 id: instance.id,
+                status,
                 job_id,
                 job_name,
                 run_id,
                 started_at: instance.launch_time,
                 ended_at,
                 pr_number,
-                status,
+                build_kind,
             })
         })
         .collect();
@@ -387,13 +406,14 @@ pub enum Ec2InstanceStatus {
 #[derive(Clone, Debug)]
 pub struct Ec2Instance {
     pub id: String,
+    pub status: Ec2InstanceStatus,
     pub job_id: JobId,
     pub job_name: String,
     pub run_id: RunId,
     pub started_at: DateTime<Utc>,
     pub ended_at: Option<DateTime<Utc>>,
     pub pr_number: Option<PullRequestNumber>,
-    pub status: Ec2InstanceStatus,
+    pub build_kind: BuildKind,
 }
 
 #[derive(Deserialize)]

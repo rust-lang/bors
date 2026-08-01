@@ -3,7 +3,7 @@ use crate::bors::build::{CancelBuildConclusion, CancelBuildError};
 use crate::bors::build_queue::BuildQueueSender;
 use crate::bors::comment::{CommentTag, append_workflow_links_to_comment};
 use crate::bors::event::{WorkflowJobStarted, WorkflowRunCompleted, WorkflowRunStarted};
-use crate::bors::handlers::is_bors_observed_branch;
+use crate::bors::handlers::{get_build_kind_from_branch, is_bors_observed_branch};
 use crate::bors::{BuildKind, build};
 use crate::database::{BuildModel, BuildStatus, PullRequestModel, WorkflowStatus};
 use crate::ec2::{ParsedLabel, start_ec2_github_runner};
@@ -153,9 +153,9 @@ pub(super) async fn handle_workflow_job_started(
     repo: Arc<RepositoryState>,
     payload: WorkflowJobStarted,
 ) -> anyhow::Result<()> {
-    if !is_bors_observed_branch(&payload.branch) {
+    let Some(build_kind) = get_build_kind_from_branch(&payload.branch) else {
         return Ok(());
-    }
+    };
 
     let Some(ec2_ctx) = ctx.get_ec2_ctx() else {
         return Ok(());
@@ -201,7 +201,10 @@ pub(super) async fn handle_workflow_job_started(
         }
     };
 
-    start_ec2_github_runner(ec2_ctx, ec2_config, &repo, label, &payload, pr_number).await?;
+    start_ec2_github_runner(
+        ec2_ctx, ec2_config, &repo, label, &payload, pr_number, build_kind,
+    )
+    .await?;
 
     Ok(())
 }
