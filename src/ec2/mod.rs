@@ -1,6 +1,7 @@
 use crate::bors::RepositoryState;
 use crate::bors::event::WorkflowJobStarted;
 use crate::config::{Ec2RunnersConfig, JitRunnerKind};
+use crate::github::PullRequestNumber;
 use anyhow::Context;
 use chrono::Utc;
 use serde::Deserialize;
@@ -20,6 +21,8 @@ const TAG_JOB_ID: &str = "bors-job-id";
 const TAG_JOB_NAME: &str = "bors-job-name";
 /// Tag with the workflow run ID for which the instance was started.
 const TAG_RUN_ID: &str = "bors-run-id";
+/// Tag with the pull request number for which the instance was started.
+const TAG_PR_NUMBER: &str = "bors-pr-number";
 
 /// How much time to wait before timeouting each aws command execution.
 const AWS_COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
@@ -73,6 +76,7 @@ pub async fn start_ec2_github_runner(
     repo: &RepositoryState,
     label: ParsedLabel<'_>,
     payload: &WorkflowJobStarted,
+    pr_number: Option<PullRequestNumber>,
 ) -> anyhow::Result<()> {
     tracing::info!("Trying to start EC2 runner for label {}", label.label);
     let Some(image_name) = ec2.images.get(label.image_name) else {
@@ -136,14 +140,18 @@ pub async fn start_ec2_github_runner(
         payload.commit_sha,
     );
 
-    let tags = [
-        ("Name", instance_name.as_str()),
-        (TAG_BORS_TERMINATE, "true"),
-        (TAG_REPO, &repo.repository().to_string()),
-        (TAG_JOB_ID, &payload.job_id.to_string()),
-        (TAG_JOB_NAME, &payload.name),
-        (TAG_RUN_ID, &payload.run_id.to_string()),
+    let mut tags = vec![
+        ("Name", instance_name.clone()),
+        (TAG_BORS_TERMINATE, "true".to_string()),
+        (TAG_REPO, repo.repository().to_string()),
+        (TAG_JOB_ID, payload.job_id.to_string()),
+        (TAG_JOB_NAME, payload.name.clone()),
+        (TAG_RUN_ID, payload.run_id.to_string()),
     ];
+    if let Some(pr_number) = pr_number {
+        tags.push((TAG_PR_NUMBER, pr_number.to_string()));
+    }
+
     let tags = tags
         .into_iter()
         .map(|(k, v)| {

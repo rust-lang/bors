@@ -149,6 +149,7 @@ pub(super) async fn handle_workflow_completed(
 
 pub(super) async fn handle_workflow_job_started(
     ctx: &BorsContext,
+    db: Arc<PgDbClient>,
     repo: Arc<RepositoryState>,
     payload: WorkflowJobStarted,
 ) -> anyhow::Result<()> {
@@ -172,7 +173,35 @@ pub(super) async fn handle_workflow_job_started(
         return Ok(());
     };
 
-    start_ec2_github_runner(ec2_ctx, ec2_config, &repo, label, &payload).await?;
+    // Try to find a PR attached to the job. This is best effort (though normally it should
+    // suceced).
+    let pr_number = async {
+        let Some(build) = db
+            .find_build(
+                repo.repository(),
+                &payload.branch,
+                payload.commit_sha.clone(),
+            )
+            .await?
+        else {
+            return Ok(None);
+        };
+
+        let Some(pr) = db.find_pr_by_build(&build).await? else {
+            return Ok(None);
+        };
+        anyhow::Ok(Some(pr.number))
+    }
+    .await;
+    let pr_number = match pr_number {
+        Ok(Some(pr_number)) => Some(pr_number),
+        res => {
+            tracing::warn!("Cannot find PR for workflow job {}: {res:?}", payload.name);
+            None
+        }
+    };
+
+    start_ec2_github_runner(ec2_ctx, ec2_config, &repo, label, &payload, pr_number).await?;
 
     Ok(())
 }
