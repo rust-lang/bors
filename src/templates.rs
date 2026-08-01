@@ -3,6 +3,7 @@ use crate::database::{
     BuildModel, BuildStatus, MergeableState::*, PullRequestModel, QueueStatus, TreeState,
     WorkflowModel,
 };
+use crate::ec2::{Ec2Instance, Ec2InstanceStatus};
 use crate::github::PullRequestNumber;
 use askama::Template;
 use axum::response::{Html, IntoResponse, Response};
@@ -95,35 +96,7 @@ pub struct QueueTemplate {
 
 impl QueueTemplate {
     fn format_duration(&self, duration: Duration) -> String {
-        let total_seconds = duration.as_secs();
-        let days = total_seconds / 86400;
-        let hours = (total_seconds % 86400) / 3600;
-        let minutes = (total_seconds % 3600) / 60;
-
-        let mut output = String::new();
-        if days > 0 {
-            write!(output, "{days}d").unwrap();
-        }
-
-        if hours > 0 {
-            if !output.is_empty() {
-                output.push(' ');
-            }
-            write!(output, "{hours}h").unwrap();
-        }
-
-        if days == 0 && minutes > 0 {
-            if !output.is_empty() {
-                output.push(' ');
-            }
-            write!(output, "{minutes}m").unwrap();
-        }
-
-        if output.is_empty() {
-            output.push_str("<1m");
-        }
-
-        output
+        format_duration(duration)
     }
 
     fn pending_build_elapsed(&self, build: &BuildModel) -> Duration {
@@ -172,6 +145,70 @@ impl QueueTemplate {
         // and the result is significant
         pr.note() == Some("rustc-perf")
     }
+}
+
+#[derive(Template)]
+#[template(path = "ec2.html", whitespace = "minimize")]
+pub struct EC2Template {
+    pub repo_name: String,
+    pub repo_owner: String,
+    pub repo_url: String,
+    pub instances: Vec<Ec2Instance>,
+}
+
+impl EC2Template {
+    fn format_status<'a>(&self, status: &'a Ec2InstanceStatus) -> &'a str {
+        match status {
+            Ec2InstanceStatus::Pending => "Starting",
+            Ec2InstanceStatus::Running => "Running",
+            Ec2InstanceStatus::ShuttingDown => "Shutting down",
+            Ec2InstanceStatus::Terminated => "Terminated",
+            Ec2InstanceStatus::Stopping => "Stopping",
+            Ec2InstanceStatus::Stopped => "Stopped",
+            Ec2InstanceStatus::Unknown(reason) => reason.as_str(),
+        }
+    }
+
+    fn get_lifetime(&self, instance: &Ec2Instance) -> String {
+        let end = instance.ended_at.unwrap_or_else(|| Utc::now());
+        let duration = end
+            .signed_duration_since(instance.started_at)
+            .to_std()
+            .unwrap_or(Duration::ZERO);
+        format_duration(duration)
+    }
+}
+
+fn format_duration(duration: Duration) -> String {
+    let total_seconds = duration.as_secs();
+    let days = total_seconds / 86400;
+    let hours = (total_seconds % 86400) / 3600;
+    let minutes = (total_seconds % 3600) / 60;
+
+    let mut output = String::new();
+    if days > 0 {
+        write!(output, "{days}d").unwrap();
+    }
+
+    if hours > 0 {
+        if !output.is_empty() {
+            output.push(' ');
+        }
+        write!(output, "{hours}h").unwrap();
+    }
+
+    if days == 0 && minutes > 0 {
+        if !output.is_empty() {
+            output.push(' ');
+        }
+        write!(output, "{minutes}m").unwrap();
+    }
+
+    if output.is_empty() {
+        output.push_str("<1m");
+    }
+
+    output
 }
 
 #[derive(Template)]

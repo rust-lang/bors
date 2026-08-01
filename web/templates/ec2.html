@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+
+{% block title %}EC2 instances of {{ repo_owner }}/{{ repo_name }}{% endblock %}
+
+{% block head %}
+<style>
+    main {
+        max-width: 65rem;
+        width: 100%;
+    }
+
+    table {
+        margin-block: var(--space-s);
+    }
+
+    tbody tr:last-child td {
+        border-bottom: none;
+    }
+
+    th,
+    td {
+        padding: var(--space-xs) var(--space-s);
+        border-bottom: 1px solid var(--color-border-muted);
+        white-space: nowrap;
+    }
+
+    th {
+        background-color: var(--color-bg-higlight);
+    }
+</style>
+{% endblock %}
+
+{% block body %}
+<main>
+  <h1>EC2 instances of <b>{{ repo_owner }}/{{ repo_name }}</b></h1>
+
+  <table>
+    <thead>
+    <tr>
+      <th>ID</th>
+      <th>PR</th>
+      <th>Job</th>
+      <th>State</th>
+      <th>Started at</th>
+      <th>Ended at</th>
+      <th>Lifetime</th>
+    </tr>
+    </thead>
+    {% for instance in instances %}
+    <tr>
+      <td>{{ instance.id }}</td>
+      <td>
+        {% if let Some(pr_number) = instance.pr_number %}
+        <a href="{{ repo_url }}/pull/{{ pr_number }}">{{ pr_number }}</a></td>
+      {% else %}
+      Unknown
+      {% endif %}
+      <td><a href="{{ repo_url }}/actions/runs/{{ instance.run_id }}/job/{{ instance.job_id }}">{{
+        instance.job_name }}</a></td>
+      <td>{{ format_status(&instance.status) }}</td>
+      <td>{{ instance.started_at.to_string() }}</td>
+      <td>
+        {% if let Some(ended_at) = instance.ended_at %}
+        {{ ended_at.to_string() }}
+        {% endif %}
+      </td>
+      <td>
+        {{ get_lifetime(&instance) }}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  <div style="text-align: center; margin-top: 1em;">
+    <a href="https://github.com/rust-lang/bors">Contribute on GitHub</a>
+  </div>
+</main>
+{% endblock %}

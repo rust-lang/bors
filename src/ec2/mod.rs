@@ -131,7 +131,7 @@ pub async fn start_ec2_github_runner(
 
     let script = LAUNCH_SCRIPT.replace("$JITCONFIG", &jit_config.encoded_jit_config);
 
-    let creds = get_aws_credentials(&ec2_ctx.role_arn).await?;
+    let creds = get_aws_credentials(ec2_ctx).await?;
 
     // Hopefully a unique key that identifies this specific instance
     let instance_name = format!(
@@ -224,7 +224,7 @@ pub async fn terminate_old_ec2_instances(
 
     let timeout = repo_config.timeout;
 
-    let creds = get_aws_credentials(&ec2_ctx.role_arn).await?;
+    let creds = get_aws_credentials(ec2_ctx).await?;
     let instances = get_ec2_instances(repo.repository(), &creds, ec2_config)
         .await
         .context("Cannot load EC2 instances")?;
@@ -405,7 +405,7 @@ pub struct RoleCredentials {
 }
 
 /// Assume the given role with the current AWS credentials, to create credentials for the role.
-pub async fn get_aws_credentials(role_arn: &str) -> anyhow::Result<RoleCredentials> {
+pub async fn get_aws_credentials(ctx: &Ec2Context) -> anyhow::Result<RoleCredentials> {
     #[derive(Deserialize)]
     #[serde(rename_all = "PascalCase")]
     struct Root {
@@ -416,7 +416,7 @@ pub async fn get_aws_credentials(role_arn: &str) -> anyhow::Result<RoleCredentia
     cli.arg("sts")
         .arg("assume-role")
         .arg("--role-arn")
-        .arg(role_arn)
+        .arg(&ctx.role_arn)
         .arg("--role-session-name")
         .arg("bors");
     let output = run_command(&mut cli)

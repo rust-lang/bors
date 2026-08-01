@@ -1,10 +1,11 @@
 use crate::bors::event::BorsEvent;
 use crate::bors::{CommandPrefix, RepositoryState, format_help};
 use crate::database::{ApprovalStatus, QueueStatus};
+use crate::ec2::{get_aws_credentials, get_ec2_instances};
 use crate::github::{GithubRepoName, PullRequestNumber, rollup};
 use crate::templates::{
-    HelpTemplate, HtmlTemplate, NotFoundTemplate, PullRequestStats, QueueTemplate, RepositoryView,
-    RollupsInfo,
+    EC2Template, HelpTemplate, HtmlTemplate, NotFoundTemplate, PullRequestStats, QueueTemplate,
+    RepositoryView, RollupsInfo,
 };
 use crate::utils::sort_queue::sort_queue_prs;
 use crate::{
@@ -132,7 +133,11 @@ pub fn create_app(state: ServerState) -> Router {
         .route("/help", get(help_handler))
         .route(
             "/queue/{repo_name}",
-            get(queue_handler).layer(compression_layer),
+            get(queue_handler).layer(compression_layer.clone()),
+        )
+        .route(
+            "/ec2/{repo_owner}/{repo_name}",
+            get(ec2_handler).layer(compression_layer),
         )
         .route("/github", post(github_webhook_handler))
         .route("/health", get(health_handler))
@@ -456,6 +461,49 @@ pub async fn queue_handler(
     .into_response())
 }
 
+pub async fn ec2_handler(
+    Path((repo_owner, repo_name)): Path<(String, String)>,
+    State(ServerStateRef(state)): State<ServerStateRef>,
+) -> Result<impl IntoResponse, AppError> {
+    let Some(ec2_context) = state.ctx.get_ec2_ctx() else {
+        return Ok((
+            StatusCode::SERVICE_UNAVAILABLE,
+            "EC2 context is not configured for this bors instance".to_string(),
+        )
+            .into_response());
+    };
+
+    let gh_repo_name = GithubRepoName::new(&repo_owner, &repo_name);
+    let repo = match state.get_repo(&gh_repo_name) {
+        Some(repo) => repo,
+        None => {
+            return Ok((
+                StatusCode::UNPROCESSABLE_ENTITY,
+                format!("Repository {gh_repo_name} not found"),
+            )
+                .into_response());
+        }
+    };
+    let Some(ec2_config) = &repo.config.load().ec2_runners else {
+        return Ok((
+            StatusCode::UNPROCESSABLE_ENTITY,
+            format!("Repository {gh_repo_name} does not have EC2 configured"),
+        )
+            .into_response());
+    };
+
+    let creds = get_aws_credentials(ec2_context).await?;
+    let instances = get_ec2_instances(&gh_repo_name, &creds, ec2_config).await?;
+
+    Ok(HtmlTemplate(EC2Template {
+        repo_name,
+        repo_owner,
+        repo_url: format!("https://github.com/{gh_repo_name}"),
+        instances,
+    })
+    .into_response())
+}
+
 /// Axum handler that receives a webhook and sends it to a webhook channel.
 pub async fn github_webhook_handler(
     State(ServerStateRef(state)): State<ServerStateRef>,
@@ -496,6 +544,6 @@ mod tests {
             insta::assert_snapshot!(response, @r#"[{"number":1,"title":"Title of PR 1","author":"default-user","status":"open","head_branch":"pr/1","base_branch":"main","priority":null,"approver":"default-user","try_build":null,"auto_build":null}]"#);
             Ok(())
         })
-        .await;
+            .await;
     }
 }
