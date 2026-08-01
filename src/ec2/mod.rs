@@ -12,8 +12,14 @@ const LAUNCH_SCRIPT: &str = include_str!("ec2-runner-script.sh");
 
 /// Instance tag that specifies that the given instance should be garbage collected by bors.
 const TAG_BORS_TERMINATE: &str = "bors-terminate";
-/// Tag with the job ID for which the instance was started.
+/// Tag with the repository for which the instance was started.
+const TAG_REPO: &str = "bors-repo";
+/// Tag with the workflow job ID for which the instance was started.
 const TAG_JOB_ID: &str = "bors-job-id";
+/// Tag with the workflow job name for which the instance was started.
+const TAG_JOB_NAME: &str = "bors-job-name";
+/// Tag with the workflow run ID for which the instance was started.
+const TAG_RUN_ID: &str = "bors-run-id";
 
 /// How much time to wait before timeouting each aws command execution.
 const AWS_COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
@@ -130,15 +136,23 @@ pub async fn start_ec2_github_runner(
         payload.commit_sha,
     );
 
-    let job_id = payload.job_id.to_string();
     let tags = [
         ("Name", instance_name.as_str()),
         (TAG_BORS_TERMINATE, "true"),
-        (TAG_JOB_ID, job_id.as_str()),
+        (TAG_REPO, &repo.repository().to_string()),
+        (TAG_JOB_ID, &payload.job_id.to_string()),
+        (TAG_JOB_NAME, &payload.name),
+        (TAG_RUN_ID, &payload.run_id.to_string()),
     ];
     let tags = tags
         .into_iter()
-        .map(|(k, v)| format!("{{Key={k},Value={v}}}"))
+        .map(|(k, v)| {
+            format!(
+                "{{Key=\"{}\",Value=\"{}\"}}",
+                k.replace("\"", ""),
+                v.replace("\"", "")
+            )
+        })
         .collect::<Vec<_>>()
         .join(",");
 
