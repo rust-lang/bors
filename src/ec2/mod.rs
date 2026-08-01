@@ -377,10 +377,10 @@ pub async fn get_ec2_instances(
 pub enum Ec2InstanceStatus {
     Pending,
     Running,
-    ShuttingDown,
-    Terminated,
     Stopping,
     Stopped,
+    ShuttingDown,
+    Terminated,
     Unknown(String),
 }
 

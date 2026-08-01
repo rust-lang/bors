@@ -1,7 +1,7 @@
 use crate::bors::event::BorsEvent;
-use crate::bors::{CommandPrefix, RepositoryState, format_help};
+use crate::bors::{BuildKind, CommandPrefix, RepositoryState, format_help};
 use crate::database::{ApprovalStatus, QueueStatus};
-use crate::ec2::{Ec2Instance, get_aws_credentials, get_ec2_instances};
+use crate::ec2::{Ec2Instance, Ec2InstanceStatus, get_aws_credentials, get_ec2_instances};
 use crate::github::{GithubRepoName, PullRequestNumber, rollup};
 use crate::server::cached::Cached;
 use crate::templates::{
@@ -517,12 +517,34 @@ pub async fn ec2_handler(
         anyhow::Ok(instances)
     };
     let cached = state.cache.ec2_instances.load(load_instances).await?;
+    let mut instances = cached.value;
+    instances.sort_by(|a, b| {
+        // Sort by status first, then build kind, then started date
+        let status = |instance: &Ec2Instance| match instance.status {
+            Ec2InstanceStatus::Pending => 0,
+            Ec2InstanceStatus::Running => 1,
+            Ec2InstanceStatus::Stopping => 2,
+            Ec2InstanceStatus::Stopped => 3,
+            Ec2InstanceStatus::ShuttingDown => 4,
+            Ec2InstanceStatus::Terminated => 5,
+            _ => 6,
+        };
+        let build_kind = |instance: &Ec2Instance| match instance.build_kind {
+            BuildKind::Auto => 0,
+            BuildKind::Try => 1,
+        };
+
+        status(a)
+            .cmp(&status(b))
+            .then_with(|| build_kind(a).cmp(&build_kind(b)))
+            .then_with(|| a.started_at.cmp(&b.started_at))
+    });
 
     Ok(HtmlTemplate(EC2Template {
         repo_name,
         repo_owner,
         repo_url: format!("https://github.com/{gh_repo_name}"),
-        instances: cached.value,
+        instances,
         loaded_at: cached.loaded_at,
     })
     .into_response())
