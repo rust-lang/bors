@@ -24,8 +24,8 @@ use crate::bors::labels::handle_label_trigger;
 use crate::bors::mergeability_queue::set_pr_mergeability_based_on_user_action;
 use crate::bors::process::QueueSenders;
 use crate::bors::{
-    AUTO_BRANCH_NAME, BorsContext, CommandPrefix, Comment, PullRequestStatus, RepositoryState,
-    TRY_BRANCH_NAME,
+    AUTO_BRANCH_NAME, BorsContext, BuildKind, CommandPrefix, Comment, PullRequestStatus,
+    RepositoryState, TRY_BRANCH_NAME,
 };
 use crate::database::{DelegatedPermission, DelegationStatus, PullRequestModel};
 use crate::ec2::terminate_old_ec2_instances;
@@ -138,7 +138,7 @@ pub async fn handle_bors_repository_event(
                 run_id = payload.run_id.into_inner(),
                 job_id = payload.job_id.into_inner(),
             );
-            handle_workflow_job_started(&ctx, repo, payload)
+            handle_workflow_job_started(&ctx, db, repo, payload)
                 .instrument(span)
                 .await?;
         }
@@ -1130,6 +1130,14 @@ pub fn invalidation_comment(
 /// Is this branch interesting for the bot?
 fn is_bors_observed_branch(branch: &str) -> bool {
     branch == TRY_BRANCH_NAME || branch == AUTO_BRANCH_NAME
+}
+
+fn get_build_kind_from_branch(branch: &str) -> Option<BuildKind> {
+    match branch {
+        b if b == TRY_BRANCH_NAME => Some(BuildKind::Try),
+        b if b == AUTO_BRANCH_NAME => Some(BuildKind::Auto),
+        _ => None,
+    }
 }
 
 #[cfg(test)]

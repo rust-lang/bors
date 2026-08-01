@@ -1,10 +1,15 @@
-use crate::bors::RepositoryState;
 use crate::bors::event::WorkflowJobStarted;
+use crate::bors::{BuildKind, RepositoryState};
 use crate::config::{Ec2RunnersConfig, JitRunnerKind};
+use crate::database::RunId;
+use crate::github::{GithubRepoName, PullRequestNumber};
 use anyhow::Context;
-use chrono::Utc;
+use chrono::{DateTime, NaiveDateTime, Utc};
+use octocrab::models::JobId;
+use regex::Regex;
 use serde::Deserialize;
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
 /// Script that will be executed on the launched EC2 instance.
@@ -12,8 +17,18 @@ const LAUNCH_SCRIPT: &str = include_str!("ec2-runner-script.sh");
 
 /// Instance tag that specifies that the given instance should be garbage collected by bors.
 const TAG_BORS_TERMINATE: &str = "bors-terminate";
-/// Tag with the job ID for which the instance was started.
+/// Tag with the repository for which the instance was started.
+const TAG_REPO: &str = "bors-repo";
+/// Tag with the workflow job ID for which the instance was started.
 const TAG_JOB_ID: &str = "bors-job-id";
+/// Tag with the workflow job name for which the instance was started.
+const TAG_JOB_NAME: &str = "bors-job-name";
+/// Tag with the workflow run ID for which the instance was started.
+const TAG_RUN_ID: &str = "bors-run-id";
+/// Tag with the pull request number for which the instance was started.
+const TAG_PR_NUMBER: &str = "bors-pr-number";
+/// Tag with the build kind (auto/try) for which the instance was started.
+const TAG_BUILD_KIND: &str = "bors-build-kind";
 
 /// How much time to wait before timeouting each aws command execution.
 const AWS_COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
@@ -67,6 +82,8 @@ pub async fn start_ec2_github_runner(
     repo: &RepositoryState,
     label: ParsedLabel<'_>,
     payload: &WorkflowJobStarted,
+    pr_number: Option<PullRequestNumber>,
+    build_kind: BuildKind,
 ) -> anyhow::Result<()> {
     tracing::info!("Trying to start EC2 runner for label {}", label.label);
     let Some(image_name) = ec2.images.get(label.image_name) else {
@@ -117,7 +134,7 @@ pub async fn start_ec2_github_runner(
 
     let script = LAUNCH_SCRIPT.replace("$JITCONFIG", &jit_config.encoded_jit_config);
 
-    let creds = get_aws_credentials(&ec2_ctx.role_arn).await?;
+    let creds = get_aws_credentials(ec2_ctx).await?;
 
     // Hopefully a unique key that identifies this specific instance
     let instance_name = format!(
@@ -130,15 +147,35 @@ pub async fn start_ec2_github_runner(
         payload.commit_sha,
     );
 
-    let job_id = payload.job_id.to_string();
-    let tags = [
-        ("Name", instance_name.as_str()),
-        (TAG_BORS_TERMINATE, "true"),
-        (TAG_JOB_ID, job_id.as_str()),
+    let mut tags = vec![
+        ("Name", instance_name.clone()),
+        (TAG_BORS_TERMINATE, "true".to_string()),
+        (TAG_REPO, repo.repository().to_string()),
+        (TAG_JOB_ID, payload.job_id.to_string()),
+        (TAG_JOB_NAME, payload.name.clone()),
+        (TAG_RUN_ID, payload.run_id.to_string()),
+        (
+            TAG_BUILD_KIND,
+            match build_kind {
+                BuildKind::Try => "try",
+                BuildKind::Auto => "auto",
+            }
+            .to_string(),
+        ),
     ];
+    if let Some(pr_number) = pr_number {
+        tags.push((TAG_PR_NUMBER, pr_number.to_string()));
+    }
+
     let tags = tags
         .into_iter()
-        .map(|(k, v)| format!("{{Key={k},Value={v}}}"))
+        .map(|(k, v)| {
+            format!(
+                "{{Key=\"{}\",Value=\"{}\"}}",
+                k.replace("\"", ""),
+                v.replace("\"", "")
+            )
+        })
         .collect::<Vec<_>>()
         .join(",");
 
@@ -198,69 +235,10 @@ pub async fn terminate_old_ec2_instances(
 
     let timeout = repo_config.timeout;
 
-    #[derive(serde::Deserialize, Debug)]
-    #[serde(rename_all = "PascalCase")]
-    struct InstanceState {
-        name: String,
-    }
-
-    #[derive(serde::Deserialize, Debug)]
-    #[serde(rename_all = "PascalCase")]
-    struct Tag {
-        key: String,
-        value: String,
-    }
-
-    #[derive(serde::Deserialize, Debug)]
-    #[serde(rename_all = "PascalCase")]
-    struct Instance {
-        #[serde(rename = "InstanceId")]
-        id: String,
-        launch_time: chrono::DateTime<Utc>,
-        state: InstanceState,
-        #[serde(default)]
-        tags: Vec<Tag>,
-    }
-
-    #[derive(serde::Deserialize, Debug)]
-    #[serde(rename_all = "PascalCase")]
-    struct Reservation {
-        instances: Vec<Instance>,
-    }
-
-    #[derive(serde::Deserialize, Debug)]
-    #[serde(rename_all = "PascalCase")]
-    struct Instances {
-        reservations: Vec<Reservation>,
-    }
-
-    #[derive(Debug)]
-    struct BorsInstance {
-        instance: Instance,
-    }
-
-    let creds = get_aws_credentials(&ec2_ctx.role_arn).await?;
-    let instances = run_command(
-        prepare_aws_cli(Some(&creds), Some(&ec2_config.region))
-            .arg("ec2")
-            .arg("describe-instances"),
-    )
-    .await
-    .context("Cannot list running EC2 instances")?;
-
-    let instances: Vec<BorsInstance> = serde_json::from_str::<Instances>(&instances)?
-        .reservations
-        .into_iter()
-        .flat_map(|r| r.instances)
-        .filter_map(|instance| {
-            let terminate = instance.tags.iter().find(|t| t.key == TAG_BORS_TERMINATE)?;
-            if terminate.value != "true" {
-                return None;
-            }
-
-            Some(BorsInstance { instance })
-        })
-        .collect();
+    let creds = get_aws_credentials(ec2_ctx).await?;
+    let instances = get_ec2_instances(repo.repository(), &creds, ec2_config)
+        .await
+        .context("Cannot load EC2 instances")?;
     if instances.is_empty() {
         tracing::info!("Did not find any bors EC2 instances");
         return Ok(());
@@ -274,9 +252,9 @@ pub async fn terminate_old_ec2_instances(
     let deadline = Utc::now() - timeout;
     let too_old_ids = instances
         .into_iter()
-        .filter(|instance| instance.instance.state.name != "terminated")
-        .filter(|instance| instance.instance.launch_time < deadline)
-        .map(|instance| instance.instance.id)
+        .filter(|instance| !matches!(instance.status, Ec2InstanceStatus::Terminated))
+        .filter(|instance| instance.started_at < deadline)
+        .map(|instance| instance.id)
         .collect::<Vec<String>>();
 
     if !too_old_ids.is_empty() {
@@ -303,6 +281,172 @@ pub async fn terminate_old_ec2_instances(
     Ok(())
 }
 
+/// Return EC2 instances for the given repo and region that are managed by bors.
+pub async fn get_ec2_instances(
+    repo: &GithubRepoName,
+    creds: &RoleCredentials,
+    ec2_config: &Ec2RunnersConfig,
+) -> anyhow::Result<Vec<Ec2Instance>> {
+    #[derive(serde::Deserialize, Debug)]
+    #[serde(rename_all = "PascalCase")]
+    struct InstanceState {
+        name: String,
+    }
+
+    #[derive(serde::Deserialize, Debug)]
+    #[serde(rename_all = "PascalCase")]
+    struct Tag {
+        key: String,
+        value: String,
+    }
+
+    #[derive(serde::Deserialize, Debug)]
+    #[serde(rename_all = "PascalCase")]
+    struct Instance {
+        #[serde(rename = "InstanceId")]
+        id: String,
+        launch_time: chrono::DateTime<Utc>,
+        state: InstanceState,
+        #[serde(default)]
+        tags: Vec<Tag>,
+        #[serde(default, rename = "StateTransitionReason")]
+        reason: Option<String>,
+    }
+
+    #[derive(serde::Deserialize, Debug)]
+    #[serde(rename_all = "PascalCase")]
+    struct Reservation {
+        instances: Vec<Instance>,
+    }
+
+    #[derive(serde::Deserialize, Debug)]
+    #[serde(rename_all = "PascalCase")]
+    struct Instances {
+        reservations: Vec<Reservation>,
+    }
+
+    let mut cli = prepare_aws_cli(Some(creds), Some(&ec2_config.region));
+    cli.arg("ec2").arg("describe-instances").arg("--filters");
+
+    // Filter by bors terminate marker and repository
+    cli.arg(format!("Name=tag:{TAG_BORS_TERMINATE},Values=true"));
+    cli.arg(format!("Name=tag:{TAG_REPO},Values={repo}"));
+
+    let instances = run_command(&mut cli)
+        .await
+        .context("Cannot list running EC2 instances")?;
+
+    let instances = serde_json::from_str::<Instances>(&instances)?
+        .reservations
+        .into_iter()
+        .flat_map(|r| r.instances)
+        .filter_map(|instance| {
+            let tags: HashMap<String, String> = instance
+                .tags
+                .into_iter()
+                .map(|t| (t.key, t.value))
+                .collect();
+            let job_id = tags
+                .get(TAG_JOB_ID)
+                .and_then(|id| id.parse::<u64>().map(JobId).ok())?;
+            let job_name = tags.get(TAG_JOB_ID).cloned()?;
+            let run_id = tags
+                .get(TAG_RUN_ID)
+                .and_then(|id| id.parse::<u64>().map(RunId).ok())?;
+            let pr_number = tags
+                .get(TAG_PR_NUMBER)
+                .and_then(|pr| pr.parse::<u64>().map(PullRequestNumber).ok());
+            let build_kind =
+                tags.get(TAG_BUILD_KIND)
+                    .and_then(|build_kind| match build_kind.as_str() {
+                        "try" => Some(BuildKind::Try),
+                        "auto" => Some(BuildKind::Auto),
+                        _ => None,
+                    })?;
+
+            let status = match instance.state.name.as_str() {
+                "pending" => Ec2InstanceStatus::Pending,
+                "running" => Ec2InstanceStatus::Running,
+                "shutting-down" => Ec2InstanceStatus::ShuttingDown,
+                "terminated" => Ec2InstanceStatus::Terminated,
+                "stopping" => Ec2InstanceStatus::Stopping,
+                "stopped" => Ec2InstanceStatus::Stopped,
+                _ => Ec2InstanceStatus::Unknown(instance.state.name),
+            };
+
+            let ended_at = instance.reason.and_then(|r| parse_state_transition(&r));
+
+            Some(Ec2Instance {
+                id: instance.id,
+                status,
+                job_id,
+                job_name,
+                run_id,
+                started_at: instance.launch_time,
+                ended_at,
+                pr_number,
+                build_kind,
+            })
+        })
+        .collect();
+    Ok(instances)
+}
+
+#[derive(Clone, Debug)]
+pub enum Ec2InstanceStatus {
+    Pending,
+    Running,
+    Stopping,
+    Stopped,
+    ShuttingDown,
+    Terminated,
+    Unknown(String),
+}
+
+#[derive(Clone, Debug)]
+pub struct Ec2Instance {
+    pub id: String,
+    pub status: Ec2InstanceStatus,
+    pub job_id: JobId,
+    pub job_name: String,
+    pub run_id: RunId,
+    pub started_at: DateTime<Utc>,
+    pub ended_at: Option<DateTime<Utc>>,
+    pub pr_number: Option<PullRequestNumber>,
+    pub build_kind: BuildKind,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct RoleCredentials {
+    access_key_id: String,
+    secret_access_key: String,
+    session_token: String,
+}
+
+/// Assume the given role with the current AWS credentials, to create credentials for the role.
+pub async fn get_aws_credentials(ctx: &Ec2Context) -> anyhow::Result<RoleCredentials> {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "PascalCase")]
+    struct Root {
+        credentials: RoleCredentials,
+    }
+
+    let mut cli = prepare_aws_cli(None, None);
+    cli.arg("sts")
+        .arg("assume-role")
+        .arg("--role-arn")
+        .arg(&ctx.role_arn)
+        .arg("--role-session-name")
+        .arg("bors");
+    let output = run_command(&mut cli)
+        .await
+        .context("Cannot assume role for AWS")?;
+    let creds: Root =
+        serde_json::from_str(&output).context("Cannot deserialize aws sts assume-role output")?;
+    Ok(creds.credentials)
+}
+
 fn prepare_aws_cli(
     creds: Option<&RoleCredentials>,
     region: Option<&str>,
@@ -318,37 +462,6 @@ fn prepare_aws_cli(
     }
     cmd.kill_on_drop(true);
     cmd
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "PascalCase")]
-struct RoleCredentials {
-    access_key_id: String,
-    secret_access_key: String,
-    session_token: String,
-}
-
-/// Assume the given role with the current AWS credentials, to create credentials for the role.
-async fn get_aws_credentials(role_arn: &str) -> anyhow::Result<RoleCredentials> {
-    #[derive(Deserialize)]
-    #[serde(rename_all = "PascalCase")]
-    struct Root {
-        credentials: RoleCredentials,
-    }
-
-    let mut cli = prepare_aws_cli(None, None);
-    cli.arg("sts")
-        .arg("assume-role")
-        .arg("--role-arn")
-        .arg(role_arn)
-        .arg("--role-session-name")
-        .arg("bors");
-    let output = run_command(&mut cli)
-        .await
-        .context("Cannot assume role for AWS")?;
-    let creds: Root =
-        serde_json::from_str(&output).context("Cannot deserialize aws sts assume-role output")?;
-    Ok(creds.credentials)
 }
 
 async fn run_command(cmd: &mut tokio::process::Command) -> anyhow::Result<String> {
@@ -372,9 +485,21 @@ async fn run_command(cmd: &mut tokio::process::Command) -> anyhow::Result<String
     }
 }
 
+/// Parse State transition reason of EC2 instances, for example:
+/// `User initiated (2026-08-01 18:44:49 GMT)`
+fn parse_state_transition(text: &str) -> Option<DateTime<Utc>> {
+    static TRANSITION_REGEX: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r#"^.*\((.*?)\).*$"#).unwrap());
+
+    let re = TRANSITION_REGEX.captures(text)?;
+    let group = re.get(1)?;
+    let date = NaiveDateTime::parse_from_str(group.as_str(), "%Y-%m-%d %H:%M:%S %Z").ok()?;
+    Some(DateTime::from_naive_utc_and_offset(date, Utc))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::ParsedLabel;
+    use super::{ParsedLabel, parse_state_transition};
 
     #[test]
     fn parse_label() {
@@ -391,5 +516,12 @@ mod tests {
     #[test]
     fn parse_label_different_prefix() {
         assert!(ParsedLabel::parse("x64-linux", "ec2").is_none());
+    }
+
+    #[test]
+    fn parse_state_transition_reason() {
+        let reason = "User initiated (2026-08-01 18:44:49 GMT)";
+        let date = parse_state_transition(reason).unwrap();
+        insta::assert_debug_snapshot!(date, @"2026-08-01T18:44:49Z");
     }
 }

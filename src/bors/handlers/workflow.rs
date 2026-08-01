@@ -3,7 +3,7 @@ use crate::bors::build::{CancelBuildConclusion, CancelBuildError};
 use crate::bors::build_queue::BuildQueueSender;
 use crate::bors::comment::{CommentTag, append_workflow_links_to_comment};
 use crate::bors::event::{WorkflowJobStarted, WorkflowRunCompleted, WorkflowRunStarted};
-use crate::bors::handlers::is_bors_observed_branch;
+use crate::bors::handlers::{get_build_kind_from_branch, is_bors_observed_branch};
 use crate::bors::{BuildKind, build};
 use crate::database::{BuildModel, BuildStatus, PullRequestModel, WorkflowStatus};
 use crate::ec2::{ParsedLabel, start_ec2_github_runner};
@@ -149,12 +149,13 @@ pub(super) async fn handle_workflow_completed(
 
 pub(super) async fn handle_workflow_job_started(
     ctx: &BorsContext,
+    db: Arc<PgDbClient>,
     repo: Arc<RepositoryState>,
     payload: WorkflowJobStarted,
 ) -> anyhow::Result<()> {
-    if !is_bors_observed_branch(&payload.branch) {
+    let Some(build_kind) = get_build_kind_from_branch(&payload.branch) else {
         return Ok(());
-    }
+    };
 
     let Some(ec2_ctx) = ctx.get_ec2_ctx() else {
         return Ok(());
@@ -172,7 +173,38 @@ pub(super) async fn handle_workflow_job_started(
         return Ok(());
     };
 
-    start_ec2_github_runner(ec2_ctx, ec2_config, &repo, label, &payload).await?;
+    // Try to find a PR attached to the job. This is best-effort (though normally it should
+    // succeed).
+    let pr_number = async {
+        let Some(build) = db
+            .find_build(
+                repo.repository(),
+                &payload.branch,
+                payload.commit_sha.clone(),
+            )
+            .await?
+        else {
+            return Ok(None);
+        };
+
+        let Some(pr) = db.find_pr_by_build(&build).await? else {
+            return Ok(None);
+        };
+        anyhow::Ok(Some(pr.number))
+    }
+    .await;
+    let pr_number = match pr_number {
+        Ok(Some(pr_number)) => Some(pr_number),
+        res => {
+            tracing::warn!("Cannot find PR for workflow job {}: {res:?}", payload.name);
+            None
+        }
+    };
+
+    start_ec2_github_runner(
+        ec2_ctx, ec2_config, &repo, label, &payload, pr_number, build_kind,
+    )
+    .await?;
 
     Ok(())
 }
