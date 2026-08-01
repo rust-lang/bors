@@ -1,4 +1,5 @@
 use crate::bors::RepositoryState;
+use crate::bors::event::WorkflowJobStarted;
 use crate::config::{Ec2RunnersConfig, JitRunnerKind};
 use anyhow::Context;
 use chrono::Utc;
@@ -8,6 +9,14 @@ use std::time::Duration;
 
 /// Script that will be executed on the launched EC2 instance.
 const LAUNCH_SCRIPT: &str = include_str!("ec2-runner-script.sh");
+
+/// Instance tag that specifies that the given instance should be garbage collected by bors.
+const TAG_BORS_TERMINATE: &str = "bors-terminate";
+/// Tag with the job ID for which the instance was started.
+const TAG_JOB_ID: &str = "bors-job-id";
+
+/// How much time to wait before timeouting each aws command execution.
+const AWS_COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Debug)]
 pub struct ParsedLabel<'a> {
@@ -57,6 +66,7 @@ pub async fn start_ec2_github_runner(
     ec2: &Ec2RunnersConfig,
     repo: &RepositoryState,
     label: ParsedLabel<'_>,
+    payload: &WorkflowJobStarted,
 ) -> anyhow::Result<()> {
     tracing::info!("Trying to start EC2 runner for label {}", label.label);
     let Some(image_name) = ec2.images.get(label.image_name) else {
@@ -109,16 +119,46 @@ pub async fn start_ec2_github_runner(
 
     let creds = get_aws_credentials(&ec2_ctx.role_arn).await?;
 
+    // Hopefully a unique key that identifies this specific instance
+    let instance_name = format!(
+        "{}-{}-{}-{}-{}-{}",
+        repo.repository().owner(),
+        repo.repository().name(),
+        payload.name,
+        payload.run_id,
+        payload.job_id,
+        payload.commit_sha,
+    );
+
+    let job_id = payload.job_id.to_string();
+    let tags = [
+        ("Name", instance_name.as_str()),
+        (TAG_BORS_TERMINATE, "true"),
+        (TAG_JOB_ID, job_id.as_str()),
+    ];
+    let tags = tags
+        .into_iter()
+        .map(|(k, v)| format!("{{Key={k},Value={v}}}"))
+        .collect::<Vec<_>>()
+        .join(",");
+
+    // Idempotency token, to avoid starting the same instance multiple times
+    // For some reason, GitHub sometimes sends us the workflow job started webhook multiple
+    // times...
+    let mut idempotency_token = format!("{}-{}", payload.job_id, payload.commit_sha);
+    // The idempotency token cannot be longer than 64 characters
+    idempotency_token.truncate(64);
+
     // Using the AWS cli is not ideal, but the alternative (depending on aws-config, aws-sdk-ssm and
     // asd-sdk-ec2) has a massive impact on build times and binary size, plus it currently runs into
     // feature hell (ring vs aws-lc-sys). The choice might be reevaluated in the future.
     let instance_type = label.instance_type;
-    let mut ec2_cli = prepare_aws_cli(Some(&creds));
+    let mut ec2_cli = prepare_aws_cli(Some(&creds), Some(&ec2.region));
     ec2_cli
         .arg("ec2")
         .arg("run-instances")
-        .arg("--region")
-        .arg(&ec2.region)
+        .arg("--client-token")
+        .arg(&idempotency_token)
         .arg("--image-id")
         .arg(format!("resolve:ssm:{image_name}"))
         .arg("--instance-type")
@@ -128,6 +168,8 @@ pub async fn start_ec2_github_runner(
         .arg("terminate")
         .arg("--launch-template")
         .arg("LaunchTemplateName=gha-runner,Version=$Latest")
+        .arg("--tag-specifications")
+        .arg(format!("ResourceType=instance,Tags=[{tags}]"))
         .arg("--user-data")
         .arg(script);
 
@@ -149,64 +191,92 @@ pub async fn terminate_old_ec2_instances(
     ec2_ctx: &Ec2Context,
     repo: Arc<RepositoryState>,
 ) -> anyhow::Result<()> {
-    if repo.config.load().ec2_runners.is_none() {
+    let repo_config = repo.config.load();
+    let Some(ec2_config) = &repo_config.ec2_runners else {
         return Ok(());
     };
 
-    let timeout = repo.config.load().timeout;
+    let timeout = repo_config.timeout;
 
     #[derive(serde::Deserialize, Debug)]
+    #[serde(rename_all = "PascalCase")]
     struct InstanceState {
-        #[serde(rename = "Name")]
         name: String,
     }
 
     #[derive(serde::Deserialize, Debug)]
-    struct Instance {
-        #[serde(rename = "InstanceId")]
-        id: String,
-        #[serde(rename = "LaunchTime")]
-        launch_time: chrono::DateTime<Utc>,
-        #[serde(rename = "State")]
-        state: InstanceState,
+    #[serde(rename_all = "PascalCase")]
+    struct Tag {
+        key: String,
+        value: String,
     }
 
     #[derive(serde::Deserialize, Debug)]
+    #[serde(rename_all = "PascalCase")]
+    struct Instance {
+        #[serde(rename = "InstanceId")]
+        id: String,
+        launch_time: chrono::DateTime<Utc>,
+        state: InstanceState,
+        #[serde(default)]
+        tags: Vec<Tag>,
+    }
+
+    #[derive(serde::Deserialize, Debug)]
+    #[serde(rename_all = "PascalCase")]
     struct Reservation {
-        #[serde(rename = "Instances")]
         instances: Vec<Instance>,
     }
 
     #[derive(serde::Deserialize, Debug)]
+    #[serde(rename_all = "PascalCase")]
     struct Instances {
-        #[serde(rename = "Reservations")]
         reservations: Vec<Reservation>,
+    }
+
+    #[derive(Debug)]
+    struct BorsInstance {
+        instance: Instance,
     }
 
     let creds = get_aws_credentials(&ec2_ctx.role_arn).await?;
     let instances = run_command(
-        prepare_aws_cli(Some(&creds))
+        prepare_aws_cli(Some(&creds), Some(&ec2_config.region))
             .arg("ec2")
             .arg("describe-instances"),
     )
     .await
     .context("Cannot list running EC2 instances")?;
-    let instances: Vec<Instance> = serde_json::from_str::<Instances>(&instances)?
+
+    let instances: Vec<BorsInstance> = serde_json::from_str::<Instances>(&instances)?
         .reservations
         .into_iter()
         .flat_map(|r| r.instances)
+        .filter_map(|instance| {
+            let terminate = instance.tags.iter().find(|t| t.key == TAG_BORS_TERMINATE)?;
+            if terminate.value != "true" {
+                return None;
+            }
+
+            Some(BorsInstance { instance })
+        })
         .collect();
-    tracing::debug!(
-        "Found the following EC2 instances ({}): {instances:?}",
+    if instances.is_empty() {
+        tracing::info!("Did not find any bors EC2 instances");
+        return Ok(());
+    }
+    tracing::info!(
+        "Found the following bors EC2 instances ({}): {instances:?}",
         instances.len()
     );
 
+    // TODO: also terminate instances whose GitHub jobs are no longer running
     let deadline = Utc::now() - timeout;
     let too_old_ids = instances
         .into_iter()
-        .filter(|instance| instance.launch_time < deadline)
-        .filter(|instance| instance.state.name != "terminated")
-        .map(|instance| instance.id)
+        .filter(|instance| instance.instance.state.name != "terminated")
+        .filter(|instance| instance.instance.launch_time < deadline)
+        .map(|instance| instance.instance.id)
         .collect::<Vec<String>>();
 
     if !too_old_ids.is_empty() {
@@ -214,7 +284,7 @@ pub async fn terminate_old_ec2_instances(
         tracing::info!("Cancelling EC2 instance(s) {too_old_ids}");
 
         run_command(
-            prepare_aws_cli(Some(&creds))
+            prepare_aws_cli(Some(&creds), Some(&ec2_config.region))
                 .arg("ec2")
                 .arg("terminate-instances")
                 // No need for graceful shutdown, we just want to terminate the instances
@@ -226,41 +296,47 @@ pub async fn terminate_old_ec2_instances(
         )
         .await
         .context("Cannot terminate EC2 instances")?;
+    } else {
+        tracing::info!("No EC2 instances to terminate");
     }
 
     Ok(())
 }
 
-fn prepare_aws_cli(creds: Option<&RoleCredentials>) -> tokio::process::Command {
+fn prepare_aws_cli(
+    creds: Option<&RoleCredentials>,
+    region: Option<&str>,
+) -> tokio::process::Command {
     let mut cmd = tokio::process::Command::new("aws");
     if let Some(creds) = creds {
         cmd.env("AWS_ACCESS_KEY_ID", &creds.access_key_id);
         cmd.env("AWS_SECRET_ACCESS_KEY", &creds.secret_access_key);
         cmd.env("AWS_SESSION_TOKEN", &creds.session_token);
     }
+    if let Some(region) = region {
+        cmd.arg("--region").arg(region);
+    }
     cmd.kill_on_drop(true);
     cmd
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "PascalCase")]
 struct RoleCredentials {
-    #[serde(rename = "AccessKeyId")]
     access_key_id: String,
-    #[serde(rename = "SecretAccessKey")]
     secret_access_key: String,
-    #[serde(rename = "SessionToken")]
     session_token: String,
 }
 
 /// Assume the given role with the current AWS credentials, to create credentials for the role.
 async fn get_aws_credentials(role_arn: &str) -> anyhow::Result<RoleCredentials> {
     #[derive(Deserialize)]
+    #[serde(rename_all = "PascalCase")]
     struct Root {
-        #[serde(rename = "Credentials")]
-        pub credentials: RoleCredentials,
+        credentials: RoleCredentials,
     }
 
-    let mut cli = prepare_aws_cli(None);
+    let mut cli = prepare_aws_cli(None, None);
     cli.arg("sts")
         .arg("assume-role")
         .arg("--role-arn")
@@ -276,7 +352,7 @@ async fn get_aws_credentials(role_arn: &str) -> anyhow::Result<RoleCredentials> 
 }
 
 async fn run_command(cmd: &mut tokio::process::Command) -> anyhow::Result<String> {
-    let output = match tokio::time::timeout(Duration::from_secs(60), cmd.output()).await {
+    let output = match tokio::time::timeout(AWS_COMMAND_TIMEOUT, cmd.output()).await {
         Ok(output) => output?,
         Err(_) => {
             return Err(anyhow::anyhow!(

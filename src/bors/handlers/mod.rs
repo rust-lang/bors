@@ -134,7 +134,9 @@ pub async fn handle_bors_repository_event(
             let span = tracing::info_span!(
                 "Workflow job started",
                 repo = payload.repository.to_string(),
-                id = payload.run_id.into_inner()
+                name = payload.name,
+                run_id = payload.run_id.into_inner(),
+                job_id = payload.job_id.into_inner(),
             );
             handle_workflow_job_started(&ctx, repo, payload)
                 .instrument(span)
@@ -318,6 +320,7 @@ pub async fn handle_bors_global_event(
             senders.merge_queue().maybe_perform_tick().await?;
         }
         BorsGlobalEvent::TerminateOldEC2Instances => {
+            tracing::info!("Attempt to terminate old EC2 instances");
             if let Some(ec2_ctx) = ctx.get_ec2_ctx() {
                 let span = tracing::info_span!("Terminate old EC2 instances");
                 for_each_repo(&ctx, |repo| {

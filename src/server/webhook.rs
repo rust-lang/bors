@@ -13,7 +13,7 @@ use octocrab::models::events::payload::{
 };
 use octocrab::models::pulls::{PullRequest, Review};
 use octocrab::models::webhook_events::payload::PullRequestWebhookEventAction;
-use octocrab::models::{Author, CheckSuiteId, Repository, RunId, workflows};
+use octocrab::models::{Author, CheckSuiteId, JobId, Repository, RunId, workflows};
 use secrecy::{ExposeSecret, SecretString};
 use sha2::Sha256;
 
@@ -80,6 +80,7 @@ struct WebhookWorkflowJob<'a> {
 
 #[derive(serde::Deserialize, Debug)]
 struct WorkflowJobInner {
+    id: JobId,
     run_id: RunId,
     head_branch: String,
     head_sha: String,
@@ -391,6 +392,7 @@ fn parse_workflow_job_events(body: &[u8]) -> anyhow::Result<Option<BorsEvent>> {
             BorsRepositoryEvent::WorkflowJobStarted(WorkflowJobStarted {
                 repository: repository_name,
                 name: payload.workflow_job.name,
+                job_id: payload.workflow_job.id,
                 branch: payload.workflow_job.head_branch,
                 commit_sha: CommitSha(payload.workflow_job.head_sha),
                 run_id: payload.workflow_job.run_id,
@@ -1773,6 +1775,9 @@ mod tests {
                         WorkflowJobStarted {
                             repository: kobzol/bors-kindergarten2,
                             name: "init",
+                            job_id: JobId(
+                                89214823120,
+                            ),
                             branch: "automation/bors/try",
                             commit_sha: CommitSha(
                                 "13e4ae6263d3ffab811a472772e03b7d345e81fb",

@@ -261,6 +261,7 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
             BorsGlobalEvent::RefreshPullRequestMergeability,
             BorsGlobalEvent::RefreshPendingBuilds,
             BorsGlobalEvent::ProcessMergeQueue,
+            BorsGlobalEvent::TerminateOldEC2Instances,
         ];
         for event in startup_events {
             refresh_tx.send(event).await?;
