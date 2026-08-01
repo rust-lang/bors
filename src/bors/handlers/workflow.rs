@@ -173,8 +173,8 @@ pub(super) async fn handle_workflow_job_started(
         return Ok(());
     };
 
-    // Try to find a PR attached to the job. This is best effort (though normally it should
-    // suceced).
+    // Try to find a PR attached to the job. This is best-effort (though normally it should
+    // succeed).
     let pr_number = async {
         let Some(build) = db
             .find_build(
