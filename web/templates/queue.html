@@ -225,21 +225,31 @@
         display: flex;
         margin-left: 5px;
     }
+    nav {
+        margin-bottom: 10px;
+        display: flex;
+        flex-direction: row;
+        justify-content: space-between;
+        align-items: center;
+    }
 </style>
 {% endblock %}
 
 {% block body %}
 <main>
-  <h1>
-    <a href="/help">Bors</a> queue - <a href="{{ repo_url }}" target="_blank">{{ repo_name }}</a>
-    {% if tree_state.is_closed() %}
-    {% if let Some(comment_source) = tree_state.comment_source() %}
-    {% if let Some(priority) = tree_state.priority() %}
-    [<a href="{{ comment_source }}">TREECLOSED</a> below priority {{ priority }}{% if let Some(reason) = tree_state.reason() %} ({{ reason }}){% endif %}]
-    {% endif %}
-    {% endif %}
-    {% endif %}
-  </h1>
+  <nav>
+    <h1 style="margin-bottom: 0;">
+      Bors queue - <a href="{{ repo_url }}" target="_blank">{{ repo_name }}</a>
+      {% if tree_state.is_closed() %}
+      {% if let Some(comment_source) = tree_state.comment_source() %}
+      {% if let Some(priority) = tree_state.priority() %}
+      [<a href="{{ comment_source }}">TREECLOSED</a> below priority {{ priority }}{% if let Some(reason) = tree_state.reason() %} ({{ reason }}){% endif %}]
+      {% endif %}
+      {% endif %}
+      {% endif %}
+    </h1>
+    <a href="/help">Help</a>
+  </nav>
 
   <div style="margin-bottom: 1rem; display: flex; align-items: center;">
     <button id="showRollupSelection">Create rollup</button>
