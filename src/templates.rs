@@ -103,6 +103,7 @@ pub struct QueueTemplate {
     pub expected_remaining_duration: Option<Duration>,
     // Average build duration over the past few successful auto builds
     pub average_build_duration: Duration,
+    pub ec2_configured: bool,
 }
 
 impl QueueTemplate {

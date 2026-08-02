@@ -248,7 +248,12 @@
       {% endif %}
       {% endif %}
     </h1>
-    <a href="/help">Help</a>
+    <div>
+      {% if ec2_configured %}
+      <a href="/ec2/{{ repo_owner }}/{{ repo_name }}">EC2 instances</a> |
+      {% endif %}
+      <a href="/help">Help</a>
+    </div>
   </nav>
 
   <div style="margin-bottom: 1rem; display: flex; align-items: center;">
