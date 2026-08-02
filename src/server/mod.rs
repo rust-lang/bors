@@ -486,6 +486,13 @@ pub async fn queue_handler(
             Some(expected_remaining_duration.unwrap_or_default() + remaining_duration);
     }
 
+    let ec2_configured = state.ctx.get_ec2_ctx().is_some()
+        && state
+            .ctx
+            .get_repo(&repo.name)
+            .map(|r| r.config.load().ec2_runners.is_some())
+            .unwrap_or(false);
+
     Ok(HtmlTemplate(QueueTemplate {
         oauth_client_id: oauth
             .as_ref()
@@ -505,6 +512,7 @@ pub async fn queue_handler(
         rollups_info: RollupsInfo::from(rollups),
         expected_remaining_duration,
         average_build_duration,
+        ec2_configured,
     })
     .into_response())
 }
