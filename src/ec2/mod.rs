@@ -1,11 +1,12 @@
-use crate::bors::event::WorkflowJobStarted;
+use crate::PgDbClient;
 use crate::bors::{BuildKind, RepositoryState};
 use crate::config::{Ec2RunnersConfig, JitRunnerKind};
-use crate::database::RunId;
-use crate::github::{GithubRepoName, PullRequestNumber};
+use crate::database::{RunId, WorkflowStatus};
+use crate::github::{CommitSha, GithubRepoName, PullRequestNumber};
 use anyhow::Context;
 use chrono::{DateTime, NaiveDateTime, Utc};
 use octocrab::models::JobId;
+use octocrab::models::workflows::Status;
 use regex::Regex;
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -32,6 +33,10 @@ const TAG_BUILD_KIND: &str = "bors-build-kind";
 
 /// How much time to wait before timeouting each aws command execution.
 const AWS_COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// If an EC2 job is queued for a longer time than this duration, a new EC2 instance will be started
+/// for it.
+const BACKFILL_INSTANCE_TIMEOUT: Duration = Duration::from_secs(60 * 10);
 
 #[derive(Debug)]
 pub struct ParsedLabel<'a> {
@@ -74,19 +79,26 @@ impl Ec2Context {
     }
 }
 
+pub struct Ec2InstanceStartData {
+    pub job_id: JobId,
+    pub job_name: String,
+    pub run_id: RunId,
+    pub commit_sha: CommitSha,
+    pub pr_number: Option<PullRequestNumber>,
+    pub build_kind: BuildKind,
+}
+
 /// Starts an EC2 instance on AWS, which should run a self-hosted GitHub Actions runner
 /// that will be able to execute a job with the given `label`.
 pub async fn start_ec2_github_runner(
     ec2_ctx: &Ec2Context,
-    ec2: &Ec2RunnersConfig,
+    ec2_config: &Ec2RunnersConfig,
     repo: &RepositoryState,
     label: ParsedLabel<'_>,
-    payload: &WorkflowJobStarted,
-    pr_number: Option<PullRequestNumber>,
-    build_kind: BuildKind,
+    data: Ec2InstanceStartData,
 ) -> anyhow::Result<()> {
     tracing::info!("Trying to start EC2 runner for label {}", label.label);
-    let Some(image_name) = ec2.images.get(label.image_name) else {
+    let Some(image_name) = ec2_config.images.get(label.image_name) else {
         return Err(anyhow::anyhow!(
             "EC2 runner image name {} not found",
             label.image_name
@@ -103,13 +115,13 @@ pub async fn start_ec2_github_runner(
     //
     // We allow configuring the repository JIT runner mostly just to make local testing on personal
     // repos easier.
-    let jit_config = match ec2.jit_runner {
+    let jit_config = match ec2_config.jit_runner {
         JitRunnerKind::Organization => {
             repo.client
                 .create_org_jit_runner_config(
                     repo.repository().owner(),
                     &runner_name.to_string(),
-                    ec2.runner_group_id.into(),
+                    ec2_config.runner_group_id.into(),
                     vec![label.label.to_string()],
                 )
                 .await?
@@ -120,7 +132,7 @@ pub async fn start_ec2_github_runner(
                     repo.repository().owner(),
                     repo.repository().name(),
                     &runner_name.to_string(),
-                    ec2.runner_group_id.into(),
+                    ec2_config.runner_group_id.into(),
                     vec![label.label.to_string()],
                 )
                 .await?
@@ -141,29 +153,29 @@ pub async fn start_ec2_github_runner(
         "{}-{}-{}-{}-{}-{}",
         repo.repository().owner(),
         repo.repository().name(),
-        payload.name,
-        payload.run_id,
-        payload.job_id,
-        payload.commit_sha,
+        data.job_name,
+        data.run_id,
+        data.job_id,
+        data.commit_sha,
     );
 
     let mut tags = vec![
         ("Name", instance_name.clone()),
         (TAG_BORS_TERMINATE, "true".to_string()),
         (TAG_REPO, repo.repository().to_string()),
-        (TAG_JOB_ID, payload.job_id.to_string()),
-        (TAG_JOB_NAME, payload.name.clone()),
-        (TAG_RUN_ID, payload.run_id.to_string()),
+        (TAG_JOB_ID, data.job_id.to_string()),
+        (TAG_JOB_NAME, data.job_name.clone()),
+        (TAG_RUN_ID, data.run_id.to_string()),
         (
             TAG_BUILD_KIND,
-            match build_kind {
+            match data.build_kind {
                 BuildKind::Try => "try",
                 BuildKind::Auto => "auto",
             }
             .to_string(),
         ),
     ];
-    if let Some(pr_number) = pr_number {
+    if let Some(pr_number) = data.pr_number {
         tags.push((TAG_PR_NUMBER, pr_number.to_string()));
     }
 
@@ -182,7 +194,7 @@ pub async fn start_ec2_github_runner(
     // Idempotency token, to avoid starting the same instance multiple times
     // For some reason, GitHub sometimes sends us the workflow job started webhook multiple
     // times...
-    let mut idempotency_token = format!("{}-{}", payload.job_id, payload.commit_sha);
+    let mut idempotency_token = format!("{}-{}", data.job_id, data.commit_sha);
     // The idempotency token cannot be longer than 64 characters
     idempotency_token.truncate(64);
 
@@ -190,7 +202,7 @@ pub async fn start_ec2_github_runner(
     // asd-sdk-ec2) has a massive impact on build times and binary size, plus it currently runs into
     // feature hell (ring vs aws-lc-sys). The choice might be reevaluated in the future.
     let instance_type = label.instance_type;
-    let mut ec2_cli = prepare_aws_cli(Some(&creds), Some(&ec2.region));
+    let mut ec2_cli = prepare_aws_cli(Some(&creds), Some(&ec2_config.region));
     ec2_cli
         .arg("ec2")
         .arg("run-instances")
@@ -276,6 +288,100 @@ pub async fn terminate_old_ec2_instances(
         .context("Cannot terminate EC2 instances")?;
     } else {
         tracing::info!("No EC2 instances to terminate");
+    }
+
+    Ok(())
+}
+
+/// Find workflow jobs that have been in the *queued* state for some time, and that are looking
+/// for EC2 workers. Try to backfill a(nother) EC2 instance for that job.
+///
+/// This can be used to resurrect jobs for which an EC2 instance wasn't started for some reason.
+pub async fn backfill_ec2_instances(
+    ec2_ctx: &Ec2Context,
+    db: Arc<PgDbClient>,
+    repo: Arc<RepositoryState>,
+) -> anyhow::Result<()> {
+    let Some(ec2_config) = &repo.config.load().ec2_runners else {
+        return Ok(());
+    };
+
+    let cutoff_date = Utc::now() - BACKFILL_INSTANCE_TIMEOUT;
+
+    let mut jobs = Vec::new();
+
+    let builds = db.get_pending_builds(repo.repository()).await?;
+    for build in &builds {
+        let Ok(workflows) = repo
+            .client
+            .get_workflow_runs_for_commit_sha(CommitSha(build.commit_sha.clone()))
+            .await
+        else {
+            continue;
+        };
+        for workflow in workflows {
+            match workflow.status {
+                WorkflowStatus::Pending => {}
+                WorkflowStatus::Success | WorkflowStatus::Failure => {
+                    continue;
+                }
+            }
+            let Ok(workflow_jobs) = repo.client.get_jobs_for_workflow_run(workflow.id).await else {
+                continue;
+            };
+
+            // We want to check the job if it has been waiting for a worker for some time
+            jobs.extend(
+                workflow_jobs
+                    .into_iter()
+                    .filter(|job| job.status == Status::Queued)
+                    .filter(|job| job.created_at < cutoff_date)
+                    .map(|job| (build, workflow.id, job)),
+            );
+        }
+    }
+
+    let mut build_to_pr: HashMap<i32, Option<PullRequestNumber>> = HashMap::new();
+    for (build, run_id, job) in jobs {
+        // Check if the job requires an EC2 instance
+        let Some(label) = job
+            .labels
+            .iter()
+            .find_map(|label| ParsedLabel::parse(label, &ec2_config.label_prefix))
+        else {
+            continue;
+        };
+
+        tracing::info!(
+            "Backfilling EC2 instance for run {run_id}, job {}, label {}",
+            job.name,
+            label.label
+        );
+        let pr_number = match build_to_pr.get(&build.id) {
+            Some(number) => *number,
+            None => {
+                let number = db
+                    .find_pr_by_build(build)
+                    .await
+                    .ok()
+                    .flatten()
+                    .map(|pr| pr.number);
+                build_to_pr.insert(build.id, number);
+                number
+            }
+        };
+        let data = Ec2InstanceStartData {
+            job_id: job.id,
+            job_name: job.name,
+            run_id: job.run_id.into(),
+            commit_sha: CommitSha(build.commit_sha.clone()),
+            pr_number,
+            build_kind: build.kind,
+        };
+        let res = start_ec2_github_runner(ec2_ctx, ec2_config, &repo, label, data).await;
+        if let Err(error) = res {
+            tracing::error!("Could not backfill EC2 instance: {error:?}");
+        }
     }
 
     Ok(())

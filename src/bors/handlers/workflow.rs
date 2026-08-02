@@ -8,7 +8,7 @@ use crate::bors::event::{
 use crate::bors::handlers::{get_build_kind_from_branch, is_bors_observed_branch};
 use crate::bors::{BuildKind, build};
 use crate::database::{BuildModel, BuildStatus, PullRequestModel, WorkflowStatus};
-use crate::ec2::{ParsedLabel, start_ec2_github_runner};
+use crate::ec2::{Ec2InstanceStartData, ParsedLabel, start_ec2_github_runner};
 use crate::github::api::client::GithubRepositoryClient;
 use crate::{BorsContext, PgDbClient};
 use std::sync::Arc;
@@ -212,10 +212,15 @@ pub(super) async fn handle_workflow_job_started(
         }
     };
 
-    start_ec2_github_runner(
-        ec2_ctx, ec2_config, &repo, label, &payload, pr_number, build_kind,
-    )
-    .await?;
+    let data = Ec2InstanceStartData {
+        job_id: payload.job_id,
+        job_name: payload.name,
+        run_id: payload.run_id.into(),
+        commit_sha: payload.commit_sha,
+        pr_number,
+        build_kind,
+    };
+    start_ec2_github_runner(ec2_ctx, ec2_config, &repo, label, data).await?;
 
     Ok(())
 }

@@ -42,7 +42,11 @@ const MERGE_QUEUE_CHECK_INTERVAL: Duration = Duration::from_secs(5);
 const MERGE_QUEUE_MAX_INTERVAL: Duration = Duration::from_secs(30);
 
 /// How often should the bot try to terminate running EC2 instances that are too old.
-const EC2_INSTANCE_CHECK_INTERVAL: Duration = Duration::from_secs(60 * 10);
+const EC2_INSTANCE_TERMINATE_INTERVAL: Duration = Duration::from_secs(60 * 10);
+
+/// How often should the bot try to backfill EC2 instances for jobs that have been queued for a
+/// long time.
+const EC2_INSTANCE_BACKFILL_TERMINAL: Duration = Duration::from_secs(60 * 15);
 
 #[derive(clap::Parser)]
 struct Opts {
@@ -273,7 +277,8 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
         let mut mergeability_status_refresh = make_interval(MERGEABILITY_STATUS_INTERVAL);
         let mut prs_interval = make_interval(PR_STATE_PERIODIC_REFRESH);
         let mut merge_queue_interval = make_interval(MERGE_QUEUE_CHECK_INTERVAL);
-        let mut ec2_check_interval = make_interval(EC2_INSTANCE_CHECK_INTERVAL);
+        let mut ec2_check_interval = make_interval(EC2_INSTANCE_TERMINATE_INTERVAL);
+        let mut ec2_backfill_interval = make_interval(EC2_INSTANCE_BACKFILL_TERMINAL);
         loop {
             tokio::select! {
                 _ = config_refresh.tick() => {
@@ -296,6 +301,9 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
                 }
                 _ = ec2_check_interval.tick() => {
                     refresh_tx.send(BorsGlobalEvent::TerminateOldEC2Instances).await?;
+                }
+                _ = ec2_backfill_interval.tick() => {
+                    refresh_tx.send(BorsGlobalEvent::BackfillEC2Instances).await?;
                 }
             }
         }
