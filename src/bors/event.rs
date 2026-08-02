@@ -81,6 +81,8 @@ pub enum BorsGlobalEvent {
     ProcessMergeQueue,
     /// Try to terminate old EC2 running instances.
     TerminateOldEC2Instances,
+    /// Try to create EC2 instances for jobs that have been queued for some time.
+    BackfillEC2Instances,
 }
 
 #[derive(Debug)]

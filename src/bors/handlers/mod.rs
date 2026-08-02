@@ -28,7 +28,7 @@ use crate::bors::{
     RepositoryState, TRY_BRANCH_NAME,
 };
 use crate::database::{DelegatedPermission, DelegationStatus, PullRequestModel};
-use crate::ec2::terminate_old_ec2_instances;
+use crate::ec2::{backfill_ec2_instances, terminate_old_ec2_instances};
 use crate::github::{
     CommitSha, GithubUser, LabelTrigger, PullRequest, PullRequestInfo, PullRequestNumber,
 };
@@ -332,12 +332,24 @@ pub async fn handle_bors_global_event(
             senders.merge_queue().maybe_perform_tick().await?;
         }
         BorsGlobalEvent::TerminateOldEC2Instances => {
-            tracing::info!("Attempt to terminate old EC2 instances");
             if let Some(ec2_ctx) = ctx.get_ec2_ctx() {
+                tracing::info!("Attempt to terminate old EC2 instances");
                 let span = tracing::info_span!("Terminate old EC2 instances");
                 for_each_repo(&ctx, |repo| {
                     let subspan = tracing::info_span!("Repo", "{}", repo.repository());
                     terminate_old_ec2_instances(ec2_ctx, repo).instrument(subspan)
+                })
+                .instrument(span)
+                .await?;
+            }
+        }
+        BorsGlobalEvent::BackfillEC2Instances => {
+            if let Some(ec2_ctx) = ctx.get_ec2_ctx() {
+                tracing::info!("Attempt to backfill EC2 instances for long queued jobs");
+                let span = tracing::info_span!("Backfill EC2 instances");
+                for_each_repo(&ctx, |repo| {
+                    let subspan = tracing::info_span!("Repo", "{}", repo.repository());
+                    backfill_ec2_instances(ec2_ctx, db.clone(), repo).instrument(subspan)
                 })
                 .instrument(span)
                 .await?;
