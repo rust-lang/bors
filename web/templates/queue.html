@@ -233,7 +233,7 @@
         align-items: center;
     }
     .table-builds-wrapper {
-        max-width: 800px;
+        max-width: 1200px;
     }
     .table-builds-wrapper .dt-layout-row {
         margin: 0 !important;
@@ -303,7 +303,8 @@ Average duration of recent auto builds: {{ format_duration(*average_build_durati
           <tr>
             <th>#</th>
             <th>Workflow URL</th>
-            <th>Started at/elapsed</th>
+            <th>Started at</th>
+            <th>Elapsed time</th>
             <th>Remaining time (est.)</th>
             <th>Jobs</th>
           </tr>
@@ -328,7 +329,9 @@ Average duration of recent auto builds: {{ format_duration(*average_build_durati
             {% endif %}
             <td>
               <span class="timestamp"></span>
-              <span class="elapsed-time-display"></span>
+            </td>
+            <td>
+              <span class="elapsed-time-display standalone"></span>
             </td>
             <td>
               <span class="remaining-time-display"></span>
@@ -772,10 +775,11 @@ Average duration of recent auto builds: {{ format_duration(*average_build_durati
         pageLength: 100,
         columns: [
           { name: "pr", className: "dt-right" },
-          { name: "workflow-url" },
-          { name: "started" },
-          { name: "remaining" },
-          { name: "jobs" },
+          { name: "workflow-url", className: "dt-right" },
+          { name: "started", className: "dt-right" },
+          { name: "elapsed", className: "dt-right" },
+          { name: "remaining", className: "dt-right" },
+          { name: "jobs", width: "100%" },
         ],
         ordering: false,
         autoWidth: false,
@@ -951,11 +955,11 @@ Average duration of recent auto builds: {{ format_duration(*average_build_durati
                 const elapsedMs = now - createdAtMs;
 
                 let elapsedTime = formatTimeMs(elapsedMs);
-                if (elapsedTime.length > 0) {
-                  elapsedTime = ` (${elapsedTime})`;
-                }
                 const elapsedTimeElements = td.querySelector('.elapsed-time-display');
                 if (elapsedTimeElements !== null) {
+                  if (!elapsedTimeElements.classList.contains("standalone") && elapsedTime.length > 0) {
+                    elapsedTime = ` (${elapsedTime})`;
+                  }
                   elapsedTimeElements.textContent = elapsedTime;
                 }
                 const timestampElements = td.querySelector('.timestamp');
