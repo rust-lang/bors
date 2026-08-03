@@ -177,13 +177,25 @@ impl QueueTemplate {
     fn remaining_jobs_formatted_title(&self, jobs: &[WorkflowJobData]) -> String {
         use std::fmt::Write;
 
+        const MAX_JOBS_TO_SHOW: usize = 20;
+
         let remaining = get_remaining_jobs(jobs);
         if remaining.is_empty() {
             return String::new();
         }
-        let mut data = String::from("\n\nRemaining jobs:\n");
-        for job in remaining {
+        let mut data = format!("\n\nRemaining jobs ({}):\n", remaining.len());
+        for job in remaining.iter().take(MAX_JOBS_TO_SHOW) {
             writeln!(data, "{}", job.name).unwrap();
+        }
+
+        if remaining.len() > MAX_JOBS_TO_SHOW {
+            let leftover = remaining.len() - MAX_JOBS_TO_SHOW;
+            writeln!(
+                data,
+                "(and {leftover} other{})",
+                if leftover == 1 { "" } else { "s" }
+            )
+            .unwrap();
         }
 
         data
@@ -195,10 +207,25 @@ impl QueueTemplate {
         if remaining.is_empty() {
             return String::new();
         }
-        format!(
-            " ({})",
-            remaining.iter().take(5).map(|j| &j.name).join(", ")
+
+        const MAX_JOBS_TO_SHOW: usize = 5;
+
+        let mut data = String::new();
+        write!(
+            data,
+            " ({}",
+            remaining
+                .iter()
+                .take(MAX_JOBS_TO_SHOW)
+                .map(|j| &j.name)
+                .join(", ")
         )
+        .unwrap();
+        if remaining.len() > MAX_JOBS_TO_SHOW {
+            write!(data, ", ...").unwrap();
+        }
+        data.push(')');
+        data
     }
 }
 

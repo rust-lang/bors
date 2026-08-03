@@ -232,6 +232,12 @@
         justify-content: space-between;
         align-items: center;
     }
+    .table-builds-wrapper {
+        max-width: 800px;
+    }
+    .table-builds-wrapper .dt-layout-row {
+        margin: 0 !important;
+    }
 </style>
 {% endblock %}
 
@@ -290,7 +296,7 @@ Average duration of recent auto builds: {{ format_duration(*average_build_durati
     <div class="toggle">
       <button id="builds-toggle" title="Toggle pending builds table">Pending builds</button>
     </div>
-    <div class="table-builds-wrapper" style="display: none; max-width: 800px;">
+    <div class="table-builds-wrapper" style="display: none;">
       <div id="loading-builds">Loading...</div>
       <table id="table-builds" class="stripe" style="display: none;">
         <thead>
