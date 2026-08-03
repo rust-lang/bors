@@ -62,7 +62,7 @@ pub use github::User;
 pub use github::{BranchPushBehaviour, BranchPushError, MergeBehavior};
 pub use github::{WorkflowEvent, WorkflowJob};
 pub use github::{default_branch_name, default_repo_name};
-pub use mock::ExternalHttpMock;
+pub use mock::{ExternalHttpMock, ZulipMessage};
 pub use utils::io::load_test_file;
 pub use utils::sync::TestSyncMarker;
 pub use utils::webhook::{TEST_WEBHOOK_SECRET, create_webhook_request};
@@ -226,7 +226,7 @@ impl BorsTester {
             // local git ops, but we do not currently mock git in tests.
             Some(Git::from_path(PathBuf::from("/tmp/git"))),
             "https://bors-test.com",
-            None,
+            Some(mock.zulip_client()),
             None,
         ));
 
@@ -426,6 +426,20 @@ impl BorsTester {
         id: Id,
     ) -> anyhow::Result<Comment> {
         GitHub::get_next_comment(self.github.clone(), id).await
+    }
+
+    pub async fn zulip_messages(&self) -> Vec<ZulipMessage> {
+        self.http_mock.zulip_messages().await
+    }
+
+    /// Expect that `count` Zulip messages will be received, without checking their contents.
+    pub async fn expect_zulip_messages(&self, count: usize) {
+        let messages = self.zulip_messages().await;
+        assert_eq!(
+            messages.len(),
+            count,
+            "Expected {count} Zulip messages, got {messages:#?}"
+        );
     }
 
     pub async fn post_comment<C: Into<Comment>>(&mut self, comment: C) -> anyhow::Result<Comment> {
@@ -1206,7 +1220,7 @@ impl BorsTester {
             }
         };
         // Flush any local queues
-        self.http_mock.gh_server.assert_empty_queues().await?;
+        self.http_mock.assert_empty_queues().await?;
         Ok(Arc::into_inner(self.github).unwrap().into_inner())
     }
 }

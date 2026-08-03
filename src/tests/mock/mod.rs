@@ -6,7 +6,7 @@ use crate::tests::mock::app::{AppHandler, default_app_id};
 use crate::tests::mock::permissions::TeamApiMockServer;
 use crate::tests::mock::repository::{mock_repo, mock_repo_list};
 use crate::tests::{GitHub, User};
-use crate::{OAuthClient, OAuthConfig, TeamApiClient, create_github_client};
+use crate::{OAuthClient, OAuthConfig, TeamApiClient, ZulipClient, create_github_client};
 use graphql_parser::query::{Definition, Document, OperationDefinition, Selection};
 use http::HeaderValue;
 use http::header::AUTHORIZATION;
@@ -27,6 +27,7 @@ mod permissions;
 mod pull_request;
 mod repository;
 mod workflow;
+mod zulip;
 
 use crate::tests::mock::oauth::mock_oauth;
 pub use comment::GitHubIssueCommentEventPayload;
@@ -34,6 +35,8 @@ pub use pull_request::{
     GitHubPullRequestEventPayload, GitHubPushEventPayload, PullRequestChangeEvent,
 };
 pub use workflow::GitHubWorkflowEventPayload;
+pub use zulip::ZulipMessage;
+use zulip::ZulipMockServer;
 
 #[derive(serde::Serialize, Clone)]
 struct GitHubUser {
@@ -113,15 +116,18 @@ impl From<User> for GitHubUser {
 pub struct ExternalHttpMock {
     pub(super) gh_server: GitHubMockServer,
     team_api_server: TeamApiMockServer,
+    zulip_server: ZulipMockServer,
 }
 
 impl ExternalHttpMock {
     pub async fn start(github: Arc<Mutex<GitHub>>) -> Self {
         let gh_server = GitHubMockServer::start(github.clone()).await;
         let team_api_server = TeamApiMockServer::start(github.clone()).await;
+        let zulip_server = ZulipMockServer::start().await;
         Self {
             gh_server,
             team_api_server,
+            zulip_server,
         }
     }
 
@@ -131,6 +137,20 @@ impl ExternalHttpMock {
 
     pub fn team_api_client(&self) -> TeamApiClient {
         self.team_api_server.client()
+    }
+
+    pub fn zulip_client(&self) -> ZulipClient {
+        self.zulip_server.client()
+    }
+
+    pub async fn zulip_messages(&self) -> Vec<ZulipMessage> {
+        self.zulip_server.take_received_messages()
+    }
+
+    pub async fn assert_empty_queues(self) -> anyhow::Result<()> {
+        self.gh_server.assert_empty_queues().await?;
+        self.zulip_server.assert_empty_queue().await?;
+        Ok(())
     }
 
     pub fn oauth_client(&self, config: OAuthConfig) -> OAuthClient {
