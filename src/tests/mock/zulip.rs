@@ -8,36 +8,34 @@ use http::{
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::sync::Arc;
-use wiremock::{Mock, MockServer, Request, ResponseTemplate, matchers::any};
+use wiremock::{Mock, MockServer, Request, ResponseTemplate, matchers::path};
 
 const TEST_ZULIP_USERNAME: &str = "bors-test@example.com";
 const TEST_ZULIP_TOKEN: &str = "test-zulip-token";
 
 pub(super) struct ZulipMockServer {
     mock_server: MockServer,
-    received_messages: Arc<Mutex<Vec<anyhow::Result<ZulipMessage>>>>,
+    received_messages: Arc<Mutex<Vec<ZulipMessage>>>,
 }
 
 impl ZulipMockServer {
     pub(super) async fn start() -> Self {
         let mock_server = MockServer::start().await;
         let received_messages = Arc::new(Mutex::new(Vec::new()));
+        let responder_messages = Arc::clone(&received_messages);
 
-        Mock::given(any())
-            .respond_with({
-                let received_messages = received_messages.clone();
+        Mock::given(path("/api/v1/messages"))
+            .respond_with(move |request: &Request| {
+                let message = ZulipMessage::try_from(request)
+                    .expect("Failed to parse received Zulip message");
 
-                move |request: &Request| {
-                    received_messages
-                        .lock()
-                        .push(ZulipMessage::try_from(request));
+                responder_messages.lock().push(message);
 
-                    ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                        "result": "success",
-                        "msg": "",
-                        "id": 1,
-                    }))
-                }
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "result": "success",
+                    "msg": "",
+                    "id": 1,
+                }))
             })
             .mount(&mock_server)
             .await;
@@ -57,22 +55,15 @@ impl ZulipMockServer {
         .unwrap()
     }
 
-    pub(super) fn take_received_messages(&self) -> anyhow::Result<Vec<ZulipMessage>> {
-        let received_messages: Vec<_> = self.received_messages.lock().drain(..).collect();
-        let mut messages = Vec::with_capacity(received_messages.len());
-
-        for message in received_messages {
-            match message {
-                Ok(message) => messages.push(message),
-                Err(error) => return Err(error),
-            }
-        }
-
-        Ok(messages)
+    pub(super) fn take_received_messages(&self) -> Vec<ZulipMessage> {
+        self.received_messages.lock().drain(..).collect()
     }
 
-    pub(super) fn assert_empty_queue(&self) -> anyhow::Result<()> {
-        let messages = self.take_received_messages()?;
+    pub(super) async fn assert_empty_queue(self) -> anyhow::Result<()> {
+        self.mock_server.reset().await;
+        let messages = self.take_received_messages();
+        drop(self.mock_server);
+
         ensure!(
             messages.is_empty(),
             "Expected no unread Zulip messages, got {messages:#?}"

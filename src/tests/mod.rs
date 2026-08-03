@@ -428,16 +428,13 @@ impl BorsTester {
         GitHub::get_next_comment(self.github.clone(), id).await
     }
 
-    pub async fn zulip_messages(&self) -> anyhow::Result<Vec<ZulipMessage>> {
+    pub async fn zulip_messages(&self) -> Vec<ZulipMessage> {
         self.http_mock.zulip_messages().await
     }
 
     /// Expect that `count` Zulip messages will be received, without checking their contents.
     pub async fn expect_zulip_messages(&self, count: usize) {
-        let messages = self
-            .zulip_messages()
-            .await
-            .unwrap_or_else(|error| panic!("Failed to receive Zulip messages: {error:?}"));
+        let messages = self.zulip_messages().await;
         assert_eq!(
             messages.len(),
             count,

@@ -1142,7 +1142,7 @@ approved = { modifications = ["+foo", "+baz"], unless = ["label1", "label2"] }
                 ctx.get_next_comment_text(()).await?,
                 @"Tree closed for PRs with priority less than 5."
             );
-            let messages = ctx.zulip_messages().await?;
+            let messages = ctx.zulip_messages().await;
             insta::assert_debug_snapshot!(messages, @r#"
             [
                 ZulipMessage {
@@ -1183,7 +1183,7 @@ approved = { modifications = ["+foo", "+baz"], unless = ["label1", "label2"] }
                 @"Tree closed for PRs with priority less than 5."
             );
 
-            let messages = ctx.zulip_messages().await?;
+            let messages = ctx.zulip_messages().await;
 
             // Ensure that messages are stripped from the reason before it is sent to Zulip.
             insta::assert_debug_snapshot!(messages, @r#"
@@ -1243,7 +1243,7 @@ approved = { modifications = ["+foo", "+baz"], unless = ["label1", "label2"] }
                 @"Tree is now open for merging."
             );
 
-            let messages = ctx.zulip_messages().await?;
+            let messages = ctx.zulip_messages().await;
             insta::assert_debug_snapshot!(messages, @r#"
             [
                 ZulipMessage {

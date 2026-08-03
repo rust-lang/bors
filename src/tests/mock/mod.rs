@@ -143,13 +143,14 @@ impl ExternalHttpMock {
         self.zulip_server.client()
     }
 
-    pub async fn zulip_messages(&self) -> anyhow::Result<Vec<ZulipMessage>> {
+    pub async fn zulip_messages(&self) -> Vec<ZulipMessage> {
         self.zulip_server.take_received_messages()
     }
 
     pub async fn assert_empty_queues(self) -> anyhow::Result<()> {
         self.gh_server.assert_empty_queues().await?;
-        self.zulip_server.assert_empty_queue()
+        self.zulip_server.assert_empty_queue().await?;
+        Ok(())
     }
 
     pub fn oauth_client(&self, config: OAuthConfig) -> OAuthClient {
