@@ -155,6 +155,10 @@ pub(super) async fn handle_workflow_job_started(
     repo: Arc<RepositoryState>,
     payload: WorkflowJobStarted,
 ) -> anyhow::Result<()> {
+    if let Err(error) = try_start_ec2_instance(ctx, &db, &repo, &payload).await {
+        tracing::error!("Cannot start EC2 instance: {error:?}");
+    }
+
     let Some(build_kind) = get_build_kind_from_branch(&payload.branch) else {
         return Ok(());
     };
@@ -168,6 +172,17 @@ pub(super) async fn handle_workflow_job_started(
         );
     }
 
+    Ok(())
+}
+
+/// Try to start an EC2 instance with a GitHub self-hosted runner for the started GitHub Actions
+/// workflow job.
+async fn try_start_ec2_instance(
+    ctx: &BorsContext,
+    db: &PgDbClient,
+    repo: &RepositoryState,
+    payload: &WorkflowJobStarted,
+) -> anyhow::Result<()> {
     let Some(ec2_ctx) = ctx.get_ec2_ctx() else {
         return Ok(());
     };
@@ -212,17 +227,19 @@ pub(super) async fn handle_workflow_job_started(
         }
     };
 
+    // If we don't know what kind of branch it is, we just assume that it is a try build
+    let build_kind = get_build_kind_from_branch(&payload.branch).unwrap_or(BuildKind::Try);
+
+    // We try to spawn EC2 instances for all kinds of jobs, even those outside of try/auto branches
     let data = Ec2InstanceStartData {
         job_id: payload.job_id,
-        job_name: payload.name,
+        job_name: payload.name.clone(),
         run_id: payload.run_id.into(),
-        commit_sha: payload.commit_sha,
+        commit_sha: payload.commit_sha.clone(),
         pr_number,
         build_kind,
     };
-    start_ec2_github_runner(ec2_ctx, ec2_config, &repo, label, data).await?;
-
-    Ok(())
+    start_ec2_github_runner(ec2_ctx, ec2_config, repo, label, data).await
 }
 
 pub(super) async fn handle_workflow_job_completed(
