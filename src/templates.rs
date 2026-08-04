@@ -185,7 +185,7 @@ impl QueueTemplate {
         }
         let mut data = format!("\n\nRemaining jobs ({}):\n", remaining.len());
         for job in remaining.iter().take(MAX_JOBS_TO_SHOW) {
-            writeln!(data, "{}", job.name).unwrap();
+            writeln!(data, "{}", normalize_job_name(&job.name)).unwrap();
         }
 
         if remaining.len() > MAX_JOBS_TO_SHOW {
@@ -217,7 +217,7 @@ impl QueueTemplate {
             remaining
                 .iter()
                 .take(MAX_JOBS_TO_SHOW)
-                .map(|j| &j.name)
+                .map(|j| normalize_job_name(&j.name))
                 .join(", ")
         )
         .unwrap();
@@ -227,6 +227,14 @@ impl QueueTemplate {
         data.push(')');
         data
     }
+}
+
+/// A hardcoded logic for rust-lang/rust, to strip auto/try prefixes.
+fn normalize_job_name(name: &str) -> String {
+    name.split_once(" - ")
+        .map(|(_, rest)| rest)
+        .unwrap_or_else(|| name)
+        .to_string()
 }
 
 fn get_remaining_jobs(jobs: &[WorkflowJobData]) -> Vec<&WorkflowJobData> {
@@ -303,3 +311,16 @@ fn format_duration(duration: Duration) -> String {
 #[derive(Template)]
 #[template(path = "not_found.html")]
 pub struct NotFoundTemplate {}
+
+#[cfg(test)]
+mod tests {
+    use crate::templates::normalize_job_name;
+
+    #[test]
+    fn test_normalize_job() {
+        assert_eq!(
+            normalize_job_name("auto - aarch64-apple-macos-26"),
+            "aarch64-apple-macos-26"
+        );
+    }
+}
