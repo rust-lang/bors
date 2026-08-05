@@ -210,3 +210,17 @@ To make the implementation more robust, it now behaves as follow:
 Note that we explicitly do not read the "Check suite was completed" webhook, because it can actually be received *before* a webhook that tells us that the last workflow of that check suite was completed. If that happens, we could mark a build as completed without knowing the final conclusion of its workflows. That is not a big problem, but it would mean that we sometimes cannot post the real status of a workflow in the "build completed" bors comment on GitHub. So instead we just listen for the completed workflows.
 
 In any case, with new bors there is no need to introduce fake conclusion CI jobs.
+
+## Zulip messages
+
+Bors can post certain messages (e.g. tree of a repo being open/closed) to Zulip. You can configure this via three environment variables. See [README.md](../README.md) for more information.
+
+## EC2 instance spawning
+Bors can spawn and manage the lifecycle of EC2 instances with self-hosted GitHub runners for executing GitHub Actions jobs.
+To enable this functionality, set the `CI_EC2_RUNNER_ROLE` environment variable and configure the `ec2_runners` section in the config file.
+
+Then you can use a special value for the `os` field of GHA jobs, which will tell bors to spawn an EC2 instance to run the job.
+This value is documented in `rust-bors.example.toml`.
+
+Bors will start the EC2 instance when the job starts; the instance should end by itself once the job ends. Bors also periodically monitors all spawned instances, and it will terminate instances that have been running for a long time.
+It will also observe jobs that have been waiting for an EC2 instance for a long time (this can happen e.g. when the workflow job started webhook doesn't arrive) and backfill EC2 instances for them.

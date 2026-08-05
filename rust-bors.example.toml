@@ -33,3 +33,29 @@ try_failed = []
 auto_build_succeeded = { modifications = ["+foo", "+bar"], unless = ["baz"] }
 auto_build_failed = ["+foo", "+bar"]
 conflict = ["+conflict"]
+
+# Configuration for launching self-hosted GitHub runners on EC2.
+[ec2_runners]
+# GitHub self-hosted runner group ID.
+# Note that it should be configured to work on the branches for which bors will spawn the EC2
+# runners!
+runner_group_id = 1
+# Prefix of the `os` label of GitHub Actions jobs.
+# If the `os` field of a job begins with this prefix, bors will attempt to parse the `os` field
+# and use its information to configure the EC2 instance.
+# The format of the label should be `<prefix>-<image-name>-<instance-type>-<label>`.
+label_prefix = "ec2"
+# Region where the EC2 instance will be spawned.
+region = "us-east-2"
+# Map of image names to AMI IDs.
+# If you specify `ubuntu26.04` as the image name with the config below, bors will start an EC2
+# instance with the given AMI ID.
+images = {
+    "ubuntu26.04" = "/aws/service/canonical/ubuntu/server/26.04/stable/current/amd64/hvm/ebs-gp3/ami-id"
+}
+# Whether the self-hosted GitHub runner should be started with a repository or an organization
+# JIT config.
+# Use organization for production deployments, and repository for local testing.
+jit_runner = "organization" # "repository" or "organization"
+# Allowed EC2 instance types that can be used in the `<instance-type>` field of the `os` label.
+allowed_instances = ["c8a.12xlarge"]
