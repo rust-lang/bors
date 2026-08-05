@@ -335,6 +335,14 @@ fn parse_pull_request_review_comment_events(body: &[u8]) -> anyhow::Result<Optio
 fn parse_workflow_run_events(body: &[u8]) -> anyhow::Result<Option<BorsEvent>> {
     let payload: WebhookWorkflowRun = serde_json::from_slice(body)?;
     let repository_name = parse_repository_name(&payload.repository)?;
+
+    // As a security precaution, we eagerly prefilter all workflow runs other than "push" here,
+    // to ensure that only workflows from privileged pushes to branches in the repository are
+    // registered by bors.
+    if payload.workflow_run.run.event != "push" {
+        return Ok(None);
+    }
+
     let result = match payload.action {
         "requested" => Some(BorsEvent::Repository(BorsRepositoryEvent::WorkflowStarted(
             WorkflowRunStarted {

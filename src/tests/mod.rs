@@ -195,6 +195,7 @@ pub struct BorsTester {
     mergeability_queue_rx: MergeabilityQueueReceiver,
     gitops_queue_rx: GitOpsQueueReceiver,
     ctx: Arc<BorsContext>,
+    wait_for_markers: bool,
 }
 
 impl BorsTester {
@@ -267,6 +268,7 @@ impl BorsTester {
                 mergeability_queue_rx,
                 gitops_queue_rx,
                 ctx,
+                wait_for_markers: true,
             },
             bors,
         )
@@ -525,6 +527,7 @@ impl BorsTester {
                     .unwrap();
                 Ok(())
             },
+            self.wait_for_markers,
             &WAIT_FOR_BUILD_QUEUE,
         )
         .await
@@ -542,6 +545,7 @@ impl BorsTester {
                     .unwrap();
                 Ok(())
             },
+            self.wait_for_markers,
             &WAIT_FOR_MERGEABILITY_STATUS_REFRESH,
         )
         .await
@@ -558,6 +562,7 @@ impl BorsTester {
                     .unwrap();
                 Ok(())
             },
+            self.wait_for_markers,
             &WAIT_FOR_PR_STATUS_REFRESH,
         )
         .await
@@ -577,6 +582,7 @@ impl BorsTester {
                 self.senders.merge_queue().perform_tick().await.unwrap();
                 Ok(())
             },
+            self.wait_for_markers,
             &WAIT_FOR_MERGE_QUEUE,
         )
         .await
@@ -592,6 +598,7 @@ impl BorsTester {
                     .unwrap();
                 Ok(())
             },
+            self.wait_for_markers,
             &WAIT_FOR_MERGE_QUEUE,
         )
         .await
@@ -1180,6 +1187,7 @@ impl BorsTester {
                 );
                 Ok(())
             },
+            self.wait_for_markers,
             &WAIT_FOR_WEBHOOK_COMPLETED,
         )
         .await?;
@@ -1194,6 +1202,18 @@ impl BorsTester {
         self.db()
             .get_pull_request(&id.repo, PullRequestNumber(id.number))
             .await
+    }
+
+    /// Run the provided async function while not waiting for markers to be hit.
+    pub async fn skip_waiting_for_marker<F, R>(&mut self, func: F) -> R
+    where
+        F: AsyncFnOnce(&mut Self) -> R,
+    {
+        let orig = self.wait_for_markers;
+        self.wait_for_markers = false;
+        let res = func(self).await;
+        self.wait_for_markers = orig;
+        res
     }
 
     async fn finish(self, bors: JoinHandle<()>) -> anyhow::Result<GitHub> {
@@ -1519,7 +1539,11 @@ impl PullRequestProxy {
 
 /// Start an async operation and wait until a specific [`TestSyncMarker`]
 /// is marked.
-async fn wait_for_marker<Func, R>(func: Func, marker: &TestSyncMarker) -> anyhow::Result<R>
+async fn wait_for_marker<Func, R>(
+    func: Func,
+    wait: bool,
+    marker: &TestSyncMarker,
+) -> anyhow::Result<R>
 where
     Func: AsyncFnOnce() -> anyhow::Result<R>,
 {
@@ -1530,7 +1554,7 @@ where
     marker.drain().await;
 
     let res = func().await;
-    if res.is_ok() {
+    if wait && res.is_ok() {
         tokio::time::timeout(SYNC_MARKER_TIMEOUT, marker.sync())
             .await
             .map_err(|_| anyhow::anyhow!("Timed out waiting for a test marker to be marked"))?;
