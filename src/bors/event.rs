@@ -83,6 +83,8 @@ pub enum BorsGlobalEvent {
     TerminateOldEC2Instances,
     /// Try to create EC2 instances for jobs that have been queued for some time.
     BackfillEC2Instances,
+    /// Reload jobs of pending workfows into the in-memory job cache.
+    ReloadWorkflowJobCache,
 }
 
 #[derive(Debug)]

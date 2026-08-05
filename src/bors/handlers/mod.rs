@@ -19,6 +19,7 @@ use crate::bors::handlers::trybuild::{command_try_build, command_try_cancel};
 use crate::bors::handlers::workflow::{
     AutoBuildCancelReason, handle_workflow_completed, handle_workflow_job_completed,
     handle_workflow_job_started, handle_workflow_started, maybe_cancel_auto_build,
+    reload_workflow_job_cache,
 };
 use crate::bors::labels::handle_label_trigger;
 use crate::bors::mergeability_queue::set_pr_mergeability_based_on_user_action;
@@ -354,6 +355,16 @@ pub async fn handle_bors_global_event(
                 .instrument(span)
                 .await?;
             }
+        }
+        BorsGlobalEvent::ReloadWorkflowJobCache => {
+            tracing::info!("Attempt to reload in-memory workflow job cache");
+            let span = tracing::info_span!("Reloading workflow jobs");
+            for_each_repo(&ctx, |repo| {
+                let subspan = tracing::info_span!("Repo", "{}", repo.repository());
+                reload_workflow_job_cache(&ctx, db.clone(), repo).instrument(subspan)
+            })
+            .instrument(span)
+            .await?;
         }
     }
     Ok(())

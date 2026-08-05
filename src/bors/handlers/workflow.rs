@@ -9,8 +9,10 @@ use crate::bors::handlers::{get_build_kind_from_branch, is_bors_observed_branch}
 use crate::bors::{BuildKind, build};
 use crate::database::{BuildModel, BuildStatus, PullRequestModel, WorkflowStatus};
 use crate::ec2::{Ec2InstanceStartData, ParsedLabel, start_ec2_github_runner};
+use crate::github::CommitSha;
 use crate::github::api::client::GithubRepositoryClient;
 use crate::{BorsContext, PgDbClient};
+use octocrab::models::workflows::Status;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -258,6 +260,71 @@ pub(super) async fn handle_workflow_job_completed(
             payload.job_id,
             &payload.name,
         );
+    }
+
+    Ok(())
+}
+
+/// Load pending auto workflows and their jobs from GitHub Actions, and store their state into the
+/// in-memory job cache.
+pub(super) async fn reload_workflow_job_cache(
+    ctx: &BorsContext,
+    db: Arc<PgDbClient>,
+    repo: Arc<RepositoryState>,
+) -> anyhow::Result<()> {
+    let job_cache = ctx.get_job_cache();
+
+    let builds = db.get_pending_builds(repo.repository()).await?;
+    for build in &builds {
+        // Right now, we only care about auto builds
+        if build.kind != BuildKind::Auto {
+            continue;
+        }
+
+        let Ok(workflows) = repo
+            .client
+            .get_workflow_runs_for_commit_sha(CommitSha(build.commit_sha.clone()))
+            .await
+        else {
+            continue;
+        };
+        for workflow in workflows {
+            match workflow.status {
+                WorkflowStatus::Pending => {}
+                WorkflowStatus::Success | WorkflowStatus::Failure => {
+                    continue;
+                }
+            }
+            let Ok(workflow_jobs) = repo.client.get_jobs_for_workflow_run(workflow.id).await else {
+                continue;
+            };
+
+            tracing::info!(
+                "Reloading {} job(s) of workflow run {}",
+                workflow_jobs.len(),
+                workflow.id
+            );
+            for job in workflow_jobs {
+                match job.status {
+                    Status::Completed | Status::Failed => {
+                        job_cache.auto_job_completed(
+                            repo.repository(),
+                            workflow.id,
+                            job.id,
+                            &job.name,
+                        );
+                    }
+                    _ => {
+                        job_cache.auto_job_started(
+                            repo.repository(),
+                            workflow.id,
+                            job.id,
+                            &job.name,
+                        );
+                    }
+                }
+            }
+        }
     }
 
     Ok(())
