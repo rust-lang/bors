@@ -102,7 +102,8 @@ struct Opts {
     )]
     permissions: String,
 
-    /// Optional EC2 role that will be used when
+    /// Set this to an AWS EC2 ARN role to be assumed when executing AWS commands.
+    /// Setting this variable is required to enable the EC2 instance spawning functionality.
     #[arg(long, env = "CI_EC2_RUNNER_ROLE")]
     ec2_role: Option<String>,
 }
