@@ -1117,6 +1117,7 @@ pub struct WorkflowRun {
     /// How long did the workflow run for?
     duration: Duration,
     status: WorkflowStatus,
+    event: String,
 }
 
 impl WorkflowRun {
@@ -1130,6 +1131,7 @@ impl WorkflowRun {
             jobs: vec![],
             head_sha: branch.sha(),
             duration: Duration::from_secs(3600),
+            event: "push".to_string(),
         }
     }
 
@@ -1170,6 +1172,13 @@ impl WorkflowRun {
 
     pub fn status(&self) -> WorkflowStatus {
         self.status
+    }
+
+    pub fn event(&self) -> &str {
+        &self.event
+    }
+    pub fn set_event(&mut self, event: &str) {
+        self.event = event.to_string();
     }
 
     pub fn add_job(&mut self, status: WorkflowStatus) {

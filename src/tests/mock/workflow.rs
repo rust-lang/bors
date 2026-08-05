@@ -95,7 +95,7 @@ impl GitHubWorkflowRun {
             head_branch: run.head_branch().to_owned(),
             head_sha: run.head_sha().to_owned(),
             run_number: 0,
-            event: "".to_string(),
+            event: run.event().to_string(),
             status,
             conclusion,
             created_at,

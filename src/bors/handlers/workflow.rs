@@ -691,4 +691,27 @@ min_ci_time = 20
         })
         .await;
     }
+
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
+    async fn ignore_pull_request_event_workflow(pool: sqlx::PgPool) {
+        run_test(pool.clone(), async |ctx: &mut BorsTester| {
+            ctx.post_comment("@bors try").await?;
+            ctx.expect_comments((), 1).await;
+
+            let workflow = ctx.try_workflow();
+            ctx.modify_workflow(workflow, |run| {
+                run.set_event("pull_request");
+            });
+
+            ctx.skip_waiting_for_marker(async |ctx| {
+                ctx.workflow_event(WorkflowEvent::started(workflow)).await?;
+                ctx.workflow_event(WorkflowEvent::success(workflow)).await
+            })
+            .await?;
+
+            Ok(())
+        })
+        .await;
+        assert!(get_all_workflows(&pool).await.unwrap().is_empty());
+    }
 }
