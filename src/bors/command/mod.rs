@@ -174,5 +174,20 @@ pub enum BorsCommand {
     /// Cancel an auto build currently running on a given PR (without removing it from the queue).
     Cancel,
     /// Squash all commits of a pull request into a single commit.
-    Squash { commit_message: SquashCommitMessage },
+    Squash {
+        /// Squash message for the commit
+        commit_message: SquashCommitMessage,
+    },
+    SquashAndApprove {
+        /// Squash message for the commit
+        commit_message: SquashCommitMessage,
+        /// Who is approving the commit.
+        approver: Approver,
+        /// Priority of the commit.
+        priority: Option<Priority>,
+        /// Rollup status of the commit.
+        rollup: Option<RollupMode>,
+        /// Optional note attached at the end of the command.
+        note: Option<String>,
+    },
 }

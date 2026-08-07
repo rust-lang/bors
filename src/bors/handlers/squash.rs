@@ -14,13 +14,18 @@ use crate::bors::{
 use crate::database::BuildStatus;
 use crate::github::api::CommitAuthor;
 use crate::github::api::operations::Commit;
-use crate::github::{GithubRepoName, GithubUser};
+use crate::github::{CommitSha, GithubRepoName, GithubUser};
 use crate::permissions::PermissionType;
+use anyhow::anyhow;
 use std::collections::HashSet;
 use std::fmt::Write;
 use std::sync::Arc;
 
 const CO_AUTHORED_BY_TRAILER: &str = "Co-authored-by";
+
+pub struct SquashResult {
+    pub(crate) sha: CommitSha,
+}
 
 /// Entry point for the squash command.
 /// This function validates the command and enqueues the actual work to the gitops queue.
@@ -32,7 +37,7 @@ pub(super) async fn command_squash(
     commit_message: SquashCommitMessage,
     bot_prefix: &CommandPrefix,
     gitops_queue: &GitOpsQueueSender,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<SquashResult> {
     let send_comment = async |text: String| {
         let comment = repo_state
             .client
@@ -50,12 +55,12 @@ pub(super) async fn command_squash(
     if !is_author && !is_reviewer {
         send_comment(":key: Only the PR author or reviewers can squash commits.".to_string())
             .await?;
-        return Ok(());
+        return Err(anyhow!("cannot generate squash sha"));
     }
 
     if !pr.github.editable_by_maintainers {
         send_comment(":key: The `Allow edits by maintainers` option is not enabled on this PR. It is required for squashing to work.".to_string()).await?;
-        return Ok(());
+        return Err(anyhow!("cannot generate squash sha"));
     }
 
     let fork_error =
@@ -67,7 +72,7 @@ pub(super) async fn command_squash(
         .take_if(|repo| validate_fork(&pr.github.author, repo_state.repository(), repo))
     else {
         send_comment(fork_error()).await?;
-        return Ok(());
+        return Err(anyhow!("cannot generate squash sha"));
     };
 
     let pr_model = pr.db;
@@ -81,7 +86,7 @@ pub(super) async fn command_squash(
             format!(":exclamation: Cannot squash a PR that is currently being tested. Unapprove the PR first using `{bot_prefix} r-`."),
         )
             .await?;
-        return Ok(());
+        return Err(anyhow!("cannot generate squash sha"));
     }
 
     if pr.github.commit_count > 250 {
@@ -90,7 +95,7 @@ pub(super) async fn command_squash(
             pr.github.commit_count
         ))
         .await?;
-        return Ok(());
+        return Err(anyhow!("cannot generate squash sha"));
     }
 
     let pr_id = PullRequestId {
@@ -99,7 +104,7 @@ pub(super) async fn command_squash(
     };
     if gitops_queue.is_pending(&pr_id) {
         send_comment(":hourglass: This PR already has a pending git operation in progress, please wait until it is completed.".to_string()).await?;
-        return Ok(());
+        return Err(anyhow!("cannot generate squash sha"));
     }
 
     let commits = repo_state
@@ -108,7 +113,7 @@ pub(super) async fn command_squash(
         .await?;
     if commits.len() < 2 {
         send_comment(":exclamation: The PR has only one commit.".to_string()).await?;
-        return Ok(());
+        return Err(anyhow!("cannot generate squash sha"));
     }
 
     let notify_comment = repo_state
@@ -169,7 +174,7 @@ pub(super) async fn command_squash(
                 ":exclamation: Failed to create squashed commit: {error}"
             ))
             .await?;
-            return Ok(());
+            return Err(anyhow!("cannot generate squash sha"));
         }
     };
 
@@ -259,7 +264,7 @@ pub(super) async fn command_squash(
         source_repo: repo_state.repository().clone(),
         target_repo: fork_repository,
         target_branch,
-        commit,
+        commit: commit.clone(),
         token,
         on_finish,
     });
@@ -270,9 +275,9 @@ pub(super) async fn command_squash(
                 .to_string(),
         )
             .await?;
-        return Ok(());
+        return Ok(SquashResult { sha: commit });
     }
-    Ok(())
+    Ok(SquashResult { sha: commit })
 }
 
 /// Add "Co-authored-by: [name] <[email]>" trailer(s) to the commit message to properly reflect
