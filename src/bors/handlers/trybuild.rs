@@ -505,7 +505,11 @@ try-job: Bar
     async fn try_too_many_jobs(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.post_comment(format!("@bors try jobs={TOO_MANY_JOBS}").as_str()).await?;
-            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @":exclamation: You cannot specify more than 20 try jobs.");
+            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @r#"
+            :exclamation: You cannot specify more than 20 try jobs.
+
+            *Hint*: Use `@bors try jobs=... nolimit` to allow running an arbitrary number of try jobs."
+            "#);
             Ok(())
         })
             .await;
