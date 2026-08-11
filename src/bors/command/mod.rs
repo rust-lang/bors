@@ -140,6 +140,8 @@ pub enum BorsCommand {
         parent: Option<Parent>,
         /// The CI workflow to run.
         jobs: Vec<String>,
+        /// Allow running an arbitrary number of try jobs.
+        nolimit: bool,
     },
     /// Cancel a try build currently running on a given PR.
     TryCancel,

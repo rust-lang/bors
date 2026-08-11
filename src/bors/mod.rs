@@ -74,7 +74,11 @@ pub fn format_help() -> &'static str {
         BorsCommand::Unapprove => {}
         BorsCommand::Help => {}
         BorsCommand::Ping => {}
-        BorsCommand::Try { parent: _, jobs: _ } => {}
+        BorsCommand::Try {
+            parent: _,
+            jobs: _,
+            nolimit: _,
+        } => {}
         BorsCommand::TryCancel => {}
         BorsCommand::SetPriority {
             priority: _,
@@ -120,12 +124,13 @@ You can use the following commands:
 - `delegate` | `delegate+`: Delegate approval permissions to the PR author
     - Shortcut for `delegate review`
 - `delegate-`: Remove any previously granted permission delegation
-- `try [parent=<parent>] [job|jobs=<jobs>]`: Start a try build.
+- `try [parent=<parent>] [job|jobs=<jobs>] [nolimit]`: Start a try build.
     - Optionally, you can specify a `<parent>` SHA with which will the PR be merged. You can specify `parent=last` to use the same parent SHA as the previous try build.
     - Optionally, you can select a comma-separated list of CI `<jobs>` to run in the try build.
       Examples:
         - `@bors try jobs=x86_64-gnu-nopt`
         - `@bors try jobs=x86_64-gnu-nopt,x86_64-mingw-*` (matches `x86_64-gnu-nopt` and jobs starting with `x86_64-mingw-`)
+    - Optionally, you can turn off the limit on the number of executed try jobs with `nolimit`.
 - `try cancel`: Cancel a running try build on the current PR.
 - `retry`: Clear a failed auto build status from an approved PR. This will cause the merge queue to eventually attempt to merge the PR again.
 - `cancel` | `yield`: Cancel a running auto build on the current PR.
@@ -311,7 +316,10 @@ impl FromStr for PullRequestStatus {
 
 #[derive(Debug, Clone)]
 pub enum MergeType {
-    Try { try_jobs: Vec<String> },
+    Try {
+        try_jobs: Vec<String>,
+        nolimit: bool,
+    },
     Auto,
 }
 
@@ -349,6 +357,8 @@ pub fn normalize_merge_message(message: &str) -> String {
 }
 
 pub fn create_merge_commit_message(pr: handlers::PullRequestData, merge_type: MergeType) -> String {
+    use std::fmt::Write;
+
     /// Prefix used to specify custom try jobs in PR descriptions.
     const CUSTOM_TRY_JOB_PREFIX: &str = "try-job:";
 
@@ -363,7 +373,10 @@ pub fn create_merge_commit_message(pr: handlers::PullRequestData, merge_type: Me
         // Only keep any lines starting with `CUSTOM_TRY_JOB_PREFIX`.
         // If we do not have any custom try jobs, keep the ones that might be in the PR
         // description.
-        MergeType::Try { try_jobs } if try_jobs.is_empty() => pr
+        MergeType::Try {
+            try_jobs,
+            nolimit: _,
+        } if try_jobs.is_empty() => pr
             .github
             .message
             .lines()
@@ -387,9 +400,12 @@ pub fn create_merge_commit_message(pr: handlers::PullRequestData, merge_type: Me
     );
 
     match merge_type {
-        MergeType::Try { try_jobs } => {
+        MergeType::Try { try_jobs, nolimit } => {
             for job in try_jobs {
-                message.push_str(&format!("\n{CUSTOM_TRY_JOB_PREFIX} {job}"));
+                write!(message, "\n{CUSTOM_TRY_JOB_PREFIX} {job}").unwrap();
+            }
+            if nolimit {
+                writeln!(message, "\ntry-nolimit").unwrap();
             }
         }
         MergeType::Auto => {}

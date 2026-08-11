@@ -102,6 +102,12 @@ pub fn cant_find_last_parent_comment() -> Comment {
     Comment::new(":exclamation: There was no previous build. Please set an explicit parent or remove the `parent=last` argument to use the default parent.".to_string())
 }
 
+pub fn too_many_try_jobs_comment(max_jobs: usize) -> Comment {
+    Comment::new(format!(
+        ":exclamation: You cannot specify more than {max_jobs} try jobs."
+    ))
+}
+
 pub fn no_try_build_in_progress_comment() -> Comment {
     Comment::new(
         ":exclamation: There is currently no try build in progress on this PR.".to_string(),

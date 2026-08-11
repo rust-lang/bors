@@ -9,12 +9,12 @@ use crate::bors::build::{
     start_build,
 };
 use crate::bors::command::{CommandPrefix, Parent};
-use crate::bors::comment::try_build_cancelled_comment;
 use crate::bors::comment::try_build_cancelled_with_failed_workflow_cancel_comment;
 use crate::bors::comment::{CommentTag, no_try_build_in_progress_comment};
 use crate::bors::comment::{
     cant_find_last_parent_comment, merge_attempt_merge_conflict_comment, try_build_started_comment,
 };
+use crate::bors::comment::{too_many_try_jobs_comment, try_build_cancelled_comment};
 use crate::bors::{
     BuildKind, MergeType, RepositoryState, TRY_BRANCH_NAME, bors_commit_author,
     create_merge_commit_message, hide_tagged_comments,
@@ -33,11 +33,15 @@ pub(super) const TRY_MERGE_BRANCH_NAME: &str = "automation/bors/try-merge";
 // The name of the check run seen in the GitHub UI.
 pub(super) const TRY_BUILD_CHECK_RUN_NAME: &str = "Bors try build";
 
+/// Maximum number of jobs in a single try command.
+const MAX_TRY_JOBS_COUNT: usize = 20;
+
 /// Performs a so-called try build - merges the PR branch into a special branch designed
 /// for running CI checks.
 ///
 /// If `parent` is set, it will use it as a base commit for the merge.
 /// Otherwise, it will use the latest commit on the main repository branch.
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn command_try_build(
     repo: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
@@ -45,11 +49,24 @@ pub(super) async fn command_try_build(
     author: &GithubUser,
     parent: Option<Parent>,
     jobs: Vec<String>,
+    nolimit: bool,
     bot_prefix: &CommandPrefix,
 ) -> anyhow::Result<()> {
     let repo = repo.as_ref();
     if !has_permission(repo, author, pr, PermissionType::Try).await? {
         deny_request(repo, &db, pr.number(), author, PermissionType::Try).await?;
+        return Ok(());
+    }
+
+    // Rust CI currently allows specifying 20 jobs max
+    if jobs.len() > MAX_TRY_JOBS_COUNT && !nolimit {
+        repo.client
+            .post_comment(
+                pr.number(),
+                too_many_try_jobs_comment(MAX_TRY_JOBS_COUNT),
+                &db,
+            )
+            .await?;
         return Ok(());
     }
 
@@ -101,7 +118,13 @@ pub(super) async fn command_try_build(
                     build_kind: BuildKind::Try,
                 },
                 StartBuildCommit {
-                    message: create_merge_commit_message(pr, MergeType::Try { try_jobs: jobs }),
+                    message: create_merge_commit_message(
+                        pr,
+                        MergeType::Try {
+                            try_jobs: jobs,
+                            nolimit,
+                        },
+                    ),
                     author: bors_commit_author(),
                 },
                 StartBuildCheckRun {
@@ -474,6 +497,70 @@ try-job: Bar
             Ok(())
         })
         .await;
+    }
+
+    const TOO_MANY_JOBS: &str = "Baz,Baz2,Baz3,Baz4,Baz5,Baz6,Baz7,Baz8,Baz9,Baz10,Baz11,Baz12,Baz13,Baz14,Baz15,Baz16,Baz17,Baz18,Baz19,Baz20,Baz21";
+
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
+    async fn try_too_many_jobs(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            ctx.post_comment(format!("@bors try jobs={TOO_MANY_JOBS}").as_str()).await?;
+            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @":exclamation: You cannot specify more than 20 try jobs.");
+            Ok(())
+        })
+            .await;
+    }
+
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
+    async fn try_too_many_jobs_nolimit(pool: sqlx::PgPool) {
+        let gh = run_test(pool, async |ctx: &mut BorsTester| {
+            ctx.post_comment(format!("@bors try jobs={TOO_MANY_JOBS} nolimit").as_str())
+                .await?;
+            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
+            :hourglass: Trying commit pr-1-sha with merge merge-0-pr-1-d7d45f1f-reauthored-to-bors…
+
+            To cancel the try build, run the command `@bors try cancel`.
+            ");
+            Ok(())
+        })
+        .await;
+        let message = gh
+            .default_repo()
+            .lock()
+            .get_branch_by_name(TRY_BRANCH_NAME)
+            .unwrap()
+            .get_commit()
+            .message()
+            .to_owned();
+        insta::assert_snapshot!(message, @"
+        Auto merge of #1 - default-user:pr/1, r=<try>
+
+        Title of PR 1
+
+
+        try-job: Baz
+        try-job: Baz2
+        try-job: Baz3
+        try-job: Baz4
+        try-job: Baz5
+        try-job: Baz6
+        try-job: Baz7
+        try-job: Baz8
+        try-job: Baz9
+        try-job: Baz10
+        try-job: Baz11
+        try-job: Baz12
+        try-job: Baz13
+        try-job: Baz14
+        try-job: Baz15
+        try-job: Baz16
+        try-job: Baz17
+        try-job: Baz18
+        try-job: Baz19
+        try-job: Baz20
+        try-job: Baz21
+        try-nolimit
+        ");
     }
 
     #[sqlx::test(migrator = "crate::MIGRATOR")]

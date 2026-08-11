@@ -551,7 +551,11 @@ async fn handle_comment(
                             .instrument(span)
                             .await
                     }
-                    BorsCommand::Try { parent, jobs } => {
+                    BorsCommand::Try {
+                        parent,
+                        jobs,
+                        nolimit,
+                    } => {
                         let span = tracing::info_span!("Try");
                         // we hard code the command prefix instead of using `ctx.parser.prefix()`
                         // because we are using the new bors for try builds, so we don't want to
@@ -564,6 +568,7 @@ async fn handle_comment(
                             &comment.author,
                             parent,
                             jobs,
+                            nolimit,
                             &command_prefix,
                         )
                         .instrument(span)
