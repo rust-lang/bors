@@ -316,7 +316,10 @@ impl FromStr for PullRequestStatus {
 
 #[derive(Debug, Clone)]
 pub enum MergeType {
-    Try { try_jobs: Vec<String> },
+    Try {
+        try_jobs: Vec<String>,
+        nolimit: bool,
+    },
     Auto,
 }
 
@@ -354,6 +357,8 @@ pub fn normalize_merge_message(message: &str) -> String {
 }
 
 pub fn create_merge_commit_message(pr: handlers::PullRequestData, merge_type: MergeType) -> String {
+    use std::fmt::Write;
+
     /// Prefix used to specify custom try jobs in PR descriptions.
     const CUSTOM_TRY_JOB_PREFIX: &str = "try-job:";
 
@@ -368,7 +373,10 @@ pub fn create_merge_commit_message(pr: handlers::PullRequestData, merge_type: Me
         // Only keep any lines starting with `CUSTOM_TRY_JOB_PREFIX`.
         // If we do not have any custom try jobs, keep the ones that might be in the PR
         // description.
-        MergeType::Try { try_jobs } if try_jobs.is_empty() => pr
+        MergeType::Try {
+            try_jobs,
+            nolimit: _,
+        } if try_jobs.is_empty() => pr
             .github
             .message
             .lines()
@@ -392,9 +400,12 @@ pub fn create_merge_commit_message(pr: handlers::PullRequestData, merge_type: Me
     );
 
     match merge_type {
-        MergeType::Try { try_jobs } => {
+        MergeType::Try { try_jobs, nolimit } => {
             for job in try_jobs {
-                message.push_str(&format!("\n{CUSTOM_TRY_JOB_PREFIX} {job}"));
+                write!(message, "\n{CUSTOM_TRY_JOB_PREFIX} {job}").unwrap();
+            }
+            if nolimit {
+                writeln!(message, "\ntry-nolimit").unwrap();
             }
         }
         MergeType::Auto => {}

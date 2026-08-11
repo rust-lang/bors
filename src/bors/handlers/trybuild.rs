@@ -41,6 +41,7 @@ const MAX_TRY_JOBS_COUNT: usize = 20;
 ///
 /// If `parent` is set, it will use it as a base commit for the merge.
 /// Otherwise, it will use the latest commit on the main repository branch.
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn command_try_build(
     repo: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
@@ -117,7 +118,13 @@ pub(super) async fn command_try_build(
                     build_kind: BuildKind::Try,
                 },
                 StartBuildCommit {
-                    message: create_merge_commit_message(pr, MergeType::Try { try_jobs: jobs }),
+                    message: create_merge_commit_message(
+                        pr,
+                        MergeType::Try {
+                            try_jobs: jobs,
+                            nolimit,
+                        },
+                    ),
                     author: bors_commit_author(),
                 },
                 StartBuildCheckRun {
@@ -506,7 +513,7 @@ try-job: Bar
 
     #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn try_too_many_jobs_nolimit(pool: sqlx::PgPool) {
-        run_test(pool, async |ctx: &mut BorsTester| {
+        let gh = run_test(pool, async |ctx: &mut BorsTester| {
             ctx.post_comment(format!("@bors try jobs={TOO_MANY_JOBS} nolimit").as_str())
                 .await?;
             insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
@@ -517,6 +524,43 @@ try-job: Bar
             Ok(())
         })
         .await;
+        let message = gh
+            .default_repo()
+            .lock()
+            .get_branch_by_name(TRY_BRANCH_NAME)
+            .unwrap()
+            .get_commit()
+            .message()
+            .to_owned();
+        insta::assert_snapshot!(message, @"
+        Auto merge of #1 - default-user:pr/1, r=<try>
+
+        Title of PR 1
+
+
+        try-job: Baz
+        try-job: Baz2
+        try-job: Baz3
+        try-job: Baz4
+        try-job: Baz5
+        try-job: Baz6
+        try-job: Baz7
+        try-job: Baz8
+        try-job: Baz9
+        try-job: Baz10
+        try-job: Baz11
+        try-job: Baz12
+        try-job: Baz13
+        try-job: Baz14
+        try-job: Baz15
+        try-job: Baz16
+        try-job: Baz17
+        try-job: Baz18
+        try-job: Baz19
+        try-job: Baz20
+        try-job: Baz21
+        try-nolimit
+        ");
     }
 
     #[sqlx::test(migrator = "crate::MIGRATOR")]
