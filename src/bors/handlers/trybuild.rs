@@ -9,12 +9,12 @@ use crate::bors::build::{
     start_build,
 };
 use crate::bors::command::{CommandPrefix, Parent};
-use crate::bors::comment::try_build_cancelled_comment;
 use crate::bors::comment::try_build_cancelled_with_failed_workflow_cancel_comment;
 use crate::bors::comment::{CommentTag, no_try_build_in_progress_comment};
 use crate::bors::comment::{
     cant_find_last_parent_comment, merge_attempt_merge_conflict_comment, try_build_started_comment,
 };
+use crate::bors::comment::{too_many_try_jobs_comment, try_build_cancelled_comment};
 use crate::bors::{
     BuildKind, MergeType, RepositoryState, TRY_BRANCH_NAME, bors_commit_author,
     create_merge_commit_message, hide_tagged_comments,
@@ -33,6 +33,9 @@ pub(super) const TRY_MERGE_BRANCH_NAME: &str = "automation/bors/try-merge";
 // The name of the check run seen in the GitHub UI.
 pub(super) const TRY_BUILD_CHECK_RUN_NAME: &str = "Bors try build";
 
+/// Maximum number of jobs in a single try command.
+const MAX_TRY_JOBS_COUNT: usize = 20;
+
 /// Performs a so-called try build - merges the PR branch into a special branch designed
 /// for running CI checks.
 ///
@@ -50,6 +53,18 @@ pub(super) async fn command_try_build(
     let repo = repo.as_ref();
     if !has_permission(repo, author, pr, PermissionType::Try).await? {
         deny_request(repo, &db, pr.number(), author, PermissionType::Try).await?;
+        return Ok(());
+    }
+
+    // Rust CI currently allows specifying 20 jobs max
+    if jobs.len() > MAX_TRY_JOBS_COUNT {
+        repo.client
+            .post_comment(
+                pr.number(),
+                too_many_try_jobs_comment(MAX_TRY_JOBS_COUNT),
+                &db,
+            )
+            .await?;
         return Ok(());
     }
 
@@ -474,6 +489,16 @@ try-job: Bar
             Ok(())
         })
         .await;
+    }
+
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
+    async fn try_too_many_jobs(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            ctx.post_comment("@bors try jobs=Baz,Baz2,Baz3,Baz4,Baz5,Baz6,Baz7,Baz8,Baz9,Baz10,Baz11,Baz12,Baz13,Baz14,Baz15,Baz16,Baz17,Baz18,Baz19,Baz20,Baz21").await?;
+            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @":exclamation: You cannot specify more than 20 try jobs.");
+            Ok(())
+        })
+            .await;
     }
 
     #[sqlx::test(migrator = "crate::MIGRATOR")]

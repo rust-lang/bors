@@ -339,9 +339,6 @@ fn parse_sha(input: &str) -> Result<CommitSha, String> {
     Ok(CommitSha(input.to_string()))
 }
 
-/// Maximum number of jobs in a single try command.
-const MAX_TRY_JOBS_COUNT: usize = 20;
-
 /// Parses "@bors try <parent=sha>".
 fn parser_try(command: &CommandPart<'_>, parts: &[CommandPart<'_>]) -> ParseResult {
     if *command != CommandPart::Bare("try") {
@@ -377,12 +374,6 @@ fn parser_try(command: &CommandPart<'_>, parts: &[CommandPart<'_>]) -> ParseResu
                         )));
                     }
 
-                    // Rust CI currently allows specifying 20 jobs max
-                    if raw_jobs.len() > MAX_TRY_JOBS_COUNT {
-                        return Some(Err(CommandParseError::ValidationError(format!(
-                            "You cannot specify more than {MAX_TRY_JOBS_COUNT} jobs"
-                        ))));
-                    }
                     jobs = raw_jobs;
                 }
                 _ => {
@@ -1544,20 +1535,6 @@ line two
             MissingArgValue {
                 arg: "jobs",
             },
-        )
-        "#);
-    }
-
-    #[test]
-    fn parse_try_jobs_too_many() {
-        let cmds =
-            parse_commands("@bors try jobs=ci,lint,foo,bar,baz,qux,quux,corge,grault,garply,waldo");
-        assert_eq!(cmds.len(), 1);
-        insta::assert_debug_snapshot!(cmds[0], @r#"
-        Err(
-            ValidationError(
-                "Try jobs must not have more than 10 jobs",
-            ),
         )
         "#);
     }
