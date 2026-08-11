@@ -48,6 +48,7 @@ pub(super) async fn command_try_build(
     author: &GithubUser,
     parent: Option<Parent>,
     jobs: Vec<String>,
+    nolimit: bool,
     bot_prefix: &CommandPrefix,
 ) -> anyhow::Result<()> {
     let repo = repo.as_ref();
@@ -57,7 +58,7 @@ pub(super) async fn command_try_build(
     }
 
     // Rust CI currently allows specifying 20 jobs max
-    if jobs.len() > MAX_TRY_JOBS_COUNT {
+    if jobs.len() > MAX_TRY_JOBS_COUNT && !nolimit {
         repo.client
             .post_comment(
                 pr.number(),
@@ -491,14 +492,31 @@ try-job: Bar
         .await;
     }
 
+    const TOO_MANY_JOBS: &str = "Baz,Baz2,Baz3,Baz4,Baz5,Baz6,Baz7,Baz8,Baz9,Baz10,Baz11,Baz12,Baz13,Baz14,Baz15,Baz16,Baz17,Baz18,Baz19,Baz20,Baz21";
+
     #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn try_too_many_jobs(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
-            ctx.post_comment("@bors try jobs=Baz,Baz2,Baz3,Baz4,Baz5,Baz6,Baz7,Baz8,Baz9,Baz10,Baz11,Baz12,Baz13,Baz14,Baz15,Baz16,Baz17,Baz18,Baz19,Baz20,Baz21").await?;
+            ctx.post_comment(format!("@bors try jobs={TOO_MANY_JOBS}").as_str()).await?;
             insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @":exclamation: You cannot specify more than 20 try jobs.");
             Ok(())
         })
             .await;
+    }
+
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
+    async fn try_too_many_jobs_nolimit(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            ctx.post_comment(format!("@bors try jobs={TOO_MANY_JOBS} nolimit").as_str())
+                .await?;
+            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
+            :hourglass: Trying commit pr-1-sha with merge merge-0-pr-1-d7d45f1f-reauthored-to-bors…
+
+            To cancel the try build, run the command `@bors try cancel`.
+            ");
+            Ok(())
+        })
+        .await;
     }
 
     #[sqlx::test(migrator = "crate::MIGRATOR")]

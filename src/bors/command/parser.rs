@@ -347,9 +347,16 @@ fn parser_try(command: &CommandPart<'_>, parts: &[CommandPart<'_>]) -> ParseResu
 
     let mut parent = None;
     let mut jobs = Vec::new();
+    let mut nolimit = false;
 
     for part in parts {
         match part {
+            CommandPart::Bare("nolimit") => {
+                if nolimit {
+                    return Some(Err(CommandParseError::DuplicateArg("nolimit".to_string())));
+                }
+                nolimit = true;
+            }
             CommandPart::Bare(key) => {
                 return Some(Err(CommandParseError::UnknownArg {
                     arg: key.to_string(),
@@ -385,7 +392,11 @@ fn parser_try(command: &CommandPart<'_>, parts: &[CommandPart<'_>]) -> ParseResu
             },
         }
     }
-    Some(Ok(BorsCommand::Try { parent, jobs }))
+    Some(Ok(BorsCommand::Try {
+        parent,
+        jobs,
+        nolimit,
+    }))
 }
 
 /// Parses "@bors try cancel".
@@ -661,9 +672,8 @@ fn parser_squash(command: &CommandPart<'_>, parts: &[CommandPart<'_>]) -> ParseR
 
 #[cfg(test)]
 mod tests {
+    use crate::bors::command::BorsCommand;
     use crate::bors::command::parser::{CommandParseError, CommandParser};
-    use crate::bors::command::{BorsCommand, Parent};
-    use crate::github::CommitSha;
 
     #[test]
     fn no_commands() {
@@ -1411,6 +1421,7 @@ line two
             Try {
                 parent: None,
                 jobs: [],
+                nolimit: false,
             },
         )
         ");
@@ -1425,6 +1436,7 @@ line two
             Try {
                 parent: None,
                 jobs: [],
+                nolimit: false,
             },
         )
         ");
@@ -1433,29 +1445,41 @@ line two
     #[test]
     fn parse_try_parent() {
         let cmds = parse_commands("@bors try parent=ea9c1b050cc8b420c2c211d2177811e564a4dc60");
-        assert_eq!(cmds.len(), 1);
-        assert_eq!(
-            cmds[0],
-            Ok(BorsCommand::Try {
-                parent: Some(Parent::CommitSha(CommitSha(
-                    "ea9c1b050cc8b420c2c211d2177811e564a4dc60".to_string()
-                ))),
-                jobs: Vec::new()
-            })
-        );
+        insta::assert_debug_snapshot!(cmds, @r#"
+        [
+            Ok(
+                Try {
+                    parent: Some(
+                        CommitSha(
+                            CommitSha(
+                                "ea9c1b050cc8b420c2c211d2177811e564a4dc60",
+                            ),
+                        ),
+                    ),
+                    jobs: [],
+                    nolimit: false,
+                },
+            ),
+        ]
+        "#);
     }
 
     #[test]
     fn parse_try_parent_last() {
         let cmds = parse_commands("@bors try parent=last");
-        assert_eq!(cmds.len(), 1);
-        assert_eq!(
-            cmds[0],
-            Ok(BorsCommand::Try {
-                parent: Some(Parent::Last),
-                jobs: Vec::new()
-            })
-        );
+        insta::assert_debug_snapshot!(cmds, @"
+        [
+            Ok(
+                Try {
+                    parent: Some(
+                        Last,
+                    ),
+                    jobs: [],
+                    nolimit: false,
+                },
+            ),
+        ]
+        ");
     }
 
     #[test]
@@ -1474,41 +1498,59 @@ line two
     #[test]
     fn parse_try_jobs() {
         let cmds = parse_commands("@bors try jobs=ci,lint");
-        assert_eq!(cmds.len(), 1);
-        assert_eq!(
-            cmds[0],
-            Ok(BorsCommand::Try {
-                parent: None,
-                jobs: vec!["ci".to_string(), "lint".to_string()]
-            })
-        );
+        insta::assert_debug_snapshot!(cmds, @r#"
+        [
+            Ok(
+                Try {
+                    parent: None,
+                    jobs: [
+                        "ci",
+                        "lint",
+                    ],
+                    nolimit: false,
+                },
+            ),
+        ]
+        "#);
     }
 
     #[test]
     fn parse_try_jobs_glob() {
         let cmds = parse_commands("@bors try jobs=ci-1,lint_2,foo*");
-        assert_eq!(cmds.len(), 1);
-        assert_eq!(
-            cmds[0],
-            Ok(BorsCommand::Try {
-                parent: None,
-                jobs: vec!["ci-1".to_string(), "lint_2".to_string(), "foo*".to_string()]
-            })
-        );
+        insta::assert_debug_snapshot!(cmds, @r#"
+        [
+            Ok(
+                Try {
+                    parent: None,
+                    jobs: [
+                        "ci-1",
+                        "lint_2",
+                        "foo*",
+                    ],
+                    nolimit: false,
+                },
+            ),
+        ]
+        "#);
     }
 
     // Make sure that *foo* gets parsed as foo, ignoring the Markdown italics.
     #[test]
     fn parse_try_jobs_glob_2() {
         let cmds = parse_commands("@bors try jobs=*x86_64-msvc*");
-        assert_eq!(cmds.len(), 1);
-        assert_eq!(
-            cmds[0],
-            Ok(BorsCommand::Try {
-                parent: None,
-                jobs: vec!["*x86_64-msvc*".to_string()]
-            })
-        );
+        insta::assert_debug_snapshot!(cmds, @r#"
+        [
+            Ok(
+                Try {
+                    parent: None,
+                    jobs: [
+                        "*x86_64-msvc*",
+                    ],
+                    nolimit: false,
+                },
+            ),
+        ]
+        "#);
     }
 
     // Make sure that foo\\* gets parsed as foo*, so that people can escape * to avoid weird
@@ -1516,26 +1558,52 @@ line two
     #[test]
     fn parse_try_jobs_glob_3() {
         let cmds = parse_commands("@bors try jobs=\\*x86_64-msvc\\*,foo\\*");
-        assert_eq!(cmds.len(), 1);
-        assert_eq!(
-            cmds[0],
-            Ok(BorsCommand::Try {
-                parent: None,
-                jobs: vec!["*x86_64-msvc*".to_string(), "foo*".to_string()]
-            })
-        );
+        insta::assert_debug_snapshot!(cmds, @r#"
+        [
+            Ok(
+                Try {
+                    parent: None,
+                    jobs: [
+                        "*x86_64-msvc*",
+                        "foo*",
+                    ],
+                    nolimit: false,
+                },
+            ),
+        ]
+        "#);
     }
 
     #[test]
     fn parse_try_jobs_empty() {
         let cmds = parse_commands("@bors try jobs=");
-        assert_eq!(cmds.len(), 1);
-        insta::assert_debug_snapshot!(cmds[0], @r#"
-        Err(
-            MissingArgValue {
-                arg: "jobs",
-            },
-        )
+        insta::assert_debug_snapshot!(cmds, @r#"
+        [
+            Err(
+                MissingArgValue {
+                    arg: "jobs",
+                },
+            ),
+        ]
+        "#);
+    }
+
+    #[test]
+    fn parse_try_jobs_nolimit() {
+        let cmds = parse_commands("@bors try jobs=ci,lint nolimit");
+        insta::assert_debug_snapshot!(cmds, @r#"
+        [
+            Ok(
+                Try {
+                    parent: None,
+                    jobs: [
+                        "ci",
+                        "lint",
+                    ],
+                    nolimit: true,
+                },
+            ),
+        ]
         "#);
     }
 
@@ -1552,6 +1620,7 @@ for the crater",
             Try {
                 parent: None,
                 jobs: [],
+                nolimit: false,
             },
         )
         ");
@@ -1600,6 +1669,7 @@ for the crater",
             Try {
                 parent: None,
                 jobs: [],
+                nolimit: false,
             },
         )
         ")
@@ -2039,14 +2109,17 @@ I am markdown HTML comment
 -->
 "#,
         );
-        assert_eq!(cmds.len(), 1);
-        assert_eq!(
-            cmds[0],
-            Ok(BorsCommand::Try {
-                parent: None,
-                jobs: vec![]
-            })
-        );
+        insta::assert_debug_snapshot!(cmds, @"
+        [
+            Ok(
+                Try {
+                    parent: None,
+                    jobs: [],
+                    nolimit: false,
+                },
+            ),
+        ]
+        ");
     }
 
     #[test]
@@ -2094,14 +2167,19 @@ I am markdown HTML comment
     #[test]
     fn parse_quoted_value_without_spaces() {
         let cmds = parse_commands(r#"@bors try jobs="ci""#);
-        assert_eq!(cmds.len(), 1);
-        assert_eq!(
-            cmds[0],
-            Ok(BorsCommand::Try {
-                parent: None,
-                jobs: vec!["ci".to_string()]
-            })
-        );
+        insta::assert_debug_snapshot!(cmds, @r#"
+        [
+            Ok(
+                Try {
+                    parent: None,
+                    jobs: [
+                        "ci",
+                    ],
+                    nolimit: false,
+                },
+            ),
+        ]
+        "#);
     }
 
     #[test]
@@ -2115,6 +2193,7 @@ I am markdown HTML comment
                 jobs: [
                     "foo bar baz",
                 ],
+                nolimit: false,
             },
         )
         "#);
@@ -2142,40 +2221,61 @@ I am markdown HTML comment
     #[test]
     fn parse_quoted_and_unquoted_args() {
         let cmds = parse_commands(r#"@bors try parent=last jobs="ci, lint""#);
-        assert_eq!(cmds.len(), 1);
-        assert_eq!(
-            cmds[0],
-            Ok(BorsCommand::Try {
-                parent: Some(Parent::Last),
-                jobs: vec!["ci".to_string(), " lint".to_string()]
-            })
-        );
+        insta::assert_debug_snapshot!(cmds, @r#"
+        [
+            Ok(
+                Try {
+                    parent: Some(
+                        Last,
+                    ),
+                    jobs: [
+                        "ci",
+                        " lint",
+                    ],
+                    nolimit: false,
+                },
+            ),
+        ]
+        "#);
     }
 
     #[test]
     fn parse_quoted_value_followed_by_more_args() {
         let cmds = parse_commands(r#"@bors try jobs="ci, lint" parent=last"#);
-        assert_eq!(cmds.len(), 1);
-        assert_eq!(
-            cmds[0],
-            Ok(BorsCommand::Try {
-                parent: Some(Parent::Last),
-                jobs: vec!["ci".to_string(), " lint".to_string()]
-            })
-        );
+        insta::assert_debug_snapshot!(cmds, @r#"
+        [
+            Ok(
+                Try {
+                    parent: Some(
+                        Last,
+                    ),
+                    jobs: [
+                        "ci",
+                        " lint",
+                    ],
+                    nolimit: false,
+                },
+            ),
+        ]
+        "#);
     }
 
     #[test]
     fn parse_at_inside_quoted_value() {
         let cmds = parse_commands(r#"@bors try jobs="test@windows""#);
-        assert_eq!(cmds.len(), 1);
-        assert_eq!(
-            cmds[0],
-            Ok(BorsCommand::Try {
-                parent: None,
-                jobs: vec!["test@windows".to_string()]
-            })
-        );
+        insta::assert_debug_snapshot!(cmds, @r#"
+        [
+            Ok(
+                Try {
+                    parent: None,
+                    jobs: [
+                        "test@windows",
+                    ],
+                    nolimit: false,
+                },
+            ),
+        ]
+        "#);
     }
 
     fn parse_commands(text: &str) -> Vec<Result<BorsCommand, CommandParseError>> {
