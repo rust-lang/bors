@@ -104,7 +104,10 @@ pub fn cant_find_last_parent_comment() -> Comment {
 
 pub fn too_many_try_jobs_comment(max_jobs: usize) -> Comment {
     Comment::new(format!(
-        ":exclamation: You cannot specify more than {max_jobs} try jobs."
+        r#":exclamation: You cannot specify more than {max_jobs} try jobs.
+
+*Hint*: Use `@bors try jobs=... nolimit` to allow running an arbitrary number of try jobs."
+"#
     ))
 }
 
