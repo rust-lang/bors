@@ -127,10 +127,10 @@ pub(super) async fn command_try_build(
                     ),
                     author: bors_commit_author(),
                 },
-                StartBuildCheckRun {
+                Some(StartBuildCheckRun {
                     name: TRY_BUILD_CHECK_RUN_NAME.to_string(),
-                    title: "Bors try build".to_string(),
-                },
+                    title: TRY_BUILD_CHECK_RUN_NAME.to_string(),
+                }),
                 pr.db,
             )
             .await

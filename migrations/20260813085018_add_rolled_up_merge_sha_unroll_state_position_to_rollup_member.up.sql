@@ -6,6 +6,9 @@ ALTER TABLE rollup_member
     ADD COLUMN unroll_state        TEXT NULL,
     ADD COLUMN position            INT  NOT NULL DEFAULT 0;
 
+-- For finding unreported unrolled builds
+CREATE INDEX IF NOT EXISTS rollup_member_unroll_state_idx ON rollup_member (unroll_state);
+
 -- Backfill existing rows from `rolled_up_sha`
 -- This is not really correct, but it is better than leaving the column empty
 UPDATE rollup_member rm

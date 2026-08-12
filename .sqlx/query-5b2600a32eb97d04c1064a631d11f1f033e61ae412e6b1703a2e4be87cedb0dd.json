@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE rollup_member\n        SET unroll_state = $1\n        WHERE rollup = $2 AND member = $3\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int4",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "5b2600a32eb97d04c1064a631d11f1f033e61ae412e6b1703a2e4be87cedb0dd"
+}

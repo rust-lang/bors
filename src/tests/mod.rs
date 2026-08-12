@@ -593,9 +593,13 @@ impl BorsTester {
     pub async fn run_merge_queue_directly(&self) {
         wait_for_marker(
             async || {
-                merge_queue_tick(self.ctx.clone(), self.senders.mergeability_queue())
-                    .await
-                    .unwrap();
+                merge_queue_tick(
+                    self.ctx.clone(),
+                    self.senders.mergeability_queue(),
+                    self.senders.unroll_queue(),
+                )
+                .await
+                .unwrap();
                 Ok(())
             },
             self.wait_for_markers,

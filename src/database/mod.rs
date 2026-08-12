@@ -779,7 +779,7 @@ pub struct RegisterRollupMemberParams {
     pub rolled_up_merge_sha: CommitSha,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum UnrollState {
     /// An unrolled build should be started for this rollup member.
     Waiting,
@@ -789,6 +789,9 @@ pub enum UnrollState {
     Finished,
     /// All the unrolled builds for the rollup of this rollup member have been reported in a comment
     /// on GitHub
+    ///
+    /// Invariant: if one member of a rollup has state reported, all the other members must also
+    /// have the state reported.
     Reported,
 }
 
@@ -825,10 +828,14 @@ impl sqlx::Decode<'_, sqlx::Postgres> for UnrollState {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct RollupMember {
+    /// Pull request DB ID of the rollup containing this member PR.
+    pub rollup_id: PrimaryKey,
     /// Pull request number of the member PR.
     pub member: PullRequestNumber,
+    /// Pull request DB ID of the member PR.
+    pub member_id: PrimaryKey,
     /// HEAD SHA of the member PR at rollup creation.
     pub rolled_up_head_sha: CommitSha,
     /// SHA of the intermediate merge of the PR into its containing rollup.
@@ -838,6 +845,12 @@ pub struct RollupMember {
     /// Position of the member within the rollup.
     /// Rollup members are merged sequentially, so each member has its specified index.
     pub position: u32,
+}
+
+#[derive(Debug)]
+pub struct RollupMemberForUnrolling {
+    pub pr: PullRequestModel,
+    pub member: RollupMember,
 }
 
 /// Updates the build table with the given fields.

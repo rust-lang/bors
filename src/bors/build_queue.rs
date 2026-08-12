@@ -18,6 +18,7 @@ use crate::bors::comment::{
 use crate::bors::event::WorkflowRunCompleted;
 use crate::bors::labels::handle_label_trigger;
 use crate::bors::merge_queue::MergeQueueSender;
+use crate::bors::unroll_queue::UnrollQueueSender;
 use crate::bors::{
     BuildKind, FailedWorkflowRun, RepositoryState, elapsed_time_since, hide_tagged_comments,
 };
@@ -96,6 +97,7 @@ pub async fn handle_build_queue_event(
     ctx: Arc<BorsContext>,
     event: BuildQueueEvent,
     merge_queue_tx: MergeQueueSender,
+    unroll_queue_tx: UnrollQueueSender,
 ) -> anyhow::Result<()> {
     let db = &ctx.db;
     match event {
@@ -111,8 +113,16 @@ pub async fn handle_build_queue_event(
                         // First try to complete builds, and only then timeout then
                         // Because if the bot was offline for some time, we want to first attempt to
                         // actually finish the build, otherwise it might get instantly timeouted.
-                        if !maybe_complete_build(&repo, db, &build, &pr, &merge_queue_tx, None)
-                            .await?
+                        if !maybe_complete_build(
+                            &repo,
+                            db,
+                            &build,
+                            &pr,
+                            &merge_queue_tx,
+                            &unroll_queue_tx,
+                            None,
+                        )
+                        .await?
                         {
                             maybe_timeout_build(&repo, db, &build, &pr, timeout).await?;
                         }
@@ -167,6 +177,7 @@ pub async fn handle_build_queue_event(
                     &build,
                     &pr,
                     &merge_queue_tx,
+                    &unroll_queue_tx,
                     Some(CompletionTrigger { error_context }),
                 )
                 .await?;
@@ -248,6 +259,7 @@ async fn maybe_complete_build(
     build: &BuildModel,
     pr: &PullRequestModel,
     merge_queue_tx: &MergeQueueSender,
+    unroll_queue_tx: &UnrollQueueSender,
     completion_trigger: Option<CompletionTrigger>,
 ) -> anyhow::Result<bool> {
     assert_eq!(
@@ -374,7 +386,12 @@ async fn maybe_complete_build(
         BuildKind::Auto => {
             merge_queue_tx.notify().await?;
         }
-        BuildKind::Try | BuildKind::UnrolledMember => {}
+        BuildKind::UnrolledMember => {
+            unroll_queue_tx
+                .process_unrolled_members(repo.repository())
+                .await?;
+        }
+        BuildKind::Try => {}
     }
 
     let comment_opt = if build_succeeded {

@@ -85,6 +85,8 @@ pub enum BorsGlobalEvent {
     BackfillEC2Instances,
     /// Reload jobs of pending workfows into the in-memory job cache.
     ReloadWorkflowJobCache,
+    /// Start or complete unrolled builds of rollups.
+    ProcessUnrolledMemberBuilds,
 }
 
 #[derive(Debug)]

@@ -36,6 +36,7 @@ mod labels;
 pub mod merge_queue;
 pub mod mergeability_queue;
 pub mod process;
+pub mod unroll_queue;
 
 use crate::PgDbClient;
 use crate::bors::command::BorsCommand;
@@ -160,6 +161,9 @@ You can use the following commands:
 
 #[cfg(test)]
 pub static WAIT_FOR_BUILD_QUEUE: TestSyncMarker = TestSyncMarker::new();
+
+#[cfg(test)]
+pub static WAIT_FOR_UNROLL_QUEUE: TestSyncMarker = TestSyncMarker::new();
 
 #[cfg(test)]
 pub static WAIT_FOR_MERGEABILITY_STATUS_REFRESH: TestSyncMarker = TestSyncMarker::new();

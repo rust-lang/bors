@@ -25,6 +25,7 @@ use crate::github::{
 };
 use crate::utils::timing::{RetryMethod, RetryableOpError, ShouldRetry, perform_retryable};
 use futures::TryStreamExt;
+use http::StatusCode;
 use octocrab::models::actions::SelfHostedRunnerJitConfig;
 use octocrab::models::workflows::{Job, Run};
 use serde::de::DeserializeOwned;
@@ -375,6 +376,52 @@ impl GithubRepositoryClient {
             RetryableOpError::Err(error) => error,
             RetryableOpError::AllAttemptsExhausted(_) => MergeError::Timeout,
         })
+    }
+
+    /// Get message of a commit with the given SHA.
+    pub async fn get_commit_message(
+        &self,
+        commit_sha: &CommitSha,
+    ) -> anyhow::Result<Option<String>> {
+        let message = perform_retryable("get_commit", RetryMethod::default(), || async {
+            #[derive(serde::Deserialize)]
+            struct CommitData {
+                message: String,
+            }
+
+            #[derive(serde::Deserialize)]
+            struct CommitResponse {
+                commit: CommitData,
+            }
+            let response = self
+                .client
+                ._get(format!("/repos/{}/commits/{commit_sha}", self.repo_name))
+                .await?;
+            match response.status() {
+                StatusCode::OK => {
+                    let text = self
+                        .client
+                        .body_to_string(response)
+                        .await
+                        .unwrap_or_default();
+                    let commit = serde_json::from_str::<CommitResponse>(&text)?;
+                    anyhow::Ok(Some(commit.commit.message))
+                }
+                StatusCode::NOT_FOUND => Ok(None),
+                status => {
+                    let text = self
+                        .client
+                        .body_to_string(response)
+                        .await
+                        .unwrap_or_default();
+                    Err(anyhow::anyhow!(
+                        "Could not get commit `{commit_sha}` ({status}): {text}"
+                    ))
+                }
+            }
+        })
+        .await?;
+        Ok(message)
     }
 
     /// Create a new commit with the given author.

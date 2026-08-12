@@ -366,6 +366,21 @@ pub async fn handle_bors_global_event(
             .instrument(span)
             .await?;
         }
+        BorsGlobalEvent::ProcessUnrolledMemberBuilds => {
+            tracing::info!("Process unrolled member builds");
+            for_each_repo(&ctx, |repo| {
+                let repo = repo.clone();
+                let senders = senders.clone();
+                async move {
+                    senders
+                        .unroll_queue()
+                        .process_unrolled_members(repo.repository())
+                        .await?;
+                    anyhow::Ok(())
+                }
+            })
+            .await?;
+        }
     }
     Ok(())
 }
