@@ -65,10 +65,12 @@ pub(crate) async fn get_pull_request(
         pr.mergeable_state_is_stale,
         pr.created_at as "created_at: DateTime<Utc>",
         try_build AS "try_build: BuildModel",
-        auto_build AS "auto_build: BuildModel"
+        auto_build AS "auto_build: BuildModel",
+        unrolled_build AS "unrolled_build: BuildModel"
     FROM pull_request as pr
     LEFT JOIN build AS try_build ON pr.try_build_id = try_build.id
     LEFT JOIN build AS auto_build ON pr.auto_build_id = auto_build.id
+    LEFT JOIN build AS unrolled_build ON pr.unrolled_build_id = unrolled_build.id
     WHERE pr.repository = $1 AND
           pr.number = $2
     "#,
@@ -193,10 +195,12 @@ pub(crate) async fn upsert_pull_request(
                 pr.mergeable_state_is_stale,
                 pr.created_at as "created_at: DateTime<Utc>",
                 try_build AS "try_build: BuildModel",
-                auto_build AS "auto_build: BuildModel"
+                auto_build AS "auto_build: BuildModel",
+                unrolled_build AS "unrolled_build: BuildModel"
             FROM upserted_pr as pr
             LEFT JOIN build AS try_build ON pr.try_build_id = try_build.id
             LEFT JOIN build AS auto_build ON pr.auto_build_id = auto_build.id
+            LEFT JOIN build AS unrolled_build ON pr.unrolled_build_id = unrolled_build.id
             "#,
             repo as &GithubRepoName,
             pr_number.0 as i64,
@@ -249,10 +253,12 @@ pub(crate) async fn get_nonclosed_pull_requests(
                 pr.mergeable_state_is_stale,
                 pr.created_at as "created_at: DateTime<Utc>",
                 try_build AS "try_build: BuildModel",
-                auto_build AS "auto_build: BuildModel"
+                auto_build AS "auto_build: BuildModel",
+                unrolled_build AS "unrolled_build: BuildModel"
             FROM pull_request as pr
             LEFT JOIN build AS try_build ON pr.try_build_id = try_build.id
             LEFT JOIN build AS auto_build ON pr.auto_build_id = auto_build.id
+            LEFT JOIN build AS unrolled_build ON pr.unrolled_build_id = unrolled_build.id
             WHERE pr.repository = $1
                 AND pr.status IN ('open', 'draft')
             "#,
@@ -334,10 +340,12 @@ pub(crate) async fn get_prs_with_stale_mergeability_or_approved(
                 pr.mergeable_state_is_stale,
                 pr.created_at as "created_at: DateTime<Utc>",
                 try_build AS "try_build: BuildModel",
-                auto_build AS "auto_build: BuildModel"
+                auto_build AS "auto_build: BuildModel",
+                unrolled_build AS "unrolled_build: BuildModel"
             FROM pull_request as pr
             LEFT JOIN build AS try_build ON pr.try_build_id = try_build.id
             LEFT JOIN build AS auto_build ON pr.auto_build_id = auto_build.id
+            LEFT JOIN build AS unrolled_build ON pr.unrolled_build_id = unrolled_build.id
             WHERE pr.repository = $1
               AND (pr.mergeable_state = 'unknown' OR pr.mergeable_state_is_stale = true OR pr.approved_by IS NOT NULL)
               AND pr.status IN ('open', 'draft')
@@ -394,10 +402,12 @@ pub(crate) async fn set_stale_mergeability_status_by_base_branch(
                 pr.mergeable_state_is_stale,
                 pr.created_at as "created_at: DateTime<Utc>",
                 try_build AS "try_build: BuildModel",
-                auto_build AS "auto_build: BuildModel"
+                auto_build AS "auto_build: BuildModel",
+                unrolled_build AS "unrolled_build: BuildModel"
             FROM pr
             LEFT JOIN build AS try_build ON pr.try_build_id = try_build.id
             LEFT JOIN build AS auto_build ON pr.auto_build_id = auto_build.id
+            LEFT JOIN build AS unrolled_build ON pr.unrolled_build_id = unrolled_build.id
             "#,
             repo as &GithubRepoName,
             base_branch,
@@ -545,10 +555,12 @@ SELECT
     pr.rollup as "rollup: RollupMode",
     pr.created_at as "created_at: DateTime<Utc>",
     try_build AS "try_build: BuildModel",
-    auto_build AS "auto_build: BuildModel"
+    auto_build AS "auto_build: BuildModel",
+    unrolled_build AS "unrolled_build: BuildModel"
 FROM pull_request as pr
 LEFT JOIN build AS try_build ON pr.try_build_id = try_build.id
 LEFT JOIN build AS auto_build ON pr.auto_build_id = auto_build.id
+LEFT JOIN build AS unrolled_build ON pr.unrolled_build_id = unrolled_build.id
 WHERE try_build.id = $1 OR auto_build.id = $1
 "#,
             build_id
@@ -588,6 +600,24 @@ pub(crate) async fn update_pr_auto_build_id(
         sqlx::query!(
             "UPDATE pull_request SET auto_build_id = $1 WHERE id = $2",
             auto_build_id,
+            pr_id
+        )
+        .execute(executor)
+        .await?;
+        Ok(())
+    })
+    .await
+}
+
+pub(crate) async fn update_pr_unrolled_build_id(
+    executor: impl PgExecutor<'_>,
+    pr_id: i32,
+    unrolled_build_id: i32,
+) -> anyhow::Result<()> {
+    measure_db_query("update_pr_unrolled_build_id", || async {
+        sqlx::query!(
+            "UPDATE pull_request SET unrolled_build_id = $1 WHERE id = $2",
+            unrolled_build_id,
             pr_id
         )
         .execute(executor)
@@ -1285,10 +1315,12 @@ pub(crate) async fn find_rollups_for_member_pr(
         pr.mergeable_state_is_stale,
         pr.created_at as "created_at: DateTime<Utc>",
         try_build AS "try_build: BuildModel",
-        auto_build AS "auto_build: BuildModel"
+        auto_build AS "auto_build: BuildModel",
+        unrolled_build AS "unrolled_build: BuildModel"
     FROM pull_request as pr
     LEFT JOIN build AS try_build ON pr.try_build_id = try_build.id
     LEFT JOIN build AS auto_build ON pr.auto_build_id = auto_build.id
+    LEFT JOIN build AS unrolled_build ON pr.unrolled_build_id = unrolled_build.id
     WHERE pr.id IN (
         SELECT rollup
         FROM rollup_member

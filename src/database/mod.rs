@@ -492,6 +492,9 @@ pub struct PullRequestModel {
     pub try_build: Option<BuildModel>,
     /// The (latest) auto merge build associated with this PR, if any.
     pub auto_build: Option<BuildModel>,
+    /// The (latest) unrolled build associated with this PR, if any.
+    /// This is only present for merged members of a rollup.
+    pub unrolled_build: Option<BuildModel>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -889,6 +892,7 @@ pub fn pr_needs_update_in_db(db_pr: &PullRequestModel, gh_pr: &PullRequest) -> b
         note: _,
         try_build: _,
         auto_build: _,
+        unrolled_build: _,
         created_at: _,
     } = db_pr;
     let PullRequest {

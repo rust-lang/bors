@@ -6,9 +6,10 @@ use super::operations::{
     get_repository_by_name, get_rollup_members, get_tagged_bot_comments,
     get_workflow_urls_for_build, get_workflows_for_build, insert_repo_if_not_exists, is_rollup,
     record_tagged_bot_comment, set_pr_assignees, set_pr_mergeability_state, set_pr_priority,
-    set_pr_rollup_mode, set_pr_status, set_stale_mergeability_status_by_base_branch,
-    unapprove_pull_request, undelegate_pull_request, update_build, update_pr_try_build_id,
-    update_workflow_status, upsert_pull_request, upsert_repository,
+    set_pr_rollup_mode, set_pr_status,
+    set_stale_mergeability_status_by_base_branch, unapprove_pull_request, undelegate_pull_request,
+    update_build, update_pr_try_build_id, update_pr_unrolled_build_id, update_workflow_status,
+    upsert_pull_request, upsert_repository,
 };
 use super::{
     ApprovalInfo, DelegatedPermission, MergeableState, PrimaryKey, RegisterRollupMemberParams,
@@ -264,16 +265,16 @@ impl PgDbClient {
         Ok(build_id)
     }
 
-    /// Creates a new try perf build.
-    /// Right now, it does not attach itself to any PR.
-    pub async fn create_try_perf_build(
+    /// Creates a new unrolled rollup member build and attaches it to a PR.
+    pub async fn attach_unrolled_build(
         &self,
         pr: &PullRequestModel,
         branch: String,
         commit_sha: CommitSha,
         parent: CommitSha,
     ) -> anyhow::Result<i32> {
-        create_build(
+        let mut tx = self.pool.begin().await?;
+        let build_id = create_build(
             &self.pool,
             pr,
             &branch,
@@ -281,7 +282,10 @@ impl PgDbClient {
             &commit_sha,
             &parent,
         )
-        .await
+        .await?;
+        update_pr_unrolled_build_id(&mut *tx, pr.id, build_id).await?;
+        tx.commit().await?;
+        Ok(build_id)
     }
 
     pub async fn find_build(

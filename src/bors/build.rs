@@ -294,7 +294,7 @@ pub async fn start_build(
             .await
         }
         BuildKind::UnrolledMember => {
-            db.create_try_perf_build(
+            db.attach_unrolled_build(
                 pr,
                 ci_branch.clone(),
                 build_commit_sha.clone(),
