@@ -779,7 +779,7 @@ pub struct RegisterRollupMemberParams {
     pub rolled_up_merge_sha: CommitSha,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum UnrollState {
     /// An unrolled build should be started for this rollup member.
     Waiting,

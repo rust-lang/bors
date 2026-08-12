@@ -302,7 +302,7 @@ mod tests {
 
     #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn try_success(pool: sqlx::PgPool) {
-        run_test(pool.clone(), async |ctx: &mut BorsTester| {
+        run_test(pool, async |ctx: &mut BorsTester| {
             ctx.post_comment("@bors try").await?;
             ctx.expect_comments((), 1).await;
             ctx.workflow_full_success(ctx.try_workflow()).await?;

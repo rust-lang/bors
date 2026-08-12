@@ -1347,6 +1347,10 @@ impl PullRequestProxy {
         self.gh_pr.clone()
     }
 
+    pub fn get_db_pr(&self) -> &PullRequestModel {
+        self.require_db_pr()
+    }
+
     /// Useful for debugging the GitHub and DB PR state.
     #[allow(unused)]
     pub fn dump(&self) -> &Self {

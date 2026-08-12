@@ -300,9 +300,16 @@ async fn handle_successful_build(
         }
     } else {
         tracing::info!("Auto build succeeded and merged for PR {pr_num}");
-        ctx.db
-            .set_pr_status(&pr.repository, pr.number, PullRequestStatus::Merged)
-            .await?;
+
+        if ctx.db.is_rollup(pr).await? {
+            // Rollup, also mark its members as waiting for an unroll
+            ctx.db.finish_rollup_merge(pr).await?;
+        } else {
+            // Not a rollup, just mark it as merged
+            ctx.db
+                .set_pr_status(&pr.repository, pr.number, PullRequestStatus::Merged)
+                .await?;
+        }
         repo.client
             .post_comment(pr.number, comment, &ctx.db)
             .await?;

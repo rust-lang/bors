@@ -431,6 +431,8 @@ async fn create_rollup(
 #[cfg(test)]
 mod tests {
     use crate::bors::{PullRequestStatus, RollupMode};
+    use crate::database::UnrollState;
+    use crate::database::operations::get_rollup_members;
     use crate::github::rollup::OAuthRollupState;
     use crate::github::{GithubRepoName, PullRequestNumber};
     use crate::permissions::PermissionType;
@@ -1197,6 +1199,43 @@ also include this pls"
             assert_eq!(ctx.pr(4).await.get_gh_pr().status(), PullRequestStatus::Closed);
             Ok(())
         })
+        .await;
+    }
+
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
+    async fn rollup_merge_unrolled_state_waiting(pool: sqlx::PgPool) {
+        run_test(
+            (pool.clone(), rollup_state()),
+            async |ctx: &mut BorsTester| {
+                let pr2 = ctx.open_pr((), |_| {}).await?;
+                ctx.approve(pr2.id()).await?;
+                let pr3 = ctx.open_pr((), |_| {}).await?;
+                ctx.approve(pr3.id()).await?;
+
+                make_rollup(ctx, &[&pr2, &pr3])
+                    .await?
+                    .assert_status(StatusCode::SEE_OTHER);
+                ctx.approve(4).await?;
+
+                ctx.start_and_finish_auto_build(4).await?;
+                ctx.pr(4).await.expect_status(PullRequestStatus::Merged);
+
+                let pr_id = ctx.pr(4).await.get_db_pr().id;
+
+                let members = get_rollup_members(&pool, pr_id).await.unwrap();
+                assert_eq!(members.len(), 2);
+                for member in members {
+                    assert_eq!(
+                        member.unroll_state,
+                        Some(UnrollState::Waiting),
+                        "Rollup member {} has invalid unroll state",
+                        member.member
+                    );
+                }
+
+                Ok(())
+            },
+        )
         .await;
     }
 

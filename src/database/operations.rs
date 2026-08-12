@@ -3,7 +3,6 @@ use chrono::Utc;
 use sqlx::postgres::PgExecutor;
 use std::collections::{HashMap, HashSet};
 
-use super::BuildModel;
 use super::CommentModel;
 use super::DelegatedPermission;
 use super::MergeableState;
@@ -16,6 +15,7 @@ use super::WorkflowType;
 use super::{ApprovalInfo, PrimaryKey, UpdateBuildParams};
 use super::{ApprovalStatus, RollupMember};
 use super::{Assignees, RegisterRollupMemberParams};
+use super::{BuildModel, UnrollState};
 use crate::bors::PullRequestStatus;
 use crate::bors::RollupMode;
 use crate::bors::comment::CommentTag;
@@ -1261,8 +1261,6 @@ pub(crate) async fn get_rollup_members(
     executor: impl PgExecutor<'_>,
     pr_id: PrimaryKey,
 ) -> anyhow::Result<Vec<RollupMember>> {
-    use crate::database::UnrollState;
-
     measure_db_query("get_rollup_members", || async {
         let rows = sqlx::query!(
             r#"
@@ -1290,6 +1288,28 @@ pub(crate) async fn get_rollup_members(
                 position: row.position as u32,
             })
             .collect())
+    })
+    .await
+}
+
+pub(crate) async fn set_rollup_members_unrolled_state(
+    executor: impl PgExecutor<'_>,
+    rollup_id: PrimaryKey,
+    state: UnrollState,
+) -> anyhow::Result<()> {
+    measure_db_query("set_rollup_members_unrolled_state", || async {
+        sqlx::query!(
+            r#"
+        UPDATE rollup_member
+        SET unroll_state = $1
+        WHERE rollup = $2
+            "#,
+            state as UnrollState,
+            rollup_id
+        )
+        .execute(executor)
+        .await?;
+        Ok(())
     })
     .await
 }
