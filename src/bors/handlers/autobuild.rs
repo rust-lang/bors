@@ -140,6 +140,8 @@ async fn notify_of_invalid_retry_state(
     let mut msg = ":exclamation: You can only retry pull requests that are approved and have a previously failed auto build.".to_string();
     if running_auto_build {
         writeln!(msg, "\n\n*Hint*: There is currently a pending auto build on this PR. To cancel it, run `{bot_prefix} cancel`.").unwrap();
+    } else {
+        writeln!(msg, "\n\n*Hint*: If you wanted to retry pull request CI instead, push the latest commit again, or close and then reopen this PR.").unwrap();
     }
 
     repo.client
@@ -172,7 +174,11 @@ mod tests {
             ctx.post_comment("@bors retry").await?;
             insta::assert_snapshot!(
                 ctx.get_next_comment_text(()).await?,
-                @":exclamation: You can only retry pull requests that are approved and have a previously failed auto build."
+                @"
+            :exclamation: You can only retry pull requests that are approved and have a previously failed auto build.
+
+            *Hint*: If you wanted to retry pull request CI instead, push the latest commit again, or close and then reopen this PR.
+            "
             );
             Ok(())
         })
