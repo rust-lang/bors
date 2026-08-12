@@ -51,13 +51,25 @@ impl PgDbClient {
     /// **If it is not possible to take the lock, then `func` will NOT be called at all!**
     pub async fn ensure_not_concurrent<Func, R>(
         &self,
-        lock_name: &str,
+        build_kind: BuildKind,
+        repo: &GithubRepoName,
         func: Func,
     ) -> anyhow::Result<ExclusiveOperationOutcome<R>>
     where
         Func: AsyncFnOnce(ExclusiveLockProof) -> R,
     {
-        let lock = PgAdvisoryLock::new(lock_name);
+        let lock_name = match build_kind {
+            BuildKind::Try => {
+                format!("{repo}-try-build")
+            }
+            BuildKind::Auto => {
+                format!("{repo}-auto-build")
+            }
+            BuildKind::UnrolledMember => {
+                format!("{repo}-unrolled-build")
+            }
+        };
+        let lock = PgAdvisoryLock::new(&lock_name);
 
         // Try to acquire the lock
         let _guard = match lock

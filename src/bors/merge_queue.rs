@@ -102,16 +102,13 @@ pub async fn merge_queue_tick(
         // from the DB).
         let res = ctx
             .db
-            .ensure_not_concurrent(
-                &format!("{}-auto-build", repo.repository()),
-                async |proof| {
-                    if let Err(error) =
-                        process_repository(&repo, &ctx, mergeability_sender, proof).await
-                    {
-                        tracing::error!("Error running merge queue for {repo_name}: {error:?}");
-                    }
-                },
-            )
+            .ensure_not_concurrent(BuildKind::Auto, repo.repository(), async |proof| {
+                if let Err(error) =
+                    process_repository(&repo, &ctx, mergeability_sender, proof).await
+                {
+                    tracing::error!("Error running merge queue for {repo_name}: {error:?}");
+                }
+            })
             .await
             .context("Merge lock failure")?;
         match res {

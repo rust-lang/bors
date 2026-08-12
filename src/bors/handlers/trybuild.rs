@@ -88,7 +88,7 @@ pub(super) async fn command_try_build(
     };
 
     let res = db
-        .ensure_not_concurrent(&format!("{}-try-build", repo.repository()), async |proof| {
+        .ensure_not_concurrent(BuildKind::Try, repo.repository(), async |proof| {
             // Try to cancel any previously running try build workflows
             let cancelled_workflow_urls = if let Some(build) = get_pending_try_build(pr.db) {
                 let res = cancel_previous_try_build(repo, &db, build).await?;
