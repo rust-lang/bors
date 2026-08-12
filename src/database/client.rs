@@ -216,7 +216,10 @@ impl PgDbClient {
         &self,
         build: &BuildModel,
     ) -> anyhow::Result<Option<PullRequestModel>> {
-        find_pr_by_build(&self.pool, build.id).await
+        match build.pr_number {
+            Some(pr_num) => get_pull_request(&self.pool, &build.repository, pr_num).await,
+            None => find_pr_by_build(&self.pool, build.id).await,
+        }
     }
 
     pub async fn attach_try_build(
@@ -227,15 +230,8 @@ impl PgDbClient {
         parent: CommitSha,
     ) -> anyhow::Result<i32> {
         let mut tx = self.pool.begin().await?;
-        let build_id = create_build(
-            &mut *tx,
-            &pr.repository,
-            &branch,
-            BuildKind::Try,
-            &commit_sha,
-            &parent,
-        )
-        .await?;
+        let build_id =
+            create_build(&mut *tx, pr, &branch, BuildKind::Try, &commit_sha, &parent).await?;
         update_pr_try_build_id(&mut *tx, pr.id, build_id).await?;
         tx.commit().await?;
         Ok(build_id)
@@ -249,15 +245,8 @@ impl PgDbClient {
         parent: CommitSha,
     ) -> anyhow::Result<i32> {
         let mut tx = self.pool.begin().await?;
-        let build_id = create_build(
-            &mut *tx,
-            &pr.repository,
-            &branch,
-            BuildKind::Auto,
-            &commit_sha,
-            &parent,
-        )
-        .await?;
+        let build_id =
+            create_build(&mut *tx, pr, &branch, BuildKind::Auto, &commit_sha, &parent).await?;
         update_pr_auto_build_id(&mut *tx, pr.id, build_id).await?;
         tx.commit().await?;
         Ok(build_id)

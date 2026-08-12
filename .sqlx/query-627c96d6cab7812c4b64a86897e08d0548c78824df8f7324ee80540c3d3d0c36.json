@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\nINSERT INTO build (repository, pr_number, branch, kind, commit_sha, parent, status)\nVALUES ($1, $2, $3, $4, $5, $6, $7)\nRETURNING id\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "627c96d6cab7812c4b64a86897e08d0548c78824df8f7324ee80540c3d3d0c36"
+}

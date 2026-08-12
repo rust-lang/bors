@@ -93,6 +93,22 @@ impl sqlx::Type<sqlx::Postgres> for PullRequestNumber {
     }
 }
 
+impl sqlx::Encode<'_, sqlx::Postgres> for PullRequestNumber {
+    fn encode_by_ref(
+        &self,
+        buf: &mut sqlx::postgres::PgArgumentBuffer,
+    ) -> Result<sqlx::encode::IsNull, BoxDynError> {
+        <i64 as sqlx::Encode<sqlx::Postgres>>::encode(self.0 as i64, buf)
+    }
+}
+
+impl sqlx::Decode<'_, sqlx::Postgres> for PullRequestNumber {
+    fn decode(value: sqlx::postgres::PgValueRef<'_>) -> Result<Self, BoxDynError> {
+        let value = <i64 as sqlx::Decode<sqlx::Postgres>>::decode(value)?;
+        Ok(Self(value as u64))
+    }
+}
+
 impl sqlx::Type<sqlx::Postgres> for RollupMode {
     fn type_info() -> sqlx::postgres::PgTypeInfo {
         <String as sqlx::Type<sqlx::Postgres>>::type_info() // Store as TEXT in Postgres
@@ -377,6 +393,9 @@ impl sqlx::Decode<'_, sqlx::Postgres> for PgDuration {
 }
 
 /// Represents a single (merged) commit.
+///
+/// Note: the order of fields of this struct is load-bearing, and has to match the table column
+/// layout, because the encode/decode functions are automatically derived.
 #[derive(Debug, Clone, PartialEq, sqlx::Type)]
 #[sqlx(type_name = "build")]
 pub struct BuildModel {
@@ -398,6 +417,9 @@ pub struct BuildModel {
     pub kind: BuildKind,
     /// Build time to finish CI workflow.
     pub duration: Option<PgDuration>,
+    /// The pull request number to which this build is attached.
+    /// We store only the number, and not the whole model, because a PR may also contain a build.
+    pub pr_number: Option<PullRequestNumber>,
 }
 
 impl sqlx::Type<sqlx::Postgres> for BuildKind {

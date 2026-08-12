@@ -43,7 +43,7 @@ pub(crate) async fn get_pull_request(
     SELECT
         pr.id,
         pr.repository as "repository: GithubRepoName",
-        pr.number as "number!: i64",
+        pr.number as "number: PullRequestNumber",
         pr.title,
         pr.author,
         pr.assignees as "assignees: Assignees",
@@ -73,7 +73,7 @@ pub(crate) async fn get_pull_request(
           pr.number = $2
     "#,
             repo as &GithubRepoName,
-            pr_number.0 as i32
+            pr_number.0 as i64
         )
         .fetch_optional(executor)
         .await?;
@@ -93,7 +93,7 @@ pub(crate) async fn set_pr_status(
         sqlx::query!(
             "UPDATE pull_request SET status = $3 WHERE repository = $1 AND number = $2",
             repo as &GithubRepoName,
-            pr_number.0 as i32,
+            pr_number.0 as i64,
             pr_status as PullRequestStatus,
         )
         .execute(executor)
@@ -171,7 +171,7 @@ pub(crate) async fn upsert_pull_request(
             SELECT
                 pr.id,
                 pr.repository as "repository: GithubRepoName",
-                pr.number as "number!: i64",
+                pr.number as "number: PullRequestNumber",
                 pr.title,
                 pr.author,
                 pr.assignees as "assignees: Assignees",
@@ -199,7 +199,7 @@ pub(crate) async fn upsert_pull_request(
             LEFT JOIN build AS auto_build ON pr.auto_build_id = auto_build.id
             "#,
             repo as &GithubRepoName,
-            pr_number.0 as i32,
+            pr_number.0 as i64,
             title,
             author,
             assignees.join(","),
@@ -227,7 +227,7 @@ pub(crate) async fn get_nonclosed_pull_requests(
             SELECT
                 pr.id,
                 pr.repository as "repository: GithubRepoName",
-                pr.number as "number!: i64",
+                pr.number as "number: PullRequestNumber",
                 pr.title,
                 pr.author,
                 pr.assignees as "assignees: Assignees",
@@ -291,7 +291,7 @@ pub(crate) async fn set_pr_mergeability_state(
         RETURNING pr2.mergeable_state as "mergeable_state: MergeableState"
 "#,
             repo as &GithubRepoName,
-            pr_number.0 as i32,
+            pr_number.0 as i64,
             mergeability_state as _,
         )
         .fetch_one(executor)
@@ -312,7 +312,7 @@ pub(crate) async fn get_prs_with_stale_mergeability_or_approved(
             SELECT
                 pr.id,
                 pr.repository as "repository: GithubRepoName",
-                pr.number as "number!: i64",
+                pr.number as "number: PullRequestNumber",
                 pr.title,
                 pr.author,
                 pr.assignees as "assignees: Assignees",
@@ -372,7 +372,7 @@ pub(crate) async fn set_stale_mergeability_status_by_base_branch(
             SELECT
                 pr.id,
                 pr.repository as "repository: GithubRepoName",
-                pr.number as "number!: i64",
+                pr.number as "number: PullRequestNumber",
                 pr.title,
                 pr.author,
                 pr.assignees as "assignees: Assignees",
@@ -523,7 +523,7 @@ pub(crate) async fn find_pr_by_build(
 SELECT
     pr.id,
     pr.repository as "repository: GithubRepoName",
-    pr.number as "number!: i64",
+    pr.number as "number: PullRequestNumber",
     pr.title,
     pr.author,
     pr.assignees as "assignees: Assignees",
@@ -599,7 +599,7 @@ pub(crate) async fn update_pr_auto_build_id(
 
 pub(crate) async fn create_build(
     executor: impl PgExecutor<'_>,
-    repo: &GithubRepoName,
+    pr: &PullRequestModel,
     branch: &str,
     kind: BuildKind,
     commit_sha: &CommitSha,
@@ -608,11 +608,12 @@ pub(crate) async fn create_build(
     measure_db_query("create_build", || async {
         let build_id = sqlx::query_scalar!(
             r#"
-INSERT INTO build (repository, branch, kind, commit_sha, parent, status)
-VALUES ($1, $2, $3, $4, $5, $6)
+INSERT INTO build (repository, pr_number, branch, kind, commit_sha, parent, status)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
 RETURNING id
 "#,
-            repo as &GithubRepoName,
+            &pr.repository as &GithubRepoName,
+            pr.number.0 as i64,
             branch,
             kind as BuildKind,
             commit_sha.0,
@@ -639,6 +640,7 @@ pub(crate) async fn find_build(
 SELECT
     id,
     repository as "repository: GithubRepoName",
+    pr_number as "pr_number: PullRequestNumber",
     branch,
     kind as "kind: BuildKind",
     commit_sha,
@@ -674,6 +676,7 @@ pub(crate) async fn get_pending_builds(
 SELECT
     id,
     repository as "repository: GithubRepoName",
+    pr_number as "pr_number: PullRequestNumber",
     branch,
     kind as "kind: BuildKind",
     commit_sha,
@@ -835,7 +838,7 @@ pub(crate) async fn set_pr_assignees(
             "UPDATE pull_request SET assignees = $1 WHERE repository = $2 AND number = $3",
             assignees.join(","),
             repo as &GithubRepoName,
-            pr_number.0 as i32,
+            pr_number.0 as i64,
         )
         .execute(executor)
         .await?;
@@ -860,18 +863,7 @@ SELECT
     workflow.type as "workflow_type: WorkflowType",
     workflow.status as "status: WorkflowStatus",
     workflow.created_at as "created_at: DateTime<Utc>",
-    (
-        build.id,
-        build.repository,
-        build.branch,
-        build.commit_sha,
-        build.status,
-        build.parent,
-        build.created_at,
-        build.check_run_id,
-        build.kind,
-        build.duration
-    ) AS "build!: BuildModel"
+    build AS "build!: BuildModel"
 FROM workflow
     LEFT JOIN build ON workflow.build_id = build.id
 WHERE build.id = $1
@@ -922,18 +914,7 @@ SELECT
     workflow.type as "workflow_type: WorkflowType",
     workflow.status as "status: WorkflowStatus",
     workflow.created_at as "created_at: DateTime<Utc>",
-    (
-        build.id,
-        build.repository,
-        build.branch,
-        build.commit_sha,
-        build.status,
-        build.parent,
-        build.created_at,
-        build.check_run_id,
-        build.kind,
-        build.duration
-    ) AS "build!: BuildModel"
+    build AS "build!: BuildModel"
 FROM workflow
     LEFT JOIN build ON workflow.build_id = build.id
 "#
@@ -1093,7 +1074,7 @@ pub(crate) async fn get_tagged_bot_comments(
             SELECT
                 id,
                 repository as "repository: GithubRepoName",
-                pr_number as "pr_number: i64",
+                pr_number as "pr_number: PullRequestNumber",
                 tag as "tag: CommentTag",
                 node_id,
                 created_at as "created_at: DateTime<Utc>"
@@ -1104,7 +1085,7 @@ pub(crate) async fn get_tagged_bot_comments(
             ORDER BY created_at
             "#,
             repo as &GithubRepoName,
-            pr_number.0 as i32,
+            pr_number.0 as i64,
             tag as CommentTag,
         )
         .fetch_all(executor)
@@ -1128,7 +1109,7 @@ pub(crate) async fn record_tagged_bot_comment(
             VALUES ($1, $2, $3, $4)
             "#,
             repo as &GithubRepoName,
-            pr_number.0 as i32,
+            pr_number.0 as i64,
             tag as CommentTag,
             node_id
         )
@@ -1282,7 +1263,7 @@ pub(crate) async fn find_rollups_for_member_pr(
     SELECT
         pr.id,
         pr.repository as "repository: GithubRepoName",
-        pr.number as "number!: i64",
+        pr.number as "number: PullRequestNumber",
         pr.title,
         pr.author,
         pr.assignees as "assignees: Assignees",
@@ -1335,6 +1316,7 @@ pub(crate) async fn get_last_n_successful_auto_builds(
         SELECT
             id,
             repository as "repository: GithubRepoName",
+            pr_number as "pr_number: PullRequestNumber",
             branch,
             kind as "kind: BuildKind",
             commit_sha,
