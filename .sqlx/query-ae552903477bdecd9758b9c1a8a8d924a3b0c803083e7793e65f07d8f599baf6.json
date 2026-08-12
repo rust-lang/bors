@@ -1,0 +1,114 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\nSELECT\n    workflow.id,\n    workflow.name,\n    workflow.url,\n    workflow.run_id,\n    workflow.type as \"workflow_type: WorkflowType\",\n    workflow.status as \"status: WorkflowStatus\",\n    workflow.created_at as \"created_at: DateTime<Utc>\",\n    build AS \"build!: BuildModel\"\nFROM workflow\n    LEFT JOIN build ON workflow.build_id = build.id\n",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "run_id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "workflow_type: WorkflowType",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "status: WorkflowStatus",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "created_at: DateTime<Utc>",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "build!: BuildModel",
+        "type_info": {
+          "Custom": {
+            "name": "build",
+            "kind": {
+              "Composite": [
+                [
+                  "id",
+                  "Int4"
+                ],
+                [
+                  "repository",
+                  "Text"
+                ],
+                [
+                  "branch",
+                  "Text"
+                ],
+                [
+                  "commit_sha",
+                  "Text"
+                ],
+                [
+                  "status",
+                  "Text"
+                ],
+                [
+                  "parent",
+                  "Text"
+                ],
+                [
+                  "created_at",
+                  "Timestamptz"
+                ],
+                [
+                  "check_run_id",
+                  "Int8"
+                ],
+                [
+                  "kind",
+                  "Text"
+                ],
+                [
+                  "duration",
+                  "Interval"
+                ],
+                [
+                  "pr_number",
+                  "Int8"
+                ]
+              ]
+            }
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "ae552903477bdecd9758b9c1a8a8d924a3b0c803083e7793e65f07d8f599baf6"
+}

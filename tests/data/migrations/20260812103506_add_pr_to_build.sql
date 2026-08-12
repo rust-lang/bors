@@ -1,0 +1,2 @@
+-- Empty to satisfy migration tests
+-- Data was backfilled during the migration itself.
