@@ -211,6 +211,7 @@ async fn maybe_timeout_build(
         let trigger = match build.kind {
             BuildKind::Try => LabelTrigger::TryBuildFailed,
             BuildKind::Auto => LabelTrigger::AutoBuildFailed,
+            BuildKind::UnrolledMember => return Ok(()),
         };
         let gh_pr = repo.client.get_pull_request(pr.number).await?;
         handle_label_trigger(repo, &gh_pr.into(), trigger).await?;
@@ -326,6 +327,7 @@ async fn maybe_complete_build(
         } else {
             LabelTrigger::AutoBuildFailed
         }),
+        BuildKind::UnrolledMember => None,
     };
 
     let compute_duration = || {
@@ -368,22 +370,30 @@ async fn maybe_complete_build(
     }
 
     // Trigger merge queue when an auto build completes
-    if build.kind == BuildKind::Auto {
-        merge_queue_tx.notify().await?;
+    match build.kind {
+        BuildKind::Auto => {
+            merge_queue_tx.notify().await?;
+        }
+        BuildKind::Try | BuildKind::UnrolledMember => {}
     }
 
     let comment_opt = if build_succeeded {
         tracing::info!("Build succeeded for PR {pr_num}");
 
-        if build.kind == BuildKind::Try {
-            Some(try_build_succeeded_comment(
+        match build.kind {
+            BuildKind::Try => Some(try_build_succeeded_comment(
                 workflow_runs,
                 CommitSha(build.commit_sha.clone()),
                 CommitSha(build.parent.clone()),
-            ))
-        } else {
-            // Merge queue will post the build succeeded comment
-            None
+            )),
+            BuildKind::Auto => {
+                // Merge queue will post the build succeeded comment
+                None
+            }
+            BuildKind::UnrolledMember => {
+                // Unrolled perf builds do not send any comments on the rollup member PRs
+                None
+            }
         }
     } else {
         tracing::info!("Build failed for PR {pr_num}");
@@ -417,13 +427,16 @@ async fn maybe_complete_build(
     };
 
     let tag = match build.kind {
-        BuildKind::Try => CommentTag::TryBuildStarted,
-        BuildKind::Auto => CommentTag::AutoBuildStarted,
+        BuildKind::Try => Some(CommentTag::TryBuildStarted),
+        BuildKind::Auto => Some(CommentTag::AutoBuildStarted),
+        BuildKind::UnrolledMember => None,
     };
-    hide_tagged_comments(repo, db, pr, tag).await?;
+    if let Some(tag) = tag {
+        hide_tagged_comments(repo, db, pr, tag).await?;
 
-    if let Some(comment) = comment_opt {
-        repo.client.post_comment(pr_num, comment, db).await?;
+        if let Some(comment) = comment_opt {
+            repo.client.post_comment(pr_num, comment, db).await?;
+        }
     }
 
     Ok(true)

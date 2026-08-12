@@ -171,6 +171,7 @@ pub async fn start_ec2_github_runner(
             match data.build_kind {
                 BuildKind::Try => "try",
                 BuildKind::Auto => "auto",
+                BuildKind::UnrolledMember => "try-perf",
             }
             .to_string(),
         ),

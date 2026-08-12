@@ -252,6 +252,26 @@ impl PgDbClient {
         Ok(build_id)
     }
 
+    /// Creates a new try perf build.
+    /// Right now, it does not attach itself to any PR.
+    pub async fn create_try_perf_build(
+        &self,
+        pr: &PullRequestModel,
+        branch: String,
+        commit_sha: CommitSha,
+        parent: CommitSha,
+    ) -> anyhow::Result<i32> {
+        create_build(
+            &self.pool,
+            pr,
+            &branch,
+            BuildKind::UnrolledMember,
+            &commit_sha,
+            &parent,
+        )
+        .await
+    }
+
     pub async fn find_build(
         &self,
         repo: &GithubRepoName,

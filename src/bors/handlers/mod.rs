@@ -26,7 +26,7 @@ use crate::bors::mergeability_queue::set_pr_mergeability_based_on_user_action;
 use crate::bors::process::QueueSenders;
 use crate::bors::{
     AUTO_BRANCH_NAME, BorsContext, BuildKind, CommandPrefix, Comment, PullRequestStatus,
-    RepositoryState, TRY_BRANCH_NAME,
+    RepositoryState, TRY_BRANCH_NAME, TRY_PERF_BRANCH_NAME,
 };
 use crate::database::{DelegatedPermission, DelegationStatus, PullRequestModel};
 use crate::ec2::{backfill_ec2_instances, terminate_old_ec2_instances};
@@ -1169,13 +1169,14 @@ pub fn invalidation_comment(
 
 /// Is this branch interesting for the bot?
 fn is_bors_observed_branch(branch: &str) -> bool {
-    branch == TRY_BRANCH_NAME || branch == AUTO_BRANCH_NAME
+    get_build_kind_from_branch(branch).is_some()
 }
 
 fn get_build_kind_from_branch(branch: &str) -> Option<BuildKind> {
     match branch {
         b if b == TRY_BRANCH_NAME => Some(BuildKind::Try),
         b if b == AUTO_BRANCH_NAME => Some(BuildKind::Auto),
+        b if b == TRY_PERF_BRANCH_NAME => Some(BuildKind::UnrolledMember),
         _ => None,
     }
 }

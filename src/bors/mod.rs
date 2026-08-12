@@ -50,13 +50,22 @@ pub use job_cache::{WorkflowJobData, WorkflowJobStatus};
 /// This branch should run CI checks.
 pub const AUTO_BRANCH_NAME: &str = "automation/bors/auto";
 
+/// Branch where CI checks run for try builds.
 /// This branch should run CI checks.
 pub const TRY_BRANCH_NAME: &str = "automation/bors/try";
 
+/// Branch where CI checks run for unrolled perf builds.
+/// This branch should run CI checks.
+pub const TRY_PERF_BRANCH_NAME: &str = "automation/bors/try-perf";
+
 #[derive(PartialEq, Eq, Copy, Clone, Debug)]
 pub enum BuildKind {
+    /// Try build on a PR, to test a set of CI jobs.
     Try,
+    /// Merge build, which attempts to merge a PR into the target branch.
     Auto,
+    /// Unrolled build of a rollup member, designed for compiler performance tests.
+    UnrolledMember,
 }
 
 /// Format the bors command help in Markdown format.

@@ -60,6 +60,8 @@
         {% match instance.build_kind %}
         {% when BuildKind::Try %}
         try
+        {% when BuildKind::UnrolledMember %}
+        unrolled-member
         {% when BuildKind::Auto %}
         auto
         {% endmatch %}

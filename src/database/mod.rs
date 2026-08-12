@@ -436,6 +436,7 @@ impl sqlx::Encode<'_, sqlx::Postgres> for BuildKind {
         let tag = match self {
             Self::Try => "try",
             Self::Auto => "auto",
+            Self::UnrolledMember => "unrolled-member",
         };
         <&str as sqlx::Encode<sqlx::Postgres>>::encode(tag, buf)
     }
@@ -446,6 +447,7 @@ impl sqlx::Decode<'_, sqlx::Postgres> for BuildKind {
         match <&str as sqlx::Decode<sqlx::Postgres>>::decode(value)? {
             "try" => Ok(Self::Try),
             "auto" => Ok(Self::Auto),
+            "unrolled-member" => Ok(Self::UnrolledMember),
             kind => Err(format!("Unknown build kind: {kind}").into()),
         }
     }
