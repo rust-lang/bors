@@ -773,7 +773,56 @@ pub struct RegisterRollupMemberParams {
     /// Pull request model of the member PR.
     pub member: PullRequestModel,
     /// HEAD SHA of the member PR at rollup creation.
-    pub rolled_up_sha: CommitSha,
+    pub rolled_up_head_sha: CommitSha,
+    /// SHA of the intermediate merge commit that added this PR to the rollup.
+    /// It is used to fetch the rollup commit message when performing unrolling.
+    pub rolled_up_merge_sha: CommitSha,
+}
+
+#[derive(Debug)]
+pub enum UnrollState {
+    /// An unrolled build should be started for this rollup member.
+    Waiting,
+    /// An unrolled build has already been started for this rollup member, and is in progress.
+    Pending,
+    /// The unrolled build has finished.
+    Finished,
+    /// All the unrolled builds for the rollup of this rollup member have been reported in a comment
+    /// on GitHub
+    Reported,
+}
+
+impl sqlx::Type<sqlx::Postgres> for UnrollState {
+    fn type_info() -> sqlx::postgres::PgTypeInfo {
+        <String as sqlx::Type<sqlx::Postgres>>::type_info()
+    }
+}
+
+impl sqlx::Encode<'_, sqlx::Postgres> for UnrollState {
+    fn encode_by_ref(
+        &self,
+        buf: &mut sqlx::postgres::PgArgumentBuffer,
+    ) -> Result<sqlx::encode::IsNull, BoxDynError> {
+        let tag = match self {
+            UnrollState::Waiting => "Waiting",
+            UnrollState::Pending => "Pending",
+            UnrollState::Finished => "Finished",
+            UnrollState::Reported => "Reported",
+        };
+        <&str as sqlx::Encode<sqlx::Postgres>>::encode(tag, buf)
+    }
+}
+
+impl sqlx::Decode<'_, sqlx::Postgres> for UnrollState {
+    fn decode(value: sqlx::postgres::PgValueRef<'_>) -> Result<Self, BoxDynError> {
+        match <&str as sqlx::Decode<sqlx::Postgres>>::decode(value)? {
+            "Waiting" => Ok(Self::Waiting),
+            "Pending" => Ok(Self::Pending),
+            "Finished" => Ok(Self::Finished),
+            "Reported" => Ok(Self::Reported),
+            tag => Err(format!("Unknown unroll state: {tag}").into()),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -781,7 +830,14 @@ pub struct RollupMember {
     /// Pull request number of the member PR.
     pub member: PullRequestNumber,
     /// HEAD SHA of the member PR at rollup creation.
-    pub rolled_up_sha: CommitSha,
+    pub rolled_up_head_sha: CommitSha,
+    /// SHA of the intermediate merge of the PR into its containing rollup.
+    pub rolled_up_merge_sha: CommitSha,
+    /// Status of an unrolled commit corresponding to this rollup member.
+    pub unroll_state: Option<UnrollState>,
+    /// Position of the member within the rollup.
+    /// Rollup members are merged sequentially, so each member has its specified index.
+    pub position: u32,
 }
 
 /// Updates the build table with the given fields.

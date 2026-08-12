@@ -3,7 +3,6 @@ use chrono::Utc;
 use sqlx::postgres::PgExecutor;
 use std::collections::{HashMap, HashSet};
 
-use super::Assignees;
 use super::BuildModel;
 use super::CommentModel;
 use super::DelegatedPermission;
@@ -16,6 +15,7 @@ use super::WorkflowStatus;
 use super::WorkflowType;
 use super::{ApprovalInfo, PrimaryKey, UpdateBuildParams};
 use super::{ApprovalStatus, RollupMember};
+use super::{Assignees, RegisterRollupMemberParams};
 use crate::bors::PullRequestStatus;
 use crate::bors::RollupMode;
 use crate::bors::comment::CommentTag;
@@ -1182,18 +1182,20 @@ pub(crate) async fn clear_auto_build(
 pub(crate) async fn register_rollup_pr_member(
     executor: impl PgExecutor<'_>,
     rollup: &PullRequestModel,
-    member: &PullRequestModel,
-    rolled_up_sha: &CommitSha,
+    params: &RegisterRollupMemberParams,
+    position: usize,
 ) -> anyhow::Result<()> {
     measure_db_query("register_rollup_pr_member", || async {
         sqlx::query!(
             r#"
-        INSERT INTO rollup_member (rollup, member, rolled_up_sha)
-        VALUES ($1, $2, $3)
+        INSERT INTO rollup_member (rollup, member, rolled_up_sha, rolled_up_merge_sha, position)
+        VALUES ($1, $2, $3, $4, $5)
         "#,
             rollup.id,
-            member.id,
-            rolled_up_sha.as_ref()
+            params.member.id,
+            params.rolled_up_head_sha.as_ref(),
+            params.rolled_up_merge_sha.as_ref(),
+            position as i32
         )
         .execute(executor)
         .await?;
@@ -1259,10 +1261,17 @@ pub(crate) async fn get_rollup_members(
     executor: impl PgExecutor<'_>,
     pr_id: PrimaryKey,
 ) -> anyhow::Result<Vec<RollupMember>> {
+    use crate::database::UnrollState;
+
     measure_db_query("get_rollup_members", || async {
         let rows = sqlx::query!(
             r#"
-        SELECT pr.number AS number, rm.rolled_up_sha AS sha
+        SELECT
+            pr.number AS number,
+            rm.rolled_up_sha AS rolled_up_head_sha,
+            rm.rolled_up_merge_sha AS rolled_up_merge_sha,
+            rm.unroll_state as "unroll_state: UnrollState",
+            rm.position as position
         FROM rollup_member rm
         JOIN pull_request AS pr ON pr.id = rm.member
         WHERE rm.rollup = $1
@@ -1275,7 +1284,10 @@ pub(crate) async fn get_rollup_members(
             .into_iter()
             .map(|row| RollupMember {
                 member: PullRequestNumber(row.number as u64),
-                rolled_up_sha: CommitSha(row.sha),
+                rolled_up_head_sha: CommitSha(row.rolled_up_head_sha),
+                rolled_up_merge_sha: CommitSha(row.rolled_up_merge_sha),
+                unroll_state: row.unroll_state,
+                position: row.position as u32,
             })
             .collect())
     })

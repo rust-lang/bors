@@ -284,7 +284,7 @@ async fn create_rollup(
             anyhow::anyhow!("Could not create rollup branch {rollup_branch}: {error:?}")
         })?;
 
-    let mut successes = Vec::new();
+    let mut successes: Vec<RegisterRollupMemberParams> = Vec::new();
     let mut failures = Vec::new();
 
     let mut github_prs = Vec::with_capacity(pr_nums.len());
@@ -339,8 +339,12 @@ async fn create_rollup(
             .await;
 
         match merge_attempt {
-            Ok(_) => {
-                successes.push((pr, head_sha));
+            Ok(merge_commit) => {
+                successes.push(RegisterRollupMemberParams {
+                    member: pr,
+                    rolled_up_head_sha: head_sha,
+                    rolled_up_merge_sha: merge_commit.sha,
+                });
             }
             Err(error) => match error {
                 MergeError::Conflict => {
@@ -358,12 +362,12 @@ async fn create_rollup(
     }
 
     let mut body = "Successful merges:\n\n".to_string();
-    for (pr, _) in &successes {
+    for successful_merge in &successes {
         body.push_str(&format!(
             " - {}#{} ({})\n",
             gh_client.repository(),
-            pr.number.0,
-            pr.title
+            successful_merge.member.number.0,
+            successful_merge.member.title
         ));
     }
 
@@ -411,16 +415,8 @@ async fn create_rollup(
     db.set_rollup_mode(&rollup_db, RollupMode::Never, None)
         .await?;
 
-    let members = successes
-        .into_iter()
-        .map(|(member, rolled_up_sha)| RegisterRollupMemberParams {
-            member,
-            rolled_up_sha,
-        })
-        .collect::<Vec<_>>();
-
     // And register its rollup member PRs
-    db.register_rollup_members(&rollup_db, &members)
+    db.register_rollup_members(&rollup_db, &successes)
         .await
         .context("Cannot register rollup members")?;
 

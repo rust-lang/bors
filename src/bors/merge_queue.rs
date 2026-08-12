@@ -614,10 +614,10 @@ async fn sanity_check_rollup(
                 continue;
             }
         };
-        if member_gh.head.sha != member.rolled_up_sha {
+        if member_gh.head.sha != member.rolled_up_head_sha {
             mismatches.push(RollupMemberMismatch {
                 member: member.member,
-                expected: member.rolled_up_sha,
+                expected: member.rolled_up_head_sha,
                 actual: member_gh.head.sha,
             });
         }

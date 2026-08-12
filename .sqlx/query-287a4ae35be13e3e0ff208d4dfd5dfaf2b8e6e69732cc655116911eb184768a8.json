@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            pr.number AS number,\n            rm.rolled_up_sha AS head_sha,\n            rm.rolled_up_merge_sha AS merge_sha,\n            rm.unroll_state as \"unroll_state: UnrollState\"\n        FROM rollup_member rm\n        JOIN pull_request AS pr ON pr.id = rm.member\n        WHERE rm.rollup = $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "number",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "head_sha",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "merge_sha",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "unroll_state: UnrollState",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "287a4ae35be13e3e0ff208d4dfd5dfaf2b8e6e69732cc655116911eb184768a8"
+}

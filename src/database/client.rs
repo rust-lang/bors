@@ -425,10 +425,9 @@ impl PgDbClient {
         members: &[RegisterRollupMemberParams],
     ) -> anyhow::Result<()> {
         let mut tx = self.pool.begin().await?;
-        for member in members {
+        for (index, member) in members.iter().enumerate() {
             assert_ne!(rollup.id, member.member.id);
-            register_rollup_pr_member(&mut *tx, rollup, &member.member, &member.rolled_up_sha)
-                .await?;
+            register_rollup_pr_member(&mut *tx, rollup, member, index).await?;
         }
         tx.commit().await?;
         Ok(())
