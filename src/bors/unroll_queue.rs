@@ -8,6 +8,7 @@ use crate::database::{
 };
 use crate::github::{CommitSha, GithubRepoName, PullRequestNumber};
 use crate::{BorsContext, PgDbClient};
+use anyhow::Context;
 use std::collections::HashMap;
 use std::fmt::Write;
 use std::sync::Arc;
@@ -131,14 +132,12 @@ async fn process_unrolled_members(repo: &RepositoryState, db: &PgDbClient) -> an
         );
         let span = info_span!("Rollup unrolling", rollup = rollup_number.0);
 
-        if let Err(error) = process_rollup(db, repo, &rollup, rollup_auto_build, &members)
+        process_rollup(db, repo, &rollup, rollup_auto_build, &members)
             .instrument(span)
             .await
-        {
-            tracing::error!(
-                "Transient error occurred while unrolling rollup #{rollup_number}: {error:?}"
-            );
-        }
+            .with_context(|| {
+                anyhow::anyhow!("Transient error occurred while unrolling rollup #{rollup_number}")
+            })?;
     }
     Ok(())
 }
@@ -378,6 +377,7 @@ async fn start_unrolled_build(
             sha: member.member.rolled_up_merge_sha.clone(),
         });
     };
+    let message = format!("Unrolled build for #{}\n{message}", member.pr.number);
 
     let res = db
         .ensure_not_concurrent(
@@ -413,9 +413,7 @@ async fn start_unrolled_build(
                     StartBuildOutcome::Success {
                         build_commit_sha, ..
                     } => Ok(build_commit_sha),
-                    StartBuildOutcome::MergeConflict => {
-                        return Err(UnrollError::MergeConflict);
-                    }
+                    StartBuildOutcome::MergeConflict => Err(UnrollError::MergeConflict),
                 }
             },
         )
@@ -425,5 +423,326 @@ async fn start_unrolled_build(
         ExclusiveOperationOutcome::Skipped => Err(UnrollError::Transient(anyhow::anyhow!(
             "Cannot start unrolled build due to a concurrent bors instance."
         ))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::database::UnrollState;
+    use crate::github::{PullRequestNumber, make_rollup, rollup_state};
+    use crate::tests::{
+        BorsTester, Comment, MergeBehavior, PullRequest, default_repo_name, run_test,
+    };
+    use http::StatusCode;
+
+    #[sqlx::test]
+    async fn unroll_success(pool: sqlx::PgPool) {
+        run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
+            let pr2 = ctx.open_pr((), |_| {}).await?;
+            let pr3 = ctx.open_pr((), |_| {}).await?;
+            ctx.approve(pr2.id()).await?;
+            ctx.approve(pr3.id()).await?;
+
+            let rollup = make_merged_rollup(ctx, &[&pr2, &pr3]).await?;
+
+            // Ensure that waiting state has been set
+            ctx.get_rollup(rollup)
+                .await?
+                .expect_unroll_state_all(UnrollState::Waiting);
+
+            // Unrolling should have been triggered by the merge queue after the rollup was merged
+            ctx.run_unroll_queue().await?;
+
+            ctx.get_rollup(rollup)
+                .await?
+                .expect_unroll_state_all(UnrollState::Pending);
+
+            for workflow in ctx.unrolled_workflows(2) {
+                ctx.workflow_full_success(workflow).await?;
+            }
+            ctx.run_unroll_queue().await?;
+
+            let comment = ctx.get_next_comment_text(rollup).await?;
+            insta::assert_snapshot!(comment, @"
+            :pushpin: Perf builds for each rolled up PR:
+
+            | PR# | Message | Perf Build Sha |
+            |----|----|:-----:|
+            |#2|Title of PR 2|`merge-0-pr-2-d7d45f1f-reauthored-to-bors`<br>([link](https://github.com/rust-lang/borstest/commit/merge-0-pr-2-d7d45f1f-reauthored-to-bors))|
+            |#3|Title of PR 3|`merge-1-pr-3-d7d45f1f-reauthored-to-bors`<br>([link](https://github.com/rust-lang/borstest/commit/merge-1-pr-3-d7d45f1f-reauthored-to-bors))|
+
+            *parent commit*: [main-sha1](https://github.com/rust-lang/borstest/commit/main-sha1)
+
+            In the case of a perf regression, run the following command for each PR you suspect might be the cause: `@rust-timer build $SHA`
+            ");
+
+            ctx.get_rollup(rollup)
+                .await?
+                .expect_unroll_state_all(UnrollState::Reported);
+            Ok(())
+        })
+            .await;
+    }
+
+    #[sqlx::test]
+    async fn unroll_unrolled_build_commit_message(pool: sqlx::PgPool) {
+        run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
+            let pr2 = ctx.open_pr((), |_| {}).await?;
+            ctx.approve(pr2.id()).await?;
+
+            make_merged_rollup(ctx, &[&pr2]).await?;
+            ctx.run_unroll_queue().await?;
+
+            insta::assert_snapshot!(ctx.unrolled_branch().get_commit().message(), @"
+            Unrolled build for #2
+            Rollup merge of #2 - default-user:pr/2, r=default-user
+
+            Title of PR 2
+
+            Description of PR 2
+            ");
+
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn unroll_merge_conflict(pool: sqlx::PgPool) {
+        run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
+            let pr2 = ctx.open_pr((), |_| {}).await?;
+            let pr3 = ctx.open_pr((), |_| {}).await?;
+            ctx.approve(pr2.id()).await?;
+            ctx.approve(pr3.id()).await?;
+
+            let rollup = make_merged_rollup(ctx, &[&pr2, &pr3]).await?;
+
+            ctx.modify_repo(default_repo_name(), |repo| {
+                let mut n = 0;
+                repo.merge_behavior = MergeBehavior::Custom(Box::new(move || {
+                    n += 1;
+                    // Cause a conflict on the second member merge
+                    (n == 2).then_some(StatusCode::CONFLICT)
+                }));
+            });
+
+            ctx.run_unroll_queue().await?;
+            for workflow in ctx.unrolled_workflows(1) {
+                ctx.workflow_full_success(workflow).await?;
+            }
+            ctx.run_unroll_queue().await?;
+
+            let comment = ctx.get_next_comment_text(rollup).await?;
+            insta::assert_snapshot!(comment, @"
+            :pushpin: Perf builds for each rolled up PR:
+
+            | PR# | Message | Perf Build Sha |
+            |----|----|:-----:|
+            |#2|Title of PR 2|`merge-0-pr-2-d7d45f1f-reauthored-to-bors`<br>([link](https://github.com/rust-lang/borstest/commit/merge-0-pr-2-d7d45f1f-reauthored-to-bors))|
+            |#3|Title of PR 3|:x: conflicts merging into previous parent commit :x:|
+
+            *parent commit*: [main-sha1](https://github.com/rust-lang/borstest/commit/main-sha1)
+
+            In the case of a perf regression, run the following command for each PR you suspect might be the cause: `@rust-timer build $SHA`
+            ");
+            Ok(())
+        })
+            .await;
+    }
+
+    #[sqlx::test]
+    async fn unroll_workflow_failure(pool: sqlx::PgPool) {
+        run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
+            let pr2 = ctx.open_pr((), |_| {}).await?;
+            let pr3 = ctx.open_pr((), |_| {}).await?;
+            ctx.approve(pr2.id()).await?;
+            ctx.approve(pr3.id()).await?;
+
+            let rollup = make_merged_rollup(ctx, &[&pr2, &pr3]).await?;
+            ctx.run_unroll_queue().await?;
+
+            let workflows = ctx.unrolled_workflows(2);
+            ctx.workflow_full_failure(workflows[0]).await?;
+            ctx.workflow_full_success(workflows[1]).await?;
+            ctx.run_unroll_queue().await?;
+
+            let comment = ctx.get_next_comment_text(rollup).await?;
+            insta::assert_snapshot!(comment, @"
+            :pushpin: Perf builds for each rolled up PR:
+
+            | PR# | Message | Perf Build Sha |
+            |----|----|:-----:|
+            |#2|Title of PR 2|:x: build [failed](https://github.com/rust-lang/borstest/actions/runs/2) :x:|
+            |#3|Title of PR 3|`merge-1-pr-3-d7d45f1f-reauthored-to-bors`<br>([link](https://github.com/rust-lang/borstest/commit/merge-1-pr-3-d7d45f1f-reauthored-to-bors))|
+
+            *parent commit*: [main-sha1](https://github.com/rust-lang/borstest/commit/main-sha1)
+
+            In the case of a perf regression, run the following command for each PR you suspect might be the cause: `@rust-timer build $SHA`
+            ");
+            Ok(())
+        })
+            .await;
+    }
+
+    #[sqlx::test]
+    async fn unroll_pr_order(pool: sqlx::PgPool) {
+        run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
+            let pr2 = ctx.open_pr((), |_| {}).await?;
+            let pr3 = ctx.open_pr((), |_| {}).await?;
+            let pr4 = ctx.open_pr((), |_| {}).await?;
+            ctx.approve(pr2.id()).await?;
+            ctx.approve(pr3.id()).await?;
+            ctx.approve(pr4.id()).await?;
+            // This PR should be the first member of the rollup, due to the priority
+            ctx.post_comment(Comment::new(pr3.id(), "@bors p=5")).await?;
+
+            let rollup = prepare_rollup(ctx, &[&pr2, &pr3, &pr4]).await?;
+            // This is needed so that the rollup is actually merged first
+            ctx.post_comment(Comment::new(rollup, "@bors p=10")).await?;
+            ctx.start_and_finish_auto_build(rollup).await?;
+
+            ctx.run_unroll_queue().await?;
+
+            for workflow in ctx.unrolled_workflows(3) {
+                ctx.workflow_full_success(workflow).await?;
+            }
+            ctx.run_unroll_queue().await?;
+
+            let comment = ctx.get_next_comment_text(rollup).await?;
+            insta::assert_snapshot!(comment, @"
+            :pushpin: Perf builds for each rolled up PR:
+
+            | PR# | Message | Perf Build Sha |
+            |----|----|:-----:|
+            |#3|Title of PR 3|`merge-1-pr-3-d7d45f1f-reauthored-to-bors`<br>([link](https://github.com/rust-lang/borstest/commit/merge-1-pr-3-d7d45f1f-reauthored-to-bors))|
+            |#2|Title of PR 2|`merge-0-pr-2-d7d45f1f-reauthored-to-bors`<br>([link](https://github.com/rust-lang/borstest/commit/merge-0-pr-2-d7d45f1f-reauthored-to-bors))|
+            |#4|Title of PR 4|`merge-2-pr-4-d7d45f1f-reauthored-to-bors`<br>([link](https://github.com/rust-lang/borstest/commit/merge-2-pr-4-d7d45f1f-reauthored-to-bors))|
+
+            *parent commit*: [main-sha1](https://github.com/rust-lang/borstest/commit/main-sha1)
+
+            In the case of a perf regression, run the following command for each PR you suspect might be the cause: `@rust-timer build $SHA`
+            ");
+            Ok(())
+        })
+            .await;
+    }
+
+    #[sqlx::test]
+    async fn unroll_recover_transient_error(pool: sqlx::PgPool) {
+        run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
+            let pr2 = ctx.open_pr((), |_| {}).await?;
+            let pr3 = ctx.open_pr((), |_| {}).await?;
+            ctx.approve(pr2.id()).await?;
+            ctx.approve(pr3.id()).await?;
+
+            let rollup = make_merged_rollup(ctx, &[&pr2, &pr3]).await?;
+
+            ctx.modify_repo(default_repo_name(), |repo| {
+                repo.merge_behavior =
+                    MergeBehavior::Custom(Box::new(|| Some(StatusCode::INTERNAL_SERVER_ERROR)));
+            });
+
+            // Transient error during merging
+            assert!(ctx.run_unroll_queue().await.is_err());
+            ctx.get_rollup(rollup)
+                .await?
+                .expect_unroll_state_all(UnrollState::Waiting);
+
+            ctx.modify_repo(default_repo_name(), |repo| {
+                repo.merge_behavior = MergeBehavior::default();
+            });
+
+            ctx.trigger_and_run_unroll_queue().await?;
+            ctx.get_rollup(rollup)
+                .await?
+                .expect_unroll_state_all(UnrollState::Pending);
+
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn unroll_recover_handle_all_members(pool: sqlx::PgPool) {
+        run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
+            let pr2 = ctx.open_pr((), |_| {}).await?;
+            let pr3 = ctx.open_pr((), |_| {}).await?;
+            ctx.approve(pr2.id()).await?;
+            ctx.approve(pr3.id()).await?;
+
+            let rollup = make_merged_rollup(ctx, &[&pr2, &pr3]).await?;
+
+            // Ensure that if one of the members has an error, we will continue processing
+            // the other ones.
+            ctx.modify_repo(default_repo_name(), |repo| {
+                let mut n = 0;
+                repo.merge_behavior = MergeBehavior::Custom(Box::new(move || {
+                    n += 1;
+                    // Cause a conflict only on the first member merge
+                    (n == 1).then_some(StatusCode::CONFLICT)
+                }));
+            });
+
+            // Run the unrolling once, the second member should still be processed
+            // even if processing the first member fails
+            ctx.run_unroll_queue().await?;
+            ctx.get_rollup(rollup)
+                .await?
+                .expect_unroll_state(2, UnrollState::Finished)
+                .expect_unroll_state(3, UnrollState::Pending);
+
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test]
+    async fn unroll_concurrent_bors_instances(pool: sqlx::PgPool) {
+        run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
+            let pr2 = ctx.open_pr((), |_| {}).await?;
+            let pr3 = ctx.open_pr((), |_| {}).await?;
+            ctx.approve(pr2.id()).await?;
+            ctx.approve(pr3.id()).await?;
+
+            make_merged_rollup(ctx, &[&pr2, &pr3]).await?;
+
+            let concurrent_futs = (0..10)
+                .map(|_| async { ctx.run_unroll_queue_concurrent().await })
+                .collect::<Vec<_>>();
+            futures::future::join_all(concurrent_futs).await;
+
+            let branch = ctx.unrolled_branch();
+            assert_eq!(branch.get_commit_history().len(), 2);
+
+            Ok(())
+        })
+        .await;
+    }
+
+    /// Creates and approves a rollup and waits until it is merged.
+    async fn make_merged_rollup(
+        ctx: &mut BorsTester,
+        prs: &[&PullRequest],
+    ) -> anyhow::Result<PullRequestNumber> {
+        let pr_number = prepare_rollup(ctx, prs).await?;
+        ctx.start_and_finish_auto_build(pr_number).await?;
+        Ok(pr_number)
+    }
+
+    /// Creates and approves a rollup.
+    async fn prepare_rollup(
+        ctx: &mut BorsTester,
+        prs: &[&PullRequest],
+    ) -> anyhow::Result<PullRequestNumber> {
+        let response = make_rollup(ctx, prs).await?;
+        let location = response.get_header("location");
+        let rollup: u64 = location
+            .rsplit('/')
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("Invalid rollup redirect URL: {location}"))?
+            .parse()?;
+        let pr_number = PullRequestNumber(rollup);
+        ctx.approve(pr_number).await?;
+        Ok(pr_number)
     }
 }

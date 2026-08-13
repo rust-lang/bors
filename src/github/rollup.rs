@@ -429,7 +429,7 @@ async fn create_rollup(
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use crate::bors::{PullRequestStatus, RollupMode};
     use crate::database::UnrollState;
     use crate::database::operations::get_rollup_members;
@@ -1239,7 +1239,7 @@ also include this pls"
         .await;
     }
 
-    async fn make_rollup(
+    pub async fn make_rollup(
         ctx: &mut BorsTester,
         prs: &[&PullRequest],
     ) -> anyhow::Result<ApiResponse> {
@@ -1252,7 +1252,7 @@ also include this pls"
         .await
     }
 
-    fn rollup_state() -> GitHub {
+    pub fn rollup_state() -> GitHub {
         let mut gh = GitHub::default();
         let rolluper = rollup_user();
         gh.add_user(rolluper.clone());
@@ -1261,10 +1261,11 @@ also include this pls"
             .permissions
             .users
             .insert(rolluper.clone(), vec![PermissionType::Review]);
+        let gh = gh.append_to_default_config("[unroll]");
 
         // Create fork
         let mut repo = Repo::new(rolluper, fork_repo().name());
-        repo.fork = true;
+        repo.fork_of = Some(gh.default_repo());
         gh.with_repo(repo)
     }
 

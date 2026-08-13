@@ -163,9 +163,6 @@ You can use the following commands:
 pub static WAIT_FOR_BUILD_QUEUE: TestSyncMarker = TestSyncMarker::new();
 
 #[cfg(test)]
-pub static WAIT_FOR_UNROLL_QUEUE: TestSyncMarker = TestSyncMarker::new();
-
-#[cfg(test)]
 pub static WAIT_FOR_MERGEABILITY_STATUS_REFRESH: TestSyncMarker = TestSyncMarker::new();
 
 #[cfg(test)]

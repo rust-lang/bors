@@ -77,7 +77,8 @@ async fn mock_branches_and_commits(repo: Arc<Mutex<Repo>>, mock_server: &MockSer
     mock_create_branch(repo.clone(), mock_server).await;
     mock_update_branch(repo.clone(), mock_server).await;
     mock_merge_branch(repo.clone(), mock_server).await;
-    mock_create_commit(repo.clone(), mock_server).await;
+    mock_get_commit(repo.clone(), mock_server).await;
+    mock_create_commit(repo, mock_server).await;
 }
 
 async fn mock_cancel_workflow(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
@@ -328,6 +329,29 @@ async fn mock_merge_branch(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
         })
         .mount(mock_server)
         .await;
+}
+
+async fn mock_get_commit(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
+    let repo_name = repo.lock().full_name();
+    dynamic_mock_req(
+        move |_: &Request, [sha]| {
+            let repo = repo.lock();
+
+            let commit = repo.get_commit_by_sha(sha);
+
+            let response = serde_json::json!({
+                "commit": {
+                    "message": commit.message()
+                }
+            });
+
+            ResponseTemplate::new(200).set_body_json(response)
+        },
+        "GET",
+        format!("^/repos/{repo_name}/commits/(.*)"),
+    )
+    .mount(mock_server)
+    .await;
 }
 
 async fn mock_create_commit(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {

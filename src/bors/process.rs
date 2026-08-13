@@ -1,16 +1,12 @@
 use crate::bors::build_queue::{
     BuildQueueReceiver, BuildQueueSender, create_build_queue, handle_build_queue_event,
 };
-#[cfg(not(test))]
-use crate::bors::gitops_queue::handle_gitops_entry;
 use crate::bors::gitops_queue::{GitOpsQueueReceiver, GitOpsQueueSender, create_gitops_queue};
 use crate::bors::merge_queue::{MergeQueueSender, start_merge_queue};
 use crate::bors::mergeability_queue::{
     MergeabilityQueueReceiver, MergeabilityQueueSender, create_mergeability_queue,
 };
-use crate::bors::unroll_queue::{
-    UnrollQueueReceiver, UnrollQueueSender, create_unroll_queue, handle_unroll_queue_event,
-};
+use crate::bors::unroll_queue::{UnrollQueueReceiver, UnrollQueueSender, create_unroll_queue};
 use crate::bors::{handle_bors_global_event, handle_bors_repository_event};
 use crate::{BorsContext, BorsGlobalEvent, BorsRepositoryEvent, TeamApiClient};
 use anyhow::Error;
@@ -25,14 +21,14 @@ pub struct BorsProcess {
     pub global_tx: mpsc::Sender<BorsGlobalEvent>,
     pub senders: QueueSenders,
     pub bors_process: Pin<Box<dyn Future<Output = ()> + Send>>,
-    // In tests, we want to run the mergeability queue manually, rather than it running in the
+    // In tests, we want to run the following queues manually, rather than it running in the
     // background, to have the ability to simulate various race conditions.
     #[cfg(test)]
     pub mergeability_queue_rx: MergeabilityQueueReceiver,
-    // In tests, we want to run gitops operations manually, to have explicit control over when
-    // expensive git operations are executed.
     #[cfg(test)]
     pub gitops_queue_rx: GitOpsQueueReceiver,
+    #[cfg(test)]
+    pub unroll_queue_rx: UnrollQueueReceiver,
 }
 
 /// Creates a future with a Bors process that continuously receives webhook events and reacts to
@@ -82,12 +78,14 @@ pub fn create_bors_process(
                     merge_queue_tx,
                     unroll_queue_tx
                 ),
-                consume_unroll_events(ctx.clone(), unroll_queue_rx),
                 merge_queue_fut
             );
-            // Note that we do not run the mergeability queue or gitops queue automatically in
-            // tests, to have more control over them. Instead, we add them to the bors context
-            // below.
+            // Note that we do not run:
+            // - mergeability queue
+            // - unroll queue
+            // - gitops queue
+            // automatically in tests, to have more control over them. Instead, we add them to the
+            // bors context below.
         }
         // In real execution, the bot runs forever. If there is something that finishes
         // the futures early, it's essentially a bug.
@@ -129,6 +127,8 @@ pub fn create_bors_process(
         mergeability_queue_rx,
         #[cfg(test)]
         gitops_queue_rx,
+        #[cfg(test)]
+        unroll_queue_rx,
     }
 }
 
@@ -247,7 +247,10 @@ async fn consume_build_queue_events(
     }
 }
 
+#[cfg(not(test))]
 async fn consume_unroll_events(ctx: Arc<BorsContext>, mut unroll_queue_rx: UnrollQueueReceiver) {
+    use crate::bors::unroll_queue::handle_unroll_queue_event;
+
     while let Some(event) = unroll_queue_rx.recv().await {
         let ctx = ctx.clone();
 
@@ -258,14 +261,13 @@ async fn consume_unroll_events(ctx: Arc<BorsContext>, mut unroll_queue_rx: Unrol
         {
             handle_root_error(span, error);
         }
-
-        #[cfg(test)]
-        crate::bors::WAIT_FOR_UNROLL_QUEUE.mark();
     }
 }
 
 #[cfg(not(test))]
 async fn consume_gitops_queue_events(mut gitops_queue_rx: GitOpsQueueReceiver) {
+    use crate::bors::gitops_queue::handle_gitops_entry;
+
     while let Some(entry) = gitops_queue_rx.recv().await {
         let span = tracing::debug_span!("Gitops queue command", "{entry:?}");
         if let Err(error) = handle_gitops_entry(&gitops_queue_rx, entry)

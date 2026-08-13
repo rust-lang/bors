@@ -383,7 +383,7 @@ impl GithubRepositoryClient {
         &self,
         commit_sha: &CommitSha,
     ) -> anyhow::Result<Option<String>> {
-        let message = perform_retryable("get_commit", RetryMethod::default(), || async {
+        let message = perform_retryable("get_commit_message", RetryMethod::default(), || async {
             #[derive(serde::Deserialize)]
             struct CommitData {
                 message: String,

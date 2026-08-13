@@ -40,7 +40,7 @@ impl TeamApiMockServer {
 
         let repos: Vec<_> = github.lock().repos.values().cloned().collect();
         for repo in repos {
-            if repo.lock().fork {
+            if repo.lock().is_fork() {
                 continue;
             }
 

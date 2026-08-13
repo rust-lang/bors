@@ -785,7 +785,8 @@ pub enum UnrollState {
     Waiting,
     /// An unrolled build has already been started for this rollup member, and is in progress.
     Pending,
-    /// The unrolled build has finished.
+    /// The unrolled build has finished (whether successfully or with a failure).
+    /// This state is also used if the build cannot be started for this member at all.
     Finished,
     /// All the unrolled builds for the rollup of this rollup member have been reported in a comment
     /// on GitHub

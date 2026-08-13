@@ -7,6 +7,7 @@ use crate::permissions::PermissionType;
 use crate::tests::COMMENT_RECEIVE_TIMEOUT;
 use chrono::{DateTime, Utc};
 use http::StatusCode;
+use itertools::Itertools;
 use octocrab::models::pulls::MergeableState;
 use octocrab::models::workflows::Conclusion;
 use octocrab::models::{CheckSuiteId, JobId, RunId};
@@ -385,7 +386,7 @@ pub struct Repo {
     pub pull_request_error: bool,
     /// Push error failure/success behaviour.
     pub push_behaviour: BranchPushBehaviour,
-    pub fork: bool,
+    pub fork_of: Option<Arc<Mutex<Repo>>>,
     pub merge_behavior: MergeBehavior,
 }
 
@@ -405,7 +406,7 @@ impl Repo {
             pull_request_error: false,
             check_runs: vec![],
             push_behaviour: BranchPushBehaviour::default(),
-            fork: false,
+            fork_of: None,
             merge_behavior: MergeBehavior::default(),
         };
         repo.add_branch(Branch::default());
@@ -418,6 +419,10 @@ impl Repo {
 
     pub fn owner(&self) -> &User {
         &self.owner
+    }
+
+    pub fn is_fork(&self) -> bool {
+        self.fork_of.is_some()
     }
 
     pub fn branches(&self) -> &[Branch] {
@@ -490,12 +495,20 @@ impl Repo {
         if let Some(old) = self.commits.insert(commit.commit_sha(), commit.clone()) {
             assert_eq!(old, commit);
         }
+        // Emulate commits being shared across forks on GitHub
+        if let Some(fork) = &self.fork_of {
+            fork.lock().create_commit(commit);
+        }
     }
 
     pub fn get_commit_by_sha(&self, sha: &str) -> Commit {
         self.commits
             .get(&CommitSha(sha.to_owned()))
-            .expect("Looking up non-existing commit SHA")
+            .unwrap_or_else(|| {
+                let commits: Vec<_> = self.commits.values().collect();
+                let commits = commits.iter().map(|c| format!("{c:?}")).join("\n");
+                panic!("Looking up non-existing commit SHA {sha}. Existing commits:\n{commits}")
+            })
             .clone()
     }
 
@@ -1161,6 +1174,9 @@ impl WorkflowRun {
 
     pub fn head_sha(&self) -> &str {
         &self.head_sha
+    }
+    pub fn set_head_sha(&mut self, sha: &str) {
+        self.head_sha = sha.to_string();
     }
 
     pub fn duration(&self) -> Duration {
