@@ -776,7 +776,11 @@ try-job: Bar
 
             To cancel the try build, run the command `@bors try cancel`.
             ");
-            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"Try build cancelled. Cancelled workflows:");
+            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
+            Try build cancelled. Cancelled workflows:
+
+            **Hint**: if you want to run another try build, you do not need to manually cancel the previous one. Just run `@bors try` and bors will cancel the previous build automatically.
+            ");
             Ok(())
         })
         .await;
@@ -861,6 +865,8 @@ try-job: Bar
             Try build cancelled. Cancelled workflows:
             - https://github.com/rust-lang/borstest/actions/runs/1
             - https://github.com/rust-lang/borstest/actions/runs/2
+
+            **Hint**: if you want to run another try build, you do not need to manually cancel the previous one. Just run `@bors try` and bors will cancel the previous build automatically.
             ");
             ctx.expect_cancelled_workflows((), &[w1, w2]);
 
@@ -919,6 +925,8 @@ try-job: Bar
             insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
             Try build cancelled. Cancelled workflows:
             - https://github.com/rust-lang/borstest/actions/runs/3
+
+            **Hint**: if you want to run another try build, you do not need to manually cancel the previous one. Just run `@bors try` and bors will cancel the previous build automatically.
             ");
             ctx.expect_cancelled_workflows((), &[w3]);
             Ok(())
