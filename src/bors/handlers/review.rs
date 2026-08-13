@@ -279,6 +279,7 @@ pub(super) async fn command_set_priority(
     author: &GithubUser,
     priority: u32,
     note: Option<String>,
+    merge_queue_tx: &MergeQueueSender,
 ) -> anyhow::Result<()> {
     if !has_permission(&repo_state, author, pr, PermissionType::Review).await? {
         deny_request(
@@ -291,7 +292,12 @@ pub(super) async fn command_set_priority(
         .await?;
         return Ok(());
     };
-    db.set_priority(pr.db, priority, note).await
+    db.set_priority(pr.db, priority, note).await?;
+
+    // Changing the priority can be interesting for the merge queue
+    merge_queue_tx.notify().await?;
+
+    Ok(())
 }
 
 /// Delegate permissions of a pull request to its author.
