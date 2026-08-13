@@ -484,6 +484,10 @@ pub async fn attempt_merge(
             tracing::warn!("Merge conflict");
             Ok(MergeResult::Conflict)
         }
+        Err(MergeError::AlreadyMerged) => {
+            tracing::warn!("Branch was already merged");
+            Ok(MergeResult::Conflict)
+        }
         Err(error) => Err(error.into()),
     }
 }

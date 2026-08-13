@@ -48,6 +48,9 @@ const EC2_INSTANCE_TERMINATE_INTERVAL: Duration = Duration::from_secs(60 * 10);
 /// long time.
 const EC2_INSTANCE_BACKFILL_TERMINAL: Duration = Duration::from_secs(60 * 15);
 
+/// How often should the bot try to check unrolled builds?
+const PROCESS_UNROLLED_MEMBER_BUILDS: Duration = Duration::from_secs(60 * 5);
+
 #[derive(clap::Parser)]
 struct Opts {
     /// Github App ID.
@@ -268,6 +271,7 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
             BorsGlobalEvent::ProcessMergeQueue,
             BorsGlobalEvent::TerminateOldEC2Instances,
             BorsGlobalEvent::ReloadWorkflowJobCache,
+            BorsGlobalEvent::ProcessUnrolledMemberBuilds,
         ];
         for event in startup_events {
             refresh_tx.send(event).await?;
@@ -281,6 +285,7 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
         let mut merge_queue_interval = make_interval(MERGE_QUEUE_CHECK_INTERVAL);
         let mut ec2_check_interval = make_interval(EC2_INSTANCE_TERMINATE_INTERVAL);
         let mut ec2_backfill_interval = make_interval(EC2_INSTANCE_BACKFILL_TERMINAL);
+        let mut unrolled_build_interval = make_interval(PROCESS_UNROLLED_MEMBER_BUILDS);
         loop {
             tokio::select! {
                 _ = config_refresh.tick() => {
@@ -306,6 +311,9 @@ fn try_main(opts: Opts) -> anyhow::Result<()> {
                 }
                 _ = ec2_backfill_interval.tick() => {
                     refresh_tx.send(BorsGlobalEvent::BackfillEC2Instances).await?;
+                }
+                _ = unrolled_build_interval.tick() => {
+                    refresh_tx.send(BorsGlobalEvent::ProcessUnrolledMemberBuilds).await?;
                 }
             }
         }

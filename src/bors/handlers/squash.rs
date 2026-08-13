@@ -851,7 +851,7 @@ mod tests {
         // Create fork
         let fork_repo = fork_repo();
         let mut repo = Repo::new(pr_author.clone(), fork_repo.name());
-        repo.fork = true;
+        repo.fork_of = Some(gh.default_repo());
 
         // Set the default PR to be from the fork
         gh.default_repo().lock().get_pr_mut(1).head_repository = Some(repo.full_name());

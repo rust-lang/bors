@@ -19,6 +19,7 @@ use crate::bors::handlers::{
     InvalidationComment, InvalidationInfo, InvalidationReason, invalidate_pr, unapprove_pr,
 };
 use crate::bors::mergeability_queue::{MergeabilityQueueSender, update_pr_with_known_mergeability};
+use crate::bors::unroll_queue::UnrollQueueSender;
 use crate::bors::{AUTO_BRANCH_NAME, BuildKind, PullRequestStatus, RepositoryState};
 use crate::database::{
     ApprovalInfo, BuildModel, BuildStatus, ExclusiveLockProof, ExclusiveOperationOutcome,
@@ -91,6 +92,7 @@ pub(super) const AUTO_BUILD_CHECK_RUN_NAME: &str = "Bors auto build";
 pub async fn merge_queue_tick(
     ctx: Arc<BorsContext>,
     mergeability_sender: &MergeabilityQueueSender,
+    unroll_queue_sender: &UnrollQueueSender,
 ) -> anyhow::Result<()> {
     let repos: Vec<Arc<RepositoryState>> = ctx.repositories.repositories();
 
@@ -102,16 +104,14 @@ pub async fn merge_queue_tick(
         // from the DB).
         let res = ctx
             .db
-            .ensure_not_concurrent(
-                &format!("{}-auto-build", repo.repository()),
-                async |proof| {
-                    if let Err(error) =
-                        process_repository(&repo, &ctx, mergeability_sender, proof).await
-                    {
-                        tracing::error!("Error running merge queue for {repo_name}: {error:?}");
-                    }
-                },
-            )
+            .ensure_not_concurrent(BuildKind::Auto, repo.repository(), async |proof| {
+                if let Err(error) =
+                    process_repository(&repo, &ctx, mergeability_sender, unroll_queue_sender, proof)
+                        .await
+                {
+                    tracing::error!("Error running merge queue for {repo_name}: {error:?}");
+                }
+            })
             .await
             .context("Merge lock failure")?;
         match res {
@@ -134,6 +134,7 @@ async fn process_repository(
     repo: &RepositoryState,
     ctx: &BorsContext,
     mergeability_sender: &MergeabilityQueueSender,
+    unroll_queue_sender: &UnrollQueueSender,
     proof: ExclusiveLockProof,
 ) -> anyhow::Result<()> {
     if !repo.config.load().merge_queue_enabled {
@@ -171,7 +172,16 @@ async fn process_repository(
                 #[cfg(test)]
                 crate::bors::WAIT_FOR_MERGE_QUEUE_MERGE_ATTEMPT.mark();
 
-                handle_successful_build(repo, ctx, pr, auto_build, approval_info, pr_num).await?;
+                handle_successful_build(
+                    repo,
+                    ctx,
+                    pr,
+                    auto_build,
+                    approval_info,
+                    pr_num,
+                    unroll_queue_sender,
+                )
+                .await?;
                 break;
             }
             QueueStatus::Approved(approval_info) => {
@@ -257,6 +267,7 @@ async fn handle_successful_build(
     auto_build: &BuildModel,
     approval_info: &ApprovalInfo,
     pr_num: PullRequestNumber,
+    unroll_queue_sender: &UnrollQueueSender,
 ) -> anyhow::Result<()> {
     let commit_sha = CommitSha(auto_build.commit_sha.clone());
     let workflow_runs = load_workflow_runs(repo, &ctx.db, auto_build)
@@ -303,9 +314,21 @@ async fn handle_successful_build(
         }
     } else {
         tracing::info!("Auto build succeeded and merged for PR {pr_num}");
-        ctx.db
-            .set_pr_status(&pr.repository, pr.number, PullRequestStatus::Merged)
-            .await?;
+
+        if ctx.db.is_rollup(pr).await? {
+            tracing::info!("Recording waiting rollup member unroll state");
+            // Rollup, also mark its members as waiting for an unroll
+            ctx.db.finish_rollup_merge(pr).await?;
+            // Trigger the unroll queue
+            unroll_queue_sender
+                .process_unrolled_members(repo.repository())
+                .await?;
+        } else {
+            // Not a rollup, just mark it as merged
+            ctx.db
+                .set_pr_status(&pr.repository, pr.number, PullRequestStatus::Merged)
+                .await?;
+        }
         repo.client
             .post_comment(pr.number, comment, &ctx.db)
             .await?;
@@ -617,10 +640,10 @@ async fn sanity_check_rollup(
                 continue;
             }
         };
-        if member_gh.head.sha != member.rolled_up_sha {
+        if member_gh.head.sha != member.rolled_up_head_sha {
             mismatches.push(RollupMemberMismatch {
                 member: member.member,
-                expected: member.rolled_up_sha,
+                expected: member.rolled_up_head_sha,
                 actual: member_gh.head.sha,
             });
         }
@@ -679,10 +702,10 @@ async fn start_auto_build(
             message: auto_merge_commit_message,
             author: bors_commit_author(),
         },
-        StartBuildCheckRun {
+        Some(StartBuildCheckRun {
             name: AUTO_BUILD_CHECK_RUN_NAME.to_string(),
             title: AUTO_BUILD_CHECK_RUN_NAME.to_string(),
-        },
+        }),
         pr,
     )
     .await
@@ -732,6 +755,7 @@ pub fn start_merge_queue(
     ctx: Arc<BorsContext>,
     max_interval: chrono::Duration,
     mergeability_sender: MergeabilityQueueSender,
+    unroll_queue_sender: UnrollQueueSender,
 ) -> (MergeQueueSender, impl Future<Output = ()>) {
     let (tx, mut rx) = mpsc::channel::<MergeQueueEvent>(1024);
     let sender = MergeQueueSender { inner: tx };
@@ -745,15 +769,17 @@ pub fn start_merge_queue(
             notified: &mut bool,
             last_executed_at: &mut DateTime<Utc>,
             mergeability_sender: &MergeabilityQueueSender,
+            unroll_queue_sender: &UnrollQueueSender,
         ) {
             *notified = false;
             *last_executed_at = Utc::now();
 
             let span = tracing::info_span!("MergeQueue");
             tracing::debug!("Processing merge queue");
-            if let Err(error) = merge_queue_tick(ctx.clone(), mergeability_sender)
-                .instrument(span.clone())
-                .await
+            if let Err(error) =
+                merge_queue_tick(ctx.clone(), mergeability_sender, unroll_queue_sender)
+                    .instrument(span.clone())
+                    .await
             {
                 // In tests, we want to panic on all errors.
                 #[cfg(test)]
@@ -777,6 +803,7 @@ pub fn start_merge_queue(
                         &mut notified,
                         &mut last_executed_at,
                         &mergeability_sender,
+                        &unroll_queue_sender,
                     )
                     .await;
                 }
@@ -788,6 +815,7 @@ pub fn start_merge_queue(
                             &mut notified,
                             &mut last_executed_at,
                             &mergeability_sender,
+                            &unroll_queue_sender,
                         )
                         .await;
                     }

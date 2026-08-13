@@ -52,6 +52,9 @@ repository:
 - Reload the mergeability status of open PRs from GitHub.
 - Sync the status of PRs between the DB and GitHub.
 - Run the merge queue.
+- Terminate long-running EC2 instances.
+- Start EC2 instances for jobs that have been queued for a long time.
+- Process pending unrolled rollup member builds.
 
 ## Concurrency
 The bot is currently listening for GitHub webhooks concurrently, however it handles all commands serially, to avoid
@@ -194,6 +197,26 @@ preventing the problem where two PRs pass tests independently but fail when comb
 
 Note that `automation/bors/auto-merge` should not have any CI workflows configured! These should be configured for the
 `automation/bors/auto` branch instead.
+
+## Unrolled builds
+When a rollup PR is merged, and the `[unroll]` section is enabled in the config, bors creates a separate unrolled build for each of its rollup member.
+
+The state of the unrolled builds is tracked via the `unroll_state` column of the `rollup_member` table. The individual states are:
+
+- `NULL`: the rollup member hasn't been merged (yet) in this rollup
+- `Waiting`: the rollup is waiting for an unrolled build to be started by bors
+- `Pending`: the rollup is waiting for an unrolled build to finish
+- `Finished`: the unrolled build has finished, or it could not have been started
+- `Reported`: the comment with the unrolling results has been posted to the rollup PR
+
+Once a rollup is merged, all its members are set to the `Waiting` state. Then, when the unroll queue runs, it will attempt to start an unrolled build for each member:
+- It uses the `rolled_up_head_sha` captured when the rollup was created for the merge, and the `rolled_up_merge_sha` for the commit message.
+- It attempts to merge the HEAD SHA onto the parent of the rollup's merge commit, in the `automation/bors/try-perf-merge` branch.
+- If the merge succeeds, force-pushes the unrolled commit to `automation/bors/try-perf`.
+
+If any non-transient errors occur, the given rollup member is marked as `Finished`. 
+
+Once all members are in the `Finished` state, bors will post a comment with a result tableto the merged rollup.
 
 ## Recognizing that CI has succeeded/failed
 With [homu](https://github.com/rust-lang/homu) (the old bors implementation), GitHub actions CI running repositories had

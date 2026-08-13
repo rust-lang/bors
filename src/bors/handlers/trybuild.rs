@@ -88,7 +88,7 @@ pub(super) async fn command_try_build(
     };
 
     let res = db
-        .ensure_not_concurrent(&format!("{}-try-build", repo.repository()), async |proof| {
+        .ensure_not_concurrent(BuildKind::Try, repo.repository(), async |proof| {
             // Try to cancel any previously running try build workflows
             let cancelled_workflow_urls = if let Some(build) = get_pending_try_build(pr.db) {
                 let res = cancel_previous_try_build(repo, &db, build).await?;
@@ -127,10 +127,10 @@ pub(super) async fn command_try_build(
                     ),
                     author: bors_commit_author(),
                 },
-                StartBuildCheckRun {
+                Some(StartBuildCheckRun {
                     name: TRY_BUILD_CHECK_RUN_NAME.to_string(),
-                    title: "Bors try build".to_string(),
-                },
+                    title: TRY_BUILD_CHECK_RUN_NAME.to_string(),
+                }),
                 pr.db,
             )
             .await
@@ -302,7 +302,7 @@ mod tests {
 
     #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn try_success(pool: sqlx::PgPool) {
-        run_test(pool.clone(), async |ctx: &mut BorsTester| {
+        run_test(pool, async |ctx: &mut BorsTester| {
             ctx.post_comment("@bors try").await?;
             ctx.expect_comments((), 1).await;
             ctx.workflow_full_success(ctx.try_workflow()).await?;

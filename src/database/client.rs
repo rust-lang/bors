@@ -2,17 +2,20 @@ use super::operations::{
     approve_pull_request, clear_auto_build, create_build, create_workflow, delegate_pull_request,
     delete_tagged_bot_comment, find_build, find_pr_by_build, find_rollups_for_member_pr,
     get_last_n_successful_auto_builds, get_nonclosed_pull_requests, get_pending_builds,
-    get_prs_with_stale_mergeability_or_approved, get_pull_request, get_repository,
-    get_repository_by_name, get_rollup_members, get_tagged_bot_comments,
-    get_workflow_urls_for_build, get_workflows_for_build, insert_repo_if_not_exists, is_rollup,
-    record_tagged_bot_comment, set_pr_assignees, set_pr_mergeability_state, set_pr_priority,
-    set_pr_rollup_mode, set_pr_status, set_stale_mergeability_status_by_base_branch,
-    unapprove_pull_request, undelegate_pull_request, update_build, update_pr_try_build_id,
-    update_workflow_status, upsert_pull_request, upsert_repository,
+    get_prs_with_stale_mergeability_or_approved, get_pull_request, get_pull_request_by_id,
+    get_repository, get_repository_by_name, get_rollup_members, get_rollup_members_for_unrolling,
+    get_tagged_bot_comments, get_workflow_urls_for_build, get_workflows_for_build,
+    insert_repo_if_not_exists, is_rollup, record_tagged_bot_comment, set_pr_assignees,
+    set_pr_mergeability_state, set_pr_priority, set_pr_rollup_mode, set_pr_status,
+    set_rollup_member_unrolled_state, set_rollup_members_unrolled_state,
+    set_stale_mergeability_status_by_base_branch, unapprove_pull_request, undelegate_pull_request,
+    update_build, update_pr_try_build_id, update_pr_unrolled_build_id, update_workflow_status,
+    upsert_pull_request, upsert_repository,
 };
 use super::{
     ApprovalInfo, DelegatedPermission, MergeableState, PrimaryKey, RegisterRollupMemberParams,
-    RollupMember, RunId, UpdateBuildParams, UpsertPullRequestParams,
+    RollupMember, RollupMemberForUnrolling, RunId, UnrollState, UpdateBuildParams,
+    UpsertPullRequestParams,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -51,13 +54,25 @@ impl PgDbClient {
     /// **If it is not possible to take the lock, then `func` will NOT be called at all!**
     pub async fn ensure_not_concurrent<Func, R>(
         &self,
-        lock_name: &str,
+        build_kind: BuildKind,
+        repo: &GithubRepoName,
         func: Func,
     ) -> anyhow::Result<ExclusiveOperationOutcome<R>>
     where
         Func: AsyncFnOnce(ExclusiveLockProof) -> R,
     {
-        let lock = PgAdvisoryLock::new(lock_name);
+        let lock_name = match build_kind {
+            BuildKind::Try => {
+                format!("{repo}-try-build")
+            }
+            BuildKind::Auto => {
+                format!("{repo}-auto-build")
+            }
+            BuildKind::UnrolledMember => {
+                format!("{repo}-unrolled-build")
+            }
+        };
+        let lock = PgAdvisoryLock::new(&lock_name);
 
         // Try to acquire the lock
         let _guard = match lock
@@ -178,6 +193,13 @@ impl PgDbClient {
         get_pull_request(&self.pool, repo, pr_number).await
     }
 
+    pub async fn get_pull_request_by_id(
+        &self,
+        id: PrimaryKey,
+    ) -> anyhow::Result<Option<PullRequestModel>> {
+        get_pull_request_by_id(&self.pool, id).await
+    }
+
     /// Create or update a pull request in the database.
     /// Returns the updated PR state from the database.
     pub async fn upsert_pull_request(
@@ -248,6 +270,29 @@ impl PgDbClient {
         let build_id =
             create_build(&mut *tx, pr, &branch, BuildKind::Auto, &commit_sha, &parent).await?;
         update_pr_auto_build_id(&mut *tx, pr.id, build_id).await?;
+        tx.commit().await?;
+        Ok(build_id)
+    }
+
+    /// Creates a new unrolled rollup member build and attaches it to a PR.
+    pub async fn attach_unrolled_build(
+        &self,
+        pr: &PullRequestModel,
+        branch: String,
+        commit_sha: CommitSha,
+        parent: CommitSha,
+    ) -> anyhow::Result<i32> {
+        let mut tx = self.pool.begin().await?;
+        let build_id = create_build(
+            &self.pool,
+            pr,
+            &branch,
+            BuildKind::UnrolledMember,
+            &commit_sha,
+            &parent,
+        )
+        .await?;
+        update_pr_unrolled_build_id(&mut *tx, pr.id, build_id).await?;
         tx.commit().await?;
         Ok(build_id)
     }
@@ -389,13 +434,57 @@ impl PgDbClient {
         members: &[RegisterRollupMemberParams],
     ) -> anyhow::Result<()> {
         let mut tx = self.pool.begin().await?;
-        for member in members {
+        for (index, member) in members.iter().enumerate() {
             assert_ne!(rollup.id, member.member.id);
-            register_rollup_pr_member(&mut *tx, rollup, &member.member, &member.rolled_up_sha)
-                .await?;
+            register_rollup_pr_member(&mut *tx, rollup, member, index).await?;
         }
         tx.commit().await?;
         Ok(())
+    }
+
+    /// Mark the rollup PR as being merged, and set waiting unrolled state for all its members
+    /// inside a transaction.
+    pub async fn finish_rollup_merge(&self, rollup: &PullRequestModel) -> anyhow::Result<()> {
+        let mut tx = self.pool.begin().await?;
+        set_pr_status(
+            &mut *tx,
+            &rollup.repository,
+            rollup.number,
+            PullRequestStatus::Merged,
+        )
+        .await?;
+        set_rollup_members_unrolled_state(&mut *tx, rollup.id, UnrollState::Waiting).await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    /// Set the given unroll state to the given member of a rollup.
+    pub async fn set_rollup_member_state(
+        &self,
+        member: &RollupMember,
+        state: UnrollState,
+    ) -> anyhow::Result<()> {
+        set_rollup_member_unrolled_state(&self.pool, member.rollup_id, member.member_id, state)
+            .await
+    }
+
+    /// Set the given unroll state to all members of this rollup.
+    pub async fn set_all_rollup_members_state(
+        &self,
+        rollup_id: i32,
+        state: UnrollState,
+    ) -> anyhow::Result<()> {
+        set_rollup_members_unrolled_state(&self.pool, rollup_id, state).await
+    }
+
+    /// Mark the rollup PR as being merged, and set waiting unrolled state for all its members
+    /// inside a transaction.
+    pub async fn get_rollup_members_for_unrolling(
+        &self,
+        repo: &GithubRepoName,
+    ) -> anyhow::Result<Vec<RollupMemberForUnrolling>> {
+        let members = get_rollup_members_for_unrolling(&self.pool, repo).await?;
+        Ok(members)
     }
 
     /// Returns a map of rollup PR numbers to the set of member PR numbers that are part of that rollup.
@@ -412,7 +501,7 @@ impl PgDbClient {
         is_rollup(&self.pool, pr.id).await
     }
 
-    /// Returns true if the given PR is a rollup.
+    /// If the given `pr` is a rollup, return its members.
     /// If the returned Vec is empty, the given pull request is not a rollup.
     pub async fn get_rollup_members(
         &self,

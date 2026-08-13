@@ -569,6 +569,7 @@ pub async fn ec2_handler(
         let build_kind = |instance: &Ec2Instance| match instance.build_kind {
             BuildKind::Auto => 0,
             BuildKind::Try => 1,
+            BuildKind::UnrolledMember => 2,
         };
 
         status(a)

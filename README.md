@@ -47,6 +47,13 @@ The bot uses the following branch names for its operations.
 - `automation/bors/auto`
   - This branch should be configured for CI workflows that need to run before merging to the base branch.
 
+#### Unrolled builds
+- `automation/bors/try-perf-merge`
+  - Used to prepare unrolled builds of rollup members, used for perf runs.
+  - Should not be configured for any CI workflows!
+- `automation/bors/try-perf`
+  - This branch should be configured for CI workflows used to produce perf artifacts.
+
 The merge and non-merge branches are needed because we cannot set branches to parent and merge them with a PR commit
 atomically using the GitHub API.
 
@@ -69,7 +76,9 @@ describes the file can be found in `src/config.rs`. [Here](rust-bors.example.tom
 4) Configure CI workflows on push to:
    - `automation/bors/try` branch (for try builds)
    - `automation/bors/auto` branch (for auto builds)
-5) Give the bot permissions to push to `automation/bors/try`, `automation/bors/try-merge`, `automation/bors/auto`, and `automation/bors/auto-merge`.
+   - `automation/bors/try-perf` branch (for unrolled rollup perf builds)
+     - This is only needed if the `[unroll]` section is configured in the config file.
+5) Give the bot permissions to push to `automation/bors/try`, `automation/bors/try-merge`, `automation/bors/auto`, `automation/bors/auto-merge`, `automation/bors/try-perf`, and `automation/bors/try-perf-merge`.
 
 ## Contributing
 

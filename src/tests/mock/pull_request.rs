@@ -88,7 +88,7 @@ async fn mock_pr_create(
                 .get(&GithubRepoName::new(fork_owner, repo.full_name().name()))
                 .expect("Fork not found")
                 .clone();
-            assert!(fork.lock().fork);
+            assert!(fork.lock().is_fork());
             let commit = fork
                 .lock()
                 .get_branch_by_name(branch)

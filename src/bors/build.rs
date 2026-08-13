@@ -224,7 +224,7 @@ pub async fn start_build(
     proof: &ExclusiveLockProof,
     context: StartBuildContext,
     commit: StartBuildCommit,
-    check_run: StartBuildCheckRun,
+    check_run: Option<StartBuildCheckRun>,
     pr: &PullRequestModel,
 ) -> Result<StartBuildOutcome, StartBuildError> {
     let StartBuildContext {
@@ -293,44 +293,55 @@ pub async fn start_build(
             )
             .await
         }
+        BuildKind::UnrolledMember => {
+            db.attach_unrolled_build(
+                pr,
+                ci_branch.clone(),
+                build_commit_sha.clone(),
+                base_sha.clone(),
+            )
+            .await
+        }
     }
     .map_err(StartBuildError::DatabaseError)?;
 
-    // Create a check run to track the build status in GitHub's UI.
-    // This gets added to the PR's head SHA so GitHub shows UI in the checks tab and
-    // the bottom of the PR.
-    let check_run_result = repo
-        .client
-        .create_check_run(
-            &check_run.name,
-            &head_sha,
-            CheckRunStatus::InProgress,
-            CheckRunOutput {
-                title: check_run.title,
-                summary: "".to_string(),
-            },
-            &build_id.to_string(),
-        )
-        .await;
-    match check_run_result {
-        Ok(check_run) => {
-            let check_run_id = check_run.id.into_inner() as i64;
-            if let Err(error) = db
-                .update_build(
-                    build_id,
-                    UpdateBuildParams::default().check_run_id(check_run_id),
-                )
-                .await
-            {
-                tracing::error!(
-                    "Failed to update build {build_id} with check run id {check_run_id}: {error:?}"
-                );
+    if let Some(check_run) = check_run {
+        // Create a check run to track the build status in GitHub's UI.
+        // This gets added to the PR's head SHA so GitHub shows UI in the checks tab and
+        // the bottom of the PR.
+        let check_run_result = repo
+            .client
+            .create_check_run(
+                &check_run.name,
+                &head_sha,
+                CheckRunStatus::InProgress,
+                CheckRunOutput {
+                    title: check_run.title,
+                    summary: "".to_string(),
+                },
+                &build_id.to_string(),
+            )
+            .await;
+        match check_run_result {
+            Ok(check_run) => {
+                let check_run_id = check_run.id.into_inner() as i64;
+                if let Err(error) = db
+                    .update_build(
+                        build_id,
+                        UpdateBuildParams::default().check_run_id(check_run_id),
+                    )
+                    .await
+                {
+                    tracing::error!(
+                        "Failed to update build {build_id} with check run id {check_run_id}: {error:?}"
+                    );
+                }
             }
-        }
-        Err(error) => {
-            // Check runs are non-critical; the build has already started, so do not block
-            // progress if they fail.
-            tracing::error!("Failed to create check run: {error:?}");
+            Err(error) => {
+                // Check runs are non-critical; the build has already started, so do not block
+                // progress if they fail.
+                tracing::error!("Failed to create check run: {error:?}");
+            }
         }
     }
 

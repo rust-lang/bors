@@ -18,6 +18,7 @@ use crate::bors::comment::{
 use crate::bors::event::WorkflowRunCompleted;
 use crate::bors::labels::handle_label_trigger;
 use crate::bors::merge_queue::MergeQueueSender;
+use crate::bors::unroll_queue::UnrollQueueSender;
 use crate::bors::{
     BuildKind, FailedWorkflowRun, RepositoryState, elapsed_time_since, hide_tagged_comments,
 };
@@ -96,6 +97,7 @@ pub async fn handle_build_queue_event(
     ctx: Arc<BorsContext>,
     event: BuildQueueEvent,
     merge_queue_tx: MergeQueueSender,
+    unroll_queue_tx: UnrollQueueSender,
 ) -> anyhow::Result<()> {
     let db = &ctx.db;
     match event {
@@ -111,8 +113,16 @@ pub async fn handle_build_queue_event(
                         // First try to complete builds, and only then timeout then
                         // Because if the bot was offline for some time, we want to first attempt to
                         // actually finish the build, otherwise it might get instantly timeouted.
-                        if !maybe_complete_build(&repo, db, &build, &pr, &merge_queue_tx, None)
-                            .await?
+                        if !maybe_complete_build(
+                            &repo,
+                            db,
+                            &build,
+                            &pr,
+                            &merge_queue_tx,
+                            &unroll_queue_tx,
+                            None,
+                        )
+                        .await?
                         {
                             maybe_timeout_build(&repo, db, &build, &pr, timeout).await?;
                         }
@@ -167,6 +177,7 @@ pub async fn handle_build_queue_event(
                     &build,
                     &pr,
                     &merge_queue_tx,
+                    &unroll_queue_tx,
                     Some(CompletionTrigger { error_context }),
                 )
                 .await?;
@@ -211,6 +222,7 @@ async fn maybe_timeout_build(
         let trigger = match build.kind {
             BuildKind::Try => LabelTrigger::TryBuildFailed,
             BuildKind::Auto => LabelTrigger::AutoBuildFailed,
+            BuildKind::UnrolledMember => return Ok(()),
         };
         let gh_pr = repo.client.get_pull_request(pr.number).await?;
         handle_label_trigger(repo, &gh_pr.into(), trigger).await?;
@@ -247,6 +259,7 @@ async fn maybe_complete_build(
     build: &BuildModel,
     pr: &PullRequestModel,
     merge_queue_tx: &MergeQueueSender,
+    unroll_queue_tx: &UnrollQueueSender,
     completion_trigger: Option<CompletionTrigger>,
 ) -> anyhow::Result<bool> {
     assert_eq!(
@@ -326,6 +339,7 @@ async fn maybe_complete_build(
         } else {
             LabelTrigger::AutoBuildFailed
         }),
+        BuildKind::UnrolledMember => None,
     };
 
     let compute_duration = || {
@@ -368,22 +382,35 @@ async fn maybe_complete_build(
     }
 
     // Trigger merge queue when an auto build completes
-    if build.kind == BuildKind::Auto {
-        merge_queue_tx.notify().await?;
+    match build.kind {
+        BuildKind::Auto => {
+            merge_queue_tx.notify().await?;
+        }
+        BuildKind::UnrolledMember => {
+            unroll_queue_tx
+                .process_unrolled_members(repo.repository())
+                .await?;
+        }
+        BuildKind::Try => {}
     }
 
     let comment_opt = if build_succeeded {
         tracing::info!("Build succeeded for PR {pr_num}");
 
-        if build.kind == BuildKind::Try {
-            Some(try_build_succeeded_comment(
+        match build.kind {
+            BuildKind::Try => Some(try_build_succeeded_comment(
                 workflow_runs,
                 CommitSha(build.commit_sha.clone()),
                 CommitSha(build.parent.clone()),
-            ))
-        } else {
-            // Merge queue will post the build succeeded comment
-            None
+            )),
+            BuildKind::Auto => {
+                // Merge queue will post the build succeeded comment
+                None
+            }
+            BuildKind::UnrolledMember => {
+                // Unrolled perf builds do not send any comments on the rollup member PRs
+                None
+            }
         }
     } else {
         tracing::info!("Build failed for PR {pr_num}");
@@ -417,13 +444,16 @@ async fn maybe_complete_build(
     };
 
     let tag = match build.kind {
-        BuildKind::Try => CommentTag::TryBuildStarted,
-        BuildKind::Auto => CommentTag::AutoBuildStarted,
+        BuildKind::Try => Some(CommentTag::TryBuildStarted),
+        BuildKind::Auto => Some(CommentTag::AutoBuildStarted),
+        BuildKind::UnrolledMember => None,
     };
-    hide_tagged_comments(repo, db, pr, tag).await?;
+    if let Some(tag) = tag {
+        hide_tagged_comments(repo, db, pr, tag).await?;
 
-    if let Some(comment) = comment_opt {
-        repo.client.post_comment(pr_num, comment, db).await?;
+        if let Some(comment) = comment_opt {
+            repo.client.post_comment(pr_num, comment, db).await?;
+        }
     }
 
     Ok(true)

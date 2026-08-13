@@ -46,7 +46,13 @@ pub struct RepositoryConfig {
     /// jobs in the repositories that bors manages.
     #[serde(default)]
     pub ec2_runners: Option<Ec2RunnersConfig>,
+    /// Enable unrolling of rollups.
+    #[serde(default)]
+    pub unroll: Option<UnrollConfig>,
 }
+
+#[derive(serde::Deserialize, Debug)]
+pub struct UnrollConfig {}
 
 #[derive(serde::Deserialize, Debug, Default)]
 #[serde(rename_all = "kebab-case")]
@@ -481,8 +487,31 @@ allowed_instances = ["c8a.12xlarge"]
                     ],
                 },
             ),
+            unroll: None,
         }
         "#);
+    }
+
+    #[test]
+    fn deserialize_unroll() {
+        let content = r#"
+[unroll]
+"#;
+        let config = load_config(content);
+        insta::assert_debug_snapshot!(config, @"
+        RepositoryConfig {
+            timeout: 3600s,
+            labels: {},
+            labels_blocking_approval: [],
+            min_ci_time: None,
+            merge_queue_enabled: false,
+            report_merge_conflicts: false,
+            ec2_runners: None,
+            unroll: Some(
+                UnrollConfig,
+            ),
+        }
+        ");
     }
 
     #[test]

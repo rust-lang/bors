@@ -436,6 +436,7 @@ impl sqlx::Encode<'_, sqlx::Postgres> for BuildKind {
         let tag = match self {
             Self::Try => "try",
             Self::Auto => "auto",
+            Self::UnrolledMember => "unrolled-member",
         };
         <&str as sqlx::Encode<sqlx::Postgres>>::encode(tag, buf)
     }
@@ -446,6 +447,7 @@ impl sqlx::Decode<'_, sqlx::Postgres> for BuildKind {
         match <&str as sqlx::Decode<sqlx::Postgres>>::decode(value)? {
             "try" => Ok(Self::Try),
             "auto" => Ok(Self::Auto),
+            "unrolled-member" => Ok(Self::UnrolledMember),
             kind => Err(format!("Unknown build kind: {kind}").into()),
         }
     }
@@ -490,6 +492,9 @@ pub struct PullRequestModel {
     pub try_build: Option<BuildModel>,
     /// The (latest) auto merge build associated with this PR, if any.
     pub auto_build: Option<BuildModel>,
+    /// The (latest) unrolled build associated with this PR, if any.
+    /// This is only present for merged members of a rollup.
+    pub unrolled_build: Option<BuildModel>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -768,15 +773,85 @@ pub struct RegisterRollupMemberParams {
     /// Pull request model of the member PR.
     pub member: PullRequestModel,
     /// HEAD SHA of the member PR at rollup creation.
-    pub rolled_up_sha: CommitSha,
+    pub rolled_up_head_sha: CommitSha,
+    /// SHA of the intermediate merge commit that added this PR to the rollup.
+    /// It is used to fetch the rollup commit message when performing unrolling.
+    pub rolled_up_merge_sha: CommitSha,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum UnrollState {
+    /// An unrolled build should be started for this rollup member.
+    Waiting,
+    /// An unrolled build has already been started for this rollup member, and is in progress.
+    Pending,
+    /// The unrolled build has finished (whether successfully or with a failure).
+    /// This state is also used if the build cannot be started for this member at all.
+    Finished,
+    /// All the unrolled builds for the rollup of this rollup member have been reported in a comment
+    /// on GitHub
+    ///
+    /// Invariant: if one member of a rollup has state reported, all the other members must also
+    /// have the state reported.
+    Reported,
+}
+
+impl sqlx::Type<sqlx::Postgres> for UnrollState {
+    fn type_info() -> sqlx::postgres::PgTypeInfo {
+        <String as sqlx::Type<sqlx::Postgres>>::type_info()
+    }
+}
+
+impl sqlx::Encode<'_, sqlx::Postgres> for UnrollState {
+    fn encode_by_ref(
+        &self,
+        buf: &mut sqlx::postgres::PgArgumentBuffer,
+    ) -> Result<sqlx::encode::IsNull, BoxDynError> {
+        let tag = match self {
+            UnrollState::Waiting => "Waiting",
+            UnrollState::Pending => "Pending",
+            UnrollState::Finished => "Finished",
+            UnrollState::Reported => "Reported",
+        };
+        <&str as sqlx::Encode<sqlx::Postgres>>::encode(tag, buf)
+    }
+}
+
+impl sqlx::Decode<'_, sqlx::Postgres> for UnrollState {
+    fn decode(value: sqlx::postgres::PgValueRef<'_>) -> Result<Self, BoxDynError> {
+        match <&str as sqlx::Decode<sqlx::Postgres>>::decode(value)? {
+            "Waiting" => Ok(Self::Waiting),
+            "Pending" => Ok(Self::Pending),
+            "Finished" => Ok(Self::Finished),
+            "Reported" => Ok(Self::Reported),
+            tag => Err(format!("Unknown unroll state: {tag}").into()),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct RollupMember {
+    /// Pull request DB ID of the rollup containing this member PR.
+    pub rollup_id: PrimaryKey,
+    /// Pull request number of the member PR.
+    pub member: PullRequestNumber,
+    /// Pull request DB ID of the member PR.
+    pub member_id: PrimaryKey,
+    /// HEAD SHA of the member PR at rollup creation.
+    pub rolled_up_head_sha: CommitSha,
+    /// SHA of the intermediate merge of the PR into its containing rollup.
+    pub rolled_up_merge_sha: CommitSha,
+    /// Status of an unrolled commit corresponding to this rollup member.
+    pub unroll_state: Option<UnrollState>,
+    /// Position of the member within the rollup.
+    /// Rollup members are merged sequentially, so each member has its specified index.
+    pub position: u32,
 }
 
 #[derive(Debug)]
-pub struct RollupMember {
-    /// Pull request number of the member PR.
-    pub member: PullRequestNumber,
-    /// HEAD SHA of the member PR at rollup creation.
-    pub rolled_up_sha: CommitSha,
+pub struct RollupMemberForUnrolling {
+    pub pr: PullRequestModel,
+    pub member: RollupMember,
 }
 
 /// Updates the build table with the given fields.
@@ -887,6 +962,7 @@ pub fn pr_needs_update_in_db(db_pr: &PullRequestModel, gh_pr: &PullRequest) -> b
         note: _,
         try_build: _,
         auto_build: _,
+        unrolled_build: _,
         created_at: _,
     } = db_pr;
     let PullRequest {

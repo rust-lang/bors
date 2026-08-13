@@ -59,3 +59,6 @@ images = {
 jit_runner = "organization" # "repository" or "organization"
 # Allowed EC2 instance types that can be used in the `<instance-type>` field of the `os` label.
 allowed_instances = ["c8a.12xlarge"]
+
+# Enable unrolling of rollups
+[unroll]

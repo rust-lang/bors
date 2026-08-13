@@ -1,4 +1,6 @@
 #![allow(async_fn_in_trait)]
+#![allow(clippy::large_enum_variant)]
+#![allow(clippy::result_large_err)]
 
 //! This is the library of the bors bot.
 mod bors;

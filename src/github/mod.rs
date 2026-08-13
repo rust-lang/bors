@@ -24,6 +24,9 @@ pub use api::operations::{MergeResult, attempt_merge};
 pub use error::AppError;
 pub use labels::{LabelModification, LabelTrigger};
 
+#[cfg(test)]
+pub use rollup::tests::{make_rollup, rollup_state};
+
 use crate::bors::PullRequestStatus;
 
 /// Unique identifier of a GitHub repository

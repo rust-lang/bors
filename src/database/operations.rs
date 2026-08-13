@@ -3,9 +3,6 @@ use chrono::Utc;
 use sqlx::postgres::PgExecutor;
 use std::collections::{HashMap, HashSet};
 
-use super::Assignees;
-use super::BuildModel;
-use super::CommentModel;
 use super::DelegatedPermission;
 use super::MergeableState;
 use super::PullRequestModel;
@@ -16,6 +13,9 @@ use super::WorkflowStatus;
 use super::WorkflowType;
 use super::{ApprovalInfo, PrimaryKey, UpdateBuildParams};
 use super::{ApprovalStatus, RollupMember};
+use super::{Assignees, RegisterRollupMemberParams};
+use super::{BuildModel, UnrollState};
+use super::{CommentModel, RollupMemberForUnrolling};
 use crate::bors::PullRequestStatus;
 use crate::bors::RollupMode;
 use crate::bors::comment::CommentTag;
@@ -65,15 +65,68 @@ pub(crate) async fn get_pull_request(
         pr.mergeable_state_is_stale,
         pr.created_at as "created_at: DateTime<Utc>",
         try_build AS "try_build: BuildModel",
-        auto_build AS "auto_build: BuildModel"
+        auto_build AS "auto_build: BuildModel",
+        unrolled_build AS "unrolled_build: BuildModel"
     FROM pull_request as pr
     LEFT JOIN build AS try_build ON pr.try_build_id = try_build.id
     LEFT JOIN build AS auto_build ON pr.auto_build_id = auto_build.id
+    LEFT JOIN build AS unrolled_build ON pr.unrolled_build_id = unrolled_build.id
     WHERE pr.repository = $1 AND
           pr.number = $2
     "#,
             repo as &GithubRepoName,
             pr_number.0 as i64
+        )
+        .fetch_optional(executor)
+        .await?;
+
+        Ok(record)
+    })
+    .await
+}
+
+pub(crate) async fn get_pull_request_by_id(
+    executor: impl PgExecutor<'_>,
+    id: PrimaryKey,
+) -> anyhow::Result<Option<PullRequestModel>> {
+    measure_db_query("get_pull_request_by_id", || async {
+        let record = sqlx::query_as!(
+            PullRequestModel,
+            r#"
+    SELECT
+        pr.id,
+        pr.repository as "repository: GithubRepoName",
+        pr.number as "number: PullRequestNumber",
+        pr.title,
+        pr.author,
+        pr.assignees as "assignees: Assignees",
+        (
+            pr.approved_by,
+            pr.approved_sha
+        ) AS "approval_status!: ApprovalStatus",
+        pr.status as "status: PullRequestStatus",
+        pr.priority,
+        pr.rollup as "rollup: RollupMode",
+        pr.note,
+        (
+            pr.delegatee_id,
+            pr.delegated_permission
+        ) AS "delegation!: DelegationStatus",
+        pr.head_branch,
+        pr.base_branch,
+        pr.mergeable_state as "mergeable_state: MergeableState",
+        pr.mergeable_state_is_stale,
+        pr.created_at as "created_at: DateTime<Utc>",
+        try_build AS "try_build: BuildModel",
+        auto_build AS "auto_build: BuildModel",
+        unrolled_build AS "unrolled_build: BuildModel"
+    FROM pull_request as pr
+    LEFT JOIN build AS try_build ON pr.try_build_id = try_build.id
+    LEFT JOIN build AS auto_build ON pr.auto_build_id = auto_build.id
+    LEFT JOIN build AS unrolled_build ON pr.unrolled_build_id = unrolled_build.id
+    WHERE pr.id = $1
+    "#,
+            id
         )
         .fetch_optional(executor)
         .await?;
@@ -193,10 +246,12 @@ pub(crate) async fn upsert_pull_request(
                 pr.mergeable_state_is_stale,
                 pr.created_at as "created_at: DateTime<Utc>",
                 try_build AS "try_build: BuildModel",
-                auto_build AS "auto_build: BuildModel"
+                auto_build AS "auto_build: BuildModel",
+                unrolled_build AS "unrolled_build: BuildModel"
             FROM upserted_pr as pr
             LEFT JOIN build AS try_build ON pr.try_build_id = try_build.id
             LEFT JOIN build AS auto_build ON pr.auto_build_id = auto_build.id
+            LEFT JOIN build AS unrolled_build ON pr.unrolled_build_id = unrolled_build.id
             "#,
             repo as &GithubRepoName,
             pr_number.0 as i64,
@@ -249,10 +304,12 @@ pub(crate) async fn get_nonclosed_pull_requests(
                 pr.mergeable_state_is_stale,
                 pr.created_at as "created_at: DateTime<Utc>",
                 try_build AS "try_build: BuildModel",
-                auto_build AS "auto_build: BuildModel"
+                auto_build AS "auto_build: BuildModel",
+                unrolled_build AS "unrolled_build: BuildModel"
             FROM pull_request as pr
             LEFT JOIN build AS try_build ON pr.try_build_id = try_build.id
             LEFT JOIN build AS auto_build ON pr.auto_build_id = auto_build.id
+            LEFT JOIN build AS unrolled_build ON pr.unrolled_build_id = unrolled_build.id
             WHERE pr.repository = $1
                 AND pr.status IN ('open', 'draft')
             "#,
@@ -334,10 +391,12 @@ pub(crate) async fn get_prs_with_stale_mergeability_or_approved(
                 pr.mergeable_state_is_stale,
                 pr.created_at as "created_at: DateTime<Utc>",
                 try_build AS "try_build: BuildModel",
-                auto_build AS "auto_build: BuildModel"
+                auto_build AS "auto_build: BuildModel",
+                unrolled_build AS "unrolled_build: BuildModel"
             FROM pull_request as pr
             LEFT JOIN build AS try_build ON pr.try_build_id = try_build.id
             LEFT JOIN build AS auto_build ON pr.auto_build_id = auto_build.id
+            LEFT JOIN build AS unrolled_build ON pr.unrolled_build_id = unrolled_build.id
             WHERE pr.repository = $1
               AND (pr.mergeable_state = 'unknown' OR pr.mergeable_state_is_stale = true OR pr.approved_by IS NOT NULL)
               AND pr.status IN ('open', 'draft')
@@ -394,10 +453,12 @@ pub(crate) async fn set_stale_mergeability_status_by_base_branch(
                 pr.mergeable_state_is_stale,
                 pr.created_at as "created_at: DateTime<Utc>",
                 try_build AS "try_build: BuildModel",
-                auto_build AS "auto_build: BuildModel"
+                auto_build AS "auto_build: BuildModel",
+                unrolled_build AS "unrolled_build: BuildModel"
             FROM pr
             LEFT JOIN build AS try_build ON pr.try_build_id = try_build.id
             LEFT JOIN build AS auto_build ON pr.auto_build_id = auto_build.id
+            LEFT JOIN build AS unrolled_build ON pr.unrolled_build_id = unrolled_build.id
             "#,
             repo as &GithubRepoName,
             base_branch,
@@ -545,10 +606,12 @@ SELECT
     pr.rollup as "rollup: RollupMode",
     pr.created_at as "created_at: DateTime<Utc>",
     try_build AS "try_build: BuildModel",
-    auto_build AS "auto_build: BuildModel"
+    auto_build AS "auto_build: BuildModel",
+    unrolled_build AS "unrolled_build: BuildModel"
 FROM pull_request as pr
 LEFT JOIN build AS try_build ON pr.try_build_id = try_build.id
 LEFT JOIN build AS auto_build ON pr.auto_build_id = auto_build.id
+LEFT JOIN build AS unrolled_build ON pr.unrolled_build_id = unrolled_build.id
 WHERE try_build.id = $1 OR auto_build.id = $1
 "#,
             build_id
@@ -588,6 +651,24 @@ pub(crate) async fn update_pr_auto_build_id(
         sqlx::query!(
             "UPDATE pull_request SET auto_build_id = $1 WHERE id = $2",
             auto_build_id,
+            pr_id
+        )
+        .execute(executor)
+        .await?;
+        Ok(())
+    })
+    .await
+}
+
+pub(crate) async fn update_pr_unrolled_build_id(
+    executor: impl PgExecutor<'_>,
+    pr_id: i32,
+    unrolled_build_id: i32,
+) -> anyhow::Result<()> {
+    measure_db_query("update_pr_unrolled_build_id", || async {
+        sqlx::query!(
+            "UPDATE pull_request SET unrolled_build_id = $1 WHERE id = $2",
+            unrolled_build_id,
             pr_id
         )
         .execute(executor)
@@ -1152,18 +1233,20 @@ pub(crate) async fn clear_auto_build(
 pub(crate) async fn register_rollup_pr_member(
     executor: impl PgExecutor<'_>,
     rollup: &PullRequestModel,
-    member: &PullRequestModel,
-    rolled_up_sha: &CommitSha,
+    params: &RegisterRollupMemberParams,
+    position: usize,
 ) -> anyhow::Result<()> {
     measure_db_query("register_rollup_pr_member", || async {
         sqlx::query!(
             r#"
-        INSERT INTO rollup_member (rollup, member, rolled_up_sha)
-        VALUES ($1, $2, $3)
+        INSERT INTO rollup_member (rollup, member, rolled_up_sha, rolled_up_merge_sha, position)
+        VALUES ($1, $2, $3, $4, $5)
         "#,
             rollup.id,
-            member.id,
-            rolled_up_sha.as_ref()
+            params.member.id,
+            params.rolled_up_head_sha.as_ref(),
+            params.rolled_up_merge_sha.as_ref(),
+            position as i32
         )
         .execute(executor)
         .await?;
@@ -1227,27 +1310,178 @@ pub(crate) async fn is_rollup(
 
 pub(crate) async fn get_rollup_members(
     executor: impl PgExecutor<'_>,
-    pr_id: PrimaryKey,
+    rollup_pr_id: PrimaryKey,
 ) -> anyhow::Result<Vec<RollupMember>> {
     measure_db_query("get_rollup_members", || async {
         let rows = sqlx::query!(
             r#"
-        SELECT pr.number AS number, rm.rolled_up_sha AS sha
+        SELECT
+            rm.rollup,
+            rm.member,
+            pr.number AS number,
+            rm.rolled_up_sha AS rolled_up_head_sha,
+            rm.rolled_up_merge_sha AS rolled_up_merge_sha,
+            rm.unroll_state as "unroll_state: UnrollState",
+            rm.position as position
         FROM rollup_member rm
         JOIN pull_request AS pr ON pr.id = rm.member
         WHERE rm.rollup = $1
             "#,
-            pr_id
+            rollup_pr_id
         )
         .fetch_all(executor)
         .await?;
         Ok(rows
             .into_iter()
             .map(|row| RollupMember {
+                rollup_id: row.rollup,
                 member: PullRequestNumber(row.number as u64),
-                rolled_up_sha: CommitSha(row.sha),
+                member_id: row.member,
+                rolled_up_head_sha: CommitSha(row.rolled_up_head_sha),
+                rolled_up_merge_sha: CommitSha(row.rolled_up_merge_sha),
+                unroll_state: row.unroll_state,
+                position: row.position as u32,
             })
             .collect())
+    })
+    .await
+}
+
+pub(crate) async fn get_rollup_members_for_unrolling(
+    executor: impl PgExecutor<'_>,
+    repo: &GithubRepoName,
+) -> anyhow::Result<Vec<RollupMemberForUnrolling>> {
+    measure_db_query("get_rollup_members_for_unrolling", || async {
+        let rows = sqlx::query!(
+            r#"
+        SELECT
+            pr.id,
+            pr.repository as "repository: GithubRepoName",
+            pr.number as "number: PullRequestNumber",
+            pr.title,
+            pr.author,
+            pr.assignees as "assignees: Assignees",
+            (
+                pr.approved_by,
+                pr.approved_sha
+            ) AS "approval_status!: ApprovalStatus",
+            pr.status as "status: PullRequestStatus",
+            pr.priority,
+            pr.rollup as "rollup: RollupMode",
+            pr.note,
+            (
+                pr.delegatee_id,
+                pr.delegated_permission
+            ) AS "delegation!: DelegationStatus",
+            pr.head_branch,
+            pr.base_branch,
+            pr.mergeable_state as "mergeable_state: MergeableState",
+            pr.mergeable_state_is_stale,
+            pr.created_at as "created_at: DateTime<Utc>",
+            try_build AS "try_build: BuildModel",
+            auto_build AS "auto_build: BuildModel",
+            unrolled_build AS "unrolled_build: BuildModel",
+            rm.rollup AS rollup_id,
+            rm.member,
+            rm.rolled_up_sha,
+            rm.rolled_up_merge_sha,
+            rm.unroll_state AS "unroll_state: UnrollState",
+            rm.position
+        FROM pull_request as pr
+        LEFT JOIN build AS try_build ON pr.try_build_id = try_build.id
+        LEFT JOIN build AS auto_build ON pr.auto_build_id = auto_build.id
+        LEFT JOIN build AS unrolled_build ON pr.unrolled_build_id = unrolled_build.id
+        JOIN rollup_member AS rm ON pr.id = rm.member
+        WHERE pr.repository = $1 AND
+              -- These states are "active" - we need to do something about them
+              rm.unroll_state IN ('Waiting', 'Pending', 'Finished')
+            "#,
+            repo as &GithubRepoName
+        )
+        .fetch_all(executor)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|row| RollupMemberForUnrolling {
+                pr: PullRequestModel {
+                    id: row.id,
+                    repository: row.repository,
+                    number: row.number,
+                    title: row.title,
+                    author: row.author,
+                    assignees: row.assignees.into(),
+                    status: row.status,
+                    head_branch: row.head_branch,
+                    base_branch: row.base_branch,
+                    mergeable_state: row.mergeable_state,
+                    mergeable_state_is_stale: row.mergeable_state_is_stale,
+                    approval_status: row.approval_status,
+                    delegation: row.delegation,
+                    priority: row.priority,
+                    rollup: row.rollup,
+                    note: row.note,
+                    try_build: row.try_build,
+                    auto_build: row.auto_build,
+                    unrolled_build: row.unrolled_build,
+                    created_at: row.created_at,
+                },
+                member: RollupMember {
+                    rollup_id: row.rollup_id,
+                    member: row.number,
+                    member_id: row.member,
+                    rolled_up_head_sha: CommitSha(row.rolled_up_sha),
+                    rolled_up_merge_sha: CommitSha(row.rolled_up_merge_sha),
+                    unroll_state: row.unroll_state,
+                    position: row.position as u32,
+                },
+            })
+            .collect())
+    })
+    .await
+}
+
+pub(crate) async fn set_rollup_member_unrolled_state(
+    executor: impl PgExecutor<'_>,
+    rollup_id: PrimaryKey,
+    member_id: PrimaryKey,
+    state: UnrollState,
+) -> anyhow::Result<()> {
+    measure_db_query("set_rollup_member_unrolled_state", || async {
+        sqlx::query!(
+            r#"
+        UPDATE rollup_member
+        SET unroll_state = $1
+        WHERE rollup = $2 AND member = $3
+            "#,
+            state as UnrollState,
+            rollup_id,
+            member_id,
+        )
+        .execute(executor)
+        .await?;
+        Ok(())
+    })
+    .await
+}
+
+pub(crate) async fn set_rollup_members_unrolled_state(
+    executor: impl PgExecutor<'_>,
+    rollup_id: PrimaryKey,
+    state: UnrollState,
+) -> anyhow::Result<()> {
+    measure_db_query("set_rollup_members_unrolled_state", || async {
+        sqlx::query!(
+            r#"
+        UPDATE rollup_member
+        SET unroll_state = $1
+        WHERE rollup = $2
+            "#,
+            state as UnrollState,
+            rollup_id
+        )
+        .execute(executor)
+        .await?;
+        Ok(())
     })
     .await
 }
@@ -1285,10 +1519,12 @@ pub(crate) async fn find_rollups_for_member_pr(
         pr.mergeable_state_is_stale,
         pr.created_at as "created_at: DateTime<Utc>",
         try_build AS "try_build: BuildModel",
-        auto_build AS "auto_build: BuildModel"
+        auto_build AS "auto_build: BuildModel",
+        unrolled_build AS "unrolled_build: BuildModel"
     FROM pull_request as pr
     LEFT JOIN build AS try_build ON pr.try_build_id = try_build.id
     LEFT JOIN build AS auto_build ON pr.auto_build_id = auto_build.id
+    LEFT JOIN build AS unrolled_build ON pr.unrolled_build_id = unrolled_build.id
     WHERE pr.id IN (
         SELECT rollup
         FROM rollup_member

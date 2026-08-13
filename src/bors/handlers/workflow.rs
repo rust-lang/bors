@@ -81,6 +81,7 @@ async fn add_workflow_links_to_build_start_comment(
     let tag = match build.kind {
         BuildKind::Try => CommentTag::TryBuildStarted,
         BuildKind::Auto => CommentTag::AutoBuildStarted,
+        BuildKind::UnrolledMember => return Ok(()),
     };
     let comments = db
         .get_tagged_bot_comments(&payload.repository, pr.number, tag)

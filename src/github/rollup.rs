@@ -284,7 +284,7 @@ async fn create_rollup(
             anyhow::anyhow!("Could not create rollup branch {rollup_branch}: {error:?}")
         })?;
 
-    let mut successes = Vec::new();
+    let mut successes: Vec<RegisterRollupMemberParams> = Vec::new();
     let mut failures = Vec::new();
 
     let mut github_prs = Vec::with_capacity(pr_nums.len());
@@ -339,8 +339,12 @@ async fn create_rollup(
             .await;
 
         match merge_attempt {
-            Ok(_) => {
-                successes.push((pr, head_sha));
+            Ok(merge_commit) => {
+                successes.push(RegisterRollupMemberParams {
+                    member: pr,
+                    rolled_up_head_sha: head_sha,
+                    rolled_up_merge_sha: merge_commit.sha,
+                });
             }
             Err(error) => match error {
                 MergeError::Conflict => {
@@ -358,12 +362,12 @@ async fn create_rollup(
     }
 
     let mut body = "Successful merges:\n\n".to_string();
-    for (pr, _) in &successes {
+    for successful_merge in &successes {
         body.push_str(&format!(
             " - {}#{} ({})\n",
             gh_client.repository(),
-            pr.number.0,
-            pr.title
+            successful_merge.member.number.0,
+            successful_merge.member.title
         ));
     }
 
@@ -411,16 +415,8 @@ async fn create_rollup(
     db.set_rollup_mode(&rollup_db, RollupMode::Never, None)
         .await?;
 
-    let members = successes
-        .into_iter()
-        .map(|(member, rolled_up_sha)| RegisterRollupMemberParams {
-            member,
-            rolled_up_sha,
-        })
-        .collect::<Vec<_>>();
-
     // And register its rollup member PRs
-    db.register_rollup_members(&rollup_db, &members)
+    db.register_rollup_members(&rollup_db, &successes)
         .await
         .context("Cannot register rollup members")?;
 
@@ -433,8 +429,10 @@ async fn create_rollup(
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use crate::bors::{PullRequestStatus, RollupMode};
+    use crate::database::UnrollState;
+    use crate::database::operations::get_rollup_members;
     use crate::github::rollup::OAuthRollupState;
     use crate::github::{GithubRepoName, PullRequestNumber};
     use crate::permissions::PermissionType;
@@ -1204,7 +1202,44 @@ also include this pls"
         .await;
     }
 
-    async fn make_rollup(
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
+    async fn rollup_merge_unrolled_state_waiting(pool: sqlx::PgPool) {
+        run_test(
+            (pool.clone(), rollup_state()),
+            async |ctx: &mut BorsTester| {
+                let pr2 = ctx.open_pr((), |_| {}).await?;
+                ctx.approve(pr2.id()).await?;
+                let pr3 = ctx.open_pr((), |_| {}).await?;
+                ctx.approve(pr3.id()).await?;
+
+                make_rollup(ctx, &[&pr2, &pr3])
+                    .await?
+                    .assert_status(StatusCode::SEE_OTHER);
+                ctx.approve(4).await?;
+
+                ctx.start_and_finish_auto_build(4).await?;
+                ctx.pr(4).await.expect_status(PullRequestStatus::Merged);
+
+                let pr_id = ctx.pr(4).await.get_db_pr().id;
+
+                let members = get_rollup_members(&pool, pr_id).await.unwrap();
+                assert_eq!(members.len(), 2);
+                for member in members {
+                    assert_eq!(
+                        member.unroll_state,
+                        Some(UnrollState::Waiting),
+                        "Rollup member {} has invalid unroll state",
+                        member.member
+                    );
+                }
+
+                Ok(())
+            },
+        )
+        .await;
+    }
+
+    pub async fn make_rollup(
         ctx: &mut BorsTester,
         prs: &[&PullRequest],
     ) -> anyhow::Result<ApiResponse> {
@@ -1217,7 +1252,7 @@ also include this pls"
         .await
     }
 
-    fn rollup_state() -> GitHub {
+    pub fn rollup_state() -> GitHub {
         let mut gh = GitHub::default();
         let rolluper = rollup_user();
         gh.add_user(rolluper.clone());
@@ -1226,10 +1261,11 @@ also include this pls"
             .permissions
             .users
             .insert(rolluper.clone(), vec![PermissionType::Review]);
+        let gh = gh.append_to_default_config("[unroll]");
 
         // Create fork
         let mut repo = Repo::new(rolluper, fork_repo().name());
-        repo.fork = true;
+        repo.fork_of = Some(gh.default_repo());
         gh.with_repo(repo)
     }
 
