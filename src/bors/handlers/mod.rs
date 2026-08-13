@@ -531,9 +531,17 @@ async fn handle_comment(
                     }
                     BorsCommand::SetPriority { priority, note } => {
                         let span = tracing::info_span!("Priority");
-                        command_set_priority(repo, database, pr, &comment.author, priority, note)
-                            .instrument(span)
-                            .await
+                        command_set_priority(
+                            repo,
+                            database,
+                            pr,
+                            &comment.author,
+                            priority,
+                            note,
+                            senders.merge_queue(),
+                        )
+                        .instrument(span)
+                        .await
                     }
                     BorsCommand::Delegate(cmd) => {
                         let span = tracing::info_span!("Delegate");
