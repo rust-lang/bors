@@ -272,22 +272,26 @@ pub async fn terminate_old_ec2_instances(
         .collect::<Vec<String>>();
 
     if !too_old_ids.is_empty() {
-        let too_old_ids = too_old_ids.join(",");
-        tracing::info!("Cancelling EC2 instance(s) {too_old_ids}");
+        tracing::info!("Cancelling EC2 instance(s) {}", too_old_ids.join(", "));
 
-        run_command(
-            prepare_aws_cli(Some(&creds), Some(&ec2_config.region))
-                .arg("ec2")
+        // Split the termination into smaller batches, in case there are a lot of them
+        for id_batch in too_old_ids.chunks(10) {
+            let mut cmd = prepare_aws_cli(Some(&creds), Some(&ec2_config.region));
+            cmd.arg("ec2")
                 .arg("terminate-instances")
                 // No need for graceful shutdown, we just want to terminate the instances
                 // as fast as possible.
                 .arg("--force")
                 .arg("--skip-os-shutdown")
-                .arg("--instance-ids")
-                .arg(too_old_ids),
-        )
-        .await
-        .context("Cannot terminate EC2 instances")?;
+                .arg("--instance-ids");
+            for id in id_batch {
+                cmd.arg(id);
+            }
+
+            run_command(&mut cmd)
+                .await
+                .context("Cannot terminate EC2 instances")?;
+        }
     } else {
         tracing::info!("No EC2 instances to terminate");
     }
