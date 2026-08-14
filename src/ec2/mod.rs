@@ -5,6 +5,7 @@ use crate::database::{RunId, WorkflowStatus};
 use crate::github::{CommitSha, GithubRepoName, PullRequestNumber};
 use anyhow::Context;
 use chrono::{DateTime, NaiveDateTime, Utc};
+use itertools::Itertools;
 use octocrab::models::JobId;
 use octocrab::models::workflows::Status;
 use regex::Regex;
@@ -572,17 +573,36 @@ fn prepare_aws_cli(
 }
 
 async fn run_command(cmd: &mut tokio::process::Command) -> anyhow::Result<String> {
+    fn format_command(cmd: &tokio::process::Command) {
+        // The command probably has secrets in ENV, so only print the command-line arguments
+        let program = cmd
+            .as_std()
+            .get_program()
+            .to_str()
+            .unwrap_or_default()
+            .to_string();
+        let args = cmd
+            .as_std()
+            .get_args()
+            .into_iter()
+            .filter_map(|arg| arg.to_str())
+            .join(" ");
+        format!("{program} {args}")
+    }
+
     let output = match tokio::time::timeout(AWS_COMMAND_TIMEOUT, cmd.output()).await {
         Ok(output) => output?,
         Err(_) => {
             return Err(anyhow::anyhow!(
-                "Command {cmd:?} has timeouted after one minute"
+                "Command {} has timeouted after one minute",
+                format_command(cmd)
             ));
         }
     };
     if !output.status.success() {
         Err(anyhow::anyhow!(
-            "Command {cmd:?} ended with status {}.\nStdout:\n{}\n\nStderr:\n{}\n",
+            "Command {} ended with status {}.\nStdout:\n{}\n\nStderr:\n{}\n",
+            format_command(cmd),
             output.status,
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr),
