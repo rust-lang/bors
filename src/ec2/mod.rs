@@ -10,6 +10,7 @@ use octocrab::models::workflows::Status;
 use regex::Regex;
 use serde::Deserialize;
 use std::collections::HashMap;
+use std::process::Command;
 use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
@@ -468,6 +469,7 @@ pub async fn get_ec2_instances(
                     .and_then(|build_kind| match build_kind.as_str() {
                         "try" => Some(BuildKind::Try),
                         "auto" => Some(BuildKind::Auto),
+                        "try-perf" => Some(BuildKind::UnrolledMember),
                         _ => None,
                     })?;
 
@@ -572,17 +574,37 @@ fn prepare_aws_cli(
 }
 
 async fn run_command(cmd: &mut tokio::process::Command) -> anyhow::Result<String> {
+    fn format_command(cmd: &Command) -> String {
+        // The command probably has secrets in ENV, so only print the command-line arguments
+        let program = cmd.get_program().to_str().unwrap_or_default();
+        let mut args = vec![];
+        let mut iter = cmd.get_args();
+        while let Some(arg) = iter.next().and_then(|v| v.to_str()) {
+            if arg == "--user-data" {
+                // Skip the following argument, as it might be sensitive
+                iter.next();
+                args.push("--user-data");
+                args.push("<REDACTED>");
+            } else {
+                args.push(arg);
+            }
+        }
+        format!("{program} {}", args.join(" "))
+    }
+
     let output = match tokio::time::timeout(AWS_COMMAND_TIMEOUT, cmd.output()).await {
         Ok(output) => output?,
         Err(_) => {
             return Err(anyhow::anyhow!(
-                "Command {cmd:?} has timeouted after one minute"
+                "Command {} has timeouted after one minute",
+                format_command(cmd.as_std())
             ));
         }
     };
     if !output.status.success() {
         Err(anyhow::anyhow!(
-            "Command {cmd:?} ended with status {}.\nStdout:\n{}\n\nStderr:\n{}\n",
+            "Command {} ended with status {}.\nStdout:\n{}\n\nStderr:\n{}\n",
+            format_command(cmd.as_std()),
             output.status,
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr),
