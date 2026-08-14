@@ -469,6 +469,7 @@ pub async fn get_ec2_instances(
                     .and_then(|build_kind| match build_kind.as_str() {
                         "try" => Some(BuildKind::Try),
                         "auto" => Some(BuildKind::Auto),
+                        "try-perf" => Some(BuildKind::UnrolledMember),
                         _ => None,
                     })?;
 
