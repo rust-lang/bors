@@ -59,7 +59,7 @@ impl CommandParser {
 
     /// Parses bors commands from the given string.
     ///
-    /// Assumes that each command spands at most one line and that there are not more commands on
+    /// Assumes that each command spans at most one line and that there are not more commands on
     /// each line.
     pub fn parse_commands(&self, text: &str) -> Vec<Result<BorsCommand, CommandParseError>> {
         let segments = extract_text_from_markdown(text);

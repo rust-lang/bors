@@ -170,7 +170,8 @@ async fn process_rollup<'a>(
         match unroll_state {
             UnrollState::Waiting => {
                 // No unrolled build started yet, start it
-                let build_result = start_unrolled_build(db, repo, rollup_auto_build, member).await;
+                let build_result =
+                    start_unrolled_build(db, repo, rollup, rollup_auto_build, member).await;
                 let merge_sha = match build_result {
                     Ok(sha) => sha,
                     Err(UnrollError::CommitNotFound { sha }) => {
@@ -355,6 +356,7 @@ struct CompletedMember<'a> {
 async fn start_unrolled_build(
     db: &PgDbClient,
     repo: &RepositoryState,
+    rollup: &PullRequestModel,
     rollup_auto_build: &BuildModel,
     member: &RollupMemberForUnrolling,
 ) -> Result<CommitSha, UnrollError> {
@@ -377,7 +379,12 @@ async fn start_unrolled_build(
             sha: member.member.rolled_up_merge_sha.clone(),
         });
     };
-    let message = format!("Unrolled build for #{}\n{message}", member.pr.number);
+
+    // Note: This message is parsed by rust-timer's `triage` command
+    let message = format!(
+        "Unrolled build for #{} in rollup #{}\n{message}",
+        member.pr.number, rollup.number
+    );
 
     let res = db
         .ensure_not_concurrent(
@@ -494,7 +501,7 @@ mod tests {
             ctx.run_unroll_queue().await?;
 
             insta::assert_snapshot!(ctx.unrolled_branch().get_commit().message(), @"
-            Unrolled build for #2
+            Unrolled build for #2 in rollup #3
             Rollup merge of #2 - default-user:pr/2, r=default-user
 
             Title of PR 2
