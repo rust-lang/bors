@@ -44,8 +44,12 @@ async fn mock_pr(repo: Arc<Mutex<Repo>>, github: Arc<Mutex<GitHub>>, mock_server
             if pull_request_error {
                 ResponseTemplate::new(500)
             } else if let Some(pr) = repo.lock().pulls().get(&pr_number) {
-                ResponseTemplate::new(200)
-                    .set_body_json(GitHubPullRequest::new(&github.lock(), pr.clone()))
+                if pr.missing {
+                    ResponseTemplate::new(404)
+                } else {
+                    ResponseTemplate::new(200)
+                        .set_body_json(GitHubPullRequest::new(&github.lock(), pr.clone()))
+                }
             } else {
                 ResponseTemplate::new(404)
             }
@@ -188,6 +192,7 @@ async fn mock_pr_list(
                                 true
                             }
                         })
+                        .filter(|pr| !pr.missing)
                         .map(|pr| {
                             let mut pr = GitHubPullRequest::new(&github.lock(), pr.clone());
                             // GitHub always returns unknown mergeable state from this endpoint
@@ -477,7 +482,9 @@ impl GitHubPullRequest {
             comment_queue_tx: _,
             comment_queue_rx: _,
             comment_history: _,
+            missing,
         } = pr;
+        assert!(!missing);
 
         if let Some(head_repository) = &head_repository {
             assert_ne!(head_repository, &repo);

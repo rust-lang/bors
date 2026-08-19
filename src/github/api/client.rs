@@ -1,4 +1,5 @@
 use anyhow::Context;
+use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use octocrab::Octocrab;
 use octocrab::models::checks::CheckRun;
@@ -25,7 +26,8 @@ use crate::github::{
 };
 use crate::utils::timing::{RetryMethod, RetryableOpError, ShouldRetry, perform_retryable};
 use futures::TryStreamExt;
-use http::StatusCode;
+use http::{Response, StatusCode};
+use http_body_util::combinators::BoxBody;
 use octocrab::models::actions::SelfHostedRunnerJitConfig;
 use octocrab::models::workflows::{Job, Run};
 use serde::de::DeserializeOwned;
@@ -213,17 +215,31 @@ impl GithubRepositoryClient {
     }
 
     /// Resolve a pull request from this repository by it's number.
-    pub async fn get_pull_request(&self, pr: PullRequestNumber) -> anyhow::Result<PullRequest> {
-        let prs = perform_retryable("get_pull_request", RetryMethod::default(), || async {
-            let pr = self
+    pub async fn get_pull_request(&self, number: PullRequestNumber) -> anyhow::Result<PullRequest> {
+        let pr = self.get_pull_request_opt(number).await?;
+        match pr {
+            Some(pr) => Ok(pr),
+            None => Err(anyhow::anyhow!("Cannot find pull request {number}")),
+        }
+    }
+
+    /// Resolve a pull request from this repository by it's number.
+    /// If it cannot be found, return `Ok(None)`.
+    pub async fn get_pull_request_opt(
+        &self,
+        pr: PullRequestNumber,
+    ) -> anyhow::Result<Option<PullRequest>> {
+        let prs = perform_retryable("get_pull_request_opt", RetryMethod::default(), || async {
+            let response = self
                 .client
-                .pulls(self.repository().owner(), self.repository().name())
-                .get(pr.0)
+                ._get(&format!("/repos/{}/pulls/{pr}", self.repository()))
+                .await?;
+            let pr = get_optional::<octocrab::models::pulls::PullRequest>(&self.client, response)
                 .await
                 .map_err(|error| {
                     anyhow::anyhow!("Could not get PR {}/{}: {error:?}", self.repository(), pr.0)
                 })?;
-            anyhow::Ok(PullRequest::from(pr))
+            anyhow::Ok(pr.map(PullRequest::from))
         })
         .await?;
         Ok(prs)
@@ -397,28 +413,12 @@ impl GithubRepositoryClient {
                 .client
                 ._get(format!("/repos/{}/commits/{commit_sha}", self.repo_name))
                 .await?;
-            match response.status() {
-                StatusCode::OK => {
-                    let text = self
-                        .client
-                        .body_to_string(response)
-                        .await
-                        .unwrap_or_default();
-                    let commit = serde_json::from_str::<CommitResponse>(&text)?;
-                    anyhow::Ok(Some(commit.commit.message))
-                }
-                StatusCode::NOT_FOUND => Ok(None),
-                status => {
-                    let text = self
-                        .client
-                        .body_to_string(response)
-                        .await
-                        .unwrap_or_default();
-                    Err(anyhow::anyhow!(
-                        "Could not get commit `{commit_sha}` ({status}): {text}"
-                    ))
-                }
-            }
+
+            anyhow::Ok(
+                get_optional::<CommitResponse>(&self.client, response)
+                    .await?
+                    .map(|r| r.commit.message),
+            )
         })
         .await?;
         Ok(message)
@@ -762,6 +762,29 @@ impl GithubRepositoryClient {
 
     fn format_pr(&self, pr: PullRequestNumber) -> String {
         format!("{}/{}", self.repository(), pr)
+    }
+}
+
+async fn get_optional<T>(
+    client: &Octocrab,
+    response: Response<BoxBody<Bytes, octocrab::Error>>,
+) -> anyhow::Result<Option<T>>
+where
+    T: DeserializeOwned,
+{
+    match response.status() {
+        StatusCode::OK => {
+            let text = client.body_to_string(response).await?;
+            let data = serde_json::from_str::<T>(&text)?;
+            anyhow::Ok(Some(data))
+        }
+        StatusCode::NOT_FOUND => Ok(None),
+        status => {
+            let text = client.body_to_string(response).await.unwrap_or_default();
+            Err(anyhow::anyhow!(
+                "Could not read response ({status}): {text}"
+            ))
+        }
     }
 }
 

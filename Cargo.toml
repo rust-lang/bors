@@ -43,6 +43,8 @@ jsonwebtoken = "10"
 url = "2"
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
 http = "1"
+http-body-util = "0.1"
+bytes = "1"
 askama = "0.16"
 
 # Cryptography
