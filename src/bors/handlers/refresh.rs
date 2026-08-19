@@ -3,8 +3,8 @@ use std::sync::Arc;
 use anyhow::Context;
 use std::collections::BTreeMap;
 
-use crate::bors::RepositoryState;
 use crate::bors::mergeability_queue::MergeabilityQueueSender;
+use crate::bors::{PullRequestStatus, RepositoryState};
 use crate::{PgDbClient, TeamApiClient, database};
 
 /// Reload the team DB bors permissions for the given repository.
@@ -117,16 +117,29 @@ pub async fn sync_pull_requests_state(
         if !nonclosed_gh_prs_num.contains_key(pr_num) {
             let gh_pr = repo
                 .client
-                .get_pull_request(*pr_num)
+                .get_pull_request_opt(*pr_num)
                 .await
                 .with_context(|| {
                     anyhow::anyhow!("Cannot fetch PR {}#{pr_num}", repo.repository())
                 })?;
-            tracing::debug!(
-                "PR {pr_num} not found in open/draft prs in GitHub, marking it as {} in DB",
-                gh_pr.status,
-            );
-            db.upsert_pull_request(repo_name, gh_pr.into()).await?;
+            match gh_pr {
+                Some(gh_pr) => {
+                    tracing::debug!(
+                        "PR {pr_num} not found in open/draft prs in GitHub, marking it as {} in DB",
+                        gh_pr.status,
+                    );
+                    db.upsert_pull_request(repo_name, gh_pr.into()).await?;
+                }
+                None => {
+                    // If the pull request is missing on GitHub, but we had it previously recorded in our
+                    // DB, then the PR was probably removed from GitHub because of a moderation action or
+                    // GitHub intervention.
+                    // In that case mark it as closed in our DB.
+                    tracing::warn!("PR {pr_num} not found in GitHub, closing it in DB");
+                    db.set_pr_status(repo_name, *pr_num, PullRequestStatus::Closed)
+                        .await?;
+                }
+            }
         }
     }
 
@@ -380,6 +393,32 @@ auto_build_failed = ["+failed"]
             });
 
             ctx.refresh_prs().await;
+            ctx.pr(pr.id())
+                .await
+                .expect_status(PullRequestStatus::Closed);
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
+    async fn refresh_pr_deleted_on_github(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            let pr = ctx.open_pr((), |_| {}).await?;
+            ctx.wait_for_pr(pr.id(), |_| true).await?;
+
+            // Completely remove the PR from the GitHub database, to emulate a GitHub intervention
+            ctx.modify_pr_in_gh(pr.id(), |pr| {
+                pr.missing = true;
+            });
+
+            ctx.refresh_prs().await;
+
+            // Set it back to avoid unrelated failures when finishing tests
+            ctx.modify_pr_in_gh(pr.id(), |pr| {
+                pr.missing = false;
+            });
+
             ctx.pr(pr.id())
                 .await
                 .expect_status(PullRequestStatus::Closed);

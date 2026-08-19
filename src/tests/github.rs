@@ -671,6 +671,8 @@ pub struct PullRequest {
     pub(super) comment_queue_rx: Arc<tokio::sync::Mutex<Receiver<CommentMsg>>>,
     pub(super) comment_history: Vec<Comment>,
     pub maintainers_can_modify: bool,
+    /// Should API requests for this PR return 404?
+    pub missing: bool,
 }
 
 impl PullRequest {
@@ -711,6 +713,7 @@ impl PullRequest {
             comment_queue_rx: Arc::new(tokio::sync::Mutex::new(comment_queue_rx)),
             comment_history: Vec::new(),
             maintainers_can_modify: true,
+            missing: false,
         }
     }
 
