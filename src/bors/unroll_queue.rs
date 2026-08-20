@@ -381,8 +381,9 @@ async fn start_unrolled_build(
     };
 
     // Note: This message is parsed by rust-timer's `triage` command
+    // Note: The rollup ID is not prefixed with `#` to prevent a spam of commits referencing the rollup
     let message = format!(
-        "Unrolled build for #{} in rollup #{}\n{message}",
+        "Unrolled build for #{} in rollup {}\n{message}",
         member.pr.number, rollup.number
     );
 
@@ -501,7 +502,7 @@ mod tests {
             ctx.run_unroll_queue().await?;
 
             insta::assert_snapshot!(ctx.unrolled_branch().get_commit().message(), @"
-            Unrolled build for #2 in rollup #3
+            Unrolled build for #2 in rollup 3
             Rollup merge of #2 - default-user:pr/2, r=default-user
 
             Title of PR 2
