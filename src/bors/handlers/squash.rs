@@ -9,6 +9,7 @@ use crate::bors::handlers::{
 };
 use crate::bors::{
     CommandPrefix, Comment, RepositoryState, bors_commit_author, hide_tagged_comments,
+    normalize_merge_message,
 };
 use crate::database::BuildStatus;
 use crate::github::api::CommitAuthor;
@@ -151,6 +152,7 @@ pub(super) async fn command_squash(
         SquashCommitMessage::Explicit(msg) => msg,
     };
     let commit_msg = add_coauthored_authors(commit_msg, &commits, &commit_author);
+    let commit_msg = normalize_merge_message(&commit_msg);
     let commit = match repo_state
         .client
         .create_commit(
@@ -837,6 +839,41 @@ mod tests {
 
             Co-authored-by: User 1 <user1@users.com>
             Co-authored-by: User 2 <user2@users.com>
+            ");
+
+            Ok(())
+        })
+            .await;
+    }
+
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
+    async fn squash_normalize_message(pool: sqlx::PgPool) {
+        run_test((pool, squash_state()), async |ctx: &mut BorsTester| {
+            ctx.modify_pr_in_gh((), |pr| {
+                pr.description = r#"
+include this
+
+<!-- homu-ignore:start -->
+ignore this 2
+<!-- homu-ignore:end -->
+
+also include this pls
+"#.to_string();
+                pr.reset_to_single_commit(Commit::from_sha("sha1"));
+                pr.add_commits(vec![Commit::from_sha("sha2")]);
+            });
+            ctx.approve(()).await?;
+            ctx.post_comment("@bors squash msg=description")
+                .await?;
+            ctx.run_gitop_queue().await?;
+            ctx.expect_comments((), 2).await;
+            insta::assert_snapshot!(ctx.pr(()).await.get_gh_pr().head_branch_copy().get_commit().message(), @"
+
+            include this
+
+
+
+            also include this pls
             ");
 
             Ok(())
