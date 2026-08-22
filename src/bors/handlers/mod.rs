@@ -15,6 +15,7 @@ use crate::bors::handlers::refresh::{
 use crate::bors::handlers::review::{
     TreeCloseArguments, command_approve, command_close_tree, command_open_tree, command_unapprove,
 };
+use crate::bors::handlers::squash::SquashResult;
 use crate::bors::handlers::trybuild::{command_try_build, command_try_cancel};
 use crate::bors::handlers::workflow::{
     AutoBuildCancelReason, handle_workflow_completed, handle_workflow_job_completed,
@@ -55,6 +56,7 @@ mod pr_events;
 mod refresh;
 mod review;
 mod squash;
+mod squash_and_approve;
 mod trybuild;
 mod workflow;
 
@@ -487,6 +489,7 @@ async fn handle_comment(
                             rollup,
                             note,
                             senders.merge_queue(),
+                            pr.github.head.sha.clone(),
                         )
                         .instrument(span)
                         .await
@@ -652,7 +655,8 @@ async fn handle_comment(
                                 senders.gitops_queue(),
                             )
                             .instrument(span)
-                            .await
+                            .await?;
+                            Ok(())
                         } else {
                             repo.client
                                 .post_comment(
@@ -666,6 +670,106 @@ async fn handle_comment(
                                 .instrument(span)
                                 .await?;
                             Ok(())
+                        }
+                    }
+                    BorsCommand::SquashAndApprove {
+                        commit_message,
+                        approver,
+                        priority,
+                        rollup,
+                        note,
+                    } => {
+                        let span = tracing::info_span!("SquashAndApprove");
+
+                        if ctx.local_git_available() {
+                            let span_cloned = span.clone();
+                            let ctx_cloned = ctx.clone();
+                            let ctx2_cloned = ctx.clone();
+                            let comment_author_cloned = comment.author.clone();
+                            let comment2_author_cloned = comment.author.clone();
+                            let senders_cloned = senders.clone();
+                            let senders2_cloned = senders.clone();
+                            let db_cloned = database.clone();
+                            let db2_cloned = database.clone();
+                            let pr2_github_cloned = pr_github.clone();
+
+                            let pr_cloned = PullRequestData {
+                                github: &(pr_github.clone()),
+                                db: {
+                                    &database
+                                        .clone()
+                                        .get_pull_request(repo.repository(), pr_number)
+                                        .await?
+                                        .unwrap()
+                                },
+                            };
+
+                            squash_and_approve::command_squash_and_approve(
+                                repo.clone(),
+                                db_cloned.clone(),
+                                pr_cloned,
+                                &comment_author_cloned.clone(),
+                                commit_message,
+                                ctx_cloned.parser.prefix(),
+                                senders_cloned.gitops_queue(),
+                                Box::new(move |squash_result: SquashResult| {
+                                    let ctx3_cloned = ctx2_cloned.clone();
+                                    let span2_cloned = span_cloned.clone();
+                                    let db3_cloned = db2_cloned.clone();
+                                    let comment3_author_cloned = comment2_author_cloned.clone();
+                                    let rollup_cloned = rollup;
+                                    let priority_cloned = priority;
+                                    let note_cloned = note.clone();
+                                    let approver_cloned = approver.clone();
+                                    let repo_cloned = repo.clone();
+                                    let senders3_cloned = senders2_cloned.clone();
+                                    let pr3_github_cloned = pr2_github_cloned.clone();
+
+                                    Box::pin(async move {
+                                        let pr_db_cloned = db3_cloned
+                                            .get_pull_request(repo_cloned.repository(), pr_number)
+                                            .await?
+                                            .unwrap();
+
+                                        let pr2_cloned = PullRequestData {
+                                            github: &pr3_github_cloned.clone(),
+                                            db: { &pr_db_cloned },
+                                        };
+                                        command_approve(
+                                            ctx3_cloned.clone(),
+                                            repo_cloned.clone(),
+                                            db3_cloned.clone(),
+                                            pr2_cloned,
+                                            &comment3_author_cloned.clone(),
+                                            &approver_cloned.clone(),
+                                            priority_cloned,
+                                            rollup_cloned,
+                                            note_cloned.clone(),
+                                            senders3_cloned.clone().merge_queue(),
+                                            squash_result.sha,
+                                        )
+                                        .instrument(span2_cloned.clone())
+                                        .await
+                                    })
+                                }),
+                            )
+                            .instrument(span.clone())
+                            .await
+                        } else {
+                            repo.client
+                                .post_comment(
+                                    pr_number,
+                                    Comment::new(
+                                        "`@bors squash` is not enabled in this bors instance.\
+                                        Cancelling command, to just approve use the `r+`\
+                                        command instead."
+                                            .to_string(),
+                                    ),
+                                    &ctx.db,
+                                )
+                                .instrument(span)
+                                .await?;
+                            return Ok(());
                         }
                     }
                 };

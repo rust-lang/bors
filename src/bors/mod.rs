@@ -106,6 +106,7 @@ pub fn format_help() -> &'static str {
         BorsCommand::Retry => {}
         BorsCommand::Cancel => {}
         BorsCommand::Squash { .. } => {}
+        BorsCommand::SquashAndApprove { .. } => {}
     }
 
     r#"
