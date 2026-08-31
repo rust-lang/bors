@@ -198,11 +198,15 @@ impl GithubRepositoryClient {
                     .map_err(|error| {
                         anyhow::anyhow!("Could not fetch {path} from {}: {error:?}", self.repo_name)
                     })?;
-                let Some(contents) = contents else {
+                let Some(content) = contents.map(|c| c.content) else {
                     return Ok(None);
                 };
-                let content =
-                    base64::prelude::BASE64_STANDARD.decode(contents.content.as_bytes())?;
+                let mut content = content.into_bytes();
+
+                // Copied from octocrab
+                // Get rid of invalid (?) base64 characters
+                content.retain(|b| !b" \n\t\r\x0b\x0c".contains(b));
+                let content = base64::prelude::BASE64_STANDARD.decode(&content)?;
                 anyhow::Ok(Some(String::from_utf8_lossy(&content).into_owned()))
             },
         )
