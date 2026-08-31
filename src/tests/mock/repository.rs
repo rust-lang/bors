@@ -2,6 +2,7 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 use crate::database::WorkflowStatus;
+use crate::github::CommitSha;
 use crate::tests::BranchPushError;
 use crate::tests::github::{CheckRunData, Commit, GitUser, WorkflowRun};
 use crate::tests::mock::pull_request::mock_pull_requests;
@@ -69,7 +70,7 @@ pub async fn mock_repo(
     mock_check_runs(repo.clone(), mock_server).await;
     mock_workflow_runs(repo.clone(), mock_server).await;
     mock_workflow_jobs(repo.clone(), mock_server).await;
-    mock_config(repo.clone(), mock_server).await;
+    mock_contents(repo.clone(), mock_server).await;
 }
 
 async fn mock_branches_and_commits(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
@@ -468,29 +469,48 @@ async fn mock_workflow_jobs(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
 }
 
 fn get_query_param(req: &Request, key: &str) -> String {
+    get_query_param_opt(req, key)
+        .unwrap_or_else(|| panic!("Query parameter {key} not found in {}", req.url))
+}
+
+fn get_query_param_opt(req: &Request, key: &str) -> Option<String> {
     req.url
         .query_pairs()
         .find(|(k, _)| k == key)
         .map(|(_, v)| v.to_string())
-        .unwrap_or_else(|| panic!("Query parameter {key} not found in {}", req.url))
 }
 
-async fn mock_config(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
-    // Extracted into a block to avoid holding the lock over an await point
-    let mock = {
-        let repo = repo.lock();
-        Mock::given(method("GET"))
-            .and(path(format!(
-                "/repos/{}/contents/rust-bors.toml",
-                repo.full_name()
-            )))
-            .respond_with(
-                ResponseTemplate::new(200)
-                    .set_body_json(GitHubContent::new("rust-bors.toml", &repo.config)),
-            )
-            .mount(mock_server)
-    };
-    mock.await;
+async fn mock_contents(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
+    let repo_name = repo.lock().full_name();
+    dynamic_mock_req(
+        move |req: &Request, [path]: [&str; 1]| {
+            let sha = get_query_param_opt(req, "ref");
+            let repo = repo.lock();
+
+            // Request for overridden file content at a specific commit SHA
+            if let Some(sha) = sha {
+                let file = repo.contents.get(&CommitSha(sha));
+                if let Some(file) = file {
+                    return match file {
+                        Some(content) => ResponseTemplate::new(200)
+                            .set_body_json(GitHubContent::new(path, content)),
+                        None => ResponseTemplate::new(404),
+                    };
+                }
+            }
+
+            // Request for default config path
+            if path == "rust-bors.toml" {
+                ResponseTemplate::new(200).set_body_json(GitHubContent::new(path, &repo.config))
+            } else {
+                ResponseTemplate::new(404)
+            }
+        },
+        "GET",
+        format!("^/repos/{repo_name}/contents/(.*)$"),
+    )
+    .mount(mock_server)
+    .await;
 }
 
 #[derive(serde::Deserialize)]

@@ -388,6 +388,7 @@ pub struct Repo {
     pub push_behaviour: BranchPushBehaviour,
     pub fork_of: Option<Arc<Mutex<Repo>>>,
     pub merge_behavior: MergeBehavior,
+    pub contents: HashMap<CommitSha, Option<String>>,
 }
 
 impl Repo {
@@ -408,6 +409,7 @@ impl Repo {
             push_behaviour: BranchPushBehaviour::default(),
             fork_of: None,
             merge_behavior: MergeBehavior::default(),
+            contents: Default::default(),
         };
         repo.add_branch(Branch::default());
         repo
