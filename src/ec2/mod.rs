@@ -224,9 +224,14 @@ pub async fn start_ec2_github_runner(
         .arg("--user-data")
         .arg(script);
 
-    let output = run_command(&mut ec2_cli)
-        .await
-        .context("Cannot start ec2 instance")?;
+    let output = match run_command(&mut ec2_cli).await {
+        Ok(output) => output,
+        Err(error) if is_idempotent_parameter_mismatch(&error) => {
+            tracing::info!("EC2 instance launch was already attempted with the same client token");
+            return Ok(());
+        }
+        Err(error) => return Err(error).context("Cannot start ec2 instance"),
+    };
     let launched: serde_json::Value = serde_json::from_str(&output)?;
     tracing::info!(
         "Launched {instance_type}: {}",
@@ -577,6 +582,12 @@ fn prepare_aws_cli(
     cmd
 }
 
+fn is_idempotent_parameter_mismatch(error: &anyhow::Error) -> bool {
+    error
+        .chain()
+        .any(|cause| cause.to_string().contains("IdempotentParameterMismatch"))
+}
+
 async fn run_command(cmd: &mut tokio::process::Command) -> anyhow::Result<String> {
     fn format_command(cmd: &Command) -> String {
         // The command probably has secrets in ENV, so only print the command-line arguments
@@ -632,7 +643,23 @@ fn parse_state_transition(text: &str) -> Option<DateTime<Utc>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{ParsedLabel, parse_state_transition};
+    use super::{ParsedLabel, is_idempotent_parameter_mismatch, parse_state_transition};
+
+    #[test]
+    fn detects_idempotent_parameter_mismatch() {
+        let error = anyhow::anyhow!(
+            "An error occurred (IdempotentParameterMismatch) when calling the RunInstances operation"
+        );
+        assert!(is_idempotent_parameter_mismatch(&error));
+    }
+
+    #[test]
+    fn does_not_suppress_other_aws_errors() {
+        let error = anyhow::anyhow!(
+            "An error occurred (UnauthorizedOperation) when calling the RunInstances operation"
+        );
+        assert!(!is_idempotent_parameter_mismatch(&error));
+    }
 
     #[test]
     fn parse_label() {
