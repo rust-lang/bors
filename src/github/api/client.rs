@@ -1,4 +1,5 @@
 use anyhow::Context;
+use base64::Engine;
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use octocrab::Octocrab;
@@ -158,46 +159,55 @@ impl GithubRepositoryClient {
     /// Loads repository configuration from a file located at `[CONFIG_FILE_PATH]` in the main
     /// branch.
     pub async fn load_config(&self) -> anyhow::Result<RepositoryConfig> {
-        let config = perform_retryable::<RepositoryConfig, anyhow::Error, _, _, _>(
-            "load_config",
+        let content = self.load_file_at(CONFIG_FILE_PATH, None).await?;
+        let Some(content) = content else {
+            return Err(anyhow::anyhow!("Bors configuration file not found"));
+        };
+        let config: RepositoryConfig = deserialize_config(&content).map_err(|error| {
+            anyhow::anyhow!("Could not deserialize repository config: {error:?}")
+        })?;
+        Ok(config)
+    }
+
+    /// Loads a file at the specified `path` and commit `sha`.
+    /// If the commit SHA is not specified, loads the file from the default branch.
+    pub async fn load_file_at(
+        &self,
+        path: &str,
+        sha: Option<CommitSha>,
+    ) -> anyhow::Result<Option<String>> {
+        use std::fmt::Write;
+
+        let content = perform_retryable::<Option<String>, anyhow::Error, _, _, _>(
+            "load_file_at",
             RetryMethod::default(),
             || async {
-                let mut response = self
-                    .client
-                    .repos(&self.repo_name.owner, &self.repo_name.name)
-                    .get_content()
-                    .path(CONFIG_FILE_PATH)
-                    .send()
+                let mut uri = format!("/repos/{}/contents/{path}", self.repository());
+                if let Some(sha) = &sha {
+                    write!(uri, "?ref={sha}").unwrap();
+                }
+
+                #[derive(serde::Deserialize)]
+                struct Response {
+                    content: String,
+                }
+
+                let response = self.client._get(&uri).await?;
+                let contents = get_optional::<Response>(&self.client, response)
                     .await
                     .map_err(|error| {
-                        anyhow::anyhow!(
-                            "Could not fetch {CONFIG_FILE_PATH} from {}: {error:?}",
-                            self.repo_name
-                        )
+                        anyhow::anyhow!("Could not fetch {path} from {}: {error:?}", self.repo_name)
                     })?;
-
-                response
-                    .take_items()
-                    .into_iter()
-                    .next()
-                    .and_then(|content| content.decoded_content())
-                    .ok_or_else(|| anyhow::anyhow!("Configuration file not found"))
-                    .and_then(|content| {
-                        let config: RepositoryConfig =
-                            deserialize_config(&content).map_err(|error| {
-                                anyhow::anyhow!(
-                                    "Could not deserialize repository config: {error:?}"
-                                )
-                            })?;
-                        Ok(config)
-                    })
-                    // If the config can't be found or parsed, there is no need for retrying at this
-                    // moment
-                    .map_err(ShouldRetry::No)
+                let Some(contents) = contents else {
+                    return Ok(None);
+                };
+                let content =
+                    base64::prelude::BASE64_STANDARD.decode(contents.content.as_bytes())?;
+                anyhow::Ok(Some(String::from_utf8_lossy(&content).into_owned()))
             },
         )
         .await?;
-        Ok(config)
+        Ok(content)
     }
 
     /// Return the current SHA of the given branch.
@@ -538,7 +548,7 @@ impl GithubRepositoryClient {
                     url: run.html_url.to_string(),
                     status,
                     created_at: run.created_at,
-                    duration
+                    duration,
                 };
                 runs.push(run);
             }

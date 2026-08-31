@@ -21,6 +21,7 @@ use crate::bors::handlers::{
 use crate::bors::mergeability_queue::{MergeabilityQueueSender, update_pr_with_known_mergeability};
 use crate::bors::unroll_queue::UnrollQueueSender;
 use crate::bors::{AUTO_BRANCH_NAME, BuildKind, PullRequestStatus, RepositoryState};
+use crate::config::{CONFIG_FILE_PATH, deserialize_config};
 use crate::database::{
     ApprovalInfo, BuildModel, BuildStatus, ExclusiveLockProof, ExclusiveOperationOutcome,
     MergeableState, PullRequestModel, QueueStatus, UpdateBuildParams,
@@ -524,6 +525,41 @@ This rollup has been unapproved."#,
             );
             Ok(AutoBuildStartOutcome::PauseQueue)
         }
+        StartAutoBuildError::SanityCheckFailed {
+            error: SanityCheckError::ConfigMissing,
+            pr: gh_pr,
+        } => {
+            tracing::info!("Sanity check failed for PR {pr_num}: bors config is missing");
+
+            unapprove_pr(repo, &ctx.db, pr, &gh_pr.into()).await?;
+            let comment = format!(
+                "The bors config is missing in this PR. Ensure that the config exists at `{CONFIG_FILE_PATH}`."
+            );
+            repo.client
+                .post_comment(pr_num, Comment::new(comment), &ctx.db)
+                .await?;
+            Ok(AutoBuildStartOutcome::ContinueToNextPr)
+        }
+        StartAutoBuildError::SanityCheckFailed {
+            error: SanityCheckError::ConfigInvalid { error },
+            pr: gh_pr,
+        } => {
+            tracing::info!("Sanity check failed for PR {pr_num}: bors config is invalid");
+
+            unapprove_pr(repo, &ctx.db, pr, &gh_pr.into()).await?;
+            let comment = format!(
+                r#"The bors config at `{CONFIG_FILE_PATH}` is invalid in this PR. Parse error:
+
+```
+{error}
+```
+"#
+            );
+            repo.client
+                .post_comment(pr_num, Comment::new(comment), &ctx.db)
+                .await?;
+            Ok(AutoBuildStartOutcome::ContinueToNextPr)
+        }
     }
 }
 
@@ -557,6 +593,10 @@ enum SanityCheckError {
         status: PullRequestStatus,
     },
     RollupMemberMismatch(Vec<RollupMemberMismatch>),
+    ConfigMissing,
+    ConfigInvalid {
+        error: String,
+    },
 }
 
 async fn sanity_check_pr(
@@ -680,6 +720,25 @@ async fn start_auto_build(
         .map_err(StartAutoBuildError::GitHubError)?;
     let head_sha = gh_pr.head.sha.clone();
 
+    let result = sanity_check_config(repo, &head_sha)
+        .await
+        .map_err(StartAutoBuildError::GitHubError)?;
+    match result {
+        ConfigCheckResult::Ok => {}
+        ConfigCheckResult::Missing => {
+            return Err(StartAutoBuildError::SanityCheckFailed {
+                error: SanityCheckError::ConfigMissing,
+                pr: gh_pr,
+            });
+        }
+        ConfigCheckResult::Invalid { error } => {
+            return Err(StartAutoBuildError::SanityCheckFailed {
+                error: SanityCheckError::ConfigInvalid { error },
+                pr: gh_pr,
+            });
+        }
+    }
+
     let pr_data = super::handlers::PullRequestData {
         db: pr,
         github: &gh_pr,
@@ -734,6 +793,34 @@ async fn start_auto_build(
     };
 
     Ok(())
+}
+
+#[must_use]
+enum ConfigCheckResult {
+    Ok,
+    Missing,
+    Invalid { error: String },
+}
+
+/// Ensures that the commit that we are about to merge has a valid bors config.
+async fn sanity_check_config(
+    repo: &RepositoryState,
+    commit_sha: &CommitSha,
+) -> anyhow::Result<ConfigCheckResult> {
+    let config = repo
+        .client
+        .load_file_at(CONFIG_FILE_PATH, Some(commit_sha.clone()))
+        .await?;
+    let Some(config) = config else {
+        return Ok(ConfigCheckResult::Missing);
+    };
+    if let Err(error) = deserialize_config(&config) {
+        Ok(ConfigCheckResult::Invalid {
+            error: error.to_string(),
+        })
+    } else {
+        Ok(ConfigCheckResult::Ok)
+    }
 }
 
 /// Starts the background merge queue loop.
@@ -836,6 +923,7 @@ mod tests {
     use std::time::Duration;
 
     use crate::bors::with_mocked_time;
+    use crate::github::CommitSha;
     use crate::github::api::client::HideCommentReason;
     use crate::tests::{BorsBuilder, Commit, GitHub, run_test};
     use crate::tests::{default_branch_name, default_repo_name};
@@ -1524,6 +1612,54 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
                 CheckRunStatus::Completed,
                 Some(CheckRunConclusion::Failure),
             );
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
+    async fn auto_build_missing_config(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            let pr = ctx.open_pr((), |_| {}).await?;
+            ctx.repo().lock().contents.insert(CommitSha(pr.head_sha()), None);
+            ctx.approve(pr.id()).await?;
+            ctx.run_merge_queue_now().await;
+            insta::assert_snapshot!(ctx.get_next_comment_text(pr.id()).await?, @"The bors config is missing in this PR. Ensure that the config exists at `rust-bors.toml`.");
+            ctx.pr(pr.id())
+                .await
+                .expect_no_auto_build()
+                .expect_unapproved();
+            Ok(())
+        })
+            .await;
+    }
+
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
+    async fn auto_build_invalid_config(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            let pr = ctx.open_pr((), |_| {}).await?;
+            ctx.repo().lock().contents.insert(
+                CommitSha(pr.head_sha()),
+                Some("[foo bar I am invalid toml!".to_string()),
+            );
+            ctx.approve(pr.id()).await?;
+            ctx.run_merge_queue_now().await;
+            insta::assert_snapshot!(ctx.get_next_comment_text(pr.id()).await?, @"
+            The bors config at `rust-bors.toml` is invalid in this PR. Parse error:
+
+            ```
+            TOML parse error at line 1, column 5
+              |
+            1 | [foo bar I am invalid toml!
+              |     ^
+            unclosed table, expected `]`
+
+            ```
+            ");
+            ctx.pr(pr.id())
+                .await
+                .expect_no_auto_build()
+                .expect_unapproved();
             Ok(())
         })
         .await;
