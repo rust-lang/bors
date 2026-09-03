@@ -105,6 +105,17 @@ pub async fn start_ec2_github_runner(
             label.image_name
         ));
     };
+    if !ec2_config.allowed_instances.is_empty()
+        && !ec2_config
+            .allowed_instances
+            .iter()
+            .any(|instance| instance == label.instance_type)
+    {
+        return Err(anyhow::anyhow!(
+            "EC2 runner instance {} is not allowed to be used",
+            label.instance_type
+        ));
+    }
 
     // Emulate a "UUID" to avoid adding dependency on the uuid crate just for this one line.
     let runner_name = format!("{:x}", rand::random::<u128>());
