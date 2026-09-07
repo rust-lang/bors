@@ -18,13 +18,13 @@ use crate::github::{CommitSha, GithubRepoName, GithubUser};
 use crate::permissions::PermissionType;
 use std::collections::HashSet;
 use std::fmt::Write;
+use std::pin::Pin;
 use std::sync::Arc;
 
 const CO_AUTHORED_BY_TRAILER: &str = "Co-authored-by";
 
-pub struct SquashResult {
-    pub(crate) sha: Option<CommitSha>,
-}
+pub(super) type AfterSquashCallback =
+    Box<dyn FnOnce(CommitSha) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>> + Send>;
 
 /// Entry point for the squash command.
 /// This function validates the command and enqueues the actual work to the gitops queue.
@@ -36,7 +36,8 @@ pub(super) async fn command_squash(
     commit_message: SquashCommitMessage,
     bot_prefix: &CommandPrefix,
     gitops_queue: &GitOpsQueueSender,
-) -> anyhow::Result<SquashResult> {
+    after_squash_callback: Option<AfterSquashCallback>,
+) -> anyhow::Result<()> {
     let send_comment = async |text: String| {
         let comment = repo_state
             .client
@@ -54,12 +55,12 @@ pub(super) async fn command_squash(
     if !is_author && !is_reviewer {
         send_comment(":key: Only the PR author or reviewers can squash commits.".to_string())
             .await?;
-        return Ok(SquashResult { sha: None });
+        return Ok(());
     }
 
     if !pr.github.editable_by_maintainers {
         send_comment(":key: The `Allow edits by maintainers` option is not enabled on this PR. It is required for squashing to work.".to_string()).await?;
-        return Ok(SquashResult { sha: None });
+        return Ok(());
     }
 
     let fork_error =
@@ -71,7 +72,7 @@ pub(super) async fn command_squash(
         .take_if(|repo| validate_fork(&pr.github.author, repo_state.repository(), repo))
     else {
         send_comment(fork_error()).await?;
-        return Ok(SquashResult { sha: None });
+        return Ok(());
     };
 
     let pr_model = pr.db;
@@ -85,7 +86,7 @@ pub(super) async fn command_squash(
             format!(":exclamation: Cannot squash a PR that is currently being tested. Unapprove the PR first using `{bot_prefix} r-`."),
         )
             .await?;
-        return Ok(SquashResult { sha: None });
+        return Ok(());
     }
 
     if pr.github.commit_count > 250 {
@@ -94,7 +95,7 @@ pub(super) async fn command_squash(
             pr.github.commit_count
         ))
         .await?;
-        return Ok(SquashResult { sha: None });
+        return Ok(());
     }
 
     let pr_id = PullRequestId {
@@ -103,7 +104,7 @@ pub(super) async fn command_squash(
     };
     if gitops_queue.is_pending(&pr_id) {
         send_comment(":hourglass: This PR already has a pending git operation in progress, please wait until it is completed.".to_string()).await?;
-        return Ok(SquashResult { sha: None });
+        return Ok(());
     }
 
     let commits = repo_state
@@ -112,7 +113,7 @@ pub(super) async fn command_squash(
         .await?;
     if commits.len() < 2 {
         send_comment(":exclamation: The PR has only one commit.".to_string()).await?;
-        return Ok(SquashResult { sha: None });
+        return Ok(());
     }
 
     let notify_comment = repo_state
@@ -173,7 +174,7 @@ pub(super) async fn command_squash(
                 ":exclamation: Failed to create squashed commit: {error}"
             ))
             .await?;
-            return Ok(SquashResult { sha: None });
+            return Ok(());
         }
     };
 
@@ -244,6 +245,11 @@ pub(super) async fn command_squash(
             .await?;
             // Hide previous "squash started" comments.
             hide_tagged_comments(&repo_state, &db, &pr_model, CommentTag::SquashStarted).await?;
+
+            if let Some(cb) = after_squash_callback {
+                cb(commit).await?;
+            }
+
             Ok(())
         })
     });
@@ -274,9 +280,9 @@ pub(super) async fn command_squash(
                 .to_string(),
         )
             .await?;
-        return Ok(SquashResult { sha: Some(commit) });
+        return Ok(());
     }
-    Ok(SquashResult { sha: Some(commit) })
+    Ok(())
 }
 
 /// Add "Co-authored-by: [name] <[email]>" trailer(s) to the commit message to properly reflect
@@ -401,6 +407,7 @@ mod tests {
         BorsTester, Comment, Commit, GitHub, GitUser, PullRequest, Repo, User, default_repo_name,
         run_test,
     };
+    use std::sync::Arc;
 
     #[test]
     fn parse_coauthor_valid_trailer() {
@@ -883,6 +890,59 @@ also include this pls
             Ok(())
         })
             .await;
+    }
+
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
+    async fn squash_two_commits_and_approve(pool: sqlx::PgPool) {
+        let pool = Arc::new(pool);
+        let gh = run_test(
+            (
+                <sqlx::PgPool as Clone>::clone(&*(pool.clone())),
+                squash_state(),
+            ),
+            async |ctx: &mut BorsTester| {
+                ctx.modify_pr_in_gh((), |pr| {
+                    pr.title = "Foobar".to_string();
+                    pr.reset_to_single_commit(Commit::from_sha("sha1"));
+                    pr.add_commits(vec![Commit::from_sha("sha2")]);
+                });
+                ctx.post_comment("@bors squash").await?;
+                ctx.run_gitop_queue().await?;
+                insta::assert_snapshot!(
+                    ctx.get_next_comment_text(()).await?,
+                    @":construction: Squashing... this can take a few minutes."
+                );
+                insta::assert_snapshot!(
+                    ctx.get_next_comment_text(()).await?,
+                    @":hammer: 2 commits were squashed into sha2-reauthored-to-git-user."
+                );
+                let branch = ctx.pr(()).await.get_gh_pr().head_branch_copy();
+                assert_eq!(branch.get_commits().len(), 1);
+                insta::assert_debug_snapshot!(branch.get_commit(), @r#"
+            Commit {
+                sha: "sha2-reauthored-to-git-user",
+                message: "Foobar\n\n* Commit sha1\n* Commit sha2\n",
+                author: GitUser {
+                    name: "git-user",
+                    email: "git-user@git.com",
+                },
+            }
+            "#);
+                crate::bors::handlers::squash_and_approve::tests::approve_add_label(
+                    <sqlx::PgPool as Clone>::clone(&*(pool.clone())),
+                )
+                .await;
+
+                Ok(())
+            },
+        )
+        .await;
+        insta::assert_snapshot!(gh.get_sha_history((), "pr/1"), @"
+        pr-1-sha
+        sha1
+        sha2
+        sha2-reauthored-to-git-user
+        ");
     }
 
     fn squash_state() -> GitHub {
