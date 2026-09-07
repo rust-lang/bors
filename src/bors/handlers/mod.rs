@@ -15,7 +15,7 @@ use crate::bors::handlers::refresh::{
 use crate::bors::handlers::review::{
     TreeCloseArguments, command_approve, command_close_tree, command_open_tree, command_unapprove,
 };
-use crate::bors::handlers::squash::SquashResult;
+use crate::bors::handlers::squash::AfterSquashCallback;
 use crate::bors::handlers::trybuild::{command_try_build, command_try_cancel};
 use crate::bors::handlers::workflow::{
     AutoBuildCancelReason, handle_workflow_completed, handle_workflow_job_completed,
@@ -56,7 +56,6 @@ mod pr_events;
 mod refresh;
 mod review;
 mod squash;
-mod squash_and_approve;
 mod trybuild;
 mod workflow;
 
@@ -653,6 +652,7 @@ async fn handle_comment(
                                 commit_message,
                                 ctx.parser.prefix(),
                                 senders.gitops_queue(),
+                                None,
                             )
                             .instrument(span)
                             .await?;
@@ -682,81 +682,51 @@ async fn handle_comment(
                         let span = tracing::info_span!("SquashAndApprove");
 
                         if ctx.local_git_available() {
-                            let span_cloned = span.clone();
-                            let ctx_cloned = ctx.clone();
-                            let ctx2_cloned = ctx.clone();
-                            let comment_author_cloned = comment.author.clone();
-                            let comment2_author_cloned = comment.author.clone();
-                            let senders_cloned = senders.clone();
-                            let senders2_cloned = senders.clone();
-                            let db_cloned = database.clone();
-                            let db2_cloned = database.clone();
-                            let pr2_github_cloned = pr_github.clone();
-
-                            let pr_cloned = PullRequestData {
-                                github: &(pr_github.clone()),
-                                db: {
-                                    &database
-                                        .clone()
-                                        .get_pull_request(repo.repository(), pr_number)
+                            let ctx2 = ctx.clone();
+                            let repo2 = repo.clone();
+                            let db2 = database.clone();
+                            let pr_github = pr_github.clone();
+                            let comment_author = comment.author.clone();
+                            let merge_queue_tx = senders.merge_queue().clone();
+                            let callback: AfterSquashCallback = Box::new(move |sha: CommitSha| {
+                                Box::pin(async move {
+                                    let pr_db = db2
+                                        .get_pull_request(repo2.repository(), pr_github.number)
                                         .await?
-                                        .unwrap()
-                                },
-                            };
+                                        .expect("TODO");
+                                    let pr2 = PullRequestData {
+                                        github: &pr_github,
+                                        db: &pr_db,
+                                    };
 
-                            squash_and_approve::command_squash_and_approve(
-                                repo.clone(),
-                                db_cloned.clone(),
-                                pr_cloned,
-                                &comment_author_cloned.clone(),
+                                    command_approve(
+                                        ctx2,
+                                        repo2,
+                                        db2,
+                                        pr2,
+                                        &comment_author,
+                                        &approver,
+                                        priority,
+                                        rollup,
+                                        note,
+                                        &merge_queue_tx,
+                                        sha,
+                                    )
+                                    .await
+                                })
+                            });
+                            squash::command_squash(
+                                repo,
+                                database,
+                                pr,
+                                &comment.author,
                                 commit_message,
-                                ctx_cloned.parser.prefix(),
-                                senders_cloned.gitops_queue(),
-                                Box::new(move |squash_result: SquashResult| {
-                                    let ctx3_cloned = ctx2_cloned.clone();
-                                    let span2_cloned = span_cloned.clone();
-                                    let db3_cloned = db2_cloned.clone();
-                                    let comment3_author_cloned = comment2_author_cloned.clone();
-                                    let rollup_cloned = rollup;
-                                    let priority_cloned = priority;
-                                    let note_cloned = note.clone();
-                                    let approver_cloned = approver.clone();
-                                    let repo_cloned = repo.clone();
-                                    let senders3_cloned = senders2_cloned.clone();
-                                    let pr3_github_cloned = pr2_github_cloned.clone();
-
-                                    Box::pin(async move {
-                                        let pr_db_cloned = db3_cloned
-                                            .get_pull_request(repo_cloned.repository(), pr_number)
-                                            .await?
-                                            .unwrap();
-
-                                        let pr2_cloned = PullRequestData {
-                                            github: &pr3_github_cloned.clone(),
-                                            db: { &pr_db_cloned },
-                                        };
-                                        command_approve(
-                                            ctx3_cloned.clone(),
-                                            repo_cloned.clone(),
-                                            db3_cloned.clone(),
-                                            pr2_cloned,
-                                            &comment3_author_cloned.clone(),
-                                            &approver_cloned.clone(),
-                                            priority_cloned,
-                                            rollup_cloned,
-                                            note_cloned.clone(),
-                                            senders3_cloned.clone().merge_queue(),
-                                            squash_result.sha.unwrap_or(Err(anyhow::anyhow!(
-                                                "missing sha from squash"
-                                            ))?),
-                                        )
-                                        .instrument(span2_cloned.clone())
-                                        .await
-                                    })
-                                }),
+                                ctx.parser.prefix(),
+                                senders.gitops_queue(),
+                                Some(callback),
                             )
-                            .instrument(span.clone())
-                            .await
+                            .instrument(span)
+                            .await?;
                         } else {
                             repo.client
                                 .post_comment(
@@ -771,8 +741,8 @@ async fn handle_comment(
                                 )
                                 .instrument(span)
                                 .await?;
-                            return Ok(());
                         }
+                        Ok(())
                     }
                 };
                 if result.is_err() {
