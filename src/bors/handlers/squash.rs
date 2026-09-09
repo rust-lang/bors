@@ -28,6 +28,7 @@ pub(super) type AfterSquashCallback =
 
 /// Entry point for the squash command.
 /// This function validates the command and enqueues the actual work to the gitops queue.
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn command_squash(
     repo_state: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
