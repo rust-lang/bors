@@ -892,6 +892,21 @@ also include this pls
             .await;
     }
 
+    async fn approve_add_label(pool: sqlx::PgPool) {
+        let gh = GitHub::default().append_to_default_config(
+            r#"
+[labels]
+approved = ["+approved"]
+"#,
+        );
+        run_test((pool, gh), async |ctx: &mut BorsTester| {
+            ctx.approve(()).await?;
+            ctx.pr(()).await.expect_added_labels(&["approved"]);
+            Ok(())
+        })
+        .await;
+    }
+
     #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn squash_two_commits_and_approve(pool: sqlx::PgPool) {
         let pool = Arc::new(pool);
@@ -928,11 +943,9 @@ also include this pls
                 },
             }
             "#);
-                crate::bors::handlers::squash_and_approve::tests::approve_add_label(
-                    <sqlx::PgPool as Clone>::clone(&*(pool.clone())),
-                )
-                .await;
+                approve_add_label(<sqlx::PgPool as Clone>::clone(&*(pool.clone()))).await;
 
+                ctx.pr(()).await.expect_approved_by("default-user");
                 Ok(())
             },
         )
