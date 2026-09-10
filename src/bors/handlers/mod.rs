@@ -908,7 +908,9 @@ pub enum InvalidationReason {
     /// A new commit was pushed to the pull request.
     /// If it was approved, it will be unapproved.
     /// If it was contained in any rollups, they will be closed.
-    CommitShaChanged,
+    CommitShaChanged { sha: CommitSha },
+    /// The base branch of the PR has changed.
+    BaseBranchChanged,
     /// The pull request was closed.
     /// If it was approved, it will be unapproved.
     /// If it was contained in any rollups, they will be closed.
@@ -936,6 +938,20 @@ pub async fn unapprove_pr(
     db.unapprove(pr_db).await?;
     handle_label_trigger(repo_state, pr_gh, LabelTrigger::Unapproved).await?;
     Ok(())
+}
+
+/// Unapprove the given pull request if `new_sha` already wasn't the approved commit.
+/// Returns true if the PR was actually unapproved.
+pub async fn unapprove_pr_if_sha_changed(
+    repo_state: &RepositoryState,
+    db: &PgDbClient,
+    pr_db: &PullRequestModel,
+    pr_gh: &PullRequestInfo,
+    new_sha: &CommitSha,
+) -> anyhow::Result<bool> {
+    let unapproved = db.unapprove_if_sha_changed(pr_db, new_sha).await?;
+    handle_label_trigger(repo_state, pr_gh, LabelTrigger::Unapproved).await?;
+    Ok(unapproved)
 }
 
 pub struct InvalidationComment {
@@ -995,17 +1011,38 @@ pub async fn invalidate_pr(
     comment: Option<InvalidationComment>,
 ) -> anyhow::Result<InvalidationOutcome> {
     // Step 1: unapprove the pull request if it was approved
-    // This happens everytime the PR is invalidated, if it was approved before
+    // This happens everytime the PR is invalidated, if it was approved before with a different
+    // commit
     let pr_unapproved = if pr_db.is_approved() {
-        unapprove_pr(repo_state, db, pr_db, &pr_gh.clone().into()).await?;
-        true
+        // This is handling a potential race condition coming from `@bors r+ squash`.
+        // When we squash, we push a new commit to the PR, and then we approve it.
+        // GitHub will then send us a webhook about the push, which will call this function.
+        // If we then unapproved the PR, then we would essentially cancel the previous `r+ squash`.
+        // So instead, if the pushed commit SHA is the same as the one that is already approved in
+        // the DB, we do not unapprove it. We figure this out atomically, to avoid further race
+        // conditions in the DB.
+        match &info.reason {
+            InvalidationReason::CommitShaChanged { sha } => {
+                unapprove_pr_if_sha_changed(repo_state, db, pr_db, &pr_gh.clone().into(), sha)
+                    .await?
+            }
+            InvalidationReason::Close
+            | InvalidationReason::BaseBranchChanged
+            | InvalidationReason::Unapproval { .. }
+            | InvalidationReason::RollupMemberInvalidated { .. } => {
+                unapprove_pr(repo_state, db, pr_db, &pr_gh.clone().into()).await?;
+                true
+            }
+        }
     } else {
         false
     };
 
     fn get_cancel_reason(reason: &InvalidationReason) -> AutoBuildCancelReason {
         match reason {
-            InvalidationReason::CommitShaChanged => AutoBuildCancelReason::PushToPR,
+            InvalidationReason::CommitShaChanged { .. } | InvalidationReason::BaseBranchChanged => {
+                AutoBuildCancelReason::PushToPR
+            }
             InvalidationReason::Close => AutoBuildCancelReason::Close,
             InvalidationReason::Unapproval { .. } => AutoBuildCancelReason::Unapproval,
             InvalidationReason::RollupMemberInvalidated { reason, .. } => get_cancel_reason(reason),
@@ -1025,7 +1062,9 @@ pub async fn invalidate_pr(
     // Note that we don't do this on `InvalidationReason::Close` itself, because that happens after
     // the PR has been closed already.
     let pr_closed = if let InvalidationReason::RollupMemberInvalidated { reason, .. } = &info.reason
-        && let InvalidationReason::Close | InvalidationReason::CommitShaChanged = &**reason
+        && let InvalidationReason::Close
+        | InvalidationReason::CommitShaChanged { .. }
+        | InvalidationReason::BaseBranchChanged = &**reason
         && matches!(
             pr_gh.status,
             PullRequestStatus::Open | PullRequestStatus::Draft
@@ -1040,7 +1079,8 @@ pub async fn invalidate_pr(
 
     // Step 4: recursively invalidate all open rollups containing this PR
     let invalidate_rollups = match info.reason {
-        InvalidationReason::CommitShaChanged
+        InvalidationReason::CommitShaChanged { .. }
+        | InvalidationReason::BaseBranchChanged
         | InvalidationReason::Close
         | InvalidationReason::Unapproval { .. } => true,
         // We do not assume that rollups contain other rollups
@@ -1168,7 +1208,12 @@ pub fn invalidation_comment(
         };
 
         let action = match &**reason {
-            InvalidationReason::CommitShaChanged => format!("{} its commit SHA", wrap("changed")),
+            InvalidationReason::CommitShaChanged { sha } => {
+                format!("{} its commit SHA to {sha}", wrap("changed"))
+            }
+            InvalidationReason::BaseBranchChanged => {
+                format!("{} its base branch", wrap("changed"))
+            }
             InvalidationReason::Close => format!("was {}", wrap("closed")),
             InvalidationReason::Unapproval { .. } => format!("was {}", wrap("unapproved")),
             InvalidationReason::RollupMemberInvalidated { .. } => {
