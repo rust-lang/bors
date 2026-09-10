@@ -233,8 +233,10 @@ pub(super) async fn command_squash(
                 &db,
                 &pr_model,
                 &pr_github,
-                InvalidationInfo::new(InvalidationReason::CommitShaChanged)
-                    .with_comment_url(notify_comment.html_url.to_string()),
+                InvalidationInfo::new(InvalidationReason::CommitShaChanged {
+                    sha: commit.clone(),
+                })
+                .with_comment_url(notify_comment.html_url.to_string()),
                 Some(
                     InvalidationComment::new(format!(
                         ":hammer: {} commits were squashed into {commit}.",
@@ -957,6 +959,36 @@ approved = ["+approved"]
         sha2
         sha2-reauthored-to-git-user
         ");
+    }
+
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
+    async fn squash_approve_push_webhook(pool: sqlx::PgPool) {
+        run_test((pool, squash_state()), async |ctx: &mut BorsTester| {
+            ctx.modify_pr_in_gh((), |pr| {
+                pr.title = "Foobar".to_string();
+                pr.reset_to_single_commit(Commit::from_sha("sha1"));
+                pr.add_commits(vec![Commit::from_sha("sha2")]);
+            });
+            ctx.post_comment("@bors r+ squash").await?;
+            ctx.expect_comments((), 1).await;
+            ctx.run_gitop_queue().await?;
+            insta::assert_snapshot!(
+                ctx.get_next_comment_text(()).await?,
+                @":hammer: 2 commits were squashed into sha2-reauthored-to-git-user."
+            );
+            insta::assert_snapshot!(
+                ctx.get_next_comment_text(()).await?,
+                @":hammer: 2 commits were squashed into sha2-reauthored-to-git-user."
+            );
+            let branch = ctx.pr(()).await.get_gh_pr().head_branch_copy();
+
+            // Check that this won't unapprove the PR
+            ctx.push_to_pr((), branch.get_commit().clone()).await?;
+
+            ctx.pr(()).await.expect_approved_by("default-user");
+            Ok(())
+        })
+        .await;
     }
 
     fn squash_state() -> GitHub {
