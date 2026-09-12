@@ -23,7 +23,7 @@ pub enum CommandParseError {
 }
 
 /// Part of a command, either a bare string like `try` or a key value like `parent=<sha>`.
-#[derive(PartialEq, Copy, Clone)]
+#[derive(Debug, PartialEq, Copy, Clone)]
 enum CommandPart<'a> {
     Bare(&'a str),
     KeyValue { key: &'a str, value: &'a str },
@@ -267,6 +267,11 @@ fn parse_parts(input: &str) -> Result<Vec<CommandPart<'_>>, CommandParseError> {
 /// - "@bors r+ [p=<priority>] [rollup=<never|iffy|maybe|always>] [force] [note=<note>]"
 /// - "@bors r=<user> [p=<priority>] [rollup=<never|iffy|maybe|always>] [force] [note=<note>]"
 fn parser_approval(command: &CommandPart<'_>, parts: &[CommandPart<'_>]) -> ParseResult {
+    let also_squash = parts
+        .iter()
+        .position(|x| *x == CommandPart::Bare("squash"))
+        .map(|x| &parts[x..]);
+
     let approver = match command {
         CommandPart::Bare("r+") => Approver::Myself,
         CommandPart::KeyValue { key: "r", value } => {
@@ -300,6 +305,47 @@ fn parser_approval(command: &CommandPart<'_>, parts: &[CommandPart<'_>]) -> Pars
     let force = parts
         .iter()
         .any(|part| matches!(part, CommandPart::Bare("force")));
+
+    // parse the squash part of the approve_squash command
+    if let Some(also_squash) = also_squash {
+        match parser_squash(&also_squash[0], &also_squash[1..]) {
+            None => {
+                return Some(Err(CommandParseError::UnknownArg {
+                    arg: also_squash[1..][0].as_key().to_owned(),
+                    did_you_mean: "r+ squash [msg|message=\"<commit-msg>\"|description]"
+                        .to_string(),
+                }));
+            }
+            Some(val) => match val {
+                Ok(val) => match val {
+                    BorsCommand::Squash { commit_message, .. } => {
+                        return Some(Ok(BorsCommand::SquashApprove {
+                            commit_message,
+                            approver,
+                            priority,
+                            rollup,
+                            note,
+                        }));
+                    }
+                    _ => {
+                        return Some(Err(CommandParseError::UnknownArg {
+                            arg: also_squash[1..][0].as_key().to_owned(),
+                            did_you_mean: "r+ squash [msg|message=\"<commit-msg>\"|description]"
+                                .to_string(),
+                        }));
+                    }
+                },
+                Err(_) => {
+                    return Some(Err(CommandParseError::UnknownArg {
+                        arg: also_squash[1..][0].as_key().to_owned(),
+                        did_you_mean: "r+ squash [msg|message=\"<commit-msg>\"|description]"
+                            .to_string(),
+                    }));
+                }
+            },
+        }
+    }
+
     Some(Ok(BorsCommand::Approve {
         approver,
         priority,
@@ -2129,6 +2175,137 @@ for the crater",
                     commit_message: Explicit(
                         "foo",
                     ),
+                },
+            ),
+        ]
+        "#);
+    }
+
+    #[test]
+    fn parse_squash_approve() {
+        let cmds = parse_commands("@bors r+ squash");
+        insta::assert_debug_snapshot!(cmds, @"
+        [
+            Ok(
+                SquashApprove {
+                    commit_message: AutoGenerate,
+                    approver: Myself,
+                    priority: None,
+                    rollup: None,
+                    note: None,
+                },
+            ),
+        ]
+        ");
+    }
+
+    #[test]
+    fn parse_squash_approve_msg() {
+        let cmds = parse_commands("@bors r+ squash msg=foo");
+        insta::assert_debug_snapshot!(cmds, @r#"
+        [
+            Ok(
+                SquashApprove {
+                    commit_message: Explicit(
+                        "foo",
+                    ),
+                    approver: Myself,
+                    priority: None,
+                    rollup: None,
+                    note: None,
+                },
+            ),
+        ]
+        "#);
+    }
+
+    #[test]
+    fn parse_squash_approve_message() {
+        let cmds = parse_commands("@bors r+ squash message=foo");
+        insta::assert_debug_snapshot!(cmds, @r#"
+        [
+            Ok(
+                SquashApprove {
+                    commit_message: Explicit(
+                        "foo",
+                    ),
+                    approver: Myself,
+                    priority: None,
+                    rollup: None,
+                    note: None,
+                },
+            ),
+        ]
+        "#);
+    }
+
+    #[test]
+    fn parse_squash_approve_message_quoted() {
+        let cmds = parse_commands(r#"@bors r+ squash message="foo bar baz""#);
+        insta::assert_debug_snapshot!(cmds, @r#"
+        [
+            Ok(
+                SquashApprove {
+                    commit_message: Explicit(
+                        "foo bar baz",
+                    ),
+                    approver: Myself,
+                    priority: None,
+                    rollup: None,
+                    note: None,
+                },
+            ),
+        ]
+        "#);
+    }
+
+    #[test]
+    fn parse_squash_approve_msg_description() {
+        let cmds = parse_commands("@bors r+ squash msg=description");
+        insta::assert_debug_snapshot!(cmds, @"
+        [
+            Ok(
+                SquashApprove {
+                    commit_message: PullRequestDescription,
+                    approver: Myself,
+                    priority: None,
+                    rollup: None,
+                    note: None,
+                },
+            ),
+        ]
+        ");
+    }
+
+    #[test]
+    fn parse_squash_approve_unknown_arg() {
+        let cmds = parse_commands("@bors r+ squash commit=foo");
+        insta::assert_debug_snapshot!(cmds, @r#"
+        [
+            Err(
+                UnknownArg {
+                    arg: "commit",
+                    did_you_mean: "r+ squash [msg|message=\"<commit-msg>\"|description]",
+                },
+            ),
+        ]
+        "#);
+    }
+
+    #[test]
+    fn parse_squash_approve_extra_args() {
+        let cmds = parse_commands("@bors r+ squash message=foo baz");
+        insta::assert_debug_snapshot!(cmds, @r#"
+        [
+            Ok(
+                SquashApprove {
+                    commit_message: Explicit(
+                        "foo",
+                    ),
+                    approver: Myself,
+                    priority: None,
+                    rollup: None,
+                    note: None,
                 },
             ),
         ]
