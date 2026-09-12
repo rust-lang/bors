@@ -178,7 +178,7 @@ pub enum BorsCommand {
         /// Squash message for the commit
         commit_message: SquashCommitMessage,
     },
-    SquashAndApprove {
+    SquashApprove {
         /// Squash message for the commit
         commit_message: SquashCommitMessage,
         /// Who is approving the commit.

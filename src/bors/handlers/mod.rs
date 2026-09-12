@@ -672,7 +672,7 @@ async fn handle_comment(
                             Ok(())
                         }
                     }
-                    BorsCommand::SquashAndApprove {
+                    BorsCommand::SquashApprove {
                         commit_message,
                         approver,
                         priority,
