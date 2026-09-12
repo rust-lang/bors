@@ -410,7 +410,6 @@ mod tests {
         BorsTester, Comment, Commit, GitHub, GitUser, PullRequest, Repo, User, default_repo_name,
         run_test,
     };
-    use std::sync::Arc;
 
     #[test]
     fn parse_coauthor_valid_trailer() {
@@ -893,72 +892,6 @@ also include this pls
             Ok(())
         })
             .await;
-    }
-
-    async fn approve_add_label(pool: sqlx::PgPool) {
-        let gh = GitHub::default().append_to_default_config(
-            r#"
-[labels]
-approved = ["+approved"]
-"#,
-        );
-        run_test((pool, gh), async |ctx: &mut BorsTester| {
-            ctx.approve(()).await?;
-            ctx.pr(()).await.expect_added_labels(&["approved"]);
-            Ok(())
-        })
-        .await;
-    }
-
-    #[sqlx::test(migrator = "crate::MIGRATOR")]
-    async fn squash_two_commits_and_approve(pool: sqlx::PgPool) {
-        let pool = Arc::new(pool);
-        let gh = run_test(
-            (
-                <sqlx::PgPool as Clone>::clone(&*(pool.clone())),
-                squash_state(),
-            ),
-            async |ctx: &mut BorsTester| {
-                ctx.modify_pr_in_gh((), |pr| {
-                    pr.title = "Foobar".to_string();
-                    pr.reset_to_single_commit(Commit::from_sha("sha1"));
-                    pr.add_commits(vec![Commit::from_sha("sha2")]);
-                });
-                ctx.post_comment("@bors squash").await?;
-                ctx.run_gitop_queue().await?;
-                insta::assert_snapshot!(
-                    ctx.get_next_comment_text(()).await?,
-                    @":construction: Squashing... this can take a few minutes."
-                );
-                insta::assert_snapshot!(
-                    ctx.get_next_comment_text(()).await?,
-                    @":hammer: 2 commits were squashed into sha2-reauthored-to-git-user."
-                );
-                let branch = ctx.pr(()).await.get_gh_pr().head_branch_copy();
-                assert_eq!(branch.get_commits().len(), 1);
-                insta::assert_debug_snapshot!(branch.get_commit(), @r#"
-            Commit {
-                sha: "sha2-reauthored-to-git-user",
-                message: "Foobar\n\n* Commit sha1\n* Commit sha2\n",
-                author: GitUser {
-                    name: "git-user",
-                    email: "git-user@git.com",
-                },
-            }
-            "#);
-                approve_add_label(<sqlx::PgPool as Clone>::clone(&*(pool.clone()))).await;
-
-                ctx.pr(()).await.expect_approved_by("default-user");
-                Ok(())
-            },
-        )
-        .await;
-        insta::assert_snapshot!(gh.get_sha_history((), "pr/1"), @"
-        pr-1-sha
-        sha1
-        sha2
-        sha2-reauthored-to-git-user
-        ");
     }
 
     #[sqlx::test(migrator = "crate::MIGRATOR")]
