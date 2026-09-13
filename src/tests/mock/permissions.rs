@@ -98,6 +98,7 @@ impl TeamApiMockServer {
                                 github: None,
                                 website_data: None,
                                 roles: vec![],
+                                google_workspace_saml_group: None,
                             },
                         )
                     })
