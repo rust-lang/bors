@@ -1,4 +1,4 @@
-FROM rust:1.92 AS base
+FROM rust:1.98.1 AS base
 
 RUN cargo install cargo-chef
 
