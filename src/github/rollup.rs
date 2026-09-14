@@ -522,7 +522,14 @@ async fn has_pending_auto_build_conflict(
             );
             true
         }
-        Ok(_) | Err(MergeError::AlreadyMerged) => {
+        Ok(_) => {
+            tracing::info!(
+                pending_pr = %pending_auto_pr_number,
+                "Rollup is compatible with the pending auto build"
+            );
+            false
+        }
+        Err(MergeError::AlreadyMerged) => {
             tracing::info!(
                 pending_pr = %pending_auto_pr_number,
                 "Rollup already contains the pending auto build"
