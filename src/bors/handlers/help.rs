@@ -65,6 +65,9 @@ mod tests {
             - `squash [msg|message=<commit-message>|description]`: Squash the commits of a PR into a single commit.
                 - Optionally, you can specify a `<commit-message>` for the created commit. If not specified, the commit messages of all squashed commits will be combined.
                 - If you specify `msg=description`, then the PR body will be used as the squashed commit message.
+            - `r+ squash [msg|message=<commit-message>|description]`: Squash the commits of a PR into a single commit, then approve on your behalf.
+                - Optionally, you can specify a `<commit-message>` for the created commit. If not specified, the commit messages of all squashed commits will be combined.
+                - If you specify `msg=description`, then the PR body will be used as the squashed commit message.
             - `info`: Get information about the current PR
 
             ## Repository management

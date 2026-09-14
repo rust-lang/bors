@@ -527,6 +527,32 @@ pub(crate) async fn unapprove_pull_request(
     .await
 }
 
+pub(crate) async fn unapprove_pull_request_if_sha_changed(
+    executor: impl PgExecutor<'_>,
+    pr_id: i32,
+    sha: &CommitSha,
+) -> anyhow::Result<bool> {
+    measure_db_query("unapprove_pull_request_if_sha_changed", || async {
+        let result = sqlx::query!(
+            r#"
+                UPDATE pull_request
+                SET approved_by = NULL,
+                    approved_sha = NULL,
+                    auto_build_id = NULL
+                WHERE
+                    id = $1 AND
+                    (approved_by IS NULL OR approved_sha != $2)
+                "#,
+            pr_id,
+            sha.0
+        )
+        .execute(executor)
+        .await?;
+        Ok(result.rows_affected() > 0)
+    })
+    .await
+}
+
 pub(crate) async fn delegate_pull_request(
     executor: impl PgExecutor<'_>,
     pr_id: i32,

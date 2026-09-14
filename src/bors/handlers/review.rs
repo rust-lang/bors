@@ -35,6 +35,7 @@ pub(super) async fn command_approve(
     rollup_mode: Option<RollupMode>,
     note: Option<String>,
     merge_queue_tx: &MergeQueueSender,
+    sha: CommitSha,
 ) -> anyhow::Result<()> {
     tracing::info!("Approving PR {}", pr.number());
     if !has_permission(&repo_state, author, pr, PermissionType::Review).await? {
@@ -79,7 +80,7 @@ pub(super) async fn command_approve(
 
     let approval_info = ApprovalInfo {
         approver: approver.clone(),
-        sha: pr.github.head.sha.to_string(),
+        sha: sha.to_string(),
     };
 
     db.approve(pr.db, approval_info, priority, rollup_mode, note)
@@ -125,7 +126,7 @@ pub(super) async fn command_approve(
             approved_comment(
                 ctx.get_web_url(),
                 repo_state.repository(),
-                &pr.github.head.sha,
+                &sha,
                 &approver,
                 unknown_reviewers,
                 tree_state,

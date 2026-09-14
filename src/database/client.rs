@@ -8,8 +8,9 @@ use super::operations::{
     insert_repo_if_not_exists, is_rollup, record_tagged_bot_comment, set_pr_assignees,
     set_pr_mergeability_state, set_pr_priority, set_pr_rollup_mode, set_pr_status,
     set_rollup_member_unrolled_state, set_rollup_members_unrolled_state,
-    set_stale_mergeability_status_by_base_branch, unapprove_pull_request, undelegate_pull_request,
-    update_build, update_pr_try_build_id, update_pr_unrolled_build_id, update_workflow_status,
+    set_stale_mergeability_status_by_base_branch, unapprove_pull_request,
+    unapprove_pull_request_if_sha_changed, undelegate_pull_request, update_build,
+    update_pr_try_build_id, update_pr_unrolled_build_id, update_workflow_status,
     upsert_pull_request, upsert_repository,
 };
 use super::{
@@ -112,6 +113,17 @@ impl PgDbClient {
     /// Unapprove a pull request and remove its auto build status, if there is any attached.
     pub async fn unapprove(&self, pr: &PullRequestModel) -> anyhow::Result<()> {
         unapprove_pull_request(&self.pool, pr.id).await
+    }
+
+    /// Unapprove a pull request and remove its auto build status, if there is any attached.
+    /// Only do it if `sha` wasn't already approved.
+    /// Returns true if the PR was actually unapproved.
+    pub async fn unapprove_if_sha_changed(
+        &self,
+        pr: &PullRequestModel,
+        sha: &CommitSha,
+    ) -> anyhow::Result<bool> {
+        unapprove_pull_request_if_sha_changed(&self.pool, pr.id, sha).await
     }
 
     pub async fn clear_auto_build(&self, pr: &PullRequestModel) -> anyhow::Result<()> {
