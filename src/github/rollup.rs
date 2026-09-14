@@ -1,7 +1,7 @@
 use super::{CommitSha, GithubRepoName, PullRequest, PullRequestNumber};
 use crate::PgDbClient;
-use crate::bors::{RollupMode, make_text_ignored_by_bors, normalize_merge_message};
-use crate::database::{BuildModel, RegisterRollupMemberParams};
+use crate::bors::{BuildKind, RollupMode, make_text_ignored_by_bors, normalize_merge_message};
+use crate::database::{BuildModel, QueueStatus, RegisterRollupMemberParams};
 use crate::github::api::client::GithubRepositoryClient;
 use crate::github::api::operations::{ForcePush, MergeError};
 use crate::github::oauth::{OAuthClient, UserGitHubClient};
@@ -383,10 +383,9 @@ async fn create_rollup(
         }
     }
 
-    match db.find_pending_auto_build(&base_repo, &base_branch).await {
-        Ok(Some(pending_auto_build)) => {
+    match find_pending_auto_build(&db, &base_repo, &base_branch).await {
+        Ok(Some((pending_auto_build, pending_auto_pr_number))) => {
             if let Some(rollup_head) = successes.last()
-                && let Some(pending_auto_pr_number) = pending_auto_build.pr_number
                 && has_pending_auto_build_conflict(
                     &user_client.client,
                     &rollup_branch,
@@ -453,6 +452,47 @@ async fn create_rollup(
         .await?;
 
     Ok(pr)
+}
+
+async fn find_pending_auto_build(
+    db: &PgDbClient,
+    repo: &GithubRepoName,
+    base_branch: &str,
+) -> anyhow::Result<Option<(BuildModel, PullRequestNumber)>> {
+    let Some(pending_auto_build) = db
+        .get_pending_builds(repo)
+        .await?
+        .into_iter()
+        .find(|build| build.kind == BuildKind::Auto)
+    else {
+        return Ok(None);
+    };
+
+    let Some(pr) = db.find_pr_by_build(&pending_auto_build).await? else {
+        tracing::warn!(
+            build_id = pending_auto_build.id,
+            "Ignoring an orphaned pending auto build during the rollup conflict check"
+        );
+        return Ok(None);
+    };
+
+    if pr.base_branch != base_branch {
+        return Ok(None);
+    }
+
+    if !matches!(
+        pr.queue_status(),
+        QueueStatus::Pending(_, attached_build) if attached_build.id == pending_auto_build.id
+    ) {
+        tracing::warn!(
+            build_id = pending_auto_build.id,
+            pr = %pr.number,
+            "Ignoring a stale pending auto build during the rollup conflict check"
+        );
+        return Ok(None);
+    }
+
+    Ok(Some((pending_auto_build, pr.number)))
 }
 
 /// Temporarily merges the pending auto build's commit into the rollup branch
@@ -723,12 +763,6 @@ pub mod tests {
         let gh = run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
             ctx.approve(()).await?;
             ctx.start_auto_build(()).await?;
-            assert!(
-                ctx.db()
-                    .find_pending_auto_build(&default_repo_name(), "beta")
-                    .await?
-                    .is_none()
-            );
             let pr2 = ctx.open_pr((), |_| {}).await?;
             let pr3 = ctx.open_pr((), |_| {}).await?;
             ctx.approve(pr2.id()).await?;

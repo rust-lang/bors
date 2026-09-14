@@ -780,51 +780,6 @@ WHERE repository = $1
     .await
 }
 
-pub(crate) async fn find_pending_auto_build(
-    executor: impl PgExecutor<'_>,
-    repo: &GithubRepoName,
-    base_branch: &str,
-) -> anyhow::Result<Option<BuildModel>> {
-    measure_db_query("find_pending_auto_build", || async {
-        let build = sqlx::query_as!(
-            BuildModel,
-            r#"
-SELECT
-    auto_build.id,
-    auto_build.repository AS "repository: GithubRepoName",
-    auto_build.pr_number AS "pr_number: PullRequestNumber",
-    auto_build.branch,
-    auto_build.kind AS "kind: BuildKind",
-    auto_build.commit_sha,
-    auto_build.status AS "status: BuildStatus",
-    auto_build.parent,
-    auto_build.created_at AS "created_at: DateTime<Utc>",
-    auto_build.check_run_id,
-    auto_build.duration AS "duration: PgDuration"
-FROM pull_request AS pr
-JOIN build AS auto_build ON pr.auto_build_id = auto_build.id
-WHERE pr.repository = $1
-    AND pr.base_branch = $2
-    AND pr.status = 'open'
-    AND pr.approved_by IS NOT NULL
-    AND pr.approved_sha IS NOT NULL
-    AND auto_build.repository = pr.repository
-    AND auto_build.pr_number = pr.number
-    AND auto_build.kind = $3
-    AND auto_build.status = $4
-"#,
-            repo as &GithubRepoName,
-            base_branch,
-            BuildKind::Auto as BuildKind,
-            BuildStatus::Pending as BuildStatus,
-        )
-        .fetch_optional(executor)
-        .await?;
-        Ok(build)
-    })
-    .await
-}
-
 pub(crate) async fn update_build(
     executor: impl PgExecutor<'_>,
     build_id: PrimaryKey,

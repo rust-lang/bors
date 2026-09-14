@@ -1,13 +1,13 @@
 use super::operations::{
     approve_pull_request, clear_auto_build, create_build, create_workflow, delegate_pull_request,
-    delete_tagged_bot_comment, find_build, find_pending_auto_build, find_pr_by_build,
-    find_rollups_for_member_pr, get_last_n_successful_auto_builds, get_nonclosed_pull_requests,
-    get_pending_builds, get_prs_with_stale_mergeability_or_approved, get_pull_request,
-    get_pull_request_by_id, get_repository, get_repository_by_name, get_rollup_members,
-    get_rollup_members_for_unrolling, get_tagged_bot_comments, get_workflow_urls_for_build,
-    get_workflows_for_build, insert_repo_if_not_exists, is_rollup, record_tagged_bot_comment,
-    set_pr_assignees, set_pr_mergeability_state, set_pr_priority, set_pr_rollup_mode,
-    set_pr_status, set_rollup_member_unrolled_state, set_rollup_members_unrolled_state,
+    delete_tagged_bot_comment, find_build, find_pr_by_build, find_rollups_for_member_pr,
+    get_last_n_successful_auto_builds, get_nonclosed_pull_requests, get_pending_builds,
+    get_prs_with_stale_mergeability_or_approved, get_pull_request, get_pull_request_by_id,
+    get_repository, get_repository_by_name, get_rollup_members, get_rollup_members_for_unrolling,
+    get_tagged_bot_comments, get_workflow_urls_for_build, get_workflows_for_build,
+    insert_repo_if_not_exists, is_rollup, record_tagged_bot_comment, set_pr_assignees,
+    set_pr_mergeability_state, set_pr_priority, set_pr_rollup_mode, set_pr_status,
+    set_rollup_member_unrolled_state, set_rollup_members_unrolled_state,
     set_stale_mergeability_status_by_base_branch, unapprove_pull_request, undelegate_pull_request,
     update_build, update_pr_try_build_id, update_pr_unrolled_build_id, update_workflow_status,
     upsert_pull_request, upsert_repository,
@@ -311,14 +311,6 @@ impl PgDbClient {
         repo: &GithubRepoName,
     ) -> anyhow::Result<Vec<BuildModel>> {
         get_pending_builds(&self.pool, repo).await
-    }
-
-    pub async fn find_pending_auto_build(
-        &self,
-        repo: &GithubRepoName,
-        base_branch: &str,
-    ) -> anyhow::Result<Option<BuildModel>> {
-        find_pending_auto_build(&self.pool, repo, base_branch).await
     }
 
     pub async fn update_build(
