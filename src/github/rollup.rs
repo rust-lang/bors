@@ -1,9 +1,9 @@
-use super::{GithubRepoName, PullRequest, PullRequestNumber};
+use super::{CommitSha, GithubRepoName, PullRequest, PullRequestNumber};
 use crate::PgDbClient;
-use crate::bors::{RollupMode, make_text_ignored_by_bors, normalize_merge_message};
-use crate::database::RegisterRollupMemberParams;
+use crate::bors::{BuildKind, RollupMode, make_text_ignored_by_bors, normalize_merge_message};
+use crate::database::{BuildModel, QueueStatus, RegisterRollupMemberParams};
 use crate::github::api::client::GithubRepositoryClient;
-use crate::github::api::operations::MergeError;
+use crate::github::api::operations::{ForcePush, MergeError};
 use crate::github::oauth::{OAuthClient, UserGitHubClient};
 use crate::permissions::PermissionType;
 use crate::server::ServerStateRef;
@@ -383,6 +383,32 @@ async fn create_rollup(
         }
     }
 
+    match find_pending_auto_build(&db, &base_repo, &base_branch).await {
+        Ok(Some((pending_auto_build, pending_auto_pr_number))) => {
+            if let Some(rollup_head) = successes.last()
+                && has_pending_auto_build_conflict(
+                    &user_client.client,
+                    &rollup_branch,
+                    &rollup_head.rolled_up_merge_sha,
+                    &pending_auto_build,
+                    pending_auto_pr_number,
+                )
+                .await?
+            {
+                write!(
+                    body,
+                    "\n> [!WARNING]\n> This rollup conflicts with pending auto build #{pending_auto_pr_number} and may need to be recreated if the pending build succeeds.\n",
+                )?;
+            }
+        }
+        Ok(None) => {}
+        Err(error) => {
+            tracing::warn!(
+                "Could not load the pending auto build for the rollup conflict check: {error:?}"
+            );
+        }
+    }
+
     let ignored_body = format!(
         "r? @ghost\n\n\
         [Create a similar rollup]({web_url}/queue/{repo_name}?prs={pr_nums})",
@@ -428,6 +454,109 @@ async fn create_rollup(
     Ok(pr)
 }
 
+async fn find_pending_auto_build(
+    db: &PgDbClient,
+    repo: &GithubRepoName,
+    base_branch: &str,
+) -> anyhow::Result<Option<(BuildModel, PullRequestNumber)>> {
+    let Some(pending_auto_build) = db
+        .get_pending_builds(repo)
+        .await?
+        .into_iter()
+        .find(|build| build.kind == BuildKind::Auto)
+    else {
+        return Ok(None);
+    };
+
+    let Some(pr) = db.find_pr_by_build(&pending_auto_build).await? else {
+        tracing::warn!(
+            build_id = pending_auto_build.id,
+            "Ignoring an orphaned pending auto build during the rollup conflict check"
+        );
+        return Ok(None);
+    };
+
+    if pr.base_branch != base_branch {
+        return Ok(None);
+    }
+
+    if !matches!(
+        pr.queue_status(),
+        QueueStatus::Pending(_, attached_build) if attached_build.id == pending_auto_build.id
+    ) {
+        tracing::warn!(
+            build_id = pending_auto_build.id,
+            pr = %pr.number,
+            "Ignoring a stale pending auto build during the rollup conflict check"
+        );
+        return Ok(None);
+    }
+
+    Ok(Some((pending_auto_build, pr.number)))
+}
+
+/// Temporarily merges the pending auto build's commit into the rollup branch
+/// Returns Ok(true) if there is a conflict between the current rollup branch and the pending build.
+async fn has_pending_auto_build_conflict(
+    client: &GithubRepositoryClient,
+    rollup_branch: &str,
+    rollup_branch_sha: &CommitSha,
+    pending_auto_build: &BuildModel,
+    pending_auto_pr_number: PullRequestNumber,
+) -> Result<bool, RollupError> {
+    let merge_message =
+        format!("Rollup compatibility check against pending auto build #{pending_auto_pr_number}");
+    // Merge the pending auto build's commit into the rollup branch
+    let has_conflict = match client
+        .merge_branches(
+            rollup_branch,
+            &CommitSha(pending_auto_build.commit_sha.clone()),
+            &merge_message,
+        )
+        .await
+    {
+        Err(MergeError::Conflict) => {
+            tracing::info!(
+                pending_pr = %pending_auto_pr_number,
+                "Rollup conflicts with the pending auto build"
+            );
+            true
+        }
+        Ok(_) => {
+            tracing::info!(
+                pending_pr = %pending_auto_pr_number,
+                "Rollup is compatible with the pending auto build"
+            );
+            false
+        }
+        Err(MergeError::AlreadyMerged) => {
+            tracing::info!(
+                pending_pr = %pending_auto_pr_number,
+                "Rollup already contains the pending auto build"
+            );
+            false
+        }
+        Err(error) => {
+            tracing::warn!(
+                "Could not check for conflicts with pending auto build #{pending_auto_pr_number}: {error:?}"
+            );
+            false
+        }
+    };
+
+    // Restore the rollup branch after the temporary merge
+    client
+        .set_branch_to_sha(rollup_branch, rollup_branch_sha, ForcePush::Yes)
+        .await
+        .map_err(|error| {
+            anyhow::anyhow!(
+                "Could not restore rollup branch {rollup_branch} to {rollup_branch_sha}: {error:?}"
+            )
+        })?;
+
+    Ok(has_conflict)
+}
+
 #[cfg(test)]
 pub mod tests {
     use crate::bors::{PullRequestStatus, RollupMode};
@@ -437,8 +566,8 @@ pub mod tests {
     use crate::github::{GithubRepoName, PullRequestNumber};
     use crate::permissions::PermissionType;
     use crate::tests::{
-        ApiRequest, ApiResponse, BorsTester, Comment, Commit, GitHub, MergeBehavior, PullRequest,
-        Repo, User, default_repo_name, run_test,
+        ApiRequest, ApiResponse, BorsTester, BranchPushBehaviour, BranchPushError, Comment, Commit,
+        GitHub, MergeBehavior, PullRequest, Repo, User, default_repo_name, run_test,
     };
     use http::StatusCode;
     use std::collections::{HashMap, HashSet};
@@ -596,6 +725,121 @@ pub mod tests {
         [Create a similar rollup](https://bors-test.com/queue/borstest?prs=2,3,4,5)
         <!-- homu-ignore:end -->
         ");
+    }
+
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
+    async fn rollup_pending_auto_build_conflict(pool: sqlx::PgPool) {
+        let gh = run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
+            ctx.approve(()).await?;
+            ctx.start_auto_build(()).await?;
+            let pr2 = ctx.open_pr((), |_| {}).await?;
+            let pr3 = ctx.open_pr((), |_| {}).await?;
+            ctx.approve(pr2.id()).await?;
+            ctx.approve(pr3.id()).await?;
+
+            ctx.modify_repo(fork_repo(), |repo| {
+                let mut merge_count = 0;
+                repo.merge_behavior = MergeBehavior::Custom(Box::new(move || {
+                    merge_count += 1;
+                    (merge_count == 3).then_some(StatusCode::CONFLICT)
+                }));
+            });
+
+            make_rollup(ctx, &[&pr2, &pr3])
+                .await?
+                .assert_status(StatusCode::SEE_OTHER);
+            Ok(())
+        })
+        .await;
+
+        insta::assert_snapshot!(gh.get_repo(()).lock().get_pr(4).description, @"
+        Successful merges:
+
+         - rust-lang/borstest#2 (Title of PR 2)
+         - rust-lang/borstest#3 (Title of PR 3)
+
+        > [!WARNING]
+        > This rollup conflicts with pending auto build #1 and may need to be recreated if the pending build succeeds.
+
+        <!-- homu-ignore:start -->
+        r? @ghost
+
+        [Create a similar rollup](https://bors-test.com/queue/borstest?prs=2,3)
+        <!-- homu-ignore:end -->
+        ");
+    }
+
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
+    async fn rollup_pending_auto_build_mergeable(pool: sqlx::PgPool) {
+        let gh = run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
+            ctx.approve(()).await?;
+            ctx.start_auto_build(()).await?;
+            let pr2 = ctx.open_pr((), |_| {}).await?;
+            let pr3 = ctx.open_pr((), |_| {}).await?;
+            ctx.approve(pr2.id()).await?;
+            ctx.approve(pr3.id()).await?;
+
+            make_rollup(ctx, &[&pr2, &pr3])
+                .await?
+                .assert_status(StatusCode::SEE_OTHER);
+            Ok(())
+        })
+        .await;
+
+        let rollup_branch = gh.get_repo(()).lock().get_pr(4).head_branch_copy();
+        assert_eq!(rollup_branch.get_commits().len(), 1);
+    }
+
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
+    async fn rollup_pending_auto_conflict_check_is_best_effort(pool: sqlx::PgPool) {
+        run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
+            ctx.approve(()).await?;
+            ctx.start_auto_build(()).await?;
+            let pr2 = ctx.open_pr((), |_| {}).await?;
+            ctx.approve(pr2.id()).await?;
+
+            ctx.modify_repo(fork_repo(), |repo| {
+                let mut merge_count = 0;
+                repo.merge_behavior = MergeBehavior::Custom(Box::new(move || {
+                    merge_count += 1;
+                    (merge_count == 2).then_some(StatusCode::NOT_FOUND)
+                }));
+            });
+
+            make_rollup(ctx, &[&pr2])
+                .await?
+                .assert_status(StatusCode::SEE_OTHER);
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
+    async fn rollup_pending_auto_conflict_restoration_failure_aborts_creation(pool: sqlx::PgPool) {
+        let gh = run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
+            ctx.approve(()).await?;
+            ctx.start_auto_build(()).await?;
+            let pr2 = ctx.open_pr((), |_| {}).await?;
+            ctx.approve(pr2.id()).await?;
+
+            ctx.modify_repo(fork_repo(), |repo| {
+                let mut merge_count = 0;
+                repo.merge_behavior = MergeBehavior::Custom(Box::new(move || {
+                    merge_count += 1;
+                    (merge_count == 2).then_some(StatusCode::CONFLICT)
+                }));
+                repo.push_behaviour =
+                    BranchPushBehaviour::always_fail(BranchPushError::InternalServerError);
+            });
+
+            make_rollup(ctx, &[&pr2])
+                .await?
+                .assert_status(StatusCode::INTERNAL_SERVER_ERROR);
+            Ok(())
+        })
+        .await;
+
+        assert!(!gh.get_repo(()).lock().pulls().contains_key(&3));
     }
 
     #[sqlx::test(migrator = "crate::MIGRATOR")]
