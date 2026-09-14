@@ -496,6 +496,7 @@ async fn find_pending_auto_build(
 }
 
 /// Temporarily merges the pending auto build's commit into the rollup branch
+/// Returns Ok(true) if there is a conflict between the current rollup branch and the pending build.
 async fn has_pending_auto_build_conflict(
     client: &GithubRepositoryClient,
     rollup_branch: &str,
@@ -506,7 +507,7 @@ async fn has_pending_auto_build_conflict(
     let merge_message =
         format!("Rollup compatibility check against pending auto build #{pending_auto_pr_number}");
     // Merge the pending auto build's commit into the rollup branch
-    match client
+    let has_conflict = match client
         .merge_branches(
             rollup_branch,
             &CommitSha(pending_auto_build.commit_sha.clone()),
@@ -519,20 +520,22 @@ async fn has_pending_auto_build_conflict(
                 pending_pr = %pending_auto_pr_number,
                 "Rollup conflicts with the pending auto build"
             );
-            return Ok(true);
+            true
         }
         Ok(_) | Err(MergeError::AlreadyMerged) => {
             tracing::info!(
                 pending_pr = %pending_auto_pr_number,
                 "Rollup already contains the pending auto build"
             );
+            false
         }
         Err(error) => {
             tracing::warn!(
                 "Could not check for conflicts with pending auto build #{pending_auto_pr_number}: {error:?}"
             );
+            false
         }
-    }
+    };
 
     // Restore the rollup branch after the temporary merge
     client
@@ -544,7 +547,7 @@ async fn has_pending_auto_build_conflict(
             )
         })?;
 
-    Ok(false)
+    Ok(has_conflict)
 }
 
 #[cfg(test)]
@@ -804,7 +807,7 @@ pub mod tests {
     }
 
     #[sqlx::test(migrator = "crate::MIGRATOR")]
-    async fn rollup_pending_auto_branch_restoration_failure_aborts_creation(pool: sqlx::PgPool) {
+    async fn rollup_pending_auto_conflict_restoration_failure_aborts_creation(pool: sqlx::PgPool) {
         let gh = run_test((pool, rollup_state()), async |ctx: &mut BorsTester| {
             ctx.approve(()).await?;
             ctx.start_auto_build(()).await?;
@@ -812,6 +815,11 @@ pub mod tests {
             ctx.approve(pr2.id()).await?;
 
             ctx.modify_repo(fork_repo(), |repo| {
+                let mut merge_count = 0;
+                repo.merge_behavior = MergeBehavior::Custom(Box::new(move || {
+                    merge_count += 1;
+                    (merge_count == 2).then_some(StatusCode::CONFLICT)
+                }));
                 repo.push_behaviour =
                     BranchPushBehaviour::always_fail(BranchPushError::InternalServerError);
             });
