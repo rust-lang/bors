@@ -397,7 +397,7 @@ async fn create_rollup(
             {
                 write!(
                     body,
-                    "\nThis rollup conflicts with pending auto build #{pending_auto_pr_number} and may need to be recreated if the pending build succeeds.\n",
+                    "\n> [!WARNING]\n> This rollup conflicts with pending auto build #{pending_auto_pr_number} and may need to be recreated if the pending build succeeds.\n",
                 )?;
             }
         }
@@ -758,7 +758,8 @@ pub mod tests {
          - rust-lang/borstest#2 (Title of PR 2)
          - rust-lang/borstest#3 (Title of PR 3)
 
-        This rollup conflicts with pending auto build #1 and may need to be recreated if the pending build succeeds.
+        > [!WARNING]
+        > This rollup conflicts with pending auto build #1 and may need to be recreated if the pending build succeeds.
 
         <!-- homu-ignore:start -->
         r? @ghost
