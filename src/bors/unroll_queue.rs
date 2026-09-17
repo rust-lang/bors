@@ -344,7 +344,8 @@ async fn create_unroll_result_comment(
         | PR# | Message | Perf Build Sha |\n|----|----|:-----:|\n\
         {unrolled_rows}\n\
         *parent commit*: {parent_sha_link}\n\nIn the case of a perf regression, \
-        run the following command for each PR you suspect might be the cause: `@rust-timer build $SHA`\n\
+        run the following command with the SHAs of each PR you suspect might be the cause: `@rust-timer triage $SHA $SHA $SHA...`, \
+        or run `@rust-timer triage all` to benchmark all rollup members.\n\
         <!-- machine-readable-shas: {machine_readable_shas} -->"
     ))
 }
@@ -493,7 +494,7 @@ mod tests {
 
             *parent commit*: [main-sha1](https://github.com/rust-lang/borstest/commit/main-sha1)
 
-            In the case of a perf regression, run the following command for each PR you suspect might be the cause: `@rust-timer build $SHA`
+            In the case of a perf regression, run the following command with the SHAs of each PR you suspect might be the cause: `@rust-timer triage $SHA $SHA $SHA...`, or run `@rust-timer triage all` to benchmark all rollup members.
             <!-- machine-readable-shas: ["merge-0-pr-2-d7d45f1f-reauthored-to-bors","merge-1-pr-3-d7d45f1f-reauthored-to-bors"] -->
             "#);
 
@@ -564,7 +565,7 @@ mod tests {
 
             *parent commit*: [main-sha1](https://github.com/rust-lang/borstest/commit/main-sha1)
 
-            In the case of a perf regression, run the following command for each PR you suspect might be the cause: `@rust-timer build $SHA`
+            In the case of a perf regression, run the following command with the SHAs of each PR you suspect might be the cause: `@rust-timer triage $SHA $SHA $SHA...`, or run `@rust-timer triage all` to benchmark all rollup members.
             <!-- machine-readable-shas: ["merge-0-pr-2-d7d45f1f-reauthored-to-bors"] -->
             "#);
             Ok(())
@@ -599,7 +600,7 @@ mod tests {
 
             *parent commit*: [main-sha1](https://github.com/rust-lang/borstest/commit/main-sha1)
 
-            In the case of a perf regression, run the following command for each PR you suspect might be the cause: `@rust-timer build $SHA`
+            In the case of a perf regression, run the following command with the SHAs of each PR you suspect might be the cause: `@rust-timer triage $SHA $SHA $SHA...`, or run `@rust-timer triage all` to benchmark all rollup members.
             <!-- machine-readable-shas: ["merge-1-pr-3-d7d45f1f-reauthored-to-bors"] -->
             "#);
             Ok(())
@@ -643,7 +644,7 @@ mod tests {
 
             *parent commit*: [main-sha1](https://github.com/rust-lang/borstest/commit/main-sha1)
 
-            In the case of a perf regression, run the following command for each PR you suspect might be the cause: `@rust-timer build $SHA`
+            In the case of a perf regression, run the following command with the SHAs of each PR you suspect might be the cause: `@rust-timer triage $SHA $SHA $SHA...`, or run `@rust-timer triage all` to benchmark all rollup members.
             <!-- machine-readable-shas: ["merge-1-pr-3-d7d45f1f-reauthored-to-bors","merge-0-pr-2-d7d45f1f-reauthored-to-bors","merge-2-pr-4-d7d45f1f-reauthored-to-bors"] -->
             "#);
             Ok(())
