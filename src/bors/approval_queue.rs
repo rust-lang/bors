@@ -121,3 +121,97 @@ async fn process_tentative_approval(
     .await?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::database::WorkflowStatus;
+    use crate::tests::{BorsTester, Commit, User, run_test};
+
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
+    async fn refresh_promotes_tentative_approval_when_ci_passes(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            let workflow = ctx.create_workflow((), "pr/1", "pull_request");
+            ctx.approve(()).await?;
+            ctx.modify_workflow(workflow, |w| w.change_status(WorkflowStatus::Success));
+
+            ctx.refresh_tentative_approvals().await;
+
+            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
+            :pushpin: Commit pr-1-sha has been approved by `default-user`
+
+            It is now in the [queue](https://bors-test.com/queue/borstest) for this repository.
+            ");
+            ctx.pr(())
+                .await
+                .expect_approved_by(&User::default_pr_author().name);
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
+    async fn refresh_rejects_tentative_approval_when_ci_fails(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            let workflow = ctx.create_workflow((), "pr/1", "pull_request");
+            ctx.approve(()).await?;
+            ctx.modify_workflow(workflow, |w| w.change_status(WorkflowStatus::Failure));
+
+            ctx.refresh_tentative_approvals().await;
+
+            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
+            :x: Commit pr-1-sha has not been approved due to failing CI.
+            ");
+            ctx.pr(()).await.expect_unapproved();
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
+    async fn refresh_keeps_tentative_approval_while_ci_is_pending(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            ctx.create_workflow((), "pr/1", "pull_request");
+            ctx.approve(()).await?;
+
+            ctx.refresh_tentative_approvals().await;
+
+            ctx.pr(())
+                .await
+                .expect_approved_by(&User::default_pr_author().name);
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
+    async fn refresh_removes_tentative_approval_after_head_changes(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            ctx.create_workflow((), "pr/1", "pull_request");
+            ctx.approve(()).await?;
+            ctx.modify_pr_in_gh((), |pr| {
+                pr.add_commits(vec![Commit::from_sha("new-head-sha")])
+            });
+
+            ctx.refresh_tentative_approvals().await;
+
+            assert_eq!(ctx.pr(()).await.get_db_pr().approver(), None);
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
+    async fn refresh_removes_tentative_approval_when_pr_is_closed(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            ctx.create_workflow((), "pr/1", "pull_request");
+            ctx.approve(()).await?;
+            ctx.modify_pr_in_gh((), |pr| pr.close());
+
+            ctx.refresh_tentative_approvals().await;
+
+            assert_eq!(ctx.pr(()).await.get_db_pr().approver(), None);
+            Ok(())
+        })
+        .await;
+    }
+}
