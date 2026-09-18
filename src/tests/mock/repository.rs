@@ -409,7 +409,17 @@ async fn mock_workflow_runs(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
         move |req: &Request, []| {
             let repo = repo.lock();
             let head_sha = get_query_param(req, "head_sha");
-            let workflow_runs: Vec<WorkflowRun> = repo.find_workflows_by_commit_sha(&head_sha);
+            let event = get_query_param_opt(req, "event");
+            let workflow_runs: Vec<WorkflowRun> = repo
+                .find_workflows_by_commit_sha(&head_sha)
+                .into_iter()
+                .filter(|workflow| {
+                    event
+                        .as_deref()
+                        .map(|event| workflow.event() == event)
+                        .unwrap_or(true)
+                })
+                .collect();
 
             let response = WorkflowRunsResponse {
                 workflow_runs: workflow_runs

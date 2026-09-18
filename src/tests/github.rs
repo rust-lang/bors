@@ -247,13 +247,14 @@ impl GitHub {
         );
     }
 
-    pub fn new_workflow(&mut self, repo: &GithubRepoName, branch: &str) -> RunId {
+    pub fn new_workflow(&mut self, repo: &GithubRepoName, branch: &str, event: &str) -> RunId {
         let repo = self.get_repo(repo);
         let mut repo = repo.lock();
         let branch = repo.get_branch_by_name(branch).expect("Branch not found");
         self.workflow_run_id_counter += 1;
         let run_id = RunId(self.workflow_run_id_counter);
-        let workflow = WorkflowRun::new(run_id, branch);
+        let mut workflow = WorkflowRun::new(run_id, branch);
+        workflow.set_event(event);
         repo.workflow_runs.push(workflow);
         run_id
     }

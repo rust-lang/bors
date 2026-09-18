@@ -500,17 +500,21 @@ impl GithubRepositoryClient {
         Ok(check_run)
     }
 
-    /// Find all workflows attached to a specific commit SHA.
+    /// Find all workflows attached to a specific commit SHA, filtered by trigger event.
     pub async fn get_workflow_runs_for_commit_sha(
         &self,
         commit_sha: CommitSha,
+        event: Option<&str>,
     ) -> anyhow::Result<Vec<WorkflowRun>> {
         let runs = perform_retryable("get_workflows_for_commit_sha", RetryMethod::default(), || async {
-            let response = self.client.workflows(self.repo_name.owner(), self.repo_name.name())
+            let workflows = self.client.workflows(self.repo_name.owner(), self.repo_name.name());
+            let mut request = workflows
                 .list_all_runs()
-                .head_sha(&commit_sha.0)
-                .send()
-                .await?;
+                .head_sha(&commit_sha.0);
+            if let Some(event) = event {
+                request = request.event(event);
+            }
+            let response = request.send().await?;
             let mut runs = Vec::with_capacity(
                 response
                     .total_count

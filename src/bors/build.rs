@@ -127,7 +127,7 @@ pub async fn load_workflow_runs(
     // This tells us for how many workflow runs we should wait.
     let mut workflow_runs: Vec<WorkflowRun> = repo
         .client
-        .get_workflow_runs_for_commit_sha(CommitSha(build.commit_sha.clone()))
+        .get_workflow_runs_for_commit_sha(CommitSha(build.commit_sha.clone()), None)
         .await?;
     tracing::debug!("Workflow runs from GitHub: {workflow_runs:?}");
 
