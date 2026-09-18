@@ -22,6 +22,7 @@ use std::str::FromStr;
 use std::sync::{Arc, LazyLock, RwLock};
 use std::time::Duration;
 
+mod approval;
 mod build;
 mod build_queue;
 mod command;

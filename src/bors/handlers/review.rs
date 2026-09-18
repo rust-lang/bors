@@ -1,20 +1,20 @@
 use crate::bors::RepositoryState;
+use crate::bors::approval::finalize_approval;
 use crate::bors::command::{Approver, CommandPrefix, Delegatee};
 use crate::bors::command::{DelegateCommand, RollupMode};
 use crate::bors::comment::{
     approve_blocking_labels_present, approve_merge_conflict_comment, approve_non_open_pr_comment,
-    approve_wip_title, approved_comment, delegate_comment, delegate_try_builds_comment,
+    approve_wip_title, delegate_comment, delegate_try_builds_comment,
     unapprove_non_open_pr_comment, unapprove_not_approved,
 };
 use crate::bors::handlers::{InvalidationInfo, InvalidationReason, PullRequestData, deny_request};
 use crate::bors::handlers::{has_permission, invalidate_pr};
-use crate::bors::labels::handle_label_trigger;
 use crate::bors::merge_queue::MergeQueueSender;
 use crate::bors::{Comment, PullRequestStatus};
 use crate::database::DelegatedPermission;
 use crate::database::{ApprovalInfo, PullRequestModel};
 use crate::database::{MergeableState, TreeState};
-use crate::github::{CommitSha, LabelTrigger, PullRequest};
+use crate::github::{CommitSha, PullRequest};
 use crate::github::{GithubUser, PullRequestNumber};
 use crate::permissions::PermissionType;
 use crate::{BorsContext, PgDbClient, ZulipClient};
@@ -85,60 +85,16 @@ pub(super) async fn command_approve(
     db.approve(pr.db, approval_info, false, priority, rollup_mode, note)
         .await?;
 
-    let was_failed = pr
-        .db
-        .auto_build
-        .as_ref()
-        .map(|b| b.status.is_failure())
-        .unwrap_or(false);
-    // Re-approval should act as a retry
-    if was_failed {
-        db.clear_auto_build(pr.db).await?;
-    }
-
     let priority = priority.or(pr.db.priority.map(|p| p as u32));
 
-    merge_queue_tx.notify().await?;
-
-    let mut tree_state = ctx
-        .db
-        .repo_db(repo_state.repository())
-        .await?
-        .map(|r| r.tree_state.clone())
-        .unwrap_or(TreeState::Open);
-
-    // If the PR has high enough priority, do not post the tree closed message
-    if let TreeState::Closed {
-        priority: tree_priority,
-        ..
-    } = &tree_state
-        && let Some(priority) = priority
-        && priority >= *tree_priority
-    {
-        tree_state = TreeState::Open;
-    }
-
-    repo_state
-        .client
-        .post_comment(
-            pr.db.number,
-            approved_comment(
-                ctx.get_web_url(),
-                repo_state.repository(),
-                &pr.github.head.sha,
-                &approver,
-                unknown_reviewers,
-                tree_state,
-                was_failed,
-            ),
-            &db,
-        )
-        .await?;
-
-    handle_label_trigger(
+    finalize_approval(
+        &ctx,
         &repo_state,
-        &pr.github.clone().into(),
-        LabelTrigger::Approved,
+        pr,
+        &approver,
+        unknown_reviewers,
+        priority,
+        merge_queue_tx,
     )
     .await
 }
