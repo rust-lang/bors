@@ -8,7 +8,7 @@ use crate::bors::event::{
 use crate::bors::handlers::{get_build_kind_from_branch, is_bors_observed_branch};
 use crate::bors::{BuildKind, build};
 use crate::database::{BuildModel, BuildStatus, PullRequestModel, WorkflowStatus};
-use crate::ec2::{Ec2InstanceStartData, ParsedLabel, start_ec2_github_runner};
+use crate::ec2::{Ec2InstanceStartData, InstanceSpawnKind, ParsedLabel, start_ec2_github_runner};
 use crate::github::CommitSha;
 use crate::github::api::client::GithubRepositoryClient;
 use crate::{BorsContext, PgDbClient};
@@ -158,13 +158,13 @@ pub(super) async fn handle_workflow_job_started(
     repo: Arc<RepositoryState>,
     payload: WorkflowJobStarted,
 ) -> anyhow::Result<()> {
-    if let Err(error) = try_start_ec2_instance(ctx, &db, &repo, &payload).await {
-        tracing::error!("Cannot start EC2 instance: {error:?}");
-    }
-
     let Some(build_kind) = get_build_kind_from_branch(&payload.branch) else {
         return Ok(());
     };
+
+    if let Err(error) = try_start_ec2_instance(ctx, &db, &repo, &payload, build_kind).await {
+        tracing::error!("Cannot start EC2 instance: {error:?}");
+    }
 
     if let BuildKind::Auto = build_kind {
         ctx.get_job_cache().auto_job_started(
@@ -185,6 +185,7 @@ async fn try_start_ec2_instance(
     db: &PgDbClient,
     repo: &RepositoryState,
     payload: &WorkflowJobStarted,
+    build_kind: BuildKind,
 ) -> anyhow::Result<()> {
     let Some(ec2_ctx) = ctx.get_ec2_ctx() else {
         return Ok(());
@@ -230,10 +231,6 @@ async fn try_start_ec2_instance(
         }
     };
 
-    // If we don't know what kind of branch it is, we just assume that it is a try build
-    let build_kind = get_build_kind_from_branch(&payload.branch).unwrap_or(BuildKind::Try);
-
-    // We try to spawn EC2 instances for all kinds of jobs, even those outside of try/auto branches
     let data = Ec2InstanceStartData {
         job_id: payload.job_id,
         job_name: payload.name.clone(),
@@ -241,6 +238,7 @@ async fn try_start_ec2_instance(
         commit_sha: payload.commit_sha.clone(),
         pr_number,
         build_kind,
+        spawn_kind: InstanceSpawnKind::Normal,
     };
     start_ec2_github_runner(ec2_ctx, ec2_config, repo, label, data).await
 }

@@ -11,7 +11,7 @@ use regex::Regex;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::process::Command;
-use std::sync::{Arc, LazyLock};
+use std::sync::{Arc, LazyLock, Mutex};
 use std::time::Duration;
 
 /// Script that will be executed on the launched EC2 instance.
@@ -69,15 +69,72 @@ impl<'a> ParsedLabel<'a> {
     }
 }
 
+/// How long should we cache spawned instances in memory.
+const INSTANCE_CACHE_LIMIT: chrono::Duration = chrono::Duration::minutes(30);
+/// Maximum number of spawned instances to remember.
+const INSTANCE_CACHE_SIZE: usize = 300;
+
+struct SpawnedInstance {
+    /// Idempotency token of the spawned instance
+    token: String,
+    spawned_at: DateTime<Utc>,
+}
+
+/// Remembers which EC2 instances were spawned recently.
+#[derive(Default)]
+struct SpawnedInstanceCache {
+    instances: Vec<SpawnedInstance>,
+}
+
+impl SpawnedInstanceCache {
+    fn add_token(&mut self, token: String) {
+        self.instances.push(SpawnedInstance {
+            token,
+            spawned_at: Utc::now(),
+        });
+        self.prune();
+    }
+
+    fn has_token(&self, token: &str) -> bool {
+        // Iterate from the newest ones, as there's a highest chance of getting a hit
+        self.instances
+            .iter()
+            .rev()
+            .any(|instance| instance.token == token)
+    }
+
+    fn prune(&mut self) {
+        let now = Utc::now();
+        self.instances
+            .retain(|instance| (now - instance.spawned_at) <= INSTANCE_CACHE_LIMIT);
+        if self.instances.len() > INSTANCE_CACHE_SIZE {
+            // Keep `INSTANCE_CACHE_SIZE` newest entries
+            let oldest_to_keep = self.instances.len() - INSTANCE_CACHE_SIZE;
+            self.instances.drain(..oldest_to_keep).for_each(|_| {});
+        }
+    }
+}
+
 /// Context necessary to perform actions related to EC2.
 pub struct Ec2Context {
     role_arn: String,
+    tokens: Mutex<SpawnedInstanceCache>,
 }
 
 impl Ec2Context {
     pub fn new(role_arn: String) -> Self {
-        Self { role_arn }
+        Self {
+            role_arn,
+            tokens: Mutex::new(Default::default()),
+        }
     }
+}
+
+pub enum InstanceSpawnKind {
+    /// We are spawning an instance in reaction to a webhook about a job being started.
+    Normal,
+    /// We are spawning an instance for a job that didn't receive any runner in some time.
+    Backfill,
 }
 
 pub struct Ec2InstanceStartData {
@@ -87,6 +144,7 @@ pub struct Ec2InstanceStartData {
     pub commit_sha: CommitSha,
     pub pr_number: Option<PullRequestNumber>,
     pub build_kind: BuildKind,
+    pub spawn_kind: InstanceSpawnKind,
 }
 
 /// Starts an EC2 instance on AWS, which should run a self-hosted GitHub Actions runner
@@ -115,6 +173,47 @@ pub async fn start_ec2_github_runner(
             "EC2 runner instance {} is not allowed to be used",
             label.instance_type
         ));
+    }
+
+    // Idempotency token, to avoid starting the same instance multiple times
+    // For some reason, GitHub sometimes sends us the workflow job started webhook multiple
+    // times...
+
+    // The idempotency token cannot be longer than 64 characters
+    // Commit SHA is 40 characters
+    // GitHub job ID is e.g. `102375935997`, so around ~12 characters
+    // Thus below we should have ~53 characters, with some to spare
+    // If we are backfilling, allow "breaking" through the idempotency token by adding a separate
+    // marker. This allows us to spawn an additional instance even if there was one spawned
+    // previously, with the hope that it will now work.
+    // Note that due to the idempotency token memory cache below, we won't be able to spawn even a
+    // backfilled instance more than once per `INSTANCE_CACHE_LIMIT`.
+    let mut idempotency_token = format!("{}-{}", data.job_id, data.commit_sha);
+    match data.spawn_kind {
+        InstanceSpawnKind::Normal => {}
+        InstanceSpawnKind::Backfill => {
+            // Use a short marker to avoid filling up the 64 characters. Commit SHAs should never
+            // contain a dash, so this shouldn't conflict with it.
+            idempotency_token.push_str("-b");
+        }
+    }
+    idempotency_token.truncate(64);
+
+    // Ideally, we would just be using EC2's idempotency mechanism directly.
+    // However, since we use a different `--user-data` for each EC2 instance, but some of them
+    // might get the same idempotency token (e.g. if GitHub sends us a duplicated webhook),
+    // the start will fail, because EC2 doesn't allow having the same idempotency token, but
+    // different request parameters.
+    // This produces noise in bors logs, and detecting this failure is brittle.
+    // Instead, we have our own cache, so that we don't even attempt to start such an instance
+    // multiple times in a short time period.
+    // If the cache is empty (e.g. due to a bors restart), it doesn't really matter much, because
+    // we still use the idempotency token, and at worst we'll get an entry in the logs.
+    if ec2_ctx.tokens.lock().unwrap().has_token(&idempotency_token) {
+        tracing::warn!(
+            "Skipping spawning of EC2 instance for token {idempotency_token}, as it was already started"
+        );
+        return Ok(());
     }
 
     // Emulate a "UUID" to avoid adding dependency on the uuid crate just for this one line.
@@ -204,13 +303,6 @@ pub async fn start_ec2_github_runner(
         .collect::<Vec<_>>()
         .join(",");
 
-    // Idempotency token, to avoid starting the same instance multiple times
-    // For some reason, GitHub sometimes sends us the workflow job started webhook multiple
-    // times...
-    let mut idempotency_token = format!("{}-{}", data.job_id, data.commit_sha);
-    // The idempotency token cannot be longer than 64 characters
-    idempotency_token.truncate(64);
-
     // Using the AWS cli is not ideal, but the alternative (depending on aws-config, aws-sdk-ssm and
     // asd-sdk-ec2) has a massive impact on build times and binary size, plus it currently runs into
     // feature hell (ring vs aws-lc-sys). The choice might be reevaluated in the future.
@@ -245,6 +337,8 @@ pub async fn start_ec2_github_runner(
             .as_str()
             .unwrap_or("unknown instance id")
     );
+    // Remember that this token was recently spawned
+    ec2_ctx.tokens.lock().unwrap().add_token(idempotency_token);
 
     Ok(())
 }
@@ -394,6 +488,7 @@ pub async fn backfill_ec2_instances(
             commit_sha: CommitSha(build.commit_sha.clone()),
             pr_number,
             build_kind: build.kind,
+            spawn_kind: InstanceSpawnKind::Backfill,
         };
         let res = start_ec2_github_runner(ec2_ctx, ec2_config, &repo, label, data).await;
         if let Err(error) = res {
