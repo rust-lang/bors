@@ -131,6 +131,18 @@ pub async fn handle_bors_repository_event(
                 .instrument(span)
                 .await?;
         }
+        BorsRepositoryEvent::PullRequestWorkflowCompleted(payload) => {
+            let span = tracing::info_span!(
+                "Pull request workflow completed",
+                repo = payload.repository.to_string(),
+                sha = %payload.commit_sha,
+            );
+            senders
+                .approval_queue()
+                .on_workflow_completed(payload)
+                .instrument(span)
+                .await?;
+        }
         BorsRepositoryEvent::WorkflowJobStarted(payload) => {
             let span = tracing::info_span!(
                 "Workflow job started",

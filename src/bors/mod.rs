@@ -170,6 +170,10 @@ pub static WAIT_FOR_BUILD_QUEUE: TestSyncMarker = TestSyncMarker::new();
 #[cfg(test)]
 pub static WAIT_FOR_APPROVAL_QUEUE: TestSyncMarker = TestSyncMarker::new();
 
+/// The approval queue has handled a workflow completed event.
+#[cfg(test)]
+pub static WAIT_FOR_APPROVAL_WORKFLOW_COMPLETED_HANDLED: TestSyncMarker = TestSyncMarker::new();
+
 #[cfg(test)]
 pub static WAIT_FOR_MERGEABILITY_STATUS_REFRESH: TestSyncMarker = TestSyncMarker::new();
 
