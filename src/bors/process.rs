@@ -1,3 +1,6 @@
+use crate::bors::approval_queue::{
+    ApprovalQueueReceiver, ApprovalQueueSender, create_approval_queue, handle_approval_queue_event,
+};
 use crate::bors::build_queue::{
     BuildQueueReceiver, BuildQueueSender, create_build_queue, handle_build_queue_event,
 };
@@ -44,6 +47,7 @@ pub fn create_bors_process(
     let (mergeability_queue_tx, mergeability_queue_rx) = create_mergeability_queue();
     let (gitops_queue_tx, gitops_queue_rx) = create_gitops_queue(ctx.get_git());
 
+    let (approval_queue_tx, approval_queue_rx) = create_approval_queue();
     let (build_queue_tx, build_queue_rx) = create_build_queue();
     let (unroll_queue_tx, unroll_queue_rx) = create_unroll_queue();
     let (merge_queue_tx, merge_queue_fut) = start_merge_queue(
@@ -56,6 +60,7 @@ pub fn create_bors_process(
     let senders = QueueSenders {
         merge_queue: merge_queue_tx.clone(),
         mergeability_queue: mergeability_queue_tx,
+        approval_queue: approval_queue_tx,
         build_queue: build_queue_tx,
         gitops_queue: gitops_queue_tx,
         unroll_queue: unroll_queue_tx.clone(),
@@ -72,6 +77,11 @@ pub fn create_bors_process(
             let _ = tokio::join!(
                 consume_repository_events(ctx.clone(), repository_rx, senders2.clone()),
                 consume_global_events(ctx.clone(), global_rx, senders2, gh_client, team_api),
+                consume_approval_queue_events(
+                    ctx.clone(),
+                    approval_queue_rx,
+                    merge_queue_tx.clone()
+                ),
                 consume_build_queue_events(
                     ctx.clone(),
                     build_queue_rx,
@@ -101,6 +111,9 @@ pub fn create_bors_process(
                 }
                 _ = consume_mergeability_queue_events(ctx.clone(), mergeability_queue_rx) => {
                     tracing::error!("Mergeability queue handling process has ended")
+                }
+                _ = consume_approval_queue_events(ctx.clone(), approval_queue_rx, merge_queue_tx.clone()) => {
+                    tracing::error!("Approval queue handling process has ended")
                 }
                 _ = consume_build_queue_events(ctx.clone(), build_queue_rx, merge_queue_tx, unroll_queue_tx) => {
                     tracing::error!("Build queue handling process has ended")
@@ -136,6 +149,7 @@ pub fn create_bors_process(
 pub struct QueueSenders {
     mergeability_queue: MergeabilityQueueSender,
     merge_queue: MergeQueueSender,
+    approval_queue: ApprovalQueueSender,
     build_queue: BuildQueueSender,
     gitops_queue: GitOpsQueueSender,
     unroll_queue: UnrollQueueSender,
@@ -147,6 +161,9 @@ impl QueueSenders {
     }
     pub fn mergeability_queue(&self) -> &MergeabilityQueueSender {
         &self.mergeability_queue
+    }
+    pub fn approval_queue(&self) -> &ApprovalQueueSender {
+        &self.approval_queue
     }
     pub fn build_queue(&self) -> &BuildQueueSender {
         &self.build_queue
@@ -244,6 +261,27 @@ async fn consume_build_queue_events(
 
         #[cfg(test)]
         crate::bors::WAIT_FOR_BUILD_QUEUE.mark();
+    }
+}
+
+async fn consume_approval_queue_events(
+    ctx: Arc<BorsContext>,
+    mut approval_queue_rx: ApprovalQueueReceiver,
+    merge_queue_tx: MergeQueueSender,
+) {
+    while let Some(event) = approval_queue_rx.recv().await {
+        let ctx = ctx.clone();
+
+        let span = tracing::debug_span!("Approval queue event", "{event:?}");
+        if let Err(error) = handle_approval_queue_event(ctx, event, merge_queue_tx.clone())
+            .instrument(span.clone())
+            .await
+        {
+            handle_root_error(span, error);
+        }
+
+        #[cfg(test)]
+        crate::bors::WAIT_FOR_APPROVAL_QUEUE.mark();
     }
 }
 

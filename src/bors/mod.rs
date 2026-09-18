@@ -23,6 +23,7 @@ use std::sync::{Arc, LazyLock, RwLock};
 use std::time::Duration;
 
 mod approval;
+mod approval_queue;
 mod build;
 mod build_queue;
 mod command;
@@ -162,6 +163,9 @@ You can use the following commands:
 
 #[cfg(test)]
 pub static WAIT_FOR_BUILD_QUEUE: TestSyncMarker = TestSyncMarker::new();
+
+#[cfg(test)]
+pub static WAIT_FOR_APPROVAL_QUEUE: TestSyncMarker = TestSyncMarker::new();
 
 #[cfg(test)]
 pub static WAIT_FOR_MERGEABILITY_STATUS_REFRESH: TestSyncMarker = TestSyncMarker::new();

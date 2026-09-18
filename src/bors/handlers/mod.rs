@@ -303,6 +303,18 @@ pub async fn handle_bors_global_event(
             .instrument(span.clone())
             .await?;
         }
+        BorsGlobalEvent::RefreshTentativeApprovals => {
+            let span = tracing::info_span!("Refresh tentative approvals");
+            for_each_repo(&ctx, |repo| {
+                senders
+                    .approval_queue()
+                    .refresh_tentative_approvals(repo.repository().clone())
+                    .instrument(span.clone())
+                    .map_err(|error| error.into())
+            })
+            .instrument(span.clone())
+            .await?;
+        }
         BorsGlobalEvent::RefreshPullRequestMergeability => {
             let span = tracing::info_span!("Refresh PR mergeability status");
             for_each_repo(&ctx, |repo| {

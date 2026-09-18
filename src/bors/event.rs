@@ -73,6 +73,8 @@ pub enum BorsGlobalEvent {
     RefreshPermissions,
     /// Examine pending builds, and try to complete or timeout them.
     RefreshPendingBuilds,
+    /// Recheck CI for tentatively approved pull requests.
+    RefreshTentativeApprovals,
     /// Refresh mergeability status of PRs that have unknown mergeability status.
     RefreshPullRequestMergeability,
     /// Synchronize PR status with GitHub.

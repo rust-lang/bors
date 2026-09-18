@@ -352,6 +352,12 @@ Reason for tree closure: `{reason}`
     Comment::new(comment)
 }
 
+pub fn tentative_approval_failed_comment(commit_sha: &CommitSha) -> Comment {
+    Comment::new(format!(
+        ":x: Commit {commit_sha} has not been approved due to failing CI."
+    ))
+}
+
 pub fn approve_non_open_pr_comment() -> Comment {
     Comment::new(":clipboard: Only open, non-draft PRs can be approved.".to_string())
 }

@@ -1,9 +1,9 @@
-use crate::bors::comment::approved_comment;
+use crate::bors::comment::{approved_comment, tentative_approval_failed_comment};
 use crate::bors::handlers::PullRequestData;
 use crate::bors::labels::handle_label_trigger;
 use crate::bors::merge_queue::MergeQueueSender;
 use crate::bors::{BorsContext, RepositoryState};
-use crate::database::TreeState;
+use crate::database::{TreeState, WorkflowStatus};
 use crate::github::LabelTrigger;
 
 #[allow(clippy::too_many_arguments)]
@@ -63,4 +63,70 @@ pub(super) async fn finalize_approval(
         )
         .await?;
     handle_label_trigger(repo, &pr.github.clone().into(), LabelTrigger::Approved).await
+}
+
+/// Returns whether the tentative approval reached a final success or failure state.
+#[allow(clippy::too_many_arguments)]
+pub(super) async fn resolve_tentative_approval(
+    ctx: &BorsContext,
+    repo: &RepositoryState,
+    pr: PullRequestData<'_>,
+    approver: &str,
+    unknown_reviewers: Vec<String>,
+    priority: Option<u32>,
+    merge_queue_tx: &MergeQueueSender,
+) -> anyhow::Result<bool> {
+    let workflow_runs = match repo
+        .client
+        .get_workflow_runs_for_commit_sha(pr.github.head.sha.clone(), Some("pull_request"))
+        .await
+    {
+        Ok(workflow_runs) => workflow_runs,
+        Err(error) => {
+            tracing::error!(
+                "Failed to get pull request CI status for commit {}: {error:?}",
+                pr.github.head.sha
+            );
+            return Ok(false);
+        }
+    };
+
+    if workflow_runs.is_empty() {
+        return Ok(false);
+    }
+
+    if workflow_runs
+        .iter()
+        .any(|run| run.status == WorkflowStatus::Failure)
+    {
+        ctx.db.remove_tentative_approval(pr.db).await?;
+        repo.client
+            .post_comment(
+                pr.number(),
+                tentative_approval_failed_comment(&pr.github.head.sha),
+                &ctx.db,
+            )
+            .await?;
+        return Ok(true);
+    }
+
+    if workflow_runs
+        .iter()
+        .any(|run| run.status == WorkflowStatus::Pending)
+    {
+        return Ok(false);
+    }
+
+    ctx.db.promote_tentative_approval(pr.db).await?;
+    finalize_approval(
+        ctx,
+        repo,
+        pr,
+        approver,
+        unknown_reviewers,
+        priority,
+        merge_queue_tx,
+    )
+    .await?;
+    Ok(true)
 }

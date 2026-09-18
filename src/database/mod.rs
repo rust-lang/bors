@@ -531,6 +531,13 @@ impl PullRequestModel {
         }
     }
 
+    pub fn tentative_approval(&self) -> Option<&ApprovalInfo> {
+        match &self.approval_status {
+            ApprovalStatus::Tentative(info) => Some(info),
+            ApprovalStatus::Approved(_) | ApprovalStatus::NotApproved => None,
+        }
+    }
+
     /// Get the latest known mergeable status.
     /// If it is possibly stale, it will be returned as `MergeableState::Unknown`.
     pub fn mergeable_status(&self) -> MergeableState {
