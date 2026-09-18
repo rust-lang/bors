@@ -122,7 +122,8 @@ Note that `automation/bors/try-merge` should not have any CI workflows configure
 
 ## Auto builds
 The merge queue is an automated system that processes approved pull requests and merges them into the base branch after
-ensuring they pass all CI checks. PRs are approved using the `@bors r+` command and then "queued" automatically.
+ensuring they pass all CI checks. By default, `@bors r+` tentatively approves a PR until CI succeeds, after which it is
+"queued" automatically.
 
 Here is a sequence diagram that describes what happens when a PR is approved and enters the merge queue:
 
@@ -137,7 +138,19 @@ Here is a sequence diagram that describes what happens when a PR is approved and
    |                                   | check user permissions              |       |         |
    |                                   |------------------------------------------------------>|
    |                                   |                                     |       |         |
-   |                                   | store approval in DB                |       |         |
+   |                                   | store tentative approval in DB      |       |         |
+   |                                   |-------------------------------------------->|         |
+   |                                   |                                     |       |         |
+   |                                   | check CI                            |       |         |
+   |                                   |------------------------------------>|       |         |
+   |                                   |                                     |       |         |
+   |                                   |                workflow completed   |       |         |
+   |                                   |<------------------------------------|       |         |
+   |                                   |                                     |       |         |
+   |                                   | check CI                            |       |         |
+   |                                   |------------------------------------>|       |         |
+   |                                   |                                     |       |         |
+   |                                   | promote approval in DB              |       |         |
    |                                   |-------------------------------------------->|         |
    |                                   |                                     |       |         |
    | comment: "Commit abc123 approved" |                                     |       |         |
@@ -215,7 +228,7 @@ Once a rollup is merged, all its members are set to the `Waiting` state. Then, w
 - It attempts to merge the HEAD SHA onto the parent of the rollup's merge commit, in the `automation/bors/try-perf-merge` branch.
 - If the merge succeeds, force-pushes the unrolled commit to `automation/bors/try-perf`.
 
-If any non-transient errors occur, the given rollup member is marked as `Finished`. 
+If any non-transient errors occur, the given rollup member is marked as `Finished`.
 
 Once all members are in the `Finished` state, bors will post a comment with a result tableto the merged rollup.
 
