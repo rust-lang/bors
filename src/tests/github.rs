@@ -1159,7 +1159,7 @@ pub struct WorkflowRun {
 }
 
 impl WorkflowRun {
-    fn new(run_id: RunId, branch: &Branch) -> Self {
+    pub(super) fn new(run_id: RunId, branch: &Branch) -> Self {
         Self {
             status: WorkflowStatus::Pending,
             name: "Workflow1".to_string(),

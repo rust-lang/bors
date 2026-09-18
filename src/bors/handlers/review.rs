@@ -1,10 +1,10 @@
 use crate::bors::RepositoryState;
-use crate::bors::approval::finalize_approval;
+use crate::bors::approval::{finalize_approval, resolve_tentative_approval};
 use crate::bors::command::{Approver, CommandPrefix, Delegatee};
 use crate::bors::command::{DelegateCommand, RollupMode};
 use crate::bors::comment::{
     approve_blocking_labels_present, approve_merge_conflict_comment, approve_non_open_pr_comment,
-    approve_wip_title, delegate_comment, delegate_try_builds_comment,
+    approve_wip_title, delegate_comment, delegate_try_builds_comment, tentatively_approved_comment,
     unapprove_non_open_pr_comment, unapprove_not_approved,
 };
 use crate::bors::handlers::{InvalidationInfo, InvalidationReason, PullRequestData, deny_request};
@@ -83,14 +83,35 @@ pub(super) async fn command_approve(
         sha: pr.github.head.sha.to_string(),
     };
 
-    if !force {
-        todo!("handle non-forced approval");
-    }
-
     db.approve(pr.db, approval_info, !force, priority, rollup_mode, note)
         .await?;
 
     let priority = priority.or(pr.db.priority.map(|p| p as u32));
+
+    if !force {
+        let resolved = resolve_tentative_approval(
+            &ctx,
+            &repo_state,
+            pr,
+            &approver,
+            unknown_reviewers.clone(),
+            priority,
+            merge_queue_tx,
+        )
+        .await?;
+
+        if !resolved {
+            repo_state
+                .client
+                .post_comment(
+                    pr.number(),
+                    tentatively_approved_comment(&pr.github.head.sha, &approver, unknown_reviewers),
+                    &db,
+                )
+                .await?;
+        }
+        return Ok(());
+    }
 
     finalize_approval(
         &ctx,
@@ -582,7 +603,7 @@ mod tests {
     use crate::bors::TRY_BRANCH_NAME;
     use crate::bors::merge_queue::AUTO_BUILD_CHECK_RUN_NAME;
     use crate::database::{
-        DelegatedPermission, DelegationStatus, OctocrabMergeableState, TreeState,
+        DelegatedPermission, DelegationStatus, OctocrabMergeableState, TreeState, WorkflowStatus,
     };
     use crate::permissions::PermissionType;
     use crate::tests::default_repo_name;
@@ -608,6 +629,102 @@ mod tests {
             ctx.pr(())
                 .await
                 .expect_rollup(None)
+                .expect_approved_by(&User::default_pr_author().name);
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
+    async fn approve_with_passing_ci_on_tentative(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            let workflow = ctx.create_workflow((), "pr/1", "pull_request");
+            ctx.modify_workflow(workflow, |w| w.change_status(WorkflowStatus::Success));
+
+            ctx.post_comment("@bors r+").await?;
+            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
+            :pushpin: Commit pr-1-sha has been approved by `default-user`
+
+            It is now in the [queue](https://bors-test.com/queue/borstest) for this repository.
+            ");
+
+            ctx.pr(())
+                .await
+                .expect_approved_by(&User::default_pr_author().name);
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
+    async fn approve_with_pending_ci_is_tentative(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            ctx.create_workflow((), "pr/1", "pull_request");
+
+            ctx.post_comment("@bors r+").await?;
+            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
+            :hourglass: Commit pr-1-sha has been tentatively approved by `default-user`
+            ");
+
+            ctx.pr(())
+                .await
+                .expect_approved_by(&User::default_pr_author().name);
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
+    async fn approve_with_pending_ci_applies_options_immediately(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            ctx.create_workflow((), "pr/1", "pull_request");
+
+            ctx.post_comment(r#"@bors r+ p=5 rollup=never note="foo bar""#)
+                .await?;
+            ctx.expect_comments((), 1).await;
+
+            ctx.pr(())
+                .await
+                .expect_priority(Some(5))
+                .expect_rollup(Some(RollupMode::Never))
+                .expect_note(Some("foo bar"));
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
+    async fn approve_with_failed_ci_is_immediately_rejected(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            let workflow = ctx.create_workflow((), "pr/1", "pull_request");
+            ctx.modify_workflow(workflow, |w| w.change_status(WorkflowStatus::Failure));
+
+            ctx.post_comment("@bors r+").await?;
+            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
+            :x: Commit pr-1-sha has not been approved due to failing CI.
+            ");
+
+            ctx.pr(()).await.expect_unapproved();
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
+    async fn force_approve_bypasses_failed_ci(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            let workflow = ctx.create_workflow((), "pr/1", "pull_request");
+            ctx.modify_workflow(workflow, |w| w.change_status(WorkflowStatus::Failure));
+
+            ctx.post_comment("@bors r+ force").await?;
+            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
+            :pushpin: Commit pr-1-sha has been approved by `default-user`
+
+            It is now in the [queue](https://bors-test.com/queue/borstest) for this repository.
+            ");
+
+            ctx.pr(())
+                .await
                 .expect_approved_by(&User::default_pr_author().name);
             Ok(())
         })
