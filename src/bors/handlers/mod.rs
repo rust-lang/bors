@@ -486,6 +486,7 @@ async fn handle_comment(
                         priority,
                         rollup,
                         note,
+                        force,
                     } => {
                         let span = tracing::info_span!("Approve");
                         command_approve(
@@ -498,6 +499,7 @@ async fn handle_comment(
                             priority,
                             rollup,
                             note,
+                            force,
                             senders.merge_queue(),
                         )
                         .instrument(span)

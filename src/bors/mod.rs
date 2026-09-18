@@ -82,6 +82,7 @@ pub fn format_help() -> &'static str {
             rollup: _,
             priority: _,
             note: _,
+            force: _,
         } => {}
         BorsCommand::Unapprove => {}
         BorsCommand::Help => {}
@@ -114,12 +115,14 @@ pub fn format_help() -> &'static str {
 You can use the following commands:
 
 ## PR management
-- `r+ [p=<priority>] [rollup=<never|iffy|maybe|always>] [note=<note>]`: Approve this PR on your behalf
+- `r+ [p=<priority>] [rollup=<never|iffy|maybe|always>] [force] [note=<note>]`: Approve this PR on your behalf
     - Optionally, you can specify the `<priority>` of the PR and if it is eligible for rollups (`<rollup>)`.
+    - Pass `force` to approve the PR immediately.
     - Optionally, you can attach a `<note>` to the PR that will be displayed on the queue page.
-- `r=<user> [p=<priority>] [rollup=<never|iffy|maybe|always>] [note=<note>]`: Approve this PR on behalf of `<user>`
+- `r=<user> [p=<priority>] [rollup=<never|iffy|maybe|always>] [force] [note=<note>]`: Approve this PR on behalf of `<user>`
     - Optionally, you can specify the `<priority>` of the PR and if it is eligible for rollups (`<rollup>)`.
     - You can pass a comma-separated list of GitHub usernames.
+    - Pass `force` to approve the PR immediately.
     - Optionally, you can attach a `<note>` to the PR that will be displayed on the queue page.
 - `r-`: Unapprove this PR
 - `p=<priority> [note=[<note>]]` | `priority=<priority> [note=[<note>]]`: Set the priority of this PR

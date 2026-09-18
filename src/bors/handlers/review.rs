@@ -34,6 +34,7 @@ pub(super) async fn command_approve(
     priority: Option<u32>,
     rollup_mode: Option<RollupMode>,
     note: Option<String>,
+    force: bool,
     merge_queue_tx: &MergeQueueSender,
 ) -> anyhow::Result<()> {
     tracing::info!("Approving PR {}", pr.number());
@@ -82,7 +83,11 @@ pub(super) async fn command_approve(
         sha: pr.github.head.sha.to_string(),
     };
 
-    db.approve(pr.db, approval_info, false, priority, rollup_mode, note)
+    if !force {
+        todo!("handle non-forced approval");
+    }
+
+    db.approve(pr.db, approval_info, !force, priority, rollup_mode, note)
         .await?;
 
     let priority = priority.or(pr.db.priority.map(|p| p as u32));
