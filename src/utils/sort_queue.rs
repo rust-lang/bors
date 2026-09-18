@@ -2,11 +2,11 @@ use crate::bors::RollupMode;
 use crate::database::{MergeableState, PullRequestModel, QueueStatus};
 
 /// Sorts pull requests according to merge queue priority rules.
-/// Ordered by: ready for merge > pending builds > approved > failed > not approved > mergeability
-/// > priority > rollup > age.
+/// Ordered by: ready for merge > pending builds > approved > tentative > failed > not approved
+/// > mergeability > priority > rollup > age.
 pub fn sort_queue_prs(mut prs: Vec<PullRequestModel>) -> Vec<PullRequestModel> {
     prs.sort_by(|a, b| {
-        // 1. Compare queue status (ready for merge > pending > approved > failed > not approved)
+        // 1. Compare queue status (ready for merge > pending > approved > tentative > failed > not approved)
         get_queue_status_priority(&a.queue_status())
             .cmp(&get_queue_status_priority(&b.queue_status()))
             // 2. Compare mergeability state (0 = mergeable/unknown, 1 = conflicts)
@@ -33,8 +33,9 @@ fn get_queue_status_priority(status: &QueueStatus) -> u32 {
         QueueStatus::ReadyForMerge(_, _) => 0,
         QueueStatus::Pending(_, _) => 1,
         QueueStatus::Approved(_) => 2,
-        QueueStatus::Failed(_, _) => 3,
-        QueueStatus::NotApproved | QueueStatus::NotOpen => 4,
+        QueueStatus::Tentative(_) => 3,
+        QueueStatus::Failed(_, _) => 4,
+        QueueStatus::NotApproved | QueueStatus::NotOpen => 5,
     }
 }
 

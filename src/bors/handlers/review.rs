@@ -82,7 +82,7 @@ pub(super) async fn command_approve(
         sha: pr.github.head.sha.to_string(),
     };
 
-    db.approve(pr.db, approval_info, priority, rollup_mode, note)
+    db.approve(pr.db, approval_info, false, priority, rollup_mode, note)
         .await?;
 
     let was_failed = pr

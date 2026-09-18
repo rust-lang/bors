@@ -251,7 +251,7 @@ async fn api_merge_queue(
             base_branch: pr.base_branch,
             priority: pr.priority.map(|p| p as u64),
             approver: match pr.approval_status {
-                ApprovalStatus::NotApproved => None,
+                ApprovalStatus::NotApproved | ApprovalStatus::Tentative(_) => None,
                 ApprovalStatus::Approved(info) => Some(info.approver),
             },
             try_build: pr.try_build.map(|b| convert_status(b.status)),
@@ -439,7 +439,7 @@ pub async fn queue_handler(
             QueueStatus::ReadyForMerge(..) => (1, 0),
             QueueStatus::Pending(..) => (1, 0),
             QueueStatus::Failed(..) => (0, 1),
-            QueueStatus::NotApproved | QueueStatus::NotOpen => (0, 0),
+            QueueStatus::Tentative(_) | QueueStatus::NotApproved | QueueStatus::NotOpen => (0, 0),
         };
         in_queue_count += in_queue_inc;
         failed_count += failed_inc;
@@ -462,6 +462,7 @@ pub async fn queue_handler(
             }
             QueueStatus::Failed(_, _)
             | QueueStatus::ReadyForMerge(_, _)
+            | QueueStatus::Tentative(_)
             | QueueStatus::NotOpen
             | QueueStatus::NotApproved => {}
         }
