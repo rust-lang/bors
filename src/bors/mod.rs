@@ -125,6 +125,7 @@ You can use the following commands:
     - You can pass a comma-separated list of GitHub usernames.
     - The default is for approvals to remain tentative until PR CI succeeds. Pass `force` to approve the PR immediately.
     - Optionally, you can attach a `<note>` to the PR that will be displayed on the queue page.
+- `r+ squash`: Squash the commits of a PR into a single commit, then approve it.
 - `r-`: Unapprove this PR
 - `p=<priority> [note=[<note>]]` | `priority=<priority> [note=[<note>]]`: Set the priority of this PR
     - Optionally, you can attach a `<note>` to the PR that will be displayed on the queue page.
