@@ -464,14 +464,14 @@ async fn handle_start_auto_build(
                 &ctx.db,
                 pr,
                 &gh_pr,
-                InvalidationInfo::new(InvalidationReason::CommitShaChanged),
+                InvalidationInfo::new(InvalidationReason::CommitShaChanged {
+                    sha: actual.clone(),
+                }),
                 Some(
                     InvalidationComment::new(format!(
                         r#"Commit SHA did not match the approved SHA during a merge attempt.
-Approved commit SHA: {expected_sha}
-Actual head SHA: {actual_sha}"#,
-                        expected_sha = pr.approved_sha().unwrap_or("<missing>").to_owned(),
-                        actual_sha = gh_pr.head.sha
+Approved commit SHA: {approved}
+Actual head SHA: {actual}"#,
                     ))
                     .post_always(),
                 ),

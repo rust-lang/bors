@@ -969,6 +969,23 @@ impl BorsTester {
         self.send_webhook("pull_request", payload).await
     }
 
+    /// Sends commit push webhook for the HEAD commit of the PR identified by `id`.
+    pub async fn send_push_webhook<Id: Into<PrIdentifier>>(
+        &mut self,
+        id: Id,
+    ) -> anyhow::Result<()> {
+        let id = id.into();
+        let payload = {
+            let gh = self.github.lock();
+            let repo = gh.get_repo(&id.repo);
+            let repo = repo.lock();
+            let pr = repo.pulls().get(&id.number).expect("PR not found");
+            GitHubPullRequestEventPayload::new(&repo, &gh, pr.clone(), "synchronize", None)
+        };
+
+        self.send_webhook("pull_request", payload).await
+    }
+
     pub async fn assign_pr<Id: Into<PrIdentifier>>(
         &mut self,
         id: Id,

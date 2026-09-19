@@ -106,6 +106,7 @@ pub fn format_help() -> &'static str {
         BorsCommand::Retry => {}
         BorsCommand::Cancel => {}
         BorsCommand::Squash { .. } => {}
+        BorsCommand::SquashApprove { .. } => {}
     }
 
     r#"
@@ -119,6 +120,7 @@ You can use the following commands:
     - Optionally, you can specify the `<priority>` of the PR and if it is eligible for rollups (`<rollup>)`.
     - You can pass a comma-separated list of GitHub usernames.
     - Optionally, you can attach a `<note>` to the PR that will be displayed on the queue page.
+- `r+ squash`: Squash the commits of a PR into a single commit, then approve it.
 - `r-`: Unapprove this PR
 - `p=<priority> [note=[<note>]]` | `priority=<priority> [note=[<note>]]`: Set the priority of this PR
     - Optionally, you can attach a `<note>` to the PR that will be displayed on the queue page.
