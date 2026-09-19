@@ -1,6 +1,6 @@
 use crate::bors::{
-    CommandPrefix, PullRequestStatus, RollupMode, WAIT_FOR_BUILD_QUEUE, WAIT_FOR_MERGE_QUEUE,
-    WAIT_FOR_MERGE_QUEUE_MERGE_ATTEMPT, WAIT_FOR_MERGEABILITY_STATUS_REFRESH,
+    CommandPrefix, PullRequestStatus, RollupMode, WAIT_FOR_APPROVAL_QUEUE, WAIT_FOR_BUILD_QUEUE,
+    WAIT_FOR_MERGE_QUEUE, WAIT_FOR_MERGE_QUEUE_MERGE_ATTEMPT, WAIT_FOR_MERGEABILITY_STATUS_REFRESH,
     WAIT_FOR_PR_STATUS_REFRESH, WAIT_FOR_WEBHOOK_COMPLETED,
 };
 use crate::database::{
@@ -307,11 +307,11 @@ impl BorsTester {
     }
 
     pub fn try_workflow(&self) -> RunId {
-        self.create_workflow(default_repo_name(), TRY_BRANCH)
+        self.create_workflow(default_repo_name(), TRY_BRANCH, "push")
     }
 
     pub fn auto_workflow(&self) -> RunId {
-        self.create_workflow(default_repo_name(), AUTO_BRANCH)
+        self.create_workflow(default_repo_name(), AUTO_BRANCH, "push")
     }
 
     /// Creates N unrolled workflows, for the past N commits pushed to the unrolled branch.
@@ -334,7 +334,7 @@ impl BorsTester {
         );
         let mut workflows = vec![];
         for commit in branch.get_commit_history().into_iter().rev().take(n).rev() {
-            let workflow = self.create_workflow(&repo_name, UNROLLED_BRANCH);
+            let workflow = self.create_workflow(&repo_name, UNROLLED_BRANCH, "push");
             // Overwrite the SHA of the workflow
             self.modify_workflow(workflow, |w| w.set_head_sha(commit.sha()));
             workflows.push(workflow);
@@ -342,9 +342,14 @@ impl BorsTester {
         workflows
     }
 
-    pub fn create_workflow<Id: Into<RepoIdentifier>>(&self, id: Id, branch: &str) -> RunId {
+    pub fn create_workflow<Id: Into<RepoIdentifier>>(
+        &self,
+        id: Id,
+        branch: &str,
+        event: &str,
+    ) -> RunId {
         let mut gh = self.github.lock();
-        gh.new_workflow(&id.into().0, branch)
+        gh.new_workflow(&id.into().0, branch, event)
     }
 
     pub fn modify_workflow<F: FnOnce(&mut WorkflowRun)>(&mut self, run_id: RunId, func: F) {
@@ -593,6 +598,22 @@ impl BorsTester {
             },
             self.wait_for_markers,
             &WAIT_FOR_BUILD_QUEUE,
+        )
+        .await
+        .unwrap();
+    }
+
+    pub async fn refresh_tentative_approvals(&self) {
+        wait_for_marker(
+            async || {
+                self.global_tx
+                    .send(BorsGlobalEvent::RefreshTentativeApprovals)
+                    .await
+                    .unwrap();
+                Ok(())
+            },
+            self.wait_for_markers,
+            &WAIT_FOR_APPROVAL_QUEUE,
         )
         .await
         .unwrap();

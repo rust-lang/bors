@@ -352,6 +352,32 @@ Reason for tree closure: `{reason}`
     Comment::new(comment)
 }
 
+pub fn tentative_approval_failed_comment(commit_sha: &CommitSha) -> Comment {
+    Comment::new(format!(
+        ":x: Commit {commit_sha} has not been approved due to failing CI."
+    ))
+}
+
+pub fn tentatively_approved_comment(
+    commit_sha: &CommitSha,
+    reviewer: &str,
+    unknown_reviewers: Vec<String>,
+) -> Comment {
+    let mut comment =
+        format!(":hourglass: Commit {commit_sha} has been tentatively approved by `{reviewer}`");
+
+    if !unknown_reviewers.is_empty() {
+        writeln!(
+            comment,
+            "\n\n:warning: The following reviewer(s) could not be found: `{}`",
+            unknown_reviewers.join(", ")
+        )
+        .unwrap();
+    }
+
+    Comment::new(comment)
+}
+
 pub fn approve_non_open_pr_comment() -> Comment {
     Comment::new(":clipboard: Only open, non-draft PRs can be approved.".to_string())
 }

@@ -409,7 +409,28 @@ async fn mock_workflow_runs(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
         move |req: &Request, []| {
             let repo = repo.lock();
             let head_sha = get_query_param(req, "head_sha");
-            let workflow_runs: Vec<WorkflowRun> = repo.find_workflows_by_commit_sha(&head_sha);
+            let event = get_query_param_opt(req, "event");
+            let mut workflow_runs: Vec<WorkflowRun> = repo
+                .find_workflows_by_commit_sha(&head_sha)
+                .into_iter()
+                .filter(|workflow| {
+                    event
+                        .as_deref()
+                        .map(|event| workflow.event() == event)
+                        .unwrap_or(true)
+                })
+                .collect();
+            // Default unconfigured PR CI to pass.
+            if event.as_deref() == Some("pull_request")
+                && workflow_runs.is_empty()
+                && let Some(pr) = repo.pulls().values().find(|pr| pr.head_sha() == head_sha)
+            {
+                let branch = pr.head_branch_copy();
+                let mut workflow = WorkflowRun::new(RunId(10_000_000 + pr.number().0), &branch);
+                workflow.change_status(WorkflowStatus::Success);
+                workflow.set_event("pull_request");
+                workflow_runs.push(workflow);
+            }
 
             let response = WorkflowRunsResponse {
                 workflow_runs: workflow_runs

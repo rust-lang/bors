@@ -211,6 +211,7 @@ async fn process_repository(
                                 QueueStatus::Pending(_, _) => "pending",
                                 QueueStatus::Failed(_, _) => "failed",
                                 QueueStatus::Approved(_) => "approved",
+                                QueueStatus::Tentative(_) => "tentative",
                                 QueueStatus::ReadyForMerge(_, _) => "ready for merge",
                                 QueueStatus::NotOpen => "not open",
                                 QueueStatus::NotApproved => "not approved"
@@ -241,7 +242,10 @@ async fn process_repository(
                 }
             }
             // We got to the end of the merge queue, stop going through the rest of the PRs
-            QueueStatus::NotApproved | QueueStatus::NotOpen | QueueStatus::Failed(..) => break,
+            QueueStatus::Tentative(_)
+            | QueueStatus::NotApproved
+            | QueueStatus::NotOpen
+            | QueueStatus::Failed(..) => break,
         }
     }
 

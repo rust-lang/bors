@@ -336,15 +336,16 @@ fn parse_workflow_run_events(body: &[u8]) -> anyhow::Result<Option<BorsEvent>> {
     let payload: WebhookWorkflowRun = serde_json::from_slice(body)?;
     let repository_name = parse_repository_name(&payload.repository)?;
 
-    // As a security precaution, we eagerly prefilter all workflow runs other than "push" here,
-    // to ensure that only workflows from privileged pushes to branches in the repository are
-    // registered by bors.
-    if payload.workflow_run.run.event != "push" {
+    // As a security precaution, we eagerly prefilter all workflow runs other than "push" and
+    // "pull_request" here. Only workflows from privileged pushes to branches in the repository
+    // are registered as builds by bors. Pull request workflow completions are handled separately.
+    if payload.workflow_run.run.event != "push" && payload.workflow_run.run.event != "pull_request"
+    {
         return Ok(None);
     }
 
-    let result = match payload.action {
-        "requested" => Some(BorsEvent::Repository(BorsRepositoryEvent::WorkflowStarted(
+    let result = match (payload.workflow_run.run.event.as_str(), payload.action) {
+        ("push", "requested") => Some(BorsEvent::Repository(BorsRepositoryEvent::WorkflowStarted(
             WorkflowRunStarted {
                 repository: repository_name,
                 name: payload.workflow_run.run.name,
@@ -355,7 +356,7 @@ fn parse_workflow_run_events(body: &[u8]) -> anyhow::Result<Option<BorsEvent>> {
                 url: payload.workflow_run.run.html_url.into(),
             },
         ))),
-        "completed" => {
+        (event @ ("push" | "pull_request"), "completed") => {
             let running_time = if let (Some(started_at), Some(completed_at)) = (
                 Some(payload.workflow_run.run.created_at),
                 Some(payload.workflow_run.run.updated_at),
@@ -364,29 +365,36 @@ fn parse_workflow_run_events(body: &[u8]) -> anyhow::Result<Option<BorsEvent>> {
             } else {
                 None
             };
-            Some(BorsEvent::Repository(
-                BorsRepositoryEvent::WorkflowCompleted(WorkflowRunCompleted {
-                    repository: repository_name,
-                    branch: payload.workflow_run.run.head_branch,
-                    commit_sha: CommitSha(payload.workflow_run.run.head_sha),
-                    run_id: payload.workflow_run.run.id,
-                    check_suite_id: payload.workflow_run.check_suite_id,
-                    running_time,
-                    status: match payload
-                        .workflow_run
-                        .run
-                        .conclusion
-                        .unwrap_or_default()
-                        .as_str()
-                    {
-                        "success" => WorkflowStatus::Success,
-                        _ => WorkflowStatus::Failure,
-                    },
-                }),
-            ))
+            let workflow = WorkflowRunCompleted {
+                repository: repository_name,
+                branch: payload.workflow_run.run.head_branch,
+                commit_sha: CommitSha(payload.workflow_run.run.head_sha),
+                run_id: payload.workflow_run.run.id,
+                check_suite_id: payload.workflow_run.check_suite_id,
+                running_time,
+                status: match payload
+                    .workflow_run
+                    .run
+                    .conclusion
+                    .unwrap_or_default()
+                    .as_str()
+                {
+                    "success" => WorkflowStatus::Success,
+                    _ => WorkflowStatus::Failure,
+                },
+            };
+
+            let event = if event == "pull_request" {
+                BorsRepositoryEvent::PullRequestWorkflowCompleted(workflow)
+            } else {
+                BorsRepositoryEvent::WorkflowCompleted(workflow)
+            };
+
+            Some(BorsEvent::Repository(event))
         }
         _ => None,
     };
+
     Ok(result)
 }
 

@@ -131,6 +131,18 @@ pub async fn handle_bors_repository_event(
                 .instrument(span)
                 .await?;
         }
+        BorsRepositoryEvent::PullRequestWorkflowCompleted(payload) => {
+            let span = tracing::info_span!(
+                "Pull request workflow completed",
+                repo = payload.repository.to_string(),
+                sha = %payload.commit_sha,
+            );
+            senders
+                .approval_queue()
+                .on_workflow_completed(payload)
+                .instrument(span)
+                .await?;
+        }
         BorsRepositoryEvent::WorkflowJobStarted(payload) => {
             let span = tracing::info_span!(
                 "Workflow job started",
@@ -299,6 +311,18 @@ pub async fn handle_bors_global_event(
                     .refresh_pending_builds(repo.repository().clone())
                     .instrument(span.clone())
                     .map_err(|e| e.into())
+            })
+            .instrument(span.clone())
+            .await?;
+        }
+        BorsGlobalEvent::RefreshTentativeApprovals => {
+            let span = tracing::info_span!("Refresh tentative approvals");
+            for_each_repo(&ctx, |repo| {
+                senders
+                    .approval_queue()
+                    .refresh_tentative_approvals(repo.repository().clone())
+                    .instrument(span.clone())
+                    .map_err(|error| error.into())
             })
             .instrument(span.clone())
             .await?;
@@ -474,6 +498,7 @@ async fn handle_comment(
                         priority,
                         rollup,
                         note,
+                        force,
                     } => {
                         let span = tracing::info_span!("Approve");
                         command_approve(
@@ -486,6 +511,7 @@ async fn handle_comment(
                             priority,
                             rollup,
                             note,
+                            force,
                             senders.merge_queue(),
                         )
                         .instrument(span)
@@ -920,7 +946,7 @@ pub async fn invalidate_pr(
 ) -> anyhow::Result<InvalidationOutcome> {
     // Step 1: unapprove the pull request if it was approved
     // This happens everytime the PR is invalidated, if it was approved before
-    let pr_unapproved = if pr_db.is_approved() {
+    let pr_unapproved = if pr_db.is_approved() || pr_db.tentative_approval().is_some() {
         unapprove_pr(repo_state, db, pr_db, &pr_gh.clone().into()).await?;
         true
     } else {

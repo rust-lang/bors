@@ -264,8 +264,8 @@ fn parse_parts(input: &str) -> Result<Vec<CommandPart<'_>>, CommandParseError> {
 }
 
 /// Parses:
-/// - "@bors r+ [p=<priority>] [rollup=<never|iffy|maybe|always>] [note=<note>]"
-/// - "@bors r=<user> [p=<priority>] [rollup=<never|iffy|maybe|always>] [note=<note>]"
+/// - "@bors r+ [p=<priority>] [rollup=<never|iffy|maybe|always>] [force] [note=<note>]"
+/// - "@bors r=<user> [p=<priority>] [rollup=<never|iffy|maybe|always>] [force] [note=<note>]"
 fn parser_approval(command: &CommandPart<'_>, parts: &[CommandPart<'_>]) -> ParseResult {
     let approver = match command {
         CommandPart::Bare("r+") => Approver::Myself,
@@ -297,11 +297,15 @@ fn parser_approval(command: &CommandPart<'_>, parts: &[CommandPart<'_>]) -> Pars
             _ => None,
         })
         .next();
+    let force = parts
+        .iter()
+        .any(|part| matches!(part, CommandPart::Bare("force")));
     Some(Ok(BorsCommand::Approve {
         approver,
         priority,
         rollup,
         note,
+        force,
     }))
 }
 
@@ -672,8 +676,8 @@ fn parser_squash(command: &CommandPart<'_>, parts: &[CommandPart<'_>]) -> ParseR
 
 #[cfg(test)]
 mod tests {
-    use crate::bors::command::BorsCommand;
     use crate::bors::command::parser::{CommandParseError, CommandParser};
+    use crate::bors::command::{Approver, BorsCommand};
 
     #[test]
     fn no_commands() {
@@ -723,7 +727,7 @@ mod tests {
     #[test]
     fn parse_default_approve() {
         let cmds = parse_commands("@bors r+");
-        insta::assert_debug_snapshot!(cmds, @"
+        insta::assert_debug_snapshot!(cmds, @r"
         [
             Ok(
                 Approve {
@@ -731,10 +735,26 @@ mod tests {
                     priority: None,
                     rollup: None,
                     note: None,
+                    force: false,
                 },
             ),
         ]
         ");
+    }
+
+    #[test]
+    fn parse_force_approve() {
+        let cmds = parse_commands("@bors r+ force p=1");
+        assert_eq!(
+            cmds,
+            vec![Ok(BorsCommand::Approve {
+                approver: Approver::Myself,
+                priority: Some(1),
+                rollup: None,
+                note: None,
+                force: true,
+            })]
+        );
     }
 
     #[test]
@@ -750,6 +770,7 @@ mod tests {
                 priority: None,
                 rollup: None,
                 note: None,
+                force: false,
             },
         )
         "#);
@@ -768,6 +789,7 @@ mod tests {
                 priority: None,
                 rollup: None,
                 note: None,
+                force: false,
             },
         )
         "#);
@@ -802,7 +824,7 @@ mod tests {
     #[test]
     fn parse_approve_with_priority() {
         let cmds = parse_commands("@bors r+ p=1");
-        insta::assert_debug_snapshot!(cmds, @"
+        insta::assert_debug_snapshot!(cmds, @r"
         [
             Ok(
                 Approve {
@@ -812,6 +834,7 @@ mod tests {
                     ),
                     rollup: None,
                     note: None,
+                    force: false,
                 },
             ),
         ]
@@ -833,6 +856,7 @@ mod tests {
                     ),
                     rollup: None,
                     note: None,
+                    force: false,
                 },
             ),
         ]
@@ -857,6 +881,7 @@ mod tests {
                     ),
                     rollup: None,
                     note: None,
+                    force: false,
                 },
             ),
             Ok(
@@ -869,6 +894,7 @@ mod tests {
                     ),
                     rollup: None,
                     note: None,
+                    force: false,
                 },
             ),
         ]
@@ -903,6 +929,7 @@ mod tests {
                     ),
                     rollup: None,
                     note: None,
+                    force: false,
                 },
             ),
         ]
@@ -1060,7 +1087,7 @@ mod tests {
     #[test]
     fn parse_approve_with_rollup() {
         let cmds = parse_commands("@bors r+ rollup");
-        insta::assert_debug_snapshot!(cmds, @"
+        insta::assert_debug_snapshot!(cmds, @r"
         [
             Ok(
                 Approve {
@@ -1070,6 +1097,7 @@ mod tests {
                         Always,
                     ),
                     note: None,
+                    force: false,
                 },
             ),
         ]
@@ -1091,6 +1119,7 @@ mod tests {
                         Never,
                     ),
                     note: None,
+                    force: false,
                 },
             ),
         ]
@@ -1112,6 +1141,7 @@ mod tests {
                         Always,
                     ),
                     note: None,
+                    force: false,
                 },
             ),
         ]
@@ -1133,6 +1163,7 @@ mod tests {
                         Maybe,
                     ),
                     note: None,
+                    force: false,
                 },
             ),
         ]
@@ -1157,6 +1188,7 @@ mod tests {
                         Always,
                     ),
                     note: None,
+                    force: false,
                 },
             ),
             Ok(
@@ -1169,6 +1201,7 @@ mod tests {
                         Iffy,
                     ),
                     note: None,
+                    force: false,
                 },
             ),
         ]
@@ -1309,7 +1342,7 @@ mod tests {
     #[test]
     fn parse_approve_with_rollup_bare_priority() {
         let cmds = parse_commands("@bors r+ rollup p=1");
-        insta::assert_debug_snapshot!(cmds, @"
+        insta::assert_debug_snapshot!(cmds, @r"
         [
             Ok(
                 Approve {
@@ -1321,6 +1354,7 @@ mod tests {
                         Always,
                     ),
                     note: None,
+                    force: false,
                 },
             ),
         ]
@@ -1330,7 +1364,7 @@ mod tests {
     #[test]
     fn parse_approve_with_rollup_value_priority() {
         let cmds = parse_commands("@bors r+ rollup=iffy p=1");
-        insta::assert_debug_snapshot!(cmds, @"
+        insta::assert_debug_snapshot!(cmds, @r"
         [
             Ok(
                 Approve {
@@ -1342,6 +1376,7 @@ mod tests {
                         Iffy,
                     ),
                     note: None,
+                    force: false,
                 },
             ),
         ]
@@ -1365,6 +1400,7 @@ mod tests {
                     note: Some(
                         "foo bar",
                     ),
+                    force: false,
                 },
             ),
         ]
@@ -2159,6 +2195,7 @@ I am markdown HTML comment
                 priority: None,
                 rollup: None,
                 note: None,
+                force: false,
             },
         )
         "#);

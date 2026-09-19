@@ -208,6 +208,8 @@ pub enum QueueStatus<'a> {
     /// Approved with no auto build started yet or a failed auto build was reset
     /// with `@bors retry`.
     Approved(&'a ApprovalInfo),
+    /// Approved, subject to passing CI.
+    Tentative(&'a ApprovalInfo),
     /// Approved with passing CI.
     ReadyForMerge(&'a ApprovalInfo, &'a BuildModel),
     /// Status is draft/merged/closed.
@@ -220,27 +222,35 @@ pub enum QueueStatus<'a> {
 #[derive(Debug, Clone, PartialEq)]
 pub enum ApprovalStatus {
     NotApproved,
+    Tentative(ApprovalInfo),
     Approved(ApprovalInfo),
 }
 
 impl sqlx::Type<sqlx::Postgres> for ApprovalStatus {
     fn type_info() -> sqlx::postgres::PgTypeInfo {
-        <(Option<String>, Option<String>) as sqlx::Type<sqlx::Postgres>>::type_info()
+        <(Option<String>, Option<String>, bool) as sqlx::Type<sqlx::Postgres>>::type_info()
     }
 }
 
 impl<'r> sqlx::Decode<'r, sqlx::Postgres> for ApprovalStatus {
     fn decode(value: sqlx::postgres::PgValueRef<'r>) -> Result<Self, BoxDynError> {
-        let (approver, sha) =
-            <(Option<String>, Option<String>) as sqlx::Decode<sqlx::Postgres>>::decode(value)?;
+        let (approver, sha, tentative) =
+            <(Option<String>, Option<String>, bool) as sqlx::Decode<sqlx::Postgres>>::decode(
+                value,
+            )?;
 
-        match (approver, sha) {
-            (Some(approver), Some(sha)) => {
-                Ok(ApprovalStatus::Approved(ApprovalInfo { approver, sha }))
-            }
-            (None, None) => Ok(ApprovalStatus::NotApproved),
-            (approver, sha) => Err(format!(
-                "Inconsistent approval state: approver={approver:?}, sha={sha:?}"
+        match (approver, sha, tentative) {
+            (Some(approver), Some(sha), true) => Ok(ApprovalStatus::Tentative(ApprovalInfo {
+                approver,
+                sha,
+            })),
+            (Some(approver), Some(sha), false) => Ok(ApprovalStatus::Approved(ApprovalInfo {
+                approver,
+                sha,
+            })),
+            (None, None, false) => Ok(ApprovalStatus::NotApproved),
+            (approver, sha, tentative) => Err(format!(
+                "Inconsistent approval state: approver={approver:?}, sha={sha:?}, tentative={tentative}"
             )
             .into()),
         }
@@ -505,15 +515,26 @@ impl PullRequestModel {
 
     pub fn approver(&self) -> Option<&str> {
         match &self.approval_status {
-            ApprovalStatus::Approved(info) => Some(info.approver.as_str()),
+            ApprovalStatus::Tentative(info) | ApprovalStatus::Approved(info) => {
+                Some(info.approver.as_str())
+            }
             ApprovalStatus::NotApproved => None,
         }
     }
 
     pub fn approved_sha(&self) -> Option<&str> {
         match &self.approval_status {
-            ApprovalStatus::Approved(info) => Some(info.sha.as_str()),
+            ApprovalStatus::Tentative(info) | ApprovalStatus::Approved(info) => {
+                Some(info.sha.as_str())
+            }
             ApprovalStatus::NotApproved => None,
+        }
+    }
+
+    pub fn tentative_approval(&self) -> Option<&ApprovalInfo> {
+        match &self.approval_status {
+            ApprovalStatus::Tentative(info) => Some(info),
+            ApprovalStatus::Approved(_) | ApprovalStatus::NotApproved => None,
         }
     }
 
@@ -538,6 +559,7 @@ impl PullRequestModel {
 
         match &self.approval_status {
             ApprovalStatus::NotApproved => QueueStatus::NotApproved,
+            ApprovalStatus::Tentative(approval_info) => QueueStatus::Tentative(approval_info),
             ApprovalStatus::Approved(approval_info) => match &self.auto_build {
                 Some(build) => match build.status {
                     BuildStatus::Pending => QueueStatus::Pending(approval_info, build),
@@ -563,6 +585,7 @@ impl PullRequestModel {
             QueueStatus::Approved(_) | QueueStatus::Pending(_, _) => true,
             QueueStatus::Failed(_, _)
             | QueueStatus::ReadyForMerge(_, _)
+            | QueueStatus::Tentative(_)
             | QueueStatus::NotApproved
             | QueueStatus::NotOpen => false,
         }

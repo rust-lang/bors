@@ -22,6 +22,8 @@ use std::str::FromStr;
 use std::sync::{Arc, LazyLock, RwLock};
 use std::time::Duration;
 
+mod approval;
+mod approval_queue;
 mod build;
 mod build_queue;
 mod command;
@@ -80,6 +82,7 @@ pub fn format_help() -> &'static str {
             rollup: _,
             priority: _,
             note: _,
+            force: _,
         } => {}
         BorsCommand::Unapprove => {}
         BorsCommand::Help => {}
@@ -112,12 +115,16 @@ pub fn format_help() -> &'static str {
 You can use the following commands:
 
 ## PR management
-- `r+ [p=<priority>] [rollup=<never|iffy|maybe|always>] [note=<note>]`: Approve this PR on your behalf
+- `r+ [p=<priority>] [rollup=<never|iffy|maybe|always>] [force] [note=<note>]`: Approve this PR on your behalf
     - Optionally, you can specify the `<priority>` of the PR and if it is eligible for rollups (`<rollup>)`.
+    - The default is for approvals to remain tentative until CI succeeds.
+    - Pass `force` to approve the PR immediately.
     - Optionally, you can attach a `<note>` to the PR that will be displayed on the queue page.
-- `r=<user> [p=<priority>] [rollup=<never|iffy|maybe|always>] [note=<note>]`: Approve this PR on behalf of `<user>`
+- `r=<user> [p=<priority>] [rollup=<never|iffy|maybe|always>] [force] [note=<note>]`: Approve this PR on behalf of `<user>`
     - Optionally, you can specify the `<priority>` of the PR and if it is eligible for rollups (`<rollup>)`.
     - You can pass a comma-separated list of GitHub usernames.
+    - The default is for approvals to remain tentative until CI succeeds.
+    - Pass `force` to approve the PR immediately.
     - Optionally, you can attach a `<note>` to the PR that will be displayed on the queue page.
 - `r-`: Unapprove this PR
 - `p=<priority> [note=[<note>]]` | `priority=<priority> [note=[<note>]]`: Set the priority of this PR
@@ -161,6 +168,13 @@ You can use the following commands:
 
 #[cfg(test)]
 pub static WAIT_FOR_BUILD_QUEUE: TestSyncMarker = TestSyncMarker::new();
+
+#[cfg(test)]
+pub static WAIT_FOR_APPROVAL_QUEUE: TestSyncMarker = TestSyncMarker::new();
+
+/// The approval queue has handled a workflow completed event.
+#[cfg(test)]
+pub static WAIT_FOR_APPROVAL_WORKFLOW_COMPLETED_HANDLED: TestSyncMarker = TestSyncMarker::new();
 
 #[cfg(test)]
 pub static WAIT_FOR_MERGEABILITY_STATUS_REFRESH: TestSyncMarker = TestSyncMarker::new();

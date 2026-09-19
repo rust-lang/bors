@@ -282,7 +282,7 @@ pub(super) async fn reload_workflow_job_cache(
 
         let Ok(workflows) = repo
             .client
-            .get_workflow_runs_for_commit_sha(CommitSha(build.commit_sha.clone()))
+            .get_workflow_runs_for_commit_sha(CommitSha(build.commit_sha.clone()), None)
             .await
         else {
             continue;
@@ -421,7 +421,7 @@ mod tests {
     async fn workflow_started_unknown_build(pool: sqlx::PgPool) {
         run_test(pool.clone(), async |ctx: &mut BorsTester| {
             ctx.create_branch("unknown");
-            let run_id = ctx.create_workflow((), "unknown");
+            let run_id = ctx.create_workflow((), "unknown", "push");
             ctx.workflow_event(WorkflowEvent::started(run_id)).await?;
             Ok(())
         })
@@ -433,7 +433,7 @@ mod tests {
     async fn workflow_completed_unknown_build(pool: sqlx::PgPool) {
         run_test(pool.clone(), async |ctx: &mut BorsTester| {
             ctx.create_branch("unknown");
-            let run_id = ctx.create_workflow((), "unknown");
+            let run_id = ctx.create_workflow((), "unknown", "push");
             ctx.workflow_event(WorkflowEvent::success(run_id)).await?;
             Ok(())
         })
