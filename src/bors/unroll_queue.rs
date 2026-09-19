@@ -1,8 +1,8 @@
 use crate::bors::build::{StartBuildContext, StartBuildError, StartBuildOutcome, start_build};
 use crate::bors::{BuildKind, Comment, RepositoryState, TRY_PERF_BRANCH_NAME, bors_commit_author};
 use crate::database::{
-    BuildModel, BuildStatus, ExclusiveOperationOutcome, PullRequestModel, RollupMemberForUnrolling,
-    UnrollState,
+    BuildModel, BuildStatus, ExclusiveLockProof, ExclusiveOperationOutcome, PullRequestModel,
+    RollupMemberForUnrolling, UnrollState,
 };
 use crate::github::{CommitSha, GithubRepoName, PullRequestNumber};
 use crate::{BorsContext, PgDbClient};
@@ -59,7 +59,10 @@ pub fn create_unroll_queue() -> (UnrollQueueSender, UnrollQueueReceiver) {
 /// - We can explicitly trigger it in tests without also triggering the build queue.
 ///
 /// We implement this as a separate unroll queue, so that it does not block other background sync
-/// processes, and so that we can easily trigger it via a dedicated queue
+/// processes, and so that we can easily trigger it via a dedicated queue.
+///
+/// We need to hold the lock over the whole unroll queue operation, otherwise concurrent bors
+/// instances could start duplicate unrolled builds from the same database state.
 pub async fn handle_unroll_queue_event(
     ctx: Arc<BorsContext>,
     event: UnrollQueueEvent,
@@ -73,17 +76,32 @@ pub async fn handle_unroll_queue_event(
         return Ok(());
     }
 
+    let repository = repo.repository().clone();
     let db = &ctx.db;
-    let span = info_span!(
-        "Processing unrolled builds",
-        repo = repo.repository().to_string()
-    );
-    process_unrolled_members(&repo, db).instrument(span).await?;
-
-    Ok(())
+    let result = db
+        .ensure_not_concurrent(BuildKind::UnrolledMember, &repository, async move |proof| {
+            let span = info_span!(
+                "Processing unrolled builds",
+                repo = repo.repository().to_string()
+            );
+            process_unrolled_members(&repo, db, &proof)
+                .instrument(span)
+                .await
+        })
+        .await?;
+    match result {
+        ExclusiveOperationOutcome::Performed(result) => result,
+        ExclusiveOperationOutcome::Skipped => Err(anyhow::anyhow!(
+            "Cannot start unrolled build due to a concurrent bors instance."
+        )),
+    }
 }
 
-async fn process_unrolled_members(repo: &RepositoryState, db: &PgDbClient) -> anyhow::Result<()> {
+async fn process_unrolled_members(
+    repo: &RepositoryState,
+    db: &PgDbClient,
+    proof: &ExclusiveLockProof,
+) -> anyhow::Result<()> {
     // Find all unrolled members that have not been processed yet
     let members: Vec<RollupMemberForUnrolling> = db
         .get_rollup_members_for_unrolling(repo.repository())
@@ -131,7 +149,7 @@ async fn process_unrolled_members(repo: &RepositoryState, db: &PgDbClient) -> an
         );
         let span = info_span!("Rollup unrolling", rollup = rollup_number.0);
 
-        process_rollup(db, repo, &rollup, rollup_auto_build, &members)
+        process_rollup(db, repo, proof, &rollup, rollup_auto_build, &members)
             .instrument(span)
             .await
             .with_context(|| {
@@ -156,6 +174,7 @@ impl From<anyhow::Error> for UnrollError {
 async fn process_rollup<'a>(
     db: &'a PgDbClient,
     repo: &'a RepositoryState,
+    proof: &ExclusiveLockProof,
     rollup: &PullRequestModel,
     rollup_auto_build: &BuildModel,
     members: &'a [RollupMemberForUnrolling],
@@ -170,7 +189,7 @@ async fn process_rollup<'a>(
             UnrollState::Waiting => {
                 // No unrolled build started yet, start it
                 let build_result =
-                    start_unrolled_build(db, repo, rollup, rollup_auto_build, member).await;
+                    start_unrolled_build(db, repo, proof, rollup, rollup_auto_build, member).await;
                 let merge_sha = match build_result {
                     Ok(sha) => sha,
                     Err(UnrollError::CommitNotFound { sha }) => {
@@ -368,6 +387,7 @@ struct CompletedMember<'a> {
 async fn start_unrolled_build(
     db: &PgDbClient,
     repo: &RepositoryState,
+    proof: &ExclusiveLockProof,
     rollup: &PullRequestModel,
     rollup_auto_build: &BuildModel,
     member: &RollupMemberForUnrolling,
@@ -399,51 +419,35 @@ async fn start_unrolled_build(
         member.pr.number, rollup.number
     );
 
-    let res = db
-        .ensure_not_concurrent(
-            BuildKind::UnrolledMember,
-            repo.repository(),
-            async move |proof| {
-                let outcome = start_build(
-                    db,
-                    repo,
-                    &proof,
-                    StartBuildContext {
-                        merge_branch: TRY_PERF_MERGE_BRANCH_NAME.to_string(),
-                        ci_branch: TRY_PERF_BRANCH_NAME.to_string(),
-                        base_sha,
-                        head_sha,
-                        message,
-                        author: bors_commit_author(),
-                        // Both the members and the rollup are merged, and the GitHub UI does not show
-                        // check runs for merged PRs, so this is unnecessary
-                        check_run: None,
-                        build_kind: BuildKind::UnrolledMember,
-                    },
-                    &member.pr,
-                )
-                .await
-                .map_err(|e| match e {
-                    StartBuildError::Github(e) => e,
-                    StartBuildError::Database(e) => e,
-                    StartBuildError::ConfigCheck(e) => {
-                        anyhow::anyhow!("Invalid bors config: {e:?}")
-                    }
-                })?;
-                match outcome {
-                    StartBuildOutcome::Success {
-                        build_commit_sha, ..
-                    } => Ok(build_commit_sha),
-                    StartBuildOutcome::MergeConflict => Err(UnrollError::MergeConflict),
-                }
-            },
-        )
-        .await?;
-    match res {
-        ExclusiveOperationOutcome::Performed(res) => res,
-        ExclusiveOperationOutcome::Skipped => Err(UnrollError::Transient(anyhow::anyhow!(
-            "Cannot start unrolled build due to a concurrent bors instance."
-        ))),
+    let outcome = start_build(
+        db,
+        repo,
+        proof,
+        StartBuildContext {
+            merge_branch: TRY_PERF_MERGE_BRANCH_NAME.to_string(),
+            ci_branch: TRY_PERF_BRANCH_NAME.to_string(),
+            base_sha,
+            head_sha,
+            message,
+            author: bors_commit_author(),
+            // Both the members and the rollup are merged, and the GitHub UI does not show
+            // check runs for merged PRs, so this is unnecessary
+            check_run: None,
+            build_kind: BuildKind::UnrolledMember,
+        },
+        &member.pr,
+    )
+    .await
+    .map_err(|e| match e {
+        StartBuildError::Github(e) => e,
+        StartBuildError::Database(e) => e,
+        StartBuildError::ConfigCheck(e) => anyhow::anyhow!("Invalid bors config: {e:?}"),
+    })?;
+    match outcome {
+        StartBuildOutcome::Success {
+            build_commit_sha, ..
+        } => Ok(build_commit_sha),
+        StartBuildOutcome::MergeConflict => Err(UnrollError::MergeConflict),
     }
 }
 
