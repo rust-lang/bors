@@ -267,12 +267,11 @@ fn parse_parts(input: &str) -> Result<Vec<CommandPart<'_>>, CommandParseError> {
 /// - "@bors r+ [p=<priority>] [rollup=<never|iffy|maybe|always>] [note=<note>]"
 /// - "@bors r=<user> [p=<priority>] [rollup=<never|iffy|maybe|always>] [note=<note>]"
 fn parser_approval(command: &CommandPart<'_>, parts: &[CommandPart<'_>]) -> ParseResult {
-    if let CommandPart::Bare("r+") = command
-        && !parts.is_empty()
-        && parts.contains(&CommandPart::Bare("squash"))
-    {
-        return parser_squash_approve(command, parts);
-    }
+    let also_squash = parts
+        .iter()
+        .position(|x| *x == CommandPart::Bare("squash"))
+        .and_then(|x| Some(&parts[x..]));
+
     let approver = match command {
         CommandPart::Bare("r+") => Approver::Myself,
         CommandPart::KeyValue { key: "r", value } => {
@@ -303,6 +302,47 @@ fn parser_approval(command: &CommandPart<'_>, parts: &[CommandPart<'_>]) -> Pars
             _ => None,
         })
         .next();
+
+    // parse the squash part of the approve_squash command
+    if let Some(also_squash) = also_squash {
+        match parser_squash(&also_squash[0], &also_squash[1..]) {
+            None => {
+                return Some(Err(CommandParseError::UnknownArg {
+                    arg: also_squash[1..][0].as_key().to_owned(),
+                    did_you_mean: "r+ squash [msg|message=\"<commit-msg>\"|description]"
+                        .to_string(),
+                }));
+            }
+            Some(val) => match val {
+                Ok(val) => match val {
+                    BorsCommand::Squash { commit_message, .. } => {
+                        return Some(Ok(BorsCommand::SquashApprove {
+                            commit_message,
+                            approver,
+                            priority,
+                            rollup,
+                            note,
+                        }));
+                    }
+                    _ => {
+                        return Some(Err(CommandParseError::UnknownArg {
+                            arg: also_squash[1..][0].as_key().to_owned(),
+                            did_you_mean: "r+ squash [msg|message=\"<commit-msg>\"|description]"
+                                .to_string(),
+                        }));
+                    }
+                },
+                Err(_) => {
+                    return Some(Err(CommandParseError::UnknownArg {
+                        arg: also_squash[1..][0].as_key().to_owned(),
+                        did_you_mean: "r+ squash [msg|message=\"<commit-msg>\"|description]"
+                            .to_string(),
+                    }));
+                }
+            },
+        }
+    }
+
     Some(Ok(BorsCommand::Approve {
         approver,
         priority,
@@ -673,53 +713,6 @@ fn parser_squash(command: &CommandPart<'_>, parts: &[CommandPart<'_>]) -> ParseR
             })),
         },
         _ => None,
-    }
-}
-
-/// Parses `@bors r+ squash` command.
-/// Supports specifying a commit message via `@bors r+ squash [msg|message]="message"`.
-fn parser_squash_approve(_: &CommandPart<'_>, parts: &[CommandPart<'_>]) -> ParseResult {
-    match parts {
-        &[CommandPart::Bare("squash")] => Some(Ok(BorsCommand::SquashApprove {
-            commit_message: SquashCommitMessage::AutoGenerate,
-            approver: Approver::Myself,
-            priority: None,
-            rollup: None,
-            note: None,
-        })),
-        &[
-            CommandPart::Bare("squash"),
-            CommandPart::KeyValue {
-                key: "msg" | "message",
-                value,
-            },
-            ..,
-        ] => {
-            if value == "description" {
-                Some(Ok(BorsCommand::SquashApprove {
-                    commit_message: SquashCommitMessage::PullRequestDescription,
-                    approver: Approver::Myself,
-                    priority: None,
-                    rollup: None,
-                    note: None,
-                }))
-            } else {
-                Some(Ok(BorsCommand::SquashApprove {
-                    commit_message: SquashCommitMessage::Explicit(value.to_owned()),
-                    approver: Approver::Myself,
-                    priority: None,
-                    rollup: None,
-                    note: None,
-                }))
-            }
-        }
-        [part, ..] => Some(Err(CommandParseError::UnknownArg {
-            arg: part.as_key().to_owned(),
-            did_you_mean: "r+ squash [msg|message=\"<commit-msg>\"|description]".to_string(),
-        })),
-        part => Some(Err(CommandParseError::MissingArgValue {
-            arg: format!("{:#?}", part),
-        })),
     }
 }
 
@@ -2255,7 +2248,7 @@ for the crater",
         [
             Err(
                 UnknownArg {
-                    arg: "squash",
+                    arg: "commit",
                     did_you_mean: "r+ squash [msg|message=\"<commit-msg>\"|description]",
                 },
             ),
