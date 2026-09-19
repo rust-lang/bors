@@ -1209,7 +1209,7 @@ pub fn invalidation_comment(
 
         let action = match &**reason {
             InvalidationReason::CommitShaChanged { sha } => {
-                format!("{} its commit SHA to {sha}", wrap("changed"))
+                format!("{} its commit SHA to `{sha}`", wrap("changed"))
             }
             InvalidationReason::BaseBranchChanged => {
                 format!("{} its base branch", wrap("changed"))

@@ -911,14 +911,20 @@ also include this pls
             );
             insta::assert_snapshot!(
                 ctx.get_next_comment_text(()).await?,
-                @":hammer: 2 commits were squashed into sha2-reauthored-to-git-user."
+                @"
+            :pushpin: Commit sha2-reauthored-to-git-user has been approved by `default-user`
+
+            It is now in the [queue](https://bors-test.com/queue/borstest) for this repository.
+            "
             );
-            let branch = ctx.pr(()).await.get_gh_pr().head_branch_copy();
+            // Check that generating a push webhook for the PR's HEAD SHA, because the pushed
+            // commit was already pre-approved by `@bors r+ squash`.
+            ctx.send_push_webhook(()).await?;
 
-            // Check that this won't unapprove the PR
-            ctx.push_to_pr((), branch.get_commit().clone()).await?;
-
-            ctx.pr(()).await.expect_approved_by("default-user");
+            ctx.pr(())
+                .await
+                .expect_approved_by("default-user")
+                .expect_approved_sha("sha2-reauthored-to-git-user");
             Ok(())
         })
         .await;

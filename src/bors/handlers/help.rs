@@ -37,6 +37,7 @@ mod tests {
                 - Optionally, you can specify the `<priority>` of the PR and if it is eligible for rollups (`<rollup>)`.
                 - You can pass a comma-separated list of GitHub usernames.
                 - Optionally, you can attach a `<note>` to the PR that will be displayed on the queue page.
+            - `r+ squash`: Squash the commits of a PR into a single commit, then approve it.
             - `r-`: Unapprove this PR
             - `p=<priority> [note=[<note>]]` | `priority=<priority> [note=[<note>]]`: Set the priority of this PR
                 - Optionally, you can attach a `<note>` to the PR that will be displayed on the queue page.
@@ -63,9 +64,6 @@ mod tests {
             - `retry`: Clear a failed auto build status from an approved PR. This will cause the merge queue to eventually attempt to merge the PR again.
             - `cancel` | `yield`: Cancel a running auto build on the current PR.
             - `squash [msg|message=<commit-message>|description]`: Squash the commits of a PR into a single commit.
-                - Optionally, you can specify a `<commit-message>` for the created commit. If not specified, the commit messages of all squashed commits will be combined.
-                - If you specify `msg=description`, then the PR body will be used as the squashed commit message.
-            - `r+ squash [msg|message=<commit-message>|description]`: Squash the commits of a PR into a single commit, then approve on your behalf.
                 - Optionally, you can specify a `<commit-message>` for the created commit. If not specified, the commit messages of all squashed commits will be combined.
                 - If you specify `msg=description`, then the PR body will be used as the squashed commit message.
             - `info`: Get information about the current PR
