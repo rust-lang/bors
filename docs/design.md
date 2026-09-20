@@ -122,7 +122,7 @@ Note that `automation/bors/try-merge` should not have any CI workflows configure
 
 ## Auto builds
 The merge queue is an automated system that processes approved pull requests and merges them into the base branch after
-ensuring they pass all CI checks. By default, `@bors r+` tentatively approves a PR until CI succeeds, after which it is
+ensuring they pass all CI checks. By default, `@bors r+` tentatively approves a PR until PR CI succeeds, after which it is
 "queued" automatically.
 
 Here is a sequence diagram that describes what happens when a PR is approved and enters the merge queue:
