@@ -8,7 +8,4 @@ SET approved_by = NULL,
 WHERE approval_tentative = TRUE;
 
 ALTER TABLE pull_request
-DROP CONSTRAINT pull_request_approval_state_consistent;
-
-ALTER TABLE pull_request
 DROP COLUMN approval_tentative;
