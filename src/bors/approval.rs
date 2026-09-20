@@ -7,6 +7,10 @@ use crate::database::{TreeState, WorkflowStatus};
 use crate::github::LabelTrigger;
 use crate::github::api::client::WorkflowSource;
 
+/// Finalize an approval and prepare the pull request for the merge queue.
+///
+/// Clears any failed auto build so it can be retried, wakes the merge queue, posts the approval
+/// comment, and applies label changes configured for approved pull requests.
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn finalize_approval(
     ctx: &BorsContext,
