@@ -7,6 +7,17 @@ use crate::database::{TreeState, WorkflowStatus};
 use crate::github::LabelTrigger;
 use crate::github::api::client::WorkflowSource;
 
+/// Check if the specified approvers exist as GitHub users or teams.
+pub(super) fn check_unknown_reviewers(repo: &RepositoryState, approvers: &str) -> Vec<String> {
+    let directory = repo.permissions.load();
+
+    approvers
+        .split(',')
+        .filter(|approver| !directory.user_exists(approver) && !directory.team_exists(approver))
+        .map(str::to_string)
+        .collect()
+}
+
 /// Finalize an approval and prepare the pull request for the merge queue.
 ///
 /// Clears any failed auto build so it can be retried, wakes the merge queue, posts the approval
@@ -17,10 +28,10 @@ pub(super) async fn finalize_approval(
     repo: &RepositoryState,
     pr: PullRequestData<'_>,
     approver: &str,
-    unknown_reviewers: Vec<String>,
     priority: Option<u32>,
     merge_queue_tx: &MergeQueueSender,
 ) -> anyhow::Result<()> {
+    let unknown_reviewers = check_unknown_reviewers(repo, approver);
     let was_failed = pr
         .db
         .auto_build
@@ -77,7 +88,6 @@ pub(super) async fn try_resolve_tentative_approval(
     repo: &RepositoryState,
     pr: PullRequestData<'_>,
     approver: &str,
-    unknown_reviewers: Vec<String>,
     priority: Option<u32>,
     merge_queue_tx: &MergeQueueSender,
 ) -> anyhow::Result<bool> {
@@ -123,15 +133,6 @@ pub(super) async fn try_resolve_tentative_approval(
     }
 
     ctx.db.promote_tentative_approval(pr.db).await?;
-    finalize_approval(
-        ctx,
-        repo,
-        pr,
-        approver,
-        unknown_reviewers,
-        priority,
-        merge_queue_tx,
-    )
-    .await?;
+    finalize_approval(ctx, repo, pr, approver, priority, merge_queue_tx).await?;
     Ok(true)
 }

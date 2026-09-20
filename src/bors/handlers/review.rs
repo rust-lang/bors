@@ -1,5 +1,7 @@
 use crate::bors::RepositoryState;
-use crate::bors::approval::{finalize_approval, try_resolve_tentative_approval};
+use crate::bors::approval::{
+    check_unknown_reviewers, finalize_approval, try_resolve_tentative_approval,
+};
 use crate::bors::command::{Approver, CommandPrefix, Delegatee};
 use crate::bors::command::{DelegateCommand, RollupMode};
 use crate::bors::comment::{
@@ -69,13 +71,9 @@ pub(super) async fn command_approve(
         return Ok(());
     }
 
-    let (approver, unknown_reviewers) = match approver {
-        Approver::Myself => (author.username.clone(), Vec::new()),
-        Approver::Specified(approver) => {
-            let normalized = normalize_approvers(approver);
-            let unknown = check_unknown_reviewers(&repo_state, &normalized).await;
-            (normalized.join(","), unknown)
-        }
+    let approver = match approver {
+        Approver::Myself => author.username.clone(),
+        Approver::Specified(approver) => normalize_approvers(approver).join(","),
     };
 
     let approval_info = ApprovalInfo {
@@ -101,13 +99,13 @@ pub(super) async fn command_approve(
             &repo_state,
             pr,
             &approver,
-            unknown_reviewers.clone(),
             priority,
             merge_queue_tx,
         )
         .await?;
 
         if !resolved {
+            let unknown_reviewers = check_unknown_reviewers(&repo_state, &approver);
             repo_state
                 .client
                 .post_comment(
@@ -120,16 +118,7 @@ pub(super) async fn command_approve(
         return Ok(());
     }
 
-    finalize_approval(
-        &ctx,
-        &repo_state,
-        pr,
-        &approver,
-        unknown_reviewers,
-        priority,
-        merge_queue_tx,
-    )
-    .await
+    finalize_approval(&ctx, &repo_state, pr, &approver, priority, merge_queue_tx).await
 }
 
 /// Normalize approvers (given after @bors r=) by removing leading @, possibly from multiple
@@ -139,21 +128,6 @@ fn normalize_approvers(approvers: &str) -> Vec<String> {
         .split(',')
         .map(|approver| approver.trim_start_matches('@').to_string())
         .collect::<Vec<String>>()
-}
-
-/// Check if the specified reviewers exist as GitHub users or teams.
-/// Returns comma-separated string of unknown reviewer names, or None if all exist.
-async fn check_unknown_reviewers(
-    repo_state: &RepositoryState,
-    reviewers: &[String],
-) -> Vec<String> {
-    let directory = repo_state.permissions.load();
-
-    reviewers
-        .iter()
-        .filter(|reviewer| !directory.user_exists(reviewer) && !directory.team_exists(reviewer))
-        .cloned()
-        .collect()
 }
 
 /// Keywords that will prevent an approval if they appear in the PR's title.

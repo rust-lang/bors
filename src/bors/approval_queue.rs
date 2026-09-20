@@ -164,7 +164,6 @@ async fn process_tentative_approval(
             db: pr,
         },
         &approval_info.approver,
-        Vec::new(),
         pr.priority.map(|priority| priority as u32),
         merge_queue_tx,
     )
