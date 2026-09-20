@@ -251,7 +251,7 @@ async fn api_merge_queue(
             base_branch: pr.base_branch,
             priority: pr.priority.map(|p| p as u64),
             approver: match pr.approval_status {
-                ApprovalStatus::NotApproved | ApprovalStatus::Tentative(_) => None,
+                ApprovalStatus::NotApproved | ApprovalStatus::TentativelyApproved(_) => None,
                 ApprovalStatus::Approved(info) => Some(info.approver),
             },
             try_build: pr.try_build.map(|b| convert_status(b.status)),

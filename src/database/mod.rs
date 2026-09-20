@@ -228,7 +228,7 @@ pub enum QueueStatus<'a> {
 #[derive(Debug, Clone, PartialEq)]
 pub enum ApprovalStatus {
     NotApproved,
-    Tentative(ApprovalInfo),
+    TentativelyApproved(ApprovalInfo),
     Approved(ApprovalInfo),
 }
 
@@ -246,10 +246,12 @@ impl<'r> sqlx::Decode<'r, sqlx::Postgres> for ApprovalStatus {
             )?;
 
         match (approver, sha, tentative) {
-            (Some(approver), Some(sha), true) => Ok(ApprovalStatus::Tentative(ApprovalInfo {
-                approver,
-                sha,
-            })),
+            (Some(approver), Some(sha), true) => {
+                Ok(ApprovalStatus::TentativelyApproved(ApprovalInfo {
+                    approver,
+                    sha,
+                }))
+            }
             (Some(approver), Some(sha), false) => Ok(ApprovalStatus::Approved(ApprovalInfo {
                 approver,
                 sha,
@@ -521,7 +523,7 @@ impl PullRequestModel {
 
     pub fn approver(&self) -> Option<&str> {
         match &self.approval_status {
-            ApprovalStatus::Tentative(info) | ApprovalStatus::Approved(info) => {
+            ApprovalStatus::TentativelyApproved(info) | ApprovalStatus::Approved(info) => {
                 Some(info.approver.as_str())
             }
             ApprovalStatus::NotApproved => None,
@@ -530,7 +532,7 @@ impl PullRequestModel {
 
     pub fn approved_sha(&self) -> Option<&str> {
         match &self.approval_status {
-            ApprovalStatus::Tentative(info) | ApprovalStatus::Approved(info) => {
+            ApprovalStatus::TentativelyApproved(info) | ApprovalStatus::Approved(info) => {
                 Some(info.sha.as_str())
             }
             ApprovalStatus::NotApproved => None,
@@ -539,7 +541,7 @@ impl PullRequestModel {
 
     pub fn tentative_approval(&self) -> Option<&ApprovalInfo> {
         match &self.approval_status {
-            ApprovalStatus::Tentative(info) => Some(info),
+            ApprovalStatus::TentativelyApproved(info) => Some(info),
             ApprovalStatus::Approved(_) | ApprovalStatus::NotApproved => None,
         }
     }
@@ -565,7 +567,9 @@ impl PullRequestModel {
 
         match &self.approval_status {
             ApprovalStatus::NotApproved => QueueStatus::NotApproved,
-            ApprovalStatus::Tentative(approval_info) => QueueStatus::Tentative(approval_info),
+            ApprovalStatus::TentativelyApproved(approval_info) => {
+                QueueStatus::Tentative(approval_info)
+            }
             ApprovalStatus::Approved(approval_info) => match &self.auto_build {
                 Some(build) => match build.status {
                     BuildStatus::Pending => QueueStatus::Pending(approval_info, build),
