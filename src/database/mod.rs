@@ -216,7 +216,7 @@ pub enum QueueStatus<'a> {
     Approved(&'a ApprovalInfo),
     /// Tentatively approved, waiting for PR CI to be green.
     Tentative(&'a ApprovalInfo),
-    /// Approved with passing CI.
+    /// With a successfully finished auto build. Waiting to be pushed to the base branch.
     ReadyForMerge(&'a ApprovalInfo, &'a BuildModel),
     /// Status is draft/merged/closed.
     NotOpen,
