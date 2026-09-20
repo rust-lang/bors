@@ -127,7 +127,7 @@ pub enum BorsCommand {
         rollup: Option<RollupMode>,
         /// Optional note attached at the end of the command.
         note: Option<String>,
-        /// Approve immediately without waiting for CI.
+        /// Approve immediately without waiting for PR CI.
         force: bool,
     },
     /// Unapprove a commit.
