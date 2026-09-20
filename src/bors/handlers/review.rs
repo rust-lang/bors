@@ -93,32 +93,39 @@ pub(super) async fn command_approve(
 
     let priority = priority.or(pr.db.priority.map(|p| p as u32));
 
-    if approval_mode == ApprovalMode::Tentative {
-        let resolved = try_resolve_tentative_approval(
-            &ctx,
-            &repo_state,
-            pr,
-            &approver,
-            priority,
-            merge_queue_tx,
-        )
-        .await?;
+    match approval_mode {
+        ApprovalMode::Tentative => {
+            let resolved = try_resolve_tentative_approval(
+                &ctx,
+                &repo_state,
+                pr,
+                &approver,
+                priority,
+                merge_queue_tx,
+            )
+            .await?;
 
-        if !resolved {
-            let unknown_reviewers = check_unknown_reviewers(&repo_state, &approver);
-            repo_state
-                .client
-                .post_comment(
-                    pr.number(),
-                    tentatively_approved_comment(&pr.github.head.sha, &approver, unknown_reviewers),
-                    &db,
-                )
-                .await?;
+            if !resolved {
+                let unknown_reviewers = check_unknown_reviewers(&repo_state, &approver);
+                repo_state
+                    .client
+                    .post_comment(
+                        pr.number(),
+                        tentatively_approved_comment(
+                            &pr.github.head.sha,
+                            &approver,
+                            unknown_reviewers,
+                        ),
+                        &db,
+                    )
+                    .await?;
+            }
+            Ok(())
         }
-        return Ok(());
+        ApprovalMode::Eager => {
+            finalize_approval(&ctx, &repo_state, pr, &approver, priority, merge_queue_tx).await
+        }
     }
-
-    finalize_approval(&ctx, &repo_state, pr, &approver, priority, merge_queue_tx).await
 }
 
 /// Normalize approvers (given after @bors r=) by removing leading @, possibly from multiple
