@@ -211,7 +211,7 @@ async fn process_repository(
                                 QueueStatus::Pending(_, _) => "pending",
                                 QueueStatus::Failed(_, _) => "failed",
                                 QueueStatus::Approved(_) => "approved",
-                                QueueStatus::Tentative(_) => "tentative",
+                                QueueStatus::Tentative(_) => "waiting for pr ci",
                                 QueueStatus::ReadyForMerge(_, _) => "ready for merge",
                                 QueueStatus::NotOpen => "not open",
                                 QueueStatus::NotApproved => "not approved"

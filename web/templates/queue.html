@@ -423,7 +423,7 @@ Average duration of recent auto builds: {{ format_duration(*average_build_durati
                       {%- when QueueStatus::Failed(_, _) -%}
                         failed
                       {%- when QueueStatus::Tentative(_) -%}
-                        tentative
+                        waiting for PR CI
                       {%- when QueueStatus::NotApproved | QueueStatus::NotOpen -%}
                     {%- endmatch -%}
                 </td>
