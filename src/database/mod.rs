@@ -214,7 +214,7 @@ pub enum QueueStatus<'a> {
     /// Approved with no auto build started yet or a failed auto build was reset
     /// with `@bors retry`.
     Approved(&'a ApprovalInfo),
-    /// Approved, subject to passing CI.
+    /// Tentatively approved, waiting for PR CI to be green.
     Tentative(&'a ApprovalInfo),
     /// Approved with passing CI.
     ReadyForMerge(&'a ApprovalInfo, &'a BuildModel),
