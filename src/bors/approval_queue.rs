@@ -1,5 +1,5 @@
 use crate::BorsContext;
-use crate::bors::approval::resolve_tentative_approval;
+use crate::bors::approval::try_resolve_tentative_approval;
 use crate::bors::event::WorkflowRunCompleted;
 use crate::bors::handlers::PullRequestData;
 use crate::bors::merge_queue::MergeQueueSender;
@@ -156,7 +156,7 @@ async fn process_tentative_approval(
         return Ok(());
     }
 
-    resolve_tentative_approval(
+    try_resolve_tentative_approval(
         ctx,
         repo,
         PullRequestData {

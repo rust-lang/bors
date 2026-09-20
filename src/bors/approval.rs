@@ -72,7 +72,7 @@ pub(super) async fn finalize_approval(
 
 /// Returns whether the tentative approval reached a final success or failure state.
 #[allow(clippy::too_many_arguments)]
-pub(super) async fn resolve_tentative_approval(
+pub(super) async fn try_resolve_tentative_approval(
     ctx: &BorsContext,
     repo: &RepositoryState,
     pr: PullRequestData<'_>,

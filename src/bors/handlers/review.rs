@@ -1,5 +1,5 @@
 use crate::bors::RepositoryState;
-use crate::bors::approval::{finalize_approval, resolve_tentative_approval};
+use crate::bors::approval::{finalize_approval, try_resolve_tentative_approval};
 use crate::bors::command::{Approver, CommandPrefix, Delegatee};
 use crate::bors::command::{DelegateCommand, RollupMode};
 use crate::bors::comment::{
@@ -96,7 +96,7 @@ pub(super) async fn command_approve(
     let priority = priority.or(pr.db.priority.map(|p| p as u32));
 
     if approval_mode == ApprovalMode::Tentative {
-        let resolved = resolve_tentative_approval(
+        let resolved = try_resolve_tentative_approval(
             &ctx,
             &repo_state,
             pr,
