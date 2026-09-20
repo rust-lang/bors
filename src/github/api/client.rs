@@ -46,6 +46,11 @@ pub struct GithubRepositoryClient {
     repo_name: GithubRepoName,
 }
 
+pub enum WorkflowSource<'a> {
+    Push(CommitSha),
+    PullRequest(&'a PullRequest),
+}
+
 impl GithubRepositoryClient {
     pub fn new(author_html_url: Url, client: Octocrab, repo_name: GithubRepoName) -> Self {
         Self {
@@ -503,17 +508,21 @@ impl GithubRepositoryClient {
     /// Find all workflows attached to a specific commit SHA, filtered by trigger event.
     pub async fn get_workflow_runs_for_commit_sha(
         &self,
-        commit_sha: CommitSha,
-        event: Option<&str>,
+        source: WorkflowSource<'_>,
     ) -> anyhow::Result<Vec<WorkflowRun>> {
         let runs = perform_retryable("get_workflows_for_commit_sha", RetryMethod::default(), || async {
             let workflows = self.client.workflows(self.repo_name.owner(), self.repo_name.name());
-            let mut request = workflows
-                .list_all_runs()
-                .head_sha(&commit_sha.0);
-            if let Some(event) = event {
-                request = request.event(event);
-            }
+            let request = match &source {
+                WorkflowSource::Push(commit_sha) => workflows
+                    .list_all_runs()
+                    .head_sha(&commit_sha.0)
+                    .event("push"),
+                WorkflowSource::PullRequest(pr) => workflows
+                    .list_all_runs()
+                    .head_sha(&pr.head.sha.0)
+                    .branch(&pr.head.name)
+                    .event("pull_request"),
+            };
             let response = request.send().await?;
             let mut runs = Vec::with_capacity(
                 response

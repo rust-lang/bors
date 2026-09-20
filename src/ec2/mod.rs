@@ -2,6 +2,7 @@ use crate::PgDbClient;
 use crate::bors::{BuildKind, RepositoryState};
 use crate::config::{Ec2RunnersConfig, JitRunnerKind};
 use crate::database::{RunId, WorkflowStatus};
+use crate::github::api::client::WorkflowSource;
 use crate::github::{CommitSha, GithubRepoName, PullRequestNumber};
 use anyhow::Context;
 use chrono::{DateTime, NaiveDateTime, Utc};
@@ -425,7 +426,9 @@ pub async fn backfill_ec2_instances(
     for build in &builds {
         let Ok(workflows) = repo
             .client
-            .get_workflow_runs_for_commit_sha(CommitSha(build.commit_sha.clone()), None)
+            .get_workflow_runs_for_commit_sha(WorkflowSource::Push(CommitSha(
+                build.commit_sha.clone(),
+            )))
             .await
         else {
             continue;

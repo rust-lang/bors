@@ -5,6 +5,7 @@ use crate::bors::merge_queue::MergeQueueSender;
 use crate::bors::{BorsContext, RepositoryState};
 use crate::database::{TreeState, WorkflowStatus};
 use crate::github::LabelTrigger;
+use crate::github::api::client::WorkflowSource;
 
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn finalize_approval(
@@ -78,7 +79,7 @@ pub(super) async fn resolve_tentative_approval(
 ) -> anyhow::Result<bool> {
     let workflow_runs = match repo
         .client
-        .get_workflow_runs_for_commit_sha(pr.github.head.sha.clone(), Some("pull_request"))
+        .get_workflow_runs_for_commit_sha(WorkflowSource::PullRequest(pr.github))
         .await
     {
         Ok(workflow_runs) => workflow_runs,

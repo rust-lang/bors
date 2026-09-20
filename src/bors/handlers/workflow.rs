@@ -10,7 +10,7 @@ use crate::bors::{BuildKind, build};
 use crate::database::{BuildModel, BuildStatus, PullRequestModel, WorkflowStatus};
 use crate::ec2::{Ec2InstanceStartData, InstanceSpawnKind, ParsedLabel, start_ec2_github_runner};
 use crate::github::CommitSha;
-use crate::github::api::client::GithubRepositoryClient;
+use crate::github::api::client::{GithubRepositoryClient, WorkflowSource};
 use crate::{BorsContext, PgDbClient};
 use octocrab::models::workflows::Status;
 use std::sync::Arc;
@@ -282,7 +282,9 @@ pub(super) async fn reload_workflow_job_cache(
 
         let Ok(workflows) = repo
             .client
-            .get_workflow_runs_for_commit_sha(CommitSha(build.commit_sha.clone()), None)
+            .get_workflow_runs_for_commit_sha(WorkflowSource::Push(CommitSha(
+                build.commit_sha.clone(),
+            )))
             .await
         else {
             continue;
