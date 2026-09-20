@@ -951,7 +951,7 @@ pub async fn invalidate_pr(
 ) -> anyhow::Result<InvalidationOutcome> {
     // Step 1: unapprove the pull request if it was approved
     // This happens everytime the PR is invalidated, if it was approved before
-    let pr_unapproved = if pr_db.is_approved() || pr_db.tentative_approval().is_some() {
+    let pr_unapproved = if pr_db.is_approved() || pr_db.is_tentatively_approved().is_some() {
         unapprove_pr(repo_state, db, pr_db, &pr_gh.clone().into()).await?;
         true
     } else {
