@@ -6,11 +6,11 @@ use super::operations::{
     get_repository, get_repository_by_name, get_rollup_members, get_rollup_members_for_unrolling,
     get_tagged_bot_comments, get_workflow_urls_for_build, get_workflows_for_build,
     insert_repo_if_not_exists, is_rollup, promote_tentative_approval, record_tagged_bot_comment,
-    remove_tentative_approval, set_pr_assignees, set_pr_mergeability_state, set_pr_priority,
-    set_pr_rollup_mode, set_pr_status, set_rollup_member_unrolled_state,
-    set_rollup_members_unrolled_state, set_stale_mergeability_status_by_base_branch,
-    unapprove_pull_request, undelegate_pull_request, update_build, update_pr_try_build_id,
-    update_pr_unrolled_build_id, update_workflow_status, upsert_pull_request, upsert_repository,
+    set_pr_assignees, set_pr_mergeability_state, set_pr_priority, set_pr_rollup_mode,
+    set_pr_status, set_rollup_member_unrolled_state, set_rollup_members_unrolled_state,
+    set_stale_mergeability_status_by_base_branch, unapprove_pull_request, undelegate_pull_request,
+    update_build, update_pr_try_build_id, update_pr_unrolled_build_id, update_workflow_status,
+    upsert_pull_request, upsert_repository,
 };
 use super::{
     ApprovalInfo, ApprovalMode, DelegatedPermission, MergeableState, PrimaryKey,
@@ -121,10 +121,6 @@ impl PgDbClient {
 
     pub async fn promote_tentative_approval(&self, pr: &PullRequestModel) -> anyhow::Result<()> {
         promote_tentative_approval(&self.pool, pr.id).await
-    }
-
-    pub async fn remove_tentative_approval(&self, pr: &PullRequestModel) -> anyhow::Result<()> {
-        remove_tentative_approval(&self.pool, pr.id).await
     }
 
     /// Unapprove a pull request and remove its auto build status, if there is any attached.

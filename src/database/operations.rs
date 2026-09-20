@@ -536,28 +536,6 @@ WHERE id = $1
     .await
 }
 
-pub(crate) async fn remove_tentative_approval(
-    executor: impl PgExecutor<'_>,
-    pr_id: i32,
-) -> anyhow::Result<()> {
-    measure_db_query("remove_tentative_approval", || async {
-        sqlx::query!(
-            r#"
-UPDATE pull_request
-SET approved_by = NULL,
-    approved_sha = NULL,
-    approval_tentative = FALSE
-WHERE id = $1
-"#,
-            pr_id,
-        )
-        .execute(executor)
-        .await?;
-        Ok(())
-    })
-    .await
-}
-
 pub(crate) async fn unapprove_pull_request(
     executor: impl PgExecutor<'_>,
     pr_id: i32,

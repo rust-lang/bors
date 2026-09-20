@@ -152,7 +152,7 @@ async fn process_tentative_approval(
         tracing::info!(
             "Removing tentative approval for PR #{pr_number} after sanity check failed: {error:?}"
         );
-        ctx.db.remove_tentative_approval(pr).await?;
+        ctx.db.unapprove(pr).await?;
         return Ok(());
     }
 

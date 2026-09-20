@@ -104,7 +104,7 @@ pub(super) async fn resolve_tentative_approval(
         .iter()
         .any(|run| run.status == WorkflowStatus::Failure)
     {
-        ctx.db.remove_tentative_approval(pr.db).await?;
+        ctx.db.unapprove(pr.db).await?;
         repo.client
             .post_comment(
                 pr.number(),
