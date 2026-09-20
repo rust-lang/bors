@@ -141,13 +141,13 @@ Here is a sequence diagram that describes what happens when a PR is approved and
    |                                   | store tentative approval in DB      |       |         |
    |                                   |-------------------------------------------->|         |
    |                                   |                                     |       |         |
-   |                                   | check CI                            |       |         |
+   |                                   | check PR CI                         |       |         |
    |                                   |------------------------------------>|       |         |
    |                                   |                                     |       |         |
    |                                   |                workflow completed   |       |         |
    |                                   |<------------------------------------|       |         |
    |                                   |                                     |       |         |
-   |                                   | check CI                            |       |         |
+   |                                   | check PR CI                         |       |         |
    |                                   |------------------------------------>|       |         |
    |                                   |                                     |       |         |
    |                                   | promote approval in DB              |       |         |
