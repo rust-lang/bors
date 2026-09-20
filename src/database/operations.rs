@@ -11,7 +11,7 @@ use super::TreeState;
 use super::UpsertPullRequestParams;
 use super::WorkflowStatus;
 use super::WorkflowType;
-use super::{ApprovalInfo, PrimaryKey, UpdateBuildParams};
+use super::{ApprovalInfo, ApprovalMode, PrimaryKey, UpdateBuildParams};
 use super::{ApprovalStatus, RollupMember};
 use super::{Assignees, RegisterRollupMemberParams};
 use super::{BuildModel, UnrollState};
@@ -481,12 +481,13 @@ pub(crate) async fn approve_pull_request(
     executor: impl PgExecutor<'_>,
     pr_id: i32,
     approval_info: ApprovalInfo,
-    tentative: bool,
+    approval_mode: ApprovalMode,
     priority: Option<u32>,
     rollup: Option<RollupMode>,
     note: Option<String>,
 ) -> anyhow::Result<()> {
     let priority_i32 = priority.map(|p| p as i32);
+    let tentative = approval_mode == ApprovalMode::Tentative;
 
     measure_db_query("approve_pull_request", || async {
         sqlx::query!(

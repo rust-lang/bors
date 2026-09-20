@@ -199,6 +199,12 @@ pub struct ApprovalInfo {
     pub sha: String,
 }
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum ApprovalMode {
+    Eager,
+    Tentative,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum QueueStatus<'a> {
     /// Approved with running auto build.

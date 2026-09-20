@@ -28,7 +28,7 @@ use crate::bors::{
     AUTO_BRANCH_NAME, BorsContext, BuildKind, CommandPrefix, Comment, PullRequestStatus,
     RepositoryState, TRY_BRANCH_NAME, TRY_PERF_BRANCH_NAME,
 };
-use crate::database::{DelegatedPermission, DelegationStatus, PullRequestModel};
+use crate::database::{ApprovalMode, DelegatedPermission, DelegationStatus, PullRequestModel};
 use crate::ec2::{backfill_ec2_instances, terminate_old_ec2_instances};
 use crate::github::{
     CommitSha, GithubUser, LabelTrigger, PullRequest, PullRequestInfo, PullRequestNumber,
@@ -501,6 +501,11 @@ async fn handle_comment(
                         force,
                     } => {
                         let span = tracing::info_span!("Approve");
+                        let approval_mode = if force {
+                            ApprovalMode::Eager
+                        } else {
+                            ApprovalMode::Tentative
+                        };
                         command_approve(
                             ctx.clone(),
                             repo,
@@ -511,7 +516,7 @@ async fn handle_comment(
                             priority,
                             rollup,
                             note,
-                            force,
+                            approval_mode,
                             senders.merge_queue(),
                         )
                         .instrument(span)

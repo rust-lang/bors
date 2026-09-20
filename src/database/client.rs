@@ -13,9 +13,9 @@ use super::operations::{
     update_pr_unrolled_build_id, update_workflow_status, upsert_pull_request, upsert_repository,
 };
 use super::{
-    ApprovalInfo, DelegatedPermission, MergeableState, PrimaryKey, RegisterRollupMemberParams,
-    RollupMember, RollupMemberForUnrolling, RunId, UnrollState, UpdateBuildParams,
-    UpsertPullRequestParams,
+    ApprovalInfo, ApprovalMode, DelegatedPermission, MergeableState, PrimaryKey,
+    RegisterRollupMemberParams, RollupMember, RollupMemberForUnrolling, RunId, UnrollState,
+    UpdateBuildParams, UpsertPullRequestParams,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -102,7 +102,7 @@ impl PgDbClient {
         &self,
         pr: &PullRequestModel,
         approval_info: ApprovalInfo,
-        tentative: bool,
+        approval_mode: ApprovalMode,
         priority: Option<u32>,
         rollup: Option<RollupMode>,
         note: Option<String>,
@@ -111,7 +111,7 @@ impl PgDbClient {
             &self.pool,
             pr.id,
             approval_info,
-            tentative,
+            approval_mode,
             priority,
             rollup,
             note,

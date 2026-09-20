@@ -12,7 +12,7 @@ use crate::bors::handlers::{has_permission, invalidate_pr};
 use crate::bors::merge_queue::MergeQueueSender;
 use crate::bors::{Comment, PullRequestStatus};
 use crate::database::DelegatedPermission;
-use crate::database::{ApprovalInfo, PullRequestModel};
+use crate::database::{ApprovalInfo, ApprovalMode, PullRequestModel};
 use crate::database::{MergeableState, TreeState};
 use crate::github::{CommitSha, PullRequest};
 use crate::github::{GithubUser, PullRequestNumber};
@@ -34,7 +34,7 @@ pub(super) async fn command_approve(
     priority: Option<u32>,
     rollup_mode: Option<RollupMode>,
     note: Option<String>,
-    force: bool,
+    approval_mode: ApprovalMode,
     merge_queue_tx: &MergeQueueSender,
 ) -> anyhow::Result<()> {
     tracing::info!("Approving PR {}", pr.number());
@@ -83,12 +83,19 @@ pub(super) async fn command_approve(
         sha: pr.github.head.sha.to_string(),
     };
 
-    db.approve(pr.db, approval_info, !force, priority, rollup_mode, note)
-        .await?;
+    db.approve(
+        pr.db,
+        approval_info,
+        approval_mode,
+        priority,
+        rollup_mode,
+        note,
+    )
+    .await?;
 
     let priority = priority.or(pr.db.priority.map(|p| p as u32));
 
-    if !force {
+    if approval_mode == ApprovalMode::Tentative {
         let resolved = resolve_tentative_approval(
             &ctx,
             &repo_state,
