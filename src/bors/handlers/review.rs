@@ -1,6 +1,7 @@
 use crate::bors::RepositoryState;
 use crate::bors::approval::{
-    check_unknown_reviewers, finalize_approval, try_resolve_tentative_approval,
+    TentativeApprovalOutcome, check_unknown_reviewers, finalize_approval,
+    try_resolve_tentative_approval,
 };
 use crate::bors::command::{Approver, CommandPrefix, Delegatee};
 use crate::bors::command::{DelegateCommand, RollupMode};
@@ -95,7 +96,7 @@ pub(super) async fn command_approve(
 
     match approval_mode {
         ApprovalMode::Tentative => {
-            let resolved = try_resolve_tentative_approval(
+            match try_resolve_tentative_approval(
                 &ctx,
                 &repo_state,
                 pr,
@@ -104,22 +105,25 @@ pub(super) async fn command_approve(
                 priority,
                 merge_queue_tx,
             )
-            .await?;
-
-            if !resolved {
-                let unknown_reviewers = check_unknown_reviewers(&repo_state, &approver);
-                repo_state
-                    .client
-                    .post_comment(
-                        pr.number(),
-                        tentatively_approved_comment(
-                            &pr.github.head.sha,
-                            &approver,
-                            unknown_reviewers,
-                        ),
-                        &db,
-                    )
-                    .await?;
+            .await?
+            {
+                // The resolved comment has already been posted.
+                TentativeApprovalOutcome::Resolved => {}
+                TentativeApprovalOutcome::Pending | TentativeApprovalOutcome::Skipped => {
+                    let unknown_reviewers = check_unknown_reviewers(&repo_state, &approver);
+                    repo_state
+                        .client
+                        .post_comment(
+                            pr.number(),
+                            tentatively_approved_comment(
+                                &pr.github.head.sha,
+                                &approver,
+                                unknown_reviewers,
+                            ),
+                            &db,
+                        )
+                        .await?;
+                }
             }
             Ok(())
         }

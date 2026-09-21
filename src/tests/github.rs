@@ -381,6 +381,8 @@ pub struct Repo {
     pub workflow_cancel_error: bool,
     /// All workflows that we know about from the side of the test.
     workflow_runs: Vec<WorkflowRun>,
+    /// Treat unconfigured PR CI as successful.
+    pub default_pr_ci: bool,
     pull_requests: HashMap<u64, PullRequest>,
     check_runs: Vec<CheckRunData>,
     /// Cause pull request fetch to fail.
@@ -407,6 +409,7 @@ impl Repo {
             workflows_cancelled_by_bors: vec![],
             workflow_cancel_error: false,
             workflow_runs: vec![],
+            default_pr_ci: true,
             pull_request_error: false,
             check_runs: vec![],
             push_behaviour: BranchPushBehaviour::default(),

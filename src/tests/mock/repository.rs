@@ -68,6 +68,7 @@ pub async fn mock_repo(
     mock_cancel_workflow(repo.clone(), mock_server).await;
     mock_check_runs(repo.clone(), mock_server).await;
     mock_workflow_runs(repo.clone(), mock_server).await;
+    mock_repository_activities(repo.clone(), mock_server).await;
     mock_workflow_jobs(repo.clone(), mock_server).await;
     mock_contents(repo.clone(), mock_server).await;
 }
@@ -426,6 +427,7 @@ async fn mock_workflow_runs(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
             // Default unconfigured PR CI to pass.
             if event.as_deref() == Some("pull_request")
                 && workflow_runs.is_empty()
+                && repo.default_pr_ci
                 && let Some(pr) = repo.pulls().values().find(|pr| {
                     pr.head_sha() == head_sha
                         && branch
@@ -450,6 +452,47 @@ async fn mock_workflow_runs(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
         },
         "GET",
         format!("^/repos/{repo_name}/actions/runs$"),
+    )
+    .mount(mock_server)
+    .await;
+}
+
+async fn mock_repository_activities(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
+    #[derive(Serialize)]
+    struct RepositoryActivity {
+        id: u64,
+        node_id: String,
+        before: String,
+        after: String,
+        #[serde(rename = "ref")]
+        ref_field: String,
+        timestamp: DateTime<Utc>,
+        activity_type: &'static str,
+    }
+
+    let repo_name = repo.lock().full_name();
+    dynamic_mock_req(
+        move |req: &Request, []| {
+            let branch_name = get_query_param(req, "ref");
+            let mut repo = repo.lock();
+            let activities = repo
+                .get_branch_by_name(&branch_name)
+                .map(|branch| {
+                    vec![RepositoryActivity {
+                        id: 1,
+                        node_id: "repository-activity-1".to_string(),
+                        before: String::new(),
+                        after: branch.sha(),
+                        ref_field: format!("refs/heads/{branch_name}"),
+                        timestamp: Utc::now(),
+                        activity_type: "push",
+                    }]
+                })
+                .unwrap_or_default();
+            ResponseTemplate::new(200).set_body_json(activities)
+        },
+        "GET",
+        format!("^/repos/{repo_name}/activity$"),
     )
     .mount(mock_server)
     .await;

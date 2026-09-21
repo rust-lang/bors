@@ -81,7 +81,17 @@ pub(super) async fn finalize_approval(
     handle_label_trigger(repo, &pr.github.clone().into(), LabelTrigger::Approved).await
 }
 
-/// Returns whether the tentative approval reached a final success or failure state.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub(super) enum TentativeApprovalOutcome {
+    /// The tentative approval was confirmed or rejected.
+    Resolved,
+    /// Still waiting for some workflows to be finished.
+    Pending,
+    /// There was some transient error, the tentative approval should be resolved later.
+    Skipped,
+}
+
+/// Try to resolve a tentative approval from the current PR CI state.
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn try_resolve_tentative_approval(
     ctx: &BorsContext,
@@ -91,7 +101,7 @@ pub(super) async fn try_resolve_tentative_approval(
     failure_comment: Comment,
     priority: Option<u32>,
     merge_queue_tx: &MergeQueueSender,
-) -> anyhow::Result<bool> {
+) -> anyhow::Result<TentativeApprovalOutcome> {
     let workflow_runs = match repo
         .client
         .get_workflow_runs_for_commit_sha(WorkflowSource::PullRequest(pr.github))
@@ -103,12 +113,12 @@ pub(super) async fn try_resolve_tentative_approval(
                 "Failed to get pull request CI status for commit {}: {error:?}",
                 pr.github.head.sha
             );
-            return Ok(false);
+            return Ok(TentativeApprovalOutcome::Skipped);
         }
     };
 
     if workflow_runs.is_empty() {
-        return Ok(false);
+        return Ok(TentativeApprovalOutcome::Pending);
     }
 
     if workflow_runs
@@ -119,17 +129,17 @@ pub(super) async fn try_resolve_tentative_approval(
         repo.client
             .post_comment(pr.number(), failure_comment, &ctx.db)
             .await?;
-        return Ok(true);
+        return Ok(TentativeApprovalOutcome::Resolved);
     }
 
     if workflow_runs
         .iter()
         .any(|run| run.status == WorkflowStatus::Pending)
     {
-        return Ok(false);
+        return Ok(TentativeApprovalOutcome::Pending);
     }
 
     ctx.db.confirm_tentative_approval(pr.db).await?;
     finalize_approval(ctx, repo, pr, approver, priority, merge_queue_tx).await?;
-    Ok(true)
+    Ok(TentativeApprovalOutcome::Resolved)
 }

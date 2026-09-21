@@ -1,10 +1,12 @@
 use crate::BorsContext;
-use crate::bors::approval::try_resolve_tentative_approval;
-use crate::bors::comment::tentative_approval_failed_comment;
+use crate::bors::approval::{TentativeApprovalOutcome, try_resolve_tentative_approval};
+use crate::bors::comment::{
+    tentative_approval_failed_comment, tentative_approval_timed_out_comment,
+};
 use crate::bors::event::WorkflowRunCompleted;
 use crate::bors::handlers::PullRequestData;
 use crate::bors::merge_queue::MergeQueueSender;
-use crate::bors::{PullRequestStatus, RepositoryState};
+use crate::bors::{PullRequestStatus, RepositoryState, elapsed_time_since};
 use crate::database::{ApprovalInfo, PullRequestModel};
 use crate::github::{GithubRepoName, PullRequest};
 use std::sync::Arc;
@@ -157,7 +159,7 @@ async fn process_tentative_approval(
         return Ok(());
     }
 
-    try_resolve_tentative_approval(
+    match try_resolve_tentative_approval(
         ctx,
         repo,
         PullRequestData {
@@ -169,14 +171,47 @@ async fn process_tentative_approval(
         pr.priority.map(|priority| priority as u32),
         merge_queue_tx,
     )
-    .await?;
+    .await?
+    {
+        TentativeApprovalOutcome::Resolved => {}
+        TentativeApprovalOutcome::Skipped => {}
+        TentativeApprovalOutcome::Pending => {
+            let Some(head_update_time) = repo
+                .client
+                .get_pull_request_head_update_time(&gh_pr)
+                .await?
+            else {
+                tracing::warn!(
+                    "Could not find the last head update for PR #{} at commit {}",
+                    pr.number,
+                    gh_pr.head.sha
+                );
+                return Ok(());
+            };
+
+            let timeout = repo.config.load().timeout;
+            if elapsed_time_since(head_update_time) >= timeout {
+                ctx.db.unapprove(pr).await?;
+                repo.client
+                    .post_comment(
+                        pr.number,
+                        tentative_approval_timed_out_comment(&gh_pr.head.sha, timeout),
+                        &ctx.db,
+                    )
+                    .await?;
+            }
+        }
+    }
+
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::bors::with_mocked_time;
     use crate::database::WorkflowStatus;
     use crate::tests::{BorsTester, Commit, User, WorkflowEvent, run_test};
+    use std::time::Duration;
 
     #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn workflow_completion_promotes_tentative_approval_when_ci_passes(pool: sqlx::PgPool) {
@@ -221,6 +256,7 @@ mod tests {
         run_test(pool, async |ctx: &mut BorsTester| {
             let workflow = ctx.pr_ci_workflow(());
             ctx.approve(()).await?;
+            // Missed PR CI completion webhook
             ctx.modify_workflow(workflow, |w| w.change_status(WorkflowStatus::Success));
 
             ctx.refresh_tentative_approvals().await;
@@ -243,6 +279,7 @@ mod tests {
         run_test(pool, async |ctx: &mut BorsTester| {
             let workflow = ctx.pr_ci_workflow(());
             ctx.approve(()).await?;
+            // Missed PR CI completion webhook
             ctx.modify_workflow(workflow, |w| w.change_status(WorkflowStatus::Failure));
 
             ctx.refresh_tentative_approvals().await;
@@ -264,6 +301,68 @@ mod tests {
 
             ctx.refresh_tentative_approvals().await;
 
+            ctx.pr(())
+                .await
+                .expect_approved_by(&User::default_pr_author().name);
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
+    async fn refresh_rejects_tentative_approval_when_ci_does_not_start(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            ctx.modify_repo((), |repo| repo.default_pr_ci = false);
+            ctx.approve(()).await?;
+
+            with_mocked_time(Duration::from_secs(4000), async {
+                ctx.refresh_tentative_approvals().await;
+            })
+            .await;
+
+            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @":x: Commit pr-1-sha has been unapproved because PR CI timed out after `3600`s.");
+            ctx.pr(()).await.expect_unapproved();
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
+    async fn refresh_rejects_approval_on_ci_timeout(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            ctx.pr_ci_workflow(());
+            ctx.approve(()).await?;
+
+            with_mocked_time(Duration::from_secs(4000), async {
+                ctx.refresh_tentative_approvals().await;
+            })
+            .await;
+
+            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @":x: Commit pr-1-sha has been unapproved because PR CI timed out after `3600`s.");
+            ctx.pr(()).await.expect_unapproved();
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
+    async fn refresh_confirms_approval_before_timeout(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            let workflow = ctx.pr_ci_workflow(());
+            ctx.approve(()).await?;
+            // Missed PR CI completion webhook
+            ctx.modify_workflow(workflow, |w| w.change_status(WorkflowStatus::Success));
+
+            with_mocked_time(Duration::from_secs(4000), async {
+                ctx.refresh_tentative_approvals().await;
+            })
+            .await;
+
+            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
+            :pushpin: Commit pr-1-sha has been approved by `default-user`
+
+            It is now in the [queue](https://bors-test.com/queue/borstest) for this repository.
+            ");
             ctx.pr(())
                 .await
                 .expect_approved_by(&User::default_pr_author().name);

@@ -358,6 +358,13 @@ pub fn tentative_approval_failed_comment(commit_sha: &CommitSha) -> Comment {
     ))
 }
 
+pub fn tentative_approval_timed_out_comment(commit_sha: &CommitSha, timeout: Duration) -> Comment {
+    Comment::new(format!(
+        ":x: Commit {commit_sha} has been unapproved because PR CI timed out after `{}`s.",
+        timeout.as_secs()
+    ))
+}
+
 pub fn approval_failed_comment(commit_sha: &CommitSha) -> Comment {
     Comment::new(format!(
         ":x: Commit {commit_sha} has not been approved due to PR CI failure."
