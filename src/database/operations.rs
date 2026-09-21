@@ -516,11 +516,11 @@ WHERE id = $7
     .await
 }
 
-pub(crate) async fn promote_tentative_approval(
+pub(crate) async fn confirm_tentative_approval(
     executor: impl PgExecutor<'_>,
     pr_id: i32,
 ) -> anyhow::Result<()> {
-    measure_db_query("promote_tentative_approval", || async {
+    measure_db_query("confirm_tentative_approval", || async {
         sqlx::query!(
             r#"
 UPDATE pull_request

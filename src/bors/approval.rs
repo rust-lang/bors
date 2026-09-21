@@ -132,7 +132,7 @@ pub(super) async fn try_resolve_tentative_approval(
         return Ok(false);
     }
 
-    ctx.db.promote_tentative_approval(pr.db).await?;
+    ctx.db.confirm_tentative_approval(pr.db).await?;
     finalize_approval(ctx, repo, pr, approver, priority, merge_queue_tx).await?;
     Ok(true)
 }
