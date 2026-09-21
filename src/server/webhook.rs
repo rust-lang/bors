@@ -1780,6 +1780,47 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn pull_request_workflow_run_completed() {
+        insta::assert_debug_snapshot!(
+            check_webhook(
+                "webhook/pull-request-workflow-run-completed.json",
+                "workflow_run"
+            )
+            .await,
+            @r#"
+        Ok(
+            GitHubWebhook(
+                Repository(
+                    PullRequestWorkflowCompleted(
+                        WorkflowRunCompleted {
+                            repository: sakib25800/rust,
+                            branch: "webhook-fixture-head-20260921084340",
+                            commit_sha: CommitSha(
+                                "3d739e64026b41bd4895c1623979bb68e8e77aef",
+                            ),
+                            run_id: RunId(
+                                35579638383,
+                            ),
+                            status: Success,
+                            running_time: Some(
+                                TimeDelta {
+                                    secs: 7,
+                                    nanos: 0,
+                                },
+                            ),
+                            check_suite_id: CheckSuiteId(
+                                96325974841,
+                            ),
+                        },
+                    ),
+                ),
+            ),
+        )
+        "#
+        );
+    }
+
+    #[tokio::test]
     async fn workflow_job_started() {
         insta::assert_debug_snapshot!(
             check_webhook("webhook/workflow-job-queued.json", "workflow_job").await,
