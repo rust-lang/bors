@@ -652,7 +652,7 @@ mod tests {
 
             ctx.post_comment("@bors r+").await?;
             insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
-            :hourglass: Commit pr-1-sha has been tentatively approved by `default-user`
+            :hourglass: Commit pr-1-sha has been tentatively approved by `default-user`. It will be fully approved once PR CI is successful.
             ");
 
             ctx.pr(())

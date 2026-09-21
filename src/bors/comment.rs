@@ -369,8 +369,9 @@ pub fn tentatively_approved_comment(
     reviewer: &str,
     unknown_reviewers: Vec<String>,
 ) -> Comment {
-    let mut comment =
-        format!(":hourglass: Commit {commit_sha} has been tentatively approved by `{reviewer}`");
+    let mut comment = format!(
+        ":hourglass: Commit {commit_sha} has been tentatively approved by `{reviewer}`. It will be fully approved once PR CI is successful."
+    );
 
     if !unknown_reviewers.is_empty() {
         writeln!(
