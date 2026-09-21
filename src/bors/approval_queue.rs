@@ -1,5 +1,6 @@
 use crate::BorsContext;
 use crate::bors::approval::try_resolve_tentative_approval;
+use crate::bors::comment::tentative_approval_failed_comment;
 use crate::bors::event::WorkflowRunCompleted;
 use crate::bors::handlers::PullRequestData;
 use crate::bors::merge_queue::MergeQueueSender;
@@ -164,6 +165,7 @@ async fn process_tentative_approval(
             db: pr,
         },
         &approval_info.approver,
+        tentative_approval_failed_comment(&gh_pr.head.sha),
         pr.priority.map(|priority| priority as u32),
         merge_queue_tx,
     )

@@ -5,9 +5,9 @@ use crate::bors::approval::{
 use crate::bors::command::{Approver, CommandPrefix, Delegatee};
 use crate::bors::command::{DelegateCommand, RollupMode};
 use crate::bors::comment::{
-    approve_blocking_labels_present, approve_merge_conflict_comment, approve_non_open_pr_comment,
-    approve_wip_title, delegate_comment, delegate_try_builds_comment, tentatively_approved_comment,
-    unapprove_non_open_pr_comment, unapprove_not_approved,
+    approval_failed_comment, approve_blocking_labels_present, approve_merge_conflict_comment,
+    approve_non_open_pr_comment, approve_wip_title, delegate_comment, delegate_try_builds_comment,
+    tentatively_approved_comment, unapprove_non_open_pr_comment, unapprove_not_approved,
 };
 use crate::bors::handlers::{InvalidationInfo, InvalidationReason, PullRequestData, deny_request};
 use crate::bors::handlers::{has_permission, invalidate_pr};
@@ -100,6 +100,7 @@ pub(super) async fn command_approve(
                 &repo_state,
                 pr,
                 &approver,
+                approval_failed_comment(&pr.github.head.sha),
                 priority,
                 merge_queue_tx,
             )
@@ -689,7 +690,7 @@ mod tests {
 
             ctx.post_comment("@bors r+").await?;
             insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
-            :x: Commit pr-1-sha has been unapproved due to PR CI failure.
+            :x: Commit pr-1-sha has not been approved due to PR CI failure.
             ");
 
             ctx.pr(()).await.expect_unapproved();

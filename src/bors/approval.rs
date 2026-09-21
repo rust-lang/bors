@@ -1,8 +1,8 @@
-use crate::bors::comment::{approved_comment, tentative_approval_failed_comment};
+use crate::bors::comment::approved_comment;
 use crate::bors::handlers::PullRequestData;
 use crate::bors::labels::handle_label_trigger;
 use crate::bors::merge_queue::MergeQueueSender;
-use crate::bors::{BorsContext, RepositoryState};
+use crate::bors::{BorsContext, Comment, RepositoryState};
 use crate::database::{TreeState, WorkflowStatus};
 use crate::github::LabelTrigger;
 use crate::github::api::client::WorkflowSource;
@@ -88,6 +88,7 @@ pub(super) async fn try_resolve_tentative_approval(
     repo: &RepositoryState,
     pr: PullRequestData<'_>,
     approver: &str,
+    failure_comment: Comment,
     priority: Option<u32>,
     merge_queue_tx: &MergeQueueSender,
 ) -> anyhow::Result<bool> {
@@ -116,11 +117,7 @@ pub(super) async fn try_resolve_tentative_approval(
     {
         ctx.db.unapprove(pr.db).await?;
         repo.client
-            .post_comment(
-                pr.number(),
-                tentative_approval_failed_comment(&pr.github.head.sha),
-                &ctx.db,
-            )
+            .post_comment(pr.number(), failure_comment, &ctx.db)
             .await?;
         return Ok(true);
     }

@@ -358,6 +358,12 @@ pub fn tentative_approval_failed_comment(commit_sha: &CommitSha) -> Comment {
     ))
 }
 
+pub fn approval_failed_comment(commit_sha: &CommitSha) -> Comment {
+    Comment::new(format!(
+        ":x: Commit {commit_sha} has not been approved due to PR CI failure."
+    ))
+}
+
 pub fn tentatively_approved_comment(
     commit_sha: &CommitSha,
     reviewer: &str,
