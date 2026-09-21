@@ -627,7 +627,7 @@ mod tests {
     #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn approve_with_passing_ci_on_tentative(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
-            let workflow = ctx.create_workflow((), "pr/1", "pull_request");
+            let workflow = ctx.pr_ci_workflow(());
             ctx.modify_workflow(workflow, |w| w.change_status(WorkflowStatus::Success));
 
             ctx.post_comment("@bors r+").await?;
@@ -648,7 +648,7 @@ mod tests {
     #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn approve_with_pending_ci_is_tentative(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
-            ctx.create_workflow((), "pr/1", "pull_request");
+            ctx.pr_ci_workflow(());
 
             ctx.post_comment("@bors r+").await?;
             insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
@@ -666,7 +666,7 @@ mod tests {
     #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn approve_with_pending_ci_applies_options_immediately(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
-            ctx.create_workflow((), "pr/1", "pull_request");
+            ctx.pr_ci_workflow(());
 
             ctx.post_comment(r#"@bors r+ p=5 rollup=never note="foo bar""#)
                 .await?;
@@ -685,7 +685,7 @@ mod tests {
     #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn approve_with_failed_ci_is_immediately_rejected(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
-            let workflow = ctx.create_workflow((), "pr/1", "pull_request");
+            let workflow = ctx.pr_ci_workflow(());
             ctx.modify_workflow(workflow, |w| w.change_status(WorkflowStatus::Failure));
 
             ctx.post_comment("@bors r+").await?;
@@ -702,7 +702,7 @@ mod tests {
     #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn force_approve_bypasses_failed_ci(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
-            let workflow = ctx.create_workflow((), "pr/1", "pull_request");
+            let workflow = ctx.pr_ci_workflow(());
             ctx.modify_workflow(workflow, |w| w.change_status(WorkflowStatus::Failure));
 
             ctx.post_comment("@bors r+ force").await?;

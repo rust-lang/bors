@@ -181,7 +181,7 @@ mod tests {
     #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn workflow_completion_promotes_tentative_approval_when_ci_passes(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
-            let workflow = ctx.create_workflow((), "pr/1", "pull_request");
+            let workflow = ctx.pr_ci_workflow(());
             ctx.approve(()).await?;
 
             ctx.workflow_event(WorkflowEvent::success(workflow)).await?;
@@ -202,7 +202,7 @@ mod tests {
     #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn workflow_completion_rejects_tentative_approval_when_ci_fails(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
-            let workflow = ctx.create_workflow((), "pr/1", "pull_request");
+            let workflow = ctx.pr_ci_workflow(());
             ctx.approve(()).await?;
 
             ctx.workflow_event(WorkflowEvent::failure(workflow)).await?;
@@ -219,7 +219,7 @@ mod tests {
     #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn refresh_promotes_tentative_approval_when_ci_passes(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
-            let workflow = ctx.create_workflow((), "pr/1", "pull_request");
+            let workflow = ctx.pr_ci_workflow(());
             ctx.approve(()).await?;
             ctx.modify_workflow(workflow, |w| w.change_status(WorkflowStatus::Success));
 
@@ -241,7 +241,7 @@ mod tests {
     #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn refresh_rejects_tentative_approval_when_ci_fails(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
-            let workflow = ctx.create_workflow((), "pr/1", "pull_request");
+            let workflow = ctx.pr_ci_workflow(());
             ctx.approve(()).await?;
             ctx.modify_workflow(workflow, |w| w.change_status(WorkflowStatus::Failure));
 
@@ -259,7 +259,7 @@ mod tests {
     #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn refresh_keeps_tentative_approval_while_ci_is_pending(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
-            ctx.create_workflow((), "pr/1", "pull_request");
+            ctx.pr_ci_workflow(());
             ctx.approve(()).await?;
 
             ctx.refresh_tentative_approvals().await;
@@ -275,7 +275,7 @@ mod tests {
     #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn refresh_removes_tentative_approval_after_head_changes(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
-            ctx.create_workflow((), "pr/1", "pull_request");
+            ctx.pr_ci_workflow(());
             ctx.approve(()).await?;
             ctx.modify_pr_in_gh((), |pr| {
                 pr.add_commits(vec![Commit::from_sha("new-head-sha")])
@@ -292,7 +292,7 @@ mod tests {
     #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn refresh_removes_tentative_approval_when_pr_is_closed(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
-            ctx.create_workflow((), "pr/1", "pull_request");
+            ctx.pr_ci_workflow(());
             ctx.approve(()).await?;
             ctx.modify_pr_in_gh((), |pr| pr.close());
 

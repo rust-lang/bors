@@ -620,7 +620,7 @@ mod tests {
     #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn api_queue_page(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
-            ctx.create_workflow((), "pr/1", "pull_request");
+            ctx.pr_ci_workflow(());
             ctx.approve(()).await?;
             let response = ctx
                 .api_request(ApiRequest::get(&format!("/api/queue/{}", default_repo_name().name())))

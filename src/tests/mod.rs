@@ -314,6 +314,16 @@ impl BorsTester {
         self.create_workflow(default_repo_name(), AUTO_BRANCH, "push")
     }
 
+    pub fn pr_ci_workflow<Id: Into<PrIdentifier>>(&self, id: Id) -> RunId {
+        let id = id.into();
+        let head_branch = self
+            .get_repo(&id.repo)
+            .lock()
+            .get_pr(id.number)
+            .head_branch_copy();
+        self.create_workflow(&id.repo, head_branch.name(), "pull_request")
+    }
+
     /// Creates N unrolled workflows, for the past N commits pushed to the unrolled branch.
     /// This can be used to create workflows for unrolled builds, which are created in a batch,
     /// and thus we cannot create a workflow for the latest SHA of the unrolled branch only.
