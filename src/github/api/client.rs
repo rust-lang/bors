@@ -828,31 +828,10 @@ impl GithubRepositoryClient {
             variables: V,
         }
 
-        #[derive(serde::Deserialize, Debug)]
-        struct Error {
-            #[allow(unused)]
-            message: String,
-        }
-
-        #[derive(serde::Deserialize)]
-        struct RawResponse<T> {
-            errors: Option<Vec<Error>>,
-            #[serde(flatten)]
-            result: T,
-        }
-
-        let response = self
-            .client
-            .graphql::<RawResponse<T>>(&Payload { query, variables })
+        self.client
+            .graphql::<T>(&Payload { query, variables })
             .await
-            .context("GraphQL request failed")?;
-
-        let errors = response.errors.unwrap_or_default();
-        if !errors.is_empty() {
-            Err(anyhow::anyhow!("Query ended with error(s): {errors:?}"))
-        } else {
-            Ok(response.result)
-        }
+            .context("GraphQL request failed")
     }
 
     /// Hides a comment on an Issue, Commit, Pull Request, or Gist.
@@ -907,11 +886,6 @@ impl GithubRepositoryClient {
 
         #[derive(Deserialize)]
         struct Output {
-            data: OutputInner,
-        }
-
-        #[derive(Deserialize)]
-        struct OutputInner {
             node: Option<IssueCommentNode>,
         }
 
@@ -929,7 +903,7 @@ impl GithubRepositoryClient {
         })
         .await?;
 
-        match output.data.node {
+        match output.node {
             Some(comment) => Ok(comment.body),
             None => anyhow::bail!("No comment found for node_id: {node_id}"),
         }
@@ -955,10 +929,13 @@ impl GithubRepositoryClient {
             body: &'a str,
         }
 
+        #[derive(Deserialize)]
+        struct Output {}
+
         tracing::debug!(node_id, "Updating comment content");
 
         perform_retryable("update_comment_content", RetryMethod::default(), || async {
-            self.graphql::<(), Variables>(
+            self.graphql::<Output, Variables>(
                 QUERY,
                 Variables {
                     id: node_id,
@@ -1021,10 +998,6 @@ impl GithubRepositoryClient {
 
         #[derive(serde::Deserialize)]
         struct Output {
-            data: OutputInner,
-        }
-        #[derive(serde::Deserialize)]
-        struct OutputInner {
             repository: RepositoryNode,
         }
         #[derive(serde::Deserialize)]
@@ -1085,7 +1058,6 @@ impl GithubRepositoryClient {
 
             result.extend(
                 response
-                    .data
                     .repository
                     .pull_requests
                     .nodes
@@ -1111,12 +1083,11 @@ impl GithubRepositoryClient {
             );
 
             vars.after = response
-                .data
                 .repository
                 .pull_requests
                 .page_info
                 .has_next_page
-                .then_some(response.data.repository.pull_requests.page_info.end_cursor)
+                .then_some(response.repository.pull_requests.page_info.end_cursor)
                 .flatten();
 
             if vars.after.is_none() {

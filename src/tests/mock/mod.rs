@@ -14,7 +14,6 @@ use octocrab::Octocrab;
 use octocrab::models::pulls::MergeableState;
 use parking_lot::Mutex;
 use regex::Regex;
-use std::collections::HashMap;
 use std::sync::Arc;
 use url::Url;
 use wiremock::matchers::{method, path_regex};
@@ -298,7 +297,9 @@ async fn mock_graphql(github: Arc<Mutex<GitHub>>, mock_server: &MockServer) {
                     github
                         .lock()
                         .modify_comment(&data.node_id, |c| c.hide(data.reason));
-                    ResponseTemplate::new(200).set_body_json(HashMap::<String, String>::new())
+                    ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                        "data": {}
+                    }))
                 }
                 "updateIssueComment" => {
                     #[derive(serde::Deserialize)]
@@ -308,17 +309,13 @@ async fn mock_graphql(github: Arc<Mutex<GitHub>>, mock_server: &MockServer) {
                     }
 
                     let data: Variables = serde_json::from_value(body.variables).unwrap();
-                    let response = serde_json::json!({
-                        "issueComment": {
-                            "id": data.id,
-                        }
-                    });
-
                     github
                         .lock()
                         .modify_comment(&data.id, |c| c.set_content(&data.body));
 
-                    ResponseTemplate::new(200).set_body_json(response)
+                    ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                        "data": {}
+                    }))
                 }
                 // Get comment content
                 "node" => {
