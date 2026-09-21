@@ -336,14 +336,6 @@ fn parse_workflow_run_events(body: &[u8]) -> anyhow::Result<Option<BorsEvent>> {
     let payload: WebhookWorkflowRun = serde_json::from_slice(body)?;
     let repository_name = parse_repository_name(&payload.repository)?;
 
-    // As a security precaution, we eagerly prefilter all workflow runs other than "push" and
-    // "pull_request" here. Only workflows from privileged pushes to branches in the repository
-    // are registered as builds by bors. Pull request workflow completions are handled separately.
-    if payload.workflow_run.run.event != "push" && payload.workflow_run.run.event != "pull_request"
-    {
-        return Ok(None);
-    }
-
     let result = match (payload.workflow_run.run.event.as_str(), payload.action) {
         ("push", "requested") => Some(BorsEvent::Repository(BorsRepositoryEvent::WorkflowStarted(
             WorkflowRunStarted {
