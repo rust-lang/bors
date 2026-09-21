@@ -206,7 +206,7 @@ mod tests {
             ctx.workflow_event(WorkflowEvent::failure(workflow)).await?;
 
             insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
-            :x: Commit pr-1-sha has not been approved due to failing CI.
+            :x: Commit pr-1-sha has been unapproved due to PR CI failure.
             ");
             ctx.pr(()).await.expect_unapproved();
             Ok(())
@@ -246,7 +246,7 @@ mod tests {
             ctx.refresh_tentative_approvals().await;
 
             insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
-            :x: Commit pr-1-sha has not been approved due to failing CI.
+            :x: Commit pr-1-sha has been unapproved due to PR CI failure.
             ");
             ctx.pr(()).await.expect_unapproved();
             Ok(())
