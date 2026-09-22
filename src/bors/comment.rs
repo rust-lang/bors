@@ -367,7 +367,7 @@ pub fn tentative_approval_timed_out_comment(commit_sha: &CommitSha, timeout: Dur
 
 pub fn tentative_approval_failed_comment(commit_sha: &CommitSha) -> Comment {
     Comment::new(format!(
-        ":x: Commit {commit_sha} has not been approved due to PR CI failure."
+        ":x: Cannot approve commit {commit_sha}, because CI currently fails on this PR. Use `@bors r+ force` to override the PR CI check."
     ))
 }
 

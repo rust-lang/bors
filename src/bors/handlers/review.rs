@@ -695,7 +695,7 @@ mod tests {
 
             ctx.post_comment("@bors r+").await?;
             insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
-            :x: Commit pr-1-sha has not been approved due to PR CI failure.
+            :x: Cannot approve commit pr-1-sha, because CI currently fails on this PR. Use `@bors r+ force` to override the PR CI check.
             ");
 
             ctx.pr(()).await.expect_unapproved();
