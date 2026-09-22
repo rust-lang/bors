@@ -201,7 +201,9 @@ pub struct ApprovalInfo {
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum ApprovalMode {
+    /// Immediately approve a PR.
     Eager,
+    /// Tentatively approve a PR. Once its PR CI finishes successfully, it will be fully approved by bors.
     Tentative,
 }
 
