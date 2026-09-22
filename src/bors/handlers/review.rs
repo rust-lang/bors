@@ -597,7 +597,7 @@ mod tests {
     use crate::bors::TRY_BRANCH_NAME;
     use crate::bors::merge_queue::AUTO_BUILD_CHECK_RUN_NAME;
     use crate::database::{
-        DelegatedPermission, DelegationStatus, OctocrabMergeableState, TreeState, WorkflowStatus,
+        DelegatedPermission, DelegationStatus, OctocrabMergeableState, TreeState,
     };
     use crate::permissions::PermissionType;
     use crate::tests::default_repo_name;
@@ -633,7 +633,7 @@ mod tests {
     async fn approve_with_passing_ci_on_tentative(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             let workflow = ctx.pr_ci_workflow(());
-            ctx.modify_workflow(workflow, |w| w.change_status(WorkflowStatus::Success));
+            ctx.pr_workflow_success(workflow).await?;
 
             ctx.post_comment("@bors r+").await?;
             insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
@@ -691,7 +691,7 @@ mod tests {
     async fn approve_with_failed_ci_is_immediately_rejected(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             let workflow = ctx.pr_ci_workflow(());
-            ctx.modify_workflow(workflow, |w| w.change_status(WorkflowStatus::Failure));
+            ctx.pr_workflow_failure(workflow).await?;
 
             ctx.post_comment("@bors r+").await?;
             insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
@@ -708,7 +708,7 @@ mod tests {
     async fn force_approve_bypasses_failed_ci(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             let workflow = ctx.pr_ci_workflow(());
-            ctx.modify_workflow(workflow, |w| w.change_status(WorkflowStatus::Failure));
+            ctx.pr_workflow_failure(workflow).await?;
 
             ctx.post_comment("@bors r+ force").await?;
             insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"

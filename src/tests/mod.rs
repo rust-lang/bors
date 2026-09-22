@@ -802,6 +802,16 @@ impl BorsTester {
             .await
     }
 
+    /// Complete a PR workflow without sending its ignored start webhook.
+    pub async fn pr_workflow_success(&mut self, run_id: RunId) -> anyhow::Result<()> {
+        self.workflow_event(WorkflowEvent::success(run_id)).await
+    }
+
+    /// Fail a PR workflow without sending its ignored start webhook.
+    pub async fn pr_workflow_failure(&mut self, run_id: RunId) -> anyhow::Result<()> {
+        self.workflow_event(WorkflowEvent::failure(run_id)).await
+    }
+
     /// Creates a new PR and sends a webhook about its creation.
     /// If you want to set some non-default properties on the PR,
     /// use the `modify_pr` callback, to avoid race conditions with the webhook being sent.
