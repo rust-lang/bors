@@ -6,9 +6,10 @@ use crate::bors::approval::{
 use crate::bors::command::{Approver, CommandPrefix, Delegatee};
 use crate::bors::command::{DelegateCommand, RollupMode};
 use crate::bors::comment::{
-    approval_failed_comment, approve_blocking_labels_present, approve_merge_conflict_comment,
-    approve_non_open_pr_comment, approve_wip_title, delegate_comment, delegate_try_builds_comment,
-    tentatively_approved_comment, unapprove_non_open_pr_comment, unapprove_not_approved,
+    approve_blocking_labels_present, approve_merge_conflict_comment, approve_non_open_pr_comment,
+    approve_wip_title, delegate_comment, delegate_try_builds_comment,
+    tentative_approval_failed_comment, tentatively_approved_comment, unapprove_non_open_pr_comment,
+    unapprove_not_approved,
 };
 use crate::bors::handlers::{InvalidationInfo, InvalidationReason, PullRequestData, deny_request};
 use crate::bors::handlers::{has_permission, invalidate_pr};
@@ -101,7 +102,7 @@ pub(super) async fn command_approve(
                 &repo_state,
                 pr,
                 &approver,
-                approval_failed_comment(&pr.github.head.sha),
+                tentative_approval_failed_comment(&pr.github.head.sha),
                 priority,
                 merge_queue_tx,
             )
