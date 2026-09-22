@@ -360,7 +360,7 @@ pub fn tentative_approval_removed_comment(commit_sha: &CommitSha) -> Comment {
 
 pub fn tentative_approval_timed_out_comment(commit_sha: &CommitSha, timeout: Duration) -> Comment {
     Comment::new(format!(
-        ":x: Commit {commit_sha} has been unapproved because PR CI timed out after `{}`s.",
+        ":x: Tentatively approved commit {commit_sha} has been unapproved because PR CI timed out after `{}`s.",
         timeout.as_secs()
     ))
 }

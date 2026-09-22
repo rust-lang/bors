@@ -320,7 +320,7 @@ mod tests {
             })
             .await;
 
-            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @":x: Commit pr-1-sha has been unapproved because PR CI timed out after `3600`s.");
+            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @":x: Tentatively approved commit pr-1-sha has been unapproved because PR CI timed out after `3600`s.");
             ctx.pr(()).await.expect_unapproved();
             Ok(())
         })
@@ -338,7 +338,7 @@ mod tests {
             })
             .await;
 
-            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @":x: Commit pr-1-sha has been unapproved because PR CI timed out after `3600`s.");
+            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @":x: Tentatively approved commit pr-1-sha has been unapproved because PR CI timed out after `3600`s.");
             ctx.pr(()).await.expect_unapproved();
             Ok(())
         })
