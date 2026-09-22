@@ -662,7 +662,7 @@ mod tests {
 
             ctx.pr(())
                 .await
-                .expect_approved_by(&User::default_pr_author().name);
+                .expect_approver(&User::default_pr_author().name);
             Ok(())
         })
         .await;
