@@ -1,7 +1,7 @@
 use crate::BorsContext;
 use crate::bors::approval::{TentativeApprovalOutcome, try_resolve_tentative_approval};
 use crate::bors::comment::{
-    tentative_approval_failed_comment, tentative_approval_timed_out_comment,
+    tentative_approval_removed_comment, tentative_approval_timed_out_comment,
 };
 use crate::bors::event::WorkflowRunCompleted;
 use crate::bors::handlers::PullRequestData;
@@ -167,7 +167,7 @@ async fn process_tentative_approval(
             db: pr,
         },
         &approval_info.approver,
-        tentative_approval_failed_comment(&gh_pr.head.sha),
+        tentative_approval_removed_comment(&gh_pr.head.sha),
         pr.priority.map(|priority| priority as u32),
         merge_queue_tx,
     )

@@ -352,7 +352,7 @@ Reason for tree closure: `{reason}`
     Comment::new(comment)
 }
 
-pub fn tentative_approval_failed_comment(commit_sha: &CommitSha) -> Comment {
+pub fn tentative_approval_removed_comment(commit_sha: &CommitSha) -> Comment {
     Comment::new(format!(
         ":x: Commit {commit_sha} has been unapproved due to PR CI failure."
     ))
