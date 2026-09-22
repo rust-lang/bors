@@ -541,7 +541,7 @@ impl PullRequestModel {
         }
     }
 
-    pub fn is_tentatively_approved(&self) -> Option<&ApprovalInfo> {
+    pub fn tentative_approval(&self) -> Option<&ApprovalInfo> {
         match &self.approval_status {
             ApprovalStatus::TentativelyApproved(info) => Some(info),
             ApprovalStatus::Approved(_) | ApprovalStatus::NotApproved => None,

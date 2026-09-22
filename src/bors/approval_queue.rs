@@ -92,7 +92,7 @@ pub async fn handle_approval_queue_event(
                     .await?;
 
                 let matching_pull_requests = pull_requests.into_iter().filter(|pr| {
-                    pr.is_tentatively_approved()
+                    pr.tentative_approval()
                         .is_some_and(|approval| approval.sha.as_str() == event.commit_sha.as_ref())
                 });
 
@@ -144,7 +144,7 @@ async fn process_tentative_approval(
     pr: &PullRequestModel,
     merge_queue_tx: &MergeQueueSender,
 ) -> anyhow::Result<()> {
-    let Some(approval_info) = pr.is_tentatively_approved() else {
+    let Some(approval_info) = pr.tentative_approval() else {
         return Ok(());
     };
 
