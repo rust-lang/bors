@@ -34,6 +34,8 @@ pub enum BorsRepositoryEvent {
     WorkflowStarted(WorkflowRunStarted),
     /// A workflow run on Github Actions or a check run from external CI system has completed.
     WorkflowCompleted(WorkflowRunCompleted),
+    /// A pull request workflow run on Github Actions has completed.
+    PullRequestWorkflowCompleted(WorkflowRunCompleted),
     /// A workflow job on Github Actions has started.
     WorkflowJobStarted(WorkflowJobStarted),
     /// A workflow job on Github Actions has completed.
@@ -57,6 +59,7 @@ impl BorsRepositoryEvent {
             BorsRepositoryEvent::PushToBranch(payload) => &payload.repository,
             BorsRepositoryEvent::WorkflowStarted(payload) => &payload.repository,
             BorsRepositoryEvent::WorkflowCompleted(payload) => &payload.repository,
+            BorsRepositoryEvent::PullRequestWorkflowCompleted(payload) => &payload.repository,
             BorsRepositoryEvent::WorkflowJobStarted(payload) => &payload.repository,
             BorsRepositoryEvent::WorkflowJobCompleted(payload) => &payload.repository,
         }
@@ -73,6 +76,8 @@ pub enum BorsGlobalEvent {
     RefreshPermissions,
     /// Examine pending builds, and try to complete or timeout them.
     RefreshPendingBuilds,
+    /// Recheck CI for tentatively approved pull requests.
+    RefreshTentativeApprovals,
     /// Refresh mergeability status of PRs that have unknown mergeability status.
     RefreshPullRequestMergeability,
     /// Synchronize PR status with GitHub.

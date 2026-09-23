@@ -28,7 +28,7 @@ use crate::bors::{
     AUTO_BRANCH_NAME, BorsContext, BuildKind, CommandPrefix, Comment, PullRequestStatus,
     RepositoryState, TRY_BRANCH_NAME, TRY_PERF_BRANCH_NAME,
 };
-use crate::database::{DelegatedPermission, DelegationStatus, PullRequestModel};
+use crate::database::{ApprovalMode, DelegatedPermission, DelegationStatus, PullRequestModel};
 use crate::ec2::{backfill_ec2_instances, terminate_old_ec2_instances};
 use crate::github::{
     CommitSha, GithubUser, LabelTrigger, PullRequest, PullRequestInfo, PullRequestNumber,
@@ -128,6 +128,18 @@ pub async fn handle_bors_repository_event(
                 id = payload.run_id.into_inner()
             );
             handle_workflow_completed(repo, db, payload, senders.build_queue())
+                .instrument(span)
+                .await?;
+        }
+        BorsRepositoryEvent::PullRequestWorkflowCompleted(payload) => {
+            let span = tracing::info_span!(
+                "Pull request workflow completed",
+                repo = payload.repository.to_string(),
+                sha = %payload.commit_sha,
+            );
+            senders
+                .approval_queue()
+                .on_workflow_completed(payload)
                 .instrument(span)
                 .await?;
         }
@@ -303,6 +315,18 @@ pub async fn handle_bors_global_event(
             .instrument(span.clone())
             .await?;
         }
+        BorsGlobalEvent::RefreshTentativeApprovals => {
+            let span = tracing::info_span!("Refresh tentative approvals");
+            for_each_repo(&ctx, |repo| {
+                senders
+                    .approval_queue()
+                    .refresh_tentative_approvals(repo.repository().clone())
+                    .instrument(span.clone())
+                    .map_err(|error| error.into())
+            })
+            .instrument(span.clone())
+            .await?;
+        }
         BorsGlobalEvent::RefreshPullRequestMergeability => {
             let span = tracing::info_span!("Refresh PR mergeability status");
             for_each_repo(&ctx, |repo| {
@@ -474,8 +498,14 @@ async fn handle_comment(
                         priority,
                         rollup,
                         note,
+                        force,
                     } => {
                         let span = tracing::info_span!("Approve");
+                        let approval_mode = if force {
+                            ApprovalMode::Eager
+                        } else {
+                            ApprovalMode::Tentative
+                        };
                         command_approve(
                             ctx.clone(),
                             repo,
@@ -486,6 +516,7 @@ async fn handle_comment(
                             priority,
                             rollup,
                             note,
+                            approval_mode,
                             senders.merge_queue(),
                         )
                         .instrument(span)
@@ -920,7 +951,7 @@ pub async fn invalidate_pr(
 ) -> anyhow::Result<InvalidationOutcome> {
     // Step 1: unapprove the pull request if it was approved
     // This happens everytime the PR is invalidated, if it was approved before
-    let pr_unapproved = if pr_db.is_approved() {
+    let pr_unapproved = if pr_db.is_approved() || pr_db.tentative_approval().is_some() {
         unapprove_pr(repo_state, db, pr_db, &pr_gh.clone().into()).await?;
         true
     } else {

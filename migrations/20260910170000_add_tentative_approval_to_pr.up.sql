@@ -1,0 +1,2 @@
+ALTER TABLE pull_request
+ADD COLUMN approval_tentative BOOLEAN NOT NULL DEFAULT FALSE;

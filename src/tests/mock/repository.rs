@@ -68,6 +68,7 @@ pub async fn mock_repo(
     mock_cancel_workflow(repo.clone(), mock_server).await;
     mock_check_runs(repo.clone(), mock_server).await;
     mock_workflow_runs(repo.clone(), mock_server).await;
+    mock_repository_activities(repo.clone(), mock_server).await;
     mock_workflow_jobs(repo.clone(), mock_server).await;
     mock_contents(repo.clone(), mock_server).await;
 }
@@ -409,7 +410,37 @@ async fn mock_workflow_runs(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
         move |req: &Request, []| {
             let repo = repo.lock();
             let head_sha = get_query_param(req, "head_sha");
-            let workflow_runs: Vec<WorkflowRun> = repo.find_workflows_by_commit_sha(&head_sha);
+            let event = get_query_param_opt(req, "event");
+            let branch = get_query_param_opt(req, "branch");
+            let mut workflow_runs: Vec<WorkflowRun> = repo
+                .find_workflows_by_commit_sha(&head_sha)
+                .into_iter()
+                .filter(|workflow| {
+                    event
+                        .as_deref()
+                        .is_none_or(|event| workflow.event() == event)
+                        && branch
+                            .as_deref()
+                            .is_none_or(|branch| workflow.head_branch() == branch)
+                })
+                .collect();
+            // Default unconfigured PR CI to pass.
+            if event.as_deref() == Some("pull_request")
+                && workflow_runs.is_empty()
+                && repo.default_pr_ci
+                && let Some(pr) = repo.pulls().values().find(|pr| {
+                    pr.head_sha() == head_sha
+                        && branch
+                            .as_deref()
+                            .is_none_or(|branch| pr.head_branch_copy().name() == branch)
+                })
+            {
+                let branch = pr.head_branch_copy();
+                let mut workflow = WorkflowRun::new(RunId(10_000_000 + pr.number().0), &branch);
+                workflow.change_status(WorkflowStatus::Success);
+                workflow.set_event("pull_request");
+                workflow_runs.push(workflow);
+            }
 
             let response = WorkflowRunsResponse {
                 workflow_runs: workflow_runs
@@ -421,6 +452,47 @@ async fn mock_workflow_runs(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
         },
         "GET",
         format!("^/repos/{repo_name}/actions/runs$"),
+    )
+    .mount(mock_server)
+    .await;
+}
+
+async fn mock_repository_activities(repo: Arc<Mutex<Repo>>, mock_server: &MockServer) {
+    #[derive(Serialize)]
+    struct RepositoryActivity {
+        id: u64,
+        node_id: String,
+        before: String,
+        after: String,
+        #[serde(rename = "ref")]
+        ref_field: String,
+        timestamp: DateTime<Utc>,
+        activity_type: &'static str,
+    }
+
+    let repo_name = repo.lock().full_name();
+    dynamic_mock_req(
+        move |req: &Request, []| {
+            let branch_name = get_query_param(req, "ref");
+            let mut repo = repo.lock();
+            let activities = repo
+                .get_branch_by_name(&branch_name)
+                .map(|branch| {
+                    vec![RepositoryActivity {
+                        id: 1,
+                        node_id: "repository-activity-1".to_string(),
+                        before: String::new(),
+                        after: branch.sha(),
+                        ref_field: format!("refs/heads/{branch_name}"),
+                        timestamp: Utc::now(),
+                        activity_type: "push",
+                    }]
+                })
+                .unwrap_or_default();
+            ResponseTemplate::new(200).set_body_json(activities)
+        },
+        "GET",
+        format!("^/repos/{repo_name}/activity$"),
     )
     .mount(mock_server)
     .await;

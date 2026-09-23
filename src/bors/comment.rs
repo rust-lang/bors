@@ -352,6 +352,46 @@ Reason for tree closure: `{reason}`
     Comment::new(comment)
 }
 
+pub fn tentative_approval_removed_comment(commit_sha: &CommitSha) -> Comment {
+    Comment::new(format!(
+        ":x: Tentatively approved commit {commit_sha} has been unapproved due to PR CI failure."
+    ))
+}
+
+pub fn tentative_approval_timed_out_comment(commit_sha: &CommitSha, timeout: Duration) -> Comment {
+    Comment::new(format!(
+        ":x: Tentatively approved commit {commit_sha} has been unapproved because PR CI timed out after `{}`s.",
+        timeout.as_secs()
+    ))
+}
+
+pub fn tentative_approval_failed_comment(commit_sha: &CommitSha) -> Comment {
+    Comment::new(format!(
+        ":x: Cannot approve commit {commit_sha}, because CI currently fails on this PR. Use `@bors r+ force` to override the PR CI check."
+    ))
+}
+
+pub fn tentatively_approved_comment(
+    commit_sha: &CommitSha,
+    reviewer: &str,
+    unknown_reviewers: Vec<String>,
+) -> Comment {
+    let mut comment = format!(
+        ":hourglass: Commit {commit_sha} has been tentatively approved by `{reviewer}`. It will be fully approved once PR CI is successful."
+    );
+
+    if !unknown_reviewers.is_empty() {
+        writeln!(
+            comment,
+            "\n\n:warning: The following reviewer(s) could not be found: `{}`",
+            unknown_reviewers.join(", ")
+        )
+        .unwrap();
+    }
+
+    Comment::new(comment)
+}
+
 pub fn approve_non_open_pr_comment() -> Comment {
     Comment::new(":clipboard: Only open, non-draft PRs can be approved.".to_string())
 }

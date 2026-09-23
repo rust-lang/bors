@@ -1,20 +1,24 @@
 use crate::bors::RepositoryState;
+use crate::bors::approval::{
+    TentativeApprovalOutcome, check_unknown_reviewers, finalize_approval,
+    try_resolve_tentative_approval,
+};
 use crate::bors::command::{Approver, CommandPrefix, Delegatee};
 use crate::bors::command::{DelegateCommand, RollupMode};
 use crate::bors::comment::{
     approve_blocking_labels_present, approve_merge_conflict_comment, approve_non_open_pr_comment,
-    approve_wip_title, approved_comment, delegate_comment, delegate_try_builds_comment,
-    unapprove_non_open_pr_comment, unapprove_not_approved,
+    approve_wip_title, delegate_comment, delegate_try_builds_comment,
+    tentative_approval_failed_comment, tentatively_approved_comment, unapprove_non_open_pr_comment,
+    unapprove_not_approved,
 };
 use crate::bors::handlers::{InvalidationInfo, InvalidationReason, PullRequestData, deny_request};
 use crate::bors::handlers::{has_permission, invalidate_pr};
-use crate::bors::labels::handle_label_trigger;
 use crate::bors::merge_queue::MergeQueueSender;
 use crate::bors::{Comment, PullRequestStatus};
 use crate::database::DelegatedPermission;
-use crate::database::{ApprovalInfo, PullRequestModel};
+use crate::database::{ApprovalInfo, ApprovalMode, PullRequestModel};
 use crate::database::{MergeableState, TreeState};
-use crate::github::{CommitSha, LabelTrigger, PullRequest};
+use crate::github::{CommitSha, PullRequest};
 use crate::github::{GithubUser, PullRequestNumber};
 use crate::permissions::PermissionType;
 use crate::{BorsContext, PgDbClient, ZulipClient};
@@ -34,6 +38,7 @@ pub(super) async fn command_approve(
     priority: Option<u32>,
     rollup_mode: Option<RollupMode>,
     note: Option<String>,
+    approval_mode: ApprovalMode,
     merge_queue_tx: &MergeQueueSender,
 ) -> anyhow::Result<()> {
     tracing::info!("Approving PR {}", pr.number());
@@ -68,13 +73,9 @@ pub(super) async fn command_approve(
         return Ok(());
     }
 
-    let (approver, unknown_reviewers) = match approver {
-        Approver::Myself => (author.username.clone(), Vec::new()),
-        Approver::Specified(approver) => {
-            let normalized = normalize_approvers(approver);
-            let unknown = check_unknown_reviewers(&repo_state, &normalized).await;
-            (normalized.join(","), unknown)
-        }
+    let approver = match approver {
+        Approver::Myself => author.username.clone(),
+        Approver::Specified(approver) => normalize_approvers(approver).join(","),
     };
 
     let approval_info = ApprovalInfo {
@@ -82,65 +83,55 @@ pub(super) async fn command_approve(
         sha: pr.github.head.sha.to_string(),
     };
 
-    db.approve(pr.db, approval_info, priority, rollup_mode, note)
-        .await?;
-
-    let was_failed = pr
-        .db
-        .auto_build
-        .as_ref()
-        .map(|b| b.status.is_failure())
-        .unwrap_or(false);
-    // Re-approval should act as a retry
-    if was_failed {
-        db.clear_auto_build(pr.db).await?;
-    }
+    db.approve(
+        pr.db,
+        approval_info,
+        approval_mode,
+        priority,
+        rollup_mode,
+        note,
+    )
+    .await?;
 
     let priority = priority.or(pr.db.priority.map(|p| p as u32));
 
-    merge_queue_tx.notify().await?;
-
-    let mut tree_state = ctx
-        .db
-        .repo_db(repo_state.repository())
-        .await?
-        .map(|r| r.tree_state.clone())
-        .unwrap_or(TreeState::Open);
-
-    // If the PR has high enough priority, do not post the tree closed message
-    if let TreeState::Closed {
-        priority: tree_priority,
-        ..
-    } = &tree_state
-        && let Some(priority) = priority
-        && priority >= *tree_priority
-    {
-        tree_state = TreeState::Open;
-    }
-
-    repo_state
-        .client
-        .post_comment(
-            pr.db.number,
-            approved_comment(
-                ctx.get_web_url(),
-                repo_state.repository(),
-                &pr.github.head.sha,
+    match approval_mode {
+        ApprovalMode::Tentative => {
+            match try_resolve_tentative_approval(
+                &ctx,
+                &repo_state,
+                pr,
                 &approver,
-                unknown_reviewers,
-                tree_state,
-                was_failed,
-            ),
-            &db,
-        )
-        .await?;
-
-    handle_label_trigger(
-        &repo_state,
-        &pr.github.clone().into(),
-        LabelTrigger::Approved,
-    )
-    .await
+                tentative_approval_failed_comment(&pr.github.head.sha),
+                priority,
+                merge_queue_tx,
+            )
+            .await?
+            {
+                // The resolved comment has already been posted.
+                TentativeApprovalOutcome::Resolved => {}
+                TentativeApprovalOutcome::Pending | TentativeApprovalOutcome::Skipped => {
+                    let unknown_reviewers = check_unknown_reviewers(&repo_state, &approver);
+                    repo_state
+                        .client
+                        .post_comment(
+                            pr.number(),
+                            tentatively_approved_comment(
+                                &pr.github.head.sha,
+                                &approver,
+                                unknown_reviewers,
+                            ),
+                            &db,
+                        )
+                        .await?;
+                }
+            }
+            Ok(())
+        }
+        ApprovalMode::Eager => {
+            finalize_approval(&ctx, &repo_state, pr, &approver, priority, merge_queue_tx).await
+        }
+    }
 }
 
 /// Normalize approvers (given after @bors r=) by removing leading @, possibly from multiple
@@ -150,21 +141,6 @@ fn normalize_approvers(approvers: &str) -> Vec<String> {
         .split(',')
         .map(|approver| approver.trim_start_matches('@').to_string())
         .collect::<Vec<String>>()
-}
-
-/// Check if the specified reviewers exist as GitHub users or teams.
-/// Returns comma-separated string of unknown reviewer names, or None if all exist.
-async fn check_unknown_reviewers(
-    repo_state: &RepositoryState,
-    reviewers: &[String],
-) -> Vec<String> {
-    let directory = repo_state.permissions.load();
-
-    reviewers
-        .iter()
-        .filter(|reviewer| !directory.user_exists(reviewer) && !directory.team_exists(reviewer))
-        .cloned()
-        .collect()
 }
 
 /// Keywords that will prevent an approval if they appear in the PR's title.
@@ -647,6 +623,102 @@ mod tests {
             ctx.pr(())
                 .await
                 .expect_rollup(None)
+                .expect_approved_by(&User::default_pr_author().name);
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
+    async fn approve_with_passing_ci_on_tentative(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            let workflow = ctx.pr_ci_workflow(());
+            ctx.pr_workflow_success(workflow).await?;
+
+            ctx.post_comment("@bors r+").await?;
+            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
+            :pushpin: Commit pr-1-sha has been approved by `default-user`
+
+            It is now in the [queue](https://bors-test.com/queue/borstest) for this repository.
+            ");
+
+            ctx.pr(())
+                .await
+                .expect_approved_by(&User::default_pr_author().name);
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
+    async fn approve_with_pending_ci_is_tentative(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            ctx.pr_ci_workflow(());
+
+            ctx.post_comment("@bors r+").await?;
+            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
+            :hourglass: Commit pr-1-sha has been tentatively approved by `default-user`. It will be fully approved once PR CI is successful.
+            ");
+
+            ctx.pr(())
+                .await
+                .expect_approver(&User::default_pr_author().name);
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
+    async fn approve_with_pending_ci_applies_options_immediately(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            ctx.pr_ci_workflow(());
+
+            ctx.post_comment(r#"@bors r+ p=5 rollup=never note="foo bar""#)
+                .await?;
+            ctx.expect_comments((), 1).await;
+
+            ctx.pr(())
+                .await
+                .expect_priority(Some(5))
+                .expect_rollup(Some(RollupMode::Never))
+                .expect_note(Some("foo bar"));
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
+    async fn approve_with_failed_ci_is_immediately_rejected(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            let workflow = ctx.pr_ci_workflow(());
+            ctx.pr_workflow_failure(workflow).await?;
+
+            ctx.post_comment("@bors r+").await?;
+            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
+            :x: Cannot approve commit pr-1-sha, because CI currently fails on this PR. Use `@bors r+ force` to override the PR CI check.
+            ");
+
+            ctx.pr(()).await.expect_unapproved();
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
+    async fn force_approve_bypasses_failed_ci(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            let workflow = ctx.pr_ci_workflow(());
+            ctx.pr_workflow_failure(workflow).await?;
+
+            ctx.post_comment("@bors r+ force").await?;
+            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
+            :pushpin: Commit pr-1-sha has been approved by `default-user`
+
+            It is now in the [queue](https://bors-test.com/queue/borstest) for this repository.
+            ");
+
+            ctx.pr(())
+                .await
                 .expect_approved_by(&User::default_pr_author().name);
             Ok(())
         })

@@ -11,7 +11,7 @@ use super::TreeState;
 use super::UpsertPullRequestParams;
 use super::WorkflowStatus;
 use super::WorkflowType;
-use super::{ApprovalInfo, PrimaryKey, UpdateBuildParams};
+use super::{ApprovalInfo, ApprovalMode, PrimaryKey, UpdateBuildParams};
 use super::{ApprovalStatus, RollupMember};
 use super::{Assignees, RegisterRollupMemberParams};
 use super::{BuildModel, UnrollState};
@@ -49,7 +49,8 @@ pub(crate) async fn get_pull_request(
         pr.assignees as "assignees: Assignees",
         (
             pr.approved_by,
-            pr.approved_sha
+            pr.approved_sha,
+            pr.approval_tentative
         ) AS "approval_status!: ApprovalStatus",
         pr.status as "status: PullRequestStatus",
         pr.priority,
@@ -102,7 +103,8 @@ pub(crate) async fn get_pull_request_by_id(
         pr.assignees as "assignees: Assignees",
         (
             pr.approved_by,
-            pr.approved_sha
+            pr.approved_sha,
+            pr.approval_tentative
         ) AS "approval_status!: ApprovalStatus",
         pr.status as "status: PullRequestStatus",
         pr.priority,
@@ -230,7 +232,8 @@ pub(crate) async fn upsert_pull_request(
                 pr.assignees as "assignees: Assignees",
                 (
                     pr.approved_by,
-                    pr.approved_sha
+                    pr.approved_sha,
+                    pr.approval_tentative
                 ) AS "approval_status!: ApprovalStatus",
                 pr.status as "status: PullRequestStatus",
                 pr.priority,
@@ -288,7 +291,8 @@ pub(crate) async fn get_nonclosed_pull_requests(
                 pr.assignees as "assignees: Assignees",
                 (
                     pr.approved_by,
-                    pr.approved_sha
+                    pr.approved_sha,
+                    pr.approval_tentative
                 ) AS "approval_status!: ApprovalStatus",
                 pr.status as "status: PullRequestStatus",
                 pr.priority,
@@ -375,7 +379,8 @@ pub(crate) async fn get_prs_with_stale_mergeability_or_approved(
                 pr.assignees as "assignees: Assignees",
                 (
                     pr.approved_by,
-                    pr.approved_sha
+                    pr.approved_sha,
+                    pr.approval_tentative
                 ) AS "approval_status!: ApprovalStatus",
                 pr.status as "status: PullRequestStatus",
                 pr.priority,
@@ -437,7 +442,8 @@ pub(crate) async fn set_stale_mergeability_status_by_base_branch(
                 pr.assignees as "assignees: Assignees",
                 (
                     pr.approved_by,
-                    pr.approved_sha
+                    pr.approved_sha,
+                    pr.approval_tentative
                 ) AS "approval_status!: ApprovalStatus",
                 pr.status as "status: PullRequestStatus",
                 pr.priority,
@@ -475,11 +481,13 @@ pub(crate) async fn approve_pull_request(
     executor: impl PgExecutor<'_>,
     pr_id: i32,
     approval_info: ApprovalInfo,
+    approval_mode: ApprovalMode,
     priority: Option<u32>,
     rollup: Option<RollupMode>,
     note: Option<String>,
 ) -> anyhow::Result<()> {
     let priority_i32 = priority.map(|p| p as i32);
+    let tentative = approval_mode == ApprovalMode::Tentative;
 
     measure_db_query("approve_pull_request", || async {
         sqlx::query!(
@@ -487,16 +495,38 @@ pub(crate) async fn approve_pull_request(
 UPDATE pull_request
 SET approved_by = $1,
     approved_sha = $2,
-    priority = COALESCE($3, priority),
-    rollup = COALESCE($4, rollup),
-    note = COALESCE($5, note)
-WHERE id = $6
+    approval_tentative = $3,
+    priority = COALESCE($4, priority),
+    rollup = COALESCE($5, rollup),
+    note = COALESCE($6, note)
+WHERE id = $7
 "#,
             approval_info.approver,
             approval_info.sha,
+            tentative,
             priority_i32,
             rollup as Option<RollupMode>,
             note,
+            pr_id,
+        )
+        .execute(executor)
+        .await?;
+        Ok(())
+    })
+    .await
+}
+
+pub(crate) async fn confirm_tentative_approval(
+    executor: impl PgExecutor<'_>,
+    pr_id: i32,
+) -> anyhow::Result<()> {
+    measure_db_query("confirm_tentative_approval", || async {
+        sqlx::query!(
+            r#"
+UPDATE pull_request
+SET approval_tentative = FALSE
+WHERE id = $1
+"#,
             pr_id,
         )
         .execute(executor)
@@ -516,9 +546,11 @@ pub(crate) async fn unapprove_pull_request(
                 UPDATE pull_request
                 SET approved_by = NULL,
                     approved_sha = NULL,
+                    approval_tentative = FALSE,
                     auto_build_id = NULL
-                WHERE id = $1"#,
-            pr_id
+                WHERE id = $1
+                "#,
+            pr_id,
         )
         .execute(executor)
         .await?;
@@ -590,7 +622,8 @@ SELECT
     pr.assignees as "assignees: Assignees",
     (
         pr.approved_by,
-        pr.approved_sha
+        pr.approved_sha,
+        pr.approval_tentative
     ) AS "approval_status!: ApprovalStatus",
     pr.status as "status: PullRequestStatus",
     (
@@ -1363,7 +1396,8 @@ pub(crate) async fn get_rollup_members_for_unrolling(
             pr.assignees as "assignees: Assignees",
             (
                 pr.approved_by,
-                pr.approved_sha
+                pr.approved_sha,
+                pr.approval_tentative
             ) AS "approval_status!: ApprovalStatus",
             pr.status as "status: PullRequestStatus",
             pr.priority,
@@ -1503,7 +1537,8 @@ pub(crate) async fn find_rollups_for_member_pr(
         pr.assignees as "assignees: Assignees",
         (
             pr.approved_by,
-            pr.approved_sha
+            pr.approved_sha,
+            pr.approval_tentative
         ) AS "approval_status!: ApprovalStatus",
         pr.status as "status: PullRequestStatus",
         pr.priority,

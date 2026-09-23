@@ -5,7 +5,9 @@ use chrono::{DateTime, Utc};
 use octocrab::Octocrab;
 use octocrab::models::checks::CheckRun;
 use octocrab::models::pulls::MergeableState;
+use octocrab::models::repos::ActivityType;
 use octocrab::models::{CheckRunId, Repository, RunId, RunnerGroupId, UserId};
+use octocrab::params::Direction;
 use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
@@ -44,6 +46,11 @@ pub struct GithubRepositoryClient {
     // We store the name separately, because repository has an optional owner, but at this point
     // we must always have some owner of the repo.
     repo_name: GithubRepoName,
+}
+
+pub enum WorkflowSource<'a> {
+    Push(CommitSha),
+    PullRequest(&'a PullRequest),
 }
 
 impl GithubRepositoryClient {
@@ -257,6 +264,50 @@ impl GithubRepositoryClient {
         })
         .await?;
         Ok(prs)
+    }
+
+    /// Return when the pull request's current head was last updated.
+    pub async fn get_pull_request_head_update_time(
+        &self,
+        pr: &PullRequest,
+    ) -> anyhow::Result<Option<DateTime<Utc>>> {
+        let head_repository = pr.head_repository.as_ref().unwrap_or(&self.repo_name);
+        let head_branch = pr.head.name.clone();
+        let head_sha = pr.head.sha.clone();
+
+        let update_time = perform_retryable(
+            "get_pull_request_head_update_time",
+            RetryMethod::default(),
+            || async {
+                let activities = self
+                    .client
+                    .repos(head_repository.owner(), head_repository.name())
+                    .list_activities()
+                    .direction(Direction::Descending)
+                    .per_page(100)
+                    .git_ref(&head_branch)
+                    .send()
+                    .await?;
+
+                anyhow::Ok(
+                    activities
+                        .items
+                        .into_iter()
+                        .filter(|activity| {
+                            matches!(
+                                activity.activity_type,
+                                ActivityType::Push
+                                    | ActivityType::ForcePush
+                                    | ActivityType::BranchCreation
+                            ) && activity.after == head_sha.as_ref()
+                        })
+                        .map(|activity| activity.timestamp)
+                        .max(),
+                )
+            },
+        )
+        .await?;
+        Ok(update_time)
     }
 
     pub async fn get_pull_request_commits(
@@ -500,17 +551,25 @@ impl GithubRepositoryClient {
         Ok(check_run)
     }
 
-    /// Find all workflows attached to a specific commit SHA.
+    /// Find all workflows attached to a specific commit SHA, filtered by trigger event.
     pub async fn get_workflow_runs_for_commit_sha(
         &self,
-        commit_sha: CommitSha,
+        source: WorkflowSource<'_>,
     ) -> anyhow::Result<Vec<WorkflowRun>> {
         let runs = perform_retryable("get_workflows_for_commit_sha", RetryMethod::default(), || async {
-            let response = self.client.workflows(self.repo_name.owner(), self.repo_name.name())
-                .list_all_runs()
-                .head_sha(&commit_sha.0)
-                .send()
-                .await?;
+            let workflows = self.client.workflows(self.repo_name.owner(), self.repo_name.name());
+            let request = match &source {
+                WorkflowSource::Push(commit_sha) => workflows
+                    .list_all_runs()
+                    .head_sha(&commit_sha.0)
+                    .event("push"),
+                WorkflowSource::PullRequest(pr) => workflows
+                    .list_all_runs()
+                    .head_sha(&pr.head.sha.0)
+                    .branch(&pr.head.name)
+                    .event("pull_request"),
+            };
+            let response = request.send().await?;
             let mut runs = Vec::with_capacity(
                 response
                     .total_count
@@ -815,31 +874,10 @@ impl GithubRepositoryClient {
             variables: V,
         }
 
-        #[derive(serde::Deserialize, Debug)]
-        struct Error {
-            #[allow(unused)]
-            message: String,
-        }
-
-        #[derive(serde::Deserialize)]
-        struct RawResponse<T> {
-            errors: Option<Vec<Error>>,
-            #[serde(flatten)]
-            result: T,
-        }
-
-        let response = self
-            .client
-            .graphql::<RawResponse<T>>(&Payload { query, variables })
+        self.client
+            .graphql::<T>(&Payload { query, variables })
             .await
-            .context("GraphQL request failed")?;
-
-        let errors = response.errors.unwrap_or_default();
-        if !errors.is_empty() {
-            Err(anyhow::anyhow!("Query ended with error(s): {errors:?}"))
-        } else {
-            Ok(response.result)
-        }
+            .context("GraphQL request failed")
     }
 
     /// Hides a comment on an Issue, Commit, Pull Request, or Gist.
@@ -894,11 +932,6 @@ impl GithubRepositoryClient {
 
         #[derive(Deserialize)]
         struct Output {
-            data: OutputInner,
-        }
-
-        #[derive(Deserialize)]
-        struct OutputInner {
             node: Option<IssueCommentNode>,
         }
 
@@ -916,7 +949,7 @@ impl GithubRepositoryClient {
         })
         .await?;
 
-        match output.data.node {
+        match output.node {
             Some(comment) => Ok(comment.body),
             None => anyhow::bail!("No comment found for node_id: {node_id}"),
         }
@@ -942,10 +975,13 @@ impl GithubRepositoryClient {
             body: &'a str,
         }
 
+        #[derive(Deserialize)]
+        struct Output {}
+
         tracing::debug!(node_id, "Updating comment content");
 
         perform_retryable("update_comment_content", RetryMethod::default(), || async {
-            self.graphql::<(), Variables>(
+            self.graphql::<Output, Variables>(
                 QUERY,
                 Variables {
                     id: node_id,
@@ -1008,10 +1044,6 @@ impl GithubRepositoryClient {
 
         #[derive(serde::Deserialize)]
         struct Output {
-            data: OutputInner,
-        }
-        #[derive(serde::Deserialize)]
-        struct OutputInner {
             repository: RepositoryNode,
         }
         #[derive(serde::Deserialize)]
@@ -1072,7 +1104,6 @@ impl GithubRepositoryClient {
 
             result.extend(
                 response
-                    .data
                     .repository
                     .pull_requests
                     .nodes
@@ -1098,12 +1129,11 @@ impl GithubRepositoryClient {
             );
 
             vars.after = response
-                .data
                 .repository
                 .pull_requests
                 .page_info
                 .has_next_page
-                .then_some(response.data.repository.pull_requests.page_info.end_cursor)
+                .then_some(response.repository.pull_requests.page_info.end_cursor)
                 .flatten();
 
             if vars.after.is_none() {

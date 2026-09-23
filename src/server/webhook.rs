@@ -336,15 +336,8 @@ fn parse_workflow_run_events(body: &[u8]) -> anyhow::Result<Option<BorsEvent>> {
     let payload: WebhookWorkflowRun = serde_json::from_slice(body)?;
     let repository_name = parse_repository_name(&payload.repository)?;
 
-    // As a security precaution, we eagerly prefilter all workflow runs other than "push" here,
-    // to ensure that only workflows from privileged pushes to branches in the repository are
-    // registered by bors.
-    if payload.workflow_run.run.event != "push" {
-        return Ok(None);
-    }
-
-    let result = match payload.action {
-        "requested" => Some(BorsEvent::Repository(BorsRepositoryEvent::WorkflowStarted(
+    let result = match (payload.workflow_run.run.event.as_str(), payload.action) {
+        ("push", "requested") => Some(BorsEvent::Repository(BorsRepositoryEvent::WorkflowStarted(
             WorkflowRunStarted {
                 repository: repository_name,
                 name: payload.workflow_run.run.name,
@@ -355,7 +348,7 @@ fn parse_workflow_run_events(body: &[u8]) -> anyhow::Result<Option<BorsEvent>> {
                 url: payload.workflow_run.run.html_url.into(),
             },
         ))),
-        "completed" => {
+        (event @ ("push" | "pull_request"), "completed") => {
             let running_time = if let (Some(started_at), Some(completed_at)) = (
                 Some(payload.workflow_run.run.created_at),
                 Some(payload.workflow_run.run.updated_at),
@@ -364,29 +357,36 @@ fn parse_workflow_run_events(body: &[u8]) -> anyhow::Result<Option<BorsEvent>> {
             } else {
                 None
             };
-            Some(BorsEvent::Repository(
-                BorsRepositoryEvent::WorkflowCompleted(WorkflowRunCompleted {
-                    repository: repository_name,
-                    branch: payload.workflow_run.run.head_branch,
-                    commit_sha: CommitSha(payload.workflow_run.run.head_sha),
-                    run_id: payload.workflow_run.run.id,
-                    check_suite_id: payload.workflow_run.check_suite_id,
-                    running_time,
-                    status: match payload
-                        .workflow_run
-                        .run
-                        .conclusion
-                        .unwrap_or_default()
-                        .as_str()
-                    {
-                        "success" => WorkflowStatus::Success,
-                        _ => WorkflowStatus::Failure,
-                    },
-                }),
-            ))
+            let workflow = WorkflowRunCompleted {
+                repository: repository_name,
+                branch: payload.workflow_run.run.head_branch,
+                commit_sha: CommitSha(payload.workflow_run.run.head_sha),
+                run_id: payload.workflow_run.run.id,
+                check_suite_id: payload.workflow_run.check_suite_id,
+                running_time,
+                status: match payload
+                    .workflow_run
+                    .run
+                    .conclusion
+                    .unwrap_or_default()
+                    .as_str()
+                {
+                    "success" => WorkflowStatus::Success,
+                    _ => WorkflowStatus::Failure,
+                },
+            };
+
+            let event = if event == "pull_request" {
+                BorsRepositoryEvent::PullRequestWorkflowCompleted(workflow)
+            } else {
+                BorsRepositoryEvent::WorkflowCompleted(workflow)
+            };
+
+            Some(BorsEvent::Repository(event))
         }
         _ => None,
     };
+
     Ok(result)
 }
 
@@ -1769,6 +1769,47 @@ mod tests {
                             ),
                             check_suite_id: CheckSuiteId(
                                 12717696197,
+                            ),
+                        },
+                    ),
+                ),
+            ),
+        )
+        "#
+        );
+    }
+
+    #[tokio::test]
+    async fn pull_request_workflow_run_completed() {
+        insta::assert_debug_snapshot!(
+            check_webhook(
+                "webhook/pull-request-workflow-run-completed.json",
+                "workflow_run"
+            )
+            .await,
+            @r#"
+        Ok(
+            GitHubWebhook(
+                Repository(
+                    PullRequestWorkflowCompleted(
+                        WorkflowRunCompleted {
+                            repository: sakib25800/rust,
+                            branch: "webhook-fixture-head-20260921084340",
+                            commit_sha: CommitSha(
+                                "3d739e64026b41bd4895c1623979bb68e8e77aef",
+                            ),
+                            run_id: RunId(
+                                35579638383,
+                            ),
+                            status: Success,
+                            running_time: Some(
+                                TimeDelta {
+                                    secs: 7,
+                                    nanos: 0,
+                                },
+                            ),
+                            check_suite_id: CheckSuiteId(
+                                96325974841,
                             ),
                         },
                     ),

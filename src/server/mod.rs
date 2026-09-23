@@ -1,6 +1,6 @@
 use crate::bors::event::BorsEvent;
 use crate::bors::{BuildKind, CommandPrefix, RepositoryState, format_help};
-use crate::database::{ApprovalStatus, QueueStatus};
+use crate::database::QueueStatus;
 use crate::ec2::{Ec2Instance, Ec2InstanceStatus, get_aws_credentials, get_ec2_instances};
 use crate::github::{GithubRepoName, PullRequestNumber, rollup};
 use crate::server::cached::Cached;
@@ -237,25 +237,25 @@ async fn api_merge_queue(
     let prs = sort_queue_prs(prs);
     let prs = prs
         .into_iter()
-        .map(|pr| PullRequest {
-            number: pr.number.0,
-            title: pr.title,
-            author: pr.author,
-            status: match pr.status {
-                bors::PullRequestStatus::Closed => PullRequestStatus::Closed,
-                bors::PullRequestStatus::Draft => PullRequestStatus::Draft,
-                bors::PullRequestStatus::Merged => PullRequestStatus::Merged,
-                bors::PullRequestStatus::Open => PullRequestStatus::Open,
-            },
-            head_branch: pr.head_branch,
-            base_branch: pr.base_branch,
-            priority: pr.priority.map(|p| p as u64),
-            approver: match pr.approval_status {
-                ApprovalStatus::NotApproved => None,
-                ApprovalStatus::Approved(info) => Some(info.approver),
-            },
-            try_build: pr.try_build.map(|b| convert_status(b.status)),
-            auto_build: pr.auto_build.map(|b| convert_status(b.status)),
+        .map(|pr| {
+            let approver = pr.approver().map(str::to_owned);
+            PullRequest {
+                number: pr.number.0,
+                title: pr.title,
+                author: pr.author,
+                status: match pr.status {
+                    bors::PullRequestStatus::Closed => PullRequestStatus::Closed,
+                    bors::PullRequestStatus::Draft => PullRequestStatus::Draft,
+                    bors::PullRequestStatus::Merged => PullRequestStatus::Merged,
+                    bors::PullRequestStatus::Open => PullRequestStatus::Open,
+                },
+                head_branch: pr.head_branch,
+                base_branch: pr.base_branch,
+                priority: pr.priority.map(|p| p as u64),
+                approver,
+                try_build: pr.try_build.map(|b| convert_status(b.status)),
+                auto_build: pr.auto_build.map(|b| convert_status(b.status)),
+            }
         })
         .collect::<Vec<_>>();
     Ok(Json(prs).into_response())
@@ -439,7 +439,7 @@ pub async fn queue_handler(
             QueueStatus::ReadyForMerge(..) => (1, 0),
             QueueStatus::Pending(..) => (1, 0),
             QueueStatus::Failed(..) => (0, 1),
-            QueueStatus::NotApproved | QueueStatus::NotOpen => (0, 0),
+            QueueStatus::Tentative(_) | QueueStatus::NotApproved | QueueStatus::NotOpen => (0, 0),
         };
         in_queue_count += in_queue_inc;
         failed_count += failed_inc;
@@ -462,6 +462,7 @@ pub async fn queue_handler(
             }
             QueueStatus::Failed(_, _)
             | QueueStatus::ReadyForMerge(_, _)
+            | QueueStatus::Tentative(_)
             | QueueStatus::NotOpen
             | QueueStatus::NotApproved => {}
         }
@@ -619,6 +620,7 @@ mod tests {
     #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn api_queue_page(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
+            ctx.pr_ci_workflow(());
             ctx.approve(()).await?;
             let response = ctx
                 .api_request(ApiRequest::get(&format!("/api/queue/{}", default_repo_name().name())))

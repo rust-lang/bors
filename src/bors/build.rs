@@ -4,7 +4,7 @@ use crate::bors::{BuildKind, RepositoryState, WorkflowRun};
 use crate::database::{
     BuildModel, BuildStatus, ExclusiveLockProof, PullRequestModel, UpdateBuildParams, WorkflowModel,
 };
-use crate::github::api::client::{CheckRunOutput, GithubRepositoryClient};
+use crate::github::api::client::{CheckRunOutput, GithubRepositoryClient, WorkflowSource};
 use crate::github::api::operations::{CommitAuthor, ForcePush};
 use crate::github::{CommitSha, MergeResult, attempt_merge};
 use octocrab::models::CheckRunId;
@@ -127,7 +127,7 @@ pub async fn load_workflow_runs(
     // This tells us for how many workflow runs we should wait.
     let mut workflow_runs: Vec<WorkflowRun> = repo
         .client
-        .get_workflow_runs_for_commit_sha(CommitSha(build.commit_sha.clone()))
+        .get_workflow_runs_for_commit_sha(WorkflowSource::Push(CommitSha(build.commit_sha.clone())))
         .await?;
     tracing::debug!("Workflow runs from GitHub: {workflow_runs:?}");
 
