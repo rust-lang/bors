@@ -2097,4 +2097,23 @@ also include this pls"
         })
         .await;
     }
+
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
+    async fn tentatively_approved_pr_is_not_merged(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            let pr2 = ctx.open_pr((), |_| {}).await?;
+            ctx.pr_ci_workflow(pr2.id());
+
+            // Tentative approval because of the pending PR CI workflow above
+            ctx.approve(pr2.id()).await?;
+
+            // This should not attempt to merge the PR
+            ctx.run_merge_queue_now().await;
+
+            ctx.pr(pr2.id()).await.expect_no_auto_build();
+
+            Ok(())
+        })
+        .await;
+    }
 }
