@@ -711,6 +711,7 @@ async fn handle_comment(
                                 priority,
                                 rollup,
                                 note,
+                                force,
                             },
                     } => {
                         let span = tracing::info_span!("SquashAndApprove");
@@ -732,6 +733,11 @@ async fn handle_comment(
                                         github: &pr_github,
                                         db: &pr_db,
                                     };
+                                    let approval_mode = if force {
+                                        ApprovalMode::Eager
+                                    } else {
+                                        ApprovalMode::Tentative
+                                    };
 
                                     command_approve(
                                         ctx2,
@@ -743,6 +749,7 @@ async fn handle_comment(
                                         priority,
                                         rollup,
                                         note,
+                                        approval_mode,
                                         &merge_queue_tx,
                                         sha,
                                     )

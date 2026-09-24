@@ -8,10 +8,9 @@ use super::operations::{
     get_workflow_urls_for_build, get_workflows_for_build, insert_repo_if_not_exists, is_rollup,
     record_tagged_bot_comment, set_pr_assignees, set_pr_mergeability_state, set_pr_priority,
     set_pr_rollup_mode, set_pr_status, set_rollup_member_unrolled_state,
-     set_rollup_members_unrolled_state,
-    set_stale_mergeability_status_by_base_branch, unapprove_pull_request,
-    unapprove_pull_request_if_sha_changed, undelegate_pull_request, update_build,
-    update_pr_try_build_id, update_pr_unrolled_build_id, update_workflow_status,
+    set_rollup_members_unrolled_state, set_stale_mergeability_status_by_base_branch,
+    unapprove_pull_request, unapprove_pull_request_if_sha_changed, undelegate_pull_request,
+    update_build, update_pr_try_build_id, update_pr_unrolled_build_id, update_workflow_status,
     upsert_pull_request, upsert_repository,
 };
 use super::{

@@ -324,6 +324,7 @@ fn parser_approval(command: &CommandPart<'_>, parts: &[CommandPart<'_>]) -> Pars
                                 priority,
                                 rollup,
                                 note,
+                                force,
                             },
                         }))
                     }
@@ -791,14 +792,13 @@ mod tests {
         let cmds = parse_commands("@bors r+ force p=1");
         assert_eq!(
             cmds,
-            vec![Ok(BorsCommand::Approve(ApproveInfo{
+            vec![Ok(BorsCommand::Approve(ApproveInfo {
                 approver: Approver::Myself,
                 priority: Some(1),
                 rollup: None,
                 note: None,
                 force: true,
-            })
-            )]
+            }))]
         );
     }
 
@@ -816,7 +816,8 @@ mod tests {
                     priority: None,
                     rollup: None,
                     note: None,
-                force: false,},
+                    force: false,
+                },
             ),
         )
         "#);
@@ -836,7 +837,8 @@ mod tests {
                     priority: None,
                     rollup: None,
                     note: None,
-                force: false,},
+                    force: false,
+                },
             ),
         )
         "#);
@@ -871,7 +873,7 @@ mod tests {
     #[test]
     fn parse_approve_with_priority() {
         let cmds = parse_commands("@bors r+ p=1");
-        insta::assert_debug_snapshot!(cmds, @r"
+        insta::assert_debug_snapshot!(cmds, @"
         [
             Ok(
                 Approve(
@@ -882,7 +884,8 @@ mod tests {
                         ),
                         rollup: None,
                         note: None,
-                    force: false,},
+                        force: false,
+                    },
                 ),
             ),
         ]
@@ -905,7 +908,8 @@ mod tests {
                         ),
                         rollup: None,
                         note: None,
-                    force: false,},
+                        force: false,
+                    },
                 ),
             ),
         ]
@@ -931,7 +935,8 @@ mod tests {
                         ),
                         rollup: None,
                         note: None,
-                    force: false,},
+                        force: false,
+                    },
                 ),
             ),
             Ok(
@@ -945,7 +950,8 @@ mod tests {
                         ),
                         rollup: None,
                         note: None,
-                    force: false,},
+                        force: false,
+                    },
                 ),
             ),
         ]
@@ -981,7 +987,8 @@ mod tests {
                         ),
                         rollup: None,
                         note: None,
-                    force: false,},
+                        force: false,
+                    },
                 ),
             ),
         ]
@@ -1139,7 +1146,7 @@ mod tests {
     #[test]
     fn parse_approve_with_rollup() {
         let cmds = parse_commands("@bors r+ rollup");
-        insta::assert_debug_snapshot!(cmds, @r"
+        insta::assert_debug_snapshot!(cmds, @"
         [
             Ok(
                 Approve(
@@ -1150,7 +1157,8 @@ mod tests {
                             Always,
                         ),
                         note: None,
-                    force: false,},
+                        force: false,
+                    },
                 ),
             ),
         ]
@@ -1173,7 +1181,8 @@ mod tests {
                             Never,
                         ),
                         note: None,
-                    force: false,},
+                        force: false,
+                    },
                 ),
             ),
         ]
@@ -1196,7 +1205,8 @@ mod tests {
                             Always,
                         ),
                         note: None,
-                    force: false,},
+                        force: false,
+                    },
                 ),
             ),
         ]
@@ -1219,7 +1229,8 @@ mod tests {
                             Maybe,
                         ),
                         note: None,
-                    force: false,},
+                        force: false,
+                    },
                 ),
             ),
         ]
@@ -1245,7 +1256,8 @@ mod tests {
                             Always,
                         ),
                         note: None,
-                    force: false,},
+                        force: false,
+                    },
                 ),
             ),
             Ok(
@@ -1259,7 +1271,8 @@ mod tests {
                             Iffy,
                         ),
                         note: None,
-                    force: false,},
+                        force: false,
+                    },
                 ),
             ),
         ]
@@ -1400,7 +1413,7 @@ mod tests {
     #[test]
     fn parse_approve_with_rollup_bare_priority() {
         let cmds = parse_commands("@bors r+ rollup p=1");
-        insta::assert_debug_snapshot!(cmds, @r"
+        insta::assert_debug_snapshot!(cmds, @"
         [
             Ok(
                 Approve(
@@ -1413,7 +1426,8 @@ mod tests {
                             Always,
                         ),
                         note: None,
-                    force: false,},
+                        force: false,
+                    },
                 ),
             ),
         ]
@@ -1423,7 +1437,7 @@ mod tests {
     #[test]
     fn parse_approve_with_rollup_value_priority() {
         let cmds = parse_commands("@bors r+ rollup=iffy p=1");
-        insta::assert_debug_snapshot!(cmds, @r"
+        insta::assert_debug_snapshot!(cmds, @"
         [
             Ok(
                 Approve(
@@ -1436,7 +1450,8 @@ mod tests {
                             Iffy,
                         ),
                         note: None,
-                    force: false,},
+                        force: false,
+                    },
                 ),
             ),
         ]
@@ -1461,7 +1476,8 @@ mod tests {
                         note: Some(
                             "foo bar",
                         ),
-                    force: false,},
+                        force: false,
+                    },
                 ),
             ),
         ]
@@ -2209,6 +2225,7 @@ for the crater",
                         priority: None,
                         rollup: None,
                         note: None,
+                        force: false,
                     },
                 },
             ),
@@ -2231,6 +2248,7 @@ for the crater",
                         priority: None,
                         rollup: None,
                         note: None,
+                        force: false,
                     },
                 },
             ),
@@ -2253,6 +2271,7 @@ for the crater",
                         priority: None,
                         rollup: None,
                         note: None,
+                        force: false,
                     },
                 },
             ),
@@ -2275,6 +2294,7 @@ for the crater",
                         priority: None,
                         rollup: None,
                         note: None,
+                        force: false,
                     },
                 },
             ),
@@ -2295,6 +2315,7 @@ for the crater",
                         priority: None,
                         rollup: None,
                         note: None,
+                        force: false,
                     },
                 },
             ),
@@ -2332,6 +2353,7 @@ for the crater",
                         priority: None,
                         rollup: None,
                         note: None,
+                        force: false,
                     },
                 },
             ),
@@ -2400,7 +2422,8 @@ I am markdown HTML comment
                     priority: None,
                     rollup: None,
                     note: None,
-                force: false,},
+                    force: false,
+                },
             ),
         )
         "#);

@@ -911,6 +911,13 @@ also include this pls
             );
             insta::assert_snapshot!(
                 ctx.get_next_comment_text(()).await?,
+                @":hourglass: Commit sha2-reauthored-to-git-user has been tentatively approved by `default-user`. It will be fully approved once PR CI is successful."
+            );
+
+            ctx.refresh_tentative_approvals().await;
+
+            insta::assert_snapshot!(
+                ctx.get_next_comment_text(()).await?,
                 @"
             :pushpin: Commit sha2-reauthored-to-git-user has been approved by `default-user`
 
