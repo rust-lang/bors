@@ -2,6 +2,10 @@
 # (Required)
 timeout = 3600
 
+# Maximum time to wait for PR CI before removing a tentative approval.
+# (Optional, defaults to 7200 seconds)
+pr_ci_timeout = 7200
+
 # Whether to enable the merge queue or not.
 # When enabled, approved PRs will be automatically merged.
 # (Optional, defaults to false)

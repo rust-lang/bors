@@ -189,7 +189,7 @@ async fn process_tentative_approval(
                 return Ok(());
             };
 
-            let timeout = repo.config.load().timeout;
+            let timeout = repo.config.load().pr_ci_timeout;
             if elapsed_time_since(head_update_time) >= timeout {
                 ctx.db.unapprove(pr).await?;
                 repo.client
@@ -315,12 +315,12 @@ mod tests {
             ctx.modify_repo((), |repo| repo.default_pr_ci = false);
             ctx.approve(()).await?;
 
-            with_mocked_time(Duration::from_secs(4000), async {
+            with_mocked_time(Duration::from_secs(8000), async {
                 ctx.refresh_tentative_approvals().await;
             })
             .await;
 
-            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @":x: Tentatively approved commit pr-1-sha has been unapproved because PR CI timed out after `3600`s.");
+            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @":x: Tentatively approved commit pr-1-sha has been unapproved because PR CI timed out after `7200`s.");
             ctx.pr(()).await.expect_unapproved();
             Ok(())
         })
@@ -333,12 +333,12 @@ mod tests {
             ctx.pr_ci_workflow(());
             ctx.approve(()).await?;
 
-            with_mocked_time(Duration::from_secs(4000), async {
+            with_mocked_time(Duration::from_secs(8000), async {
                 ctx.refresh_tentative_approvals().await;
             })
             .await;
 
-            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @":x: Tentatively approved commit pr-1-sha has been unapproved because PR CI timed out after `3600`s.");
+            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @":x: Tentatively approved commit pr-1-sha has been unapproved because PR CI timed out after `7200`s.");
             ctx.pr(()).await.expect_unapproved();
             Ok(())
         })

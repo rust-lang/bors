@@ -20,6 +20,13 @@ pub struct RepositoryConfig {
         deserialize_with = "deserialize_duration_from_secs"
     )]
     pub timeout: Duration,
+    /// Maximum duration (in seconds) to wait for PR CI before removing a tentative approval.
+    /// Defaults to 7200 seconds (2 hours).
+    #[serde(
+        default = "default_pr_ci_timeout",
+        deserialize_with = "deserialize_duration_from_secs"
+    )]
+    pub pr_ci_timeout: Duration,
     /// Label modifications to apply when specific events occur.
     /// Maps trigger events (approve, try, etc.) to label additions/removals.
     /// Format (one of):
@@ -99,6 +106,10 @@ pub fn deserialize_config(text: &str) -> Result<RepositoryConfig, toml::de::Erro
 
 fn default_timeout() -> Duration {
     Duration::from_secs(3600)
+}
+
+fn default_pr_ci_timeout() -> Duration {
+    Duration::from_secs(7200)
 }
 
 fn deserialize_duration_from_secs_opt<'de, D>(deserializer: D) -> Result<Option<Duration>, D::Error>
@@ -265,7 +276,9 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::config::{RepositoryConfig, default_timeout, deserialize_config};
+    use crate::config::{
+        RepositoryConfig, default_pr_ci_timeout, default_timeout, deserialize_config,
+    };
     use std::path::Path;
     use std::{collections::BTreeMap, time::Duration};
 
@@ -274,6 +287,7 @@ mod tests {
         let content = "";
         let config = load_config(content);
         assert_eq!(config.timeout, default_timeout());
+        assert_eq!(config.pr_ci_timeout, default_pr_ci_timeout());
     }
 
     #[test]
@@ -281,6 +295,12 @@ mod tests {
         let content = "timeout = 3600";
         let config = load_config(content);
         assert_eq!(config.timeout.as_secs(), 3600);
+    }
+
+    #[test]
+    fn deserialize_pr_ci_timeout() {
+        let config = load_config("pr_ci_timeout = 1800");
+        assert_eq!(config.pr_ci_timeout, Duration::from_secs(1800));
     }
 
     #[test]
@@ -468,6 +488,7 @@ allowed_instances = ["c8a.12xlarge"]
         insta::assert_debug_snapshot!(config, @r#"
         RepositoryConfig {
             timeout: 3600s,
+            pr_ci_timeout: 7200s,
             labels: {},
             labels_blocking_approval: [],
             min_ci_time: None,
@@ -501,6 +522,7 @@ allowed_instances = ["c8a.12xlarge"]
         insta::assert_debug_snapshot!(config, @"
         RepositoryConfig {
             timeout: 3600s,
+            pr_ci_timeout: 7200s,
             labels: {},
             labels_blocking_approval: [],
             min_ci_time: None,
