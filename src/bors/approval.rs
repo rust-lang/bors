@@ -18,6 +18,15 @@ pub(super) fn check_unknown_reviewers(repo: &RepositoryState, approvers: &str) -
         .collect()
 }
 
+/// Note that can be attached to an approval comment.
+pub enum ApprovalNote {
+    /// The pull request was force approved while its PR CI is failing.
+    PrCiIsFailing,
+    /// A previously fully approved PR was approved again *tentatively*.
+    /// This tentative approval was automatically upgraded to a full approval.
+    TentativeApprovalUpgraded,
+}
+
 /// Finalize an approval and prepare the pull request for the merge queue.
 ///
 /// Clears any failed auto build so it can be retried, wakes the merge queue, posts the approval
@@ -30,17 +39,17 @@ pub(super) async fn finalize_approval(
     approver: &str,
     priority: Option<u32>,
     merge_queue_tx: &MergeQueueSender,
-    failed_pr_ci: bool,
+    note: Option<ApprovalNote>,
 ) -> anyhow::Result<()> {
     let unknown_reviewers = check_unknown_reviewers(repo, approver);
-    let was_failed = pr
+    let had_failed_auto_build = pr
         .db
         .auto_build
         .as_ref()
         .map(|b| b.status.is_failure())
         .unwrap_or(false);
     // Re-approval should act as a retry
-    if was_failed {
+    if had_failed_auto_build {
         ctx.db.clear_auto_build(pr.db).await?;
     }
 
@@ -74,8 +83,8 @@ pub(super) async fn finalize_approval(
                 approver,
                 unknown_reviewers,
                 tree_state,
-                was_failed,
-                failed_pr_ci,
+                had_failed_auto_build,
+                note,
             ),
             &ctx.db,
         )
@@ -142,6 +151,6 @@ pub(super) async fn try_resolve_tentative_approval(
     }
 
     ctx.db.confirm_tentative_approval(pr.db).await?;
-    finalize_approval(ctx, repo, pr, approver, priority, merge_queue_tx, false).await?;
+    finalize_approval(ctx, repo, pr, approver, priority, merge_queue_tx, None).await?;
     Ok(TentativeApprovalOutcome::Resolved)
 }

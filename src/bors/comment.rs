@@ -1,3 +1,4 @@
+use crate::bors::approval::ApprovalNote;
 use crate::bors::command::CommandPrefix;
 use crate::bors::{FailedWorkflowRun, WorkflowRun};
 use crate::database::PullRequestModel;
@@ -296,8 +297,8 @@ pub fn approved_comment(
     reviewer: &str,
     unknown_reviewers: Vec<String>,
     tree_state: TreeState,
-    was_failed: bool,
-    failed_pr_ci: bool,
+    had_failed_auto_build: bool,
+    note: Option<ApprovalNote>,
 ) -> Comment {
     let approve_emoji = if is_holiday_season() {
         "star2"
@@ -312,7 +313,7 @@ It is now in the [queue]({web_url}/queue/{}) for this repository.
         repo.name()
     );
 
-    if was_failed {
+    if had_failed_auto_build {
         writeln!(
             comment,
             "\nA failed build status on this PR was cleared due to the approval."
@@ -320,12 +321,30 @@ It is now in the [queue]({web_url}/queue/{}) for this repository.
         .unwrap();
     }
 
-    if failed_pr_ci {
-        writeln!(
-            comment,
-            "\n> [!WARNING]\n> This PR was force-approved despite failing PR CI."
-        )
-        .unwrap();
+    if let Some(note) = note {
+        match note {
+            ApprovalNote::PrCiIsFailing => {
+                writeln!(
+                    comment,
+                    "\n> [!WARNING]\n> This PR was force-approved despite failing PR CI."
+                )
+                .unwrap();
+            }
+            ApprovalNote::TentativeApprovalUpgraded => {
+                writeln!(
+                    comment,
+                    r#"
+> [!WARNING]
+> This PR was already fully approved previously, so this tentative approval was treated as a full approval. If you want to instead downgrade the PR to be only tentatively approved, unapprove it first and then re-approve it again:
+> ```
+> @bors r-
+> @bors r+
+> ```
+"#
+                )
+                .unwrap();
+            }
+        }
     }
 
     if !unknown_reviewers.is_empty() {
