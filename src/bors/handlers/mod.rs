@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::bors::command::{BorsCommand, CommandParseError};
+use crate::bors::command::{ApproveInfo, BorsCommand, CommandParseError};
 use crate::bors::event::{BorsGlobalEvent, BorsRepositoryEvent, PullRequestComment};
 use crate::bors::handlers::autobuild::{command_cancel, command_retry};
 use crate::bors::handlers::help::command_help;
@@ -494,13 +494,13 @@ async fn handle_comment(
                 let repo = Arc::clone(&repo);
                 let database = Arc::clone(&database);
                 let result = match command {
-                    BorsCommand::Approve {
+                    BorsCommand::Approve(ApproveInfo {
                         approver,
                         priority,
                         rollup,
                         note,
                         force,
-                    } => {
+                    }) => {
                         let span = tracing::info_span!("Approve");
                         let approval_mode = if force {
                             ApprovalMode::Eager
@@ -705,10 +705,13 @@ async fn handle_comment(
                     }
                     BorsCommand::SquashApprove {
                         commit_message,
-                        approver,
-                        priority,
-                        rollup,
-                        note,
+                        approval_info:
+                            ApproveInfo {
+                                approver,
+                                priority,
+                                rollup,
+                                note,
+                            },
                     } => {
                         let span = tracing::info_span!("SquashAndApprove");
 
