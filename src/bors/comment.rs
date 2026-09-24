@@ -288,6 +288,7 @@ handled during merge and rebase. This is normal, and you should still perform st
     Comment::new(message).with_tag(CommentTag::MergeConflict)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn approved_comment(
     web_url: &str,
     repo: &GithubRepoName,
@@ -296,6 +297,7 @@ pub fn approved_comment(
     unknown_reviewers: Vec<String>,
     tree_state: TreeState,
     was_failed: bool,
+    failed_pr_ci: bool,
 ) -> Comment {
     let approve_emoji = if is_holiday_season() {
         "star2"
@@ -314,6 +316,14 @@ It is now in the [queue]({web_url}/queue/{}) for this repository.
         writeln!(
             comment,
             "\nA failed build status on this PR was cleared due to the approval."
+        )
+        .unwrap();
+    }
+
+    if failed_pr_ci {
+        writeln!(
+            comment,
+            "\n> [!WARNING]\n> This PR was force-approved despite failing PR CI."
         )
         .unwrap();
     }
