@@ -15,10 +15,12 @@ pub(super) async fn command_info(
     let mut message = format!("## Status of PR `{}`\n", pr.number());
 
     // Approval info
-    if let ApprovalStatus::Approved(info) = &pr.db.approval_status {
-        writeln!(message, "- Approved by: `{}`", info.approver)?;
-    } else {
-        writeln!(message, "- Not Approved")?;
+    match &pr.db.approval_status {
+        ApprovalStatus::Approved(info) => writeln!(message, "- Approved by: `{}`", info.approver)?,
+        ApprovalStatus::TentativelyApproved(info) => {
+            writeln!(message, "- Tentatively approved by: `{}`", info.approver)?
+        }
+        ApprovalStatus::NotApproved => writeln!(message, "- Not Approved")?,
     }
 
     // Priority info
@@ -120,6 +122,31 @@ mod tests {
                 @"
             ## Status of PR `1`
             - Approved by: `default-user`
+            - Priority: unset
+            - Mergeable: yes
+            "
+            );
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
+    async fn info_for_tentatively_approved_pr(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            ctx.pr_ci_workflow(());
+            ctx.approve(()).await?;
+            ctx.pr(())
+                .await
+                .expect_unapproved()
+                .expect_approver("default-user");
+
+            ctx.post_comment("@bors info").await?;
+            insta::assert_snapshot!(
+                ctx.get_next_comment_text(()).await?,
+                @"
+            ## Status of PR `1`
+            - Tentatively approved by: `default-user`
             - Priority: unset
             - Mergeable: yes
             "
