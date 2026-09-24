@@ -17,7 +17,8 @@ use crate::bors::merge_queue::MergeQueueSender;
 use crate::bors::{Comment, PullRequestStatus};
 use crate::database::DelegatedPermission;
 use crate::database::{ApprovalInfo, ApprovalMode, PullRequestModel};
-use crate::database::{MergeableState, TreeState};
+use crate::database::{MergeableState, TreeState, WorkflowStatus};
+use crate::github::api::client::WorkflowSource;
 use crate::github::{CommitSha, PullRequest};
 use crate::github::{GithubUser, PullRequestNumber};
 use crate::permissions::PermissionType;
@@ -129,7 +130,30 @@ pub(super) async fn command_approve(
             Ok(())
         }
         ApprovalMode::Eager => {
-            finalize_approval(&ctx, &repo_state, pr, &approver, priority, merge_queue_tx).await
+            let failed_pr_ci = match repo_state
+                .client
+                .get_workflow_runs_for_commit_sha(WorkflowSource::PullRequest(pr.github))
+                .await
+            {
+                Ok(runs) => runs.iter().any(|run| run.status == WorkflowStatus::Failure),
+                Err(error) => {
+                    tracing::warn!(
+                        "Failed to get pull request CI status for commit {}: {error:?}",
+                        pr.github.head.sha
+                    );
+                    false
+                }
+            };
+            finalize_approval(
+                &ctx,
+                &repo_state,
+                pr,
+                &approver,
+                priority,
+                merge_queue_tx,
+                failed_pr_ci,
+            )
+            .await
         }
     }
 }
@@ -715,6 +739,9 @@ mod tests {
             :pushpin: Commit pr-1-sha has been approved by `default-user`
 
             It is now in the [queue](https://bors-test.com/queue/borstest) for this repository.
+
+            > [!WARNING]
+            > This PR was force-approved despite failing PR CI.
             ");
 
             ctx.pr(())

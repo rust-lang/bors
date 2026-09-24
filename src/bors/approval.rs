@@ -30,6 +30,7 @@ pub(super) async fn finalize_approval(
     approver: &str,
     priority: Option<u32>,
     merge_queue_tx: &MergeQueueSender,
+    failed_pr_ci: bool,
 ) -> anyhow::Result<()> {
     let unknown_reviewers = check_unknown_reviewers(repo, approver);
     let was_failed = pr
@@ -74,6 +75,7 @@ pub(super) async fn finalize_approval(
                 unknown_reviewers,
                 tree_state,
                 was_failed,
+                failed_pr_ci,
             ),
             &ctx.db,
         )
@@ -140,6 +142,6 @@ pub(super) async fn try_resolve_tentative_approval(
     }
 
     ctx.db.confirm_tentative_approval(pr.db).await?;
-    finalize_approval(ctx, repo, pr, approver, priority, merge_queue_tx).await?;
+    finalize_approval(ctx, repo, pr, approver, priority, merge_queue_tx, false).await?;
     Ok(TentativeApprovalOutcome::Resolved)
 }
