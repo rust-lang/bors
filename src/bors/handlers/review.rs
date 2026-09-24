@@ -1,6 +1,6 @@
 use crate::bors::RepositoryState;
 use crate::bors::approval::{
-    TentativeApprovalOutcome, check_unknown_reviewers, finalize_approval,
+    ApprovalNote, TentativeApprovalOutcome, check_unknown_reviewers, finalize_approval,
     try_resolve_tentative_approval,
 };
 use crate::bors::command::{Approver, CommandPrefix, Delegatee};
@@ -84,6 +84,18 @@ pub(super) async fn command_approve(
         sha: pr.github.head.sha.to_string(),
     };
 
+    // It is possible that the PR was already (fully) approved before.
+    // If we are now doing a tentative approval, we will "upgrade" it to a full approval, which is
+    // usually what the user wants.
+    // This situation should be very rare anyway.
+    let already_approved = pr.db.is_approved();
+    let (approval_mode, approval_upgraded) =
+        if already_approved && matches!(approval_mode, ApprovalMode::Tentative) {
+            (ApprovalMode::Eager, true)
+        } else {
+            (approval_mode, false)
+        };
+
     db.approve(
         pr.db,
         approval_info,
@@ -130,18 +142,27 @@ pub(super) async fn command_approve(
             Ok(())
         }
         ApprovalMode::Eager => {
-            let failed_pr_ci = match repo_state
-                .client
-                .get_workflow_runs_for_commit_sha(WorkflowSource::PullRequest(pr.github))
-                .await
-            {
-                Ok(runs) => runs.iter().any(|run| run.status == WorkflowStatus::Failure),
-                Err(error) => {
-                    tracing::warn!(
-                        "Failed to get pull request CI status for commit {}: {error:?}",
-                        pr.github.head.sha
-                    );
-                    false
+            let note = if approval_upgraded {
+                Some(ApprovalNote::TentativeApprovalUpgraded)
+            } else {
+                let pr_ci_fails = match repo_state
+                    .client
+                    .get_workflow_runs_for_commit_sha(WorkflowSource::PullRequest(pr.github))
+                    .await
+                {
+                    Ok(runs) => runs.iter().any(|run| run.status == WorkflowStatus::Failure),
+                    Err(error) => {
+                        tracing::warn!(
+                            "Failed to get pull request CI status for commit {}: {error:?}",
+                            pr.github.head.sha
+                        );
+                        false
+                    }
+                };
+                if pr_ci_fails {
+                    Some(ApprovalNote::PrCiIsFailing)
+                } else {
+                    None
                 }
             };
             finalize_approval(
@@ -151,7 +172,7 @@ pub(super) async fn command_approve(
                 &approver,
                 priority,
                 merge_queue_tx,
-                failed_pr_ci,
+                note,
             )
             .await
         }
@@ -2302,7 +2323,7 @@ labels_blocking_approval = ["proposed-final-comment-period", "final-comment-peri
             ctx.start_auto_build(()).await?;
             ctx.workflow_full_failure(ctx.auto_workflow()).await?;
             ctx.expect_comments((), 1).await; // build failed
-            ctx.post_comment("@bors r+").await?;
+            ctx.post_comment("@bors r+ force").await?;
             insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
             :pushpin: Commit pr-1-sha has been approved by `default-user`
 
@@ -2311,6 +2332,39 @@ labels_blocking_approval = ["proposed-final-comment-period", "final-comment-peri
             A failed build status on this PR was cleared due to the approval.
             ");
             ctx.start_and_finish_auto_build(()).await?;
+
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
+    async fn tentative_approval_upgrade(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            // Full approval
+            ctx.post_comment("@bors r+ force").await?;
+            ctx.expect_comments((), 1).await;
+
+            // Cause PR CI to fail
+            ctx.pr_workflow_failure(ctx.pr_ci_workflow(())).await?;
+
+            // Tentative approval
+            ctx.post_comment("@bors r+").await?;
+            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
+            :pushpin: Commit pr-1-sha has been approved by `default-user`
+
+            It is now in the [queue](https://bors-test.com/queue/borstest) for this repository.
+
+            > [!WARNING]
+            > This PR was already fully approved previously, so this tentative approval was treated as a full approval. If you want to instead downgrade the PR to be only tentatively approved, unapprove it first and then re-approve it again:
+            > ```
+            > @bors r-
+            > @bors r+
+            > ```
+            ");
+
+            // The tentative approval should not unapprove the PR
+            ctx.pr(()).await.expect_approved_by(&User::default_pr_author().name);
 
             Ok(())
         })
