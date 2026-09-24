@@ -189,7 +189,7 @@ async fn process_tentative_approval(
                 return Ok(());
             };
 
-            let timeout = repo.config.load().timeout;
+            let timeout = repo.config.load().pr_ci_timeout;
             if elapsed_time_since(head_update_time) >= timeout {
                 ctx.db.unapprove(pr).await?;
                 repo.client

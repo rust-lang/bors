@@ -47,7 +47,7 @@ Periodically (every few minutes), the bot will perform a refresh action, which w
 repository:
 - Check the currently running CI workflow. If some of them are running for too long
 (based on the `timeout` configured for the repository), it will cancel them.
-- Recheck CI for tentatively approved pull requests.
+- Recheck CI for tentatively approved pull requests (removing tentative approvals when PR CI exceeds `pr_ci_timeout`).
 - Reload user permissions from the Team API.
 - Reload `rust-bors.toml` config for the repository from its main branch.
 - Reload the mergeability status of open PRs from GitHub.
