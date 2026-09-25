@@ -327,11 +327,13 @@ fn parser_approval(command: &CommandPart<'_>, parts: &[CommandPart<'_>]) -> Pars
                 }
                 _ => unreachable!(),
             },
-            Err(_) => return Some(Err(CommandParseError::UnknownArg {
-                arg: also_squash[1..][0].as_key().to_owned(),
-                did_you_mean: "r+ squash [msg|message=\"<commit-msg>\"|description]"
-                    .to_string(),
-            }))
+            Err(_) => {
+                return Some(Err(CommandParseError::UnknownArg {
+                    arg: also_squash[1..][0].as_key().to_owned(),
+                    did_you_mean: "r+ squash [msg|message=\"<commit-msg>\"|description]"
+                        .to_string(),
+                }));
+            }
         }
     }
 
@@ -2339,7 +2341,6 @@ for the crater",
         ]
         ");
     }
-
 
     #[test]
     fn parse_squash_approve_unknown_arg() {

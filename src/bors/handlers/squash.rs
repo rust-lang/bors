@@ -909,19 +909,15 @@ also include this pls
                 ctx.get_next_comment_text(()).await?,
                 @":hammer: 2 commits were squashed into sha2-reauthored-to-git-user."
             );
-            insta::assert_snapshot!(
-                ctx.get_next_comment_text(()).await?,
-                @":hourglass: Commit sha2-reauthored-to-git-user has been tentatively approved by `default-user`. It will be fully approved once PR CI is successful."
-            );
 
             ctx.refresh_tentative_approvals().await;
 
             insta::assert_snapshot!(
                 ctx.get_next_comment_text(()).await?,
                 @"
-            :pushpin: Commit sha2-reauthored-to-git-user has been approved by `default-user`
+            :pushpin: Commit sha2-reauthored-to-git-user has been tentatively approved by `default-user`
 
-            It is now in the [queue](https://bors-test.com/queue/borstest) for this repository.
+            It will be put into the [queue](https://bors-test.com/queue/borstest) for this repository once PR CI succeeds.
             "
             );
             // Check that generating a push webhook for the PR's HEAD SHA, because the pushed
