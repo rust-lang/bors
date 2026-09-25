@@ -217,7 +217,7 @@ pub enum QueueStatus<'a> {
     /// with `@bors retry`.
     Approved(&'a ApprovalInfo),
     /// Tentatively approved, waiting for PR CI to be green.
-    Tentative(&'a ApprovalInfo),
+    TentativelyApproved(&'a ApprovalInfo),
     /// With a successfully finished auto build. Waiting to be pushed to the base branch.
     ReadyForMerge(&'a ApprovalInfo, &'a BuildModel),
     /// Status is draft/merged/closed.
@@ -570,7 +570,7 @@ impl PullRequestModel {
         match &self.approval_status {
             ApprovalStatus::NotApproved => QueueStatus::NotApproved,
             ApprovalStatus::TentativelyApproved(approval_info) => {
-                QueueStatus::Tentative(approval_info)
+                QueueStatus::TentativelyApproved(approval_info)
             }
             ApprovalStatus::Approved(approval_info) => match &self.auto_build {
                 Some(build) => match build.status {
@@ -597,7 +597,7 @@ impl PullRequestModel {
             QueueStatus::Approved(_) | QueueStatus::Pending(_, _) => true,
             QueueStatus::Failed(_, _)
             | QueueStatus::ReadyForMerge(_, _)
-            | QueueStatus::Tentative(_)
+            | QueueStatus::TentativelyApproved(_)
             | QueueStatus::NotApproved
             | QueueStatus::NotOpen => false,
         }

@@ -393,8 +393,15 @@ impl PgDbClient {
         Ok(workflows)
     }
 
-    pub async fn repo_db(&self, repo: &GithubRepoName) -> anyhow::Result<Option<RepoModel>> {
+    pub async fn get_repository(&self, repo: &GithubRepoName) -> anyhow::Result<Option<RepoModel>> {
         get_repository(&self.pool, repo).await
+    }
+
+    pub async fn get_repository_by_name(
+        &self,
+        repo_name: &str,
+    ) -> anyhow::Result<Option<RepoModel>> {
+        get_repository_by_name(&self.pool, repo_name).await
     }
 
     pub async fn insert_repo_if_not_exists(
@@ -403,10 +410,6 @@ impl PgDbClient {
         tree_state: TreeState,
     ) -> anyhow::Result<()> {
         insert_repo_if_not_exists(&self.pool, repo, tree_state).await
-    }
-
-    pub async fn repo_by_name(&self, repo_name: &str) -> anyhow::Result<Option<RepoModel>> {
-        get_repository_by_name(&self.pool, repo_name).await
     }
 
     pub async fn upsert_repository(

@@ -1574,6 +1574,12 @@ impl PullRequestProxy {
     }
 
     #[track_caller]
+    pub fn expect_tentative_approval(&self) -> &Self {
+        assert!(self.require_db_pr().tentative_approval().is_some());
+        self
+    }
+
+    #[track_caller]
     pub fn expect_unapproved(&self) -> &Self {
         assert!(!self.require_db_pr().is_approved());
         self

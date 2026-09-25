@@ -33,7 +33,7 @@ fn get_queue_status_priority(status: &QueueStatus) -> u32 {
         QueueStatus::ReadyForMerge(_, _) => 0,
         QueueStatus::Pending(_, _) => 1,
         QueueStatus::Approved(_) => 2,
-        QueueStatus::Tentative(_) => 3,
+        QueueStatus::TentativelyApproved(_) => 3,
         QueueStatus::Failed(_, _) => 4,
         QueueStatus::NotApproved | QueueStatus::NotOpen => 5,
     }

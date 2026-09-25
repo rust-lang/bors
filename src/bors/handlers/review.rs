@@ -1,15 +1,11 @@
 use crate::bors::RepositoryState;
-use crate::bors::approval::{
-    ApprovalNote, TentativeApprovalOutcome, check_unknown_reviewers, finalize_approval,
-    try_resolve_tentative_approval,
-};
+use crate::bors::approval::{ApprovalNote, PrCiStatus, finalize_approval, get_pr_ci_status};
 use crate::bors::command::{Approver, CommandPrefix, Delegatee};
 use crate::bors::command::{DelegateCommand, RollupMode};
 use crate::bors::comment::{
     approve_blocking_labels_present, approve_merge_conflict_comment, approve_non_open_pr_comment,
-    approve_wip_title, delegate_comment, delegate_try_builds_comment,
-    tentative_approval_failed_comment, tentatively_approved_comment, unapprove_non_open_pr_comment,
-    unapprove_not_approved,
+    approve_wip_title, approved_comment, delegate_comment, delegate_try_builds_comment,
+    tentative_approval_failed_comment, unapprove_non_open_pr_comment, unapprove_not_approved,
 };
 use crate::bors::handlers::{InvalidationInfo, InvalidationReason, PullRequestData, deny_request};
 use crate::bors::handlers::{has_permission, invalidate_pr};
@@ -17,8 +13,7 @@ use crate::bors::merge_queue::MergeQueueSender;
 use crate::bors::{Comment, PullRequestStatus};
 use crate::database::DelegatedPermission;
 use crate::database::{ApprovalInfo, ApprovalMode, PullRequestModel};
-use crate::database::{MergeableState, TreeState, WorkflowStatus};
-use crate::github::api::client::WorkflowSource;
+use crate::database::{MergeableState, TreeState};
 use crate::github::{CommitSha, PullRequest};
 use crate::github::{GithubUser, PullRequestNumber};
 use crate::permissions::PermissionType;
@@ -31,7 +26,7 @@ use tracing::log;
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn command_approve(
     ctx: Arc<BorsContext>,
-    repo_state: Arc<RepositoryState>,
+    repo: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
     pr: PullRequestData<'_>,
     author: &GithubUser,
@@ -43,21 +38,13 @@ pub(super) async fn command_approve(
     merge_queue_tx: &MergeQueueSender,
 ) -> anyhow::Result<()> {
     tracing::info!("Approving PR {}", pr.number());
-    if !has_permission(&repo_state, author, pr, PermissionType::Review).await? {
-        deny_request(
-            &repo_state,
-            &db,
-            pr.number(),
-            author,
-            PermissionType::Review,
-        )
-        .await?;
+    if !has_permission(&repo, author, pr, PermissionType::Review).await? {
+        deny_request(&repo, &db, pr.number(), author, PermissionType::Review).await?;
         return Ok(());
     };
 
-    if let Some(error_comment) = check_pr_approval_validity(pr, &repo_state).await? {
-        repo_state
-            .client
+    if let Some(error_comment) = check_pr_approval_validity(pr, &repo).await? {
+        repo.client
             .post_comment(pr.number(), error_comment, &db)
             .await?;
         return Ok(());
@@ -67,8 +54,7 @@ pub(super) async fn command_approve(
         && rollup_mode != RollupMode::Never
         && db.is_rollup(pr.db).await?
     {
-        repo_state
-            .client
+        repo.client
             .post_comment(pr.number(), rollup_pr_invalid_rollup_mode_comment(), &db)
             .await?;
         return Ok(());
@@ -84,17 +70,34 @@ pub(super) async fn command_approve(
         sha: pr.github.head.sha.to_string(),
     };
 
-    // It is possible that the PR was already (fully) approved before.
-    // If we are now doing a tentative approval, we will "upgrade" it to a full approval, which is
-    // usually what the user wants.
-    // This situation should be very rare anyway.
+    let pr_ci_status = get_pr_ci_status(&repo, pr.github).await?;
     let already_approved = pr.db.is_approved();
-    let (approval_mode, approval_upgraded) =
-        if already_approved && matches!(approval_mode, ApprovalMode::Tentative) {
-            (ApprovalMode::Eager, true)
-        } else {
-            (approval_mode, false)
-        };
+
+    // Potentially upgrade the tentative approval to a full approval
+    let approval_mode = match (approval_mode, pr_ci_status) {
+        (ApprovalMode::Eager, _) => approval_mode,
+        // If PR CI is already green, just treat the approval as eager
+        (ApprovalMode::Tentative, PrCiStatus::Success) => ApprovalMode::Eager,
+        // It is possible that the PR was already (fully) approved before.
+        // If we are now doing a tentative approval, we will "upgrade" it to a full approval, which is
+        // usually what the user wants.
+        // This situation should be very rare anyway.
+        (ApprovalMode::Tentative, _) if already_approved => ApprovalMode::Eager,
+        (ApprovalMode::Tentative, PrCiStatus::Failed | PrCiStatus::Pending) => approval_mode,
+    };
+
+    if matches!(approval_mode, ApprovalMode::Tentative)
+        && matches!(pr_ci_status, PrCiStatus::Failed)
+    {
+        repo.client
+            .post_comment(
+                pr.number(),
+                tentative_approval_failed_comment(&pr.github.head.sha),
+                &db,
+            )
+            .await?;
+        return Ok(());
+    }
 
     db.approve(
         pr.db,
@@ -108,75 +111,85 @@ pub(super) async fn command_approve(
 
     let priority = priority.or(pr.db.priority.map(|p| p as u32));
 
-    match approval_mode {
-        ApprovalMode::Tentative => {
-            match try_resolve_tentative_approval(
-                &ctx,
-                &repo_state,
-                pr,
-                &approver,
-                tentative_approval_failed_comment(&pr.github.head.sha),
-                priority,
-                merge_queue_tx,
-            )
-            .await?
-            {
-                // The resolved comment has already been posted.
-                TentativeApprovalOutcome::Resolved => {}
-                TentativeApprovalOutcome::Pending | TentativeApprovalOutcome::Skipped => {
-                    let unknown_reviewers = check_unknown_reviewers(&repo_state, &approver);
-                    repo_state
-                        .client
-                        .post_comment(
-                            pr.number(),
-                            tentatively_approved_comment(
-                                &pr.github.head.sha,
-                                &approver,
-                                unknown_reviewers,
-                            ),
-                            &db,
-                        )
-                        .await?;
-                }
-            }
-            Ok(())
-        }
-        ApprovalMode::Eager => {
-            let note = if approval_upgraded {
-                Some(ApprovalNote::TentativeApprovalUpgraded)
-            } else {
-                let pr_ci_fails = match repo_state
-                    .client
-                    .get_workflow_runs_for_commit_sha(WorkflowSource::PullRequest(pr.github))
-                    .await
-                {
-                    Ok(runs) => runs.iter().any(|run| run.status == WorkflowStatus::Failure),
-                    Err(error) => {
-                        tracing::warn!(
-                            "Failed to get pull request CI status for commit {}: {error:?}",
-                            pr.github.head.sha
-                        );
-                        false
-                    }
-                };
-                if pr_ci_fails {
-                    Some(ApprovalNote::PrCiIsFailing)
-                } else {
-                    None
-                }
-            };
-            finalize_approval(
-                &ctx,
-                &repo_state,
-                pr,
-                &approver,
-                priority,
-                merge_queue_tx,
-                note,
-            )
-            .await
-        }
+    let unknown_reviewers = check_unknown_reviewers(&repo, &approver);
+    let had_failed_auto_build = pr
+        .db
+        .auto_build
+        .as_ref()
+        .map(|b| b.status.is_failure())
+        .unwrap_or(false);
+
+    // Re-approval should act as a retry
+    if had_failed_auto_build {
+        ctx.db.clear_auto_build(pr.db).await?;
     }
+
+    let mut tree_state = ctx
+        .db
+        .get_repository(repo.repository())
+        .await?
+        .map(|r| r.tree_state.clone())
+        .unwrap_or(TreeState::Open);
+
+    // If the PR has high enough priority, do not post the tree closed message
+    if let TreeState::Closed {
+        priority: tree_priority,
+        ..
+    } = &tree_state
+        && let Some(priority) = priority
+        && priority >= *tree_priority
+    {
+        tree_state = TreeState::Open;
+    }
+
+    let approval_note = if matches!(pr_ci_status, PrCiStatus::Failed) {
+        Some(ApprovalNote::PrCiIsFailing)
+    } else if matches!(approval_mode, ApprovalMode::Tentative) {
+        Some(ApprovalNote::TentativeApproval)
+    } else {
+        None
+    };
+
+    // We send the response comment eagerly, even if the approval is tentative
+    // This is an optimistic happy path, which reduces the total number of sent comments on average
+    // If we only responded with a temporary tentative approval comment, we would then have to
+    // confirm it with another comment once PR CI would succeed.
+    // In this way, we will only send another comment if PR CI fails.
+    repo.client
+        .post_comment(
+            pr.db.number,
+            approved_comment(
+                ctx.get_web_url(),
+                repo.repository(),
+                &pr.github.head.sha,
+                &approver,
+                unknown_reviewers,
+                tree_state,
+                had_failed_auto_build,
+                approval_note,
+            ),
+            &ctx.db,
+        )
+        .await?;
+
+    match approval_mode {
+        ApprovalMode::Eager => {
+            finalize_approval(&repo, pr.github, merge_queue_tx).await?;
+        }
+        ApprovalMode::Tentative => {}
+    }
+    Ok(())
+}
+
+/// Check if the specified approvers exist as GitHub users or teams.
+fn check_unknown_reviewers(repo: &RepositoryState, approvers: &str) -> Vec<String> {
+    let directory = repo.permissions.load();
+
+    approvers
+        .split(',')
+        .filter(|approver| !directory.user_exists(approver) && !directory.team_exists(approver))
+        .map(str::to_string)
+        .collect()
 }
 
 /// Normalize approvers (given after @bors r=) by removing leading @, possibly from multiple
@@ -675,7 +688,7 @@ mod tests {
     }
 
     #[sqlx::test(migrator = "crate::MIGRATOR")]
-    async fn approve_with_passing_ci_on_tentative(pool: sqlx::PgPool) {
+    async fn approve_with_passing_ci_is_forced(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             let workflow = ctx.pr_ci_workflow(());
             ctx.pr_workflow_success(workflow).await?;
@@ -702,15 +715,18 @@ mod tests {
 
             ctx.post_comment("@bors r+").await?;
             insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
-            :hourglass: Commit pr-1-sha has been tentatively approved by `default-user`. It will be fully approved once PR CI is successful.
+            :pushpin: Commit pr-1-sha has been tentatively approved by `default-user`
+
+            It will be put into the [queue](https://bors-test.com/queue/borstest) for this repository once PR CI succeeds.
             ");
 
             ctx.pr(())
                 .await
-                .expect_approver(&User::default_pr_author().name);
+                .expect_approver(&User::default_pr_author().name)
+                .expect_tentative_approval();
             Ok(())
         })
-        .await;
+            .await;
     }
 
     #[sqlx::test(migrator = "crate::MIGRATOR")]
@@ -726,7 +742,8 @@ mod tests {
                 .await
                 .expect_priority(Some(5))
                 .expect_rollup(Some(RollupMode::Never))
-                .expect_note(Some("foo bar"));
+                .expect_note(Some("foo bar"))
+                .expect_tentative_approval();
             Ok(())
         })
         .await;
@@ -746,7 +763,7 @@ mod tests {
             ctx.pr(()).await.expect_unapproved();
             Ok(())
         })
-        .await;
+            .await;
     }
 
     #[sqlx::test(migrator = "crate::MIGRATOR")]
@@ -784,6 +801,23 @@ approved = ["+approved"]
         run_test((pool, gh), async |ctx: &mut BorsTester| {
             ctx.approve(()).await?;
             ctx.pr(()).await.expect_added_labels(&["approved"]);
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
+    async fn tentative_approve_doesnt_add_labels(pool: sqlx::PgPool) {
+        let gh = GitHub::default().append_to_default_config(
+            r#"
+[labels]
+approved = ["+approved"]
+"#,
+        );
+        run_test((pool, gh), async |ctx: &mut BorsTester| {
+            ctx.pr_ci_workflow(());
+            ctx.approve(()).await?;
+            ctx.pr(()).await.expect_labels(&[]);
             Ok(())
         })
         .await;
@@ -1281,7 +1315,7 @@ approved = { modifications = ["+foo", "+baz"], unless = ["label1", "label2"] }
             ]
             "#);
 
-            let repo = ctx.db().repo_db(&default_repo_name()).await?;
+            let repo = ctx.db().get_repository(&default_repo_name()).await?;
             assert_eq!(
                 repo.unwrap().tree_state,
                 TreeState::Closed {
@@ -1296,7 +1330,7 @@ approved = { modifications = ["+foo", "+baz"], unless = ["label1", "label2"] }
 
             Ok(())
         })
-        .await;
+            .await;
     }
 
     #[sqlx::test(migrator = "crate::MIGRATOR")]
@@ -1324,7 +1358,7 @@ approved = { modifications = ["+foo", "+baz"], unless = ["label1", "label2"] }
             ]
             "#);
 
-            let repo = ctx.db().repo_db(&default_repo_name()).await?;
+            let repo = ctx.db().get_repository(&default_repo_name()).await?;
             assert_eq!(
                 repo.unwrap().tree_state,
                 TreeState::Closed {
@@ -1354,7 +1388,7 @@ approved = { modifications = ["+foo", "+baz"], unless = ["label1", "label2"] }
 
             Ok(())
         })
-        .await;
+            .await;
     }
 
     #[sqlx::test(migrator = "crate::MIGRATOR")]
@@ -1389,12 +1423,12 @@ approved = { modifications = ["+foo", "+baz"], unless = ["label1", "label2"] }
             ]
             "#);
 
-            let repo = ctx.db().repo_db(&default_repo_name()).await?;
+            let repo = ctx.db().get_repository(&default_repo_name()).await?;
             assert_eq!(repo.unwrap().tree_state, TreeState::Open);
 
             Ok(())
         })
-        .await;
+            .await;
     }
 
     #[sqlx::test(migrator = "crate::MIGRATOR")]
@@ -2323,7 +2357,7 @@ labels_blocking_approval = ["proposed-final-comment-period", "final-comment-peri
             ctx.start_auto_build(()).await?;
             ctx.workflow_full_failure(ctx.auto_workflow()).await?;
             ctx.expect_comments((), 1).await; // build failed
-            ctx.post_comment("@bors r+ force").await?;
+            ctx.post_comment("@bors r+").await?;
             insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
             :pushpin: Commit pr-1-sha has been approved by `default-user`
 
@@ -2332,39 +2366,6 @@ labels_blocking_approval = ["proposed-final-comment-period", "final-comment-peri
             A failed build status on this PR was cleared due to the approval.
             ");
             ctx.start_and_finish_auto_build(()).await?;
-
-            Ok(())
-        })
-        .await;
-    }
-
-    #[sqlx::test(migrator = "crate::MIGRATOR")]
-    async fn tentative_approval_upgrade(pool: sqlx::PgPool) {
-        run_test(pool, async |ctx: &mut BorsTester| {
-            // Full approval
-            ctx.post_comment("@bors r+ force").await?;
-            ctx.expect_comments((), 1).await;
-
-            // Cause PR CI to fail
-            ctx.pr_workflow_failure(ctx.pr_ci_workflow(())).await?;
-
-            // Tentative approval
-            ctx.post_comment("@bors r+").await?;
-            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
-            :pushpin: Commit pr-1-sha has been approved by `default-user`
-
-            It is now in the [queue](https://bors-test.com/queue/borstest) for this repository.
-
-            > [!WARNING]
-            > This PR was already fully approved previously, so this tentative approval was treated as a full approval. If you want to instead downgrade the PR to be only tentatively approved, unapprove it first and then re-approve it again:
-            > ```
-            > @bors r-
-            > @bors r+
-            > ```
-            ");
-
-            // The tentative approval should not unapprove the PR
-            ctx.pr(()).await.expect_approved_by(&User::default_pr_author().name);
 
             Ok(())
         })
