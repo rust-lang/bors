@@ -309,38 +309,30 @@ fn parser_approval(command: &CommandPart<'_>, parts: &[CommandPart<'_>]) -> Pars
 
     // parse the squash part of the approve_squash command
     if let Some(also_squash) = also_squash {
-        return match parser_squash(&also_squash[0], &also_squash[1..]) {
-            None => Some(Err(CommandParseError::UnknownArg {
-                arg: also_squash[1..][0].as_key().to_owned(),
-                did_you_mean: "r+ squash [msg|message=\"<commit-msg>\"|description]".to_string(),
-            })),
-            Some(val) => match val {
-                Ok(val) => match val {
-                    BorsCommand::Squash { commit_message, .. } => {
-                        Some(Ok(BorsCommand::SquashApprove {
-                            commit_message,
-                            approval_info: ApproveInfo {
-                                approver,
-                                priority,
-                                rollup,
-                                note,
-                                force,
-                            },
-                        }))
-                    }
-                    _ => Some(Err(CommandParseError::UnknownArg {
-                        arg: also_squash[1..][0].as_key().to_owned(),
-                        did_you_mean: "r+ squash [msg|message=\"<commit-msg>\"|description]"
-                            .to_string(),
-                    })),
-                },
-                Err(_) => Some(Err(CommandParseError::UnknownArg {
-                    arg: also_squash[1..][0].as_key().to_owned(),
-                    did_you_mean: "r+ squash [msg|message=\"<commit-msg>\"|description]"
-                        .to_string(),
-                })),
+        let val = parser_squash(&also_squash[0], &also_squash[1..]).unwrap();
+
+        match val {
+            Ok(val) => match val {
+                BorsCommand::Squash { commit_message, .. } => {
+                    return Some(Ok(BorsCommand::SquashApprove {
+                        commit_message,
+                        approval_info: ApproveInfo {
+                            approver,
+                            priority,
+                            rollup,
+                            note,
+                            force,
+                        },
+                    }));
+                }
+                _ => unreachable!(),
             },
-        };
+            Err(_) => return Some(Err(CommandParseError::UnknownArg {
+                arg: also_squash[1..][0].as_key().to_owned(),
+                did_you_mean: "r+ squash [msg|message=\"<commit-msg>\"|description]"
+                    .to_string(),
+            }))
+        }
     }
 
     Some(Ok(BorsCommand::Approve(ApproveInfo {
