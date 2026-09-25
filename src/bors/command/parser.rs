@@ -2316,6 +2316,32 @@ for the crater",
     }
 
     #[test]
+    fn parse_squash_approve_msg_desc_rollup_priority() {
+        let cmds = parse_commands("@bors r+ rollup p=1 squash msg=description");
+        insta::assert_debug_snapshot!(cmds, @"
+        [
+            Ok(
+                SquashApprove {
+                    commit_message: PullRequestDescription,
+                    approval_info: ApproveInfo {
+                        approver: Myself,
+                        priority: Some(
+                            1,
+                        ),
+                        rollup: Some(
+                            Always,
+                        ),
+                        note: None,
+                        force: false,
+                    },
+                },
+            ),
+        ]
+        ");
+    }
+
+
+    #[test]
     fn parse_squash_approve_unknown_arg() {
         let cmds = parse_commands("@bors r+ squash commit=foo");
         insta::assert_debug_snapshot!(cmds, @r#"
@@ -2350,6 +2376,44 @@ for the crater",
                 },
             ),
         ]
+        "#);
+    }
+
+    #[test]
+    fn parse_squash_approve_wrong_pos_args() {
+        let cmds = parse_commands("@bors r+ squash message=foo baz p=1");
+        assert_eq!(cmds.len(), 1);
+        insta::assert_debug_snapshot!(cmds[0], @r#"
+        Ok(
+            SquashApprove {
+                commit_message: Explicit(
+                    "foo",
+                ),
+                approval_info: ApproveInfo {
+                    approver: Myself,
+                    priority: Some(
+                        1,
+                    ),
+                    rollup: None,
+                    note: None,
+                    force: false,
+                },
+            },
+        )
+        "#);
+    }
+
+    #[test]
+    fn parse_squash_approve_negative_args() {
+        let cmds = parse_commands("@bors r+ message=foo squash p=1");
+        assert_eq!(cmds.len(), 1);
+        insta::assert_debug_snapshot!(cmds[0], @r#"
+        Err(
+            UnknownArg {
+                arg: "p",
+                did_you_mean: "r+ squash [msg|message=\"<commit-msg>\"|description]",
+            },
+        )
         "#);
     }
 
