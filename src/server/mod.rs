@@ -179,7 +179,7 @@ async fn api_merge_queue(
     Path(repo_name): Path<String>,
     State(db): State<Arc<PgDbClient>>,
 ) -> Result<impl IntoResponse, AppError> {
-    let repo = match db.repo_by_name(&repo_name).await? {
+    let repo = match db.get_repository_by_name(&repo_name).await? {
         Some(repo) => repo,
         None => {
             return Ok((
@@ -292,7 +292,7 @@ async fn help_handler(State(ServerStateRef(state)): State<ServerStateRef>) -> im
         let treeclosed = state
             .ctx
             .db
-            .repo_db(&repo)
+            .get_repository(&repo)
             .await
             .ok()
             .flatten()
@@ -348,7 +348,7 @@ pub async fn queue_handler(
     State(oauth): State<Option<OAuthClient>>,
     Query(params): Query<QueueParams>,
 ) -> Result<impl IntoResponse, AppError> {
-    let repo = match db.repo_by_name(&repo_name).await? {
+    let repo = match db.get_repository_by_name(&repo_name).await? {
         Some(repo) => repo,
         None => {
             return Ok((
@@ -439,7 +439,9 @@ pub async fn queue_handler(
             QueueStatus::ReadyForMerge(..) => (1, 0),
             QueueStatus::Pending(..) => (1, 0),
             QueueStatus::Failed(..) => (0, 1),
-            QueueStatus::Tentative(_) | QueueStatus::NotApproved | QueueStatus::NotOpen => (0, 0),
+            QueueStatus::TentativelyApproved(_)
+            | QueueStatus::NotApproved
+            | QueueStatus::NotOpen => (0, 0),
         };
         in_queue_count += in_queue_inc;
         failed_count += failed_inc;
@@ -462,7 +464,7 @@ pub async fn queue_handler(
             }
             QueueStatus::Failed(_, _)
             | QueueStatus::ReadyForMerge(_, _)
-            | QueueStatus::Tentative(_)
+            | QueueStatus::TentativelyApproved(_)
             | QueueStatus::NotOpen
             | QueueStatus::NotApproved => {}
         }

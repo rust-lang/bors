@@ -305,13 +305,25 @@ pub fn approved_comment(
     } else {
         "pushpin"
     };
-    let mut comment = format!(
-        r":{approve_emoji}: Commit {commit_sha} has been approved by `{reviewer}`
+
+    let tentative_approval = matches!(note, Some(ApprovalNote::TentativeApproval));
+    let mut comment = if tentative_approval {
+        format!(
+            r":{approve_emoji}: Commit {commit_sha} has been tentatively approved by `{reviewer}`
+
+It will be put into the [queue]({web_url}/queue/{}) for this repository once PR CI succeeds.
+",
+            repo.name()
+        )
+    } else {
+        format!(
+            r":{approve_emoji}: Commit {commit_sha} has been approved by `{reviewer}`
 
 It is now in the [queue]({web_url}/queue/{}) for this repository.
 ",
-        repo.name()
-    );
+            repo.name()
+        )
+    };
 
     if had_failed_auto_build {
         writeln!(
@@ -330,20 +342,7 @@ It is now in the [queue]({web_url}/queue/{}) for this repository.
                 )
                 .unwrap();
             }
-            ApprovalNote::TentativeApprovalUpgraded => {
-                writeln!(
-                    comment,
-                    r#"
-> [!WARNING]
-> This PR was already fully approved previously, so this tentative approval was treated as a full approval. If you want to instead downgrade the PR to be only tentatively approved, unapprove it first and then re-approve it again:
-> ```
-> @bors r-
-> @bors r+
-> ```
-"#
-                )
-                .unwrap();
-            }
+            ApprovalNote::TentativeApproval => {}
         }
     }
 
@@ -383,13 +382,13 @@ Reason for tree closure: `{reason}`
 
 pub fn tentative_approval_removed_comment(commit_sha: &CommitSha) -> Comment {
     Comment::new(format!(
-        ":x: Tentatively approved commit {commit_sha} has been unapproved due to PR CI failure."
+        ":x: Commit {commit_sha} has been unapproved due to PR CI failure. Reapprove it with `@bors r+ force` if you want to ignore the failure."
     ))
 }
 
 pub fn tentative_approval_timed_out_comment(commit_sha: &CommitSha, timeout: Duration) -> Comment {
     Comment::new(format!(
-        ":x: Tentatively approved commit {commit_sha} has been unapproved because PR CI timed out after `{}`s.",
+        ":x: Commit {commit_sha} has been unapproved because PR CI timed out after `{}s`.",
         timeout.as_secs()
     ))
 }
@@ -398,27 +397,6 @@ pub fn tentative_approval_failed_comment(commit_sha: &CommitSha) -> Comment {
     Comment::new(format!(
         ":x: Cannot approve commit {commit_sha}, because CI currently fails on this PR. Use `@bors r+ force` to override the PR CI check."
     ))
-}
-
-pub fn tentatively_approved_comment(
-    commit_sha: &CommitSha,
-    reviewer: &str,
-    unknown_reviewers: Vec<String>,
-) -> Comment {
-    let mut comment = format!(
-        ":hourglass: Commit {commit_sha} has been tentatively approved by `{reviewer}`. It will be fully approved once PR CI is successful."
-    );
-
-    if !unknown_reviewers.is_empty() {
-        writeln!(
-            comment,
-            "\n\n:warning: The following reviewer(s) could not be found: `{}`",
-            unknown_reviewers.join(", ")
-        )
-        .unwrap();
-    }
-
-    Comment::new(comment)
 }
 
 pub fn approve_non_open_pr_comment() -> Comment {

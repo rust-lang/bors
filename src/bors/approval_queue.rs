@@ -1,10 +1,9 @@
 use crate::BorsContext;
-use crate::bors::approval::{TentativeApprovalOutcome, try_resolve_tentative_approval};
+use crate::bors::approval::{PrCiStatus, finalize_approval, get_pr_ci_status};
 use crate::bors::comment::{
     tentative_approval_removed_comment, tentative_approval_timed_out_comment,
 };
 use crate::bors::event::WorkflowRunCompleted;
-use crate::bors::handlers::PullRequestData;
 use crate::bors::merge_queue::MergeQueueSender;
 use crate::bors::{PullRequestStatus, RepositoryState, elapsed_time_since};
 use crate::database::{ApprovalInfo, PullRequestModel};
@@ -84,6 +83,9 @@ pub async fn handle_approval_queue_event(
             }
         }
         ApprovalQueueEvent::OnWorkflowCompleted(event) => {
+            // We have to scan all open PRs, because we sadly cannot easily get the PR number
+            // from a pull_request workflow event :(
+            // We could look it up in the DB via the HEAD SHA, but that seems like overkill for now.
             let handle = async {
                 let repo = ctx.get_repo(&event.repository)?;
                 let pull_requests = ctx
@@ -159,23 +161,9 @@ async fn process_tentative_approval(
         return Ok(());
     }
 
-    match try_resolve_tentative_approval(
-        ctx,
-        repo,
-        PullRequestData {
-            github: &gh_pr,
-            db: pr,
-        },
-        &approval_info.approver,
-        tentative_approval_removed_comment(&gh_pr.head.sha),
-        pr.priority.map(|priority| priority as u32),
-        merge_queue_tx,
-    )
-    .await?
-    {
-        TentativeApprovalOutcome::Resolved => {}
-        TentativeApprovalOutcome::Skipped => {}
-        TentativeApprovalOutcome::Pending => {
+    let pr_ci_status = get_pr_ci_status(repo, &gh_pr).await?;
+    match pr_ci_status {
+        PrCiStatus::Pending => {
             let Some(head_update_time) = repo
                 .client
                 .get_pull_request_head_update_time(&gh_pr)
@@ -190,6 +178,8 @@ async fn process_tentative_approval(
             };
 
             let timeout = repo.config.load().pr_ci_timeout;
+
+            // CI has timed out
             if elapsed_time_since(head_update_time) >= timeout {
                 ctx.db.unapprove(pr).await?;
                 repo.client
@@ -201,6 +191,22 @@ async fn process_tentative_approval(
                     .await?;
             }
         }
+        PrCiStatus::Success => {
+            // CI is green! Confirm the approval
+            ctx.db.confirm_tentative_approval(pr).await?;
+            finalize_approval(repo, &gh_pr, merge_queue_tx).await?;
+        }
+        PrCiStatus::Failed => {
+            // CI has failed
+            ctx.db.unapprove(pr).await?;
+            repo.client
+                .post_comment(
+                    pr.number,
+                    tentative_approval_removed_comment(&gh_pr.head.sha),
+                    &ctx.db,
+                )
+                .await?;
+        }
     }
 
     Ok(())
@@ -210,7 +216,7 @@ async fn process_tentative_approval(
 mod tests {
     use crate::bors::with_mocked_time;
     use crate::database::WorkflowStatus;
-    use crate::tests::{BorsTester, Commit, User, WorkflowEvent, run_test};
+    use crate::tests::{BorsTester, Commit, GitHub, User, run_test};
     use std::time::Duration;
 
     #[sqlx::test(migrator = "crate::MIGRATOR")]
@@ -219,13 +225,12 @@ mod tests {
             let workflow = ctx.pr_ci_workflow(());
             ctx.approve(()).await?;
 
-            ctx.workflow_event(WorkflowEvent::success(workflow)).await?;
+            ctx.pr(())
+                .await
+                .expect_unapproved()
+                .expect_tentative_approval();
 
-            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
-            :pushpin: Commit pr-1-sha has been approved by `default-user`
-
-            It is now in the [queue](https://bors-test.com/queue/borstest) for this repository.
-            ");
+            ctx.pr_workflow_success(workflow).await?;
             ctx.pr(())
                 .await
                 .expect_approved_by(&User::default_pr_author().name);
@@ -240,11 +245,9 @@ mod tests {
             let workflow = ctx.pr_ci_workflow(());
             ctx.approve(()).await?;
 
-            ctx.workflow_event(WorkflowEvent::failure(workflow)).await?;
+            ctx.pr_workflow_failure(workflow).await?;
 
-            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
-            :x: Tentatively approved commit pr-1-sha has been unapproved due to PR CI failure.
-            ");
+            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @":x: Commit pr-1-sha has been unapproved due to PR CI failure. Reapprove it with `@bors r+ force` if you want to ignore the failure.");
             ctx.pr(()).await.expect_unapproved();
             Ok(())
         })
@@ -261,11 +264,6 @@ mod tests {
 
             ctx.refresh_tentative_approvals().await;
 
-            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
-            :pushpin: Commit pr-1-sha has been approved by `default-user`
-
-            It is now in the [queue](https://bors-test.com/queue/borstest) for this repository.
-            ");
             ctx.pr(())
                 .await
                 .expect_approved_by(&User::default_pr_author().name);
@@ -284,9 +282,7 @@ mod tests {
 
             ctx.refresh_tentative_approvals().await;
 
-            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
-            :x: Tentatively approved commit pr-1-sha has been unapproved due to PR CI failure.
-            ");
+            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @":x: Commit pr-1-sha has been unapproved due to PR CI failure. Reapprove it with `@bors r+ force` if you want to ignore the failure.");
             ctx.pr(()).await.expect_unapproved();
             Ok(())
         })
@@ -303,7 +299,8 @@ mod tests {
 
             ctx.pr(())
                 .await
-                .expect_approver(&User::default_pr_author().name);
+                .expect_approver(&User::default_pr_author().name)
+                .expect_tentative_approval();
             Ok(())
         })
         .await;
@@ -320,7 +317,7 @@ mod tests {
             })
             .await;
 
-            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @":x: Tentatively approved commit pr-1-sha has been unapproved because PR CI timed out after `7200`s.");
+            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @":x: Commit pr-1-sha has been unapproved because PR CI timed out after `7200s`.");
             ctx.pr(()).await.expect_unapproved();
             Ok(())
         })
@@ -338,7 +335,7 @@ mod tests {
             })
             .await;
 
-            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @":x: Tentatively approved commit pr-1-sha has been unapproved because PR CI timed out after `7200`s.");
+            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @":x: Commit pr-1-sha has been unapproved because PR CI timed out after `7200s`.");
             ctx.pr(()).await.expect_unapproved();
             Ok(())
         })
@@ -358,11 +355,6 @@ mod tests {
             })
             .await;
 
-            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
-            :pushpin: Commit pr-1-sha has been approved by `default-user`
-
-            It is now in the [queue](https://bors-test.com/queue/borstest) for this repository.
-            ");
             ctx.pr(())
                 .await
                 .expect_approved_by(&User::default_pr_author().name);
@@ -398,6 +390,24 @@ mod tests {
             ctx.refresh_tentative_approvals().await;
 
             assert_eq!(ctx.pr(()).await.get_db_pr().approver(), None);
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
+    async fn approval_confirmation_adds_labels(pool: sqlx::PgPool) {
+        let gh = GitHub::default().append_to_default_config(
+            r#"
+[labels]
+approved = ["+approved"]
+"#,
+        );
+        run_test((pool, gh), async |ctx: &mut BorsTester| {
+            let workflow = ctx.pr_ci_workflow(());
+            ctx.approve(()).await?;
+            ctx.pr_workflow_success(workflow).await?;
+            ctx.pr(()).await.expect_added_labels(&["approved"]);
             Ok(())
         })
         .await;

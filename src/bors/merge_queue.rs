@@ -142,7 +142,7 @@ async fn process_repository(
     }
 
     let repo_name = repo.repository();
-    let repo_db = match ctx.db.repo_db(repo_name).await? {
+    let repo_db = match ctx.db.get_repository(repo_name).await? {
         Some(repo) => repo,
         None => {
             tracing::error!("Repository {repo_name} not found");
@@ -211,7 +211,7 @@ async fn process_repository(
                                 QueueStatus::Pending(_, _) => "pending",
                                 QueueStatus::Failed(_, _) => "failed",
                                 QueueStatus::Approved(_) => "approved",
-                                QueueStatus::Tentative(_) => "waiting for pr ci",
+                                QueueStatus::TentativelyApproved(_) => "waiting for pr ci",
                                 QueueStatus::ReadyForMerge(_, _) => "ready for merge",
                                 QueueStatus::NotOpen => "not open",
                                 QueueStatus::NotApproved => "not approved"
@@ -242,7 +242,7 @@ async fn process_repository(
                 }
             }
             // We got to the end of the merge queue, stop going through the rest of the PRs
-            QueueStatus::Tentative(_)
+            QueueStatus::TentativelyApproved(_)
             | QueueStatus::NotApproved
             | QueueStatus::NotOpen
             | QueueStatus::Failed(..) => break,
