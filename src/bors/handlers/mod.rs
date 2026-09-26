@@ -725,10 +725,16 @@ async fn handle_comment(
                             let merge_queue_tx = senders.merge_queue().clone();
                             let callback: AfterSquashCallback = Box::new(move |sha: CommitSha| {
                                 Box::pin(async move {
-                                    let pr_db = db2
+                                    let pr_db = match db2
                                         .get_pull_request(repo2.repository(), pr_github.number)
                                         .await?
-                                        .expect("TODO");
+                                    {
+                                        Some(val) => val,
+                                        None => {
+                                            return Err(anyhow::anyhow!("PR not found in db"));
+                                        }
+                                    };
+
                                     let pr2 = PullRequestData {
                                         github: &pr_github,
                                         db: &pr_db,
