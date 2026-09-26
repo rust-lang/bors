@@ -41,7 +41,7 @@ pub(super) async fn handle_pull_request_edited(
         &db,
         &pr_model,
         pr,
-        InvalidationInfo::new(InvalidationReason::CommitShaChanged),
+        InvalidationInfo::new(InvalidationReason::BaseBranchChanged),
         Some(InvalidationComment::new(format!(
             ":warning: The base branch changed to `{base_name}`.",
             base_name = payload.pull_request.base.name
@@ -71,7 +71,9 @@ pub(super) async fn handle_push_to_pull_request(
         &db,
         &pr_model,
         pr,
-        InvalidationInfo::new(InvalidationReason::CommitShaChanged),
+        InvalidationInfo::new(InvalidationReason::CommitShaChanged {
+            sha: pr.head.sha.clone(),
+        }),
         Some(InvalidationComment::new(format!(
             ":warning: A new commit `{}` was pushed.",
             pr.head.sha

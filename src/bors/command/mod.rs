@@ -110,6 +110,20 @@ pub enum SquashCommitMessage {
     Explicit(String),
 }
 
+#[derive(Debug, PartialEq)]
+pub struct ApproveInfo {
+    /// Who is approving the commit.
+    pub approver: Approver,
+    /// Priority of the commit.
+    pub priority: Option<Priority>,
+    /// Rollup status of the commit.
+    pub rollup: Option<RollupMode>,
+    /// Optional note attached at the end of the command.
+    pub note: Option<String>,
+    /// Approve immediately without waiting for PR CI.
+    pub force: bool,
+}
+
 /// Bors command specified by a user.
 ///
 /// When modifying commands, remember to also update:
@@ -118,18 +132,7 @@ pub enum SquashCommitMessage {
 #[derive(Debug, PartialEq)]
 pub enum BorsCommand {
     /// Approve a commit.
-    Approve {
-        /// Who is approving the commit.
-        approver: Approver,
-        /// Priority of the commit.
-        priority: Option<Priority>,
-        /// Rollup status of the commit.
-        rollup: Option<RollupMode>,
-        /// Optional note attached at the end of the command.
-        note: Option<String>,
-        /// Approve immediately without waiting for PR CI.
-        force: bool,
-    },
+    Approve(ApproveInfo),
     /// Unapprove a commit.
     Unapprove,
     /// Print help.
@@ -176,5 +179,13 @@ pub enum BorsCommand {
     /// Cancel an auto build currently running on a given PR (without removing it from the queue).
     Cancel,
     /// Squash all commits of a pull request into a single commit.
-    Squash { commit_message: SquashCommitMessage },
+    Squash {
+        /// Squash message for the commit
+        commit_message: SquashCommitMessage,
+    },
+    SquashApprove {
+        /// Squash message for the commit
+        commit_message: SquashCommitMessage,
+        approval_info: ApproveInfo,
+    },
 }

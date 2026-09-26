@@ -14,16 +14,21 @@ use crate::bors::{
 use crate::database::BuildStatus;
 use crate::github::api::CommitAuthor;
 use crate::github::api::operations::Commit;
-use crate::github::{GithubRepoName, GithubUser};
+use crate::github::{CommitSha, GithubRepoName, GithubUser};
 use crate::permissions::PermissionType;
 use std::collections::HashSet;
 use std::fmt::Write;
+use std::pin::Pin;
 use std::sync::Arc;
 
 const CO_AUTHORED_BY_TRAILER: &str = "Co-authored-by";
 
+pub(super) type AfterSquashCallback =
+    Box<dyn FnOnce(CommitSha) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>> + Send>;
+
 /// Entry point for the squash command.
 /// This function validates the command and enqueues the actual work to the gitops queue.
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn command_squash(
     repo_state: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
@@ -32,6 +37,7 @@ pub(super) async fn command_squash(
     commit_message: SquashCommitMessage,
     bot_prefix: &CommandPrefix,
     gitops_queue: &GitOpsQueueSender,
+    after_squash_callback: Option<AfterSquashCallback>,
 ) -> anyhow::Result<()> {
     let send_comment = async |text: String| {
         let comment = repo_state
@@ -227,8 +233,10 @@ pub(super) async fn command_squash(
                 &db,
                 &pr_model,
                 &pr_github,
-                InvalidationInfo::new(InvalidationReason::CommitShaChanged)
-                    .with_comment_url(notify_comment.html_url.to_string()),
+                InvalidationInfo::new(InvalidationReason::CommitShaChanged {
+                    sha: commit.clone(),
+                })
+                .with_comment_url(notify_comment.html_url.to_string()),
                 Some(
                     InvalidationComment::new(format!(
                         ":hammer: {} commits were squashed into {commit}.",
@@ -240,6 +248,11 @@ pub(super) async fn command_squash(
             .await?;
             // Hide previous "squash started" comments.
             hide_tagged_comments(&repo_state, &db, &pr_model, CommentTag::SquashStarted).await?;
+
+            if let Some(cb) = after_squash_callback {
+                cb(commit).await?;
+            }
+
             Ok(())
         })
     });
@@ -259,7 +272,7 @@ pub(super) async fn command_squash(
         source_repo: repo_state.repository().clone(),
         target_repo: fork_repository,
         target_branch,
-        commit,
+        commit: commit.clone(),
         token,
         on_finish,
     });
@@ -879,6 +892,45 @@ also include this pls
             Ok(())
         })
             .await;
+    }
+
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
+    async fn squash_approve_push_webhook(pool: sqlx::PgPool) {
+        run_test((pool, squash_state()), async |ctx: &mut BorsTester| {
+            ctx.modify_pr_in_gh((), |pr| {
+                pr.title = "Foobar".to_string();
+                pr.reset_to_single_commit(Commit::from_sha("sha1"));
+                pr.add_commits(vec![Commit::from_sha("sha2")]);
+            });
+            ctx.post_comment("@bors r+ squash").await?;
+            ctx.expect_comments((), 1).await;
+            ctx.run_gitop_queue().await?;
+            insta::assert_snapshot!(
+                ctx.get_next_comment_text(()).await?,
+                @":hammer: 2 commits were squashed into sha2-reauthored-to-git-user."
+            );
+
+            ctx.refresh_tentative_approvals().await;
+
+            insta::assert_snapshot!(
+                ctx.get_next_comment_text(()).await?,
+                @"
+            :pushpin: Commit sha2-reauthored-to-git-user has been tentatively approved by `default-user`
+
+            It will be put into the [queue](https://bors-test.com/queue/borstest) for this repository once PR CI succeeds.
+            "
+            );
+            // Check that generating a push webhook for the PR's HEAD SHA, because the pushed
+            // commit was already pre-approved by `@bors r+ squash`.
+            ctx.send_push_webhook(()).await?;
+
+            ctx.pr(())
+                .await
+                .expect_approved_by("default-user")
+                .expect_approved_sha("sha2-reauthored-to-git-user");
+            Ok(())
+        })
+        .await;
     }
 
     fn squash_state() -> GitHub {
