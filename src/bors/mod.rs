@@ -41,7 +41,7 @@ pub mod process;
 pub mod unroll_queue;
 
 use crate::PgDbClient;
-use crate::bors::command::BorsCommand;
+use crate::bors::command::{ApproveInfo, BorsCommand};
 use crate::bors::comment::CommentTag;
 use crate::database::{PullRequestModel, WorkflowStatus};
 use crate::github::api::operations::CommitAuthor;
@@ -77,13 +77,13 @@ pub fn format_help() -> &'static str {
     // We do a no-op destructuring of `BorsCommand` to make it harder to modify help in case new
     // commands are added though.
     match BorsCommand::Ping {
-        BorsCommand::Approve {
+        BorsCommand::Approve(ApproveInfo {
             approver: _,
             rollup: _,
             priority: _,
             note: _,
             force: _,
-        } => {}
+        }) => {}
         BorsCommand::Unapprove => {}
         BorsCommand::Help => {}
         BorsCommand::Ping => {}
@@ -109,6 +109,7 @@ pub fn format_help() -> &'static str {
         BorsCommand::Retry => {}
         BorsCommand::Cancel => {}
         BorsCommand::Squash { .. } => {}
+        BorsCommand::SquashApprove { .. } => {}
     }
 
     r#"
@@ -124,6 +125,7 @@ You can use the following commands:
     - You can pass a comma-separated list of GitHub usernames.
     - The default is for approvals to remain tentative until PR CI succeeds. Pass `force` to approve the PR immediately.
     - Optionally, you can attach a `<note>` to the PR that will be displayed on the queue page.
+- `r+ squash`: Squash the commits of a PR into a single commit, then approve it.
 - `r-`: Unapprove this PR
 - `p=<priority> [note=[<note>]]` | `priority=<priority> [note=[<note>]]`: Set the priority of this PR
     - Optionally, you can attach a `<note>` to the PR that will be displayed on the queue page.
