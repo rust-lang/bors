@@ -383,8 +383,8 @@ pub fn normalize_merge_message(message: &str) -> String {
 pub fn create_merge_commit_message(pr: handlers::PullRequestData, merge_type: MergeType) -> String {
     use std::fmt::Write;
 
-    /// Prefix used to specify custom try jobs in PR descriptions.
-    const CUSTOM_TRY_JOB_PREFIX: &str = "try-job:";
+    /// Prefixes used to specify custom try jobs in PR descriptions.
+    const CUSTOM_TRY_JOB_PREFIXES: &[&str] = &["try-job:", "try-jobs:"];
 
     let pr_number = pr.number();
 
@@ -405,7 +405,11 @@ pub fn create_merge_commit_message(pr: handlers::PullRequestData, merge_type: Me
             .message
             .lines()
             .map(|l| l.trim())
-            .filter(|l| l.starts_with(CUSTOM_TRY_JOB_PREFIX))
+            .filter(|l| {
+                CUSTOM_TRY_JOB_PREFIXES
+                    .iter()
+                    .any(|prefix| l.starts_with(prefix))
+            })
             .join("\n"),
         // If we do have custom jobs, ignore the original description completely
         MergeType::Try { .. } => String::new(),
@@ -426,7 +430,7 @@ pub fn create_merge_commit_message(pr: handlers::PullRequestData, merge_type: Me
     match merge_type {
         MergeType::Try { try_jobs, nolimit } => {
             for job in try_jobs {
-                write!(message, "\n{CUSTOM_TRY_JOB_PREFIX} {job}").unwrap();
+                write!(message, "\n{} {job}", CUSTOM_TRY_JOB_PREFIXES[0]).unwrap();
             }
             if nolimit {
                 writeln!(message, "\ntry-nolimit").unwrap();
