@@ -1,9 +1,7 @@
 use crate::bors::RepositoryState;
-use crate::bors::labels::handle_label_trigger;
-use crate::bors::merge_queue::MergeQueueSender;
 use crate::database::WorkflowStatus;
+use crate::github::PullRequest;
 use crate::github::api::client::WorkflowSource;
-use crate::github::{LabelTrigger, PullRequest};
 
 /// Note that can be attached to an approval comment.
 pub enum ApprovalNote {
@@ -11,19 +9,6 @@ pub enum ApprovalNote {
     PrCiIsFailing,
     /// The PR was approved tentatively.
     TentativeApproval,
-}
-
-/// Perform post-approve actions.
-/// Should only be called if the PR is fully approved!
-///
-/// Notifies the merge queue and applies approval labels.
-pub(super) async fn finalize_approval(
-    repo: &RepositoryState,
-    pr: &PullRequest,
-    merge_queue_tx: &MergeQueueSender,
-) -> anyhow::Result<()> {
-    merge_queue_tx.notify().await?;
-    handle_label_trigger(repo, &pr.clone().into(), LabelTrigger::Approved).await
 }
 
 #[derive(Copy, Clone)]

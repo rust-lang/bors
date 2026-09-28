@@ -1,13 +1,14 @@
 use crate::BorsContext;
-use crate::bors::approval::{PrCiStatus, finalize_approval, get_pr_ci_status};
+use crate::bors::approval::{PrCiStatus, get_pr_ci_status};
 use crate::bors::comment::{
     tentative_approval_removed_comment, tentative_approval_timed_out_comment,
 };
 use crate::bors::event::WorkflowRunCompleted;
+use crate::bors::handlers::unapprove_pr;
 use crate::bors::merge_queue::MergeQueueSender;
 use crate::bors::{PullRequestStatus, RepositoryState, elapsed_time_since};
 use crate::database::{ApprovalInfo, PullRequestModel};
-use crate::github::{GithubRepoName, PullRequest};
+use crate::github::{GithubRepoName, PullRequest, PullRequestInfo};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
@@ -181,7 +182,7 @@ async fn process_tentative_approval(
 
             // CI has timed out
             if elapsed_time_since(head_update_time) >= timeout {
-                ctx.db.unapprove(pr).await?;
+                unapprove_pr(repo, &ctx.db, pr, &PullRequestInfo::from(gh_pr.clone())).await?;
                 repo.client
                     .post_comment(
                         pr.number,
@@ -194,11 +195,18 @@ async fn process_tentative_approval(
         PrCiStatus::Success => {
             // CI is green! Confirm the approval
             ctx.db.confirm_tentative_approval(pr).await?;
-            finalize_approval(repo, &gh_pr, merge_queue_tx).await?;
+            // Let the merge queue know
+            merge_queue_tx.notify().await?;
+
+            // Labels were already applied when tentatively approving the PR, so no need to modify
+            // them further
         }
         PrCiStatus::Failed => {
-            // CI has failed
-            ctx.db.unapprove(pr).await?;
+            // CI has failed, unapprove the PR
+            // Note: if we allow tentatively PRs to become parts of a rollup, this should ideally
+            // call invalidate_pr instead.
+            unapprove_pr(repo, &ctx.db, pr, &PullRequestInfo::from(gh_pr.clone())).await?;
+
             repo.client
                 .post_comment(
                     pr.number,
@@ -396,18 +404,21 @@ mod tests {
     }
 
     #[sqlx::test(migrator = "crate::MIGRATOR")]
-    async fn approval_confirmation_adds_labels(pool: sqlx::PgPool) {
+    async fn pr_ci_failure_applies_unapprove_labels(pool: sqlx::PgPool) {
         let gh = GitHub::default().append_to_default_config(
             r#"
 [labels]
 approved = ["+approved"]
+unapproved = ["-approved", "+unapproved"]
 "#,
         );
         run_test((pool, gh), async |ctx: &mut BorsTester| {
             let workflow = ctx.pr_ci_workflow(());
             ctx.approve(()).await?;
-            ctx.pr_workflow_success(workflow).await?;
-            ctx.pr(()).await.expect_added_labels(&["approved"]);
+            ctx.pr_workflow_failure(workflow).await?;
+            ctx.expect_comments((), 1).await;
+
+            ctx.pr(()).await.expect_labels(&["unapproved"]);
             Ok(())
         })
         .await;

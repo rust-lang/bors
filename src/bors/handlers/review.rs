@@ -1,5 +1,5 @@
 use crate::bors::RepositoryState;
-use crate::bors::approval::{ApprovalNote, PrCiStatus, finalize_approval, get_pr_ci_status};
+use crate::bors::approval::{ApprovalNote, PrCiStatus, get_pr_ci_status};
 use crate::bors::command::{Approver, CommandPrefix, Delegatee};
 use crate::bors::command::{DelegateCommand, RollupMode};
 use crate::bors::comment::{
@@ -9,12 +9,13 @@ use crate::bors::comment::{
 };
 use crate::bors::handlers::{InvalidationInfo, InvalidationReason, PullRequestData, deny_request};
 use crate::bors::handlers::{has_permission, invalidate_pr};
+use crate::bors::labels::handle_label_trigger;
 use crate::bors::merge_queue::MergeQueueSender;
 use crate::bors::{Comment, PullRequestStatus};
 use crate::database::DelegatedPermission;
 use crate::database::{ApprovalInfo, ApprovalMode, PullRequestModel};
 use crate::database::{MergeableState, TreeState};
-use crate::github::{CommitSha, PullRequest};
+use crate::github::{CommitSha, LabelTrigger, PullRequest, PullRequestInfo};
 use crate::github::{GithubUser, PullRequestNumber};
 use crate::permissions::PermissionType;
 use crate::{BorsContext, PgDbClient, ZulipClient};
@@ -173,13 +174,16 @@ pub(super) async fn command_approve(
         )
         .await?;
 
-    match approval_mode {
-        ApprovalMode::Eager => {
-            finalize_approval(&repo, pr.github, merge_queue_tx).await?;
-        }
-        ApprovalMode::Tentative => {}
-    }
-    Ok(())
+    merge_queue_tx.notify().await?;
+
+    // Eagerly apply label changes, even if we are only in a tentative approval, so that the PR
+    // gets out of the reviewer's GitHub queue
+    handle_label_trigger(
+        &repo,
+        &PullRequestInfo::from(pr.github.clone()),
+        LabelTrigger::Approved,
+    )
+    .await
 }
 
 /// Check if the specified approvers exist as GitHub users or teams.
@@ -802,23 +806,6 @@ approved = ["+approved"]
         run_test((pool, gh), async |ctx: &mut BorsTester| {
             ctx.approve(()).await?;
             ctx.pr(()).await.expect_added_labels(&["approved"]);
-            Ok(())
-        })
-        .await;
-    }
-
-    #[sqlx::test(migrator = "crate::MIGRATOR")]
-    async fn tentative_approve_doesnt_add_labels(pool: sqlx::PgPool) {
-        let gh = GitHub::default().append_to_default_config(
-            r#"
-[labels]
-approved = ["+approved"]
-"#,
-        );
-        run_test((pool, gh), async |ctx: &mut BorsTester| {
-            ctx.pr_ci_workflow(());
-            ctx.approve(()).await?;
-            ctx.pr(()).await.expect_labels(&[]);
             Ok(())
         })
         .await;
@@ -2252,6 +2239,23 @@ labels_blocking_approval = ["proposed-final-comment-period", "final-comment-peri
                 Ok(())
             })
             .await;
+    }
+
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
+    async fn tentative_approval_eagerly_applies_labels(pool: sqlx::PgPool) {
+        let gh = GitHub::default().append_to_default_config(
+            r#"
+[labels]
+approved = ["+approved"]
+"#,
+        );
+        run_test((pool, gh), async |ctx: &mut BorsTester| {
+            ctx.pr_ci_workflow(());
+            ctx.approve(()).await?;
+            ctx.pr(()).await.expect_added_labels(&["approved"]);
+            Ok(())
+        })
+        .await;
     }
 
     #[sqlx::test(migrator = "crate::MIGRATOR")]
