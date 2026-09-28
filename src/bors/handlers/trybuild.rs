@@ -442,6 +442,7 @@ It fixes so many issues, sir."
                 pr.description = r"This is a very good PR.
 
 try-job: Foo
+try-jobs: Bar
 
 It fixes so many issues, sir.
 
@@ -460,6 +461,7 @@ try-job: Bar
             Title of PR 1
 
             try-job: Foo
+            try-jobs: Bar
             try-job: Bar
             ");
             Ok(())
