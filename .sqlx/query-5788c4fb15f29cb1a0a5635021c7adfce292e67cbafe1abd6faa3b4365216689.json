@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                UPDATE pull_request\n                SET approved_by = NULL,\n                    approved_sha = NULL,\n                    approval_tentative = FALSE,\n                    auto_build_id = NULL\n                WHERE\n                    id = $1 AND\n                    (approved_by IS NULL OR approved_sha != $2)\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "5788c4fb15f29cb1a0a5635021c7adfce292e67cbafe1abd6faa3b4365216689"
+}
