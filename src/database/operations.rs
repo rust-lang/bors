@@ -570,6 +570,7 @@ pub(crate) async fn unapprove_pull_request_if_sha_changed(
                 UPDATE pull_request
                 SET approved_by = NULL,
                     approved_sha = NULL,
+                    approval_tentative = FALSE,
                     auto_build_id = NULL
                 WHERE
                     id = $1 AND
