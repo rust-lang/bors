@@ -259,6 +259,7 @@ impl<'r> sqlx::Decode<'r, sqlx::Postgres> for ApprovalStatus {
                 sha,
             })),
             (None, None, false) => Ok(ApprovalStatus::NotApproved),
+            (None, None, true) => Ok(ApprovalStatus::NotApproved),
             (approver, sha, tentative) => Err(format!(
                 "Inconsistent approval state: approver={approver:?}, sha={sha:?}, tentative={tentative}"
             )
