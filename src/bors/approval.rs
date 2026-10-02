@@ -29,6 +29,11 @@ pub async fn get_pr_ci_status(
         .client
         .get_workflow_runs_for_commit_sha(WorkflowSource::PullRequest(pr))
         .await?;
+    tracing::info!(
+        "Found PR CI workflows for PR #{} and HEAD SHA {}: {workflow_runs:?}",
+        pr.number,
+        pr.head.sha
+    );
 
     if workflow_runs.is_empty() {
         return Ok(PrCiStatus::Pending);
