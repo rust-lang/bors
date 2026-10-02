@@ -112,10 +112,9 @@ pub(super) async fn command_squash(
         .client
         .get_pull_request_commits(pr.number())
         .await?;
-    if commits.len() < 2 {
-        send_comment(":exclamation: The PR has only one commit.".to_string()).await?;
-        return Ok(());
-    }
+
+    // Note that we allow squashing even PRs that only have a single commit, so that you can easily
+    // change the commit message with `@bors squash`.
 
     let notify_comment = repo_state
         .client
@@ -228,6 +227,11 @@ pub(super) async fn command_squash(
             else {
                 return Ok(());
             };
+
+            let action = match pr_github.commit_count {
+                1 => "commit was",
+                _ => "commits were",
+            };
             invalidate_pr(
                 &repo_state,
                 &db,
@@ -239,7 +243,7 @@ pub(super) async fn command_squash(
                 .with_comment_url(notify_comment.html_url.to_string()),
                 Some(
                     InvalidationComment::new(format!(
-                        ":hammer: {} commits were squashed into {commit}.",
+                        ":hammer: {} {action} squashed into {commit}.",
                         pr_github.commit_count,
                     ))
                     .post_always(),
@@ -531,10 +535,27 @@ mod tests {
     async fn squash_single_commit(pool: sqlx::PgPool) {
         run_test((pool, squash_state()), async |ctx: &mut BorsTester| {
             ctx.post_comment("@bors squash").await?;
+            ctx.run_gitop_queue().await?;
             insta::assert_snapshot!(
                 ctx.get_next_comment_text(()).await?,
-                @":exclamation: The PR has only one commit."
+                @":construction: Squashing... this can take a few minutes."
             );
+            insta::assert_snapshot!(
+                ctx.get_next_comment_text(()).await?,
+                @":hammer: 1 commit was squashed into pr-1-sha-reauthored-to-default-user."
+            );
+            let branch = ctx.pr(()).await.get_gh_pr().head_branch_copy();
+            assert_eq!(branch.get_commits().len(), 1);
+            insta::assert_debug_snapshot!(branch.get_commit(), @r#"
+            Commit {
+                sha: "pr-1-sha-reauthored-to-default-user",
+                message: "Title of PR 1\n\n* initial PR#1 commit\n",
+                author: GitUser {
+                    name: "default-user",
+                    email: "default-user@email.com",
+                },
+            }
+            "#);
             Ok(())
         })
         .await;
