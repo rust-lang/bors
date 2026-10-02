@@ -735,6 +735,11 @@ async fn handle_comment(
                                         }
                                     };
 
+                                    // Reload the PR from GitHub, so that we (hopefully) get its
+                                    // new HEAD SHA that we just pushed to it.
+                                    let pr_github =
+                                        repo2.client.get_pull_request(pr_github.number).await?;
+
                                     let pr2 = PullRequestData {
                                         github: &pr_github,
                                         db: &pr_db,
