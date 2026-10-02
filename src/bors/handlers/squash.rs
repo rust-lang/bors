@@ -913,9 +913,9 @@ also include this pls
             insta::assert_snapshot!(
                 ctx.get_next_comment_text(()).await?,
                 @"
-            :pushpin: Commit sha2-reauthored-to-git-user has been tentatively approved by `default-user`
+            :pushpin: Commit sha2-reauthored-to-git-user has been approved by `default-user`
 
-            It will be put into the [queue](https://bors-test.com/queue/borstest) for this repository once PR CI succeeds.
+            It is now in the [queue](https://bors-test.com/queue/borstest) for this repository.
             "
             );
             // Check that generating a push webhook for the PR's HEAD SHA, because the pushed
@@ -924,7 +924,7 @@ also include this pls
 
             ctx.pr(())
                 .await
-                .expect_tentative_approval()
+                .expect_approved_by(&User::default_pr_author().name)
                 .expect_approved_sha("sha2-reauthored-to-git-user");
             Ok(())
         })
@@ -957,18 +957,48 @@ unapproved = ["-approved", "+unapproved"]
             insta::assert_snapshot!(
                 ctx.get_next_comment_text(()).await?,
                 @"
-            :pushpin: Commit sha2-reauthored-to-git-user has been tentatively approved by `default-user`
+            :pushpin: Commit sha2-reauthored-to-git-user has been approved by `default-user`
 
-            It will be put into the [queue](https://bors-test.com/queue/borstest) for this repository once PR CI succeeds.
+            It is now in the [queue](https://bors-test.com/queue/borstest) for this repository.
             "
             );
             // Check that generating a push webhook for the PR's HEAD SHA, because the pushed
             // commit was already pre-approved by `@bors r+ squash`.
             ctx.send_push_webhook(()).await?;
 
+            ctx.pr(()).await.expect_labels(&["approved"]);
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
+    async fn squash_approve_reload_github_head_sha(pool: sqlx::PgPool) {
+        run_test((pool, squash_state()), async |ctx: &mut BorsTester| {
+            ctx.modify_repo((), |repo| repo.default_pr_ci = false);
+            ctx.modify_pr_in_gh((), |pr| {
+                pr.reset_to_single_commit(Commit::from_sha("sha1"));
+                pr.add_commits(vec![Commit::from_sha("sha2")]);
+            });
+            ctx.pr_workflow_success(ctx.pr_ci_workflow(())).await?;
+
+            ctx.post_comment("@bors r+ squash").await?;
+            ctx.run_gitop_queue().await?;
+            ctx.expect_comments((), 2).await;
+
+            // Now bors should check the PR CI of the newly pushed commit, not of the old commit,
+            // so the approval should be tentative.
+            insta::assert_snapshot!(
+                ctx.get_next_comment_text(()).await?,
+                @"
+            :pushpin: Commit sha2-reauthored-to-git-user has been tentatively approved by `default-user`
+
+            It will be put into the [queue](https://bors-test.com/queue/borstest) for this repository once PR CI succeeds.
+            "
+            );
             ctx.pr(())
                 .await
-                .expect_labels(&["approved"]);
+                .expect_tentative_approval();
             Ok(())
         })
             .await;
