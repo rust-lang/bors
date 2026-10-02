@@ -997,7 +997,9 @@ pub async fn unapprove_pr_if_sha_changed(
     new_sha: &CommitSha,
 ) -> anyhow::Result<bool> {
     let unapproved = db.unapprove_if_sha_changed(pr_db, new_sha).await?;
-    handle_label_trigger(repo_state, pr_gh, LabelTrigger::Unapproved).await?;
+    if unapproved {
+        handle_label_trigger(repo_state, pr_gh, LabelTrigger::Unapproved).await?;
+    }
     Ok(unapproved)
 }
 
