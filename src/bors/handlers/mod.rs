@@ -519,7 +519,6 @@ async fn handle_comment(
                             note,
                             approval_mode,
                             senders.merge_queue(),
-                            pr.github.head.sha.clone(),
                         )
                         .instrument(span)
                         .await
@@ -735,10 +734,14 @@ async fn handle_comment(
                                         }
                                     };
 
-                                    // Reload the PR from GitHub, so that we (hopefully) get its
+                                    // Reload the PR from GitHub, so that we get its
                                     // new HEAD SHA that we just pushed to it.
-                                    let pr_github =
+                                    // However, sometimes there is a race condition, and we don't
+                                    // get the new SHA.
+                                    // So we forcefully override it below.
+                                    let mut pr_github =
                                         repo2.client.get_pull_request(pr_github.number).await?;
+                                    pr_github.head.sha = sha.clone();
 
                                     let pr2 = PullRequestData {
                                         github: &pr_github,
@@ -762,7 +765,6 @@ async fn handle_comment(
                                         note,
                                         approval_mode,
                                         &merge_queue_tx,
-                                        sha,
                                     )
                                     .await
                                 })
