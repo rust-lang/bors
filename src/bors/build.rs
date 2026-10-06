@@ -7,9 +7,10 @@ use crate::database::{
 use crate::github::api::client::{CheckRunOutput, GithubRepositoryClient, WorkflowSource};
 use crate::github::api::operations::{CommitAuthor, ForcePush};
 use crate::github::{CommitSha, MergeResult, attempt_merge};
-use octocrab::models::CheckRunId;
 use octocrab::models::workflows::{Conclusion, Job, Status};
+use octocrab::models::{CheckRunId, WorkflowId};
 use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
+use std::hash::BuildHasher;
 
 /// We want to distinguish between a critical failure (a build was not marked as cancelled, in which
 /// case bors should not continue with its normal logic), and a less important failure (could not
@@ -155,6 +156,10 @@ pub async fn load_workflow_runs(
                 db_run.run_id,
                 db_run.status
             );
+
+            // We don't really have any way of determining the workflow ID here, because we do not
+            // store it in the DB. We thus determine it at least based on the hash of the run name.
+            let workflow_id = std::hash::RandomState::default().hash_one(&db_run.name);
             workflow_runs.push(WorkflowRun {
                 id: db_run.run_id.into(),
                 name: db_run.name,
@@ -164,6 +169,7 @@ pub async fn load_workflow_runs(
                 // inserted it into the DB. But that hopefully should not matter, as the duration is
                 // `None` and this should never occur anyway :)
                 created_at: db_run.created_at,
+                workflow_id: WorkflowId(workflow_id),
                 // We currently do not store workflow duration in the DB
                 duration: None,
             });

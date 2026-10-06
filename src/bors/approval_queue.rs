@@ -423,4 +423,33 @@ unapproved = ["-approved", "+unapproved"]
         })
         .await;
     }
+
+    // Regression test for https://rust-lang.zulipchat.com/#narrow/channel/242791-t-infra/topic/can.27t.20merge.20because.20of.20failing.20CI.20disagrees.20with.20github.20ui/with/629469089
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
+    async fn retried_workflow(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            // All test workflow runs have the same workflow ID
+            // Here we simulate two runs, one failed, started sooner, and one successful, started
+            // later.
+            // bors should ignore the previous failed one
+            let workflow = ctx.pr_ci_workflow(());
+
+            // We simulate earlier created_at time by setting the failed run duration to be longer
+            ctx.modify_workflow(workflow, |r| r.set_duration(Duration::from_hours(1)));
+            ctx.pr_workflow_failure(workflow).await?;
+
+            let workflow = ctx.pr_ci_workflow(());
+            ctx.modify_workflow(workflow, |r| r.set_duration(Duration::from_mins(30)));
+            ctx.pr_workflow_success(workflow).await?;
+
+            ctx.post_comment("@bors r+").await?;
+            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
+            :pushpin: Commit pr-1-sha has been approved by `default-user`
+
+            It is now in the [queue](https://bors-test.com/queue/borstest) for this repository.
+            ");
+            Ok(())
+        })
+        .await;
+    }
 }
