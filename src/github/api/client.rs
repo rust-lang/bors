@@ -610,6 +610,7 @@ impl GithubRepositoryClient {
                     name: run.name,
                     url: run.html_url.to_string(),
                     status,
+                    workflow_id: run.workflow_id,
                     created_at: run.created_at,
                     duration,
                 };

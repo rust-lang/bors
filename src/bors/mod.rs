@@ -12,8 +12,8 @@ pub use comment::Comment;
 pub use context::BorsContext;
 pub use handlers::{handle_bors_global_event, handle_bors_repository_event};
 use itertools::Itertools;
-use octocrab::models::RunId;
 use octocrab::models::workflows::Job;
+use octocrab::models::{RunId, WorkflowId};
 use regex::{Regex, RegexBuilder};
 use serde::Serialize;
 use std::collections::HashMap;
@@ -244,6 +244,8 @@ pub struct WorkflowRun {
     pub name: String,
     pub url: String,
     pub status: WorkflowStatus,
+    /// ID of the executed workflow file
+    pub workflow_id: WorkflowId,
     pub created_at: DateTime<Utc>,
     pub duration: Option<Duration>,
 }
