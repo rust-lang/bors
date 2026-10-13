@@ -1,5 +1,5 @@
 use crate::OAuthConfig;
-use crate::bors::PullRequestStatus;
+use crate::bors::{PullRequestStatus, now};
 use crate::database::WorkflowStatus;
 use crate::github::api::client::HideCommentReason;
 use crate::github::{CommitSha, GithubRepoName, PullRequestNumber};
@@ -1159,6 +1159,7 @@ pub struct WorkflowRun {
     duration: Duration,
     status: WorkflowStatus,
     event: String,
+    started_at: DateTime<Utc>,
 }
 
 impl WorkflowRun {
@@ -1173,6 +1174,7 @@ impl WorkflowRun {
             head_sha: branch.sha(),
             duration: Duration::from_secs(3600),
             event: "push".to_string(),
+            started_at: now(),
         }
     }
 
@@ -1212,6 +1214,10 @@ impl WorkflowRun {
     }
     pub fn set_duration(&mut self, duration: Duration) {
         self.duration = duration;
+    }
+
+    pub fn started_at(&self) -> DateTime<Utc> {
+        self.started_at
     }
 
     pub fn status(&self) -> WorkflowStatus {

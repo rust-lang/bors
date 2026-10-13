@@ -2,6 +2,7 @@ use crate::bors::{RepositoryState, WorkflowRun};
 use crate::database::WorkflowStatus;
 use crate::github::PullRequest;
 use crate::github::api::client::WorkflowSource;
+use chrono::Utc;
 use octocrab::models::WorkflowId;
 use std::collections::HashMap;
 
@@ -15,8 +16,10 @@ pub enum ApprovalNote {
 
 #[derive(Copy, Clone)]
 pub enum PrCiStatus {
-    /// Waiting for PR CI to finish.
-    Pending,
+    /// No PR CI workflows were started yet.
+    NotStarted,
+    /// Waiting for PR CI workflow to finish.
+    Pending { started_at: chrono::DateTime<Utc> },
     /// PR CI has finished successfully.
     Success,
     /// PR CI has failed.
@@ -58,13 +61,13 @@ pub async fn get_pr_ci_status(
     for runs in deduplicated.values_mut() {
         runs.sort_by_key(|run| run.created_at);
     }
-    let workflow_runs = deduplicated
+    let mut workflow_runs = deduplicated
         .into_values()
         .filter_map(|mut runs| runs.pop())
         .collect::<Vec<WorkflowRun>>();
 
     if workflow_runs.is_empty() {
-        return Ok(PrCiStatus::Pending);
+        return Ok(PrCiStatus::NotStarted);
     }
 
     if workflow_runs
@@ -74,11 +77,16 @@ pub async fn get_pr_ci_status(
         return Ok(PrCiStatus::Failed);
     }
 
-    if workflow_runs
+    // Sort from oldest to newest, to return the oldest pending workflow
+    workflow_runs.sort_by_key(|run| run.created_at);
+
+    if let Some(pending) = workflow_runs
         .iter()
-        .any(|run| run.status == WorkflowStatus::Pending)
+        .find(|run| run.status == WorkflowStatus::Pending)
     {
-        Ok(PrCiStatus::Pending)
+        Ok(PrCiStatus::Pending {
+            started_at: pending.created_at,
+        })
     } else {
         Ok(PrCiStatus::Success)
     }

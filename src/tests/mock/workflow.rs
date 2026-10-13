@@ -72,8 +72,8 @@ impl GitHubWorkflowRun {
             .unwrap()
         };
 
-        let completed_at = Utc::now();
-        let created_at = completed_at - run.duration();
+        let created_at = run.started_at();
+        let completed_at = created_at + run.duration();
 
         let status = match run.status() {
             WorkflowStatus::Pending => "pending",

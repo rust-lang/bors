@@ -198,7 +198,7 @@ pub static WAIT_FOR_MERGE_QUEUE_MERGE_ATTEMPT: TestSyncMarker = TestSyncMarker::
 pub static WAIT_FOR_WORKFLOW_COMPLETED_HANDLED: TestSyncMarker = TestSyncMarker::new();
 
 #[cfg(not(test))]
-fn now() -> DateTime<Utc> {
+pub(crate) fn now() -> DateTime<Utc> {
     Utc::now()
 }
 
@@ -208,7 +208,7 @@ thread_local! {
 }
 
 #[cfg(test)]
-fn now() -> DateTime<Utc> {
+pub(crate) fn now() -> DateTime<Utc> {
     MOCK_TIME.with(|time| time.borrow_mut().unwrap_or_else(Utc::now))
 }
 
