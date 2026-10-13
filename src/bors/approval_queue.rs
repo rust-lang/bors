@@ -1,7 +1,8 @@
 use crate::BorsContext;
 use crate::bors::approval::{PrCiStatus, get_pr_ci_status};
 use crate::bors::comment::{
-    tentative_approval_removed_comment, tentative_approval_timed_out_comment,
+    tentative_approval_pr_ci_not_started, tentative_approval_removed_comment,
+    tentative_approval_timed_out_comment,
 };
 use crate::bors::event::WorkflowRunCompleted;
 use crate::bors::handlers::unapprove_pr;
@@ -162,9 +163,13 @@ async fn process_tentative_approval(
         return Ok(());
     }
 
+    let timeout = repo.config.load().pr_ci_timeout;
     let pr_ci_status = get_pr_ci_status(repo, &gh_pr).await?;
     match pr_ci_status {
-        PrCiStatus::Pending => {
+        PrCiStatus::NotStarted => {
+            // Either no PR CI workflows have started yet, or GitHub is full of crap, and it claims
+            // that there are no workflows even if there are some. In any case, if it was too long
+            // since the last push, we time out the build.
             let Some(head_update_time) = repo
                 .client
                 .get_pull_request_head_update_time(&gh_pr)
@@ -177,11 +182,24 @@ async fn process_tentative_approval(
                 );
                 return Ok(());
             };
-
-            let timeout = repo.config.load().pr_ci_timeout;
-
-            // CI has timed out
             if elapsed_time_since(head_update_time) >= timeout {
+                unapprove_pr(repo, &ctx.db, pr, &PullRequestInfo::from(gh_pr.clone())).await?;
+                repo.client
+                    .post_comment(
+                        pr.number,
+                        tentative_approval_pr_ci_not_started(&gh_pr.head.sha, timeout),
+                        &ctx.db,
+                    )
+                    .await?;
+            }
+        }
+        PrCiStatus::Pending { started_at } => {
+            // A pending workflow has been running for too long
+            // Note: in this situation, it can actually happen that a lot of time (more than the
+            // timeout) has elapsed since the last push. But we check the start date of the pending
+            // workflow anyway, because sometimes PR CI is restarted several times, and we do not
+            // want to time out the approval even if the PR CI is in the middle of its execution.
+            if elapsed_time_since(started_at) >= timeout {
                 unapprove_pr(repo, &ctx.db, pr, &PullRequestInfo::from(gh_pr.clone())).await?;
                 repo.client
                     .post_comment(
@@ -325,8 +343,67 @@ mod tests {
             })
             .await;
 
-            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @":x: Commit pr-1-sha has been unapproved because PR CI timed out after `7200s`.");
+            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @":x: Commit pr-1-sha has been unapproved because PR CI has not started after `7200s`.");
             ctx.pr(()).await.expect_unapproved();
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
+    async fn refresh_confirms_tentative_approval_when_ci_is_restarted(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            ctx.modify_repo((), |repo| repo.default_pr_ci = false);
+            ctx.approve(()).await?;
+
+            with_mocked_time(Duration::from_secs(8000), async {
+                ctx.refresh_tentative_approvals().await;
+            })
+                .await;
+
+            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @":x: Commit pr-1-sha has been unapproved because PR CI has not started after `7200s`.");
+            ctx.pr(()).await.expect_unapproved();
+            Ok(())
+        })
+            .await;
+    }
+
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
+    async fn refresh_rejects_tentative_approval_when_ci_is_too_long(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            ctx.modify_repo((), |repo| repo.default_pr_ci = false);
+            ctx.approve(()).await?;
+
+            // Start one workflow
+            ctx.pr_ci_workflow(());
+
+            let start = Duration::from_secs(3600);
+            let workflow = with_mocked_time(start, async {
+                // Start another run an hour into the future
+                let workflow = ctx.pr_ci_workflow(());
+                ctx.modify_workflow(workflow, |w| w.set_duration(Duration::from_secs(5000)));
+                workflow
+            })
+            .await;
+
+            with_mocked_time(start + Duration::from_secs(4000), async {
+                // At this point it is more than 7200s from the last push, but the last pending
+                // workflow started only ~1 hour ago, so it should not time out the build.
+                ctx.refresh_tentative_approvals().await;
+            })
+            .await;
+
+            with_mocked_time(start + Duration::from_secs(6000), async {
+                // Now finish the workflow and refresh tentative approvals to confirm the approval
+                ctx.pr_workflow_success(workflow).await?;
+                ctx.refresh_tentative_approvals().await;
+                anyhow::Ok(())
+            })
+            .await?;
+
+            ctx.pr(())
+                .await
+                .expect_approved_by(&User::default_pr_author().name);
             Ok(())
         })
         .await;

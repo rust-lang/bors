@@ -85,7 +85,10 @@ pub(super) async fn command_approve(
         // usually what the user wants.
         // This situation should be very rare anyway.
         (ApprovalMode::Tentative, _) if already_approved => ApprovalMode::Eager,
-        (ApprovalMode::Tentative, PrCiStatus::Failed | PrCiStatus::Pending) => approval_mode,
+        (
+            ApprovalMode::Tentative,
+            PrCiStatus::Failed | PrCiStatus::Pending { .. } | PrCiStatus::NotStarted,
+        ) => approval_mode,
     };
 
     if matches!(approval_mode, ApprovalMode::Tentative)
