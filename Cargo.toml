@@ -28,7 +28,7 @@ rust_team_data = { git = "https://github.com/rust-lang/team" }
 
 # GitHub - jsonwebtoken is required at the non-reexported version of octocrab
 octocrab = { version = "=0.54.2", features = ["timeout", "stream"] }
-jsonwebtoken = "=10.3.0"
+jsonwebtoken = "=11.1.0"
 
 # Async
 futures = "0.3"
