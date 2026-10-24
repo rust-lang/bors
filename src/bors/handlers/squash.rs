@@ -153,7 +153,9 @@ pub(super) async fn command_squash(
         SquashCommitMessage::AutoGenerate => {
             generate_squashed_commit_msg(&pr.github.title, &commits)
         }
-        SquashCommitMessage::PullRequestDescription => pr.github.message.clone(),
+        SquashCommitMessage::PullRequestDescription => {
+            format!("{}\n\n{}", pr.github.title, pr.github.message)
+        }
         SquashCommitMessage::Explicit(msg) => msg,
     };
     let commit_msg = add_coauthored_authors(commit_msg, &commits, &commit_author);
@@ -782,6 +784,28 @@ mod tests {
     }
 
     #[sqlx::test(migrator = "crate::MIGRATOR")]
+    async fn squash_description_message(pool: sqlx::PgPool) {
+        run_test((pool, squash_state()), async |ctx: &mut BorsTester| {
+            ctx.modify_pr_in_gh((), |pr| {
+                pr.title = "This is the title".to_string();
+                pr.description = "This is the description.".to_string();
+                pr.add_commits(vec![Commit::from_sha("sha2")]);
+            });
+            ctx.post_comment("@bors squash msg=description").await?;
+            ctx.run_gitop_queue().await?;
+            ctx.expect_comments((), 2).await;
+            insta::assert_snapshot!(ctx.pr(()).await.get_gh_pr().head_branch_copy().get_commit().message(), @"
+            This is the title
+
+            This is the description.
+
+            Co-authored-by: git-user <git-user@git.com>
+            ");
+            Ok(())
+        }).await;
+    }
+
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn squash_add_coauthored_by(pool: sqlx::PgPool) {
         run_test((pool, squash_state()), async |ctx: &mut BorsTester| {
             ctx.modify_pr_in_gh((), |pr| {
@@ -902,6 +926,8 @@ also include this pls
             ctx.run_gitop_queue().await?;
             ctx.expect_comments((), 2).await;
             insta::assert_snapshot!(ctx.pr(()).await.get_gh_pr().head_branch_copy().get_commit().message(), @"
+            Title of PR 1
+
 
             include this
 
