@@ -5,9 +5,7 @@ use chrono::{DateTime, Utc};
 use octocrab::Octocrab;
 use octocrab::models::checks::CheckRun;
 use octocrab::models::pulls::MergeableState;
-use octocrab::models::repos::ActivityType;
 use octocrab::models::{CheckRunId, Repository, RunId, RunnerGroupId, UserId};
-use octocrab::params::Direction;
 use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
@@ -266,50 +264,6 @@ impl GithubRepositoryClient {
         Ok(prs)
     }
 
-    /// Return when the pull request's current head was last updated.
-    pub async fn get_pull_request_head_update_time(
-        &self,
-        pr: &PullRequest,
-    ) -> anyhow::Result<Option<DateTime<Utc>>> {
-        let head_repository = pr.head_repository.as_ref().unwrap_or(&self.repo_name);
-        let head_branch = pr.head.name.clone();
-        let head_sha = pr.head.sha.clone();
-
-        let update_time = perform_retryable(
-            "get_pull_request_head_update_time",
-            RetryMethod::default(),
-            || async {
-                let activities = self
-                    .client
-                    .repos(head_repository.owner(), head_repository.name())
-                    .list_activities()
-                    .direction(Direction::Descending)
-                    .per_page(100)
-                    .git_ref(&head_branch)
-                    .send()
-                    .await?;
-
-                anyhow::Ok(
-                    activities
-                        .items
-                        .into_iter()
-                        .filter(|activity| {
-                            matches!(
-                                activity.activity_type,
-                                ActivityType::Push
-                                    | ActivityType::ForcePush
-                                    | ActivityType::BranchCreation
-                            ) && activity.after == head_sha.as_ref()
-                        })
-                        .map(|activity| activity.timestamp)
-                        .max(),
-                )
-            },
-        )
-        .await?;
-        Ok(update_time)
-    }
-
     pub async fn get_pull_request_commits(
         &self,
         number: PullRequestNumber,
@@ -401,7 +355,7 @@ impl GithubRepositoryClient {
         branch: &str,
         sha: &CommitSha,
         force: ForcePush,
-    ) -> Result<(), crate::github::api::operations::BranchUpdateError> {
+    ) -> Result<(), BranchUpdateError> {
         perform_retryable("set_branch_to_sha", RetryMethod::default(), || async {
             set_branch_to_commit(self, branch.to_string(), sha, force)
                 .await

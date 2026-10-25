@@ -1,6 +1,7 @@
-use crate::bors::Comment;
 use crate::bors::RepositoryState;
+use crate::bors::approval::{PrCiStatus, get_pr_ci_status};
 use crate::bors::handlers::PullRequestData;
+use crate::bors::{Comment, now};
 use crate::database::{ApprovalStatus, MergeableState};
 use crate::database::{BuildStatus, PgDbClient};
 use std::sync::Arc;
@@ -16,18 +17,55 @@ pub(super) async fn command_info(
 
     // Approval info
     match &pr.db.approval_status {
-        ApprovalStatus::Approved(info) => writeln!(message, "- Approved by: `{}`", info.approver)?,
-        ApprovalStatus::TentativelyApproved(info) => {
-            writeln!(message, "- Tentatively approved by: `{}`", info.approver)?
-        }
+        ApprovalStatus::Approved(info) => writeln!(
+            message,
+            "- Commit {} approved by: `{}`",
+            info.sha, info.approver
+        )?,
+        ApprovalStatus::TentativelyApproved(info) => writeln!(
+            message,
+            "- Commit {} tentatively approved by: `{}`",
+            info.sha, info.approver
+        )?,
         ApprovalStatus::NotApproved => writeln!(message, "- Not Approved")?,
+    }
+
+    // PR CI status
+    let pr_ci_status = get_pr_ci_status(&repo, pr.github).await?;
+    write!(message, "- PR CI status: ")?;
+    match pr_ci_status {
+        PrCiStatus::NotStarted => {
+            writeln!(message, "not started")?;
+        }
+        PrCiStatus::Pending { started_at } => {
+            let now = now();
+            writeln!(
+                message,
+                "pending (elapsed: {:.0}s)",
+                now.signed_duration_since(started_at).as_seconds_f64()
+            )?;
+        }
+        PrCiStatus::Success => {
+            writeln!(message, "successful")?;
+        }
+        PrCiStatus::Failed => {
+            writeln!(message, "failed")?;
+        }
     }
 
     // Priority info
     if let Some(priority) = pr.db.priority {
         writeln!(message, "- Priority: {priority}")?;
-    } else {
-        writeln!(message, "- Priority: unset")?;
+    }
+
+    // Rollup mode
+    if let Some(rollup) = pr.db.rollup {
+        writeln!(message, "- Rollup mode: {rollup}")?;
+    }
+
+    // Note
+    if let Some(note) = pr.db.note() {
+        writeln!(message, "- Note: {note}")?;
     }
 
     // Mergeability state
@@ -42,12 +80,26 @@ pub(super) async fn command_info(
     )?;
 
     // Try build status
-    if let Some(try_build) = &pr.db.try_build
-        && try_build.status == BuildStatus::Pending
+    if let Some(build) = &pr.db.try_build
+        && build.status == BuildStatus::Pending
     {
         writeln!(message, "- Try build is in progress")?;
 
-        if let Ok(urls) = db.get_workflow_urls_for_build(try_build).await {
+        if let Ok(urls) = db.get_workflow_urls_for_build(build).await {
+            message.extend(
+                urls.into_iter()
+                    .map(|url| format!("\t- Workflow URL: {url}")),
+            );
+        }
+    }
+
+    // Unrolled build status
+    if let Some(build) = &pr.db.unrolled_build
+        && build.status == BuildStatus::Pending
+    {
+        writeln!(message, "- Unrolled build is in progress")?;
+
+        if let Ok(urls) = db.get_workflow_urls_for_build(build).await {
             message.extend(
                 urls.into_iter()
                     .map(|url| format!("\t- Workflow URL: {url}")),
@@ -102,7 +154,7 @@ mod tests {
                 @"
             ## Status of PR `1`
             - Not Approved
-            - Priority: unset
+            - PR CI status: successful
             - Mergeable: yes
             "
             );
@@ -121,8 +173,8 @@ mod tests {
                 ctx.get_next_comment_text(()).await?,
                 @"
             ## Status of PR `1`
-            - Approved by: `default-user`
-            - Priority: unset
+            - Commit pr-1-sha approved by: `default-user`
+            - PR CI status: successful
             - Mergeable: yes
             "
             );
@@ -146,8 +198,8 @@ mod tests {
                 ctx.get_next_comment_text(()).await?,
                 @"
             ## Status of PR `1`
-            - Tentatively approved by: `default-user`
-            - Priority: unset
+            - Commit pr-1-sha tentatively approved by: `default-user`
+            - PR CI status: pending (elapsed: 0s)
             - Mergeable: yes
             "
             );
@@ -168,6 +220,7 @@ mod tests {
                 @"
             ## Status of PR `1`
             - Not Approved
+            - PR CI status: successful
             - Priority: 5
             - Mergeable: yes
             "
@@ -189,7 +242,7 @@ mod tests {
                 @"
             ## Status of PR `1`
             - Not Approved
-            - Priority: unset
+            - PR CI status: successful
             - Mergeable: yes
             - Try build is in progress
             "
@@ -216,7 +269,8 @@ mod tests {
                 ctx.get_next_comment_text(()).await?,
                 @"
             ## Status of PR `1`
-            - Approved by: `default-user`
+            - Commit pr-1-sha approved by: `default-user`
+            - PR CI status: successful
             - Priority: 10
             - Mergeable: yes
             - Try build is in progress
@@ -240,8 +294,8 @@ mod tests {
                 ctx.get_next_comment_text(()).await?,
                 @"
             ## Status of PR `1`
-            - Approved by: `default-user`
-            - Priority: unset
+            - Commit pr-1-sha approved by: `default-user`
+            - PR CI status: successful
             - Mergeable: yes
             - Auto build has been cancelled
             "

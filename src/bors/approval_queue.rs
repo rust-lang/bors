@@ -1,8 +1,7 @@
 use crate::BorsContext;
 use crate::bors::approval::{PrCiStatus, get_pr_ci_status};
 use crate::bors::comment::{
-    tentative_approval_pr_ci_not_started, tentative_approval_removed_comment,
-    tentative_approval_timed_out_comment,
+    tentative_approval_removed_comment, tentative_approval_timed_out_comment,
 };
 use crate::bors::event::WorkflowRunCompleted;
 use crate::bors::handlers::unapprove_pr;
@@ -168,30 +167,34 @@ async fn process_tentative_approval(
     match pr_ci_status {
         PrCiStatus::NotStarted => {
             // Either no PR CI workflows have started yet, or GitHub is full of crap, and it claims
-            // that there are no workflows even if there are some. In any case, if it was too long
-            // since the last push, we time out the build.
-            let Some(head_update_time) = repo
-                .client
-                .get_pull_request_head_update_time(&gh_pr)
-                .await?
-            else {
-                tracing::warn!(
-                    "Could not find the last head update for PR #{} at commit {}",
-                    pr.number,
-                    gh_pr.head.sha
-                );
-                return Ok(());
-            };
-            if elapsed_time_since(head_update_time) >= timeout {
-                unapprove_pr(repo, &ctx.db, pr, &PullRequestInfo::from(gh_pr.clone())).await?;
-                repo.client
-                    .post_comment(
-                        pr.number,
-                        tentative_approval_pr_ci_not_started(&gh_pr.head.sha, timeout),
-                        &ctx.db,
-                    )
-                    .await?;
-            }
+            // that there are no workflows even if there are some. Both cases are problematic:
+            //
+            // If no PR CI workflows have started yet, we can hit a race condition where this
+            // background check runs *just* after the PR was approved, and if the PR has a HEAD
+            // commit that was pushed a long time ago, we can immediately time out the PR CI build
+            // by mistake. We could alleviate that by storing the time of the last approval into the
+            // DB, and measuring timeouts against that, rather than against the latest push.
+            // But we could still be timing out by mistake if GitHub returns us wrong data (see
+            // below).
+            //
+            // If some PR CI workflows have started, but GitHub has some issues, it can tell us that
+            // there are no workflows. In this case, we can time out PR CI by mistake. It seems that
+            // this situation is recoverable though, so waiting for GitHub to recover might not be
+            // a bad thing.
+            //
+            // Rather than timing out tentatively approved PRs by mistake (which we used to do
+            // before), we choose the opposite trade-off: we simply don't do anything if GitHub
+            // returns us an empty list of workflows.
+            // This means that if for some reason there are absolutely no workflows started on the
+            // pushed commit, or if GitHub gets stuck and never returns us any workflows for the
+            // given HEAD SHA, the PR could stay tentatively approved forever.
+            // But given that such a PR will be shown on the queue page, which is checked by people
+            // multiple times daily, that would likely be pretty obvious, and people could then
+            // repush a commit to it.
+            //
+            // If this turns out to be problematic, we could start recording the approval date into
+            // the DB, and then time out the tentative approval if no workflows appear e.g. a whole
+            // day after the approval, or something like that.
         }
         PrCiStatus::Pending { started_at } => {
             // A pending workflow has been running for too long
@@ -333,7 +336,7 @@ mod tests {
     }
 
     #[sqlx::test(migrator = "crate::MIGRATOR")]
-    async fn refresh_rejects_tentative_approval_when_ci_does_not_start(pool: sqlx::PgPool) {
+    async fn refresh_keeps_tentative_approval_when_ci_does_not_start(pool: sqlx::PgPool) {
         run_test(pool, async |ctx: &mut BorsTester| {
             ctx.modify_repo((), |repo| repo.default_pr_ci = false);
             ctx.approve(()).await?;
@@ -343,29 +346,11 @@ mod tests {
             })
             .await;
 
-            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @":x: Commit pr-1-sha has been unapproved because PR CI has not started after `7200s`.");
-            ctx.pr(()).await.expect_unapproved();
+            // Don't do anything, because it could be a false positive from GitHub
+            ctx.pr(()).await.expect_tentative_approval();
             Ok(())
         })
         .await;
-    }
-
-    #[sqlx::test(migrator = "crate::MIGRATOR")]
-    async fn refresh_confirms_tentative_approval_when_ci_is_restarted(pool: sqlx::PgPool) {
-        run_test(pool, async |ctx: &mut BorsTester| {
-            ctx.modify_repo((), |repo| repo.default_pr_ci = false);
-            ctx.approve(()).await?;
-
-            with_mocked_time(Duration::from_secs(8000), async {
-                ctx.refresh_tentative_approvals().await;
-            })
-                .await;
-
-            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @":x: Commit pr-1-sha has been unapproved because PR CI has not started after `7200s`.");
-            ctx.pr(()).await.expect_unapproved();
-            Ok(())
-        })
-            .await;
     }
 
     #[sqlx::test(migrator = "crate::MIGRATOR")]
