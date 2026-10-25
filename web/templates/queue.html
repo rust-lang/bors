@@ -33,6 +33,39 @@
         margin: 0 auto;
     }
 
+    :root {
+        /* progress bar */
+        --color-pending0: #f0de57;
+        /* pending indicator (barber pole) */
+        --color-pending1: #f0de57;
+        --color-pending2: #fbee97;
+        /* solid line after bar to indicate where it ends */
+        --color-pending3: #000000;
+        /* approved indicator */
+        --color-approved: #85db7b;
+
+        /* highlighted rows when hovering over rollup */
+        --color-inrollup: #c2d2ff;
+
+        /* rollup status: 1 is text/dot border, 2 is dot BG */
+        --color-positive1: #004200;
+        --color-positive2: #01ce01;
+        --color-negative1: #660000;
+        --color-negative2: #f97070;
+        --color-neutral1: #8c7e14;
+        --color-neutral2: #f0de57;
+        --color-special1: #4b0066;
+        --color-special2: #c266ff;
+
+        /* stopwatch icon */
+        --color-stopwatch: #000000;
+
+        /* create rollup modal */
+        --color-rollup-modal: #ffffff;
+        --color-rollup-modal-fade: rgba(0, 0, 0, 0.5);
+        --color-rollup-modal-border: #000000;
+    }
+
     .table-wrapper {
         overflow-x: auto;
         -webkit-overflow-scrolling: touch;
@@ -94,15 +127,15 @@
            clear that these items are the ones that are being tested
            right now. */
         bottom: -20px;
-        background-color: #F0DE57;
-        background-image: repeating-linear-gradient(135deg, #F0DE57 0, #F0DE57 4px, #FBEE97 4px, #FBEE97 8px, #F0DE57 0);
+        background-color: var(--color-pending1);
+        background-image: repeating-linear-gradient(135deg, var(--color-pending1) 0, var(--color-pending1) 4px, var(--color-pending2) 4px, var(--color-pending2) 8px, var(--color-pending1) 0);
         animation: barber-pole 1s linear infinite;
     }
     td.status[data-status="approved"]:before {
-        background-color: #85DB7B;
+        background-color: var(--color-approved);
     }
     table.dataTable > tbody > tr.rollup-hover:not(.selected) > td {
-        background-color: #C2D2FF;
+        background-color: var(--color-inrollup);
     }
     table.dataTable > tbody > tr.rollup-hover:nth-child(2n+1) > td {
         /* Override the striped overlay from DataTables to properly highlight the whole row when hovering a rollup PR */
@@ -125,29 +158,29 @@
         margin-right: 0.3em;
         border: 1px solid transparent;
     }
-    .positive { color: #004200; }
+    .positive { color: var(--color-positive1); }
     .positive:before {
-        background: #01ce01;
-        border-color: #016c01;
+        background: var(--color-positive2);
+        border-color: var(--color-positive1);
     }
-    .negative { color: #660000; }
+    .negative { color: var(--color-negative1); }
     .negative:before {
-        background: #f97070;
-        border-color: #ab0a0a;
+        background: var(--color-negative2);
+        border-color: var(--color-negative1);
     }
     .neutral {
-        color: #8C7E14;
+        color: var(--color-neutral);
     }
     .neutral:before {
-        background: #F0DE57;
-        border-color: #8C7E14;
+        background: var(--color-neutral2);
+        border-color: var(--color-neutral1);
     }
     .special1 {
-        color: #4B0066;
+        color: var(--color-special);
     }
     .special1:before {
-        background: #C266FF;
-        border-color: #3A004D;
+        background: var(--color-special2);
+        border-color: var(--color-special1);
     }
 
     #rollupModal {
@@ -158,14 +191,14 @@
         top: 0;
         width: 100%;
         height: 100%;
-        background-color: rgba(0,0,0,0.5);
+        background-color: var(--color-rollup-modal-fade);
     }
 
     #rollupModalContent {
-        background-color: white;
+        background-color: var(--color-rollup-modal);
         margin: 15% auto;
         padding: 1rem;
-        border: 1px solid black;
+        border: 1px solid var(--color-rollup-modal-border);
         max-width: 500px;
     }
 
@@ -194,7 +227,7 @@
         bottom: 0;
         width: 0;
         max-width: calc(100% - 6px);
-        background-color: #F0DE5750;
+        background-color: var(--color-pending0);
         z-index: 0;
         pointer-events: none;
         box-sizing: border-box;
@@ -207,7 +240,7 @@
         top: 0;
         bottom: 0;
         width: 2px;
-        background-color: black;
+        background-color: var(--color-pending3);
         z-index: 0;
         pointer-events: none;
     }
@@ -485,7 +518,7 @@ Average duration of recent auto builds: {{ format_duration(*average_build_durati
                               xmlns="http://www.w3.org/2000/svg"
                               width="16"
                               height="16"
-                              fill="black"
+                              style="fill: var(--color-stopwatch)"
                               viewBox="0 0 16 16"
                       >
                         <path d="M8.5 5.6a.5.5 0 1 0-1 0v2.9h-3a.5.5 0 0 0 0 1H8a.5.5 0 0 0 .5-.5z"/>
