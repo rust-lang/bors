@@ -24,6 +24,6 @@ jobs:
         with:
           persist-credentials: false
       - name: Deploy to ECS
-        uses: ./.github/actions/deploy-ecs
+        uses: $/.github/actions/deploy-ecs
         with:
           aws-iam: "392478027976"
