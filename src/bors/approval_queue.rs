@@ -231,7 +231,11 @@ async fn process_tentative_approval(
             repo.client
                 .post_comment(
                     pr.number,
-                    tentative_approval_removed_comment(&gh_pr.head.sha),
+                    tentative_approval_removed_comment(
+                        repo.repository(),
+                        &gh_pr,
+                        &approval_info.sha,
+                    ),
                     &ctx.db,
                 )
                 .await?;
@@ -276,7 +280,11 @@ mod tests {
 
             ctx.pr_workflow_failure(workflow).await?;
 
-            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @":x: Commit pr-1-sha has been unapproved due to PR CI failure. Reapprove it with `@bors r+ force` if you want to ignore the failure.");
+            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
+            :x: Commit pr-1-sha has been unapproved due to PR CI failure. Reapprove it with `@bors r+ force` if you want to ignore the failure.
+
+            [View changes since this unapproval](https://triagebot.infra.rust-lang.org/gh-changes-since/rust-lang/borstest/1/main-sha1..pr-1-sha)
+            ");
             ctx.pr(()).await.expect_unapproved();
             Ok(())
         })
@@ -311,7 +319,11 @@ mod tests {
 
             ctx.refresh_tentative_approvals().await;
 
-            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @":x: Commit pr-1-sha has been unapproved due to PR CI failure. Reapprove it with `@bors r+ force` if you want to ignore the failure.");
+            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
+            :x: Commit pr-1-sha has been unapproved due to PR CI failure. Reapprove it with `@bors r+ force` if you want to ignore the failure.
+
+            [View changes since this unapproval](https://triagebot.infra.rust-lang.org/gh-changes-since/rust-lang/borstest/1/main-sha1..pr-1-sha)
+            ");
             ctx.pr(()).await.expect_unapproved();
             Ok(())
         })

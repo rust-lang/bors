@@ -2,7 +2,7 @@ use crate::bors::approval::ApprovalNote;
 use crate::bors::command::CommandPrefix;
 use crate::bors::{FailedWorkflowRun, WorkflowRun};
 use crate::database::PullRequestModel;
-use crate::github::{GithubRepoName, GithubUser, PullRequestNumber};
+use crate::github::{GithubRepoName, GithubUser, PullRequest, PullRequestNumber};
 use crate::utils::text::pluralize;
 use crate::{TreeState, database::WorkflowStatus, github::CommitSha};
 use itertools::Itertools;
@@ -380,9 +380,20 @@ Reason for tree closure: `{reason}`
     Comment::new(comment)
 }
 
-pub fn tentative_approval_removed_comment(commit_sha: &CommitSha) -> Comment {
+pub fn tentative_approval_removed_comment(
+    repo: &GithubRepoName,
+    pr: &PullRequest,
+    approved_sha: &str,
+) -> Comment {
     Comment::new(format!(
-        ":x: Commit {commit_sha} has been unapproved due to PR CI failure. Reapprove it with `@bors r+ force` if you want to ignore the failure."
+        r#":x: Commit {approved_sha} has been unapproved due to PR CI failure. Reapprove it with `@bors r+ force` if you want to ignore the failure.
+
+[View changes since this unapproval](https://triagebot.infra.rust-lang.org/gh-changes-since/{}/{}/{}/{}..{approved_sha})
+"#,
+        repo.owner(),
+        repo.name(),
+        pr.number,
+        pr.base.sha
     ))
 }
 
