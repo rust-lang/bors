@@ -2,11 +2,11 @@ use anyhow::Context;
 use base64::Engine;
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
-use octocrab::Octocrab;
 use octocrab::models::checks::CheckRun;
 use octocrab::models::pulls::MergeableState;
 use octocrab::models::{CheckRunId, Repository, RunId, RunnerGroupId, UserId};
 use octocrab::params::checks::{CheckRunConclusion, CheckRunStatus};
+use octocrab::{Octocrab, Page};
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use std::time::Duration;
@@ -523,7 +523,18 @@ impl GithubRepositoryClient {
                     .branch(&pr.head.name)
                     .event("pull_request"),
             };
-            let response = request.send().await?;
+
+            // Octocrab doesn't expose `run_started_at`, so we create our own wrapper.
+            // And we also use a custom get method to change the return type.
+            #[derive(serde::Deserialize)]
+            struct RunResponse {
+                #[serde(flatten)]
+                run: Run,
+                run_started_at: DateTime<Utc>,
+            }
+
+            let route = format!("/repos/{}/{}/actions/runs", self.repo_name.owner(), self.repo_name.name());
+            let response: Page<RunResponse> = self.client.get(route, Some(&request)).await?;
             let mut runs = Vec::with_capacity(
                 response
                     .total_count
@@ -548,24 +559,24 @@ impl GithubRepositoryClient {
 
             let mut stream = std::pin::pin!(response.into_stream(&self.client));
             while let Some(run) = stream.try_next().await? {
-                let status = get_status(&run);
+                let status = get_status(&run.run);
                 let duration = match status {
                     WorkflowStatus::Pending => None,
                     WorkflowStatus::Success |
                     WorkflowStatus::Failure => {
-                        let start = run.created_at;
-                        let end = run.updated_at;
+                        let start = run.run_started_at;
+                        let end = run.run.updated_at;
                         (end - start).to_std().ok()
                     }
                 };
 
                 let run = WorkflowRun {
-                    id: run.id,
-                    name: run.name,
-                    url: run.html_url.to_string(),
+                    id: run.run.id,
+                    name: run.run.name,
+                    url: run.run.html_url.to_string(),
                     status,
-                    workflow_id: run.workflow_id,
-                    last_attempt_started_at: run.created_at,
+                    workflow_id: run.run.workflow_id,
+                    last_attempt_started_at: run.run_started_at,
                     duration,
                 };
                 runs.push(run);

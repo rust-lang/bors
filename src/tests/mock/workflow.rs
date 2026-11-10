@@ -45,6 +45,7 @@ pub struct GitHubWorkflowRun {
     #[serde(skip_serializing_if = "Option::is_none")]
     conclusion: Option<Conclusion>,
     created_at: DateTime<Utc>,
+    run_started_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
     url: Url,
     html_url: Url,
@@ -100,6 +101,7 @@ impl GitHubWorkflowRun {
             conclusion,
             created_at,
             updated_at: completed_at,
+            run_started_at: created_at,
             url: make_url("api."),
             html_url: make_url(""),
             jobs_url: make_url("jobs."),
