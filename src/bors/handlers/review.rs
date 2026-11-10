@@ -1,6 +1,6 @@
 use crate::bors::RepositoryState;
 use crate::bors::approval::{ApprovalNote, PrCiStatus, get_pr_ci_status};
-use crate::bors::command::{Approver, CommandPrefix, Delegatee};
+use crate::bors::command::{Approval, Approver, CommandPrefix, Delegatee, QueueProperties};
 use crate::bors::command::{DelegateCommand, RollupMode};
 use crate::bors::comment::{
     approve_blocking_labels_present, approve_merge_conflict_comment, approve_non_open_pr_comment,
@@ -24,35 +24,26 @@ use tracing::log;
 
 /// Approve a pull request.
 /// A pull request can only be approved by a user of sufficient authority.
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, clippy::collapsible_if)]
 pub(super) async fn command_approve(
     ctx: Arc<BorsContext>,
     repo: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
     pr: PullRequestData<'_>,
     author: &GithubUser,
-    approver: &Approver,
-    priority: Option<u32>,
-    rollup_mode: Option<RollupMode>,
-    note: Option<String>,
-    approval_mode: ApprovalMode,
+    info: QueueProperties,
     merge_queue_tx: &MergeQueueSender,
 ) -> anyhow::Result<()> {
-    tracing::info!("Approving PR {}", pr.number());
-    if !has_permission(&repo, author, pr, PermissionType::Review).await? {
-        deny_request(&repo, &db, pr.number(), author, PermissionType::Review).await?;
-        return Ok(());
-    };
+    assert!(
+        info.approval.is_some()
+            || info.priority.is_some()
+            || info.rollup.is_some()
+            || info.note.is_some()
+    );
 
-    if let Some(error_comment) = check_pr_approval_validity(pr, &repo).await? {
-        repo.client
-            .post_comment(pr.number(), error_comment, &db)
-            .await?;
-        return Ok(());
-    }
-
-    if let Some(rollup_mode) = rollup_mode
-        && rollup_mode != RollupMode::Never
+    // Do checks
+    if let Some(rollup) = info.rollup
+        && rollup != RollupMode::Never
         && db.is_rollup(pr.db).await?
     {
         repo.client
@@ -60,8 +51,57 @@ pub(super) async fn command_approve(
             .await?;
         return Ok(());
     }
+    if info.rollup.is_some() {
+        // Require only try for rollup commands, because rust-timer uses them, and we don't want to
+        // grant it approve permissions.
+        if !has_permission(&repo, author, pr, PermissionType::Try).await? {
+            deny_request(&repo, &db, pr.number(), author, PermissionType::Try).await?;
+            return Ok(());
+        }
+    }
+    if info.priority.is_some() || info.note.is_some() {
+        if !has_permission(&repo, author, pr, PermissionType::Review).await? {
+            deny_request(&repo, &db, pr.number(), author, PermissionType::Review).await?;
+            return Ok(());
+        };
+    }
 
-    let approver = match approver {
+    // Approve the PR & set rollup properties
+    if let Some(approval) = &info.approval {
+        command_approve_base(&ctx, &repo, &db, pr, author, approval, info.priority).await?;
+    }
+    db.set_pr_queue_properties(pr.db, info.rollup, info.priority, info.note)
+        .await?;
+
+    // Finish up
+    merge_queue_tx.notify().await?;
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn command_approve_base(
+    ctx: &BorsContext,
+    repo: &RepositoryState,
+    db: &PgDbClient,
+    pr: PullRequestData<'_>,
+    author: &GithubUser,
+    approval: &Approval,
+    priority: Option<u32>, // Does not apply the priority, but uses it for user feedback
+) -> anyhow::Result<()> {
+    tracing::info!("Approving PR {}", pr.number());
+    if !has_permission(repo, author, pr, PermissionType::Review).await? {
+        deny_request(repo, db, pr.number(), author, PermissionType::Review).await?;
+        return Ok(());
+    };
+
+    if let Some(error_comment) = check_pr_approval_validity(pr, repo).await? {
+        repo.client
+            .post_comment(pr.number(), error_comment, db)
+            .await?;
+        return Ok(());
+    }
+
+    let approver = match &approval.approver {
         Approver::Myself => author.username.clone(),
         Approver::Specified(approver) => normalize_approvers(approver).join(","),
     };
@@ -72,12 +112,12 @@ pub(super) async fn command_approve(
         sha: approved_sha.to_string(),
     };
 
-    let pr_ci_status = get_pr_ci_status(&repo, pr.github).await?;
+    let pr_ci_status = get_pr_ci_status(repo, pr.github).await?;
     let already_approved = pr.db.is_approved();
 
     // Potentially upgrade the tentative approval to a full approval
-    let approval_mode = match (approval_mode, pr_ci_status) {
-        (ApprovalMode::Eager, _) => approval_mode,
+    let approval_mode = match (&approval.mode, pr_ci_status) {
+        (ApprovalMode::Eager, _) => approval.mode,
         // If PR CI is already green, just treat the approval as eager
         (ApprovalMode::Tentative, PrCiStatus::Success) => ApprovalMode::Eager,
         // It is possible that the PR was already (fully) approved before.
@@ -88,7 +128,7 @@ pub(super) async fn command_approve(
         (
             ApprovalMode::Tentative,
             PrCiStatus::Failed | PrCiStatus::Pending { .. } | PrCiStatus::NotStarted,
-        ) => approval_mode,
+        ) => approval.mode,
     };
 
     if matches!(approval_mode, ApprovalMode::Tentative)
@@ -98,25 +138,17 @@ pub(super) async fn command_approve(
             .post_comment(
                 pr.number(),
                 tentative_approval_failed_comment(&pr.github.head.sha),
-                &db,
+                db,
             )
             .await?;
         return Ok(());
     }
 
-    db.approve(
-        pr.db,
-        approval_info,
-        approval_mode,
-        priority,
-        rollup_mode,
-        note,
-    )
-    .await?;
+    db.approve(pr.db, approval_info, approval_mode).await?;
 
     let priority = priority.or(pr.db.priority.map(|p| p as u32));
 
-    let unknown_reviewers = check_unknown_reviewers(&repo, &approver);
+    let unknown_reviewers = check_unknown_reviewers(repo, &approver);
     let had_failed_auto_build = pr
         .db
         .auto_build
@@ -177,12 +209,10 @@ pub(super) async fn command_approve(
         )
         .await?;
 
-    merge_queue_tx.notify().await?;
-
     // Eagerly apply label changes, even if we are only in a tentative approval, so that the PR
     // gets out of the reviewer's GitHub queue
     handle_label_trigger(
-        &repo,
+        repo,
         &PullRequestInfo::from(pr.github.clone()),
         LabelTrigger::Approved,
     )
@@ -312,36 +342,6 @@ pub(super) async fn command_unapprove(
     Ok(())
 }
 
-/// Set the priority of a pull request.
-/// Priority can only be set by a user of sufficient authority.
-pub(super) async fn command_set_priority(
-    repo_state: Arc<RepositoryState>,
-    db: Arc<PgDbClient>,
-    pr: PullRequestData<'_>,
-    author: &GithubUser,
-    priority: u32,
-    note: Option<String>,
-    merge_queue_tx: &MergeQueueSender,
-) -> anyhow::Result<()> {
-    if !has_permission(&repo_state, author, pr, PermissionType::Review).await? {
-        deny_request(
-            &repo_state,
-            &db,
-            pr.number(),
-            author,
-            PermissionType::Review,
-        )
-        .await?;
-        return Ok(());
-    };
-    db.set_priority(pr.db, priority, note).await?;
-
-    // Changing the priority can be interesting for the merge queue
-    merge_queue_tx.notify().await?;
-
-    Ok(())
-}
-
 /// Delegate permissions of a pull request to its author.
 pub(super) async fn command_delegate(
     repo_state: Arc<RepositoryState>,
@@ -433,33 +433,6 @@ pub(super) async fn command_undelegate(
         return Ok(());
     }
     db.undelegate(pr.db).await
-}
-
-/// Set the rollup of a pull request.
-/// rollup can only be set by a user of sufficient authority.
-pub(super) async fn command_set_rollup(
-    repo_state: Arc<RepositoryState>,
-    db: Arc<PgDbClient>,
-    pr: PullRequestData<'_>,
-    author: &GithubUser,
-    rollup_mode: RollupMode,
-    note: Option<String>,
-) -> anyhow::Result<()> {
-    // Require only try for rollup commands, because rust-timer uses them, and we don't want to
-    // grant it approve permissions.
-    if !has_permission(&repo_state, author, pr, PermissionType::Try).await? {
-        deny_request(&repo_state, &db, pr.number(), author, PermissionType::Try).await?;
-        return Ok(());
-    }
-    if rollup_mode != RollupMode::Never && db.is_rollup(pr.db).await? {
-        repo_state
-            .client
-            .post_comment(pr.number(), rollup_pr_invalid_rollup_mode_comment(), &db)
-            .await?;
-        return Ok(());
-    }
-
-    db.set_rollup_mode(pr.db, rollup_mode, note).await
 }
 
 pub struct TreeCloseArguments<'a> {

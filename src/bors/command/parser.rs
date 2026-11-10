@@ -1,10 +1,10 @@
 //! Defines parsers for bors commands.
 
 use crate::bors::command::{
-    ApproveInfo, Approver, BorsCommand, CommandPrefix, DelegateCommand, Delegatee, Parent,
-    SquashCommitMessage,
+    Approval, Approver, BorsCommand, CommandPrefix, DelegateCommand, Delegatee, Parent,
+    QueueProperties, SquashCommitMessage,
 };
-use crate::database::DelegatedPermission;
+use crate::database::{ApprovalMode, DelegatedPermission};
 use crate::github::CommitSha;
 use pulldown_cmark::{Event, Parser, Tag, TagEnd, TextMergeStream};
 use std::collections::HashSet;
@@ -306,6 +306,11 @@ fn parser_approval(command: &CommandPart<'_>, parts: &[CommandPart<'_>]) -> Pars
     let force = parts
         .iter()
         .any(|part| matches!(part, CommandPart::Bare("force")));
+    let mode = if force {
+        ApprovalMode::Eager
+    } else {
+        ApprovalMode::Tentative
+    };
 
     // parse the squash part of the approve_squash command
     if let Some(also_squash) = also_squash {
@@ -324,12 +329,11 @@ fn parser_approval(command: &CommandPart<'_>, parts: &[CommandPart<'_>]) -> Pars
                 BorsCommand::Squash { commit_message, .. } => {
                     return Some(Ok(BorsCommand::SquashApprove {
                         commit_message,
-                        approval_info: ApproveInfo {
-                            approver,
+                        approval_info: QueueProperties {
+                            approval: Some(Approval { approver, mode }),
                             priority,
                             rollup,
                             note,
-                            force,
                         },
                     }));
                 }
@@ -345,12 +349,11 @@ fn parser_approval(command: &CommandPart<'_>, parts: &[CommandPart<'_>]) -> Pars
         }
     }
 
-    Some(Ok(BorsCommand::Approve(ApproveInfo {
-        approver,
+    Some(Ok(BorsCommand::ChangeQueueState(QueueProperties {
+        approval: Some(Approval { approver, mode }),
         priority,
         rollup,
         note,
-        force,
     })))
 }
 
@@ -576,7 +579,12 @@ fn parser_priority(command: &CommandPart<'_>, parts: &[CommandPart<'_>]) -> Pars
         Err(e) => return Some(Err(e)),
     };
     let note = parse_note(parts);
-    Some(Ok(BorsCommand::SetPriority { priority, note }))
+    Some(Ok(BorsCommand::ChangeQueueState(QueueProperties {
+        approval: None,
+        priority: Some(priority),
+        rollup: None,
+        note,
+    })))
 }
 
 /// Parses the first occurrence of `rollup=<never/iffy/maybe/always>` in `parts`.
@@ -605,7 +613,12 @@ fn parser_rollup(command: &CommandPart<'_>, parts: &[CommandPart<'_>]) -> ParseR
         Err(e) => return Some(Err(e)),
     };
     let note = parse_note(parts);
-    Some(Ok(BorsCommand::SetRollupMode { rollup_mode, note }))
+    Some(Ok(BorsCommand::ChangeQueueState(QueueProperties {
+        approval: None,
+        rollup: Some(rollup_mode),
+        priority: None,
+        note,
+    })))
 }
 
 /// Parses "@bors info"
@@ -721,8 +734,8 @@ fn parser_squash(command: &CommandPart<'_>, parts: &[CommandPart<'_>]) -> ParseR
 
 #[cfg(test)]
 mod tests {
+    use crate::bors::command::BorsCommand;
     use crate::bors::command::parser::{CommandParseError, CommandParser};
-    use crate::bors::command::{ApproveInfo, Approver, BorsCommand};
 
     #[test]
     fn no_commands() {
@@ -772,16 +785,20 @@ mod tests {
     #[test]
     fn parse_default_approve() {
         let cmds = parse_commands("@bors r+");
-        insta::assert_debug_snapshot!(cmds, @r"
+        insta::assert_debug_snapshot!(cmds, @"
         [
             Ok(
-                Approve(
-                    ApproveInfo {
-                        approver: Myself,
+                ChangeQueueState(
+                    QueueProperties {
+                        approval: Some(
+                            Approval {
+                                approver: Myself,
+                                mode: Tentative,
+                            },
+                        ),
                         priority: None,
                         rollup: None,
                         note: None,
-                        force: false,
                     },
                 ),
             ),
@@ -792,16 +809,26 @@ mod tests {
     #[test]
     fn parse_force_approve() {
         let cmds = parse_commands("@bors r+ force p=1");
-        assert_eq!(
-            cmds,
-            vec![Ok(BorsCommand::Approve(ApproveInfo {
-                approver: Approver::Myself,
-                priority: Some(1),
-                rollup: None,
-                note: None,
-                force: true,
-            }))]
-        );
+        assert_eq!(cmds.len(), 1);
+        insta::assert_debug_snapshot!(cmds[0], @"
+        Ok(
+            ChangeQueueState(
+                QueueProperties {
+                    approval: Some(
+                        Approval {
+                            approver: Myself,
+                            mode: Eager,
+                        },
+                    ),
+                    priority: Some(
+                        1,
+                    ),
+                    rollup: None,
+                    note: None,
+                },
+            ),
+        )
+        ");
     }
 
     #[test]
@@ -810,15 +837,19 @@ mod tests {
         assert_eq!(cmds.len(), 1);
         insta::assert_debug_snapshot!(cmds[0], @r#"
         Ok(
-            Approve(
-                ApproveInfo {
-                    approver: Specified(
-                        "user1",
+            ChangeQueueState(
+                QueueProperties {
+                    approval: Some(
+                        Approval {
+                            approver: Specified(
+                                "user1",
+                            ),
+                            mode: Tentative,
+                        },
                     ),
                     priority: None,
                     rollup: None,
                     note: None,
-                    force: false,
                 },
             ),
         )
@@ -831,15 +862,19 @@ mod tests {
         assert_eq!(cmds.len(), 1);
         insta::assert_debug_snapshot!(cmds[0], @r#"
         Ok(
-            Approve(
-                ApproveInfo {
-                    approver: Specified(
-                        "user1,user2",
+            ChangeQueueState(
+                QueueProperties {
+                    approval: Some(
+                        Approval {
+                            approver: Specified(
+                                "user1,user2",
+                            ),
+                            mode: Tentative,
+                        },
                     ),
                     priority: None,
                     rollup: None,
                     note: None,
-                    force: false,
                 },
             ),
         )
@@ -878,15 +913,19 @@ mod tests {
         insta::assert_debug_snapshot!(cmds, @"
         [
             Ok(
-                Approve(
-                    ApproveInfo {
-                        approver: Myself,
+                ChangeQueueState(
+                    QueueProperties {
+                        approval: Some(
+                            Approval {
+                                approver: Myself,
+                                mode: Tentative,
+                            },
+                        ),
                         priority: Some(
                             1,
                         ),
                         rollup: None,
                         note: None,
-                        force: false,
                     },
                 ),
             ),
@@ -900,17 +939,21 @@ mod tests {
         insta::assert_debug_snapshot!(cmds, @r#"
         [
             Ok(
-                Approve(
-                    ApproveInfo {
-                        approver: Specified(
-                            "user1",
+                ChangeQueueState(
+                    QueueProperties {
+                        approval: Some(
+                            Approval {
+                                approver: Specified(
+                                    "user1",
+                                ),
+                                mode: Tentative,
+                            },
                         ),
                         priority: Some(
                             2,
                         ),
                         rollup: None,
                         note: None,
-                        force: false,
                     },
                 ),
             ),
@@ -929,30 +972,38 @@ mod tests {
         insta::assert_debug_snapshot!(cmds, @r#"
         [
             Ok(
-                Approve(
-                    ApproveInfo {
-                        approver: Myself,
+                ChangeQueueState(
+                    QueueProperties {
+                        approval: Some(
+                            Approval {
+                                approver: Myself,
+                                mode: Tentative,
+                            },
+                        ),
                         priority: Some(
                             1,
                         ),
                         rollup: None,
                         note: None,
-                        force: false,
                     },
                 ),
             ),
             Ok(
-                Approve(
-                    ApproveInfo {
-                        approver: Specified(
-                            "user2",
+                ChangeQueueState(
+                    QueueProperties {
+                        approval: Some(
+                            Approval {
+                                approver: Specified(
+                                    "user2",
+                                ),
+                                mode: Tentative,
+                            },
                         ),
                         priority: Some(
                             2,
                         ),
                         rollup: None,
                         note: None,
-                        force: false,
                     },
                 ),
             ),
@@ -979,17 +1030,21 @@ mod tests {
         insta::assert_debug_snapshot!(cmds, @r#"
         [
             Ok(
-                Approve(
-                    ApproveInfo {
-                        approver: Specified(
-                            "user1",
+                ChangeQueueState(
+                    QueueProperties {
+                        approval: Some(
+                            Approval {
+                                approver: Specified(
+                                    "user1",
+                                ),
+                                mode: Tentative,
+                            },
                         ),
                         priority: Some(
                             2,
                         ),
                         rollup: None,
                         note: None,
-                        force: false,
                     },
                 ),
             ),
@@ -1041,10 +1096,16 @@ mod tests {
         let cmds = parse_commands("@bors p=5");
         insta::assert_debug_snapshot!(cmds[0], @"
         Ok(
-            SetPriority {
-                priority: 5,
-                note: None,
-            },
+            ChangeQueueState(
+                QueueProperties {
+                    approval: None,
+                    priority: Some(
+                        5,
+                    ),
+                    rollup: None,
+                    note: None,
+                },
+            ),
         )
         ");
     }
@@ -1054,10 +1115,16 @@ mod tests {
         let cmds = parse_commands("@bors priority=5");
         insta::assert_debug_snapshot!(cmds[0], @"
         Ok(
-            SetPriority {
-                priority: 5,
-                note: None,
-            },
+            ChangeQueueState(
+                QueueProperties {
+                    approval: None,
+                    priority: Some(
+                        5,
+                    ),
+                    rollup: None,
+                    note: None,
+                },
+            ),
         )
         ");
     }
@@ -1117,12 +1184,18 @@ mod tests {
         insta::assert_debug_snapshot!(cmds, @r#"
         [
             Ok(
-                SetPriority {
-                    priority: 1,
-                    note: Some(
-                        "a",
-                    ),
-                },
+                ChangeQueueState(
+                    QueueProperties {
+                        approval: None,
+                        priority: Some(
+                            1,
+                        ),
+                        rollup: None,
+                        note: Some(
+                            "a",
+                        ),
+                    },
+                ),
             ),
         ]
         "#);
@@ -1134,12 +1207,18 @@ mod tests {
         insta::assert_debug_snapshot!(cmds, @r#"
         [
             Ok(
-                SetPriority {
-                    priority: 1,
-                    note: Some(
-                        "a",
-                    ),
-                },
+                ChangeQueueState(
+                    QueueProperties {
+                        approval: None,
+                        priority: Some(
+                            1,
+                        ),
+                        rollup: None,
+                        note: Some(
+                            "a",
+                        ),
+                    },
+                ),
             ),
         ]
         "#);
@@ -1151,15 +1230,19 @@ mod tests {
         insta::assert_debug_snapshot!(cmds, @"
         [
             Ok(
-                Approve(
-                    ApproveInfo {
-                        approver: Myself,
+                ChangeQueueState(
+                    QueueProperties {
+                        approval: Some(
+                            Approval {
+                                approver: Myself,
+                                mode: Tentative,
+                            },
+                        ),
                         priority: None,
                         rollup: Some(
                             Always,
                         ),
                         note: None,
-                        force: false,
                     },
                 ),
             ),
@@ -1173,17 +1256,21 @@ mod tests {
         insta::assert_debug_snapshot!(cmds, @r#"
         [
             Ok(
-                Approve(
-                    ApproveInfo {
-                        approver: Specified(
-                            "user1",
+                ChangeQueueState(
+                    QueueProperties {
+                        approval: Some(
+                            Approval {
+                                approver: Specified(
+                                    "user1",
+                                ),
+                                mode: Tentative,
+                            },
                         ),
                         priority: None,
                         rollup: Some(
                             Never,
                         ),
                         note: None,
-                        force: false,
                     },
                 ),
             ),
@@ -1197,17 +1284,21 @@ mod tests {
         insta::assert_debug_snapshot!(cmds, @r#"
         [
             Ok(
-                Approve(
-                    ApproveInfo {
-                        approver: Specified(
-                            "user1",
+                ChangeQueueState(
+                    QueueProperties {
+                        approval: Some(
+                            Approval {
+                                approver: Specified(
+                                    "user1",
+                                ),
+                                mode: Tentative,
+                            },
                         ),
                         priority: None,
                         rollup: Some(
                             Always,
                         ),
                         note: None,
-                        force: false,
                     },
                 ),
             ),
@@ -1221,17 +1312,21 @@ mod tests {
         insta::assert_debug_snapshot!(cmds, @r#"
         [
             Ok(
-                Approve(
-                    ApproveInfo {
-                        approver: Specified(
-                            "user1",
+                ChangeQueueState(
+                    QueueProperties {
+                        approval: Some(
+                            Approval {
+                                approver: Specified(
+                                    "user1",
+                                ),
+                                mode: Tentative,
+                            },
                         ),
                         priority: None,
                         rollup: Some(
                             Maybe,
                         ),
                         note: None,
-                        force: false,
                     },
                 ),
             ),
@@ -1250,30 +1345,38 @@ mod tests {
         insta::assert_debug_snapshot!(cmds, @r#"
         [
             Ok(
-                Approve(
-                    ApproveInfo {
-                        approver: Myself,
+                ChangeQueueState(
+                    QueueProperties {
+                        approval: Some(
+                            Approval {
+                                approver: Myself,
+                                mode: Tentative,
+                            },
+                        ),
                         priority: None,
                         rollup: Some(
                             Always,
                         ),
                         note: None,
-                        force: false,
                     },
                 ),
             ),
             Ok(
-                Approve(
-                    ApproveInfo {
-                        approver: Specified(
-                            "user2",
+                ChangeQueueState(
+                    QueueProperties {
+                        approval: Some(
+                            Approval {
+                                approver: Specified(
+                                    "user2",
+                                ),
+                                mode: Tentative,
+                            },
                         ),
                         priority: None,
                         rollup: Some(
                             Iffy,
                         ),
                         note: None,
-                        force: false,
                     },
                 ),
             ),
@@ -1313,10 +1416,16 @@ mod tests {
         insta::assert_debug_snapshot!(cmds, @"
         [
             Ok(
-                SetRollupMode {
-                    rollup_mode: Always,
-                    note: None,
-                },
+                ChangeQueueState(
+                    QueueProperties {
+                        approval: None,
+                        priority: None,
+                        rollup: Some(
+                            Always,
+                        ),
+                        note: None,
+                    },
+                ),
             ),
         ]
         ");
@@ -1328,10 +1437,16 @@ mod tests {
         insta::assert_debug_snapshot!(cmds, @"
         [
             Ok(
-                SetRollupMode {
-                    rollup_mode: Maybe,
-                    note: None,
-                },
+                ChangeQueueState(
+                    QueueProperties {
+                        approval: None,
+                        priority: None,
+                        rollup: Some(
+                            Maybe,
+                        ),
+                        note: None,
+                    },
+                ),
             ),
         ]
         ");
@@ -1343,10 +1458,16 @@ mod tests {
         insta::assert_debug_snapshot!(cmds, @"
         [
             Ok(
-                SetRollupMode {
-                    rollup_mode: Always,
-                    note: None,
-                },
+                ChangeQueueState(
+                    QueueProperties {
+                        approval: None,
+                        priority: None,
+                        rollup: Some(
+                            Always,
+                        ),
+                        note: None,
+                    },
+                ),
             ),
         ]
         ");
@@ -1384,12 +1505,18 @@ mod tests {
         insta::assert_debug_snapshot!(cmds, @r#"
         [
             Ok(
-                SetRollupMode {
-                    rollup_mode: Always,
-                    note: Some(
-                        "a",
-                    ),
-                },
+                ChangeQueueState(
+                    QueueProperties {
+                        approval: None,
+                        priority: None,
+                        rollup: Some(
+                            Always,
+                        ),
+                        note: Some(
+                            "a",
+                        ),
+                    },
+                ),
             ),
         ]
         "#);
@@ -1401,12 +1528,18 @@ mod tests {
         insta::assert_debug_snapshot!(cmds, @r#"
         [
             Ok(
-                SetRollupMode {
-                    rollup_mode: Always,
-                    note: Some(
-                        "a",
-                    ),
-                },
+                ChangeQueueState(
+                    QueueProperties {
+                        approval: None,
+                        priority: None,
+                        rollup: Some(
+                            Always,
+                        ),
+                        note: Some(
+                            "a",
+                        ),
+                    },
+                ),
             ),
         ]
         "#);
@@ -1418,9 +1551,14 @@ mod tests {
         insta::assert_debug_snapshot!(cmds, @"
         [
             Ok(
-                Approve(
-                    ApproveInfo {
-                        approver: Myself,
+                ChangeQueueState(
+                    QueueProperties {
+                        approval: Some(
+                            Approval {
+                                approver: Myself,
+                                mode: Tentative,
+                            },
+                        ),
                         priority: Some(
                             1,
                         ),
@@ -1428,7 +1566,6 @@ mod tests {
                             Always,
                         ),
                         note: None,
-                        force: false,
                     },
                 ),
             ),
@@ -1442,9 +1579,14 @@ mod tests {
         insta::assert_debug_snapshot!(cmds, @"
         [
             Ok(
-                Approve(
-                    ApproveInfo {
-                        approver: Myself,
+                ChangeQueueState(
+                    QueueProperties {
+                        approval: Some(
+                            Approval {
+                                approver: Myself,
+                                mode: Tentative,
+                            },
+                        ),
                         priority: Some(
                             1,
                         ),
@@ -1452,7 +1594,6 @@ mod tests {
                             Iffy,
                         ),
                         note: None,
-                        force: false,
                     },
                 ),
             ),
@@ -1466,9 +1607,14 @@ mod tests {
         insta::assert_debug_snapshot!(cmds, @r#"
         [
             Ok(
-                Approve(
-                    ApproveInfo {
-                        approver: Myself,
+                ChangeQueueState(
+                    QueueProperties {
+                        approval: Some(
+                            Approval {
+                                approver: Myself,
+                                mode: Tentative,
+                            },
+                        ),
                         priority: Some(
                             1,
                         ),
@@ -1478,7 +1624,6 @@ mod tests {
                         note: Some(
                             "foo bar",
                         ),
-                        force: false,
                     },
                 ),
             ),
@@ -2222,12 +2367,16 @@ for the crater",
             Ok(
                 SquashApprove {
                     commit_message: AutoGenerate,
-                    approval_info: ApproveInfo {
-                        approver: Myself,
+                    approval_info: QueueProperties {
+                        approval: Some(
+                            Approval {
+                                approver: Myself,
+                                mode: Tentative,
+                            },
+                        ),
                         priority: None,
                         rollup: None,
                         note: None,
-                        force: false,
                     },
                 },
             ),
@@ -2245,12 +2394,16 @@ for the crater",
                     commit_message: Explicit(
                         "foo",
                     ),
-                    approval_info: ApproveInfo {
-                        approver: Myself,
+                    approval_info: QueueProperties {
+                        approval: Some(
+                            Approval {
+                                approver: Myself,
+                                mode: Tentative,
+                            },
+                        ),
                         priority: None,
                         rollup: None,
                         note: None,
-                        force: false,
                     },
                 },
             ),
@@ -2268,12 +2421,16 @@ for the crater",
                     commit_message: Explicit(
                         "foo",
                     ),
-                    approval_info: ApproveInfo {
-                        approver: Myself,
+                    approval_info: QueueProperties {
+                        approval: Some(
+                            Approval {
+                                approver: Myself,
+                                mode: Tentative,
+                            },
+                        ),
                         priority: None,
                         rollup: None,
                         note: None,
-                        force: false,
                     },
                 },
             ),
@@ -2291,12 +2448,16 @@ for the crater",
                     commit_message: Explicit(
                         "foo bar baz",
                     ),
-                    approval_info: ApproveInfo {
-                        approver: Myself,
+                    approval_info: QueueProperties {
+                        approval: Some(
+                            Approval {
+                                approver: Myself,
+                                mode: Tentative,
+                            },
+                        ),
                         priority: None,
                         rollup: None,
                         note: None,
-                        force: false,
                     },
                 },
             ),
@@ -2312,12 +2473,16 @@ for the crater",
             Ok(
                 SquashApprove {
                     commit_message: PullRequestDescription,
-                    approval_info: ApproveInfo {
-                        approver: Myself,
+                    approval_info: QueueProperties {
+                        approval: Some(
+                            Approval {
+                                approver: Myself,
+                                mode: Tentative,
+                            },
+                        ),
                         priority: None,
                         rollup: None,
                         note: None,
-                        force: false,
                     },
                 },
             ),
@@ -2333,8 +2498,13 @@ for the crater",
             Ok(
                 SquashApprove {
                     commit_message: PullRequestDescription,
-                    approval_info: ApproveInfo {
-                        approver: Myself,
+                    approval_info: QueueProperties {
+                        approval: Some(
+                            Approval {
+                                approver: Myself,
+                                mode: Tentative,
+                            },
+                        ),
                         priority: Some(
                             1,
                         ),
@@ -2342,7 +2512,6 @@ for the crater",
                             Always,
                         ),
                         note: None,
-                        force: false,
                     },
                 },
             ),
@@ -2375,12 +2544,16 @@ for the crater",
                     commit_message: Explicit(
                         "foo",
                     ),
-                    approval_info: ApproveInfo {
-                        approver: Myself,
+                    approval_info: QueueProperties {
+                        approval: Some(
+                            Approval {
+                                approver: Myself,
+                                mode: Tentative,
+                            },
+                        ),
                         priority: None,
                         rollup: None,
                         note: None,
-                        force: false,
                     },
                 },
             ),
@@ -2398,14 +2571,18 @@ for the crater",
                 commit_message: Explicit(
                     "foo",
                 ),
-                approval_info: ApproveInfo {
-                    approver: Myself,
+                approval_info: QueueProperties {
+                    approval: Some(
+                        Approval {
+                            approver: Myself,
+                            mode: Tentative,
+                        },
+                    ),
                     priority: Some(
                         1,
                     ),
                     rollup: None,
                     note: None,
-                    force: false,
                 },
             },
         )
@@ -2420,14 +2597,18 @@ for the crater",
         Ok(
             SquashApprove {
                 commit_message: AutoGenerate,
-                approval_info: ApproveInfo {
-                    approver: Myself,
+                approval_info: QueueProperties {
+                    approval: Some(
+                        Approval {
+                            approver: Myself,
+                            mode: Tentative,
+                        },
+                    ),
                     priority: Some(
                         1,
                     ),
                     rollup: None,
                     note: None,
-                    force: false,
                 },
             },
         )
@@ -2442,14 +2623,18 @@ for the crater",
         Ok(
             SquashApprove {
                 commit_message: AutoGenerate,
-                approval_info: ApproveInfo {
-                    approver: Myself,
+                approval_info: QueueProperties {
+                    approval: Some(
+                        Approval {
+                            approver: Myself,
+                            mode: Tentative,
+                        },
+                    ),
                     priority: Some(
                         1,
                     ),
                     rollup: None,
                     note: None,
-                    force: false,
                 },
             },
         )
@@ -2509,15 +2694,19 @@ I am markdown HTML comment
         assert_eq!(cmds.len(), 1);
         insta::assert_debug_snapshot!(cmds[0], @r#"
         Ok(
-            Approve(
-                ApproveInfo {
-                    approver: Specified(
-                        "čaujaksemáš",
+            ChangeQueueState(
+                QueueProperties {
+                    approval: Some(
+                        Approval {
+                            approver: Specified(
+                                "čaujaksemáš",
+                            ),
+                            mode: Tentative,
+                        },
                     ),
                     priority: None,
                     rollup: None,
                     note: None,
-                    force: false,
                 },
             ),
         )

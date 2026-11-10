@@ -482,31 +482,20 @@ pub(crate) async fn approve_pull_request(
     pr_id: i32,
     approval_info: ApprovalInfo,
     approval_mode: ApprovalMode,
-    priority: Option<u32>,
-    rollup: Option<RollupMode>,
-    note: Option<String>,
 ) -> anyhow::Result<()> {
-    let priority_i32 = priority.map(|p| p as i32);
     let tentative = approval_mode == ApprovalMode::Tentative;
-
     measure_db_query("approve_pull_request", || async {
         sqlx::query!(
             r#"
 UPDATE pull_request
 SET approved_by = $1,
     approved_sha = $2,
-    approval_tentative = $3,
-    priority = COALESCE($4, priority),
-    rollup = COALESCE($5, rollup),
-    note = COALESCE($6, note)
-WHERE id = $7
+    approval_tentative = $3
+WHERE id = $4
 "#,
             approval_info.approver,
             approval_info.sha,
             tentative,
-            priority_i32,
-            rollup as Option<RollupMode>,
-            note,
             pr_id,
         )
         .execute(executor)
@@ -920,46 +909,25 @@ pub(crate) async fn update_workflow_status(
     .await
 }
 
-pub(crate) async fn set_pr_priority(
+pub(crate) async fn set_pr_queue_properties(
     executor: impl PgExecutor<'_>,
     pr_id: i32,
-    priority: u32,
+    rollup: Option<RollupMode>,
+    priority: Option<u32>,
     note: Option<String>,
 ) -> anyhow::Result<()> {
-    measure_db_query("set_pr_priority", || async {
+    measure_db_query("set_pr_approve_properties", || async {
         sqlx::query!(
             r#"
 UPDATE pull_request
-SET priority = $1,
-    note = COALESCE($2, note)
-WHERE id = $3"#,
-            priority as i32,
+SET priority = COALESCE($1, priority),
+    rollup = COALESCE($2, rollup),
+    note = COALESCE($3, note)
+WHERE id = $4"#,
+            priority.map(|v| v as i32),
+            rollup as Option<RollupMode>,
             note,
-            pr_id,
-        )
-        .execute(executor)
-        .await?;
-        Ok(())
-    })
-    .await
-}
-
-pub(crate) async fn set_pr_rollup_mode(
-    executor: impl PgExecutor<'_>,
-    pr_id: i32,
-    rollup: RollupMode,
-    note: Option<String>,
-) -> anyhow::Result<()> {
-    measure_db_query("set_pr_rollup", || async {
-        sqlx::query!(
-            r#"
-UPDATE pull_request
-SET rollup = $1,
-    note = COALESCE($2, note)
-WHERE id = $3"#,
-            rollup as RollupMode,
-            note,
-            pr_id,
+            pr_id
         )
         .execute(executor)
         .await?;
