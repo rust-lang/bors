@@ -59,7 +59,7 @@ pub async fn get_pr_ci_status(
     // the run attempt, but as noted above, this does not always work. So we simply order them by
     // creation date and then take the latest one.
     for runs in deduplicated.values_mut() {
-        runs.sort_by_key(|run| run.created_at);
+        runs.sort_by_key(|run| run.last_attempt_started_at);
     }
     let mut workflow_runs = deduplicated
         .into_values()
@@ -78,14 +78,14 @@ pub async fn get_pr_ci_status(
     }
 
     // Sort from oldest to newest, to return the oldest pending workflow
-    workflow_runs.sort_by_key(|run| run.created_at);
+    workflow_runs.sort_by_key(|run| run.last_attempt_started_at);
 
     if let Some(pending) = workflow_runs
         .iter()
         .find(|run| run.status == WorkflowStatus::Pending)
     {
         Ok(PrCiStatus::Pending {
-            started_at: pending.created_at,
+            started_at: pending.last_attempt_started_at,
         })
     } else {
         Ok(PrCiStatus::Success)

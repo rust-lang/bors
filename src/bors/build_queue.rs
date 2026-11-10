@@ -344,10 +344,13 @@ async fn maybe_complete_build(
 
     let compute_duration = || {
         // Compute the time when the earliest workflow started, and when the latest workflow ended
-        let start = workflow_runs.iter().map(|run| run.created_at).min()?;
+        let start = workflow_runs
+            .iter()
+            .map(|run| run.last_attempt_started_at)
+            .min()?;
         let end = workflow_runs
             .iter()
-            .filter_map(|run| run.duration.map(|d| run.created_at + d))
+            .filter_map(|run| run.duration.map(|d| run.last_attempt_started_at + d))
             .max()?;
 
         // The build duration is the difference between those two
