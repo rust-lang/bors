@@ -565,7 +565,7 @@ impl GithubRepositoryClient {
                     url: run.html_url.to_string(),
                     status,
                     workflow_id: run.workflow_id,
-                    created_at: run.created_at,
+                    last_attempt_started_at: run.created_at,
                     duration,
                 };
                 runs.push(run);

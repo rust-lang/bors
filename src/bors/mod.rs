@@ -246,7 +246,8 @@ pub struct WorkflowRun {
     pub status: WorkflowStatus,
     /// ID of the executed workflow file
     pub workflow_id: WorkflowId,
-    pub created_at: DateTime<Utc>,
+    /// Returns the time of the latest run attempt of this run.
+    pub last_attempt_started_at: DateTime<Utc>,
     pub duration: Option<Duration>,
 }
 
