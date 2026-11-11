@@ -41,7 +41,7 @@ pub mod process;
 pub mod unroll_queue;
 
 use crate::PgDbClient;
-use crate::bors::command::{ApproveInfo, BorsCommand};
+use crate::bors::command::{BorsCommand, QueueProperties};
 use crate::bors::comment::CommentTag;
 use crate::database::{PullRequestModel, WorkflowStatus};
 use crate::github::api::operations::CommitAuthor;
@@ -77,12 +77,11 @@ pub fn format_help() -> &'static str {
     // We do a no-op destructuring of `BorsCommand` to make it harder to modify help in case new
     // commands are added though.
     match BorsCommand::Ping {
-        BorsCommand::Approve(ApproveInfo {
-            approver: _,
+        BorsCommand::ChangeQueueState(QueueProperties {
+            approval: _,
             rollup: _,
             priority: _,
             note: _,
-            force: _,
         }) => {}
         BorsCommand::Unapprove => {}
         BorsCommand::Help => {}
@@ -93,17 +92,9 @@ pub fn format_help() -> &'static str {
             nolimit: _,
         } => {}
         BorsCommand::TryCancel => {}
-        BorsCommand::SetPriority {
-            priority: _,
-            note: _,
-        } => {}
         BorsCommand::Info => {}
         BorsCommand::Delegate(_) => {}
         BorsCommand::Undelegate => {}
-        BorsCommand::SetRollupMode {
-            rollup_mode: _,
-            note: _,
-        } => {}
         BorsCommand::OpenTree => {}
         BorsCommand::TreeClosed { .. } => {}
         BorsCommand::Retry => {}

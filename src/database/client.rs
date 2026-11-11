@@ -6,8 +6,8 @@ use super::operations::{
     get_pull_request, get_pull_request_by_id, get_repository, get_repository_by_name,
     get_rollup_members, get_rollup_members_for_unrolling, get_tagged_bot_comments,
     get_workflow_urls_for_build, get_workflows_for_build, insert_repo_if_not_exists, is_rollup,
-    record_tagged_bot_comment, set_pr_assignees, set_pr_mergeability_state, set_pr_priority,
-    set_pr_rollup_mode, set_pr_status, set_rollup_member_unrolled_state,
+    record_tagged_bot_comment, set_pr_assignees, set_pr_mergeability_state,
+    set_pr_queue_properties, set_pr_status, set_rollup_member_unrolled_state,
     set_rollup_members_unrolled_state, set_stale_mergeability_status_by_base_branch,
     unapprove_pull_request, unapprove_pull_request_if_sha_changed, undelegate_pull_request,
     update_build, update_pr_try_build_id, update_pr_unrolled_build_id, update_workflow_status,
@@ -104,20 +104,8 @@ impl PgDbClient {
         pr: &PullRequestModel,
         approval_info: ApprovalInfo,
         approval_mode: ApprovalMode,
-        priority: Option<u32>,
-        rollup: Option<RollupMode>,
-        note: Option<String>,
     ) -> anyhow::Result<()> {
-        approve_pull_request(
-            &self.pool,
-            pr.id,
-            approval_info,
-            approval_mode,
-            priority,
-            rollup,
-            note,
-        )
-        .await
+        approve_pull_request(&self.pool, pr.id, approval_info, approval_mode).await
     }
 
     pub async fn confirm_tentative_approval(&self, pr: &PullRequestModel) -> anyhow::Result<()> {
@@ -144,13 +132,14 @@ impl PgDbClient {
         clear_auto_build(&self.pool, pr.id).await
     }
 
-    pub async fn set_priority(
+    pub async fn set_pr_queue_properties(
         &self,
         pr: &PullRequestModel,
-        priority: u32,
+        rollup_mode: Option<RollupMode>,
+        priority: Option<u32>,
         note: Option<String>,
     ) -> anyhow::Result<()> {
-        set_pr_priority(&self.pool, pr.id, priority, note).await
+        set_pr_queue_properties(&self.pool, pr.id, rollup_mode, priority, note).await
     }
 
     pub async fn delegate(
@@ -200,15 +189,6 @@ impl PgDbClient {
         base_branch: &str,
     ) -> anyhow::Result<Vec<PullRequestModel>> {
         set_stale_mergeability_status_by_base_branch(&self.pool, repo, base_branch).await
-    }
-
-    pub async fn set_rollup_mode(
-        &self,
-        pr: &PullRequestModel,
-        rollup_mode: RollupMode,
-        note: Option<String>,
-    ) -> anyhow::Result<()> {
-        set_pr_rollup_mode(&self.pool, pr.id, rollup_mode, note).await
     }
 
     pub async fn get_pull_request(

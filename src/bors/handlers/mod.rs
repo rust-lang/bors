@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::bors::command::{ApproveInfo, BorsCommand, CommandParseError};
+use crate::bors::command::{BorsCommand, CommandParseError};
 use crate::bors::event::{BorsGlobalEvent, BorsRepositoryEvent, PullRequestComment};
 use crate::bors::handlers::autobuild::{command_cancel, command_retry};
 use crate::bors::handlers::help::command_help;
@@ -29,7 +29,7 @@ use crate::bors::{
     AUTO_BRANCH_NAME, BorsContext, BuildKind, CommandPrefix, Comment, PullRequestStatus,
     RepositoryState, TRY_BRANCH_NAME, TRY_PERF_BRANCH_NAME,
 };
-use crate::database::{ApprovalMode, DelegatedPermission, DelegationStatus, PullRequestModel};
+use crate::database::{DelegatedPermission, DelegationStatus, PullRequestModel};
 use crate::ec2::{backfill_ec2_instances, terminate_old_ec2_instances};
 use crate::github::{
     CommitSha, GithubUser, LabelTrigger, PullRequest, PullRequestInfo, PullRequestNumber,
@@ -45,7 +45,7 @@ use pr_events::{
     handle_pull_request_reopened, handle_push_to_branch, handle_push_to_pull_request,
 };
 use refresh::sync_pull_requests_state;
-use review::{command_delegate, command_set_priority, command_set_rollup, command_undelegate};
+use review::{command_delegate, command_undelegate};
 use tracing::{Instrument, debug_span};
 
 mod autobuild;
@@ -494,30 +494,15 @@ async fn handle_comment(
                 let repo = Arc::clone(&repo);
                 let database = Arc::clone(&database);
                 let result = match command {
-                    BorsCommand::Approve(ApproveInfo {
-                        approver,
-                        priority,
-                        rollup,
-                        note,
-                        force,
-                    }) => {
+                    BorsCommand::ChangeQueueState(approval_info) => {
                         let span = tracing::info_span!("Approve");
-                        let approval_mode = if force {
-                            ApprovalMode::Eager
-                        } else {
-                            ApprovalMode::Tentative
-                        };
                         command_approve(
                             ctx.clone(),
                             repo,
                             database,
                             pr,
                             &comment.author,
-                            &approver,
-                            priority,
-                            rollup,
-                            note,
-                            approval_mode,
+                            approval_info,
                             senders.merge_queue(),
                         )
                         .instrument(span)
@@ -560,20 +545,6 @@ async fn handle_comment(
                         command_unapprove(repo, database, pr, &comment.author, &comment.html_url)
                             .instrument(span)
                             .await
-                    }
-                    BorsCommand::SetPriority { priority, note } => {
-                        let span = tracing::info_span!("Priority");
-                        command_set_priority(
-                            repo,
-                            database,
-                            pr,
-                            &comment.author,
-                            priority,
-                            note,
-                            senders.merge_queue(),
-                        )
-                        .instrument(span)
-                        .await
                     }
                     BorsCommand::Delegate(cmd) => {
                         let span = tracing::info_span!("Delegate");
@@ -639,12 +610,6 @@ async fn handle_comment(
                         let span = tracing::info_span!("Info");
                         command_info(repo, pr, database).instrument(span).await
                     }
-                    BorsCommand::SetRollupMode { rollup_mode, note } => {
-                        let span = tracing::info_span!("Rollup");
-                        command_set_rollup(repo, database, pr, &comment.author, rollup_mode, note)
-                            .instrument(span)
-                            .await
-                    }
                     BorsCommand::Retry => {
                         let span = tracing::info_span!("Retry");
                         command_retry(
@@ -704,14 +669,7 @@ async fn handle_comment(
                     }
                     BorsCommand::SquashApprove {
                         commit_message,
-                        approval_info:
-                            ApproveInfo {
-                                approver,
-                                priority,
-                                rollup,
-                                note,
-                                force,
-                            },
+                        approval_info,
                     } => {
                         let span = tracing::info_span!("SquashAndApprove");
 
@@ -747,11 +705,6 @@ async fn handle_comment(
                                         github: &pr_github,
                                         db: &pr_db,
                                     };
-                                    let approval_mode = if force {
-                                        ApprovalMode::Eager
-                                    } else {
-                                        ApprovalMode::Tentative
-                                    };
 
                                     command_approve(
                                         ctx2,
@@ -759,11 +712,7 @@ async fn handle_comment(
                                         db2,
                                         pr2,
                                         &comment_author,
-                                        &approver,
-                                        priority,
-                                        rollup,
-                                        note,
-                                        approval_mode,
+                                        approval_info,
                                         &merge_queue_tx,
                                     )
                                     .await

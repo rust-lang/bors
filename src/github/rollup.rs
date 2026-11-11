@@ -438,7 +438,7 @@ async fn create_rollup(
         .context("Cannot store the created rollup into the DB")?;
 
     // Mark it as rollup=never
-    db.set_rollup_mode(&rollup_db, RollupMode::Never, None)
+    db.set_pr_queue_properties(&rollup_db, Some(RollupMode::Never), None, None)
         .await?;
 
     // And register its rollup member PRs
@@ -1181,7 +1181,7 @@ also include this pls"
             insta::assert_snapshot!(ctx.get_next_comment_text(3).await?, @":exclamation: Rollup PRs can only be marked as rollup=never.");
             Ok(())
         })
-            .await;
+        .await;
     }
 
     #[sqlx::test(migrator = "crate::MIGRATOR")]

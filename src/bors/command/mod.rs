@@ -3,6 +3,7 @@ use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::str::FromStr;
 
+use crate::database::ApprovalMode;
 use crate::{database::DelegatedPermission, github::CommitSha};
 pub use parser::{CommandParseError, CommandParser};
 
@@ -111,17 +112,26 @@ pub enum SquashCommitMessage {
 }
 
 #[derive(Debug, PartialEq)]
-pub struct ApproveInfo {
-    /// Who is approving the commit.
-    pub approver: Approver,
+pub struct QueueProperties {
+    /// If the PR is being re-approved, contains information about the approval
+    pub approval: Option<Approval>,
     /// Priority of the commit.
+    /// If `None`, does not change priority.
     pub priority: Option<Priority>,
     /// Rollup status of the commit.
+    /// If `None`, does not change rollup status.
     pub rollup: Option<RollupMode>,
-    /// Optional note attached at the end of the command.
+    /// Note attached at the end of the command.
+    /// If `None`, does not change the note.
     pub note: Option<String>,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct Approval {
+    /// Who is approving the commit.
+    pub approver: Approver,
     /// Approve immediately without waiting for PR CI.
-    pub force: bool,
+    pub mode: ApprovalMode,
 }
 
 /// Bors command specified by a user.
@@ -131,8 +141,8 @@ pub struct ApproveInfo {
 /// - `src/bors/handlers/help.rs` (the `@bors help` command output)
 #[derive(Debug, PartialEq)]
 pub enum BorsCommand {
-    /// Approve a commit.
-    Approve(ApproveInfo),
+    /// Approve a commit, or change approval details of the PR without approving
+    ChangeQueueState(QueueProperties),
     /// Unapprove a commit.
     Unapprove,
     /// Print help.
@@ -150,22 +160,12 @@ pub enum BorsCommand {
     },
     /// Cancel a try build currently running on a given PR.
     TryCancel,
-    /// Set the priority of a PR.
-    SetPriority {
-        priority: Priority,
-        note: Option<String>,
-    },
     /// Get information about the current PR.
     Info,
     /// Delegate approval authority to the pull request author.
     Delegate(DelegateCommand),
     /// Revoke any previously granted delegation.
     Undelegate,
-    /// Set the rollup mode of a PRstatus.
-    SetRollupMode {
-        rollup_mode: RollupMode,
-        note: Option<String>,
-    },
     /// Open the repository tree for merging.
     OpenTree,
     /// Set the tree closed with a priority level.
@@ -186,6 +186,6 @@ pub enum BorsCommand {
     SquashApprove {
         /// Squash message for the commit
         commit_message: SquashCommitMessage,
-        approval_info: ApproveInfo,
+        approval_info: QueueProperties,
     },
 }
