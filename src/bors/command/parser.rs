@@ -960,16 +960,6 @@ mod tests {
     }
 
     #[test]
-    fn parse_duplicate_priority() {
-        let cmds = parse_commands("@bors p=1 p=2");
-        assert_eq!(cmds.len(), 1);
-        assert_eq!(
-            cmds[0],
-            Err(CommandParseError::DuplicateArg("p".to_string()))
-        );
-    }
-
-    #[test]
     fn parse_priority_explicit_note() {
         let cmds = parse_commands("@bors p=1 note=a");
         insta::assert_debug_snapshot!(cmds, @r#"
@@ -2615,6 +2605,192 @@ I am markdown HTML comment
                         "test@windows",
                     ],
                     nolimit: false,
+                },
+            ),
+        ]
+        "#);
+    }
+
+    #[test]
+    fn parse_duplicate_approve() {
+        let cmds = parse_commands(r#"@bors r+ r+"#);
+        insta::assert_debug_snapshot!(cmds, @r#"
+        [
+            Err(
+                DuplicateArg(
+                    "approval",
+                ),
+            ),
+        ]
+        "#);
+    }
+
+    #[test]
+    fn parse_duplicate_rollup() {
+        let cmds = parse_commands(r#"@bors rollup rollup=never"#);
+        insta::assert_debug_snapshot!(cmds, @r#"
+        [
+            Err(
+                DuplicateArg(
+                    "rollup",
+                ),
+            ),
+        ]
+        "#);
+    }
+
+    #[test]
+    fn parse_duplicate_priority() {
+        let cmds = parse_commands("@bors p=1 p=2");
+        insta::assert_debug_snapshot!(cmds, @r#"
+        [
+            Err(
+                DuplicateArg(
+                    "p",
+                ),
+            ),
+        ]
+        "#);
+    }
+
+    #[test]
+    fn parse_duplicate_note1() {
+        let cmds = parse_commands(r#"@bors note=1 note=2"#);
+        insta::assert_debug_snapshot!(cmds, @r#"
+        [
+            Err(
+                DuplicateArg(
+                    "note",
+                ),
+            ),
+        ]
+        "#);
+    }
+
+    #[test]
+    fn parse_duplicate_note2() {
+        let cmds = parse_commands(r#"@bors note=1 2"#);
+        insta::assert_debug_snapshot!(cmds, @r#"
+        [
+            Err(
+                DuplicateArg(
+                    "note",
+                ),
+            ),
+        ]
+        "#);
+    }
+
+    #[test]
+    fn parse_duplicate_squash() {
+        let cmds = parse_commands(r#"@bors squash squash"#);
+        insta::assert_debug_snapshot!(cmds, @r#"
+        [
+            Err(
+                DuplicateArg(
+                    "squash",
+                ),
+            ),
+        ]
+        "#);
+    }
+
+    #[test]
+    fn parse_force_without_approve() {
+        let cmds = parse_commands(r#"@bors force"#);
+        insta::assert_debug_snapshot!(cmds, @r#"
+        [
+            Err(
+                ValidationError(
+                    "The `force` argument cannot be used without an approval",
+                ),
+            ),
+        ]
+        "#);
+    }
+
+    #[test]
+    fn parse_msg_without_squash() {
+        let cmds = parse_commands(r#"@bors msg=hey"#);
+        insta::assert_debug_snapshot!(cmds, @r#"
+        [
+            Err(
+                ValidationError(
+                    "The `msg` argument cannot be used without `squash`",
+                ),
+            ),
+        ]
+        "#);
+    }
+
+    #[test]
+    fn parse_unknown_arg() {
+        let cmds = parse_commands(r#"@bors love=yes"#);
+        insta::assert_debug_snapshot!(cmds, @r#"
+        [
+            Err(
+                UnknownCommand(
+                    "love",
+                ),
+            ),
+        ]
+        "#);
+    }
+
+    #[test]
+    fn parse_prio_rollup() {
+        let cmds = parse_commands(r#"@bors p=1 rollup"#);
+        insta::assert_debug_snapshot!(cmds, @"
+        [
+            Ok(
+                ChangeQueueState(
+                    QueueProperties {
+                        approval: None,
+                        priority: Some(
+                            1,
+                        ),
+                        rollup: Some(
+                            Always,
+                        ),
+                        note: None,
+                    },
+                ),
+            ),
+        ]
+        ");
+    }
+
+    #[test]
+    fn parse_squash_note1() {
+        let cmds = parse_commands(r#"@bors squash a b c"#);
+        insta::assert_debug_snapshot!(cmds, @r#"
+        [
+            Err(
+                UnknownArg {
+                    arg: "a",
+                    did_you_mean: "[r+] [r=<user>] [p=<priority>] [rollup=<never|iffy|maybe|always>] [force] [note=<note>] [squash [message/msg=<msg>]]",
+                },
+            ),
+        ]
+        "#);
+    }
+
+    #[test]
+    fn parse_squash_note2() {
+        let cmds = parse_commands(r#"@bors squash note=a"#);
+        insta::assert_debug_snapshot!(cmds, @r#"
+        [
+            Ok(
+                SquashApprove {
+                    commit_message: AutoGenerate,
+                    approval_info: QueueProperties {
+                        approval: None,
+                        priority: None,
+                        rollup: None,
+                        note: Some(
+                            "a",
+                        ),
+                    },
                 },
             ),
         ]
