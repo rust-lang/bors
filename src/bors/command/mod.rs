@@ -126,6 +126,15 @@ pub struct QueueProperties {
     pub note: Option<String>,
 }
 
+impl QueueProperties {
+    pub fn is_empty(&self) -> bool {
+        self.approval.is_none()
+            && self.priority.is_none()
+            && self.rollup.is_none()
+            && self.note.is_none()
+    }
+}
+
 #[derive(Debug, PartialEq)]
 pub struct Approval {
     /// Who is approving the commit.

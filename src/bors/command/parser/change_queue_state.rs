@@ -1,26 +1,113 @@
 use crate::bors::RollupMode;
-use crate::bors::command::parser::{CommandPart, ParseResult, join_parts, parser_squash};
+use crate::bors::command::parser::CommandPart::{Bare, KeyValue};
+use crate::bors::command::parser::{CommandPart, ParseResult, join_parts};
 use crate::bors::command::{
     Approval, Approver, BorsCommand, CommandParseError, Priority, QueueProperties,
+    SquashCommitMessage,
 };
 use crate::database::ApprovalMode;
 use std::str::FromStr;
 
-/// Parses:
-/// - "@bors r+ [p=<priority>] [rollup=<never|iffy|maybe|always>] [force] [note=<note>]"
-/// - "@bors r=<user> [p=<priority>] [rollup=<never|iffy|maybe|always>] [force] [note=<note>]"
+const SIGNATURE: &str = "[r+] [r=<user>] [p=<priority>] [rollup=<never|iffy|maybe|always>] [force] [note=<note>] [squash [message/msg=<msg>]]";
+
+#[allow(clippy::collapsible_if)]
 pub(super) fn parser_change_queue_state(
     command: &CommandPart<'_>,
-    parts: &[CommandPart<'_>],
+    mut parts: &[CommandPart<'_>],
 ) -> ParseResult {
-    let also_squash = parts
-        .iter()
-        .position(|x| *x == CommandPart::Bare("squash"))
-        .map(|x| &parts[x..]);
+    let mut result = QueueProperties {
+        approval: None,
+        priority: None,
+        rollup: None,
+        note: None,
+    };
+    let mut squash = None;
+    if let Err(e) = parse_part(command, &mut result, &mut squash)? {
+        return Some(Err(e));
+    };
+    loop {
+        match parts {
+            // Next argument
+            [part, rest @ ..] if let Some(res) = parse_part(part, &mut result, &mut squash) => {
+                if let Err(e) = res {
+                    return Some(Err(e));
+                }
+                parts = rest;
+            }
+            // If the first argument is `KeyValue`, we think this is more likely a mistyped argument than a note
+            [KeyValue { key, .. }, ..] => {
+                return Some(Err(CommandParseError::UnknownArg {
+                    arg: key.to_string(),
+                    did_you_mean: SIGNATURE.to_string(),
+                }));
+            }
+            // If `result` is still empty, we also think this is most likely a mistyped argument
+            [part, ..] if result.is_empty() => {
+                return Some(Err(CommandParseError::UnknownArg {
+                    arg: part.as_key().to_string(),
+                    did_you_mean: SIGNATURE.to_string(),
+                }));
+            }
+            // The rest is a note
+            rest @ [Bare(_), ..] => {
+                if let Some(note) = join_parts(rest) {
+                    if let Err(e) = insert_check_dup("note", &mut result.note, note)? {
+                        return Some(Err(e));
+                    }
+                }
+                break;
+            }
+            [] => break,
+        }
+    }
 
-    let approver = match command {
-        CommandPart::Bare("r+") => Approver::Myself,
-        CommandPart::KeyValue { key: "r", value } => {
+    Some(Ok(if let Some(commit_message) = squash {
+        if result.is_empty() {
+            BorsCommand::Squash { commit_message }
+        } else {
+            BorsCommand::SquashApprove {
+                commit_message,
+                approval_info: result,
+            }
+        }
+    } else {
+        BorsCommand::ChangeQueueState(result)
+    }))
+}
+
+type PartFunction =
+    fn(&CommandPart<'_>, &mut QueueProperties, &mut Option<SquashCommitMessage>) -> ParseResult<()>;
+const PART_PARSERS: &[PartFunction] = &[
+    parse_part_approval,
+    parse_part_priority,
+    parse_part_rollup,
+    parse_part_note,
+    parse_part_force,
+    parse_part_squash,
+    parse_part_squash_message,
+];
+
+fn parse_part(
+    part: &CommandPart<'_>,
+    result: &mut QueueProperties,
+    squash: &mut Option<SquashCommitMessage>,
+) -> ParseResult<()> {
+    for parser in PART_PARSERS {
+        if let Some(result) = parser(part, result, squash) {
+            return Some(result);
+        }
+    }
+    None
+}
+
+fn parse_part_approval(
+    part: &CommandPart<'_>,
+    result: &mut QueueProperties,
+    _squash: &mut Option<SquashCommitMessage>,
+) -> ParseResult<()> {
+    let approver = match part {
+        Bare("r+") => Approver::Myself,
+        KeyValue { key: "r", value } => {
             if value.is_empty() {
                 return Some(Err(CommandParseError::MissingArgValue {
                     arg: "r".to_string(),
@@ -30,139 +117,137 @@ pub(super) fn parser_change_queue_state(
         }
         _ => return None,
     };
+    insert_check_dup(
+        "approval",
+        &mut result.approval,
+        Approval {
+            approver,
+            mode: ApprovalMode::Tentative,
+        },
+    )
+}
 
-    let priority = match parse_priority(parts) {
-        Some(Ok(p)) => Some(p),
-        Some(Err(e)) => return Some(Err(e)),
-        None => None,
+fn parse_part_force(
+    part: &CommandPart<'_>,
+    result: &mut QueueProperties,
+    _squash: &mut Option<SquashCommitMessage>,
+) -> ParseResult<()> {
+    match part {
+        Bare("force") => {}
+        _ => return None,
+    }
+    let Some(approval) = &mut result.approval else {
+        return Some(Err(CommandParseError::ValidationError(
+            "The `force` argument cannot be used without an approval".to_string(),
+        )));
     };
-    let rollup = match parse_rollup(parts) {
-        Some(Ok(p)) => Some(p),
-        Some(Err(e)) => return Some(Err(e)),
-        None => None,
+    if approval.mode != ApprovalMode::Tentative {
+        return Some(Err(CommandParseError::DuplicateArg("force".to_string())));
+    }
+    approval.mode = ApprovalMode::Eager;
+    Some(Ok(()))
+}
+
+fn parse_part_rollup(
+    part: &CommandPart<'_>,
+    result: &mut QueueProperties,
+    _squash: &mut Option<SquashCommitMessage>,
+) -> ParseResult<()> {
+    let rollup = match part {
+        Bare("rollup-") => RollupMode::Maybe,
+        Bare("rollup") => RollupMode::Always,
+        KeyValue {
+            key: "rollup",
+            value,
+        } => match RollupMode::from_str(value) {
+            Ok(mode) => mode,
+            Err(error) => return Some(Err(CommandParseError::ValidationError(error))),
+        },
+        _ => return None,
     };
-    let note = parts
-        .iter()
-        .filter_map(|part| match part {
-            CommandPart::KeyValue { key: "note", value } => Some(value.to_string()),
-            _ => None,
-        })
-        .next();
-    let force = parts
-        .iter()
-        .any(|part| matches!(part, CommandPart::Bare("force")));
-    let mode = if force {
-        ApprovalMode::Eager
-    } else {
-        ApprovalMode::Tentative
+    insert_check_dup("rollup", &mut result.rollup, rollup)
+}
+
+fn parse_part_priority(
+    part: &CommandPart<'_>,
+    result: &mut QueueProperties,
+    _squash: &mut Option<SquashCommitMessage>,
+) -> ParseResult<()> {
+    let priority = match part {
+        KeyValue {
+            key: "p" | "priority",
+            value,
+        } => match parse_priority_value(value) {
+            Ok(prio) => prio,
+            Err(err) => return Some(Err(err)),
+        },
+        _ => return None,
     };
+    insert_check_dup("priority", &mut result.priority, priority)
+}
 
-    // parse the squash part of the approve_squash command
-    if let Some(also_squash) = also_squash {
-        let filter_priority = ["r", "rollup", "p", "priority", "force", "note"];
+fn parse_part_note(
+    part: &CommandPart<'_>,
+    result: &mut QueueProperties,
+    _squash: &mut Option<SquashCommitMessage>,
+) -> ParseResult<()> {
+    let note = match part {
+        KeyValue { key: "note", value } => value.to_string(),
+        _ => return None,
+    };
+    insert_check_dup("note", &mut result.note, note)
+}
 
-        let also_squash: Vec<CommandPart> = also_squash
-            .iter()
-            .filter(|x| !filter_priority.contains(&x.as_key()))
-            .copied()
-            .collect();
+fn parse_part_squash(
+    part: &CommandPart<'_>,
+    _result: &mut QueueProperties,
+    squash: &mut Option<SquashCommitMessage>,
+) -> ParseResult<()> {
+    match part {
+        Bare("squash") => {}
+        _ => return None,
+    };
+    insert_check_dup("squash", squash, SquashCommitMessage::AutoGenerate)
+}
 
-        let val = parser_squash(&also_squash[0], &also_squash[1..]).unwrap();
-
-        match val {
-            Ok(val) => match val {
-                BorsCommand::Squash { commit_message, .. } => {
-                    return Some(Ok(BorsCommand::SquashApprove {
-                        commit_message,
-                        approval_info: QueueProperties {
-                            approval: Some(Approval { approver, mode }),
-                            priority,
-                            rollup,
-                            note,
-                        },
-                    }));
-                }
-                _ => unreachable!(),
-            },
-            Err(_) => {
-                return Some(Err(CommandParseError::UnknownArg {
-                    arg: also_squash[1].as_key().to_owned(),
-                    did_you_mean: "r+ squash [msg|message=\"<commit-msg>\"|description]"
-                        .to_string(),
-                }));
+fn parse_part_squash_message(
+    part: &CommandPart<'_>,
+    _result: &mut QueueProperties,
+    squash: &mut Option<SquashCommitMessage>,
+) -> ParseResult<()> {
+    let msg = match part {
+        KeyValue {
+            key: "msg" | "message",
+            value,
+        } => {
+            if *value == "description" {
+                SquashCommitMessage::PullRequestDescription
+            } else {
+                SquashCommitMessage::Explicit(value.to_string())
             }
         }
+        _ => return None,
+    };
+    let Some(squash) = squash else {
+        return Some(Err(CommandParseError::ValidationError(
+            "The `msg` argument cannot be used without `squash`".to_string(),
+        )));
+    };
+    if *squash != SquashCommitMessage::AutoGenerate {
+        return Some(Err(CommandParseError::DuplicateArg("force".to_string())));
     }
-
-    Some(Ok(BorsCommand::ChangeQueueState(QueueProperties {
-        approval: Some(Approval { approver, mode }),
-        priority,
-        rollup,
-        note,
-    })))
+    *squash = msg;
+    Some(Ok(()))
 }
 
-/// Parses "rollup=<never/iffy/maybe/always>"
-pub(super) fn parser_rollup(command: &CommandPart<'_>, parts: &[CommandPart<'_>]) -> ParseResult {
-    let rollup_mode = match parse_rollup(std::slice::from_ref(command))? {
-        Ok(r) => r,
-        Err(e) => return Some(Err(e)),
-    };
-    let note = parse_note(parts);
-    Some(Ok(BorsCommand::ChangeQueueState(QueueProperties {
-        approval: None,
-        rollup: Some(rollup_mode),
-        priority: None,
-        note,
-    })))
-}
-
-/// Parses the first occurrence of `rollup=<never/iffy/maybe/always>` in `parts`.
-fn parse_rollup(parts: &[CommandPart<'_>]) -> ParseResult<RollupMode> {
-    parts
-        .iter()
-        .filter_map(|part| match part {
-            CommandPart::Bare("rollup-") => Some(Ok(RollupMode::Maybe)),
-            CommandPart::Bare("rollup") => Some(Ok(RollupMode::Always)),
-            CommandPart::KeyValue {
-                key: "rollup",
-                value,
-            } => match RollupMode::from_str(value) {
-                Ok(mode) => Some(Ok(mode)),
-                Err(error) => Some(Err(CommandParseError::ValidationError(error))),
-            },
-            _ => None,
-        })
-        .next()
-}
-
-/// Parses "@bors p=<priority>"
-pub(super) fn parser_priority(command: &CommandPart<'_>, parts: &[CommandPart<'_>]) -> ParseResult {
-    let priority = match parse_priority(std::slice::from_ref(command))? {
-        Ok(p) => p,
-        Err(e) => return Some(Err(e)),
-    };
-    let note = parse_note(parts);
-    Some(Ok(BorsCommand::ChangeQueueState(QueueProperties {
-        approval: None,
-        priority: Some(priority),
-        rollup: None,
-        note,
-    })))
-}
-
-/// Parses the first occurrence of `p|priority=<priority>` in `parts`.
-fn parse_priority(parts: &[CommandPart<'_>]) -> ParseResult<Priority> {
-    parts
-        .iter()
-        .filter_map(|part| match part {
-            CommandPart::KeyValue {
-                key: "p" | "priority",
-                value,
-            } => Some(parse_priority_value(value)),
-            _ => None,
-        })
-        .next()
+fn insert_check_dup<T>(arg_name: &str, opt: &mut Option<T>, v: T) -> ParseResult<()> {
+    match opt {
+        None => {
+            *opt = Some(v);
+            Some(Ok(()))
+        }
+        Some(_) => Some(Err(CommandParseError::DuplicateArg(arg_name.to_string()))),
+    }
 }
 
 pub(super) fn parse_priority_value(value: &str) -> Result<Priority, CommandParseError> {
@@ -171,12 +256,5 @@ pub(super) fn parse_priority_value(value: &str) -> Result<Priority, CommandParse
         Err(_) => Err(CommandParseError::ValidationError(
             "Priority must be a non-negative integer".to_string(),
         )),
-    }
-}
-
-fn parse_note(parts: &[CommandPart<'_>]) -> Option<String> {
-    match parts {
-        &[CommandPart::KeyValue { key: "note", value }] => Some(value.to_string()),
-        parts => join_parts(parts),
     }
 }

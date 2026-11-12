@@ -3,11 +3,9 @@
 mod change_queue_state;
 
 use crate::bors::command::parser::change_queue_state::{
-    parse_priority_value, parser_change_queue_state, parser_priority, parser_rollup,
+    parse_priority_value, parser_change_queue_state,
 };
-use crate::bors::command::{
-    BorsCommand, CommandPrefix, DelegateCommand, Delegatee, Parent, SquashCommitMessage,
-};
+use crate::bors::command::{BorsCommand, CommandPrefix, DelegateCommand, Delegatee, Parent};
 use crate::database::DelegatedPermission;
 use crate::github::CommitSha;
 use pulldown_cmark::{Event, Parser, Tag, TagEnd, TextMergeStream};
@@ -139,8 +137,6 @@ type ParserFn = fn(&CommandPart<'_>, &[CommandPart<'_>]) -> ParseResult;
 const DEFAULT_PARSERS: &[ParserFn] = &[
     parser_change_queue_state,
     parser_unapprove,
-    parser_rollup,
-    parser_priority,
     parser_try_cancel,
     parser_try,
     parser_delegate,
@@ -151,7 +147,6 @@ const DEFAULT_PARSERS: &[ParserFn] = &[
     parser_retry,
     parser_tree_ops,
     parser_cancel,
-    parser_squash,
 ];
 
 fn parse_command(input: &str, parsers: &[ParserFn]) -> ParseResult {
@@ -524,40 +519,6 @@ fn join_parts(parts: &[CommandPart<'_>]) -> Option<String> {
 fn parser_cancel(command: &CommandPart<'_>, _parts: &[CommandPart<'_>]) -> ParseResult {
     match command {
         CommandPart::Bare("cancel" | "yield") => Some(Ok(BorsCommand::Cancel)),
-        _ => None,
-    }
-}
-
-/// Parses `@bors squash` command.
-/// Supports specifying a commit message via `@bors squash [msg|message]="message"`.
-fn parser_squash(command: &CommandPart<'_>, parts: &[CommandPart<'_>]) -> ParseResult {
-    match command {
-        CommandPart::Bare("squash") => match parts {
-            &[] => Some(Ok(BorsCommand::Squash {
-                commit_message: SquashCommitMessage::AutoGenerate,
-            })),
-            &[
-                CommandPart::KeyValue {
-                    key: "msg" | "message",
-                    value,
-                },
-                ..,
-            ] => {
-                if value == "description" {
-                    Some(Ok(BorsCommand::Squash {
-                        commit_message: SquashCommitMessage::PullRequestDescription,
-                    }))
-                } else {
-                    Some(Ok(BorsCommand::Squash {
-                        commit_message: SquashCommitMessage::Explicit(value.to_owned()),
-                    }))
-                }
-            }
-            [part, ..] => Some(Err(CommandParseError::UnknownArg {
-                arg: part.as_key().to_owned(),
-                did_you_mean: "squash [msg|message=\"<commit-msg>\"|description]".to_string(),
-            })),
-        },
         _ => None,
     }
 }
@@ -2166,7 +2127,7 @@ for the crater",
             Err(
                 UnknownArg {
                     arg: "commit",
-                    did_you_mean: "squash [msg|message=\"<commit-msg>\"|description]",
+                    did_you_mean: "[r+] [r=<user>] [p=<priority>] [rollup=<never|iffy|maybe|always>] [force] [note=<note>] [squash [message/msg=<msg>]]",
                 },
             ),
         ]
@@ -2178,11 +2139,10 @@ for the crater",
         let cmds = parse_commands("@bors squash message=foo baz");
         insta::assert_debug_snapshot!(cmds, @r#"
         [
-            Ok(
-                Squash {
-                    commit_message: Explicit(
-                        "foo",
-                    ),
+            Err(
+                UnknownArg {
+                    arg: "baz",
+                    did_you_mean: "[r+] [r=<user>] [p=<priority>] [rollup=<never|iffy|maybe|always>] [force] [note=<note>] [squash [message/msg=<msg>]]",
                 },
             ),
         ]
@@ -2357,7 +2317,7 @@ for the crater",
             Err(
                 UnknownArg {
                     arg: "commit",
-                    did_you_mean: "r+ squash [msg|message=\"<commit-msg>\"|description]",
+                    did_you_mean: "[r+] [r=<user>] [p=<priority>] [rollup=<never|iffy|maybe|always>] [force] [note=<note>] [squash [message/msg=<msg>]]",
                 },
             ),
         ]
@@ -2383,7 +2343,9 @@ for the crater",
                         ),
                         priority: None,
                         rollup: None,
-                        note: None,
+                        note: Some(
+                            "baz",
+                        ),
                     },
                 },
             ),
@@ -2408,11 +2370,11 @@ for the crater",
                             mode: Tentative,
                         },
                     ),
-                    priority: Some(
-                        1,
-                    ),
+                    priority: None,
                     rollup: None,
-                    note: None,
+                    note: Some(
+                        "baz p=1",
+                    ),
                 },
             },
         )
@@ -2421,12 +2383,14 @@ for the crater",
 
     #[test]
     fn parse_squash_approve_args() {
-        let cmds = parse_commands("@bors r+ message=foo squash p=1");
+        let cmds = parse_commands("@bors r+ squash message=foo p=1");
         assert_eq!(cmds.len(), 1);
-        insta::assert_debug_snapshot!(cmds[0], @"
+        insta::assert_debug_snapshot!(cmds[0], @r#"
         Ok(
             SquashApprove {
-                commit_message: AutoGenerate,
+                commit_message: Explicit(
+                    "foo",
+                ),
                 approval_info: QueueProperties {
                     approval: Some(
                         Approval {
@@ -2442,7 +2406,7 @@ for the crater",
                 },
             },
         )
-        ");
+        "#);
     }
 
     #[test]

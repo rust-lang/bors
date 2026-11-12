@@ -106,24 +106,23 @@ pub fn format_help() -> &'static str {
     r#"
 You can use the following commands:
 
-## PR management
-- `r+ [p=<priority>] [rollup=<never|iffy|maybe|always>] [force] [note=<note>]`: Approve this PR on your behalf
-    - Optionally, you can specify the `<priority>` of the PR and if it is eligible for rollups (`<rollup>)`.
-    - The default is for approvals to remain tentative until PR CI succeeds. Pass `force` to approve the PR immediately.
-    - Optionally, you can attach a `<note>` to the PR that will be displayed on the queue page.
-- `r=<user> [p=<priority>] [rollup=<never|iffy|maybe|always>] [force] [note=<note>]`: Approve this PR on behalf of `<user>`
-    - Optionally, you can specify the `<priority>` of the PR and if it is eligible for rollups (`<rollup>)`.
-    - You can pass a comma-separated list of GitHub usernames.
-    - The default is for approvals to remain tentative until PR CI succeeds. Pass `force` to approve the PR immediately.
-    - Optionally, you can attach a `<note>` to the PR that will be displayed on the queue page.
-- `r+ squash`: Squash the commits of a PR into a single commit, then approve it.
-- `r-`: Unapprove this PR
-- `p=<priority> [note=[<note>]]` | `priority=<priority> [note=[<note>]]`: Set the priority of this PR
-    - Optionally, you can attach a `<note>` to the PR that will be displayed on the queue page.
-- `rollup=<never|iffy|maybe|always> [note=[<note>]]`: Set the rollup status of the PR
-    - Optionally, you can attach a `<note>` to the PR that will be displayed on the queue page.
+## PR management: Approval
+These commands can be arbitrarily chained into one single command.
+- `r+`: Approve this PR on your behalf
+- `r=<user>`: Approve this PR on behalf of `<user>`
+- `p=<priority>`: Set the priority of this PR. Higher number is higher priority.
+- `rollup=<never|iffy|maybe|always>`: Set the rollup status of the PR.
 - `rollup`: Short for `rollup=always`
 - `rollup-`: Short for `rollup=maybe`
+- `force`: The default is for approvals to remain tentative until PR CI succeeds. Pass `force` to approve the PR immediately.
+    - Can only be passed if `r+` or `r=` is passed.
+- `note=<note>`: Attach a `<note>` to the PR that will be displayed on the queue page.
+- `squash [msg|message=<commit-message>|description]`: Squash the commits of a PR into a single commit.
+    - Optionally, you can specify a `<commit-message>` for the created commit. If not specified, the commit messages of all squashed commits will be combined.
+    - If you specify `msg=description`, then the PR title and body will be used as the squashed commit message.
+
+## PR management: Other
+- `r-`: Unapprove this PR
 - `delegate[=<user>] [try|review]`: Delegate permissions for running try builds or approving to the PR author or the specified `<user>`.
     - If no `<user>` is specified, the PR author is delegated the permission.
     - The default permission is `review`.
@@ -142,9 +141,6 @@ You can use the following commands:
 - `try cancel`: Cancel a running try build on the current PR.
 - `retry`: Clear a failed auto build status from an approved PR. This will cause the merge queue to eventually attempt to merge the PR again.
 - `cancel` | `yield`: Cancel a running auto build on the current PR.
-- `squash [msg|message=<commit-message>|description]`: Squash the commits of a PR into a single commit.
-    - Optionally, you can specify a `<commit-message>` for the created commit. If not specified, the commit messages of all squashed commits will be combined.
-    - If you specify `msg=description`, then the PR title and body will be used as the squashed commit message.
 - `info`: Get information about the current PR
 
 ## Repository management
