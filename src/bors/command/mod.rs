@@ -4,6 +4,7 @@ use std::fmt::{Display, Formatter};
 use std::str::FromStr;
 
 use crate::database::ApprovalMode;
+use crate::permissions::PermissionType;
 use crate::{database::DelegatedPermission, github::CommitSha};
 pub use parser::{CommandParseError, CommandParser};
 
@@ -137,6 +138,20 @@ impl QueueProperties {
                 note: None,
             }
         )
+    }
+
+    pub fn required_permissions(&self) -> PermissionType {
+        match self {
+            // Require only try for rollup commands, because rust-timer uses them, and we don't want to
+            // grant it approve permissions.
+            QueueProperties {
+                rollup: _,
+                approval: None,
+                priority: None,
+                note: None,
+            } => PermissionType::Try,
+            _ => PermissionType::Review,
+        }
     }
 }
 

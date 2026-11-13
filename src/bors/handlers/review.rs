@@ -36,6 +36,13 @@ pub(super) async fn command_approve(
 ) -> anyhow::Result<()> {
     assert!(!info.is_empty());
 
+    // Permission check
+    let permission = info.required_permissions();
+    if !has_permission(&repo, author, pr, permission).await? {
+        deny_request(&repo, &db, pr.number(), author, permission).await?;
+        return Ok(());
+    }
+
     // Do checks
     if let Some(rollup) = info.rollup
         && rollup != RollupMode::Never
@@ -45,20 +52,6 @@ pub(super) async fn command_approve(
             .post_comment(pr.number(), rollup_pr_invalid_rollup_mode_comment(), &db)
             .await?;
         return Ok(());
-    }
-    if info.rollup.is_some() {
-        // Require only try for rollup commands, because rust-timer uses them, and we don't want to
-        // grant it approve permissions.
-        if !has_permission(&repo, author, pr, PermissionType::Try).await? {
-            deny_request(&repo, &db, pr.number(), author, PermissionType::Try).await?;
-            return Ok(());
-        }
-    }
-    if info.priority.is_some() || info.note.is_some() {
-        if !has_permission(&repo, author, pr, PermissionType::Review).await? {
-            deny_request(&repo, &db, pr.number(), author, PermissionType::Review).await?;
-            return Ok(());
-        };
     }
 
     // Approve the PR & set rollup properties
