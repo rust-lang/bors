@@ -31,6 +31,8 @@ mod tests {
 
             ## PR management: Approval
             These commands can be arbitrarily chained into one single command.
+            For example: `@bors r+ squash rollup` will squash the PR, approve it, and mark it rollup-able.
+
             - `r+`: Approve this PR on your behalf
             - `r=<user>`: Approve this PR on behalf of `<user>`
             - `p=<priority>`: Set the priority of this PR. Higher number is higher priority.

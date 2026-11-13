@@ -128,10 +128,15 @@ pub struct QueueProperties {
 
 impl QueueProperties {
     pub fn is_empty(&self) -> bool {
-        self.approval.is_none()
-            && self.priority.is_none()
-            && self.rollup.is_none()
-            && self.note.is_none()
+        matches!(
+            self,
+            QueueProperties {
+                approval: None,
+                priority: None,
+                rollup: None,
+                note: None,
+            }
+        )
     }
 }
 
