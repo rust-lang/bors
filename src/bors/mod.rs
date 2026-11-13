@@ -78,7 +78,8 @@ pub fn format_help() -> &'static str {
     // commands are added though.
     match BorsCommand::Ping {
         BorsCommand::ChangeQueueState(QueueProperties {
-            approval: _,
+            approver: _,
+            force: _,
             rollup: _,
             priority: _,
             note: _,

@@ -2,10 +2,8 @@ use crate::bors::RollupMode;
 use crate::bors::command::parser::CommandPart::{Bare, KeyValue};
 use crate::bors::command::parser::{CommandPart, ParseResult, join_parts};
 use crate::bors::command::{
-    Approval, Approver, BorsCommand, CommandParseError, Priority, QueueProperties,
-    SquashCommitMessage,
+    Approver, BorsCommand, CommandParseError, Priority, QueueProperties, SquashCommitMessage,
 };
-use crate::database::ApprovalMode;
 use std::str::FromStr;
 
 const SIGNATURE: &str = "[r+] [r=<user>] [p=<priority>] [rollup=<never|iffy|maybe|always>] [force] [note=<note>] [squash [message/msg=<msg>]]";
@@ -16,7 +14,8 @@ pub(super) fn parser_change_queue_state(
     mut parts: &[CommandPart<'_>],
 ) -> ParseResult {
     let mut result = QueueProperties {
-        approval: None,
+        approver: None,
+        force: None,
         priority: None,
         rollup: None,
         note: None,
@@ -117,14 +116,7 @@ fn parse_part_approval(
         }
         _ => return None,
     };
-    insert_check_dup(
-        "approval",
-        &mut result.approval,
-        Approval {
-            approver,
-            mode: ApprovalMode::Tentative,
-        },
-    )
+    insert_check_dup("approval", &mut result.approver, approver)
 }
 
 fn parse_part_force(
@@ -136,16 +128,12 @@ fn parse_part_force(
         Bare("force") => {}
         _ => return None,
     }
-    let Some(approval) = &mut result.approval else {
+    let Some(_) = &mut result.approver else {
         return Some(Err(CommandParseError::ValidationError(
             "The `force` argument cannot be used without an approval".to_string(),
         )));
     };
-    if approval.mode != ApprovalMode::Tentative {
-        return Some(Err(CommandParseError::DuplicateArg("force".to_string())));
-    }
-    approval.mode = ApprovalMode::Eager;
-    Some(Ok(()))
+    insert_check_dup("force", &mut result.force, ())
 }
 
 fn parse_part_rollup(

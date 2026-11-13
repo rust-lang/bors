@@ -3,7 +3,6 @@ use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::str::FromStr;
 
-use crate::database::ApprovalMode;
 use crate::permissions::PermissionType;
 use crate::{database::DelegatedPermission, github::CommitSha};
 pub use parser::{CommandParseError, CommandParser};
@@ -114,8 +113,10 @@ pub enum SquashCommitMessage {
 
 #[derive(Debug, PartialEq)]
 pub struct QueueProperties {
-    /// If the PR is being re-approved, contains information about the approval
-    pub approval: Option<Approval>,
+    /// If the PR is being re-approved, who is approving the commit
+    pub approver: Option<Approver>,
+    /// Approve immediately without waiting for PR CI.
+    pub force: Option<()>,
     /// Priority of the commit.
     /// If `None`, does not change priority.
     pub priority: Option<Priority>,
@@ -132,7 +133,8 @@ impl QueueProperties {
         matches!(
             self,
             QueueProperties {
-                approval: None,
+                approver: None,
+                force: None,
                 priority: None,
                 rollup: None,
                 note: None,
@@ -146,21 +148,14 @@ impl QueueProperties {
             // grant it approve permissions.
             QueueProperties {
                 rollup: _,
-                approval: None,
+                approver: None,
+                force: None,
                 priority: None,
                 note: None,
             } => PermissionType::Try,
             _ => PermissionType::Review,
         }
     }
-}
-
-#[derive(Debug, PartialEq)]
-pub struct Approval {
-    /// Who is approving the commit.
-    pub approver: Approver,
-    /// Approve immediately without waiting for PR CI.
-    pub mode: ApprovalMode,
 }
 
 /// Bors command specified by a user.

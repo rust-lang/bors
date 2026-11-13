@@ -1,6 +1,6 @@
 use crate::bors::RepositoryState;
 use crate::bors::approval::{ApprovalNote, PrCiStatus, get_pr_ci_status};
-use crate::bors::command::{Approval, Approver, CommandPrefix, Delegatee, QueueProperties};
+use crate::bors::command::{Approver, CommandPrefix, Delegatee, QueueProperties};
 use crate::bors::command::{DelegateCommand, RollupMode};
 use crate::bors::comment::{
     approve_blocking_labels_present, approve_merge_conflict_comment, approve_non_open_pr_comment,
@@ -55,8 +55,9 @@ pub(super) async fn command_approve(
     }
 
     // Approve the PR & set rollup properties
-    if let Some(approval) = &info.approval {
-        command_approve_base(&ctx, &repo, &db, pr, author, approval, info.priority).await?;
+    if let Some(approver) = &info.approver {
+        let force = info.force.is_some();
+        command_approve_base(&ctx, &repo, &db, pr, author, approver, force, info.priority).await?;
     }
     db.set_pr_queue_properties(pr.db, info.rollup, info.priority, info.note)
         .await?;
@@ -73,7 +74,8 @@ async fn command_approve_base(
     db: &PgDbClient,
     pr: PullRequestData<'_>,
     author: &GithubUser,
-    approval: &Approval,
+    approver: &Approver,
+    force: bool,
     priority: Option<u32>, // Does not apply the priority, but uses it for user feedback
 ) -> anyhow::Result<()> {
     tracing::info!("Approving PR {}", pr.number());
@@ -89,7 +91,7 @@ async fn command_approve_base(
         return Ok(());
     }
 
-    let approver = match &approval.approver {
+    let approver = match approver {
         Approver::Myself => author.username.clone(),
         Approver::Specified(approver) => normalize_approvers(approver).join(","),
     };
@@ -104,19 +106,18 @@ async fn command_approve_base(
     let already_approved = pr.db.is_approved();
 
     // Potentially upgrade the tentative approval to a full approval
-    let approval_mode = match (&approval.mode, pr_ci_status) {
-        (ApprovalMode::Eager, _) => approval.mode,
+    let approval_mode = match (force, pr_ci_status) {
+        (true, _) => ApprovalMode::Eager,
         // If PR CI is already green, just treat the approval as eager
-        (ApprovalMode::Tentative, PrCiStatus::Success) => ApprovalMode::Eager,
+        (false, PrCiStatus::Success) => ApprovalMode::Eager,
         // It is possible that the PR was already (fully) approved before.
         // If we are now doing a tentative approval, we will "upgrade" it to a full approval, which is
         // usually what the user wants.
         // This situation should be very rare anyway.
-        (ApprovalMode::Tentative, _) if already_approved => ApprovalMode::Eager,
-        (
-            ApprovalMode::Tentative,
-            PrCiStatus::Failed | PrCiStatus::Pending { .. } | PrCiStatus::NotStarted,
-        ) => approval.mode,
+        (false, _) if already_approved => ApprovalMode::Eager,
+        (false, PrCiStatus::Failed | PrCiStatus::Pending { .. } | PrCiStatus::NotStarted) => {
+            ApprovalMode::Tentative
+        }
     };
 
     if matches!(approval_mode, ApprovalMode::Tentative)

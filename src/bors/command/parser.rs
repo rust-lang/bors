@@ -581,12 +581,10 @@ mod tests {
             Ok(
                 ChangeQueueState(
                     QueueProperties {
-                        approval: Some(
-                            Approval {
-                                approver: Myself,
-                                mode: Tentative,
-                            },
+                        approver: Some(
+                            Myself,
                         ),
+                        force: None,
                         priority: None,
                         rollup: None,
                         note: None,
@@ -605,11 +603,11 @@ mod tests {
         Ok(
             ChangeQueueState(
                 QueueProperties {
-                    approval: Some(
-                        Approval {
-                            approver: Myself,
-                            mode: Eager,
-                        },
+                    approver: Some(
+                        Myself,
+                    ),
+                    force: Some(
+                        (),
                     ),
                     priority: Some(
                         1,
@@ -630,14 +628,12 @@ mod tests {
         Ok(
             ChangeQueueState(
                 QueueProperties {
-                    approval: Some(
-                        Approval {
-                            approver: Specified(
-                                "user1",
-                            ),
-                            mode: Tentative,
-                        },
+                    approver: Some(
+                        Specified(
+                            "user1",
+                        ),
                     ),
+                    force: None,
                     priority: None,
                     rollup: None,
                     note: None,
@@ -655,14 +651,12 @@ mod tests {
         Ok(
             ChangeQueueState(
                 QueueProperties {
-                    approval: Some(
-                        Approval {
-                            approver: Specified(
-                                "user1,user2",
-                            ),
-                            mode: Tentative,
-                        },
+                    approver: Some(
+                        Specified(
+                            "user1,user2",
+                        ),
                     ),
+                    force: None,
                     priority: None,
                     rollup: None,
                     note: None,
@@ -706,12 +700,10 @@ mod tests {
             Ok(
                 ChangeQueueState(
                     QueueProperties {
-                        approval: Some(
-                            Approval {
-                                approver: Myself,
-                                mode: Tentative,
-                            },
+                        approver: Some(
+                            Myself,
                         ),
+                        force: None,
                         priority: Some(
                             1,
                         ),
@@ -732,14 +724,12 @@ mod tests {
             Ok(
                 ChangeQueueState(
                     QueueProperties {
-                        approval: Some(
-                            Approval {
-                                approver: Specified(
-                                    "user1",
-                                ),
-                                mode: Tentative,
-                            },
+                        approver: Some(
+                            Specified(
+                                "user1",
+                            ),
                         ),
+                        force: None,
                         priority: Some(
                             2,
                         ),
@@ -765,12 +755,10 @@ mod tests {
             Ok(
                 ChangeQueueState(
                     QueueProperties {
-                        approval: Some(
-                            Approval {
-                                approver: Myself,
-                                mode: Tentative,
-                            },
+                        approver: Some(
+                            Myself,
                         ),
+                        force: None,
                         priority: Some(
                             1,
                         ),
@@ -782,14 +770,12 @@ mod tests {
             Ok(
                 ChangeQueueState(
                     QueueProperties {
-                        approval: Some(
-                            Approval {
-                                approver: Specified(
-                                    "user2",
-                                ),
-                                mode: Tentative,
-                            },
+                        approver: Some(
+                            Specified(
+                                "user2",
+                            ),
                         ),
+                        force: None,
                         priority: Some(
                             2,
                         ),
@@ -823,14 +809,12 @@ mod tests {
             Ok(
                 ChangeQueueState(
                     QueueProperties {
-                        approval: Some(
-                            Approval {
-                                approver: Specified(
-                                    "user1",
-                                ),
-                                mode: Tentative,
-                            },
+                        approver: Some(
+                            Specified(
+                                "user1",
+                            ),
                         ),
+                        force: None,
                         priority: Some(
                             2,
                         ),
@@ -889,7 +873,8 @@ mod tests {
         Ok(
             ChangeQueueState(
                 QueueProperties {
-                    approval: None,
+                    approver: None,
+                    force: None,
                     priority: Some(
                         5,
                     ),
@@ -908,7 +893,8 @@ mod tests {
         Ok(
             ChangeQueueState(
                 QueueProperties {
-                    approval: None,
+                    approver: None,
+                    force: None,
                     priority: Some(
                         5,
                     ),
@@ -967,7 +953,8 @@ mod tests {
             Ok(
                 ChangeQueueState(
                     QueueProperties {
-                        approval: None,
+                        approver: None,
+                        force: None,
                         priority: Some(
                             1,
                         ),
@@ -990,7 +977,8 @@ mod tests {
             Ok(
                 ChangeQueueState(
                     QueueProperties {
-                        approval: None,
+                        approver: None,
+                        force: None,
                         priority: Some(
                             1,
                         ),
@@ -1013,12 +1001,10 @@ mod tests {
             Ok(
                 ChangeQueueState(
                     QueueProperties {
-                        approval: Some(
-                            Approval {
-                                approver: Myself,
-                                mode: Tentative,
-                            },
+                        approver: Some(
+                            Myself,
                         ),
+                        force: None,
                         priority: None,
                         rollup: Some(
                             Always,
@@ -1039,14 +1025,12 @@ mod tests {
             Ok(
                 ChangeQueueState(
                     QueueProperties {
-                        approval: Some(
-                            Approval {
-                                approver: Specified(
-                                    "user1",
-                                ),
-                                mode: Tentative,
-                            },
+                        approver: Some(
+                            Specified(
+                                "user1",
+                            ),
                         ),
+                        force: None,
                         priority: None,
                         rollup: Some(
                             Never,
@@ -1067,14 +1051,12 @@ mod tests {
             Ok(
                 ChangeQueueState(
                     QueueProperties {
-                        approval: Some(
-                            Approval {
-                                approver: Specified(
-                                    "user1",
-                                ),
-                                mode: Tentative,
-                            },
+                        approver: Some(
+                            Specified(
+                                "user1",
+                            ),
                         ),
+                        force: None,
                         priority: None,
                         rollup: Some(
                             Always,
@@ -1095,14 +1077,12 @@ mod tests {
             Ok(
                 ChangeQueueState(
                     QueueProperties {
-                        approval: Some(
-                            Approval {
-                                approver: Specified(
-                                    "user1",
-                                ),
-                                mode: Tentative,
-                            },
+                        approver: Some(
+                            Specified(
+                                "user1",
+                            ),
                         ),
+                        force: None,
                         priority: None,
                         rollup: Some(
                             Maybe,
@@ -1128,12 +1108,10 @@ mod tests {
             Ok(
                 ChangeQueueState(
                     QueueProperties {
-                        approval: Some(
-                            Approval {
-                                approver: Myself,
-                                mode: Tentative,
-                            },
+                        approver: Some(
+                            Myself,
                         ),
+                        force: None,
                         priority: None,
                         rollup: Some(
                             Always,
@@ -1145,14 +1123,12 @@ mod tests {
             Ok(
                 ChangeQueueState(
                     QueueProperties {
-                        approval: Some(
-                            Approval {
-                                approver: Specified(
-                                    "user2",
-                                ),
-                                mode: Tentative,
-                            },
+                        approver: Some(
+                            Specified(
+                                "user2",
+                            ),
                         ),
+                        force: None,
                         priority: None,
                         rollup: Some(
                             Iffy,
@@ -1199,7 +1175,8 @@ mod tests {
             Ok(
                 ChangeQueueState(
                     QueueProperties {
-                        approval: None,
+                        approver: None,
+                        force: None,
                         priority: None,
                         rollup: Some(
                             Always,
@@ -1220,7 +1197,8 @@ mod tests {
             Ok(
                 ChangeQueueState(
                     QueueProperties {
-                        approval: None,
+                        approver: None,
+                        force: None,
                         priority: None,
                         rollup: Some(
                             Maybe,
@@ -1241,7 +1219,8 @@ mod tests {
             Ok(
                 ChangeQueueState(
                     QueueProperties {
-                        approval: None,
+                        approver: None,
+                        force: None,
                         priority: None,
                         rollup: Some(
                             Always,
@@ -1288,7 +1267,8 @@ mod tests {
             Ok(
                 ChangeQueueState(
                     QueueProperties {
-                        approval: None,
+                        approver: None,
+                        force: None,
                         priority: None,
                         rollup: Some(
                             Always,
@@ -1311,7 +1291,8 @@ mod tests {
             Ok(
                 ChangeQueueState(
                     QueueProperties {
-                        approval: None,
+                        approver: None,
+                        force: None,
                         priority: None,
                         rollup: Some(
                             Always,
@@ -1334,12 +1315,10 @@ mod tests {
             Ok(
                 ChangeQueueState(
                     QueueProperties {
-                        approval: Some(
-                            Approval {
-                                approver: Myself,
-                                mode: Tentative,
-                            },
+                        approver: Some(
+                            Myself,
                         ),
+                        force: None,
                         priority: Some(
                             1,
                         ),
@@ -1362,12 +1341,10 @@ mod tests {
             Ok(
                 ChangeQueueState(
                     QueueProperties {
-                        approval: Some(
-                            Approval {
-                                approver: Myself,
-                                mode: Tentative,
-                            },
+                        approver: Some(
+                            Myself,
                         ),
+                        force: None,
                         priority: Some(
                             1,
                         ),
@@ -1390,12 +1367,10 @@ mod tests {
             Ok(
                 ChangeQueueState(
                     QueueProperties {
-                        approval: Some(
-                            Approval {
-                                approver: Myself,
-                                mode: Tentative,
-                            },
+                        approver: Some(
+                            Myself,
                         ),
+                        force: None,
                         priority: Some(
                             1,
                         ),
@@ -2148,12 +2123,10 @@ for the crater",
                 SquashApprove {
                     commit_message: AutoGenerate,
                     approval_info: QueueProperties {
-                        approval: Some(
-                            Approval {
-                                approver: Myself,
-                                mode: Tentative,
-                            },
+                        approver: Some(
+                            Myself,
                         ),
+                        force: None,
                         priority: None,
                         rollup: None,
                         note: None,
@@ -2175,12 +2148,10 @@ for the crater",
                         "foo",
                     ),
                     approval_info: QueueProperties {
-                        approval: Some(
-                            Approval {
-                                approver: Myself,
-                                mode: Tentative,
-                            },
+                        approver: Some(
+                            Myself,
                         ),
+                        force: None,
                         priority: None,
                         rollup: None,
                         note: None,
@@ -2202,12 +2173,10 @@ for the crater",
                         "foo",
                     ),
                     approval_info: QueueProperties {
-                        approval: Some(
-                            Approval {
-                                approver: Myself,
-                                mode: Tentative,
-                            },
+                        approver: Some(
+                            Myself,
                         ),
+                        force: None,
                         priority: None,
                         rollup: None,
                         note: None,
@@ -2229,12 +2198,10 @@ for the crater",
                         "foo bar baz",
                     ),
                     approval_info: QueueProperties {
-                        approval: Some(
-                            Approval {
-                                approver: Myself,
-                                mode: Tentative,
-                            },
+                        approver: Some(
+                            Myself,
                         ),
+                        force: None,
                         priority: None,
                         rollup: None,
                         note: None,
@@ -2254,12 +2221,10 @@ for the crater",
                 SquashApprove {
                     commit_message: PullRequestDescription,
                     approval_info: QueueProperties {
-                        approval: Some(
-                            Approval {
-                                approver: Myself,
-                                mode: Tentative,
-                            },
+                        approver: Some(
+                            Myself,
                         ),
+                        force: None,
                         priority: None,
                         rollup: None,
                         note: None,
@@ -2279,12 +2244,10 @@ for the crater",
                 SquashApprove {
                     commit_message: PullRequestDescription,
                     approval_info: QueueProperties {
-                        approval: Some(
-                            Approval {
-                                approver: Myself,
-                                mode: Tentative,
-                            },
+                        approver: Some(
+                            Myself,
                         ),
+                        force: None,
                         priority: Some(
                             1,
                         ),
@@ -2325,12 +2288,10 @@ for the crater",
                         "foo",
                     ),
                     approval_info: QueueProperties {
-                        approval: Some(
-                            Approval {
-                                approver: Myself,
-                                mode: Tentative,
-                            },
+                        approver: Some(
+                            Myself,
                         ),
+                        force: None,
                         priority: None,
                         rollup: None,
                         note: Some(
@@ -2354,12 +2315,10 @@ for the crater",
                     "foo",
                 ),
                 approval_info: QueueProperties {
-                    approval: Some(
-                        Approval {
-                            approver: Myself,
-                            mode: Tentative,
-                        },
+                    approver: Some(
+                        Myself,
                     ),
+                    force: None,
                     priority: None,
                     rollup: None,
                     note: Some(
@@ -2382,12 +2341,10 @@ for the crater",
                     "foo",
                 ),
                 approval_info: QueueProperties {
-                    approval: Some(
-                        Approval {
-                            approver: Myself,
-                            mode: Tentative,
-                        },
+                    approver: Some(
+                        Myself,
                     ),
+                    force: None,
                     priority: Some(
                         1,
                     ),
@@ -2408,12 +2365,10 @@ for the crater",
             SquashApprove {
                 commit_message: AutoGenerate,
                 approval_info: QueueProperties {
-                    approval: Some(
-                        Approval {
-                            approver: Myself,
-                            mode: Tentative,
-                        },
+                    approver: Some(
+                        Myself,
                     ),
+                    force: None,
                     priority: Some(
                         1,
                     ),
@@ -2480,14 +2435,12 @@ I am markdown HTML comment
         Ok(
             ChangeQueueState(
                 QueueProperties {
-                    approval: Some(
-                        Approval {
-                            approver: Specified(
-                                "čaujaksemáš",
-                            ),
-                            mode: Tentative,
-                        },
+                    approver: Some(
+                        Specified(
+                            "čaujaksemáš",
+                        ),
                     ),
+                    force: None,
                     priority: None,
                     rollup: None,
                     note: None,
@@ -2745,7 +2698,8 @@ I am markdown HTML comment
             Ok(
                 ChangeQueueState(
                     QueueProperties {
-                        approval: None,
+                        approver: None,
+                        force: None,
                         priority: Some(
                             1,
                         ),
@@ -2784,7 +2738,8 @@ I am markdown HTML comment
                 SquashApprove {
                     commit_message: AutoGenerate,
                     approval_info: QueueProperties {
-                        approval: None,
+                        approver: None,
+                        force: None,
                         priority: None,
                         rollup: None,
                         note: Some(
