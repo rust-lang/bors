@@ -34,12 +34,7 @@ pub(super) async fn command_approve(
     info: QueueProperties,
     merge_queue_tx: &MergeQueueSender,
 ) -> anyhow::Result<()> {
-    assert!(
-        info.approval.is_some()
-            || info.priority.is_some()
-            || info.rollup.is_some()
-            || info.note.is_some()
-    );
+    assert!(!info.is_empty());
 
     // Do checks
     if let Some(rollup) = info.rollup
