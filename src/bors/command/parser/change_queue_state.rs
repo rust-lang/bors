@@ -4,6 +4,7 @@ use crate::bors::command::parser::{CommandPart, ParseResult, join_parts};
 use crate::bors::command::{
     Approver, BorsCommand, CommandParseError, Priority, QueueProperties, SquashCommitMessage,
 };
+use std::mem;
 use std::str::FromStr;
 
 const SIGNATURE: &str = "[r+] [r=<user>] [p=<priority>] [rollup=<never|iffy|maybe|always>] [force] [note=<note>] [squash [message/msg=<msg>]]";
@@ -15,7 +16,7 @@ pub(super) fn parser_change_queue_state(
 ) -> ParseResult {
     let mut result = QueueProperties {
         approver: None,
-        force: None,
+        force: false,
         priority: None,
         rollup: None,
         note: None,
@@ -128,7 +129,10 @@ fn parse_part_force(
         Bare("force") => {}
         _ => return None,
     }
-    insert_check_dup("force", &mut result.force, ())
+    if mem::replace(&mut result.force, true) {
+        return Some(Err(CommandParseError::DuplicateArg("force".to_string())));
+    }
+    Some(Ok(()))
 }
 
 fn parse_part_rollup(

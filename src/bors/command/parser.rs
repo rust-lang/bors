@@ -584,7 +584,7 @@ mod tests {
                         approver: Some(
                             Myself,
                         ),
-                        force: None,
+                        force: false,
                         priority: None,
                         rollup: None,
                         note: None,
@@ -606,9 +606,7 @@ mod tests {
                     approver: Some(
                         Myself,
                     ),
-                    force: Some(
-                        (),
-                    ),
+                    force: true,
                     priority: Some(
                         1,
                     ),
@@ -633,7 +631,7 @@ mod tests {
                             "user1",
                         ),
                     ),
-                    force: None,
+                    force: false,
                     priority: None,
                     rollup: None,
                     note: None,
@@ -656,7 +654,7 @@ mod tests {
                             "user1,user2",
                         ),
                     ),
-                    force: None,
+                    force: false,
                     priority: None,
                     rollup: None,
                     note: None,
@@ -703,7 +701,7 @@ mod tests {
                         approver: Some(
                             Myself,
                         ),
-                        force: None,
+                        force: false,
                         priority: Some(
                             1,
                         ),
@@ -729,7 +727,7 @@ mod tests {
                                 "user1",
                             ),
                         ),
-                        force: None,
+                        force: false,
                         priority: Some(
                             2,
                         ),
@@ -758,7 +756,7 @@ mod tests {
                         approver: Some(
                             Myself,
                         ),
-                        force: None,
+                        force: false,
                         priority: Some(
                             1,
                         ),
@@ -775,7 +773,7 @@ mod tests {
                                 "user2",
                             ),
                         ),
-                        force: None,
+                        force: false,
                         priority: Some(
                             2,
                         ),
@@ -814,7 +812,7 @@ mod tests {
                                 "user1",
                             ),
                         ),
-                        force: None,
+                        force: false,
                         priority: Some(
                             2,
                         ),
@@ -874,7 +872,7 @@ mod tests {
             ChangeQueueState(
                 QueueProperties {
                     approver: None,
-                    force: None,
+                    force: false,
                     priority: Some(
                         5,
                     ),
@@ -894,7 +892,7 @@ mod tests {
             ChangeQueueState(
                 QueueProperties {
                     approver: None,
-                    force: None,
+                    force: false,
                     priority: Some(
                         5,
                     ),
@@ -954,7 +952,7 @@ mod tests {
                 ChangeQueueState(
                     QueueProperties {
                         approver: None,
-                        force: None,
+                        force: false,
                         priority: Some(
                             1,
                         ),
@@ -978,7 +976,7 @@ mod tests {
                 ChangeQueueState(
                     QueueProperties {
                         approver: None,
-                        force: None,
+                        force: false,
                         priority: Some(
                             1,
                         ),
@@ -1004,7 +1002,7 @@ mod tests {
                         approver: Some(
                             Myself,
                         ),
-                        force: None,
+                        force: false,
                         priority: None,
                         rollup: Some(
                             Always,
@@ -1030,7 +1028,7 @@ mod tests {
                                 "user1",
                             ),
                         ),
-                        force: None,
+                        force: false,
                         priority: None,
                         rollup: Some(
                             Never,
@@ -1056,7 +1054,7 @@ mod tests {
                                 "user1",
                             ),
                         ),
-                        force: None,
+                        force: false,
                         priority: None,
                         rollup: Some(
                             Always,
@@ -1082,7 +1080,7 @@ mod tests {
                                 "user1",
                             ),
                         ),
-                        force: None,
+                        force: false,
                         priority: None,
                         rollup: Some(
                             Maybe,
@@ -1111,7 +1109,7 @@ mod tests {
                         approver: Some(
                             Myself,
                         ),
-                        force: None,
+                        force: false,
                         priority: None,
                         rollup: Some(
                             Always,
@@ -1128,7 +1126,7 @@ mod tests {
                                 "user2",
                             ),
                         ),
-                        force: None,
+                        force: false,
                         priority: None,
                         rollup: Some(
                             Iffy,
@@ -1176,7 +1174,7 @@ mod tests {
                 ChangeQueueState(
                     QueueProperties {
                         approver: None,
-                        force: None,
+                        force: false,
                         priority: None,
                         rollup: Some(
                             Always,
@@ -1198,7 +1196,7 @@ mod tests {
                 ChangeQueueState(
                     QueueProperties {
                         approver: None,
-                        force: None,
+                        force: false,
                         priority: None,
                         rollup: Some(
                             Maybe,
@@ -1220,7 +1218,7 @@ mod tests {
                 ChangeQueueState(
                     QueueProperties {
                         approver: None,
-                        force: None,
+                        force: false,
                         priority: None,
                         rollup: Some(
                             Always,
@@ -1268,7 +1266,7 @@ mod tests {
                 ChangeQueueState(
                     QueueProperties {
                         approver: None,
-                        force: None,
+                        force: false,
                         priority: None,
                         rollup: Some(
                             Always,
@@ -1292,7 +1290,7 @@ mod tests {
                 ChangeQueueState(
                     QueueProperties {
                         approver: None,
-                        force: None,
+                        force: false,
                         priority: None,
                         rollup: Some(
                             Always,
@@ -1318,7 +1316,7 @@ mod tests {
                         approver: Some(
                             Myself,
                         ),
-                        force: None,
+                        force: false,
                         priority: Some(
                             1,
                         ),
@@ -1344,7 +1342,7 @@ mod tests {
                         approver: Some(
                             Myself,
                         ),
-                        force: None,
+                        force: false,
                         priority: Some(
                             1,
                         ),
@@ -1370,7 +1368,7 @@ mod tests {
                         approver: Some(
                             Myself,
                         ),
-                        force: None,
+                        force: false,
                         priority: Some(
                             1,
                         ),
@@ -2126,7 +2124,7 @@ for the crater",
                         approver: Some(
                             Myself,
                         ),
-                        force: None,
+                        force: false,
                         priority: None,
                         rollup: None,
                         note: None,
@@ -2151,7 +2149,7 @@ for the crater",
                         approver: Some(
                             Myself,
                         ),
-                        force: None,
+                        force: false,
                         priority: None,
                         rollup: None,
                         note: None,
@@ -2176,7 +2174,7 @@ for the crater",
                         approver: Some(
                             Myself,
                         ),
-                        force: None,
+                        force: false,
                         priority: None,
                         rollup: None,
                         note: None,
@@ -2201,7 +2199,7 @@ for the crater",
                         approver: Some(
                             Myself,
                         ),
-                        force: None,
+                        force: false,
                         priority: None,
                         rollup: None,
                         note: None,
@@ -2224,7 +2222,7 @@ for the crater",
                         approver: Some(
                             Myself,
                         ),
-                        force: None,
+                        force: false,
                         priority: None,
                         rollup: None,
                         note: None,
@@ -2247,7 +2245,7 @@ for the crater",
                         approver: Some(
                             Myself,
                         ),
-                        force: None,
+                        force: false,
                         priority: Some(
                             1,
                         ),
@@ -2291,7 +2289,7 @@ for the crater",
                         approver: Some(
                             Myself,
                         ),
-                        force: None,
+                        force: false,
                         priority: None,
                         rollup: None,
                         note: Some(
@@ -2318,7 +2316,7 @@ for the crater",
                     approver: Some(
                         Myself,
                     ),
-                    force: None,
+                    force: false,
                     priority: None,
                     rollup: None,
                     note: Some(
@@ -2344,7 +2342,7 @@ for the crater",
                     approver: Some(
                         Myself,
                     ),
-                    force: None,
+                    force: false,
                     priority: Some(
                         1,
                     ),
@@ -2368,7 +2366,7 @@ for the crater",
                     approver: Some(
                         Myself,
                     ),
-                    force: None,
+                    force: false,
                     priority: Some(
                         1,
                     ),
@@ -2440,7 +2438,7 @@ I am markdown HTML comment
                             "čaujaksemáš",
                         ),
                     ),
-                    force: None,
+                    force: false,
                     priority: None,
                     rollup: None,
                     note: None,
@@ -2657,9 +2655,7 @@ I am markdown HTML comment
                 ChangeQueueState(
                     QueueProperties {
                         approver: None,
-                        force: Some(
-                            (),
-                        ),
+                        force: true,
                         priority: None,
                         rollup: None,
                         note: None,
@@ -2707,7 +2703,7 @@ I am markdown HTML comment
                 ChangeQueueState(
                     QueueProperties {
                         approver: None,
-                        force: None,
+                        force: false,
                         priority: Some(
                             1,
                         ),
@@ -2747,7 +2743,7 @@ I am markdown HTML comment
                     commit_message: AutoGenerate,
                     approval_info: QueueProperties {
                         approver: None,
-                        force: None,
+                        force: false,
                         priority: None,
                         rollup: None,
                         note: Some(

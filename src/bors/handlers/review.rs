@@ -5,7 +5,7 @@ use crate::bors::command::{DelegateCommand, RollupMode};
 use crate::bors::comment::{
     approve_blocking_labels_present, approve_merge_conflict_comment, approve_non_open_pr_comment,
     approve_wip_title, approved_comment, delegate_comment, delegate_try_builds_comment,
-    force_non_approve, tentative_approval_failed_comment, unapprove_non_open_pr_comment,
+    force_non_approve_pr_comment, tentative_approval_failed_comment, unapprove_non_open_pr_comment,
     unapprove_not_approved,
 };
 use crate::bors::handlers::{InvalidationInfo, InvalidationReason, PullRequestData, deny_request};
@@ -62,7 +62,7 @@ pub(super) async fn command_approve(
         &db,
         pr,
         &pr_ci_status,
-        info.force.is_some(),
+        info.force,
         info.approver.is_some(),
     )
     .await?;
@@ -94,6 +94,8 @@ pub(super) async fn command_approve(
     Ok(())
 }
 
+/// Returns whether the approval succeeded.
+/// If it did not succeed, we should not continue setting the other queue properties.
 #[allow(clippy::too_many_arguments)]
 async fn command_approve_base(
     ctx: &BorsContext,
@@ -107,10 +109,6 @@ async fn command_approve_base(
     priority: Option<u32>,       // Does not apply the priority, but uses it for user feedback
 ) -> anyhow::Result<bool> {
     tracing::info!("Approving PR {}", pr.number());
-    if !has_permission(repo, author, pr, PermissionType::Review).await? {
-        deny_request(repo, db, pr.number(), author, PermissionType::Review).await?;
-        return Ok(false);
-    };
 
     if let Some(error_comment) = check_pr_approval_validity(pr, repo).await? {
         repo.client
@@ -236,7 +234,7 @@ async fn command_approve_approval_mode(
         // If we're changing approval mode, and this PR is not approved nor it will be, error
         (false, true, _) if !already_approved => {
             repo.client
-                .post_comment(pr.number(), force_non_approve(), db)
+                .post_comment(pr.number(), force_non_approve_pr_comment(), db)
                 .await?;
             return Ok(None);
         }

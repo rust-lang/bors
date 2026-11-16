@@ -116,7 +116,7 @@ pub struct QueueProperties {
     /// If the PR is being re-approved, who is approving the commit
     pub approver: Option<Approver>,
     /// Approve immediately without waiting for PR CI.
-    pub force: Option<()>,
+    pub force: bool,
     /// Priority of the commit.
     /// If `None`, does not change priority.
     pub priority: Option<Priority>,
@@ -134,7 +134,7 @@ impl QueueProperties {
             self,
             QueueProperties {
                 approver: None,
-                force: None,
+                force: false,
                 priority: None,
                 rollup: None,
                 note: None,
@@ -149,7 +149,7 @@ impl QueueProperties {
             QueueProperties {
                 rollup: _,
                 approver: None,
-                force: None,
+                force: false,
                 priority: None,
                 note: None,
             } => PermissionType::Try,
