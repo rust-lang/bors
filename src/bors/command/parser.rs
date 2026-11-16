@@ -2651,15 +2651,23 @@ I am markdown HTML comment
     #[test]
     fn parse_force_without_approve() {
         let cmds = parse_commands(r#"@bors force"#);
-        insta::assert_debug_snapshot!(cmds, @r#"
+        insta::assert_debug_snapshot!(cmds, @"
         [
-            Err(
-                ValidationError(
-                    "The `force` argument cannot be used without an approval",
+            Ok(
+                ChangeQueueState(
+                    QueueProperties {
+                        approver: None,
+                        force: Some(
+                            (),
+                        ),
+                        priority: None,
+                        rollup: None,
+                        note: None,
+                    },
                 ),
             ),
         ]
-        "#);
+        ");
     }
 
     #[test]

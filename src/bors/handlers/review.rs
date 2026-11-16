@@ -813,6 +813,39 @@ mod tests {
     }
 
     #[sqlx::test(migrator = "crate::MIGRATOR")]
+    async fn force_after_approve(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            ctx.post_comment("@bors r+").await?;
+            ctx.post_comment("@bors force").await?;
+            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
+            :pushpin: Commit pr-1-sha has been approved by `default-user`
+
+            It is now in the [queue](https://bors-test.com/queue/borstest) for this repository.
+            ");
+
+            ctx.pr(())
+                .await
+                .expect_approved_by(&User::default_pr_author().name);
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
+    async fn force_without_approve(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            ctx.post_comment("@bors force").await?;
+            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @":clipboard: Only approved PRs can be forced.");
+
+            ctx.pr(())
+                .await
+                .expect_unapproved();
+            Ok(())
+        })
+            .await;
+    }
+
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn approve_add_label(pool: sqlx::PgPool) {
         let gh = GitHub::default().append_to_default_config(
             r#"

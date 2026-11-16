@@ -128,11 +128,6 @@ fn parse_part_force(
         Bare("force") => {}
         _ => return None,
     }
-    let Some(_) = &mut result.approver else {
-        return Some(Err(CommandParseError::ValidationError(
-            "The `force` argument cannot be used without an approval".to_string(),
-        )));
-    };
     insert_check_dup("force", &mut result.force, ())
 }
 
