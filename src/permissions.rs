@@ -4,7 +4,7 @@ use serde::de::DeserializeOwned;
 use std::collections::HashSet;
 use std::fmt;
 
-#[derive(Eq, PartialEq, Debug, Clone)]
+#[derive(Eq, PartialEq, Debug, Clone, Copy)]
 pub enum PermissionType {
     /// Can perform commands like r+
     Review,

@@ -103,9 +103,8 @@ impl PgDbClient {
         &self,
         pr: &PullRequestModel,
         approval_info: ApprovalInfo,
-        approval_mode: ApprovalMode,
     ) -> anyhow::Result<()> {
-        approve_pull_request(&self.pool, pr.id, approval_info, approval_mode).await
+        approve_pull_request(&self.pool, pr.id, approval_info).await
     }
 
     pub async fn confirm_tentative_approval(&self, pr: &PullRequestModel) -> anyhow::Result<()> {
@@ -138,8 +137,17 @@ impl PgDbClient {
         rollup_mode: Option<RollupMode>,
         priority: Option<u32>,
         note: Option<String>,
+        approval_mode: Option<ApprovalMode>,
     ) -> anyhow::Result<()> {
-        set_pr_queue_properties(&self.pool, pr.id, rollup_mode, priority, note).await
+        set_pr_queue_properties(
+            &self.pool,
+            pr.id,
+            rollup_mode,
+            priority,
+            note,
+            approval_mode,
+        )
+        .await
     }
 
     pub async fn delegate(

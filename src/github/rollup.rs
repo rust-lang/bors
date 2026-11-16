@@ -438,7 +438,7 @@ async fn create_rollup(
         .context("Cannot store the created rollup into the DB")?;
 
     // Mark it as rollup=never
-    db.set_pr_queue_properties(&rollup_db, Some(RollupMode::Never), None, None)
+    db.set_pr_queue_properties(&rollup_db, Some(RollupMode::Never), None, None, None)
         .await?;
 
     // And register its rollup member PRs

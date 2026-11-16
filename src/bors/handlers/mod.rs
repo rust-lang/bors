@@ -857,7 +857,7 @@ async fn has_permission(
     if repo_state
         .permissions
         .load()
-        .has_permission(user.id, permission.clone())
+        .has_permission(user.id, permission)
     {
         return Ok(true);
     }

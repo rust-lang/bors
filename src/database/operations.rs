@@ -481,21 +481,17 @@ pub(crate) async fn approve_pull_request(
     executor: impl PgExecutor<'_>,
     pr_id: i32,
     approval_info: ApprovalInfo,
-    approval_mode: ApprovalMode,
 ) -> anyhow::Result<()> {
-    let tentative = approval_mode == ApprovalMode::Tentative;
     measure_db_query("approve_pull_request", || async {
         sqlx::query!(
             r#"
 UPDATE pull_request
 SET approved_by = $1,
-    approved_sha = $2,
-    approval_tentative = $3
-WHERE id = $4
+    approved_sha = $2
+WHERE id = $3
 "#,
             approval_info.approver,
             approval_info.sha,
-            tentative,
             pr_id,
         )
         .execute(executor)
@@ -915,18 +911,22 @@ pub(crate) async fn set_pr_queue_properties(
     rollup: Option<RollupMode>,
     priority: Option<u32>,
     note: Option<String>,
+    approval_mode: Option<ApprovalMode>,
 ) -> anyhow::Result<()> {
+    let tentative = approval_mode.map(|mode| mode == ApprovalMode::Tentative);
     measure_db_query("set_pr_approve_properties", || async {
         sqlx::query!(
             r#"
 UPDATE pull_request
 SET priority = COALESCE($1, priority),
     rollup = COALESCE($2, rollup),
-    note = COALESCE($3, note)
-WHERE id = $4"#,
+    note = COALESCE($3, note),
+    approval_tentative = COALESCE($4, approval_tentative)
+WHERE id = $5"#,
             priority.map(|v| v as i32),
             rollup as Option<RollupMode>,
             note,
+            tentative,
             pr_id
         )
         .execute(executor)
