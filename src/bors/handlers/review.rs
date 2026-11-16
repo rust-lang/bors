@@ -5,7 +5,8 @@ use crate::bors::command::{DelegateCommand, RollupMode};
 use crate::bors::comment::{
     approve_blocking_labels_present, approve_merge_conflict_comment, approve_non_open_pr_comment,
     approve_wip_title, approved_comment, delegate_comment, delegate_try_builds_comment,
-    tentative_approval_failed_comment, unapprove_non_open_pr_comment, unapprove_not_approved,
+    force_non_approve, tentative_approval_failed_comment, unapprove_non_open_pr_comment,
+    unapprove_not_approved,
 };
 use crate::bors::handlers::{InvalidationInfo, InvalidationReason, PullRequestData, deny_request};
 use crate::bors::handlers::{has_permission, invalidate_pr};
@@ -54,12 +55,38 @@ pub(super) async fn command_approve(
         return Ok(());
     }
 
+    // Handle approval mode
+    let pr_ci_status = get_pr_ci_status(&repo, pr.github).await?;
+    let approval_mode = command_approve_approval_mode(
+        &repo,
+        &db,
+        pr,
+        &pr_ci_status,
+        info.force.is_some(),
+        info.approver.is_some(),
+    )
+    .await?;
+
     // Approve the PR & set rollup properties
-    if let Some(approver) = &info.approver {
-        let force = info.force.is_some();
-        command_approve_base(&ctx, &repo, &db, pr, author, approver, force, info.priority).await?;
+    if let Some(approval) = &info.approver {
+        if !command_approve_base(
+            &ctx,
+            &repo,
+            &db,
+            pr,
+            &pr_ci_status,
+            author,
+            approval,
+            approval_mode.unwrap(),
+            info.priority,
+        )
+        .await?
+        {
+            // Command failed
+            return Ok(());
+        }
     }
-    db.set_pr_queue_properties(pr.db, info.rollup, info.priority, info.note)
+    db.set_pr_queue_properties(pr.db, info.rollup, info.priority, info.note, approval_mode)
         .await?;
 
     // Finish up
@@ -73,22 +100,23 @@ async fn command_approve_base(
     repo: &RepositoryState,
     db: &PgDbClient,
     pr: PullRequestData<'_>,
+    pr_ci_status: &PrCiStatus,
     author: &GithubUser,
     approver: &Approver,
-    force: bool,
-    priority: Option<u32>, // Does not apply the priority, but uses it for user feedback
-) -> anyhow::Result<()> {
+    approval_mode: ApprovalMode, // Does not apply the force, but uses it for user feedback
+    priority: Option<u32>,       // Does not apply the priority, but uses it for user feedback
+) -> anyhow::Result<bool> {
     tracing::info!("Approving PR {}", pr.number());
     if !has_permission(repo, author, pr, PermissionType::Review).await? {
         deny_request(repo, db, pr.number(), author, PermissionType::Review).await?;
-        return Ok(());
+        return Ok(false);
     };
 
     if let Some(error_comment) = check_pr_approval_validity(pr, repo).await? {
         repo.client
             .post_comment(pr.number(), error_comment, db)
             .await?;
-        return Ok(());
+        return Ok(false);
     }
 
     let approver = match approver {
@@ -102,24 +130,6 @@ async fn command_approve_base(
         sha: approved_sha.to_string(),
     };
 
-    let pr_ci_status = get_pr_ci_status(repo, pr.github).await?;
-    let already_approved = pr.db.is_approved();
-
-    // Potentially upgrade the tentative approval to a full approval
-    let approval_mode = match (force, pr_ci_status) {
-        (true, _) => ApprovalMode::Eager,
-        // If PR CI is already green, just treat the approval as eager
-        (false, PrCiStatus::Success) => ApprovalMode::Eager,
-        // It is possible that the PR was already (fully) approved before.
-        // If we are now doing a tentative approval, we will "upgrade" it to a full approval, which is
-        // usually what the user wants.
-        // This situation should be very rare anyway.
-        (false, _) if already_approved => ApprovalMode::Eager,
-        (false, PrCiStatus::Failed | PrCiStatus::Pending { .. } | PrCiStatus::NotStarted) => {
-            ApprovalMode::Tentative
-        }
-    };
-
     if matches!(approval_mode, ApprovalMode::Tentative)
         && matches!(pr_ci_status, PrCiStatus::Failed)
     {
@@ -130,10 +140,10 @@ async fn command_approve_base(
                 db,
             )
             .await?;
-        return Ok(());
+        return Ok(false);
     }
 
-    db.approve(pr.db, approval_info, approval_mode).await?;
+    db.approve(pr.db, approval_info).await?;
 
     let priority = priority.or(pr.db.priority.map(|p| p as u32));
 
@@ -205,7 +215,49 @@ async fn command_approve_base(
         &PullRequestInfo::from(pr.github.clone()),
         LabelTrigger::Approved,
     )
-    .await
+    .await?;
+    Ok(true)
+}
+
+/// Calculates the command approval mode from `is_force` and `is_approve`.
+/// If it returns `None`, don't change approval mode.
+async fn command_approve_approval_mode(
+    repo: &RepositoryState,
+    db: &PgDbClient,
+    pr: PullRequestData<'_>,
+    pr_ci_status: &PrCiStatus,
+    is_force: bool,
+    is_approve: bool,
+) -> anyhow::Result<Option<ApprovalMode>> {
+    let already_approved = pr.db.is_approved();
+
+    // Potentially upgrade the tentative approval to a full approval
+    let approval_mode = match (is_approve, is_force, pr_ci_status) {
+        // If we're changing approval mode, and this PR is not approved nor it will be, error
+        (false, true, _) if !already_approved => {
+            repo.client
+                .post_comment(pr.number(), force_non_approve(), db)
+                .await?;
+            return Ok(None);
+        }
+        // If force is explicitly provided, force approval
+        (_, true, _) => ApprovalMode::Eager,
+        // If force is not provided, and this command doesn't approve the PR, don't change approval mode
+        (false, false, _) => return Ok(None),
+        // If PR CI is already green, just treat the approval as eager
+        (true, false, PrCiStatus::Success) => ApprovalMode::Eager,
+        // It is possible that the PR was already (fully) approved before, we don't change the approval mode
+        (true, false, _) if already_approved => return Ok(None),
+        (true, _, PrCiStatus::Failed | PrCiStatus::Pending { .. } | PrCiStatus::NotStarted) => {
+            if is_force {
+                ApprovalMode::Eager
+            } else {
+                ApprovalMode::Tentative
+            }
+        }
+    };
+
+    Ok(Some(approval_mode))
 }
 
 /// Check if the specified approvers exist as GitHub users or teams.

@@ -414,6 +414,10 @@ pub fn approve_non_open_pr_comment() -> Comment {
     Comment::new(":clipboard: Only open, non-draft PRs can be approved.".to_string())
 }
 
+pub fn force_non_approve() -> Comment {
+    Comment::new(":clipboard: Only approved PRs can be forced.".to_string())
+}
+
 pub fn unapprove_non_open_pr_comment() -> Comment {
     Comment::new(":clipboard: Only unclosed PRs can be unapproved.".to_string())
 }
