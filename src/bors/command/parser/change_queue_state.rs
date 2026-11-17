@@ -62,13 +62,9 @@ pub(super) fn parser_change_queue_state(
     }
 
     Some(Ok(if let Some(commit_message) = squash {
-        if result.is_empty() {
-            BorsCommand::Squash { commit_message }
-        } else {
-            BorsCommand::SquashApprove {
-                commit_message,
-                approval_info: result,
-            }
+        BorsCommand::SquashChangeQueueState {
+            commit_message,
+            approval_info: result,
         }
     } else {
         BorsCommand::ChangeQueueState(result)
