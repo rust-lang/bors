@@ -2012,8 +2012,15 @@ for the crater",
         insta::assert_debug_snapshot!(cmds, @"
         [
             Ok(
-                Squash {
+                SquashChangeQueueState {
                     commit_message: AutoGenerate,
+                    approval_info: QueueProperties {
+                        approver: None,
+                        force: false,
+                        priority: None,
+                        rollup: None,
+                        note: None,
+                    },
                 },
             ),
         ]
@@ -2026,10 +2033,17 @@ for the crater",
         insta::assert_debug_snapshot!(cmds, @r#"
         [
             Ok(
-                Squash {
+                SquashChangeQueueState {
                     commit_message: Explicit(
                         "foo",
                     ),
+                    approval_info: QueueProperties {
+                        approver: None,
+                        force: false,
+                        priority: None,
+                        rollup: None,
+                        note: None,
+                    },
                 },
             ),
         ]
@@ -2042,10 +2056,17 @@ for the crater",
         insta::assert_debug_snapshot!(cmds, @r#"
         [
             Ok(
-                Squash {
+                SquashChangeQueueState {
                     commit_message: Explicit(
                         "foo",
                     ),
+                    approval_info: QueueProperties {
+                        approver: None,
+                        force: false,
+                        priority: None,
+                        rollup: None,
+                        note: None,
+                    },
                 },
             ),
         ]
@@ -2058,10 +2079,17 @@ for the crater",
         insta::assert_debug_snapshot!(cmds, @r#"
         [
             Ok(
-                Squash {
+                SquashChangeQueueState {
                     commit_message: Explicit(
                         "foo bar baz",
                     ),
+                    approval_info: QueueProperties {
+                        approver: None,
+                        force: false,
+                        priority: None,
+                        rollup: None,
+                        note: None,
+                    },
                 },
             ),
         ]
@@ -2074,8 +2102,15 @@ for the crater",
         insta::assert_debug_snapshot!(cmds, @"
         [
             Ok(
-                Squash {
+                SquashChangeQueueState {
                     commit_message: PullRequestDescription,
+                    approval_info: QueueProperties {
+                        approver: None,
+                        force: false,
+                        priority: None,
+                        rollup: None,
+                        note: None,
+                    },
                 },
             ),
         ]
@@ -2118,7 +2153,7 @@ for the crater",
         insta::assert_debug_snapshot!(cmds, @"
         [
             Ok(
-                SquashApprove {
+                SquashChangeQueueState {
                     commit_message: AutoGenerate,
                     approval_info: QueueProperties {
                         approver: Some(
@@ -2141,7 +2176,7 @@ for the crater",
         insta::assert_debug_snapshot!(cmds, @r#"
         [
             Ok(
-                SquashApprove {
+                SquashChangeQueueState {
                     commit_message: Explicit(
                         "foo",
                     ),
@@ -2166,7 +2201,7 @@ for the crater",
         insta::assert_debug_snapshot!(cmds, @r#"
         [
             Ok(
-                SquashApprove {
+                SquashChangeQueueState {
                     commit_message: Explicit(
                         "foo",
                     ),
@@ -2191,7 +2226,7 @@ for the crater",
         insta::assert_debug_snapshot!(cmds, @r#"
         [
             Ok(
-                SquashApprove {
+                SquashChangeQueueState {
                     commit_message: Explicit(
                         "foo bar baz",
                     ),
@@ -2216,7 +2251,7 @@ for the crater",
         insta::assert_debug_snapshot!(cmds, @"
         [
             Ok(
-                SquashApprove {
+                SquashChangeQueueState {
                     commit_message: PullRequestDescription,
                     approval_info: QueueProperties {
                         approver: Some(
@@ -2239,7 +2274,7 @@ for the crater",
         insta::assert_debug_snapshot!(cmds, @"
         [
             Ok(
-                SquashApprove {
+                SquashChangeQueueState {
                     commit_message: PullRequestDescription,
                     approval_info: QueueProperties {
                         approver: Some(
@@ -2281,7 +2316,7 @@ for the crater",
         insta::assert_debug_snapshot!(cmds, @r#"
         [
             Ok(
-                SquashApprove {
+                SquashChangeQueueState {
                     commit_message: Explicit(
                         "foo",
                     ),
@@ -2308,7 +2343,7 @@ for the crater",
         assert_eq!(cmds.len(), 1);
         insta::assert_debug_snapshot!(cmds[0], @r#"
         Ok(
-            SquashApprove {
+            SquashChangeQueueState {
                 commit_message: Explicit(
                     "foo",
                 ),
@@ -2334,7 +2369,7 @@ for the crater",
         assert_eq!(cmds.len(), 1);
         insta::assert_debug_snapshot!(cmds[0], @r#"
         Ok(
-            SquashApprove {
+            SquashChangeQueueState {
                 commit_message: Explicit(
                     "foo",
                 ),
@@ -2360,7 +2395,7 @@ for the crater",
         assert_eq!(cmds.len(), 1);
         insta::assert_debug_snapshot!(cmds[0], @"
         Ok(
-            SquashApprove {
+            SquashChangeQueueState {
                 commit_message: AutoGenerate,
                 approval_info: QueueProperties {
                     approver: Some(
@@ -2739,7 +2774,7 @@ I am markdown HTML comment
         insta::assert_debug_snapshot!(cmds, @r#"
         [
             Ok(
-                SquashApprove {
+                SquashChangeQueueState {
                     commit_message: AutoGenerate,
                     approval_info: QueueProperties {
                         approver: None,

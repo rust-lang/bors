@@ -100,8 +100,7 @@ pub fn format_help() -> &'static str {
         BorsCommand::TreeClosed { .. } => {}
         BorsCommand::Retry => {}
         BorsCommand::Cancel => {}
-        BorsCommand::Squash { .. } => {}
-        BorsCommand::SquashApprove { .. } => {}
+        BorsCommand::SquashChangeQueueState { .. } => {}
     }
 
     r#"

@@ -636,44 +636,28 @@ async fn handle_comment(
                         .instrument(span)
                         .await
                     }
-                    BorsCommand::Squash { commit_message } => {
-                        let span = tracing::info_span!("Squash");
-                        if ctx.local_git_available() {
-                            squash::command_squash(
-                                repo,
-                                database,
-                                pr,
-                                &comment.author,
-                                commit_message,
-                                ctx.parser.prefix(),
-                                senders.gitops_queue(),
-                                None,
-                            )
-                            .instrument(span)
-                            .await?;
-                            Ok(())
-                        } else {
+                    BorsCommand::SquashChangeQueueState {
+                        commit_message,
+                        approval_info,
+                    } => {
+                        let span = tracing::info_span!("SquashChangeQueueState");
+
+                        if !ctx.local_git_available() {
                             repo.client
                                 .post_comment(
                                     pr_number,
                                     Comment::new(
-                                        "`@bors squash` is not enabled in this bors instance."
+                                        "`@bors squash` is not enabled in this bors instance. No action has been performed."
                                             .to_string(),
                                     ),
                                     &ctx.db,
                                 )
                                 .instrument(span)
                                 .await?;
-                            Ok(())
+                            return Ok(());
                         }
-                    }
-                    BorsCommand::SquashApprove {
-                        commit_message,
-                        approval_info,
-                    } => {
-                        let span = tracing::info_span!("SquashAndApprove");
 
-                        if ctx.local_git_available() {
+                        let callback: Option<AfterSquashCallback> = if !approval_info.is_empty() {
                             let ctx2 = ctx.clone();
                             let repo2 = repo.clone();
                             let db2 = database.clone();
@@ -718,33 +702,24 @@ async fn handle_comment(
                                     .await
                                 })
                             });
-                            squash::command_squash(
-                                repo,
-                                database,
-                                pr,
-                                &comment.author,
-                                commit_message,
-                                ctx.parser.prefix(),
-                                senders.gitops_queue(),
-                                Some(callback),
-                            )
-                            .instrument(span)
-                            .await?;
+                            Some(callback)
                         } else {
-                            repo.client
-                                .post_comment(
-                                    pr_number,
-                                    Comment::new(
-                                        "`@bors squash` is not enabled in this bors instance.\
-                                        Cancelling command, to just approve use the `r+`\
-                                        command instead."
-                                            .to_string(),
-                                    ),
-                                    &ctx.db,
-                                )
-                                .instrument(span)
-                                .await?;
-                        }
+                            None
+                        };
+
+                        squash::command_squash(
+                            repo,
+                            database,
+                            pr,
+                            &comment.author,
+                            commit_message,
+                            ctx.parser.prefix(),
+                            senders.gitops_queue(),
+                            callback,
+                        )
+                        .instrument(span)
+                        .await?;
+
                         Ok(())
                     }
                 };
