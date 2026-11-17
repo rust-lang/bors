@@ -2424,4 +2424,40 @@ approved = ["+approved"]
         })
         .await;
     }
+
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
+    async fn rust_timer_permissions(pool: sqlx::PgPool) {
+        let github = GitHub::default();
+
+        // Rust-timer has `try` permissions
+        let user = User::new(9999, "rust-timer");
+        github
+            .default_repo()
+            .lock()
+            .permissions
+            .users
+            .insert(user.clone(), vec![PermissionType::Try]);
+
+        BorsBuilder::new(pool)
+            .github(github)
+            .run_test(async |ctx: &mut BorsTester| {
+                // Can set PR properties
+                ctx.post_comment(
+                    Comment::from("@bors rollup=never rust-timer").with_author(user.clone()),
+                )
+                .await?;
+
+                // Cannot approve
+                ctx.post_comment(Comment::from("@bors r+").with_author(user.clone()))
+                    .await?;
+                insta::assert_snapshot!(
+                    ctx.get_next_comment_text(()).await?,
+                    @"@rust-timer: :key: Insufficient privileges: not in review users"
+                );
+                ctx.pr(()).await.expect_unapproved();
+
+                Ok(())
+            })
+            .await;
+    }
 }
