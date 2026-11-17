@@ -40,7 +40,6 @@ mod tests {
             - `rollup`: Short for `rollup=always`
             - `rollup-`: Short for `rollup=maybe`
             - `force`: The default is for approvals to remain tentative until PR CI succeeds. Pass `force` to approve the PR immediately.
-                - Can only be passed if `r+` or `r=` is passed.
             - `note=<note>`: Attach a `<note>` to the PR that will be displayed on the queue page.
             - `squash [msg|message=<commit-message>|description]`: Squash the commits of a PR into a single commit.
                 - Optionally, you can specify a `<commit-message>` for the created commit. If not specified, the commit messages of all squashed commits will be combined.

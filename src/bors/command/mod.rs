@@ -144,14 +144,14 @@ impl QueueProperties {
 
     pub fn required_permissions(&self) -> PermissionType {
         match self {
-            // Require only try for rollup commands, because rust-timer uses them, and we don't want to
+            // Require only try for rollup commands and notes, because rust-timer uses them, and we don't want to
             // grant it approve permissions.
             QueueProperties {
                 rollup: _,
                 approver: None,
                 force: false,
                 priority: None,
-                note: None,
+                note: _,
             } => PermissionType::Try,
             _ => PermissionType::Review,
         }
