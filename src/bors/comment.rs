@@ -440,9 +440,15 @@ pub fn approve_blocking_labels_present(blocking_labels: &[&str]) -> Comment {
         .iter()
         .map(|label| format!("`{label}`"))
         .join(", ");
+    let label_removals = blocking_labels
+        .iter()
+        .map(|label| format!("-{label}"))
+        .join(" ");
     Comment::new(format!(
-        ":clipboard: This PR cannot be approved because it currently has the following {}: {labels}.",
-        pluralize("label", blocking_labels.len())
+        r#":clipboard: This PR cannot be approved because it currently has the following {}: {labels}.
+
+**Hint**: If these labels are no longer accurate, you can remove them with `@rustbot label {label_removals}`."#,
+        pluralize("label", blocking_labels.len()),
     ))
 }
 
