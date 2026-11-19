@@ -2255,7 +2255,11 @@ labels_blocking_approval = ["proposed-final-comment-period"]
                     })
                     .await?;
                 ctx.post_comment("@bors r+").await?;
-                insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @":clipboard: This PR cannot be approved because it currently has the following label: `proposed-final-comment-period`.");
+                insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
+                :clipboard: This PR cannot be approved because it currently has the following label: `proposed-final-comment-period`.
+
+                **Hint**: If these labels are no longer accurate, you can remove them with `@rustbot label -proposed-final-comment-period`.
+                ");
                 ctx.pr(()).await.expect_unapproved();
                 Ok(())
             })
@@ -2282,7 +2286,11 @@ labels_blocking_approval = ["proposed-final-comment-period", "final-comment-peri
                     })
                     .await?;
                 ctx.post_comment("@bors r+").await?;
-                insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @":clipboard: This PR cannot be approved because it currently has the following labels: `proposed-final-comment-period`, `final-comment-period`.");
+                insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
+                :clipboard: This PR cannot be approved because it currently has the following labels: `proposed-final-comment-period`, `final-comment-period`.
+
+                **Hint**: If these labels are no longer accurate, you can remove them with `@rustbot label -proposed-final-comment-period -final-comment-period`.
+                ");
                 ctx.pr(()).await.expect_unapproved();
                 Ok(())
             })
