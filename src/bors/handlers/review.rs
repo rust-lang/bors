@@ -184,6 +184,8 @@ async fn command_approve_base(
         None
     };
 
+    let merge_queue_enabled = repo.config.load().merge_queue_enabled;
+
     // We send the response comment eagerly, even if the approval is tentative
     // This is an optimistic happy path, which reduces the total number of sent comments on average
     // If we only responded with a temporary tentative approval comment, we would then have to
@@ -201,6 +203,7 @@ async fn command_approve_base(
                 tree_state,
                 had_failed_auto_build,
                 approval_note,
+                merge_queue_enabled,
             ),
             &ctx.db,
         )
@@ -783,6 +786,31 @@ mod tests {
             ctx.pr(()).await.expect_unapproved();
             Ok(())
         })
+            .await;
+    }
+
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
+    async fn approve_with_disabled_merge_queue(pool: sqlx::PgPool) {
+        BorsBuilder::new(pool)
+            .github(GitHub::default().with_default_config(
+                r#"
+merge_queue_enabled = false
+"#,
+            ))
+            .run_test(async |ctx: &mut BorsTester| {
+                ctx.post_comment("@bors r+").await?;
+                insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
+            :pushpin: Commit pr-1-sha has been approved by `default-user`
+
+            It is now in the [queue](https://bors-test.com/queue/borstest) for this repository.
+
+
+            > [!WARNING]
+            > Bors is not used for merging PRs on this repository.
+            > You may want to use `@rustbot merge` or merge the PR via the GitHub UI instead.
+            ");
+                Ok(())
+            })
             .await;
     }
 

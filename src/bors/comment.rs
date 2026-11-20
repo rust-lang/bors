@@ -299,6 +299,7 @@ pub fn approved_comment(
     tree_state: TreeState,
     had_failed_auto_build: bool,
     note: Option<ApprovalNote>,
+    merge_queue_enabled: bool,
 ) -> Comment {
     let approve_emoji = if is_holiday_season() {
         "star2"
@@ -375,6 +376,18 @@ Reason for tree closure: `{reason}`
             )
             .unwrap();
         }
+    }
+    if !merge_queue_enabled {
+        writeln!(
+            comment,
+            r#"
+
+> [!WARNING]
+> Bors is not used for merging PRs on this repository.
+> You may want to use `@rustbot merge` or merge the PR via the GitHub UI instead.
+"#
+        )
+        .unwrap();
     }
 
     Comment::new(comment)
