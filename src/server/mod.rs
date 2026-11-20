@@ -275,11 +275,18 @@ async fn health_handler() -> impl IntoResponse {
 }
 
 async fn index_handler(State(ServerStateRef(state)): State<ServerStateRef>) -> impl IntoResponse {
-    // If we manage exactly one repo, redirect to its queue page directly
-    if let Some(repo_name) = state.ctx.repositories.repository_names().pop()
-        && state.ctx.repositories.repo_count() == 1
-    {
-        return Redirect::temporary(&format!("/queue/{}", repo_name.name())).into_response();
+    let repos_with_merge_queue = state
+        .ctx
+        .repositories
+        .repositories()
+        .into_iter()
+        .filter(|r| r.config.load().merge_queue_enabled)
+        .collect::<Vec<_>>();
+
+    // If we manage exactly one repo with a merge queue, redirect to its queue page directly
+    if let [repo] = repos_with_merge_queue.as_slice() {
+        return Redirect::temporary(&format!("/queue/{}", repo.repository().name()))
+            .into_response();
     };
     help_handler(State(ServerStateRef(state)))
         .await
@@ -289,19 +296,19 @@ async fn index_handler(State(ServerStateRef(state)): State<ServerStateRef>) -> i
 async fn help_handler(State(ServerStateRef(state)): State<ServerStateRef>) -> impl IntoResponse {
     let mut repos = Vec::with_capacity(state.ctx.repositories.repo_count());
     for repo in state.ctx.repositories.repository_names() {
-        let treeclosed = state
-            .ctx
-            .db
-            .get_repository(&repo)
-            .await
-            .ok()
-            .flatten()
-            .is_some_and(|repo| repo.tree_state.is_closed());
+        let Some(repo_db) = state.ctx.db.get_repository(&repo).await.ok().flatten() else {
+            continue;
+        };
+        let Ok(repo) = state.ctx.get_repo(&repo) else {
+            continue;
+        };
         repos.push(RepositoryView {
-            name: repo.name().to_string(),
-            treeclosed,
+            name: repo_db.name.name().to_string(),
+            treeclosed: repo_db.tree_state.is_closed(),
+            bors_merge_queue_enabled: repo.config.load().merge_queue_enabled,
         });
     }
+    repos.sort_by(|a, b| a.name.cmp(&b.name));
 
     let help_md = format_help();
     let markdown = Parser::new(help_md);
