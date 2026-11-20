@@ -275,11 +275,18 @@ async fn health_handler() -> impl IntoResponse {
 }
 
 async fn index_handler(State(ServerStateRef(state)): State<ServerStateRef>) -> impl IntoResponse {
-    // If we manage exactly one repo, redirect to its queue page directly
-    if let Some(repo_name) = state.ctx.repositories.repository_names().pop()
-        && state.ctx.repositories.repo_count() == 1
-    {
-        return Redirect::temporary(&format!("/queue/{}", repo_name.name())).into_response();
+    let repos_with_merge_queue = state
+        .ctx
+        .repositories
+        .repositories()
+        .into_iter()
+        .filter(|r| r.config.load().merge_queue_enabled)
+        .collect::<Vec<_>>();
+
+    // If we manage exactly one repo with a merge queue, redirect to its queue page directly
+    if let [repo] = repos_with_merge_queue.as_slice() {
+        return Redirect::temporary(&format!("/queue/{}", repo.repository().name()))
+            .into_response();
     };
     help_handler(State(ServerStateRef(state)))
         .await
