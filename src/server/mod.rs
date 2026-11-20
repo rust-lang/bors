@@ -308,6 +308,7 @@ async fn help_handler(State(ServerStateRef(state)): State<ServerStateRef>) -> im
             bors_merge_queue_enabled: repo.config.load().merge_queue_enabled,
         });
     }
+    repos.sort_by(|a, b| a.name.cmp(&b.name));
 
     let help_md = format_help();
     let markdown = Parser::new(help_md);
