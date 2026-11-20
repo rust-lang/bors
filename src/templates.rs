@@ -56,6 +56,7 @@ pub struct HelpTemplate {
 pub struct RepositoryView {
     pub name: String,
     pub treeclosed: bool,
+    pub bors_merge_queue_enabled: bool,
 }
 
 pub struct PullRequestStats {

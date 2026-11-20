@@ -53,6 +53,8 @@
     <li>
       <a href="queue/{{ repo.name }}">{{ repo.name }}</a>
       {% if repo.treeclosed %} [TREECLOSED] {% endif %}
+      {% if !repo.bors_merge_queue_enabled %} <span
+            title="Bors does not perform merges on this repo">(auxiliary)</span>{% endif %}
     </li>
     {% endfor %}
   </ul>

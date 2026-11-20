@@ -296,17 +296,16 @@ async fn index_handler(State(ServerStateRef(state)): State<ServerStateRef>) -> i
 async fn help_handler(State(ServerStateRef(state)): State<ServerStateRef>) -> impl IntoResponse {
     let mut repos = Vec::with_capacity(state.ctx.repositories.repo_count());
     for repo in state.ctx.repositories.repository_names() {
-        let treeclosed = state
-            .ctx
-            .db
-            .get_repository(&repo)
-            .await
-            .ok()
-            .flatten()
-            .is_some_and(|repo| repo.tree_state.is_closed());
+        let Some(repo_db) = state.ctx.db.get_repository(&repo).await.ok().flatten() else {
+            continue;
+        };
+        let Ok(repo) = state.ctx.get_repo(&repo) else {
+            continue;
+        };
         repos.push(RepositoryView {
-            name: repo.name().to_string(),
-            treeclosed,
+            name: repo_db.name.name().to_string(),
+            treeclosed: repo_db.tree_state.is_closed(),
+            bors_merge_queue_enabled: repo.config.load().merge_queue_enabled,
         });
     }
 
