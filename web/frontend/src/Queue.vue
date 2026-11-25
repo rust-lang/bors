@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
+import PendingBuildsTable from "./components/PendingBuildsTable.vue";
 import RollupModal from "./components/RollupModal.vue";
 import { formatDurationMs } from "./time";
 
@@ -7,12 +8,16 @@ const props = defineProps<{
   data: Data;
 }>();
 
+const nowMs = ref(Date.now());
+let timerId: number | undefined;
+
 const rollupableNumbers = new Set(
   props.data.prs.filter((pr) => pr.is_rollupable).map((pr) => pr.number),
 );
 const selectedPrNumbers = ref<number[]>(
   props.data.selected_rollup_prs.filter((num) => rollupableNumbers.has(num)),
 );
+const hoveredBuildPr = ref<number | null>(null);
 const rollupModalOpen = ref(false);
 
 const expectedFlushText = computed(() => {
@@ -37,6 +42,20 @@ function openRollupModal() {
   }
   rollupModalOpen.value = true;
 }
+
+onMounted(() => {
+  if (props.data.pending_builds.length > 0) {
+    timerId = window.setInterval(() => {
+      nowMs.value = Date.now();
+    }, 1000);
+  }
+});
+
+onUnmounted(() => {
+  if (timerId !== undefined) {
+    window.clearInterval(timerId);
+  }
+});
 </script>
 
 <template>
@@ -70,6 +89,14 @@ function openRollupModal() {
       </p>
     </template>
   </div>
+
+  <PendingBuildsTable
+    :builds="data.pending_builds"
+    :repo-url="data.repo_url"
+    :average-build-duration-ms="data.average_build_duration_ms"
+    :now-ms="nowMs"
+    @hover-pr="hoveredBuildPr = $event"
+  />
 
   <RollupModal
     :open="rollupModalOpen"
