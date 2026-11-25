@@ -115,6 +115,30 @@ impl Default for ServerCache {
     }
 }
 
+#[derive(Embed, Clone)]
+#[folder = "web/assets/"]
+struct Assets;
+
+impl Assets {
+    /// Return the name of the queue.js script.
+    /// When Vite builds the file, it includes a content hash, to break caches when the script
+    /// changes.
+    /// Here we find a file that has the queue prefix, to locate the full filename including the
+    /// hash.
+    fn get_queue_js() -> Option<String> {
+        Self::iter().find_map(|path| {
+            let path = std::path::Path::new(path.as_ref());
+            let name = path.file_name().and_then(|f| f.to_str())?;
+            if name.starts_with("queue-") && path.extension().and_then(|e| e.to_str()) == Some("js")
+            {
+                Some(name.to_string())
+            } else {
+                None
+            }
+        })
+    }
+}
+
 pub fn create_app(state: ServerState) -> Router {
     let compression_layer = CompressionLayer::new()
         .br(true)
@@ -139,10 +163,6 @@ pub fn create_app(state: ServerState) -> Router {
                 )
             },
         );
-
-    #[derive(Embed, Clone)]
-    #[folder = "web/assets/"]
-    struct Assets;
 
     let serve_assets = ServeEmbed::<Assets>::new();
 
@@ -504,6 +524,7 @@ pub async fn queue_handler(
             .unwrap_or(false);
 
     Ok(HtmlTemplate(QueueTemplate {
+        queue_js_path: Assets::get_queue_js().expect("queue.js file not found"),
         oauth_client_id: oauth
             .as_ref()
             .map(|client| client.config().client_id().to_string()),
