@@ -106,6 +106,7 @@ pub struct QueueTemplate {
     // Average build duration over the past few successful auto builds
     pub average_build_duration: Duration,
     pub ec2_configured: bool,
+    pub queue_js_path: String,
 }
 
 impl QueueTemplate {

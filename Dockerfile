@@ -2,6 +2,15 @@ FROM rust:1.98.1 AS base
 
 RUN cargo install cargo-chef
 
+FROM node:22 AS frontend
+
+WORKDIR /app/web/frontend
+COPY web/frontend/package.json web/frontend/package-lock.json ./
+RUN npm ci
+COPY web/frontend .
+# Outputs to /app/web/assets/vue
+RUN npm run build
+
 FROM base AS planner
 
 WORKDIR /app
@@ -22,6 +31,7 @@ COPY migrations migrations
 COPY .sqlx .sqlx
 COPY src src
 COPY web web
+COPY --from=frontend /app/web/assets/vue web/assets/vue
 
 # Precompress static web assets with gzip to avoid paying for their compression cost at runtime
 RUN gzip --keep --best --force --recursive web/assets

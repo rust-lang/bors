@@ -10,6 +10,12 @@
 <!-- Note: this excludes CSS for the select plugin, which styles checkboxes in a weird way -->
 <!-- Vendored from https://cdn.datatables.net/v/dt/jq-3.7.0/dt-2.3.6/rg-1.6.0/datatables.min.css -->
 <link href="/assets/css/datatables-dt-jq-3.7.0-dt-2.3.6-rg-1.6.0.min.css" rel="stylesheet">
+<!--
+  Parsing large data is faster when it's done via JSON.parse of a string, rather than outputting the raw JS
+  directly. So we store it in a JSON script section, and then parse it as JSON in the browser.
+-->
+<script type="application/json" id="queue-data">{{ "" | json | safe }}</script>
+<script type="text/javascript" src="/assets/vue/{{ queue_js_path }}"></script>
 <style>
     @keyframes barber-pole {
         /* This animation is used to make the status indicator next to
@@ -261,6 +267,8 @@
       <a href="/help">Help</a>
     </div>
   </nav>
+
+  <div id="queue-app"></div>
 
   <div style="margin-bottom: 1rem; display: flex; align-items: center;">
     <button id="showRollupSelection">Create rollup</button>
