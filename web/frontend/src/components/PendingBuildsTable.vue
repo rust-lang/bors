@@ -71,7 +71,7 @@ function formatJobsTitle(workflow: PendingWorkflow): string {
     </div>
 
     <div v-show="isShown" class="table-builds-wrapper">
-      <table class="table-builds">
+      <table class="data-table table-builds">
         <thead>
           <tr>
             <th class="num-col">#</th>
@@ -117,36 +117,18 @@ function formatJobsTitle(workflow: PendingWorkflow): string {
 </template>
 
 <style scoped>
+.toggle {
+  margin-bottom: 0.75rem;
+}
+
 .table-builds-wrapper {
   max-width: 1200px;
   overflow-x: auto;
   margin-bottom: 0.75rem;
 }
 
-.table-builds {
-  min-width: 100%;
-  white-space: nowrap;
-}
-
-.table-builds th,
-.table-builds td {
-  padding: 6px 8px;
-}
-
-.table-builds thead th {
-  border-bottom: 1px solid rgba(0, 0, 0, 0.3);
-}
-
-.table-builds tbody tr:nth-child(odd) {
-  background-color: rgb(238, 238, 238);
-}
-
 .table-builds tbody tr:hover {
   background-color: #e4e9f5;
-}
-
-.num-col {
-  text-align: right;
 }
 
 .jobs-col {

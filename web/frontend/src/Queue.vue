@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import PendingBuildsTable from "./components/PendingBuildsTable.vue";
+import QueueTable from "./components/QueueTable.vue";
 import RollupModal from "./components/RollupModal.vue";
 import { formatDurationMs } from "./time";
 
@@ -11,12 +12,7 @@ const props = defineProps<{
 const nowMs = ref(Date.now());
 let timerId: number | undefined;
 
-const rollupableNumbers = new Set(
-  props.data.prs.filter((pr) => pr.is_rollupable).map((pr) => pr.number),
-);
-const selectedPrNumbers = ref<number[]>(
-  props.data.selected_rollup_prs.filter((num) => rollupableNumbers.has(num)),
-);
+const selectedPrNumbers = ref<number[]>([]);
 const hoveredBuildPr = ref<number | null>(null);
 const rollupModalOpen = ref(false);
 
@@ -98,6 +94,18 @@ onUnmounted(() => {
     @hover-pr="hoveredBuildPr = $event"
   />
 
+  <QueueTable
+    :prs="data.prs"
+    :pending-builds="data.pending_builds"
+    :initial-selected-prs="data.selected_rollup_prs"
+    :repo-url="data.repo_url"
+    :tree-closed-priority="data.tree_closed?.priority ?? null"
+    :average-build-duration-ms="data.average_build_duration_ms"
+    :now-ms="nowMs"
+    :hovered-build-pr="hoveredBuildPr"
+    @selected-change="selectedPrNumbers = $event"
+  />
+
   <RollupModal
     :open="rollupModalOpen"
     :selected-pr-numbers="selectedPrNumbers"
@@ -138,5 +146,29 @@ nav {
 
 .queue-flush {
   margin-bottom: 0;
+}
+</style>
+
+<style>
+.data-table {
+  min-width: 100%;
+  white-space: nowrap;
+}
+
+.data-table th,
+.data-table td {
+  padding: 6px 8px;
+}
+
+.data-table thead th {
+  border-bottom: 1px solid rgba(0, 0, 0, 0.3);
+}
+
+.data-table tbody tr:nth-child(odd) {
+  background-color: rgb(238, 238, 238);
+}
+
+.data-table .num-col {
+  text-align: right;
 }
 </style>
