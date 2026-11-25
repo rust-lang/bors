@@ -4,23 +4,39 @@
     "github>rust-lang/renovate",
     "docker:disable",
   ],
+  // Only rebase PRs when they have conflicts, not whenever the base branch changes.
+  "rebaseWhen": "conflicted",
   "lockFileMaintenance": {
-    "extends": ["schedule:monthly"]
+    "extends": [
+      "schedule:monthly"
+    ]
   },
   "packageRules": [
     {
-      "matchManagers": ["github-actions"],
-      "extends": ["schedule:monthly"]
+      "matchManagers": [
+        "github-actions"
+      ],
+      "extends": [
+        "schedule:monthly"
+      ]
     },
     {
-      "matchManagers": ["npm"],
-      "extends": ["schedule:monthly"]
+      "matchManagers": [
+        "npm"
+      ],
+      "extends": [
+        "schedule:monthly"
+      ]
     },
     {
       // Do not update the pinned Rust toolchain version in GHA workflows,
       // we update it manually together with the MSRV.
-      "matchManagers": ["github-actions"],
-      "matchDepNames": ["rust"],
+      "matchManagers": [
+        "github-actions"
+      ],
+      "matchDepNames": [
+        "rust"
+      ],
       "enabled": false
     }
   ],
