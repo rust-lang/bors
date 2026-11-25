@@ -77,13 +77,14 @@ pub fn format_help() -> &'static str {
     // We do a no-op destructuring of `BorsCommand` to make it harder to modify help in case new
     // commands are added though.
     match BorsCommand::Ping {
-        BorsCommand::ChangeQueueState(QueueProperties {
+        BorsCommand::ApproveAndChangeQueueState(QueueProperties {
             approver: _,
             force: _,
             rollup: _,
             priority: _,
             note: _,
         }) => {}
+        BorsCommand::SquashAndChangeQueueState { .. } => {}
         BorsCommand::Unapprove => {}
         BorsCommand::Help => {}
         BorsCommand::Ping => {}
@@ -100,7 +101,6 @@ pub fn format_help() -> &'static str {
         BorsCommand::TreeClosed { .. } => {}
         BorsCommand::Retry => {}
         BorsCommand::Cancel => {}
-        BorsCommand::SquashChangeQueueState { .. } => {}
     }
 
     r#"
@@ -118,9 +118,10 @@ For example: `@bors r+ squash rollup` will squash the PR, approve it, and mark i
 - `rollup-`: Short for `rollup=maybe`
 - `force`: The default is for approvals to remain tentative until PR CI succeeds. Pass `force` to approve the PR immediately.
 - `note=<note>`: Attach a `<note>` to the PR that will be displayed on the queue page.
-- `squash [msg|message=<commit-message>|description]`: Squash the commits of a PR into a single commit.
-    - Optionally, you can specify a `<commit-message>` for the created commit. If not specified, the commit messages of all squashed commits will be combined.
+- `squash [msg|message=<commit-message>|description|commits]`: Squash the commits of a PR into a single commit.
+    - Optionally, you can specify a `<commit-message>` for the created commit. If not specified, `msg=description` will be used by default.
     - If you specify `msg=description`, then the PR title and body will be used as the squashed commit message.
+    - If you specify `msg=commits`, then the combined messages of the squashed commits will be used as the squashed commit message.
 
 ## PR management: Other
 - `r-`: Unapprove this PR

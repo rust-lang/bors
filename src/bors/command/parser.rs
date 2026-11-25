@@ -579,7 +579,7 @@ mod tests {
         insta::assert_debug_snapshot!(cmds, @"
         [
             Ok(
-                ChangeQueueState(
+                ApproveAndChangeQueueState(
                     QueueProperties {
                         approver: Some(
                             Myself,
@@ -601,7 +601,7 @@ mod tests {
         assert_eq!(cmds.len(), 1);
         insta::assert_debug_snapshot!(cmds[0], @"
         Ok(
-            ChangeQueueState(
+            ApproveAndChangeQueueState(
                 QueueProperties {
                     approver: Some(
                         Myself,
@@ -624,7 +624,7 @@ mod tests {
         assert_eq!(cmds.len(), 1);
         insta::assert_debug_snapshot!(cmds[0], @r#"
         Ok(
-            ChangeQueueState(
+            ApproveAndChangeQueueState(
                 QueueProperties {
                     approver: Some(
                         Specified(
@@ -647,7 +647,7 @@ mod tests {
         assert_eq!(cmds.len(), 1);
         insta::assert_debug_snapshot!(cmds[0], @r#"
         Ok(
-            ChangeQueueState(
+            ApproveAndChangeQueueState(
                 QueueProperties {
                     approver: Some(
                         Specified(
@@ -696,7 +696,7 @@ mod tests {
         insta::assert_debug_snapshot!(cmds, @"
         [
             Ok(
-                ChangeQueueState(
+                ApproveAndChangeQueueState(
                     QueueProperties {
                         approver: Some(
                             Myself,
@@ -720,7 +720,7 @@ mod tests {
         insta::assert_debug_snapshot!(cmds, @r#"
         [
             Ok(
-                ChangeQueueState(
+                ApproveAndChangeQueueState(
                     QueueProperties {
                         approver: Some(
                             Specified(
@@ -751,7 +751,7 @@ mod tests {
         insta::assert_debug_snapshot!(cmds, @r#"
         [
             Ok(
-                ChangeQueueState(
+                ApproveAndChangeQueueState(
                     QueueProperties {
                         approver: Some(
                             Myself,
@@ -766,7 +766,7 @@ mod tests {
                 ),
             ),
             Ok(
-                ChangeQueueState(
+                ApproveAndChangeQueueState(
                     QueueProperties {
                         approver: Some(
                             Specified(
@@ -805,7 +805,7 @@ mod tests {
         insta::assert_debug_snapshot!(cmds, @r#"
         [
             Ok(
-                ChangeQueueState(
+                ApproveAndChangeQueueState(
                     QueueProperties {
                         approver: Some(
                             Specified(
@@ -869,7 +869,7 @@ mod tests {
         let cmds = parse_commands("@bors p=5");
         insta::assert_debug_snapshot!(cmds[0], @"
         Ok(
-            ChangeQueueState(
+            ApproveAndChangeQueueState(
                 QueueProperties {
                     approver: None,
                     force: false,
@@ -889,7 +889,7 @@ mod tests {
         let cmds = parse_commands("@bors priority=5");
         insta::assert_debug_snapshot!(cmds[0], @"
         Ok(
-            ChangeQueueState(
+            ApproveAndChangeQueueState(
                 QueueProperties {
                     approver: None,
                     force: false,
@@ -949,7 +949,7 @@ mod tests {
         insta::assert_debug_snapshot!(cmds, @r#"
         [
             Ok(
-                ChangeQueueState(
+                ApproveAndChangeQueueState(
                     QueueProperties {
                         approver: None,
                         force: false,
@@ -973,7 +973,7 @@ mod tests {
         insta::assert_debug_snapshot!(cmds, @r#"
         [
             Ok(
-                ChangeQueueState(
+                ApproveAndChangeQueueState(
                     QueueProperties {
                         approver: None,
                         force: false,
@@ -997,7 +997,7 @@ mod tests {
         insta::assert_debug_snapshot!(cmds, @"
         [
             Ok(
-                ChangeQueueState(
+                ApproveAndChangeQueueState(
                     QueueProperties {
                         approver: Some(
                             Myself,
@@ -1021,7 +1021,7 @@ mod tests {
         insta::assert_debug_snapshot!(cmds, @r#"
         [
             Ok(
-                ChangeQueueState(
+                ApproveAndChangeQueueState(
                     QueueProperties {
                         approver: Some(
                             Specified(
@@ -1047,7 +1047,7 @@ mod tests {
         insta::assert_debug_snapshot!(cmds, @r#"
         [
             Ok(
-                ChangeQueueState(
+                ApproveAndChangeQueueState(
                     QueueProperties {
                         approver: Some(
                             Specified(
@@ -1073,7 +1073,7 @@ mod tests {
         insta::assert_debug_snapshot!(cmds, @r#"
         [
             Ok(
-                ChangeQueueState(
+                ApproveAndChangeQueueState(
                     QueueProperties {
                         approver: Some(
                             Specified(
@@ -1104,7 +1104,7 @@ mod tests {
         insta::assert_debug_snapshot!(cmds, @r#"
         [
             Ok(
-                ChangeQueueState(
+                ApproveAndChangeQueueState(
                     QueueProperties {
                         approver: Some(
                             Myself,
@@ -1119,7 +1119,7 @@ mod tests {
                 ),
             ),
             Ok(
-                ChangeQueueState(
+                ApproveAndChangeQueueState(
                     QueueProperties {
                         approver: Some(
                             Specified(
@@ -1171,7 +1171,7 @@ mod tests {
         insta::assert_debug_snapshot!(cmds, @"
         [
             Ok(
-                ChangeQueueState(
+                ApproveAndChangeQueueState(
                     QueueProperties {
                         approver: None,
                         force: false,
@@ -1193,7 +1193,7 @@ mod tests {
         insta::assert_debug_snapshot!(cmds, @"
         [
             Ok(
-                ChangeQueueState(
+                ApproveAndChangeQueueState(
                     QueueProperties {
                         approver: None,
                         force: false,
@@ -1215,7 +1215,7 @@ mod tests {
         insta::assert_debug_snapshot!(cmds, @"
         [
             Ok(
-                ChangeQueueState(
+                ApproveAndChangeQueueState(
                     QueueProperties {
                         approver: None,
                         force: false,
@@ -1263,7 +1263,7 @@ mod tests {
         insta::assert_debug_snapshot!(cmds, @r#"
         [
             Ok(
-                ChangeQueueState(
+                ApproveAndChangeQueueState(
                     QueueProperties {
                         approver: None,
                         force: false,
@@ -1287,7 +1287,7 @@ mod tests {
         insta::assert_debug_snapshot!(cmds, @r#"
         [
             Ok(
-                ChangeQueueState(
+                ApproveAndChangeQueueState(
                     QueueProperties {
                         approver: None,
                         force: false,
@@ -1311,7 +1311,7 @@ mod tests {
         insta::assert_debug_snapshot!(cmds, @"
         [
             Ok(
-                ChangeQueueState(
+                ApproveAndChangeQueueState(
                     QueueProperties {
                         approver: Some(
                             Myself,
@@ -1337,7 +1337,7 @@ mod tests {
         insta::assert_debug_snapshot!(cmds, @"
         [
             Ok(
-                ChangeQueueState(
+                ApproveAndChangeQueueState(
                     QueueProperties {
                         approver: Some(
                             Myself,
@@ -1363,7 +1363,7 @@ mod tests {
         insta::assert_debug_snapshot!(cmds, @r#"
         [
             Ok(
-                ChangeQueueState(
+                ApproveAndChangeQueueState(
                     QueueProperties {
                         approver: Some(
                             Myself,
@@ -2012,9 +2012,9 @@ for the crater",
         insta::assert_debug_snapshot!(cmds, @"
         [
             Ok(
-                SquashChangeQueueState {
-                    commit_message: AutoGenerate,
-                    approval_info: QueueProperties {
+                SquashAndChangeQueueState {
+                    commit_message: PullRequestDescription,
+                    queue_properties: QueueProperties {
                         approver: None,
                         force: false,
                         priority: None,
@@ -2033,11 +2033,11 @@ for the crater",
         insta::assert_debug_snapshot!(cmds, @r#"
         [
             Ok(
-                SquashChangeQueueState {
+                SquashAndChangeQueueState {
                     commit_message: Explicit(
                         "foo",
                     ),
-                    approval_info: QueueProperties {
+                    queue_properties: QueueProperties {
                         approver: None,
                         force: false,
                         priority: None,
@@ -2056,11 +2056,11 @@ for the crater",
         insta::assert_debug_snapshot!(cmds, @r#"
         [
             Ok(
-                SquashChangeQueueState {
+                SquashAndChangeQueueState {
                     commit_message: Explicit(
                         "foo",
                     ),
-                    approval_info: QueueProperties {
+                    queue_properties: QueueProperties {
                         approver: None,
                         force: false,
                         priority: None,
@@ -2079,11 +2079,11 @@ for the crater",
         insta::assert_debug_snapshot!(cmds, @r#"
         [
             Ok(
-                SquashChangeQueueState {
+                SquashAndChangeQueueState {
                     commit_message: Explicit(
                         "foo bar baz",
                     ),
-                    approval_info: QueueProperties {
+                    queue_properties: QueueProperties {
                         approver: None,
                         force: false,
                         priority: None,
@@ -2102,9 +2102,9 @@ for the crater",
         insta::assert_debug_snapshot!(cmds, @"
         [
             Ok(
-                SquashChangeQueueState {
+                SquashAndChangeQueueState {
                     commit_message: PullRequestDescription,
-                    approval_info: QueueProperties {
+                    queue_properties: QueueProperties {
                         approver: None,
                         force: false,
                         priority: None,
@@ -2153,9 +2153,9 @@ for the crater",
         insta::assert_debug_snapshot!(cmds, @"
         [
             Ok(
-                SquashChangeQueueState {
-                    commit_message: AutoGenerate,
-                    approval_info: QueueProperties {
+                SquashAndChangeQueueState {
+                    commit_message: PullRequestDescription,
+                    queue_properties: QueueProperties {
                         approver: Some(
                             Myself,
                         ),
@@ -2176,11 +2176,11 @@ for the crater",
         insta::assert_debug_snapshot!(cmds, @r#"
         [
             Ok(
-                SquashChangeQueueState {
+                SquashAndChangeQueueState {
                     commit_message: Explicit(
                         "foo",
                     ),
-                    approval_info: QueueProperties {
+                    queue_properties: QueueProperties {
                         approver: Some(
                             Myself,
                         ),
@@ -2201,11 +2201,11 @@ for the crater",
         insta::assert_debug_snapshot!(cmds, @r#"
         [
             Ok(
-                SquashChangeQueueState {
+                SquashAndChangeQueueState {
                     commit_message: Explicit(
                         "foo",
                     ),
-                    approval_info: QueueProperties {
+                    queue_properties: QueueProperties {
                         approver: Some(
                             Myself,
                         ),
@@ -2226,11 +2226,11 @@ for the crater",
         insta::assert_debug_snapshot!(cmds, @r#"
         [
             Ok(
-                SquashChangeQueueState {
+                SquashAndChangeQueueState {
                     commit_message: Explicit(
                         "foo bar baz",
                     ),
-                    approval_info: QueueProperties {
+                    queue_properties: QueueProperties {
                         approver: Some(
                             Myself,
                         ),
@@ -2251,9 +2251,9 @@ for the crater",
         insta::assert_debug_snapshot!(cmds, @"
         [
             Ok(
-                SquashChangeQueueState {
+                SquashAndChangeQueueState {
                     commit_message: PullRequestDescription,
-                    approval_info: QueueProperties {
+                    queue_properties: QueueProperties {
                         approver: Some(
                             Myself,
                         ),
@@ -2274,9 +2274,9 @@ for the crater",
         insta::assert_debug_snapshot!(cmds, @"
         [
             Ok(
-                SquashChangeQueueState {
+                SquashAndChangeQueueState {
                     commit_message: PullRequestDescription,
-                    approval_info: QueueProperties {
+                    queue_properties: QueueProperties {
                         approver: Some(
                             Myself,
                         ),
@@ -2316,11 +2316,11 @@ for the crater",
         insta::assert_debug_snapshot!(cmds, @r#"
         [
             Ok(
-                SquashChangeQueueState {
+                SquashAndChangeQueueState {
                     commit_message: Explicit(
                         "foo",
                     ),
-                    approval_info: QueueProperties {
+                    queue_properties: QueueProperties {
                         approver: Some(
                             Myself,
                         ),
@@ -2343,11 +2343,11 @@ for the crater",
         assert_eq!(cmds.len(), 1);
         insta::assert_debug_snapshot!(cmds[0], @r#"
         Ok(
-            SquashChangeQueueState {
+            SquashAndChangeQueueState {
                 commit_message: Explicit(
                     "foo",
                 ),
-                approval_info: QueueProperties {
+                queue_properties: QueueProperties {
                     approver: Some(
                         Myself,
                     ),
@@ -2369,11 +2369,11 @@ for the crater",
         assert_eq!(cmds.len(), 1);
         insta::assert_debug_snapshot!(cmds[0], @r#"
         Ok(
-            SquashChangeQueueState {
+            SquashAndChangeQueueState {
                 commit_message: Explicit(
                     "foo",
                 ),
-                approval_info: QueueProperties {
+                queue_properties: QueueProperties {
                     approver: Some(
                         Myself,
                     ),
@@ -2395,9 +2395,9 @@ for the crater",
         assert_eq!(cmds.len(), 1);
         insta::assert_debug_snapshot!(cmds[0], @"
         Ok(
-            SquashChangeQueueState {
-                commit_message: AutoGenerate,
-                approval_info: QueueProperties {
+            SquashAndChangeQueueState {
+                commit_message: PullRequestDescription,
+                queue_properties: QueueProperties {
                     approver: Some(
                         Myself,
                     ),
@@ -2466,7 +2466,7 @@ I am markdown HTML comment
         assert_eq!(cmds.len(), 1);
         insta::assert_debug_snapshot!(cmds[0], @r#"
         Ok(
-            ChangeQueueState(
+            ApproveAndChangeQueueState(
                 QueueProperties {
                     approver: Some(
                         Specified(
@@ -2687,7 +2687,7 @@ I am markdown HTML comment
         insta::assert_debug_snapshot!(cmds, @"
         [
             Ok(
-                ChangeQueueState(
+                ApproveAndChangeQueueState(
                     QueueProperties {
                         approver: None,
                         force: true,
@@ -2735,7 +2735,7 @@ I am markdown HTML comment
         insta::assert_debug_snapshot!(cmds, @"
         [
             Ok(
-                ChangeQueueState(
+                ApproveAndChangeQueueState(
                     QueueProperties {
                         approver: None,
                         force: false,
@@ -2774,9 +2774,9 @@ I am markdown HTML comment
         insta::assert_debug_snapshot!(cmds, @r#"
         [
             Ok(
-                SquashChangeQueueState {
-                    commit_message: AutoGenerate,
-                    approval_info: QueueProperties {
+                SquashAndChangeQueueState {
+                    commit_message: PullRequestDescription,
+                    queue_properties: QueueProperties {
                         approver: None,
                         force: false,
                         priority: None,

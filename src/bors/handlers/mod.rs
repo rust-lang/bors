@@ -494,7 +494,7 @@ async fn handle_comment(
                 let repo = Arc::clone(&repo);
                 let database = Arc::clone(&database);
                 let result = match command {
-                    BorsCommand::ChangeQueueState(approval_info) => {
+                    BorsCommand::ApproveAndChangeQueueState(approval_info) => {
                         let span = tracing::info_span!("Approve");
                         command_approve(
                             ctx.clone(),
@@ -636,9 +636,9 @@ async fn handle_comment(
                         .instrument(span)
                         .await
                     }
-                    BorsCommand::SquashChangeQueueState {
+                    BorsCommand::SquashAndChangeQueueState {
                         commit_message,
-                        approval_info,
+                        queue_properties: approval_info,
                     } => {
                         let span = tracing::info_span!("SquashChangeQueueState");
 
