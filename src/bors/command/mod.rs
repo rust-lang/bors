@@ -101,11 +101,12 @@ pub struct DelegateCommand {
     pub permission: DelegatedPermission,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Default)]
 pub enum SquashCommitMessage {
-    /// Automatically generate a commit message based on the messages of the squashed commits.
-    AutoGenerate,
+    /// Set the commit message based on the messages of the squashed commits.
+    SquashedCommits,
     /// Set the commit message to the PR body.
+    #[default]
     PullRequestDescription,
     /// Set an explicit commit message.
     Explicit(String),
@@ -165,8 +166,15 @@ impl QueueProperties {
 /// - `src/bors/handlers/help.rs` (the `@bors help` command output)
 #[derive(Debug, PartialEq)]
 pub enum BorsCommand {
-    /// Approve a commit, or change approval details of the PR without approving
-    ChangeQueueState(QueueProperties),
+    /// Approve a commit and/or change queue state of the PR without approving it.
+    ApproveAndChangeQueueState(QueueProperties),
+    /// Squash all commits of a pull request into a single commit, then execute
+    /// `ApproveAndChangeQueueState`.
+    SquashAndChangeQueueState {
+        /// Squash message for the commit
+        commit_message: SquashCommitMessage,
+        queue_properties: QueueProperties,
+    },
     /// Unapprove a commit.
     Unapprove,
     /// Print help.
@@ -202,10 +210,4 @@ pub enum BorsCommand {
     Retry,
     /// Cancel an auto build currently running on a given PR (without removing it from the queue).
     Cancel,
-    /// Squash all commits of a pull request into a single commit, then execute `ChangeQueueState`
-    SquashChangeQueueState {
-        /// Squash message for the commit
-        commit_message: SquashCommitMessage,
-        approval_info: QueueProperties,
-    },
 }

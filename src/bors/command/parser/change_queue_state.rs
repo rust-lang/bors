@@ -62,12 +62,12 @@ pub(super) fn parser_change_queue_state(
     }
 
     Some(Ok(if let Some(commit_message) = squash {
-        BorsCommand::SquashChangeQueueState {
+        BorsCommand::SquashAndChangeQueueState {
             commit_message,
-            approval_info: result,
+            queue_properties: result,
         }
     } else {
-        BorsCommand::ChangeQueueState(result)
+        BorsCommand::ApproveAndChangeQueueState(result)
     }))
 }
 
@@ -190,7 +190,7 @@ fn parse_part_squash(
         Bare("squash") => {}
         _ => return None,
     };
-    insert_check_dup("squash", squash, SquashCommitMessage::AutoGenerate)
+    insert_check_dup("squash", squash, SquashCommitMessage::default())
 }
 
 fn parse_part_squash_message(
@@ -205,6 +205,8 @@ fn parse_part_squash_message(
         } => {
             if *value == "description" {
                 SquashCommitMessage::PullRequestDescription
+            } else if *value == "commits" {
+                SquashCommitMessage::SquashedCommits
             } else {
                 SquashCommitMessage::Explicit(value.to_string())
             }
@@ -216,8 +218,8 @@ fn parse_part_squash_message(
             "The `msg` argument cannot be used without `squash`".to_string(),
         )));
     };
-    if *squash != SquashCommitMessage::AutoGenerate {
-        return Some(Err(CommandParseError::DuplicateArg("force".to_string())));
+    if *squash != SquashCommitMessage::default() {
+        return Some(Err(CommandParseError::DuplicateArg("squash".to_string())));
     }
     *squash = msg;
     Some(Ok(()))

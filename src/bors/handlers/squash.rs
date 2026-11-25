@@ -150,7 +150,7 @@ pub(super) async fn command_squash(
     // We take the parents of the first commit, and the tree of the last commit, to create the
     // squashed commit.
     let commit_msg = match commit_message {
-        SquashCommitMessage::AutoGenerate => {
+        SquashCommitMessage::SquashedCommits => {
             generate_squashed_commit_msg(&pr.github.title, &commits)
         }
         SquashCommitMessage::PullRequestDescription => {
@@ -551,7 +551,7 @@ mod tests {
             insta::assert_debug_snapshot!(branch.get_commit(), @r#"
             Commit {
                 sha: "pr-1-sha-reauthored-to-default-user",
-                message: "Title of PR 1\n\n* initial PR#1 commit\n",
+                message: "Title of PR 1\n\nDescription of PR 1",
                 author: GitUser {
                     name: "default-user",
                     email: "default-user@email.com",
@@ -586,7 +586,7 @@ mod tests {
             insta::assert_debug_snapshot!(branch.get_commit(), @r#"
             Commit {
                 sha: "sha2-reauthored-to-git-user",
-                message: "Foobar\n\n* Commit sha1\n* Commit sha2\n",
+                message: "Foobar\n\nDescription of PR 1",
                 author: GitUser {
                     name: "git-user",
                     email: "git-user@git.com",
@@ -806,6 +806,37 @@ mod tests {
     }
 
     #[sqlx::test(migrator = "crate::MIGRATOR")]
+    async fn squash_commits_message(pool: sqlx::PgPool) {
+        run_test((pool, squash_state()), async |ctx: &mut BorsTester| {
+            ctx.modify_pr_in_gh((), |pr| {
+                pr.add_commits(vec![
+                    Commit::from_sha("sha2"),
+                    Commit::from_sha("sha3"),
+                    Commit::from_sha("sha4"),
+                    Commit::from_sha("sha5"),
+                    Commit::from_sha("sha6")
+                ]);
+            });
+            ctx.post_comment("@bors squash msg=commits").await?;
+            ctx.run_gitop_queue().await?;
+            ctx.expect_comments((), 2).await;
+            insta::assert_snapshot!(ctx.pr(()).await.get_gh_pr().head_branch_copy().get_commit().message(), @"
+            Title of PR 1
+
+            * initial PR#1 commit
+            * Commit sha2
+            * Commit sha3
+            * Commit sha4
+            * Commit sha5
+            * Commit sha6
+
+            Co-authored-by: git-user <git-user@git.com>
+            ");
+            Ok(())
+        }).await;
+    }
+
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
     async fn squash_add_coauthored_by(pool: sqlx::PgPool) {
         run_test((pool, squash_state()), async |ctx: &mut BorsTester| {
             ctx.modify_pr_in_gh((), |pr| {
@@ -835,12 +866,7 @@ mod tests {
             insta::assert_snapshot!(ctx.pr(()).await.get_gh_pr().head_branch_copy().get_commit().message(), @"
             Title of PR 1
 
-            * initial PR#1 commit
-            * Commit sha2
-            * Commit sha3
-            * Commit sha4
-            * Commit sha5
-            * Commit sha6
+            Description of PR 1
 
             Co-authored-by: User 1 <user1@users.com>
             Co-authored-by: User 2 <user2@users.com>
@@ -881,7 +907,7 @@ mod tests {
                 ]);
             });
             ctx.approve(()).await?;
-            ctx.post_comment("@bors squash")
+            ctx.post_comment("@bors squash msg=commits")
                 .await?;
             ctx.run_gitop_queue().await?;
             ctx.expect_comments((), 2).await;
