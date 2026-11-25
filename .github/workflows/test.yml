@@ -111,7 +111,7 @@ jobs:
     steps:
       # Manually check the status of all dependencies. `if: failure()` does not work.
       - name: Conclusion
-        run: |
+        run: | # zizmor: ignore[template-injection]
           # Print the dependent jobs to see them in the CI log
           jq -C <<< '${{ toJson(needs) }}'
           # Check if all jobs that we depend on (in the needs array) were successful.
