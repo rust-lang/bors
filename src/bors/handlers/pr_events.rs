@@ -248,7 +248,8 @@ pub(super) async fn handle_push_to_branch(
         .set_stale_mergeability_status_by_base_branch(repo_state.repository(), &payload.branch)
         .await?;
 
-    if !affected_prs.is_empty() {
+    let mergeability_is_relevant = repo_state.cares_about_mergeability();
+    if !affected_prs.is_empty() && mergeability_is_relevant {
         tracing::info!(
             "Adding a batch to the mergeability queue due to a new commit pushed to base branch `{}`",
             payload.branch

@@ -257,6 +257,12 @@ impl RepositoryState {
     pub fn repository(&self) -> &GithubRepoName {
         self.client.repository()
     }
+
+    /// Does this repository care about precise mergeability checks?
+    pub fn cares_about_mergeability(&self) -> bool {
+        let config = self.config.load();
+        config.merge_queue_enabled || config.report_merge_conflicts
+    }
 }
 
 #[derive(Default)]
