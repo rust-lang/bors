@@ -4,3 +4,7 @@ target/
 __pycache__/
 data/team/*.json
 .idea/
+
+# Frontend
+web/frontend/node_modules/
+web/assets/vue/

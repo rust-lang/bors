@@ -1,1 +1,3 @@
 target/
+web/frontend/node_modules/
+web/assets/vue/

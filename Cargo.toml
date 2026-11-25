@@ -46,7 +46,7 @@ reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-feature
 http = "1"
 http-body-util = "0.1"
 bytes = "1"
-askama = "0.16"
+askama = { version = "0.16", features = ["serde_json"] }
 
 # Cryptography
 sha2 = "0.11"
