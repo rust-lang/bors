@@ -32,6 +32,10 @@ pub async fn reload_mergeability_status(
     db: &PgDbClient,
     mergeability_queue: MergeabilityQueueSender,
 ) -> anyhow::Result<()> {
+    if !repo.cares_about_mergeability() {
+        return Ok(());
+    }
+
     let prs = db
         .get_prs_with_unknown_mergeability_or_approved(repo.repository())
         .await?;
