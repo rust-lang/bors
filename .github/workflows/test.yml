@@ -54,6 +54,25 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all --check
 
+  frontend:
+    name: Test frontend
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - name: Install dependencies
+        working-directory: web/frontend
+        run: npm ci
+      - name: Build frontend
+        working-directory: web/frontend
+        run: npm run build
+
   docker:
     name: Test Docker
     runs-on: ubuntu-latest
@@ -73,3 +92,27 @@ jobs:
           load: true
       - name: Run Docker image
         run: docker run bors --help
+
+  conclusion:
+    needs:
+      - test
+      - frontend
+      - docker
+    permissions:
+      contents: none
+    # We need to ensure this job does *not* get skipped if its dependencies fail,
+    # because a skipped job is considered a success by GitHub. So we have to
+    # overwrite `if:`. We use `!cancelled()` to ensure the job does still not get run
+    # when the workflow is canceled manually.
+    #
+    # ALL THE PREVIOUS JOBS NEED TO BE ADDED TO THE `needs` SECTION OF THIS JOB!
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      # Manually check the status of all dependencies. `if: failure()` does not work.
+      - name: Conclusion
+        run: |
+          # Print the dependent jobs to see them in the CI log
+          jq -C <<< '${{ toJson(needs) }}'
+          # Check if all jobs that we depend on (in the needs array) were successful.
+          jq --exit-status 'all(.result == "success")' <<< '${{ toJson(needs) }}'
