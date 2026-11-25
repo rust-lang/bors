@@ -1,5 +1,4 @@
-use crate::bors::RollupMode::*;
-use crate::bors::{BuildKind, WorkflowJobData, WorkflowJobStatus};
+use crate::bors::{BuildKind, RollupMode, WorkflowJobData};
 use crate::database::{
     BuildModel, MergeableState::*, PullRequestModel, QueueStatus, TreeState, WorkflowModel,
 };
@@ -9,21 +8,20 @@ use askama::Template;
 use axum::response::{Html, IntoResponse, Response};
 use chrono::Utc;
 use http::StatusCode;
-use itertools::Itertools;
-use std::cmp::Ordering;
+use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 use std::time::Duration;
 
 /// Build status to display on the queue page.
-pub fn status_text(pr: &PullRequestModel) -> String {
+fn status_text(pr: &PullRequestModel) -> &'static str {
     match pr.queue_status() {
-        QueueStatus::Approved(_) => "approved".to_string(),
-        QueueStatus::ReadyForMerge(_, _) => "ready for merge".to_string(),
-        QueueStatus::Pending(_, _) => "pending".to_string(),
-        QueueStatus::Failed(_, _) => "failed".to_string(),
-        QueueStatus::TentativelyApproved(_) => "waiting for PR CI".to_string(),
-        QueueStatus::NotApproved | QueueStatus::NotOpen => String::new(),
+        QueueStatus::Approved(_) => "approved",
+        QueueStatus::ReadyForMerge(_, _) => "ready for merge",
+        QueueStatus::Pending(_, _) => "pending",
+        QueueStatus::Failed(_, _) => "failed",
+        QueueStatus::TentativelyApproved(_) => "waiting for PR CI",
+        QueueStatus::NotApproved | QueueStatus::NotOpen => "",
     }
 }
 
@@ -59,21 +57,70 @@ pub struct RepositoryView {
     pub bors_merge_queue_enabled: bool,
 }
 
+#[derive(Serialize)]
 pub struct PullRequestStats {
     pub total_count: usize,
     pub in_queue_count: usize,
     pub failed_count: usize,
 }
 
-/// A displayable view of a map of rollups to their members, meant to be used with data attributes
-pub struct RollupsInfo {
-    pub rollups: HashMap<PullRequestNumber, HashSet<PullRequestNumber>>,
+#[derive(Serialize)]
+pub struct PendingWorkflowView {
+    pub run_id: u64,
+    pub url: String,
+    pub completed_jobs: usize,
+    pub total_jobs: usize,
+    pub remaining_jobs: Vec<String>,
 }
 
-impl From<HashMap<PullRequestNumber, HashSet<PullRequestNumber>>> for RollupsInfo {
-    fn from(rollups: HashMap<PullRequestNumber, HashSet<PullRequestNumber>>) -> Self {
-        Self { rollups }
-    }
+#[derive(Serialize)]
+pub struct PendingBuildView {
+    pub pr_number: u64,
+    pub created_at_ms: i64,
+    pub workflow: Option<PendingWorkflowView>,
+}
+
+#[derive(Serialize)]
+pub struct PullRequestView {
+    pub number: u64,
+    pub title: String,
+    pub author: String,
+    pub assignees: Vec<String>,
+    pub approver: Option<String>,
+    pub priority: i32,
+    pub status: &'static str,
+    pub mergeable: &'static str,
+    pub rollup: Option<&'static str>,
+    pub rollup_members: Vec<u64>,
+    pub is_rollupable: bool,
+    pub note: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct TreeClosedInfo {
+    pub priority: u32,
+    pub comment_source: String,
+    pub reason: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct QueueData {
+    pub repo_name: String,
+    pub repo_owner: String,
+    pub repo_url: String,
+    pub tree_closed: Option<TreeClosedInfo>,
+    pub ec2_configured: bool,
+    pub oauth_client_id: Option<String>,
+    pub stats: PullRequestStats,
+    // Guesstimated duration to merge all current approved/pending PRs in the queue
+    pub expected_remaining_duration_ms: Option<u64>,
+    // Average build duration over the past few successful auto builds
+    pub average_build_duration_ms: u64,
+    // PRs that should be pre-selected for being included in a rollup
+    pub selected_rollup_prs: Vec<u32>,
+    // Pending auto build(s)
+    pub pending_builds: Vec<PendingBuildView>,
+    pub prs: Vec<PullRequestView>,
 }
 
 pub struct PendingWorkflow {
@@ -89,161 +136,119 @@ pub struct PendingBuild {
 #[derive(Template)]
 #[template(path = "queue.html", whitespace = "minimize")]
 pub struct QueueTemplate {
-    pub repo_name: String,
-    pub repo_owner: String,
-    pub repo_url: String,
-    pub stats: PullRequestStats,
-    pub prs: Vec<PullRequestModel>,
-    pub rollups_info: RollupsInfo,
-    pub tree_state: TreeState,
-    pub oauth_client_id: Option<String>,
-    // PRs that should be pre-selected for being included in a rollup
-    pub selected_rollup_prs: Vec<u32>,
-    // Pending auto build(s)
-    pub pending_builds: HashMap<PullRequestNumber, PendingBuild>,
-    // Guesstimated duration to merge all current approved/pending PRs in the queue
-    pub expected_remaining_duration: Option<Duration>,
-    // Average build duration over the past few successful auto builds
-    pub average_build_duration: Duration,
-    pub ec2_configured: bool,
     pub queue_js_path: String,
+    pub queue_css_path: String,
+    pub data: QueueData,
 }
 
-impl QueueTemplate {
-    fn format_duration(&self, duration: Duration) -> String {
-        format_duration(duration)
+impl TreeClosedInfo {
+    pub fn from_tree_state(tree_state: TreeState) -> Option<Self> {
+        match tree_state {
+            TreeState::Closed {
+                priority,
+                source,
+                reason,
+            } => Some(Self {
+                priority,
+                comment_source: source,
+                reason,
+            }),
+            TreeState::Open => None,
+        }
     }
+}
 
-    fn pending_build_elapsed(&self, build: &BuildModel) -> Duration {
-        (Utc::now() - build.created_at).to_std().unwrap_or_default()
-    }
+pub fn build_pr_views(
+    prs: Vec<PullRequestModel>,
+    rollups: &HashMap<PullRequestNumber, HashSet<PullRequestNumber>>,
+) -> Vec<PullRequestView> {
+    prs.into_iter()
+        .map(|pr| {
+            let rollup_members = rollups.get(&pr.number).map(|members| {
+                let mut nums: Vec<u64> = members.iter().map(|m| m.0).collect();
+                nums.sort_unstable();
+                nums
+            });
 
-    fn get_pending_auto_build<'a>(&'a self, pr: &'a PullRequestModel) -> Option<&'a PendingBuild> {
-        self.pending_builds.get(&pr.number)
-    }
+            let rollup = if rollup_members.is_some() {
+                Some("rollup")
+            } else {
+                pr.rollup.as_ref().and_then(|r| match r {
+                    RollupMode::Always => Some("always"),
+                    RollupMode::Iffy => Some("iffy"),
+                    RollupMode::Maybe => None,
+                    RollupMode::Never => Some("never"),
+                })
+            };
 
-    fn get_pending_builds(&self) -> Vec<(&PullRequestNumber, &PendingBuild)> {
-        let mut pending: Vec<_> = self.pending_builds.iter().collect();
-        pending.sort_by(|(pr1, a), (pr2, b)| {
-            match (a.build.kind, b.build.kind) {
-                (BuildKind::Auto, BuildKind::Try) => return Ordering::Less,
-                (BuildKind::Try, BuildKind::Auto) => return Ordering::Greater,
-                _ => {}
+            let mergeable = match pr.mergeable_status() {
+                Mergeable => "yes",
+                HasConflicts => "no",
+                Unknown => "",
+            };
+
+            let status = status_text(&pr);
+            let approver = pr.approver().map(str::to_string);
+            let is_rollupable = pr.is_rollupable();
+            let note = pr.note().map(str::to_string);
+
+            PullRequestView {
+                number: pr.number.0,
+                title: pr.title,
+                author: pr.author,
+                assignees: pr.assignees,
+                approver,
+                priority: pr.priority.unwrap_or(0),
+                status,
+                mergeable,
+                rollup,
+                rollup_members: rollup_members.unwrap_or_default(),
+                is_rollupable,
+                note,
             }
+        })
+        .collect()
+}
 
-            pr1.cmp(pr2)
-        });
-        pending
-    }
+pub fn build_pending_build_views(
+    pending_builds: HashMap<PullRequestNumber, PendingBuild>,
+) -> Vec<PendingBuildView> {
+    let mut pending_builds: Vec<_> = pending_builds.into_iter().collect();
+    pending_builds.sort_by_key(|(pr, _)| *pr);
+    pending_builds
+        .into_iter()
+        .map(|(pr, pending)| PendingBuildView {
+            pr_number: pr.0,
+            created_at_ms: pending.build.created_at.timestamp_millis(),
+            workflow: pending.workflow.map(|wf| {
+                let total_jobs = wf.jobs.len();
+                let mut remaining_jobs: Vec<String> = wf
+                    .jobs
+                    .iter()
+                    .filter(|j| !j.status.is_completed())
+                    .map(|j| normalize_job_name(&j.name))
+                    .collect();
+                remaining_jobs.sort();
+                let completed_jobs = total_jobs - remaining_jobs.len();
 
-    /// Calculate the % progress of a build based on average build duration.
-    /// Capped at 100%.
-    fn calculate_progress_pct(&self, build: &BuildModel, average_duration: Duration) -> u32 {
-        if average_duration.is_zero() {
-            return 0;
-        }
-        let elapsed = self.pending_build_elapsed(build);
-        let percent = ((elapsed.as_secs_f64() / average_duration.as_secs_f64()) * 100.0) as u32;
-        percent.min(100)
-    }
-
-    fn compute_title(&self, pr: &PullRequestModel) -> Option<String> {
-        let is_rollup = self.rollups_info.rollups.contains_key(&pr.number);
-
-        let mut title = String::new();
-        if is_rollup {
-            title.push_str("Select PRs of this rollup");
-        }
-        if let Some(note) = pr.note() {
-            if !title.is_empty() {
-                title.push('\n');
-            }
-            write!(title, "Note: {note}").unwrap();
-        }
-
-        if !title.is_empty() { Some(title) } else { None }
-    }
-
-    fn has_significant_perf(&self, pr: &PullRequestModel) -> bool {
-        // This is a special note added by rustc-perf when it performs a try benchmark on a PR
-        // and the result is significant
-        pr.note() == Some("rustc-perf")
-    }
-
-    fn count_completed_jobs(&self, jobs: &[WorkflowJobData]) -> u64 {
-        jobs.iter()
-            .filter(|j| matches!(j.status, WorkflowJobStatus::Completed))
-            .count() as u64
-    }
-
-    /// Format jobs that are not yet completed, to be rendered into a title attribute.
-    fn remaining_jobs_formatted_title(&self, jobs: &[WorkflowJobData]) -> String {
-        use std::fmt::Write;
-
-        const MAX_JOBS_TO_SHOW: usize = 20;
-
-        let remaining = get_remaining_jobs(jobs);
-        if remaining.is_empty() {
-            return String::new();
-        }
-        let mut data = format!("\n\nRemaining jobs ({}):\n", remaining.len());
-        for job in remaining.iter().take(MAX_JOBS_TO_SHOW) {
-            writeln!(data, "{}", normalize_job_name(&job.name)).unwrap();
-        }
-
-        if remaining.len() > MAX_JOBS_TO_SHOW {
-            let leftover = remaining.len() - MAX_JOBS_TO_SHOW;
-            writeln!(
-                data,
-                "(and {leftover} other{})",
-                if leftover == 1 { "" } else { "s" }
-            )
-            .unwrap();
-        }
-
-        data
-    }
-
-    /// Format jobs that are not yet completed, to be rendered into the jobs column.
-    fn remaining_jobs_formatted_column(&self, jobs: &[WorkflowJobData]) -> String {
-        let remaining = get_remaining_jobs(jobs);
-        if remaining.is_empty() {
-            return String::new();
-        }
-
-        const MAX_JOBS_TO_SHOW: usize = 5;
-
-        let mut data = String::new();
-        write!(
-            data,
-            " ({}",
-            remaining
-                .iter()
-                .take(MAX_JOBS_TO_SHOW)
-                .map(|j| normalize_job_name(&j.name))
-                .join(", ")
-        )
-        .unwrap();
-        if remaining.len() > MAX_JOBS_TO_SHOW {
-            write!(data, ", ...").unwrap();
-        }
-        data.push(')');
-        data
-    }
+                PendingWorkflowView {
+                    run_id: wf.workflow.run_id.0,
+                    url: wf.workflow.url,
+                    completed_jobs,
+                    total_jobs,
+                    remaining_jobs,
+                }
+            }),
+        })
+        .collect()
 }
 
 /// A hardcoded logic for rust-lang/rust, to strip auto/try prefixes.
 fn normalize_job_name(name: &str) -> String {
     name.split_once(" - ")
         .map(|(_, rest)| rest)
-        .unwrap_or_else(|| name)
+        .unwrap_or(name)
         .to_string()
-}
-
-fn get_remaining_jobs(jobs: &[WorkflowJobData]) -> Vec<&WorkflowJobData> {
-    let mut remaining: Vec<_> = jobs.iter().filter(|j| !j.status.is_completed()).collect();
-    remaining.sort_by(|a, b| a.name.cmp(&b.name));
-    remaining
 }
 
 #[derive(Template)]

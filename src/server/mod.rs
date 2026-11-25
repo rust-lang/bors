@@ -6,7 +6,8 @@ use crate::github::{GithubRepoName, PullRequestNumber, rollup};
 use crate::server::cached::Cached;
 use crate::templates::{
     EC2Template, HelpTemplate, HtmlTemplate, NotFoundTemplate, PendingBuild, PendingWorkflow,
-    PullRequestStats, QueueTemplate, RepositoryView, RollupsInfo,
+    PullRequestStats, QueueData, QueueTemplate, RepositoryView, TreeClosedInfo,
+    build_pending_build_views, build_pr_views,
 };
 use crate::utils::sort_queue::sort_queue_prs;
 use crate::{
@@ -120,16 +121,15 @@ impl Default for ServerCache {
 struct Assets;
 
 impl Assets {
-    /// Return the name of the queue.js script.
+    /// Return the name of the built `queue-*` asset matching `extension`.
     /// When Vite builds the file, it includes a content hash, to break caches when the script
     /// changes.
-    /// Here we find a file that has the queue prefix, to locate the full filename including the
-    /// hash.
-    fn get_queue_js() -> Option<String> {
+    fn get_queue_asset(extension: &str) -> Option<String> {
         Self::iter().find_map(|path| {
             let path = std::path::Path::new(path.as_ref());
             let name = path.file_name().and_then(|f| f.to_str())?;
-            if name.starts_with("queue-") && path.extension().and_then(|e| e.to_str()) == Some("js")
+            if name.starts_with("queue-")
+                && path.extension().and_then(|e| e.to_str()) == Some(extension)
             {
                 Some(name.to_string())
             } else {
@@ -523,27 +523,31 @@ pub async fn queue_handler(
             .map(|r| r.config.load().ec2_runners.is_some())
             .unwrap_or(false);
 
-    Ok(HtmlTemplate(QueueTemplate {
-        queue_js_path: Assets::get_queue_js().expect("queue.js file not found"),
-        oauth_client_id: oauth
-            .as_ref()
-            .map(|client| client.config().client_id().to_string()),
+    let data = QueueData {
         repo_name: repo.name.name().to_string(),
         repo_owner: repo.name.owner().to_string(),
         repo_url: format!("https://github.com/{}", repo.name),
-        tree_state: repo.tree_state,
+        tree_closed: TreeClosedInfo::from_tree_state(repo.tree_state),
+        ec2_configured,
+        oauth_client_id: oauth
+            .as_ref()
+            .map(|client| client.config().client_id().to_string()),
         stats: PullRequestStats {
             total_count: prs.len(),
             in_queue_count,
             failed_count,
         },
-        prs,
-        pending_builds,
+        expected_remaining_duration_ms: expected_remaining_duration.map(|d| d.as_millis() as u64),
+        average_build_duration_ms: average_build_duration.as_millis() as u64,
         selected_rollup_prs: params.pull_requests.map(|prs| prs.0).unwrap_or_default(),
-        rollups_info: RollupsInfo::from(rollups),
-        expected_remaining_duration,
-        average_build_duration,
-        ec2_configured,
+        prs: build_pr_views(prs, &rollups),
+        pending_builds: build_pending_build_views(pending_builds),
+    };
+
+    Ok(HtmlTemplate(QueueTemplate {
+        queue_js_path: Assets::get_queue_asset("js").expect("queue.js file not found"),
+        queue_css_path: Assets::get_queue_asset("css").expect("queue.css file not found"),
+        data,
     })
     .into_response())
 }

@@ -47,7 +47,7 @@ use crate::database::{PullRequestModel, WorkflowStatus};
 use crate::github::api::operations::CommitAuthor;
 pub use command::CommandPrefix;
 pub use gitops::Git;
-pub use job_cache::{WorkflowJobData, WorkflowJobStatus};
+pub use job_cache::WorkflowJobData;
 
 /// Branch where CI checks run for auto builds.
 /// This branch should run CI checks.
