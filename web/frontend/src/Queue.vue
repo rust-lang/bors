@@ -1,8 +1,115 @@
 <script setup lang="ts">
-defineProps<{
+import { computed, ref } from "vue";
+import RollupModal from "./components/RollupModal.vue";
+import { formatDurationMs } from "./time";
+
+const props = defineProps<{
   data: Data;
 }>();
+
+const rollupableNumbers = new Set(
+  props.data.prs.filter((pr) => pr.is_rollupable).map((pr) => pr.number),
+);
+const selectedPrNumbers = ref<number[]>(
+  props.data.selected_rollup_prs.filter((num) => rollupableNumbers.has(num)),
+);
+const rollupModalOpen = ref(false);
+
+const expectedFlushText = computed(() => {
+  if (props.data.expected_remaining_duration_ms === null) {
+    return null;
+  }
+  return formatDurationMs(props.data.expected_remaining_duration_ms);
+});
+
+const flushTitle = computed(() => {
+  const avg = formatDurationMs(props.data.average_build_duration_ms);
+  return (
+    "Estimated duration to merge all current PRs in the queue, assuming that there are no build failures.\n\n" +
+    `Average duration of recent auto builds: ${avg}`
+  );
+});
+
+function openRollupModal() {
+  if (props.data.oauth_client_id === null) {
+    alert("Both CLIENT_ID and CLIENT_SECRET must be set to enabled OAuth.");
+    return;
+  }
+  rollupModalOpen.value = true;
+}
 </script>
 
 <template>
+  <nav>
+    <h1 class="queue-title">
+      Bors queue - <a :href="data.repo_url" target="_blank">{{ data.repo_name }}</a>
+      <template v-if="data.tree_closed">
+        [<a :href="data.tree_closed.comment_source">TREECLOSED</a> below priority
+        {{ data.tree_closed.priority
+        }}<template v-if="data.tree_closed.reason"> ({{ data.tree_closed.reason }})</template>]
+      </template>
+    </h1>
+    <div>
+      <template v-if="data.ec2_configured">
+        <a :href="`/ec2/${data.repo_owner}/${data.repo_name}`">EC2 instances</a> |
+      </template>
+      <a href="/help">Help</a>
+    </div>
+  </nav>
+
+  <div class="queue-summary">
+    <button type="button" @click="openRollupModal">Create rollup</button>
+    <p class="queue-stats">
+      {{ data.stats.total_count }} total, {{ data.stats.in_queue_count }} in queue,
+      {{ data.stats.failed_count }} failed
+    </p>
+    <template v-if="expectedFlushText !== null">
+      <div class="separator">|</div>
+      <p class="queue-flush" :title="flushTitle">
+        Estimated time to flush queue: {{ expectedFlushText }}
+      </p>
+    </template>
+  </div>
+
+  <RollupModal
+    :open="rollupModalOpen"
+    :selected-pr-numbers="selectedPrNumbers"
+    :repo-name="data.repo_name"
+    :repo-owner="data.repo_owner"
+    :oauth-client-id="data.oauth_client_id"
+    @close="rollupModalOpen = false"
+  />
 </template>
+
+<style scoped>
+nav {
+  margin-bottom: 10px;
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.queue-title {
+  margin-bottom: 0;
+}
+
+.queue-summary {
+  margin-bottom: 1rem;
+  display: flex;
+  align-items: center;
+}
+
+.queue-stats {
+  margin-left: 10px;
+  margin-bottom: 0;
+}
+
+.separator {
+  margin: 0 5px;
+}
+
+.queue-flush {
+  margin-bottom: 0;
+}
+</style>

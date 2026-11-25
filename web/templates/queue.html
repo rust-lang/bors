@@ -157,25 +157,6 @@
         border-color: #3A004D;
     }
 
-    #rollupModal {
-        display: none;
-        position: fixed;
-        z-index: 1000;
-        left: 0;
-        top: 0;
-        width: 100%;
-        height: 100%;
-        background-color: rgba(0,0,0,0.5);
-    }
-
-    #rollupModalContent {
-        background-color: white;
-        margin: 15% auto;
-        padding: 1rem;
-        border: 1px solid black;
-        max-width: 500px;
-    }
-
     @media screen and (min-width: 800px) {
         .wrapped {
             text-wrap: wrap;
@@ -232,13 +213,6 @@
         display: flex;
         margin-left: 5px;
     }
-    nav {
-        margin-bottom: 10px;
-        display: flex;
-        flex-direction: row;
-        justify-content: space-between;
-        align-items: center;
-    }
     .table-builds-wrapper {
         max-width: 1200px;
     }
@@ -250,32 +224,10 @@
 
 {% block body %}
 <main>
-  <nav>
-    <h1 style="margin-bottom: 0;">
-      Bors queue - <a href="{{ data.repo_url }}" target="_blank">{{ data.repo_name }}</a>
-      {% if let Some(tree_closed) = data.tree_closed %}
-      [<a href="{{ tree_closed.comment_source }}">TREECLOSED</a> below priority {{ tree_closed.priority }}{% if let Some(reason) = tree_closed.reason %} ({{ reason }}){% endif %}]
-      {% endif %}
-    </h1>
-    <div>
-      {% if data.ec2_configured %}
-      <a href="/ec2/{{ data.repo_owner }}/{{ data.repo_name }}">EC2 instances</a> |
-      {% endif %}
-      <a href="/help">Help</a>
-    </div>
-  </nav>
-
   <div id="queue-app"></div>
 
   <div style="text-align: center; margin-top: 1em;">
     <a href="https://github.com/rust-lang/bors">Contribute on GitHub</a>
-  </div>
-
-  <div id="rollupModal">
-    <div id="rollupModalContent">
-      <p id="rollupModalMessage"></p>
-      <button id="rollupModalContinue" style="display: none;">Continue</button>
-    </div>
   </div>
 </main>
 {% endblock %}
