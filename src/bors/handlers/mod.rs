@@ -13,7 +13,8 @@ use crate::bors::handlers::refresh::{
     reload_mergeability_status, reload_repository_config, reload_repository_permissions,
 };
 use crate::bors::handlers::review::{
-    TreeCloseArguments, command_approve, command_close_tree, command_open_tree, command_unapprove,
+    TreeCloseArguments, command_change_queue_properties, command_close_tree, command_open_tree,
+    command_unapprove,
 };
 use crate::bors::handlers::squash::AfterSquashCallback;
 use crate::bors::handlers::trybuild::{command_try_build, command_try_cancel};
@@ -496,7 +497,7 @@ async fn handle_comment(
                 let result = match command {
                     BorsCommand::ApproveAndChangeQueueState(approval_info) => {
                         let span = tracing::info_span!("Approve");
-                        command_approve(
+                        command_change_queue_properties(
                             ctx.clone(),
                             repo,
                             database,
@@ -690,7 +691,7 @@ async fn handle_comment(
                                         db: &pr_db,
                                     };
 
-                                    command_approve(
+                                    command_change_queue_properties(
                                         ctx2,
                                         repo2,
                                         db2,

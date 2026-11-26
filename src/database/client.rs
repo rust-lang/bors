@@ -1,16 +1,16 @@
 use super::operations::{
-    approve_pull_request, clear_auto_build, confirm_tentative_approval, create_build,
-    create_workflow, delegate_pull_request, delete_tagged_bot_comment, find_build,
-    find_pr_by_build, find_rollups_for_member_pr, get_last_n_successful_auto_builds,
-    get_nonclosed_pull_requests, get_pending_builds, get_prs_with_stale_mergeability_or_approved,
-    get_pull_request, get_pull_request_by_id, get_repository, get_repository_by_name,
-    get_rollup_members, get_rollup_members_for_unrolling, get_tagged_bot_comments,
-    get_workflow_urls_for_build, get_workflows_for_build, insert_repo_if_not_exists, is_rollup,
-    record_tagged_bot_comment, set_pr_assignees, set_pr_mergeability_state,
-    set_pr_queue_properties, set_pr_status, set_rollup_member_unrolled_state,
-    set_rollup_members_unrolled_state, set_stale_mergeability_status_by_base_branch,
-    unapprove_pull_request, unapprove_pull_request_if_sha_changed, undelegate_pull_request,
-    update_build, update_pr_try_build_id, update_pr_unrolled_build_id, update_workflow_status,
+    clear_auto_build, confirm_tentative_approval, create_build, create_workflow,
+    delegate_pull_request, delete_tagged_bot_comment, find_build, find_pr_by_build,
+    find_rollups_for_member_pr, get_last_n_successful_auto_builds, get_nonclosed_pull_requests,
+    get_pending_builds, get_prs_with_stale_mergeability_or_approved, get_pull_request,
+    get_pull_request_by_id, get_repository, get_repository_by_name, get_rollup_members,
+    get_rollup_members_for_unrolling, get_tagged_bot_comments, get_workflow_urls_for_build,
+    get_workflows_for_build, insert_repo_if_not_exists, is_rollup, record_tagged_bot_comment,
+    set_pr_assignees, set_pr_mergeability_state, set_pr_queue_properties, set_pr_status,
+    set_rollup_member_unrolled_state, set_rollup_members_unrolled_state,
+    set_stale_mergeability_status_by_base_branch, unapprove_pull_request,
+    unapprove_pull_request_if_sha_changed, undelegate_pull_request, update_build,
+    update_pr_try_build_id, update_pr_unrolled_build_id, update_workflow_status,
     upsert_pull_request, upsert_repository,
 };
 use super::{
@@ -99,14 +99,6 @@ impl PgDbClient {
         Ok(ExclusiveOperationOutcome::Performed(res))
     }
 
-    pub async fn approve(
-        &self,
-        pr: &PullRequestModel,
-        approval_info: ApprovalInfo,
-    ) -> anyhow::Result<()> {
-        approve_pull_request(&self.pool, pr.id, approval_info).await
-    }
-
     pub async fn confirm_tentative_approval(&self, pr: &PullRequestModel) -> anyhow::Result<()> {
         confirm_tentative_approval(&self.pool, pr.id).await
     }
@@ -134,18 +126,20 @@ impl PgDbClient {
     pub async fn set_pr_queue_properties(
         &self,
         pr: &PullRequestModel,
+        approval_info: Option<ApprovalInfo>,
+        approval_mode: Option<ApprovalMode>,
         rollup_mode: Option<RollupMode>,
         priority: Option<u32>,
         note: Option<String>,
-        approval_mode: Option<ApprovalMode>,
     ) -> anyhow::Result<()> {
         set_pr_queue_properties(
             &self.pool,
             pr.id,
+            approval_info,
+            approval_mode,
             rollup_mode,
             priority,
             note,
-            approval_mode,
         )
         .await
     }
