@@ -1580,7 +1580,7 @@ impl PullRequestProxy {
 
     #[track_caller]
     pub fn expect_approved_by(&self, approved_by: &str) -> &Self {
-        assert!(self.require_db_pr().is_approved());
+        assert!(self.require_db_pr().is_fully_approved());
         self.expect_approver(approved_by)
     }
 
@@ -1598,7 +1598,7 @@ impl PullRequestProxy {
 
     #[track_caller]
     pub fn expect_unapproved(&self) -> &Self {
-        assert!(!self.require_db_pr().is_approved());
+        assert!(!self.require_db_pr().is_fully_approved());
         self
     }
 

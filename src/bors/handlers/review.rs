@@ -13,8 +13,8 @@ use crate::bors::handlers::{has_permission, invalidate_pr};
 use crate::bors::labels::handle_label_trigger;
 use crate::bors::merge_queue::MergeQueueSender;
 use crate::bors::{Comment, PullRequestStatus};
-use crate::database::DelegatedPermission;
 use crate::database::{ApprovalInfo, ApprovalMode, PullRequestModel};
+use crate::database::{ApprovalStatus, DelegatedPermission};
 use crate::database::{MergeableState, TreeState};
 use crate::github::{CommitSha, LabelTrigger, PullRequest, PullRequestInfo};
 use crate::github::{GithubUser, PullRequestNumber};
@@ -57,7 +57,7 @@ pub(super) async fn command_approve(
 
     // Handle approval mode
     let pr_ci_status = get_pr_ci_status(&repo, pr.github).await?;
-    let approval_mode = command_approve_approval_mode(
+    let approval_mode = compute_approval_mode(
         &repo,
         &db,
         pr,
@@ -222,7 +222,7 @@ async fn command_approve_base(
 
 /// Calculates the command approval mode from `is_force` and `is_approve`.
 /// If it returns `None`, don't change approval mode.
-async fn command_approve_approval_mode(
+async fn compute_approval_mode(
     repo: &RepositoryState,
     db: &PgDbClient,
     pr: PullRequestData<'_>,
@@ -230,11 +230,14 @@ async fn command_approve_approval_mode(
     is_force: bool,
     is_approve: bool,
 ) -> anyhow::Result<Option<ApprovalMode>> {
-    let already_approved = pr.db.is_approved();
+    let already_approved = match pr.db.approval_status {
+        ApprovalStatus::NotApproved => false,
+        ApprovalStatus::TentativelyApproved(_) | ApprovalStatus::Approved(_) => true,
+    };
 
     // Potentially upgrade the tentative approval to a full approval
     let approval_mode = match (is_approve, is_force, pr_ci_status) {
-        // If we're changing approval mode, and this PR is not approved nor it will be, error
+        // `@bors force` was used, but this PR is not yet approved, so error out
         (false, true, _) if !already_approved => {
             repo.client
                 .post_comment(pr.number(), force_non_approve_pr_comment(), db)
@@ -848,6 +851,26 @@ merge_queue_enabled = false
 
             It is now in the [queue](https://bors-test.com/queue/borstest) for this repository.
             ");
+
+            ctx.pr(())
+                .await
+                .expect_approved_by(&User::default_pr_author().name);
+            Ok(())
+        })
+        .await;
+    }
+
+    #[sqlx::test(migrator = "crate::MIGRATOR")]
+    async fn force_after_tentative_approve(pool: sqlx::PgPool) {
+        run_test(pool, async |ctx: &mut BorsTester| {
+            ctx.pr_ci_workflow(());
+            ctx.post_comment("@bors r+").await?;
+            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
+            :pushpin: Commit pr-1-sha has been tentatively approved by `default-user`
+
+            It will be put into the [queue](https://bors-test.com/queue/borstest) for this repository once PR CI succeeds.
+            ");
+            ctx.post_comment("@bors force").await?;
 
             ctx.pr(())
                 .await

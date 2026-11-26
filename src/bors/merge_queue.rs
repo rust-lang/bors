@@ -1838,7 +1838,7 @@ auto_build_failed = ["+foo", "+bar", "-baz"]
 
             // The merge queue should also unapprove PR2
             ctx.expect_comments(pr2.id(), 1).await;
-            ctx.wait_for_pr(pr2.id(), |pr| !pr.is_approved()).await?;
+            ctx.wait_for_pr(pr2.id(), |pr| !pr.is_fully_approved()).await?;
             ctx.pr(pr2.id()).await.expect_no_auto_build();
 
             Ok(())

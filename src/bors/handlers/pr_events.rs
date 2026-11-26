@@ -424,7 +424,7 @@ mod tests {
             ctx.push_to_pr((), Commit::from_sha("foo")).await?;
 
             // No comment should be posted, but the PR should still be unapproved
-            ctx.wait_for_pr((), |pr| !pr.is_approved() && pr.auto_build.is_none())
+            ctx.wait_for_pr((), |pr| !pr.is_fully_approved() && pr.auto_build.is_none())
                 .await?;
             Ok(())
         })

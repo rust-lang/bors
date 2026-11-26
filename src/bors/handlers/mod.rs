@@ -993,7 +993,7 @@ pub async fn invalidate_pr(
     // Step 1: unapprove the pull request if it was approved
     // This happens everytime the PR is invalidated, if it was approved before with a different
     // commit
-    let pr_unapproved = if pr_db.is_approved() || pr_db.tentative_approval().is_some() {
+    let pr_unapproved = if pr_db.is_fully_approved() || pr_db.tentative_approval().is_some() {
         // This is handling a potential race condition coming from `@bors r+ squash`.
         // When we squash, we push a new commit to the PR, and then we approve it.
         // GitHub will then send us a webhook about the push, which will call this function.
