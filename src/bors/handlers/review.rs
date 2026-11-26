@@ -737,9 +737,7 @@ mod tests {
             ctx.pr_workflow_failure(workflow).await?;
 
             ctx.post_comment("@bors r+").await?;
-            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
-            :x: Cannot approve commit pr-1-sha, because CI currently fails on this PR. Use `@bors r+ force` to override the PR CI check.
-            ");
+            insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @":x: Cannot approve commit pr-1-sha, because CI currently fails on this PR. Use `@bors force` to override the PR CI check.");
 
             ctx.pr(()).await.expect_unapproved();
             Ok(())

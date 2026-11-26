@@ -281,7 +281,7 @@ mod tests {
             ctx.pr_workflow_failure(workflow).await?;
 
             insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
-            :x: Commit pr-1-sha has been unapproved due to PR CI failure. Reapprove it with `@bors r+ force` if you want to ignore the failure.
+            :x: Commit pr-1-sha has been unapproved due to PR CI failure. Use `@bors force` if you want to ignore the failure.
 
             [View changes since this unapproval](https://triagebot.infra.rust-lang.org/gh-changes-since/rust-lang/borstest/1/main-sha1..pr-1-sha)
             ");
@@ -320,7 +320,7 @@ mod tests {
             ctx.refresh_tentative_approvals().await;
 
             insta::assert_snapshot!(ctx.get_next_comment_text(()).await?, @"
-            :x: Commit pr-1-sha has been unapproved due to PR CI failure. Reapprove it with `@bors r+ force` if you want to ignore the failure.
+            :x: Commit pr-1-sha has been unapproved due to PR CI failure. Use `@bors force` if you want to ignore the failure.
 
             [View changes since this unapproval](https://triagebot.infra.rust-lang.org/gh-changes-since/rust-lang/borstest/1/main-sha1..pr-1-sha)
             ");

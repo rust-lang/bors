@@ -386,7 +386,7 @@ pub fn tentative_approval_removed_comment(
     approved_sha: &str,
 ) -> Comment {
     Comment::new(format!(
-        r#":x: Commit {approved_sha} has been unapproved due to PR CI failure. Reapprove it with `@bors r+ force` if you want to ignore the failure.
+        r#":x: Commit {approved_sha} has been unapproved due to PR CI failure. Use `@bors force` if you want to ignore the failure.
 
 [View changes since this unapproval](https://triagebot.infra.rust-lang.org/gh-changes-since/{}/{}/{}/{}..{approved_sha})
 "#,
@@ -406,7 +406,7 @@ pub fn tentative_approval_timed_out_comment(commit_sha: &CommitSha, timeout: Dur
 
 pub fn tentative_approval_failed_comment(commit_sha: &CommitSha) -> Comment {
     Comment::new(format!(
-        ":x: Cannot approve commit {commit_sha}, because CI currently fails on this PR. Use `@bors r+ force` to override the PR CI check."
+        ":x: Cannot approve commit {commit_sha}, because CI currently fails on this PR. Use `@bors force` to override the PR CI check."
     ))
 }
 
