@@ -519,7 +519,7 @@ pub struct PullRequestModel {
 }
 
 impl PullRequestModel {
-    pub fn is_approved(&self) -> bool {
+    pub fn is_fully_approved(&self) -> bool {
         matches!(self.approval_status, ApprovalStatus::Approved(_))
     }
 

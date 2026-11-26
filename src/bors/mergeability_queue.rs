@@ -379,7 +379,7 @@ impl MergeabilityQueueSender {
         // Prioritize approved PRs, so that they are checked first.
         // Those are the most important to check, because after a merge of some other PR, they
         // might be kicked out of the merge queue if they are no longer mergeable.
-        let priority = if model.is_approved() { 1 } else { 0 };
+        let priority = if model.is_fully_approved() { 1 } else { 0 };
         self.enqueue(
             &model.repository,
             model.number,
@@ -831,7 +831,7 @@ pub async fn update_pr_with_known_mergeability(
 
     // Unapprove PR if needed
     let unapproved = if let MergeableState::HasConflicts = new_mergeable_state
-        && db_pr.is_approved()
+        && db_pr.is_fully_approved()
     {
         unapprove_pr(repo, db, db_pr, gh_pr).await?;
         true
@@ -901,7 +901,7 @@ pub async fn set_pr_mergeability_based_on_user_action(
             tracing::debug!(
             "Encountered mergeability status staleness in response to user action. New state: {mergeable_state:?}, old state: {:?}, approved: {}",
                 db_pr.mergeable_status(),
-                db_pr.is_approved()
+                db_pr.is_fully_approved()
             );
         });
 
