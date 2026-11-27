@@ -8,6 +8,7 @@
     "check": "vue-tsc --noEmit"
   },
   "dependencies": {
+    "@tanstack/vue-table": "^9.3.1",
     "vue": "^3.5.46"
   },
   "devDependencies": {
