@@ -477,30 +477,6 @@ pub(crate) async fn set_stale_mergeability_status_by_base_branch(
     .await
 }
 
-pub(crate) async fn approve_pull_request(
-    executor: impl PgExecutor<'_>,
-    pr_id: i32,
-    approval_info: ApprovalInfo,
-) -> anyhow::Result<()> {
-    measure_db_query("approve_pull_request", || async {
-        sqlx::query!(
-            r#"
-UPDATE pull_request
-SET approved_by = $1,
-    approved_sha = $2
-WHERE id = $3
-"#,
-            approval_info.approver,
-            approval_info.sha,
-            pr_id,
-        )
-        .execute(executor)
-        .await?;
-        Ok(())
-    })
-    .await
-}
-
 pub(crate) async fn confirm_tentative_approval(
     executor: impl PgExecutor<'_>,
     pr_id: i32,
@@ -908,25 +884,33 @@ pub(crate) async fn update_workflow_status(
 pub(crate) async fn set_pr_queue_properties(
     executor: impl PgExecutor<'_>,
     pr_id: i32,
+    approval_info: Option<ApprovalInfo>,
+    approval_mode: Option<ApprovalMode>,
     rollup: Option<RollupMode>,
     priority: Option<u32>,
     note: Option<String>,
-    approval_mode: Option<ApprovalMode>,
 ) -> anyhow::Result<()> {
+    let approved_by = approval_info.as_ref().map(|info| info.approver.as_str());
+    let approved_sha = approval_info.as_ref().map(|info| info.sha.as_str());
     let tentative = approval_mode.map(|mode| mode == ApprovalMode::Tentative);
-    measure_db_query("set_pr_approve_properties", || async {
+
+    measure_db_query("set_pr_queue_properties", || async {
         sqlx::query!(
             r#"
 UPDATE pull_request
-SET priority = COALESCE($1, priority),
-    rollup = COALESCE($2, rollup),
-    note = COALESCE($3, note),
-    approval_tentative = COALESCE($4, approval_tentative)
-WHERE id = $5"#,
+SET approved_by = COALESCE($1, approved_by),
+    approved_sha = COALESCE($2, approved_sha),
+    approval_tentative = COALESCE($3, approval_tentative),
+    priority = COALESCE($4, priority),
+    rollup = COALESCE($5, rollup),
+    note = COALESCE($6, note)
+WHERE id = $7"#,
+            approved_by,
+            approved_sha,
+            tentative,
             priority.map(|v| v as i32),
             rollup as Option<RollupMode>,
             note,
-            tentative,
             pr_id
         )
         .execute(executor)

@@ -23,29 +23,27 @@ use crate::{BorsContext, PgDbClient, ZulipClient};
 use std::sync::Arc;
 use tracing::log;
 
-/// Approve a pull request.
-/// A pull request can only be approved by a user of sufficient authority.
-#[allow(clippy::too_many_arguments, clippy::collapsible_if)]
-pub(super) async fn command_approve(
+/// Change queue properties (approval status, rollup mode, etc.) of a pull request.
+pub(super) async fn command_change_queue_properties(
     ctx: Arc<BorsContext>,
     repo: Arc<RepositoryState>,
     db: Arc<PgDbClient>,
     pr: PullRequestData<'_>,
     author: &GithubUser,
-    info: QueueProperties,
+    props: QueueProperties,
     merge_queue_tx: &MergeQueueSender,
 ) -> anyhow::Result<()> {
-    assert!(!info.is_empty());
+    assert!(!props.is_empty());
 
     // Permission check
-    let permission = info.required_permissions();
+    let permission = props.required_permissions();
     if !has_permission(&repo, author, pr, permission).await? {
         deny_request(&repo, &db, pr.number(), author, permission).await?;
         return Ok(());
     }
 
-    // Do checks
-    if let Some(rollup) = info.rollup
+    // Check rollup mode validity
+    if let Some(rollup) = props.rollup
         && rollup != RollupMode::Never
         && db.is_rollup(pr.db).await?
     {
@@ -55,213 +53,187 @@ pub(super) async fn command_approve(
         return Ok(());
     }
 
-    // Handle approval mode
-    let pr_ci_status = get_pr_ci_status(&repo, pr.github).await?;
-    let approval_mode = compute_approval_mode(
-        &repo,
-        &db,
-        pr,
-        &pr_ci_status,
-        info.force,
-        info.approver.is_some(),
-    )
-    .await?;
+    // We are (also) approving, which has a lot of additional logic
+    if let Some(approver) = &props.approver {
+        tracing::info!("Approving: {props:?}");
 
-    // Approve the PR & set rollup properties
-    if let Some(approval) = &info.approver {
-        if !command_approve_base(
-            &ctx,
-            &repo,
-            &db,
-            pr,
-            &pr_ci_status,
-            author,
-            approval,
-            approval_mode.unwrap(),
-            info.priority,
-        )
-        .await?
-        {
-            // Command failed
+        let pr_ci_status = get_pr_ci_status(&repo, pr.github).await?;
+        let approval_mode = compute_approval_mode_for_approval(pr, &pr_ci_status, props.force);
+
+        if let Some(error_comment) = check_pr_approval_validity(pr, &repo).await? {
+            repo.client
+                .post_comment(pr.number(), error_comment, &db)
+                .await?;
             return Ok(());
         }
-    }
-    db.set_pr_queue_properties(pr.db, info.rollup, info.priority, info.note, approval_mode)
+
+        if matches!(approval_mode, ApprovalMode::Tentative)
+            && matches!(pr_ci_status, PrCiStatus::Failed)
+        {
+            repo.client
+                .post_comment(
+                    pr.number(),
+                    tentative_approval_failed_comment(&pr.github.head.sha),
+                    &db,
+                )
+                .await?;
+            return Ok(());
+        }
+
+        let approver = match approver {
+            Approver::Myself => author.username.clone(),
+            Approver::Specified(approver) => normalize_approvers(approver).join(","),
+        };
+
+        let approved_sha = pr.github.head.sha.clone();
+        let approval_info = ApprovalInfo {
+            approver: approver.clone(),
+            sha: approved_sha.to_string(),
+        };
+
+        db.set_pr_queue_properties(
+            pr.db,
+            Some(approval_info),
+            // We always overwrite the approval mode
+            Some(approval_mode),
+            props.rollup,
+            props.priority,
+            props.note,
+        )
         .await?;
 
-    // Finish up
+        let priority = props.priority.or(pr.db.priority.map(|p| p as u32));
+
+        let unknown_reviewers = check_unknown_reviewers(&repo, &approver);
+        let had_failed_auto_build = pr
+            .db
+            .auto_build
+            .as_ref()
+            .map(|b| b.status.is_failure())
+            .unwrap_or(false);
+
+        // Re-approval should act as a retry
+        if had_failed_auto_build {
+            ctx.db.clear_auto_build(pr.db).await?;
+        }
+
+        let mut tree_state = ctx
+            .db
+            .get_repository(repo.repository())
+            .await?
+            .map(|r| r.tree_state.clone())
+            .unwrap_or(TreeState::Open);
+
+        // If the PR has high enough priority, do not post the tree closed message
+        if let TreeState::Closed {
+            priority: tree_priority,
+            ..
+        } = &tree_state
+            && let Some(priority) = priority
+            && priority >= *tree_priority
+        {
+            tree_state = TreeState::Open;
+        }
+
+        let approval_note = if matches!(pr_ci_status, PrCiStatus::Failed) {
+            Some(ApprovalNote::PrCiIsFailing)
+        } else if matches!(approval_mode, ApprovalMode::Tentative) {
+            Some(ApprovalNote::TentativeApproval)
+        } else {
+            None
+        };
+
+        let merge_queue_enabled = repo.config.load().merge_queue_enabled;
+
+        // We send the response comment eagerly, even if the approval is tentative
+        // This is an optimistic happy path, which reduces the total number of sent comments on average
+        // If we only responded with a temporary tentative approval comment, we would then have to
+        // confirm it with another comment once PR CI would succeed.
+        // In this way, we will only send another comment if PR CI fails.
+        repo.client
+            .post_comment(
+                pr.db.number,
+                approved_comment(
+                    ctx.get_web_url(),
+                    repo.repository(),
+                    &approved_sha,
+                    &approver,
+                    unknown_reviewers,
+                    tree_state,
+                    had_failed_auto_build,
+                    approval_note,
+                    merge_queue_enabled,
+                ),
+                &ctx.db,
+            )
+            .await?;
+
+        // Eagerly apply label changes, even if we are only in a tentative approval, so that the PR
+        // gets out of the reviewer's GitHub queue
+        handle_label_trigger(
+            &repo,
+            &PullRequestInfo::from(pr.github.clone()),
+            LabelTrigger::Approved,
+        )
+        .await?;
+    } else {
+        tracing::info!("Changing queue properties: {props:?}");
+
+        let approval_mode = if props.force {
+            let is_at_least_tentatively_approved = match pr.db.approval_status {
+                ApprovalStatus::NotApproved => false,
+                ApprovalStatus::TentativelyApproved(_) | ApprovalStatus::Approved(_) => true,
+            };
+            if !is_at_least_tentatively_approved {
+                repo.client
+                    .post_comment(pr.number(), force_non_approve_pr_comment(), &db)
+                    .await?;
+                return Ok(());
+            }
+
+            Some(ApprovalMode::Eager)
+        } else {
+            None
+        };
+        db.set_pr_queue_properties(
+            pr.db,
+            None,
+            approval_mode,
+            props.rollup,
+            props.priority,
+            props.note,
+        )
+        .await?;
+    };
+
+    // Notify the merge queue that the queue properties of some PR have changed
     merge_queue_tx.notify().await?;
     Ok(())
 }
 
-/// Returns whether the approval succeeded.
-/// If it did not succeed, we should not continue setting the other queue properties.
-#[allow(clippy::too_many_arguments)]
-async fn command_approve_base(
-    ctx: &BorsContext,
-    repo: &RepositoryState,
-    db: &PgDbClient,
-    pr: PullRequestData<'_>,
-    pr_ci_status: &PrCiStatus,
-    author: &GithubUser,
-    approver: &Approver,
-    approval_mode: ApprovalMode, // Does not apply the force, but uses it for user feedback
-    priority: Option<u32>,       // Does not apply the priority, but uses it for user feedback
-) -> anyhow::Result<bool> {
-    tracing::info!("Approving PR {}", pr.number());
-
-    if let Some(error_comment) = check_pr_approval_validity(pr, repo).await? {
-        repo.client
-            .post_comment(pr.number(), error_comment, db)
-            .await?;
-        return Ok(false);
-    }
-
-    let approver = match approver {
-        Approver::Myself => author.username.clone(),
-        Approver::Specified(approver) => normalize_approvers(approver).join(","),
-    };
-
-    let approved_sha = pr.github.head.sha.clone();
-    let approval_info = ApprovalInfo {
-        approver: approver.clone(),
-        sha: approved_sha.to_string(),
-    };
-
-    if matches!(approval_mode, ApprovalMode::Tentative)
-        && matches!(pr_ci_status, PrCiStatus::Failed)
-    {
-        repo.client
-            .post_comment(
-                pr.number(),
-                tentative_approval_failed_comment(&pr.github.head.sha),
-                db,
-            )
-            .await?;
-        return Ok(false);
-    }
-
-    db.approve(pr.db, approval_info).await?;
-
-    let priority = priority.or(pr.db.priority.map(|p| p as u32));
-
-    let unknown_reviewers = check_unknown_reviewers(repo, &approver);
-    let had_failed_auto_build = pr
-        .db
-        .auto_build
-        .as_ref()
-        .map(|b| b.status.is_failure())
-        .unwrap_or(false);
-
-    // Re-approval should act as a retry
-    if had_failed_auto_build {
-        ctx.db.clear_auto_build(pr.db).await?;
-    }
-
-    let mut tree_state = ctx
-        .db
-        .get_repository(repo.repository())
-        .await?
-        .map(|r| r.tree_state.clone())
-        .unwrap_or(TreeState::Open);
-
-    // If the PR has high enough priority, do not post the tree closed message
-    if let TreeState::Closed {
-        priority: tree_priority,
-        ..
-    } = &tree_state
-        && let Some(priority) = priority
-        && priority >= *tree_priority
-    {
-        tree_state = TreeState::Open;
-    }
-
-    let approval_note = if matches!(pr_ci_status, PrCiStatus::Failed) {
-        Some(ApprovalNote::PrCiIsFailing)
-    } else if matches!(approval_mode, ApprovalMode::Tentative) {
-        Some(ApprovalNote::TentativeApproval)
-    } else {
-        None
-    };
-
-    let merge_queue_enabled = repo.config.load().merge_queue_enabled;
-
-    // We send the response comment eagerly, even if the approval is tentative
-    // This is an optimistic happy path, which reduces the total number of sent comments on average
-    // If we only responded with a temporary tentative approval comment, we would then have to
-    // confirm it with another comment once PR CI would succeed.
-    // In this way, we will only send another comment if PR CI fails.
-    repo.client
-        .post_comment(
-            pr.db.number,
-            approved_comment(
-                ctx.get_web_url(),
-                repo.repository(),
-                &approved_sha,
-                &approver,
-                unknown_reviewers,
-                tree_state,
-                had_failed_auto_build,
-                approval_note,
-                merge_queue_enabled,
-            ),
-            &ctx.db,
-        )
-        .await?;
-
-    // Eagerly apply label changes, even if we are only in a tentative approval, so that the PR
-    // gets out of the reviewer's GitHub queue
-    handle_label_trigger(
-        repo,
-        &PullRequestInfo::from(pr.github.clone()),
-        LabelTrigger::Approved,
-    )
-    .await?;
-    Ok(true)
-}
-
-/// Calculates the command approval mode from `is_force` and `is_approve`.
-/// If it returns `None`, don't change approval mode.
-async fn compute_approval_mode(
-    repo: &RepositoryState,
-    db: &PgDbClient,
+/// Calculates the command approval mode when we are doing an approval (`r+` or `r=`).
+fn compute_approval_mode_for_approval(
     pr: PullRequestData<'_>,
     pr_ci_status: &PrCiStatus,
     is_force: bool,
-    is_approve: bool,
-) -> anyhow::Result<Option<ApprovalMode>> {
-    let already_approved = match pr.db.approval_status {
-        ApprovalStatus::NotApproved => false,
-        ApprovalStatus::TentativelyApproved(_) | ApprovalStatus::Approved(_) => true,
-    };
-
-    // Potentially upgrade the tentative approval to a full approval
-    let approval_mode = match (is_approve, is_force, pr_ci_status) {
-        // `@bors force` was used, but this PR is not yet approved, so error out
-        (false, true, _) if !already_approved => {
-            repo.client
-                .post_comment(pr.number(), force_non_approve_pr_comment(), db)
-                .await?;
-            return Ok(None);
-        }
+) -> ApprovalMode {
+    let already_fully_approved = pr.db.is_fully_approved();
+    match (is_force, pr_ci_status) {
         // If force is explicitly provided, force approval
-        (_, true, _) => ApprovalMode::Eager,
-        // If force is not provided, and this command doesn't approve the PR, don't change approval mode
-        (false, false, _) => return Ok(None),
-        // If PR CI is already green, just treat the approval as eager
-        (true, false, PrCiStatus::Success) => ApprovalMode::Eager,
-        // It is possible that the PR was already (fully) approved before, we don't change the approval mode
-        (true, false, _) if already_approved => return Ok(None),
-        (true, _, PrCiStatus::Failed | PrCiStatus::Pending { .. } | PrCiStatus::NotStarted) => {
-            if is_force {
+        (true, _) => ApprovalMode::Eager,
+        // Otherwise, if PR CI is already green, just treat the approval as eager
+        (false, PrCiStatus::Success) => ApprovalMode::Eager,
+        // In other situations, it will be a tentative approval...
+        (false, PrCiStatus::Failed | PrCiStatus::Pending { .. } | PrCiStatus::NotStarted) => {
+            // ...unless when the PR was already fully approved previously.
+            // Then we keep its full approval status.
+            if already_fully_approved {
                 ApprovalMode::Eager
             } else {
                 ApprovalMode::Tentative
             }
         }
-    };
-
-    Ok(Some(approval_mode))
+    }
 }
 
 /// Check if the specified approvers exist as GitHub users or teams.
