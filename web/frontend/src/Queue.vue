@@ -148,27 +148,3 @@ nav {
   margin-bottom: 0;
 }
 </style>
-
-<style>
-.data-table {
-  min-width: 100%;
-  white-space: nowrap;
-}
-
-.data-table th,
-.data-table td {
-  padding: 6px 8px;
-}
-
-.data-table thead th {
-  border-bottom: 1px solid rgba(0, 0, 0, 0.3);
-}
-
-.data-table tbody tr:nth-child(odd) {
-  background-color: rgb(238, 238, 238);
-}
-
-.data-table .num-col {
-  text-align: right;
-}
-</style>

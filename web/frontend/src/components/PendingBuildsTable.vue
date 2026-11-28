@@ -128,7 +128,7 @@ function formatJobsTitle(workflow: PendingWorkflow): string {
 }
 
 .table-builds tbody tr:hover {
-  background-color: #e4e9f5;
+  background-color: var(--color-row-active);
 }
 
 .jobs-col {

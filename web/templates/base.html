@@ -7,175 +7,288 @@
   {% endblock %}
   <title>{% block title %}{% endblock %}</title>
   <link rel="icon" type="image/png"
-        href="/assets/img/favicon.png"/>
+    href="/assets/img/favicon.png"/>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Fira+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;1,300;1,400;1,500;1,600;1,700&family=Fira+Mono:wght@400;500;700&display=swap"
-        rel="stylesheet">
+    rel="stylesheet">
   <style>
-      *,
-      *::before,
-      *::after {
-          box-sizing: border-box;
-      }
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
 
-      * {
-          margin: 0;
-      }
+  * {
+    margin: 0;
+  }
 
-      body {
-          display: flex;
-          justify-content: center;
-          padding: var(--space-m);
+  body {
+    display: flex;
+    justify-content: center;
+    padding: var(--space-m);
+    color: var(--color-fg);
+    background-color: var(--color-bg);
 
-          line-height: 1.5;
-          font-family: "Fira Sans", sans-serif;
-          /* Improve text rendering for macOS */
-          -webkit-font-smoothing: antialiased;
-      }
+    line-height: 1.5;
+    font-family: "Fira Sans", sans-serif;
+    /* Improve text rendering for macOS */
+    -webkit-font-smoothing: antialiased;
+  }
 
-      html {
-          font-size: clamp(14px, 2.5vw, 18px);
-      }
+  html {
+    font-size: clamp(14px, 2.5vw, 18px);
+  }
 
-      @media (min-width: 800px) {
-          html {
-              font-size: clamp(14px, 2.5vw, 16px);
-          }
-      }
+  @media (min-width: 800px) {
+    html {
+      font-size: clamp(14px, 2.5vw, 16px);
+    }
+  }
 
-      input, button, textarea, select {
-          font: inherit;
-      }
+  input, button, textarea, select {
+    font: inherit;
+  }
 
-      /* Avoid text overflow */
-      p, h1, h2, h3, h4, h5, h6 {
-          overflow-wrap: break-word;
-      }
+  /* Avoid text overflow */
+  p, h1, h2, h3, h4, h5, h6 {
+    overflow-wrap: break-word;
+  }
 
-      /* Improve line wrapping */
-      h1, h2, h3, h4, h5, h6 {
-          text-wrap: balance;
-      }
+  /* Improve line wrapping */
+  h1, h2, h3, h4, h5, h6 {
+    text-wrap: balance;
+  }
 
-      :root {
-          /* Spacing */
-          --space-4xs: 0.125rem;
-          --space-3xs: 0.25rem;
-          --space-2xs: 0.5rem;
-          --space-xs: 0.75rem;
-          --space-s: 1rem;
-          --space-m: 1.5rem;
+  :root {
+    /* Spacing */
+    --space-4xs: 0.125rem;
+    --space-3xs: 0.25rem;
+    --space-2xs: 0.5rem;
+    --space-xs: 0.75rem;
+    --space-s: 1rem;
+    --space-m: 1.5rem;
 
-          /* Color palette */
-          --color-primary: #28607f;
-          --color-primary-hover: #3a7ba8;
-          --color-primary-active: #1e2650;
+    /* Typography */
+    --text-sm: 0.875rem;
+    --text-base: 1rem;
+    --text-lg: 1.125rem;
+    --text-xl: 1.25rem;
+    --text-2xl: 1.5rem;
+    --text-3xl: 1.875rem;
 
-          /* Code */
-          --color-code-bg: #f6f8fa;
-          --color-code-text: #383838;
+    /* Radius */
+    --radius-sm: 0.25rem;
+  }
 
-          /* Neutral colors */
-          --color-border-muted: #e1e4e8;
-          --color-text-muted: #a8b2bb;
-          --color-bg-higlight: #fafafa;
+  :root {
+    /* Base */
+    --color-fg: #000000;
+    --color-bg: #ffffff;
 
-          /* Typography */
-          --text-sm: 0.875rem;
-          --text-base: 1rem;
-          --text-lg: 1.125rem;
-          --text-xl: 1.25rem;
-          --text-2xl: 1.5rem;
-          --text-3xl: 1.875rem;
+    /* Links */
+    --color-link: #28607f;
+    --color-link-hover: #3a7ba8;
+    --color-link-active: #1e2650;
+    --color-link-visited: #7b66af;
 
-          /* Radius */
-          --radius-sm: 0.25rem;
-      }
+    /* Code formatting */
+    --color-code-bg: #f6f8fa;
+    --color-code-fg: #383838;
 
-      /* Typography */
+    /* Table header */
+    --color-header-border: #b2b2b2;
+    --color-sort-indicator: #656565;
 
-      h1 {
-          font-size: clamp(var(--text-2xl), 4vw, var(--text-3xl));
-          font-weight: 600;
-          line-height: 1.2;
-          margin-block-end: var(--space-s);
-      }
+    /* Table rows: odd, even */
+    --color-row1: #eeeeee;
+    --color-row2: #ffffff;
 
-      h2 {
-          font-size: clamp(var(--text-xl), 3vw, var(--text-2xl));
-          font-weight: 600;
-          line-height: 1.3;
-          margin-block: var(--space-m) var(--space-xs);
-      }
+    /* Rows referenced by current row (e.g. active build, in rollup) */
+    --color-row-active: #c2d2ff;
 
-      h3 {
-          font-size: clamp(var(--text-lg), 2.5vw, var(--text-xl));
-          font-weight: 500;
-          line-height: 1.4;
-          margin-block: var(--space-s) var(--space-2xs);
-      }
+    /* Rows selected by checkboxes */
+    --color-row-selected: #dbe4f0;
 
-      p {
-          font-size: var(--text-base);
-          margin-block-end: var(--space-s);
-      }
+    /* Rows indicating header for a group ("group by" controls) */
+    --color-row-group-header: #e0e0e0;
 
-      /* Links */
+    /* Queue */
 
-      a {
-          color: var(--color-primary);
-          text-decoration: none;
-      }
+    /* Progress bar */
+    --color-pending0: #f0de57;
+    /* Pending indicator (barber pole) */
+    --color-pending1: #f0de57;
+    --color-pending2: #fbee97;
+    /* Solid line after bar to indicate where it ends */
+    --color-pending3: #000000;
+    /* Approved indicator */
+    --color-approved: #85db7b;
 
-      a:visited {
-          color: #7b66af;
-      }
+    /* Rollup status */
+    --color-positive-text: #004200;
+    --color-positive-dot: #01ce01;
+    --color-negative-text: #660000;
+    --color-negative-dot: #f97070;
+    --color-neutral-text: #8c7e14;
+    --color-neutral-dot: #f0de57;
+    --color-special-text: #4b0066;
+    --color-special-dot: #c266ff;
 
-      a:hover {
-          color: var(--color-primary-hover);
-          text-decoration: underline;
-      }
+    /* Pagination, which uses gradients for backgrounds */
+    --color-paging-disabled-fg: #808080;
+    --color-paging-current-bg1: #fefefe;
+    --color-paging-current-bg2: #f2f2f2;
+    --color-paging-current-fg: #000000;
+    --color-paging-hover-bg1: #585858;
+    --color-paging-hover-bg2: #111111;
+    --color-paging-hover-fg: #ffffff;
 
-      a:active {
-          color: var(--color-primary-active);
-      }
+    /* "Create rollup" modal */
+    --color-rollup-modal: #ffffff;
+    --color-rollup-modal-fade: #00000080;
+    --color-rollup-modal-border: #000000;
 
-      a:focus-visible {
-          outline: 2px solid var(--color-primary);
-          outline-offset: 2px;
-          border-radius: var(--radius-sm);
-      }
+    /* Form controls */
+    --color-input-border: #aaa;
+    --color-input-border-active: var(--color-row-selected);
+    --color-input-bg: #fff;
+  }
 
-      code {
-          font-family: "Fira Mono", monospace;
-          font-size: var(--text-sm);
-          font-weight: 400;
-          background-color: var(--color-code-bg);
-          color: var(--color-code-text);
-          padding: var(--space-4xs) var(--space-3xs);
-          border-radius: var(--radius-sm);
-          overflow-wrap: break-word;
-          tab-size: 4;
-      }
+  /* Typography */
 
-      /* Tables */
+  h1 {
+    font-size: clamp(var(--text-2xl), 4vw, var(--text-3xl));
+    font-weight: 600;
+    line-height: 1.2;
+    margin-block-end: var(--space-s);
+  }
 
-      table {
-          font-size: var(--text-sm);
-          border-collapse: collapse;
-          inline-size: 100%;
-      }
+  h2 {
+    font-size: clamp(var(--text-xl), 3vw, var(--text-2xl));
+    font-weight: 600;
+    line-height: 1.3;
+    margin-block: var(--space-m) var(--space-xs);
+  }
 
-      th {
-          font-weight: 600;
-          text-align: start;
-      }
+  h3 {
+    font-size: clamp(var(--text-lg), 2.5vw, var(--text-xl));
+    font-weight: 500;
+    line-height: 1.4;
+    margin-block: var(--space-s) var(--space-2xs);
+  }
 
-      .empty::before {
-          content: "-";
-          color: var(--color-text-muted);
-      }
+  p {
+    font-size: var(--text-base);
+    margin-block-end: var(--space-s);
+  }
+
+  /* Links */
+
+  a {
+    color: var(--color-link);
+    text-decoration: none;
+  }
+
+  a:visited {
+    color: var(--color-link-visited);
+  }
+
+  a:hover {
+    color: var(--color-link-hover);
+    text-decoration: underline;
+  }
+
+  a:active {
+    color: var(--color-link-active);
+  }
+
+  a:focus-visible {
+    outline: 2px solid var(--color-link);
+    outline-offset: 2px;
+    border-radius: var(--radius-sm);
+  }
+
+  code {
+    font-family: "Fira Mono", monospace;
+    font-size: var(--text-sm);
+    font-weight: 400;
+    background-color: var(--color-code-bg);
+    color: var(--color-code-fg);
+    padding: var(--space-4xs) var(--space-3xs);
+    border-radius: var(--radius-sm);
+    overflow-wrap: break-word;
+    tab-size: 4;
+  }
+
+  /* Tables */
+
+  table {
+    font-size: var(--text-sm);
+    border-collapse: collapse;
+    inline-size: 100%;
+  }
+
+  th {
+    font-weight: 600;
+    text-align: start;
+  }
+
+  .empty::before {
+    content: "-";
+    color: var(--color-text-muted);
+  }
+
+  .data-table {
+    min-width: 100%;
+    white-space: nowrap;
+  }
+
+  .data-table th,
+  .data-table td {
+    padding: 6px 8px;
+  }
+
+  .data-table thead th {
+    border-bottom: 1px solid var(--color-header-border);
+  }
+
+  .data-table tbody tr:not(.group-row):nth-of-type(odd) {
+    background-color: var(--color-row1);
+  }
+
+  .data-table tbody tr:not(.group-row):nth-of-type(even) {
+    background-color: var(--color-row2);
+  }
+
+  .data-table .num-col {
+    text-align: right;
+  }
+
+  table {
+    margin-block: var(--space-s);
+  }
+
+  ul {
+    margin-block: var(--space-s);
+    padding-inline-start: var(--space-m);
+  }
+
+  li {
+    margin-block-end: var(--space-2xs);
+  }
+
+  main {
+    margin: 0 auto;
+    width: 100%;
+  }
+
+  main:not(.prose) {
+    max-width: 1920px;
+  }
+  main.prose {
+    max-width: 65rem;
+  }
   </style>
   {% block head %}{% endblock %}
 </head>

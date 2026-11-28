@@ -85,14 +85,14 @@ function handleContinue() {
 .rollup-modal {
   margin: 15% auto;
   padding: 0;
-  border: 1px solid black;
+  border: 1px solid var(--color-rollup-modal-border);
   max-width: 500px;
   width: calc(100% - 2rem);
-  background-color: white;
+  background-color: var(--color-rollup-modal);
 }
 
 .rollup-modal::backdrop {
-  background-color: rgba(0, 0, 0, 0.5);
+  background-color: var(--color-rollup-modal-fade);
 }
 
 .rollup-modal-content {
