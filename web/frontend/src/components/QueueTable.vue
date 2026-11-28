@@ -559,7 +559,7 @@ function sortIndicator(direction: false | "asc" | "desc"): string {
                     xmlns="http://www.w3.org/2000/svg"
                     width="16"
                     height="16"
-                    fill="black"
+                    fill="currentColor"
                     viewBox="0 0 16 16"
                   >
                     <path
@@ -672,14 +672,21 @@ function sortIndicator(direction: false | "asc" | "desc"): string {
 
 .table-controls input,
 .table-controls select {
-  border: 1px solid #aaa;
+  border: 1px solid var(--color-controls-border);
   border-radius: 3px;
   padding: 4px 6px;
-  background-color: transparent;
+  background-color: var(--color-controls-input);
+}
+
+.table-controls input:active,
+.table-controls select:active {
+  border-color: var(--color-controls-border-active);
+  border-width: 3px;
+  margin: -2px;
 }
 
 .group-row {
-  background-color: #e0e0e0 !important;
+  background-color: var(--color-row-group-header);
   font-weight: 600;
   cursor: pointer;
 }
@@ -731,26 +738,26 @@ function sortIndicator(direction: false | "asc" | "desc"): string {
 
 .paging-button.current,
 .paging-button.current:hover {
-  color: inherit;
-  border: 1px solid rgba(0, 0, 0, 0.3);
+  color: var(--color-paging-current-fg);
+  border: 1px solid var(--color-paging-current-bg2);
   background: linear-gradient(
     to bottom,
-    rgba(229, 229, 229, 0.05) 0%,
-    rgba(0, 0, 0, 0.05) 100%
+    var(--color-paging-current-bg1) 0%,
+    var(--color-paging-current-bg2) 100%
   );
 }
 
 .paging-button:disabled {
   cursor: default;
-  color: rgba(0, 0, 0, 0.5);
+  color: var(--color-paging-disabled-fg);
   border: 1px solid transparent;
   background: transparent;
 }
 
 .paging-button:not(:disabled):not(.current):hover {
   color: white;
-  border: 1px solid #111;
-  background: linear-gradient(to bottom, rgb(88, 88, 88) 0%, #111 100%);
+  border: 1px solid var(--color-paging-hover-bg2);
+  background: linear-gradient(to bottom, var(--color-paging-hover-bg1) 0%, var(--color-paging-hover-bg2) 100%);
 }
 
 .paging-ellipsis {
@@ -767,7 +774,7 @@ function sortIndicator(direction: false | "asc" | "desc"): string {
 
 .sort-indicator {
   font-size: 0.75em;
-  color: #555;
+  color: var(--color-sort-indicator);
 }
 
 .queue-table tbody tr.selected > td {
@@ -775,7 +782,7 @@ function sortIndicator(direction: false | "asc" | "desc"): string {
 }
 
 .queue-table tbody tr.rollup-hover:not(.selected) > td {
-  background-color: #c2d2ff;
+  background-color: var(--color-row-selected);
 }
 
 .queue-table tbody tr.rollup-row {
@@ -827,20 +834,20 @@ td.status[data-status="pending"]::before {
      clear that these items are the ones that are being tested
      right now. */
   bottom: -20px;
-  background-color: #f0de57;
+  background-color: var(--color-pending1);
   background-image: repeating-linear-gradient(
     135deg,
-    #f0de57 0,
-    #f0de57 4px,
-    #fbee97 4px,
-    #fbee97 8px,
-    #f0de57 0
+    var(--color-pending1) 0,
+    var(--color-pending1) 4px,
+    var(--color-pending2) 4px,
+    var(--color-pending2) 8px,
+    var(--color-pending1) 0
   );
   animation: barber-pole 1s linear infinite;
 }
 
 td.status[data-status="approved"]::before {
-  background-color: #85db7b;
+  background-color: var(--color-approved)
 }
 
 /* Progress bar background for pending builds */
@@ -851,7 +858,7 @@ td.status[data-status="approved"]::before {
   bottom: 0;
   width: 0;
   max-width: calc(100% - 6px);
-  background-color: #f0de5750;
+  background-color: var(--color-pending0);
   z-index: 0;
   pointer-events: none;
   box-sizing: border-box;
@@ -865,7 +872,7 @@ td.status.has-progress::after {
   top: 0;
   bottom: 0;
   width: 2px;
-  background-color: black;
+  background-color: var(--color-pending3);
   z-index: 0;
   pointer-events: none;
 }
@@ -891,35 +898,35 @@ td.status > *:not(.progress-bar-bg) {
 }
 
 .positive {
-  color: #004200;
+  color: var(--color-positive-text);
 }
 .positive::before {
-  background: #01ce01;
-  border-color: #016c01;
+  background: var(--color-positive-dot);
+  border-color: var(--color-positivea-text);
 }
 
 .negative {
-  color: #660000;
+  color: var(--color-negative-text);
 }
 .negative::before {
-  background: #f97070;
-  border-color: #ab0a0a;
+  background: var(--color-negative-dot);
+  border-color: var(--color-negative-text);
 }
 
 .neutral {
-  color: #8c7e14;
+  color: var(--color-neutral-text);
 }
 .neutral::before {
-  background: #f0de57;
-  border-color: #8c7e14;
+  background: var(--color-neutral-dot);
+  border-color: var(--color-neutral-text);
 }
 
 .special1 {
-  color: #4b0066;
+  color: var(--color-special-text);
 }
 .special1::before {
-  background: #c266ff;
-  border-color: #3a004d;
+  background: var(--color-special-dot);
+  border-color: var(--color-special-text);
 }
 
 @media screen and (min-width: 800px) {
